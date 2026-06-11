@@ -35,9 +35,12 @@ export const useMessageStore = create<MessageStore>((set) => ({
     };
   }),
 
-  setStreamingThinking: (thinking) => set((state) => ({
-    streamingMessage: { ...state.streamingMessage, thinking },
-  })),
+  setStreamingThinking: (thinking) => set((state) => {
+    if (!state.streamingMessage) return state;
+    return {
+      streamingMessage: { ...state.streamingMessage, thinking },
+    };
+  }),
 
   finishStreaming: () => set((state) => {
     if (!state.streamingMessage) return state;
