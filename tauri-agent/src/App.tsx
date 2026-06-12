@@ -80,7 +80,9 @@ function Workspace() {
   };
 
   return (
+    // 根容器：Sidebar | 右容器
     <Flexbox horizontal style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
+      {/* Sidebar */}
       {sidebarOpen && (
         <ResizeHandle
           placement="left"
@@ -97,8 +99,11 @@ function Workspace() {
         </ResizeHandle>
       )}
 
+      {/* 右容器：上部(Main+Right) / Terminal 竖向分割 */}
       <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
+        {/* 上部：Main / RightPanel 横向分割 */}
         <Flexbox horizontal flex={1} style={{ minHeight: 0 }}>
+          {/* 主列：Header + Chat */}
           <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
             <Header
               logo={<span style={{ fontWeight: 700, fontSize: 16 }}>Hermes</span>}
@@ -130,6 +135,7 @@ function Workspace() {
             </Flexbox>
           </Flexbox>
 
+          {/* Right Panel */}
           {rightPanelOpen && (
             <ResizeHandle
               placement="right"
@@ -143,6 +149,7 @@ function Workspace() {
           )}
         </Flexbox>
 
+        {/* Terminal（仅在 Main+Right 下方）*/}
         {terminalOpen && (
           <ResizeHandle
             placement="bottom"
