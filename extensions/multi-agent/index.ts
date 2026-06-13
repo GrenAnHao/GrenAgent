@@ -21,7 +21,6 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
       tasks: Type.Optional(Type.Array(Type.String(), { description: "Multiple tasks to run in parallel" })),
-      model: Type.Optional(Type.String({ description: "Model for the sub-agent(s)" })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const single = params.task?.trim();
@@ -29,7 +28,7 @@ export default function (pi: ExtensionAPI) {
       if (!single && !many.length) throw new Error("provide `task` or `tasks`");
 
       if (single && !many.length) {
-        const r = await spawnPiAgent(ctx.cwd, single, { model: params.model, signal: signal ?? undefined });
+        const r = await spawnPiAgent(ctx.cwd, single, { signal: signal ?? undefined });
         if (!r.ok) throw new Error(`sub-agent failed (exit ${r.exitCode}): ${r.error ?? "unknown error"}`);
         return { content: [{ type: "text", text: r.output || "(no output)" }], details: { exitCode: r.exitCode } };
       }
@@ -39,7 +38,7 @@ export default function (pi: ExtensionAPI) {
       for (let i = 0; i < tasks.length; i += MAX_CONCURRENCY) {
         const batch = tasks.slice(i, i + MAX_CONCURRENCY);
         const settled = await Promise.all(
-          batch.map((t) => spawnPiAgent(ctx.cwd, t, { model: params.model, signal: signal ?? undefined })),
+          batch.map((t) => spawnPiAgent(ctx.cwd, t, { signal: signal ?? undefined })),
         );
         settled.forEach((r, j) => results.push({ task: batch[j], ok: r.ok, output: r.output, error: r.error }));
       }
