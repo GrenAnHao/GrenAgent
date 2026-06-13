@@ -8,6 +8,22 @@
 
 ---
 
+## 实施状态（2026-06-13）
+
+A4 全部 7 个任务完成（含可选任务 6），逐任务提交：
+
+- ✅ 任务 1 纯函数 + 单测（8/8）：`3cec38b`
+- ✅ 任务 2 web_search 工具（tavily/brave + 可选取正文）：`a0695f1`
+- ✅ 任务 3 注册 + 重建（4887 modules，无 Could not resolve）：`77a05bd`
+- ✅ 任务 4 settings 搜索 key（分类标题改「网页 / 搜索 / 子代理」）：`10bcba2`
+- ✅ 任务 5 WebSearchCard（extensionCards 测试 11/11 + 前端 tsc 0）：`7e1923f`
+- ✅ 任务 6 输入区「联网搜索」快捷：`cf9cf3f`
+- ◐ 任务 7 端到端：print 模式实跑确认 agent **成功发出 `toolCall web_search`**（工具注册 + 调用已验证）；`resolveProvider` 降级由任务 1 单测覆盖。**待用户在 app 内**配置 TAVILY/BRAVE key 验证真实搜索结果 + WebSearchCard 渲染。
+
+> 下方为原始计划步骤（复选框保留为原始拆解；实际完成情况以本节为准）。
+
+---
+
 ## 关键发现（实现前排查）
 
 1. **`extensions/web-fetch/` 是工具模板**：`pi.registerTool({ name, label, description, promptSnippet, parameters: Type.Object({...}), execute })`，返回 `{ content:[{type:"text",text}], details }`。零依赖（Node `fetch` + 正则）。A4 同构。
