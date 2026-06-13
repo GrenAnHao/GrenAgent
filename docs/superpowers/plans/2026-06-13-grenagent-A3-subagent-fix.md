@@ -8,6 +8,18 @@
 
 ---
 
+## 实施状态（2026-06-13）
+
+- ✅ **任务 1**（runner/extractor fallback → `process.execPath` + 单测）：提交 `73ba30e`，7/7 测试通过。
+- ✅ **任务 2**（cli/main.ts 复用官方 `main`）：提交 `8a63707`。验证：`bun build` 重建成功；`<sidecar> --help` 证明官方 main 接管 argv（含 `--mode text|json|rpc`、`-p`、`--no-session`、`--model`）；`<sidecar> --mode json -p --no-session "..."` **实跑成功**（完整 JSONL：含 long-term-memory extension auto-recall + LLM 响应 + 进程 ~4s 退出）。注：`tsc` 因 cli **pre-existing 缺 `@types/node`** 无法跑，改用 bun build 产物 + 实跑验证。
+- ✅ **任务 3**（settingsSchema 加 `PI_BIN`）：提交 `56bd3b7`，前端 `tsc --noEmit` 退出 0。
+- ◐ **任务 5**（端到端冒烟）：重建 ✓、print 模式实跑 ✓（等价验证子代理链路）。**待用户在 GrenAgent app 内确认**：① `--mode rpc` 连接未回归（代码层已验证：官方 `main.js` 路由 `appMode==="rpc" → runRpcMode`）；② app 内触发 `spawn_agent` 工具实跑。
+- ⊘ **任务 4**（Rust 注入 PI_BIN）：**跳过（YAGNI）**。`process.execPath` 兜底 + print 实跑已证明二进制可被子代理调用；如后续 app 冒烟发现需显式控制再补。
+
+> 下方为原始计划步骤（复选框保留为原始拆解；实际完成情况以本节为准）。
+
+---
+
 ## 关键发现（实现前排查，修正 spec §4.6）
 
 spec §4.6 假设「runner 默认 spawn 系统 `pi`、`PI_BIN` 未注入」是唯一问题，注入 `PI_BIN` 即可。实际排查代码后发现 **spec 不完整**，真正的阻塞链是：
