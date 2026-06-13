@@ -3,6 +3,8 @@ import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 import { PlaceholderPanel } from './PlaceholderPanel';
 import { KnowledgePanel } from '../knowledge/KnowledgePanel';
 import { MemoryPanel } from '../memory/MemoryPanel';
+import { ReviewPanel } from '../review/ReviewPanel';
+import { CreatePanel } from '../create/CreatePanel';
 
 const MODULE_TITLES: Record<Exclude<ModuleId, 'chat'>, string> = {
   knowledge: '知识库',
@@ -18,5 +20,7 @@ export function ModuleContainer({ chat }: { chat: ReactNode }) {
   if (activeModule === 'chat') return <>{chat}</>;
   if (activeModule === 'knowledge') return <KnowledgePanel />;
   if (activeModule === 'memory') return <MemoryPanel />;
+  if (activeModule === 'review') return <ReviewPanel />;
+  if (activeModule === 'create') return <CreatePanel />;
   return <PlaceholderPanel title={MODULE_TITLES[activeModule]} />;
 }

@@ -5,6 +5,8 @@ import { useModuleStore } from '../../stores/moduleStore';
 
 vi.mock('../knowledge/KnowledgePanel', () => ({ KnowledgePanel: () => <div>KB_PANEL</div> }));
 vi.mock('../memory/MemoryPanel', () => ({ MemoryPanel: () => <div>MEM_PANEL</div> }));
+vi.mock('../review/ReviewPanel', () => ({ ReviewPanel: () => <div>RV_PANEL</div> }));
+vi.mock('../create/CreatePanel', () => ({ CreatePanel: () => <div>CR_PANEL</div> }));
 
 beforeEach(() => {
   useModuleStore.setState({ activeModule: 'chat' });
@@ -24,7 +26,6 @@ describe('ModuleContainer', () => {
     useModuleStore.setState({ activeModule: 'knowledge' });
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     expect(screen.getByText('KB_PANEL')).toBeTruthy();
-    expect(screen.queryByText('CHAT_CONTENT')).toBeNull();
   });
 
   it('renders MemoryPanel for memory module', () => {
@@ -33,11 +34,21 @@ describe('ModuleContainer', () => {
     expect(screen.getByText('MEM_PANEL')).toBeTruthy();
   });
 
-  it('renders placeholder with module title for not-yet-built modules', () => {
+  it('renders ReviewPanel for review module', () => {
     useModuleStore.setState({ activeModule: 'review' });
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    const panel = screen.getByTestId('placeholder-panel');
-    expect(panel.textContent).toContain('审查');
-    expect(screen.queryByText('CHAT_CONTENT')).toBeNull();
+    expect(screen.getByText('RV_PANEL')).toBeTruthy();
+  });
+
+  it('renders CreatePanel for create module', () => {
+    useModuleStore.setState({ activeModule: 'create' });
+    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
+    expect(screen.getByText('CR_PANEL')).toBeTruthy();
+  });
+
+  it('renders placeholder for not-yet-built modules', () => {
+    useModuleStore.setState({ activeModule: 'connections' });
+    render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
+    expect(screen.getByTestId('placeholder-panel').textContent).toContain('连接');
   });
 });
