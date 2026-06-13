@@ -1,65 +1,22 @@
 #!/usr/bin/env node
-// GrenAgent — agent sidecar (RPC mode).
+// GrenAgent — agent sidecar.
 //
-// pi runtime + our 8 extensions compiled in (via extensionFactories), running in
-// RPC mode. The Tauri (Rust) backend spawns this process and talks to it over
-// stdin/stdout using pi's JSONL RPC protocol (prompt / steer / abort / get_state / ...).
+// pi runtime + our extensions compiled in (via extensionFactories). We reuse the
+// official pi CLI entry (`main`) so the single sidecar binary supports every mode:
+//   - Tauri (Rust) spawns it with `--mode rpc`  → runRpcMode (stdin/stdout JSONL RPC)
+//   - sub-agents / memory-extract spawn it with
+//     `--mode json -p --no-session <task>`      → runPrintMode (single-shot)
 //
-// No TUI here — the desktop UI is your Tauri front-end. No -e / no pi install —
-// the extensions are bundled into this sidecar binary.
+// No TUI here — the desktop UI is the Tauri front-end. No `-e` / no global `pi`
+// install — the extensions are bundled into this sidecar binary.
 //
-// API per pi 0.78.x. If you bump pi, diff against packages/coding-agent/src/main.ts
-// (the `--mode rpc` branch) and adjust createAgentSessionServices options as needed.
+// `main(args, { extensionFactories })` mirrors the official `dist/cli.js`
+// (`main(process.argv.slice(2))`), plus our compiled-in extensions. API per pi 0.78.x.
 
-import {
-  AuthStorage,
-  type CreateAgentSessionRuntimeFactory,
-  createAgentSessionFromServices,
-  createAgentSessionRuntime,
-  createAgentSessionServices,
-  getAgentDir,
-  ModelRegistry,
-  runRpcMode,
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { main } from "@earendil-works/pi-coding-agent";
 import { allExtensions } from "../../extensions/index.js";
 
-const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-
-  const services = await createAgentSessionServices({
-    cwd,
-    agentDir,
-    authStorage,
-    modelRegistry,
-    resourceLoaderOptions: {
-      // ← extensions compiled into the sidecar; not discovered/installed.
-      extensionFactories: allExtensions,
-    },
-  });
-
-  return {
-    ...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),
-    services,
-    diagnostics: services.diagnostics,
-  };
-};
-
-async function main(): Promise<void> {
-  const cwd = process.cwd();
-
-  const runtime = await createAgentSessionRuntime(createRuntime, {
-    cwd,
-    agentDir: getAgentDir(),
-    sessionManager: SessionManager.create(cwd),
-  });
-
-  // Takes over stdout, reads JSONL commands from stdin, streams events out.
-  await runRpcMode(runtime);
-}
-
-main().catch((error) => {
+main(process.argv.slice(2), { extensionFactories: allExtensions }).catch((error) => {
   console.error(error);
   process.exit(1);
 });
