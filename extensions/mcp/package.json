@@ -1,0 +1,19 @@
+{
+  "name": "pi-mcp",
+  "version": "0.1.0",
+  "description": "MCP client for the Pi coding agent — connect external MCP servers (stdio/SSE) and expose their tools.",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "mcp"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@modelcontextprotocol/sdk": "*",
+    "typebox": "*"
+  }
+}
