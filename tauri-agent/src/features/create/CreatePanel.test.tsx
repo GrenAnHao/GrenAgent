@@ -5,7 +5,7 @@ vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
 
-const { createList, createImage, openPath } = vi.hoisted(() => ({
+const { createList, createImage, prompt, openPath } = vi.hoisted(() => ({
   createList: vi.fn(() =>
     Promise.resolve([
       { name: 'img_2.png', bytes: 2048, modifiedMs: 200 },
@@ -13,9 +13,10 @@ const { createList, createImage, openPath } = vi.hoisted(() => ({
     ]),
   ),
   createImage: vi.fn(() => Promise.resolve('QUJD')),
+  prompt: vi.fn(() => Promise.resolve()),
   openPath: vi.fn(),
 }));
-vi.mock('../../lib/pi', () => ({ pi: { createList, createImage } }));
+vi.mock('../../lib/pi', () => ({ pi: { createList, createImage, prompt } }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: (p: string) => openPath(p) }));
 
 import { CreatePanel } from './CreatePanel';
@@ -47,5 +48,13 @@ describe('CreatePanel', () => {
     await waitFor(() => expect(screen.getByTestId('cr-card-img_1.png')).toBeTruthy());
     fireEvent.click(screen.getByTestId('cr-card-img_1.png'));
     expect(openPath).toHaveBeenCalledWith('img_1.png');
+  });
+
+  it('submits a generate-image prompt', async () => {
+    render(<CreatePanel />);
+    await waitFor(() => expect(screen.getByTestId('cr-prompt')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('cr-prompt'), { target: { value: '一只猫' } });
+    fireEvent.click(screen.getByTestId('cr-generate'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/ws', expect.stringContaining('一只猫')));
   });
 });

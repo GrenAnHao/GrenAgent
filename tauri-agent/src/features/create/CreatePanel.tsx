@@ -1,6 +1,7 @@
-import { Flexbox } from '@lobehub/ui';
+import { ActionIcon, Flexbox } from '@lobehub/ui';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi, type ImageItem } from '../../lib/pi';
 
@@ -84,6 +85,14 @@ export function CreatePanel() {
   const { workspace } = useAgentStoreContext();
   const [items, setItems] = useState<ImageItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [promptText, setPromptText] = useState('');
+
+  const onGenerate = useCallback(() => {
+    const t = promptText.trim();
+    if (!t) return;
+    void pi.prompt(workspace, `请生成一张图片：${t}`);
+    setPromptText('');
+  }, [workspace, promptText]);
 
   useEffect(() => {
     let alive = true;
@@ -130,6 +139,29 @@ export function CreatePanel() {
           ))}
         </div>
       )}
+      <Flexbox
+        horizontal
+        align="center"
+        gap={8}
+        style={{ borderTop: border, padding: '9px 12px', flex: '0 0 auto' }}
+      >
+        <input
+          data-testid="cr-prompt"
+          value={promptText}
+          placeholder="描述要生成的图…（也可在对话里 /生图）"
+          onChange={(e) => setPromptText(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '7px 10px',
+            borderRadius: 8,
+            border,
+            background: 'transparent',
+            color: 'inherit',
+            fontSize: 12,
+          }}
+        />
+        <ActionIcon data-testid="cr-generate" icon={Sparkles} size="small" title="生成" onClick={onGenerate} />
+      </Flexbox>
     </Flexbox>
   );
 }
