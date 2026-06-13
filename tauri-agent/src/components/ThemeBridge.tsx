@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTheme } from 'antd-style';
 
 /**
@@ -8,11 +8,43 @@ import { useTheme } from 'antd-style';
  */
 export function ThemeBridge() {
   const theme = useTheme();
+  const previousAppearanceRef = useRef(theme.appearance);
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme.appearance;
-    document.body.style.background = theme.colorBgLayout;
-  }, [theme]);
+    document.body.style.backgroundColor = theme.colorBgLayout;
+
+    // 把管理面板用到的 --gren-* 占位变量接到当前主题 token，
+    // 使知识库/记忆/审查/创作/设置/连接面板的配色随亮/暗切换（面板代码无需改）。
+    const root = document.documentElement.style;
+    root.setProperty('--gren-fg', theme.colorText);
+    root.setProperty('--gren-fg-muted', theme.colorTextSecondary);
+    root.setProperty('--gren-border', theme.colorBorderSecondary);
+    root.setProperty('--gren-rail-active', theme.colorFillTertiary);
+    root.setProperty('--gren-bg-1', theme.colorBgContainer);
+    root.setProperty('--gren-bg-2', theme.colorFillSecondary);
+    root.setProperty('--gren-bg-3', theme.colorFillTertiary);
+    root.setProperty('--gren-acc', theme.colorPrimary);
+
+    if (previousAppearanceRef.current !== theme.appearance) {
+      document.documentElement.classList.add('theme-transitioning');
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = window.setTimeout(() => {
+        document.documentElement.classList.remove('theme-transitioning');
+        timeoutRef.current = null;
+      }, 220);
+      previousAppearanceRef.current = theme.appearance;
+    }
+
+    return () => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      document.documentElement.classList.remove('theme-transitioning');
+    };
+  }, [theme.appearance, theme.colorBgLayout]);
 
   return null;
 }
