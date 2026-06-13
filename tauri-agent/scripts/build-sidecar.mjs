@@ -18,6 +18,12 @@ mkdirSync(binDir, { recursive: true });
 console.log('Installing sidecar deps…');
 execSync('npm install', { cwd: sidecarRoot, stdio: 'inherit' });
 
+// extensions/*/index.ts 也 import 'typebox' 等；bun 从 ../extensions/*/ 解析这些 import，
+// 需在 extensions/ 也装好依赖，否则 bun build 报 "Could not resolve typebox"。
+const extensionsRoot = resolve(appRoot, '..', 'extensions');
+console.log('Installing extensions deps…');
+execSync('npm install', { cwd: extensionsRoot, stdio: 'inherit' });
+
 // 2) 取 rustc host target triple（Tauri sidecar 命名约定）。
 const hostLine = execSync('rustc -Vv')
   .toString()
