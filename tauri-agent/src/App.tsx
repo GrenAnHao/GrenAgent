@@ -5,7 +5,7 @@ import { PanelHeader } from './components/PanelHeader';
 import { ThemeBridge } from './components/ThemeBridge';
 import { useThemeStore } from './stores/themeStore';
 import { ChatView } from './features/chat/ChatView';
-import { SessionList } from './features/sessions/SessionList';
+import { Sidebar } from './features/sessions/Sidebar';
 import { RightPanel } from './features/panels';
 import { TerminalPanel } from './features/terminal/TerminalPanel';
 import { ResizeHandle } from './components/ResizeHandle';
@@ -23,10 +23,10 @@ import {
 } from './stores/layoutStore';
 import { pi } from './lib/pi';
 
-// 暂以当前目录为单一工作区。后续可接入工作区选择/审批流程。
-const WORKSPACE = '.';
+// 初始工作区。activeWorkspace 由 sessionStore 维护，切项目时更新。
+const INITIAL_WORKSPACE = '.';
 
-/** 拉取并刷新会话列表。 */
+/** 拉取并刷新当前工作区的会话列表。 */
 async function refreshSessions(workspace: string): Promise<void> {
   const { setSessions, setActiveSession, setError } = useSessionStore.getState();
   try {
@@ -41,8 +41,20 @@ async function refreshSessions(workspace: string): Promise<void> {
   }
 }
 
+/** 拉取所有项目的全量会话（供侧边栏按项目分组）。 */
+async function refreshAllSessions(): Promise<void> {
+  const { setAllSessions, setError } = useSessionStore.getState();
+  try {
+    setAllSessions(await pi.listAllSessions());
+  } catch (err) {
+    setError(err instanceof Error ? err.message : String(err));
+  }
+}
+
 function Workspace() {
-  const { store } = useAgentStoreContext();
+  const { store, workspace } = useAgentStoreContext();
+  const isStreaming = store.useStore((s) => s.isStreaming);
+  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen);
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
@@ -62,28 +74,88 @@ function Workspace() {
   const appearance = useThemeStore((s) => s.appearance);
   const toggleAppearance = useThemeStore((s) => s.toggleAppearance);
 
-  const setActiveSession = useSessionStore((s) => s.setActiveSession);
+  // 当前工作区变化（含首挂载与跨项目切换）：打开 → 刷新会话 → 切到活跃会话 → 载入消息。
+  // 由 [store, workspace] 驱动：切项目时 AgentStoreProvider 重建 store，本 effect 随之重跑。
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        await pi.openWorkspace(workspace);
+      } catch (err) {
+        useSessionStore.getState().setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      await refreshSessions(workspace);
+      await refreshAllSessions();
+      const path = useSessionStore.getState().activeSessionPath;
+      if (path) {
+        try {
+          await pi.switchSession(workspace, path);
+        } catch {
+          /* 会话可能已不存在，忽略 */
+        }
+      }
+      try {
+        const { messages } = await pi.getMessages(workspace);
+        if (alive) store.loadMessages(messages, { force: true });
+      } catch {
+        /* 无消息或加载失败，保持空 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [store, workspace]);
 
-  const handleCreateSession = async () => {
-    await pi.newSession(WORKSPACE);
-    store.reset();
-    await refreshSessions(WORKSPACE);
+  const switchProject = async (cwd: string) => {
+    const st = useSessionStore.getState();
+    if (st.activeWorkspace === cwd) return;
+    await pi.openWorkspace(cwd);
+    st.setActiveWorkspace(cwd); // 触发 store 重建 + 上面的 effect 重载
   };
 
-  const handleSwitchSession = async (path: string) => {
-    setActiveSession(path);
-    await pi.switchSession(WORKSPACE, path);
-    const { messages } = await pi.getMessages(WORKSPACE);
-    store.loadMessages(messages, { force: true });
+  const handleNewSession = async (cwd: string) => {
+    await pi.openWorkspace(cwd);
+    const st = useSessionStore.getState();
+    st.setActiveSession('');
+    await pi.newSession(cwd);
+    if (st.activeWorkspace !== cwd) {
+      st.setActiveWorkspace(cwd); // effect 重建后会载入新会话
+    } else {
+      store.reset();
+      await refreshSessions(cwd);
+    }
+    await refreshAllSessions();
   };
 
-  const handleDeleteSession = async (path: string) => {
-    await pi.deleteSession(WORKSPACE, path);
-    const active = useSessionStore.getState().activeSessionPath;
-    if (active === path) {
+  const handleOpenSession = async (cwd: string, path: string) => {
+    const st = useSessionStore.getState();
+    st.setActiveSession(path);
+    if (st.activeWorkspace !== cwd) {
+      await switchProject(cwd); // effect 重建后载入该会话
+    } else {
+      await pi.switchSession(cwd, path);
+      const { messages } = await pi.getMessages(cwd);
+      store.loadMessages(messages, { force: true });
+    }
+  };
+
+  const handleDeleteSession = async (cwd: string, path: string) => {
+    await pi.deleteSession(cwd, path);
+    if (useSessionStore.getState().activeSessionPath === path) {
       useSessionStore.getState().setActiveSession('');
     }
-    await refreshSessions(WORKSPACE);
+    await refreshSessions(cwd);
+    await refreshAllSessions();
+  };
+
+  const handleSubmitRename = async (cwd: string, _path: string, name: string) => {
+    if (cwd !== useSessionStore.getState().activeWorkspace) {
+      await switchProject(cwd);
+    }
+    await pi.setSessionName(cwd, name);
+    await refreshSessions(cwd);
+    await refreshAllSessions();
   };
 
   return (
@@ -101,11 +173,14 @@ function Workspace() {
           expand={sidebarOpen}
           onExpandChange={toggleSidebar}
         >
-          <SessionList
-            onCreateSession={handleCreateSession}
-            onSwitchSession={handleSwitchSession}
+          <Sidebar
+            runningSessionPath={isStreaming ? activeSessionPath : null}
+            onNewSession={handleNewSession}
+            onOpenSession={handleOpenSession}
             onDeleteSession={handleDeleteSession}
+            onSubmitRename={handleSubmitRename}
             onToggleSidebar={toggleSidebar}
+            onOpenSettings={() => {}}
           />
         </ResizeHandle>
 
@@ -181,30 +256,22 @@ function Workspace() {
 }
 
 export default function App() {
-  useEffect(() => {
-    let active = true;
-    pi.openWorkspace(WORKSPACE)
-      .then(() => {
-        if (active) void refreshSessions(WORKSPACE);
-      })
-      .catch((err) => {
-        useSessionStore.getState().setError(
-          err instanceof Error ? err.message : String(err),
-        );
-      });
+  const appearance = useThemeStore((s) => s.appearance);
+  const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
 
+  // 初始化 activeWorkspace 并在卸载时关闭当前工作区。
+  // 工作区的打开/会话加载由 Workspace 内的 effect（按 store/workspace）负责。
+  useEffect(() => {
+    useSessionStore.getState().setActiveWorkspace(INITIAL_WORKSPACE);
     return () => {
-      active = false;
-      void pi.closeWorkspace(WORKSPACE);
+      void pi.closeWorkspace(useSessionStore.getState().activeWorkspace);
     };
   }, []);
-
-  const appearance = useThemeStore((s) => s.appearance);
 
   return (
     <ThemeProvider themeMode={appearance}>
       <ThemeBridge />
-      <AgentStoreProvider workspace={WORKSPACE}>
+      <AgentStoreProvider workspace={activeWorkspace}>
         <Workspace />
       </AgentStoreProvider>
     </ThemeProvider>
