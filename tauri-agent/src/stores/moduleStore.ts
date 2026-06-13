@@ -8,6 +8,7 @@ export type ModuleId =
   | 'review'
   | 'create'
   | 'connections'
+  | 'extensions'
   | 'settings';
 
 interface ModuleState {

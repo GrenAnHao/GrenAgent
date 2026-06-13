@@ -2,7 +2,6 @@ import { Flexbox } from '@lobehub/ui';
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { SettingFieldInput } from '../settings/SettingField';
 import { CONNECTION_FIELDS } from '../settings/settingsSchema';
-import { useMcpStatusStore } from '../../stores/mcpStatusStore';
 
 const muted = 'var(--gren-fg-muted, #9aa1ac)';
 const border = '1px solid var(--gren-border, rgba(255,255,255,0.08))';
@@ -14,39 +13,11 @@ const PLATFORMS = [
   { name: 'Telegram', hint: '用 Telegram Bot webhook 把消息转发到网关 /message。' },
 ];
 
-interface McpDisplayServer {
-  name: string;
-  transport: 'stdio' | 'sse' | '?';
-}
-
-/** 从 MCP_SERVERS JSON 推导 server 列表（容错；实时连接状态留增强）。 */
-function parseMcpServers(json: string): McpDisplayServer[] {
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    if (!parsed || typeof parsed !== 'object') return [];
-    const root = parsed as Record<string, unknown>;
-    // Standard `{ "mcpServers": {...} }` (like .cursor/mcp.json) or a bare map.
-    const wrapped = root.mcpServers;
-    const source = (wrapped && typeof wrapped === 'object' ? wrapped : root) as Record<string, unknown>;
-    return Object.entries(source).map(([name, raw]) => {
-      const cfg = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-      if (typeof cfg.url === 'string') return { name, transport: 'sse' as const };
-      if (typeof cfg.command === 'string') return { name, transport: 'stdio' as const };
-      return { name, transport: '?' as const };
-    });
-  } catch {
-    return [];
-  }
-}
-
 export function ConnectionsPanel() {
   const { values, setValue, save, saving, loading, error } = useSettingsForm();
   const enabled = values.IM_GATEWAY === '1' || values.IM_GATEWAY?.toLowerCase() === 'true';
   const port = (values.IM_GATEWAY_PORT ?? '').trim() || '8765';
   const hasToken = (values.IM_GATEWAY_TOKEN ?? '').trim().length > 0;
-  const mcpServers = parseMcpServers(values.MCP_SERVERS ?? '');
-  const liveMcp = useMcpStatusStore((s) => s.servers);
-  const liveMcpByName = new Map(liveMcp.map((s) => [s.name, s]));
 
   return (
     <Flexbox
@@ -129,59 +100,6 @@ export function ConnectionsPanel() {
             <span style={{ fontSize: 11, color: muted }}>{p.hint}</span>
           </Flexbox>
         ))}
-
-        <div style={{ marginBlockStart: 14, fontSize: 13, fontWeight: 600 }}>MCP 服务器</div>
-        <div style={{ fontSize: 12, color: muted, marginBlockEnd: 8 }}>
-          连接外部 MCP server，其工具以 <code>mcp__server__tool</code> 暴露给 agent（保存并重启生效）。
-        </div>
-        {mcpServers.length === 0 ? (
-          <div data-testid="mcp-empty" style={{ fontSize: 12, color: muted, marginBlockEnd: 8 }}>
-            未配置 MCP server
-          </div>
-        ) : (
-          mcpServers.map((s) => {
-            const live = liveMcpByName.get(s.name);
-            return (
-              <Flexbox
-                key={s.name}
-                horizontal
-                align="center"
-                gap={8}
-                data-testid={`mcp-server-${s.name}`}
-                style={{ border, borderRadius: 8, padding: '8px 11px', marginBlockEnd: 7 }}
-              >
-                <span style={{ fontSize: 12, flex: 1 }}>{s.name}</span>
-                <span style={{ fontSize: 11, color: muted }}>{s.transport}</span>
-                {live ? (
-                  <span style={{ fontSize: 11, color: live.status === 'connected' ? '#4ade80' : '#f87171' }}>
-                    {live.status === 'connected' ? `● ${live.tools} 工具` : '○ 失败'}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: 11, color: muted }}>待连接</span>
-                )}
-              </Flexbox>
-            );
-          })
-        )}
-        <textarea
-          data-testid="conn-field-MCP_SERVERS"
-          value={values.MCP_SERVERS ?? ''}
-          onChange={(e) => setValue('MCP_SERVERS', e.target.value)}
-          placeholder='{"fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}}'
-          rows={4}
-          style={{
-            width: '100%',
-            marginBlockStart: 6,
-            padding: '6px 8px',
-            borderRadius: 6,
-            border,
-            background: 'transparent',
-            color: 'inherit',
-            fontFamily: mono,
-            fontSize: 12,
-            resize: 'vertical',
-          }}
-        />
       </div>
     </Flexbox>
   );

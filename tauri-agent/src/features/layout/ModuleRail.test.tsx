@@ -12,9 +12,9 @@ afterEach(() => {
 });
 
 describe('ModuleRail', () => {
-  it('renders all 7 module buttons', () => {
+  it('renders all 8 module buttons', () => {
     render(<ModuleRail />);
-    for (const id of ['chat', 'knowledge', 'memory', 'review', 'create', 'connections', 'settings']) {
+    for (const id of ['chat', 'knowledge', 'memory', 'review', 'create', 'connections', 'extensions', 'settings']) {
       expect(screen.getByTestId(`module-${id}`)).toBeTruthy();
     }
   });

@@ -39,13 +39,4 @@ describe('ConnectionsPanel', () => {
     );
   });
 
-  it('lists configured MCP servers from MCP_SERVERS (stdio/sse)', async () => {
-    getSettings.mockResolvedValueOnce({
-      MCP_SERVERS: '{"mcpServers":{"fs":{"command":"npx","args":["-y","x"]},"api":{"url":"https://m"}}}',
-    });
-    render(<ConnectionsPanel />);
-    await waitFor(() => expect(screen.getByTestId('mcp-server-fs')).toBeTruthy());
-    expect(screen.getByTestId('mcp-server-fs').textContent).toContain('stdio');
-    expect(screen.getByTestId('mcp-server-api').textContent).toContain('sse');
-  });
 });

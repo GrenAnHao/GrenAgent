@@ -6,6 +6,7 @@ import { ReviewPanel } from '../review/ReviewPanel';
 import { CreatePanel } from '../create/CreatePanel';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
+import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
 
 export function ModuleContainer({ chat }: { chat: ReactNode }) {
   const activeModule = useModuleStore((s) => s.activeModule);
@@ -24,6 +25,8 @@ export function ModuleContainer({ chat }: { chat: ReactNode }) {
       return <SettingsPanel />;
     case 'connections':
       return <ConnectionsPanel />;
+    case 'extensions':
+      return <ExtensionsPanel />;
     default:
       return <>{chat}</>;
   }

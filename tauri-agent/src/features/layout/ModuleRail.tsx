@@ -1,4 +1,4 @@
-import { Brain, FileSearch, Image, Library, type LucideIcon, MessageSquare, Plug, Settings } from 'lucide-react';
+import { Brain, FileSearch, Image, Library, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 
 interface ModuleDef {
@@ -14,7 +14,8 @@ const MODULES: ModuleDef[] = [
   { id: 'memory', label: '记忆', Icon: Brain },
   { id: 'review', label: '审查', Icon: FileSearch },
   { id: 'create', label: '创作', Icon: Image },
-  { id: 'connections', label: '连接', Icon: Plug },
+  { id: 'connections', label: '连接', Icon: Webhook },
+  { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },
 ];
 
