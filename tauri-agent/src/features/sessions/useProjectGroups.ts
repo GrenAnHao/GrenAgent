@@ -1,0 +1,85 @@
+import { useMemo } from 'react';
+import type { SessionInfo } from '../../lib/pi';
+import { useSessionStore } from '../../store/session';
+import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
+
+export interface ProjectGroup {
+  cwd: string;
+  name: string;
+  isCurrent: boolean;
+  pinned: boolean;
+  sessions: SessionInfo[];
+  lastActivity: string; // 该组最新 timestamp
+}
+
+interface BuildParams {
+  current: string;
+  pinnedProjects: string[];
+  hiddenProjects: string[];
+  aliases: Record<string, string>;
+  keyword: string;
+}
+
+const basename = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+
+export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams): ProjectGroup[] {
+  const { current, pinnedProjects, hiddenProjects, aliases, keyword } = params;
+  const kw = keyword.trim().toLowerCase();
+
+  const byCwd = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    if (!s.cwd) continue;
+    if (!byCwd.has(s.cwd)) byCwd.set(s.cwd, []);
+    byCwd.get(s.cwd)!.push(s);
+  }
+
+  let groups: ProjectGroup[] = [];
+  for (const [cwd, list] of byCwd) {
+    if (hiddenProjects.includes(cwd)) continue;
+    const sorted = [...list].sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
+    const name = aliases[cwd] || basename(cwd);
+    groups.push({
+      cwd,
+      name,
+      isCurrent: cwd === current,
+      pinned: pinnedProjects.includes(cwd),
+      sessions: sorted,
+      lastActivity: sorted[0]?.timestamp ?? '',
+    });
+  }
+
+  // 关键字过滤：项目名命中 → 整组保留；否则保留命中标题的会话
+  if (kw) {
+    groups = groups
+      .map((g): ProjectGroup | null => {
+        if (g.name.toLowerCase().includes(kw)) return g;
+        const hit = g.sessions.filter((s) => (s.name ?? '').toLowerCase().includes(kw));
+        return hit.length ? { ...g, sessions: hit } : null;
+      })
+      .filter((g): g is ProjectGroup => g !== null);
+  }
+
+  // 排序：当前项目 > 置顶 > 最近活跃
+  groups.sort((a, b) => {
+    if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return (b.lastActivity ?? '').localeCompare(a.lastActivity ?? '');
+  });
+
+  return groups;
+}
+
+export function useProjectGroups(): ProjectGroup[] {
+  const allSessions = useSessionStore((s) => s.allSessions);
+  const current = useSessionStore((s) => s.activeWorkspace);
+  const keyword = useSessionStore((s) => s.searchKeyword);
+  const pinnedProjects = useSidebarPrefsStore((s) => s.pinnedProjects);
+  const hiddenProjects = useSidebarPrefsStore((s) => s.hiddenProjects);
+  const aliases = useSidebarPrefsStore((s) => s.aliases);
+
+  return useMemo(
+    () =>
+      buildProjectGroups(allSessions, { current, pinnedProjects, hiddenProjects, aliases, keyword }),
+    [allSessions, current, pinnedProjects, hiddenProjects, aliases, keyword],
+  );
+}
