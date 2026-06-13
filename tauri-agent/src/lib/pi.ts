@@ -149,6 +149,9 @@ export const pi = {
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
   createImage: (workspace: string, name: string) =>
     invoke<string>('create_image', { workspace, name }),
+  getSettings: () => invoke<Record<string, string>>('get_settings'),
+  setSettings: (settings: Record<string, string>) =>
+    invoke<void>('set_settings', { settings }),
 };
 
 export interface SessionInfo {
