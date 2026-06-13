@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon } from '@lobehub/ui';
-import { createStyles, cx } from 'antd-style';
+import { createStaticStyles, cx } from 'antd-style';
 import { ArrowDown } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import { UserMessage } from './UserMessage';
 import { AssistantMessage } from './AssistantMessage';
 import { PreparingIndicator } from './PreparingIndicator';
-import { ToolExecution } from '../tools/ToolExecution';
+import { NoticePill } from './NoticePill';
+
+const ToolExecution = lazy(() =>
+  import('../tools/ToolExecution').then((m) => ({ default: m.ToolExecution })),
+);
 
 /** Distance (px) from the bottom within which the list is still treated as "at bottom". */
 const AT_BOTTOM_THRESHOLD = 300;
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   backBottom: css`
     position: absolute;
     inset-inline-end: 16px;
@@ -22,8 +26,8 @@ const useStyles = createStyles(({ token, css }) => ({
     pointer-events: none;
 
     transition:
-      opacity 0.2s ${token.motionEaseOut},
-      transform 0.2s ${token.motionEaseOut};
+      opacity 0.2s ease,
+      transform 0.2s ease;
   `,
   backBottomVisible: css`
     transform: translateY(0);
@@ -40,7 +44,6 @@ export function MessageList({ bottomOffset = 88 }: MessageListProps) {
   const { useStore } = useAgentStore();
   const messages = useStore((s) => s.messages);
   const isStreaming = useStore((s) => s.isStreaming);
-  const { styles } = useStyles();
 
   // agent_start 后、首条助手输出前的等待窗口：尾部既不是正在流式的助手气泡，
   // 也不是运行中的工具时，显示「准备响应中…」占位（pi 的 agent_start/agent_end 驱动）。
@@ -123,14 +126,17 @@ export function MessageList({ bottomOffset = 88 }: MessageListProps) {
                 );
               case 'tool':
                 return (
-                  <ToolExecution
-                    key={msg.id}
-                    toolName={msg.toolName}
-                    args={msg.args}
-                    result={msg.result}
-                    status={msg.status}
-                  />
+                  <Suspense key={msg.id} fallback={null}>
+                    <ToolExecution
+                      toolName={msg.toolName}
+                      args={msg.args}
+                      result={msg.result}
+                      status={msg.status}
+                    />
+                  </Suspense>
                 );
+              case 'notice':
+                return <NoticePill key={msg.id} customType={msg.customType} content={msg.content} />;
               default:
                 return null;
             }
