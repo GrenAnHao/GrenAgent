@@ -85,6 +85,19 @@ export interface MemItem {
   createdAt: number;
   scope: 'project' | 'global';
 }
+export interface ReviewNote {
+  id: string;
+  file: string;
+  line: number | null;
+  severity: string;
+  message: string;
+  createdAt: number;
+}
+export interface ImageItem {
+  name: string;
+  bytes: number;
+  modifiedMs: number;
+}
 
 export const pi = {
   openWorkspace: (workspace: string) =>
@@ -132,6 +145,10 @@ export const pi = {
     invoke<KbChunk[]>('kb_chunks', { workspace, source }),
   memStats: (workspace: string) => invoke<MemStats>('mem_stats', { workspace }),
   memList: (workspace: string) => invoke<MemItem[]>('mem_list', { workspace }),
+  rvList: (workspace: string) => invoke<ReviewNote[]>('rv_list', { workspace }),
+  createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
+  createImage: (workspace: string, name: string) =>
+    invoke<string>('create_image', { workspace, name }),
 };
 
 export interface SessionInfo {
