@@ -20,7 +20,7 @@ const styles = createStaticStyles(({ css }) => ({
     padding-inline: 12px;
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
 
-    background: ${cssVar.colorBgContainer};
+    background: var(--gren-titlebar-bg, ${cssVar.colorBgContainer});
     user-select: none;
   `,
   title: css`

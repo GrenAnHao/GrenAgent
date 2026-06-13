@@ -62,6 +62,7 @@ export function ModuleRail() {
         alignItems: 'center',
         gap: 6,
         padding: '10px 0',
+        background: 'var(--gren-sidebar-bg, transparent)',
         borderRight: '1px solid var(--gren-border, rgba(255,255,255,0.08))',
       }}
     >

@@ -12,8 +12,9 @@ export function ThemeBridge() {
   const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const isDark = theme.appearance === 'dark';
     document.documentElement.dataset.theme = theme.appearance;
-    document.body.style.backgroundColor = theme.colorBgLayout;
+    document.body.style.backgroundColor = isDark ? '#0d0d0d' : '#ffffff';
 
     // 把管理面板用到的 --gren-* 占位变量接到当前主题 token，
     // 使知识库/记忆/审查/创作/设置/连接面板的配色随亮/暗切换（面板代码无需改）。
@@ -26,6 +27,10 @@ export function ThemeBridge() {
     root.setProperty('--gren-bg-2', theme.colorFillSecondary);
     root.setProperty('--gren-bg-3', theme.colorFillTertiary);
     root.setProperty('--gren-acc', theme.colorPrimary);
+    // 三区分层背景（用户指定 hex；侧栏最深 < 顶部条 < 内容区，亮/暗各一套）
+    root.setProperty('--gren-titlebar-bg', isDark ? '#090909' : '#f8f8f8');
+    root.setProperty('--gren-sidebar-bg', isDark ? '#000000' : '#f8f8f8');
+    root.setProperty('--gren-content-bg', isDark ? '#0d0d0d' : '#ffffff');
 
     if (previousAppearanceRef.current !== theme.appearance) {
       document.documentElement.classList.add('theme-transitioning');

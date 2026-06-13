@@ -153,7 +153,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <Flexbox height="100%" style={{ minHeight: 0 }}>
+    <Flexbox height="100%" style={{ minHeight: 0, background: 'var(--gren-sidebar-bg, transparent)' }}>
       <PanelHeader
         title="Pi Agent"
         actions={<ActionIcon icon={PanelLeftClose} title="收起" onClick={props.onToggleSidebar} />}

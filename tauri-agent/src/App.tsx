@@ -286,7 +286,7 @@ function Workspace() {
       <Titlebar />
       <Flexbox horizontal flex={1} style={{ minHeight: 0 }}>
         <ModuleRail />
-        <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
+        <Flexbox flex={1} style={{ minWidth: 0, height: '100%', background: 'var(--gren-content-bg, transparent)' }}>
           <ModuleContainer
             chat={
               <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%' }}>
