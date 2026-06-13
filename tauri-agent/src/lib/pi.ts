@@ -152,6 +152,8 @@ export const pi = {
   getSettings: () => invoke<Record<string, string>>('get_settings'),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
+  runCommand: (workspace: string, command: string) =>
+    invoke<unknown>('agent_prompt', { workspace, message: command }),
 };
 
 export interface SessionInfo {
