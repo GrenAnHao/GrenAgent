@@ -33,8 +33,12 @@ export function parseMcpServers(json: string): McpServerConfig[] {
   } catch {
     return [];
   }
+  const root = asRecord(parsed);
+  // Standard format `{ "mcpServers": { name: {...} } }` (like .cursor/mcp.json /
+  // Claude Desktop); also accept a bare `{ name: {...} }` map for convenience.
+  const source = "mcpServers" in root ? asRecord(root.mcpServers) : root;
   const servers: McpServerConfig[] = [];
-  for (const [name, raw] of Object.entries(asRecord(parsed))) {
+  for (const [name, raw] of Object.entries(source)) {
     const cfg = asRecord(raw);
     const url = typeof cfg.url === "string" ? cfg.url : undefined;
     const command = typeof cfg.command === "string" ? cfg.command : undefined;

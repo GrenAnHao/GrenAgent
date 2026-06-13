@@ -86,7 +86,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         key: 'MCP_SERVERS',
         label: 'MCP Servers（JSON）',
         type: 'text',
-        placeholder: '{"fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}}',
+        placeholder: '{"mcpServers":{"fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}}}',
       },
     ],
   },

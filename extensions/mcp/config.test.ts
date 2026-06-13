@@ -12,6 +12,11 @@ describe("parseMcpServers", () => {
       { name: "api", transport: "sse", url: "https://m" },
     ]);
   });
+  it("parses the standard mcpServers wrapper format (.cursor/mcp.json style)", () => {
+    expect(parseMcpServers('{"mcpServers":{"fs":{"command":"npx","args":["-y","x"]}}}')).toEqual([
+      { name: "fs", transport: "stdio", command: "npx", args: ["-y", "x"], env: {} },
+    ]);
+  });
   it("tolerates empty / invalid / empty-object JSON", () => {
     expect(parseMcpServers("")).toEqual([]);
     expect(parseMcpServers("not json")).toEqual([]);

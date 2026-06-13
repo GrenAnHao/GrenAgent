@@ -21,9 +21,13 @@ interface McpDisplayServer {
 /** 从 MCP_SERVERS JSON 推导 server 列表（容错；实时连接状态留增强）。 */
 function parseMcpServers(json: string): McpDisplayServer[] {
   try {
-    const obj = JSON.parse(json) as unknown;
-    if (!obj || typeof obj !== 'object') return [];
-    return Object.entries(obj as Record<string, unknown>).map(([name, raw]) => {
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== 'object') return [];
+    const root = parsed as Record<string, unknown>;
+    // Standard `{ "mcpServers": {...} }` (like .cursor/mcp.json) or a bare map.
+    const wrapped = root.mcpServers;
+    const source = (wrapped && typeof wrapped === 'object' ? wrapped : root) as Record<string, unknown>;
+    return Object.entries(source).map(([name, raw]) => {
       const cfg = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
       if (typeof cfg.url === 'string') return { name, transport: 'sse' as const };
       if (typeof cfg.command === 'string') return { name, transport: 'stdio' as const };
