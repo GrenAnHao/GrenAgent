@@ -22,13 +22,18 @@ export default function (pi: ExtensionAPI) {
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
       tasks: Type.Optional(Type.Array(Type.String(), { description: "Multiple tasks to run in parallel" })),
     }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const single = params.task?.trim();
       const many = (params.tasks ?? []).map((t) => t.trim()).filter(Boolean);
       if (!single && !many.length) throw new Error("provide `task` or `tasks`");
 
       if (single && !many.length) {
-        const r = await spawnPiAgent(ctx.cwd, single, { signal: signal ?? undefined });
+        const r = await spawnPiAgent(ctx.cwd, single, {
+          signal: signal ?? undefined,
+          onUpdate: onUpdate
+            ? (output) => onUpdate({ content: [{ type: "text", text: output }], details: { streaming: true } })
+            : undefined,
+        });
         if (!r.ok) throw new Error(`sub-agent failed (exit ${r.exitCode}): ${r.error ?? "unknown error"}`);
         return { content: [{ type: "text", text: r.output || "(no output)" }], details: { exitCode: r.exitCode } };
       }
