@@ -1,5 +1,6 @@
-import { Flexbox } from '@lobehub/ui';
-import { useEffect, useState, type ReactNode } from 'react';
+import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { BookPlus, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi, type KbChunk, type KbSource, type KbStats } from '../../lib/pi';
 import { ManagerLayout } from '../common/ManagerLayout';
@@ -16,22 +17,19 @@ export function KnowledgePanel() {
   const [chunks, setChunks] = useState<KbChunk[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
+  const reload = useCallback(() => {
     setError(null);
     void Promise.all([pi.kbStats(workspace), pi.kbSources(workspace)])
       .then(([s, src]) => {
-        if (!alive) return;
         setStats(s);
         setSources(src);
       })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      alive = false;
-    };
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [workspace]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   useEffect(() => {
     if (!selected) {
@@ -52,10 +50,27 @@ export function KnowledgePanel() {
     };
   }, [workspace, selected]);
 
+  const onClear = useCallback(async () => {
+    if (!window.confirm('确定清空知识库？此操作不可撤销。')) return;
+    await pi.runCommand(workspace, '/kb clear');
+    setSelected(null);
+    reload();
+  }, [workspace, reload]);
+
+  const onAdd = useCallback(async () => {
+    const path = window.prompt('输入要索引的文件路径（相对项目根或绝对路径）：');
+    if (!path?.trim()) return;
+    await pi.runCommand(workspace, `/kb add ${path.trim()}`);
+    reload();
+  }, [workspace, reload]);
+
   const header = (
-    <Flexbox horizontal align="center" gap={12} data-testid="kb-header" style={{ fontSize: 13 }}>
+    <Flexbox horizontal align="center" gap={12} data-testid="kb-header" style={{ fontSize: 13, width: '100%' }}>
       <span>{stats ? `${stats.chunks} 块 · ${stats.sources} 文档` : '加载中…'}</span>
       <span style={{ color: muted }}>{stats?.model ? `embedding: ${stats.model}` : 'keyword 模式'}</span>
+      <div style={{ flex: 1 }} />
+      <ActionIcon data-testid="kb-add" icon={BookPlus} size="small" title="添加文档" onClick={() => void onAdd()} />
+      <ActionIcon data-testid="kb-clear" icon={Trash2} size="small" title="清空知识库" onClick={() => void onClear()} />
     </Flexbox>
   );
 
