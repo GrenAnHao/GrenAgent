@@ -1,0 +1,27 @@
+{
+  "name": "grenagent-agent-sidecar",
+  "version": "0.1.0",
+  "description": "GrenAgent's pi-based agent sidecar (RPC mode) with 8 built-in extensions, spawned by the Tauri backend.",
+  "type": "module",
+  "bin": {
+    "grenagent-sidecar": "dist/main.js"
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "node --import tsx src/main.ts --mode rpc",
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"#!/usr/bin/env node\" --external:@earendil-works/pi-coding-agent --outfile=dist/main.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
