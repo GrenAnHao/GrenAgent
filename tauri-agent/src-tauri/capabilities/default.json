@@ -17,6 +17,26 @@
       "allow": [{ "name": "binaries/pi", "sidecar": true, "args": ["--mode", "rpc"] }]
     },
     "shell:allow-stdin-write",
-    "shell:allow-kill"
+    "shell:allow-kill",
+    "dialog:allow-open",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/pi",
+          "sidecar": true,
+          "args": [
+            "-p",
+            "--no-session",
+            "--no-tools",
+            "--provider",
+            { "validator": "\\S+" },
+            "--model",
+            { "validator": "\\S+" },
+            { "validator": "[\\s\\S]+" }
+          ]
+        }
+      ]
+    }
   ]
 }

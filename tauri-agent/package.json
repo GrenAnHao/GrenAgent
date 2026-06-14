@@ -17,6 +17,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@lobehub/ui": "^5.15.13",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "antd": "^6.4.3",
     "antd-style": "^4.1.0",
