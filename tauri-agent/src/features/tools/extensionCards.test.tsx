@@ -15,7 +15,8 @@ function renderCard(toolName: string, result: unknown, args: unknown = {}) {
   return render(<>{node}</>);
 }
 
-describe('renderExtensionCard', () => {
+// @lobehub/ui（LazyMarkdown 等）首渲较重，并发跑时给足超时，避免默认 5s 抖动。
+describe('renderExtensionCard', { timeout: 30_000 }, () => {
   it('returns null for unknown tools', () => {
     expect(renderExtensionCard({ toolName: 'bash', args: {}, result: {}, status: 'done' })).toBeNull();
   });
