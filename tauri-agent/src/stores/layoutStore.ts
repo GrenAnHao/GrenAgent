@@ -27,6 +27,7 @@ interface LayoutState {
   setRightPanelOpen: (open: boolean) => void;
   setTerminalHeight: (height: number) => void;
   toggleTerminal: () => void;
+  setTerminalOpen: (open: boolean) => void;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -68,6 +69,8 @@ export const useLayoutStore = create<LayoutState>()(
         }),
 
       toggleTerminal: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
+
+      setTerminalOpen: (open) => set({ terminalOpen: open }),
     }),
     {
       name: 'hermes-layout',

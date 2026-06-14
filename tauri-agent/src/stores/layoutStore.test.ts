@@ -70,6 +70,15 @@ describe('layoutStore', () => {
     expect(useLayoutStore.getState().terminalOpen).toBe(false);
   });
 
+  it('should set terminal open explicitly (idempotent)', () => {
+    useLayoutStore.getState().setTerminalOpen(true);
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+    useLayoutStore.getState().setTerminalOpen(true);
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+    useLayoutStore.getState().setTerminalOpen(false);
+    expect(useLayoutStore.getState().terminalOpen).toBe(false);
+  });
+
   it('should clamp sidebar width to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH]', () => {
     useLayoutStore.getState().setSidebarWidth(SIDEBAR_MIN_WIDTH - 1);
     expect(useLayoutStore.getState().sidebarWidth).toBe(SIDEBAR_MIN_WIDTH);
