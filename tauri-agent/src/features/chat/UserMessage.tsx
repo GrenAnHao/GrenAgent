@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { ChatItem } from '@lobehub/ui/chat';
+import { ChatItemShell } from './ChatItemShell';
 
 interface UserMessageProps {
   text: string;
@@ -7,14 +7,9 @@ interface UserMessageProps {
 
 function UserMessageInner({ text }: UserMessageProps) {
   return (
-    <ChatItem
-      placement="right"
-      showAvatar={false}
-      variant="bubble"
-      fontSize={14}
-      message={text}
-      avatar={{ avatar: '🧑', title: 'You' }}
-    />
+    <ChatItemShell placement="right" bubble>
+      {text}
+    </ChatItemShell>
   );
 }
 
