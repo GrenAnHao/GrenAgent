@@ -269,6 +269,7 @@ export function ToolExecution({ toolName, args, result, status }: ToolExecutionP
       <Collapse
         variant="outlined"
         gap={4}
+        expandIconPosition="end"
         activeKey={expanded ? ['tool'] : []}
         onChange={(keys) => {
           const arr = Array.isArray(keys) ? keys : [keys];

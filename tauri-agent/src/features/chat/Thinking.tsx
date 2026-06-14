@@ -1,6 +1,7 @@
-import { Collapse, Flexbox, Markdown, Text } from '@lobehub/ui';
+import { Collapse, Flexbox, Text } from '@lobehub/ui';
 import { createStyles } from 'antd-style';
 import { useEffect, useState } from 'react';
+import { LazyMarkdown } from './LazyMarkdown';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { useCardStyles } from '../tools/cardStyles';
 import { StatusIndicator } from '../tools/StatusIndicator';
@@ -64,6 +65,7 @@ export function Thinking({ content, thinking, duration }: ThinkingProps) {
     <Collapse
       variant="borderless"
       gap={4}
+      expandIconPosition="end"
       activeKey={showDetail ? ['thinking'] : []}
       onChange={(keys) => {
         const arr = Array.isArray(keys) ? keys : [keys];
@@ -73,13 +75,13 @@ export function Thinking({ content, thinking, duration }: ThinkingProps) {
         {
           key: 'thinking',
           label: title,
-          children: (
+          children: showDetail ? (
             <div ref={bodyRef} className={styles.body} onScroll={handleScroll}>
-              <Markdown variant="chat" fontSize={13} animated={thinking}>
+              <LazyMarkdown variant="chat" fontSize={13} animated={thinking}>
                 {content}
-              </Markdown>
+              </LazyMarkdown>
             </div>
-          ),
+          ) : null,
         },
       ]}
     />

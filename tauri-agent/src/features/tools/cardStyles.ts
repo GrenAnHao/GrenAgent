@@ -156,12 +156,14 @@ export const useCardStyles = createStyles(({ css, cssVar }) => ({
   queryHighlight: css`
     padding: 0 1px;
     color: ${cssVar.colorText};
-    /* 荧光笔式底部高亮（对齐原型：colorInfo 30% 渐变到 42% 处） */
-    background: linear-gradient(
-      to top,
-      color-mix(in srgb, ${cssVar.colorInfo} 30%, transparent) 42%,
-      transparent 42%
+    /* 荧光笔式底部高亮：底部固定高度色带（不随行高糊成中线/删除线）。 */
+    background-image: linear-gradient(
+      color-mix(in srgb, ${cssVar.colorInfo} 32%, transparent),
+      color-mix(in srgb, ${cssVar.colorInfo} 32%, transparent)
     );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 0.5em;
   `,
   searchCount: css`
     margin-inline-start: 4px;
