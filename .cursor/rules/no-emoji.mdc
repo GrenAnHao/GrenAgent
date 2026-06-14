@@ -1,0 +1,29 @@
+---
+description: 全局禁止使用 emoji；UI 图标统一用 lobehub/lucide
+alwaysApply: true
+---
+
+# 不使用 Emoji
+
+本项目禁止在任何产出中使用 emoji，包括：源码、注释、UI 文案、文档、commit message、PR 描述、设计原型（含 HTML mockup）等。
+
+## 规则
+
+- 不得用 emoji 充当图标、状态标记或语气修饰。
+- UI 图标统一从 lobehub 取：用 `@lobehub/ui` 的 `Icon` 组件搭配 `lucide-react` 图标。
+- 需要表达状态/强调时，用文字、颜色或 lucide 图标，不要用 emoji。
+
+## 示例
+
+错误：标题 "插件" 前加一个箱子 emoji；删除按钮直接放一个垃圾桶 emoji 当图标。
+
+正确：
+
+```tsx
+import { Icon } from '@lobehub/ui';
+import { Boxes, Trash2, PencilLine } from 'lucide-react';
+
+<Icon icon={Boxes} />      // 插件 / MCP
+<Icon icon={Trash2} />     // 删除
+<Icon icon={PencilLine} /> // 编辑
+```
