@@ -142,6 +142,66 @@ pub async fn remove_project(
     Ok(())
 }
 
+#[allow(dead_code)]
+const LITE_KEYWORDS: &[&str] = &[
+    "haiku", "mini", "flash", "lite", "small", "nano", "air", "8b", "7b", "4b", "1b",
+];
+
+#[allow(dead_code)]
+fn is_lite(id: &str) -> bool {
+    let l = id.to_lowercase();
+    LITE_KEYWORDS.iter().any(|k| l.contains(k))
+}
+
+/// 标题小模型「启发式 + 兜底」：models = (provider, id, reasoning)。
+#[allow(dead_code)]
+fn pick_title_model(
+    models: &[(String, String, bool)],
+    current_provider: Option<&str>,
+    current_model: Option<(&str, &str)>,
+) -> Option<(String, String)> {
+    let same = |p: &str| current_provider == Some(p);
+    let pick = |f: &dyn Fn(&(String, String, bool)) -> bool| -> Option<(String, String)> {
+        models
+            .iter()
+            .find(|m| f(m))
+            .map(|m| (m.0.clone(), m.1.clone()))
+    };
+    pick(&|m| same(&m.0) && is_lite(&m.1) && !m.2)
+        .or_else(|| pick(&|m| same(&m.0) && is_lite(&m.1)))
+        .or_else(|| pick(&|m| is_lite(&m.1) && !m.2))
+        .or_else(|| pick(&|m| is_lite(&m.1)))
+        .or_else(|| current_model.map(|(p, id)| (p.to_string(), id.to_string())))
+}
+
+/// 清洗 LLM 标题输出：去 <think> 段、取首个非空行、>100 字符截断为 97+"..."。
+#[allow(dead_code)]
+fn clean_title(raw: &str) -> Option<String> {
+    let mut s = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find("<think>") {
+        s.push_str(&rest[..start]);
+        match rest[start..].find("</think>") {
+            Some(end) => rest = &rest[start + end + "</think>".len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    s.push_str(rest);
+    let line = s.lines().map(|l| l.trim()).find(|l| !l.is_empty())?;
+    if line.is_empty() {
+        return None;
+    }
+    if line.chars().count() > 100 {
+        let truncated: String = line.chars().take(97).collect();
+        Some(format!("{truncated}..."))
+    } else {
+        Some(line.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +221,37 @@ mod tests {
         let with = "{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"C:/ws/a\",\"timestamp\":\"t\"}\n";
         let info = parse_session_header(with, "/tmp/a.jsonl").unwrap();
         assert!(paths_equivalent(info.cwd.as_deref().unwrap(), "C:\\ws\\a"));
+    }
+
+    #[test]
+    fn pick_title_model_prefers_same_provider_lite_nonreasoning() {
+        let models = vec![
+            ("anthropic".to_string(), "claude-sonnet-4".to_string(), true),
+            ("anthropic".to_string(), "claude-haiku-4".to_string(), false),
+            ("openai".to_string(), "gpt-5-mini".to_string(), false),
+        ];
+        let got =
+            pick_title_model(&models, Some("anthropic"), Some(("anthropic", "claude-sonnet-4")));
+        assert_eq!(got, Some(("anthropic".to_string(), "claude-haiku-4".to_string())));
+    }
+
+    #[test]
+    fn pick_title_model_falls_back_to_current_when_no_lite() {
+        let models = vec![("x".to_string(), "big-model".to_string(), true)];
+        let got = pick_title_model(&models, Some("x"), Some(("x", "big-model")));
+        assert_eq!(got, Some(("x".to_string(), "big-model".to_string())));
+    }
+
+    #[test]
+    fn clean_title_strips_think_and_truncates() {
+        assert_eq!(
+            clean_title("<think>hmm</think>\n  Refactor auth  \n"),
+            Some("Refactor auth".to_string())
+        );
+        let long = "a".repeat(120);
+        let t = clean_title(&long).unwrap();
+        assert_eq!(t.chars().count(), 100);
+        assert!(t.ends_with("..."));
+        assert_eq!(clean_title("   \n  "), None);
     }
 }
