@@ -27,12 +27,18 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextTertiary};
   `,
   body: css`
+    overflow-x: hidden;
     overflow-y: auto;
     flex: 1;
     min-height: 0;
+    padding-inline-end: 4px;
     font-size: 13px;
     line-height: 1.6;
     color: ${cssVar.colorText};
+
+    /* 长文/长 URL 换行，别顶到右边框 */
+    word-break: break-word;
+    overflow-wrap: anywhere;
   `,
 }));
 
@@ -45,7 +51,7 @@ export function PageContentViewer({ page, onClose }: { page: PageView; onClose: 
   const isJson = trimmed.startsWith('{') || trimmed.startsWith('[');
 
   return (
-    <Flexbox flex={1} gap={8} padding={10} style={{ minHeight: 0 }} data-testid="page-viewer">
+    <Flexbox flex={1} gap={8} style={{ minHeight: 0, padding: 10 }} data-testid="page-viewer">
       <Flexbox horizontal align="center" gap={6}>
         <ActionIcon icon={ChevronLeft} size="small" title="返回" onClick={onClose} />
         <a className={styles.url} href={page.url} target="_blank" rel="noreferrer">
