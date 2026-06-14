@@ -19,4 +19,19 @@ describe('SubAgentInline', { timeout: 30_000 }, () => {
     wrap(<SubAgentInline index={2} task="分析主结构" result={{}} status="running" />);
     expect(screen.getByText(/运行中/)).toBeTruthy();
   });
+
+  it('完成态根据 transcript 显示步数徽章', () => {
+    const transcript = [
+      JSON.stringify({
+        type: 'message_end',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      }),
+      JSON.stringify({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'read', args: {} }),
+      JSON.stringify({ type: 'tool_execution_end', toolCallId: 'c1', result: {}, isError: false }),
+    ].join('\n');
+    wrap(
+      <SubAgentInline index={1} task="t" result={{ details: { transcript } }} status="done" />,
+    );
+    expect(screen.getByText(/已完成 · 2 步/)).toBeTruthy();
+  });
 });

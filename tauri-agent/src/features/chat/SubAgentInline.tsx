@@ -1,9 +1,10 @@
 import { Block, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { ChevronRight, Loader2, Network } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCardStyles } from '../tools/cardStyles';
 import { SubAgentConversation } from '../panels/SubAgentConversation';
+import { subAgentStepCount } from '../panels/subagentUtils';
 
 const styles = createStaticStyles(({ css }) => ({
   head: css`
@@ -33,6 +34,14 @@ const styles = createStaticStyles(({ css }) => ({
   strong: css`
     color: ${cssVar.colorText};
     font-weight: 600;
+  `,
+  badge: css`
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusSM};
+    font-size: 11px;
+    color: ${cssVar.colorTextTertiary};
   `,
   chev: css`
     flex: none;
@@ -79,6 +88,16 @@ export function SubAgentInline({ index, task, result, status }: SubAgentInlinePr
         ? cssVar.colorError
         : cssVar.colorTextSecondary;
 
+  const steps = useMemo(() => subAgentStepCount(result), [result]);
+  const badge =
+    status === 'done'
+      ? `已完成${steps ? ` · ${steps} 步` : ''}`
+      : status === 'error'
+        ? `出错${steps ? ` · ${steps} 步` : ''}`
+        : steps
+          ? `${steps} 步`
+          : '';
+
   return (
     <div data-testid="subagent-inline">
       <div className={styles.head} onClick={() => setOpen((v) => !v)}>
@@ -95,6 +114,7 @@ export function SubAgentInline({ index, task, result, status }: SubAgentInlinePr
           <b className={styles.strong}>子代理 #{index}</b> · {task}
           {running ? '（运行中…）' : ''}
         </span>
+        {badge ? <span className={styles.badge}>{badge}</span> : null}
         <span className={cx(styles.chev, open && styles.chevOpen)}>
           <Icon icon={ChevronRight} size={16} />
         </span>
