@@ -7,6 +7,7 @@ export type ModuleId =
   | 'memory'
   | 'review'
   | 'create'
+  | 'checkpoints'
   | 'connections'
   | 'extensions'
   | 'settings';

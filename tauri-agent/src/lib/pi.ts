@@ -98,6 +98,18 @@ export interface MemHistoryItem {
   createdAt: number;
   scope: string;
 }
+export interface CpFile {
+  file: string;
+  status: string;
+}
+export interface CpItem {
+  id: string;
+  hash: string;
+  label: string;
+  kind: string;
+  files: CpFile[];
+  createdAt: number;
+}
 export interface ReviewNote {
   id: string;
   file: string;
@@ -160,6 +172,8 @@ export const pi = {
   memList: (workspace: string) => invoke<MemItem[]>('mem_list', { workspace }),
   memHistory: (workspace: string, memoryId?: string) =>
     invoke<MemHistoryItem[]>('mem_history', { workspace, memoryId: memoryId ?? null }),
+  cpList: (workspace: string) => invoke<CpItem[]>('cp_list', { workspace }),
+  cpDiff: (workspace: string, id: string) => invoke<string>('cp_diff', { workspace, id }),
   rvList: (workspace: string) => invoke<ReviewNote[]>('rv_list', { workspace }),
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
   createImage: (workspace: string, name: string) =>
