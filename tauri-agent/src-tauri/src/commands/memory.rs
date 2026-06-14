@@ -90,6 +90,95 @@ pub fn mem_list(workspace: String) -> Result<Vec<MemItem>, String> {
     Ok(out)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemHistoryItem {
+    pub history_id: i64,
+    pub memory_id: String,
+    pub op: String,
+    pub old_text: Option<String>,
+    pub new_text: Option<String>,
+    pub old_category: Option<String>,
+    pub new_category: Option<String>,
+    pub reason: Option<String>,
+    pub version: i64,
+    pub created_at: i64,
+    pub scope: String,
+}
+
+fn read_mem_history(
+    path: &Path,
+    scope: &str,
+    memory_id: Option<&str>,
+) -> Result<Vec<MemHistoryItem>, String> {
+    let Some(conn) = open_readonly(path)? else {
+        return Ok(vec![]);
+    };
+    // memory_history may not exist on a pre-migration db.
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_history'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if exists == 0 {
+        return Ok(vec![]);
+    }
+    let cols = "historyId, memoryId, op, oldText, newText, oldCategory, newCategory, reason, version, createdAt";
+    let map_row = |r: &rusqlite::Row| {
+        Ok(MemHistoryItem {
+            history_id: r.get(0)?,
+            memory_id: r.get(1)?,
+            op: r.get(2)?,
+            old_text: r.get(3)?,
+            new_text: r.get(4)?,
+            old_category: r.get(5)?,
+            new_category: r.get(6)?,
+            reason: r.get(7)?,
+            version: r.get(8)?,
+            created_at: r.get(9)?,
+            scope: scope.to_string(),
+        })
+    };
+    let mut out = Vec::new();
+    if let Some(id) = memory_id {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {cols} FROM memory_history WHERE memoryId = ?1 ORDER BY historyId DESC"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([id], map_row).map_err(|e| e.to_string())?;
+        for r in rows {
+            out.push(r.map_err(|e| e.to_string())?);
+        }
+    } else {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {cols} FROM memory_history ORDER BY historyId DESC LIMIT 200"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
+        for r in rows {
+            out.push(r.map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn mem_history(
+    workspace: String,
+    memory_id: Option<String>,
+) -> Result<Vec<MemHistoryItem>, String> {
+    let mut out = read_mem_history(&mem_project_path(&workspace)?, "project", memory_id.as_deref())?;
+    if let Some(p) = mem_global_path() {
+        out.extend(read_mem_history(&p, "global", memory_id.as_deref())?);
+    }
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +229,40 @@ mod tests {
     fn missing_db_is_empty() {
         assert_eq!(read_mem_count(Path::new("/no/such/memory.db")).unwrap(), 0);
         assert!(read_mem_list(Path::new("/no/such/memory.db"), "global")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn history_reads_rows_desc_with_scope() {
+        let db = tmp_db("memory.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE memory_history(historyId INTEGER PRIMARY KEY AUTOINCREMENT, memoryId TEXT NOT NULL, op TEXT NOT NULL, oldText TEXT, newText TEXT, oldCategory TEXT, newCategory TEXT, reason TEXT, model TEXT, version INTEGER NOT NULL, createdAt INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO memory_history(memoryId,op,oldText,newText,version,createdAt) VALUES('m1','ADD',NULL,'a',1,100)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO memory_history(memoryId,op,oldText,newText,version,createdAt) VALUES('m1','UPDATE','a','b',2,200)",
+            [],
+        )
+        .unwrap();
+        let rows = read_mem_history(&db, "project", None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].op, "UPDATE"); // historyId DESC
+        assert_eq!(rows[0].scope, "project");
+        let filtered = read_mem_history(&db, "project", Some("m1")).unwrap();
+        assert_eq!(filtered.len(), 2);
+        std::fs::remove_dir_all(db.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn history_missing_db_is_empty() {
+        assert!(read_mem_history(Path::new("/no/such/memory.db"), "global", None)
             .unwrap()
             .is_empty());
     }

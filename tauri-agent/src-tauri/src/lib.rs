@@ -80,6 +80,7 @@ pub fn run() {
             commands::knowledge::kb_chunks,
             commands::memory::mem_stats,
             commands::memory::mem_list,
+            commands::memory::mem_history,
             commands::review::rv_list,
             commands::create::create_list,
             commands::create::create_image,
