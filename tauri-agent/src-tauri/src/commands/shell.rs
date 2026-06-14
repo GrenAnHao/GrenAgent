@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -29,16 +30,33 @@ impl ShellManager {
     }
 }
 
+fn shell_cwd(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        let raw = path.to_string_lossy();
+        if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellStartResult {
     pub session_id: String,
 }
 
-async fn emit_shell_output(window: &tauri::Window, data: String) -> Result<(), String> {
+async fn emit_shell_output(
+    window: &tauri::Window,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
     window
         .emit(
             "shell-output",
-            &TerminalEvent::Output { data },
+            &TerminalEvent::Output {
+                data,
+                session_id: Some(session_id),
+            },
         )
         .map_err(|e| e.to_string())
 }
@@ -53,6 +71,7 @@ pub async fn shell_start(
         Some(ws) if !ws.is_empty() => resolve_workspace_dir(&ws)?,
         _ => std::env::current_dir().map_err(|e| e.to_string())?,
     };
+    let cwd = shell_cwd(cwd);
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -65,7 +84,9 @@ pub async fn shell_start(
         .map_err(|e| format!("pty open failed: {e}"))?;
 
     let mut cmd = if cfg!(windows) {
-        CommandBuilder::new("cmd.exe")
+        let mut c = CommandBuilder::new("powershell.exe");
+        c.arg("-NoLogo");
+        c
     } else {
         let mut c = CommandBuilder::new("bash");
         c.arg("-l");
@@ -98,7 +119,8 @@ pub async fn shell_start(
                 Ok(0) => break,
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = tauri::async_runtime::block_on(emit_shell_output(&win, chunk));
+                    let _ =
+                        tauri::async_runtime::block_on(emit_shell_output(&win, sid.clone(), chunk));
                 }
                 Err(_) => break,
             }
@@ -107,22 +129,19 @@ pub async fn shell_start(
             "shell-output",
             &TerminalEvent::Exit {
                 exit_code: 0,
+                session_id: Some(sid),
             },
         );
-        let _ = sid;
     });
 
-    mgr.sessions
-        .lock()
-        .await
-        .insert(
-            session_id.clone(),
-            ShellSession {
-                _master: master,
-                writer,
-                child,
-            },
-        );
+    mgr.sessions.lock().await.insert(
+        session_id.clone(),
+        ShellSession {
+            _master: master,
+            writer,
+            child,
+        },
+    );
 
     Ok(ShellStartResult { session_id })
 }

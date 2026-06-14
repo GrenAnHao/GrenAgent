@@ -5,8 +5,8 @@ pub fn validate_path_in_workspace(
     workspace_root: &Path,
     target_path: &str,
 ) -> Result<PathBuf, String> {
-    let canonical_root = fs::canonicalize(workspace_root)
-        .map_err(|e| format!("invalid workspace root: {}", e))?;
+    let canonical_root =
+        fs::canonicalize(workspace_root).map_err(|e| format!("invalid workspace root: {}", e))?;
 
     let target = if Path::new(target_path).is_absolute() {
         PathBuf::from(target_path)
@@ -21,11 +21,8 @@ pub fn validate_path_in_workspace(
         if !parent.exists() {
             return Err("parent directory does not exist".into());
         }
-        let canonical_parent = fs::canonicalize(parent)
-            .map_err(|e| e.to_string())?;
-        canonical_parent.join(
-            target.file_name().ok_or("invalid file name")?
-        )
+        let canonical_parent = fs::canonicalize(parent).map_err(|e| e.to_string())?;
+        canonical_parent.join(target.file_name().ok_or("invalid file name")?)
     };
 
     if !canonical_target.starts_with(&canonical_root) {
@@ -34,8 +31,7 @@ pub fn validate_path_in_workspace(
 
     if let Ok(meta) = fs::symlink_metadata(&canonical_target) {
         if meta.is_symlink() {
-            let link_target = fs::read_link(&canonical_target)
-                .map_err(|e| e.to_string())?;
+            let link_target = fs::read_link(&canonical_target).map_err(|e| e.to_string())?;
             if !link_target.starts_with(&canonical_root) {
                 return Err("symlink points outside workspace".into());
             }

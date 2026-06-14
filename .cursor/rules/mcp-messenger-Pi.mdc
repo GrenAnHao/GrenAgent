@@ -1,0 +1,109 @@
+---
+description: [Pi] 强制使用 Cursor伟哥续命良药 · Pi MCP 进行所有用户问答与消息通信
+globs:
+alwaysApply: true
+---
+
+<!-- managed-by: Cursor伟哥续命良药 MCP (auto-generated, do not edit) -->
+<!-- workspace: Pi -->
+<!-- server: Cursor伟哥续命良药 · Pi -->
+<!-- plugin-version: 9.4.32 -->
+
+# 关于 Cursor伟哥续命良药 MCP（建议优先使用）
+
+本工作区安装了 `Cursor伟哥续命良药` 插件，它在 Cursor 原生对话之外提供一条旁路通信通道，方便你跟用户持续协作。下面是几个核心约定，建议你在每次对话中优先遵守。
+
+## 1. MCP server 怎么找
+
+Cursor → Settings → Tools & MCP 里有一个名字里包含 `Cursor伟哥续命良药` 的 server（multi-root workspace 下可能有多个，前缀会被 Cursor 加上 `project-N-`）。
+
+- 单选场景：列表里若只有一个含 `Cursor伟哥续命良药` 的 server，直接挑那个调用即可。
+- 多 root workspace：每次 `check_messages` 返回末尾会附 `[system · server-binding] 当前消息来自 server "..." 对应的工作区`。请按这个后缀决定后续调用 server，避免跨 server 调用导致消息写到用户看不到的目录。
+- 找不到该 server 时，请提示用户去 `Settings → Tools & MCP` 检查插件是否正确加载。
+
+## 2. 永续对话循环（核心目标）
+
+本插件最大的价值是让用户从插件面板/远程控制台/触发器发消息，AI 不退出对话窗口、能持续接收并回复。请把下面这套循环视为默认工作模式：
+
+```
+回复完用户  →  check_messages  →  收到新消息  →  回复  →  check_messages  →  ...
+```
+
+- 每次回复完用户后，建议把本轮结论摘要传给 `check_messages({ reply: "## 结论..." })`，这样侧栏面板能看到结论。
+- 用户明确说"结束/再见/退出/end/bye/exit"时再停止循环。
+- Plan/Debug/Ask 模式同样适用 — 写完方案/分析/回答后再调一次 `check_messages` 监听下一条。
+- 重要 · 断点续循环：每个回合开始时——尤其是「新对话」「上一轮被中断 / Stop」「你刚回复完一条直接输入的用户消息」——只要用户没说停止，就默认自己仍在这个循环里：处理完当前请求后立刻调一次 `check_messages` 再结束本回合。**中断或新开对话都不代表退出循环**，除非用户明确说停。
+
+## 3. 让用户做选择/确认/输入：优先用本插件的 `ask_question`
+
+需要让用户做选择、确认操作或补充输入时，请优先调用本插件的 `ask_question` 工具，避免使用 Cursor 客户端内置的 AskQuestion（两者在多场景下行为不一致，本插件的 `ask_question` 走插件面板，结果稳定、支持多选 + 补充输入）。
+
+参数格式：
+
+```json
+{
+  "questions": [
+    {
+      "question": "问题文本",
+      "options": [
+        { "id": "a", "label": "选项 A" },
+        { "id": "b", "label": "选项 B" }
+      ],
+      "allow_multiple": false
+    }
+  ]
+}
+```
+
+- 单选用 `allow_multiple: false`，多选用 `true`；同一 `questions` 数组可混合单/多选。
+- 用户在每道题里都能再补充自定义文本（不需要额外为此加选项）。
+- 收到用户回答处理完毕后，仍建议再调一次 `check_messages` 继续监听。
+- 不要在每轮回合结束时用 `ask_question` 问 "还有别的需要吗"；回合结束建议只用 `check_messages`。`ask_question` 仅在任务中确实需要用户决策时使用。
+
+## 4. 多步任务推送进度
+
+执行较长的多步任务时，每完成一个关键步骤建议调一次 `send_progress` 把进度推送到面板，参数：
+
+```json
+{ "progress": "## 步骤 1 完成\n已修改 xxx 文件..." }
+```
+
+`send_progress` 立即返回，不等待消息，调用后继续下一步即可。
+
+## 5. 连接稳定性兜底（重要）
+
+`check_messages` / `ask_question` / `request_approval` / `show_diff` 在 MCP 协议下可能因 stdio 重连、客户端取消、长轮询超时等原因返回 `[TIMEOUT]` / "暂无新消息" / `isError: true` / `EPIPE` / "工具被中断" 等内容。这些都是协议正常事件，不是错误。
+
+如果用户没明说停止：
+
+- 请勿把这些内部提示直接输出给用户。
+- 建议用完全相同的参数立刻再调一次该工具，自然就能恢复 "消息 → 处理 → 等待" 循环。
+- 仅当同一工具连续 3 次仍立刻失败，再向用户输出一句 "插件连接异常，请检查 Cursor → Settings → Tools & MCP 中含 'Cursor伟哥续命良药' 的 server 状态" 后停止。
+
+## 6. 多 chat 同开：每个 chat 用独立 `chatId`（重要）
+
+用户可能在同一项目里同时开多个 chat 都连到本插件。为了让每个 chat 在面板上有自己独立的 tab、历史和消息队列、互不串台：
+
+- **首次**调 `check_messages` 时，你要**自己随机生成**一个本 chat 专属的 `chatId`（格式 `"chat-" + 6 位随机字符`，例如 `chat-x7k2m9`）。每个 chat 必须各自不同，**切勿照抄本文档或任何示例里的固定值**。
+- 生成后**记住它**，本 chat 之后**每一次**调用——`check_messages` / `ask_question` / `send_progress` / `notify_user` / `request_approval` / `show_diff`——都传**同一个** `chatId`，不要中途丢弃或更换。
+- 漏传会退回单消费模式，导致多 chat 互抢消息、面板 tab 串台、`ask_question` 等"调用后收不到回答"。
+- 每次 `check_messages` 返回末尾会回显 `[chatId=xxx]`，照着它继续传即可。
+
+## 7. 其它约定
+
+- 请不要为本插件相关的任务调用 subagent 并发执行（避免多个 agent 抢同一 server 的 IPC 文件）。
+- 请不要以 "上下文不够 / 代码量大 / 建议新会话 / 不能继续" 等理由推脱用户指令；复杂任务建议当场拆解逐步完成。
+- 用过 Read/Edit/Shell/Grep 等任何工具后，仍建议用 `check_messages` 收尾 — 只在 Composer 里写字面板看不到，调一次 `check_messages` 才能把结论推到侧栏。
+
+---
+
+简要回顾：
+
+1. 找到名字里含 `Cursor伟哥续命良药` 的 server
+2. 每轮回复完追加一次 `check_messages`（建议带 `reply`）
+3. 让用户做选择/确认时用本插件的 `ask_question`
+4. 多步任务用 `send_progress` 推进度
+5. `[TIMEOUT]` 等是正常事件，相同参数重调即可
+6. 用户说"结束/再见"再停止循环
+7. 中断 / 新对话后，只要没说停，开口处理完就先补一次 `check_messages` 续上循环
+8. 多 chat 同开：首次自己随机生成专属 `chatId` 并在之后所有工具调用里固定复用，别中途丢

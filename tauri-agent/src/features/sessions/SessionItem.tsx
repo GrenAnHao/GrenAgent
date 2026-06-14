@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Input } from 'antd';
 import { Icon } from '@lobehub/ui';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Hand, LoaderCircle } from 'lucide-react';
 import { RowActions } from './RowActions';
 import { buildSessionMenuItems } from './useSessionMenu';
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   row: css`
     display: flex;
     align-items: center;
@@ -15,19 +15,19 @@ const useStyles = createStyles(({ token, css }) => ({
     margin: 0 6px;
     padding: 0 8px 0 16px;
     border-radius: 7px;
-    color: ${token.colorTextSecondary};
+    color: ${cssVar.colorTextSecondary};
     cursor: pointer;
 
     &:hover {
-      background: ${token.colorFillTertiary};
+      background: ${cssVar.colorFillTertiary};
     }
   `,
   active: css`
-    color: ${token.colorText};
-    background: ${token.colorFill};
+    color: ${cssVar.colorText};
+    background: ${cssVar.colorFill};
 
     &:hover {
-      background: ${token.colorFill};
+      background: ${cssVar.colorFill};
     }
   `,
   title: css`
@@ -38,7 +38,7 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
   spin: css`
     display: inline-flex;
-    color: ${token.colorWarning};
+    color: ${cssVar.colorWarning};
     animation: piSidebarSpin 1.1s linear infinite;
 
     @keyframes piSidebarSpin {
@@ -77,10 +77,20 @@ export interface SessionItemProps {
   onDelete: () => void;
 }
 
-export function SessionItem(props: SessionItemProps) {
-  const { title, active, running, waiting, pinned, editing, onClick, onPinToggle, onRequestRename, onRename, onDelete } =
-    props;
-  const { styles, cx } = useStyles();
+export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
+  const {
+    title,
+    active,
+    running,
+    waiting,
+    pinned,
+    editing,
+    onClick,
+    onPinToggle,
+    onRequestRename,
+    onRename,
+    onDelete,
+  } = props;
   const [draft, setDraft] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -134,4 +144,4 @@ export function SessionItem(props: SessionItemProps) {
       </span>
     </div>
   );
-}
+});

@@ -11,7 +11,7 @@ const SESSIONS_WIDTH = 240;
 const CONTEXT_WIDTH = 280;
 
 export const useAppStyles = createStyles(
-  ({ token, css }, { sidebarOpen, contextOpen }: AppStyleProps) => {
+  ({ css, cssVar }, { sidebarOpen, contextOpen }: AppStyleProps) => {
     const cols = [
       sidebarOpen ? `${SESSIONS_WIDTH}px` : '0px',
       'minmax(0, 1fr)',
@@ -25,7 +25,7 @@ export const useAppStyles = createStyles(
         height: 100vh;
         width: 100vw;
         overflow: hidden;
-        background: ${token.colorBgLayout};
+        background: ${cssVar.colorBgLayout};
         transition: grid-template-columns 0.2s ease;
       `,
 
@@ -33,8 +33,8 @@ export const useAppStyles = createStyles(
         min-width: 0;
         height: 100%;
         overflow: hidden;
-        border-right: 1px solid ${token.colorBorderSecondary};
-        background: ${token.colorBgContainer};
+        border-right: 1px solid ${cssVar.colorBorderSecondary};
+        background: ${cssVar.colorBgContainer};
       `,
 
       appMain: css`
@@ -43,7 +43,7 @@ export const useAppStyles = createStyles(
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        background: ${token.colorBgLayout};
+        background: ${cssVar.colorBgLayout};
       `,
 
       appChat: css`
@@ -60,16 +60,16 @@ export const useAppStyles = createStyles(
         right: 0;
         height: 200px;
         z-index: 10;
-        background: ${token.colorBgContainer};
-        border-top: 1px solid ${token.colorBorderSecondary};
+        background: ${cssVar.colorBgContainer};
+        border-top: 1px solid ${cssVar.colorBorderSecondary};
       `,
 
       appContext: css`
         min-width: 0;
         height: 100%;
         overflow: hidden;
-        border-left: 1px solid ${token.colorBorderSecondary};
-        background: ${token.colorBgContainer};
+        border-left: 1px solid ${cssVar.colorBorderSecondary};
+        background: ${cssVar.colorBgContainer};
       `,
     };
   },

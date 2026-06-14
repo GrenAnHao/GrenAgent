@@ -36,7 +36,10 @@ mod tests {
     fn splits_on_lf_only_and_strips_cr() {
         let mut buf = JsonlBuffer::new();
         let lines = buf.push("{\"a\":1}\r\n{\"b\":2}\n");
-        assert_eq!(lines, vec!["{\"a\":1}".to_string(), "{\"b\":2}".to_string()]);
+        assert_eq!(
+            lines,
+            vec!["{\"a\":1}".to_string(), "{\"b\":2}".to_string()]
+        );
     }
 
     #[test]

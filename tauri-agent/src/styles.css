@@ -26,6 +26,17 @@ body {
   background: #000;
 }
 
+html.theme-transitioning,
+html.theme-transitioning body,
+html.theme-transitioning #root,
+html.theme-transitioning #root *,
+html.theme-transitioning #root *::before,
+html.theme-transitioning #root *::after {
+  transition-property: background-color, border-color, color, box-shadow, fill, stroke;
+  transition-duration: 200ms;
+  transition-timing-function: ease;
+}
+
 .chat-view {
   display: flex;
   flex-direction: column;

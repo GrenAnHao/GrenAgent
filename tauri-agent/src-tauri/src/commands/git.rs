@@ -72,17 +72,11 @@ pub async fn get_git_status(workspace_path: String) -> Result<Vec<FileStatus>, S
     }
 
     let stdout = run_git(&cwd, &["status", "--porcelain"])?;
-    Ok(stdout
-        .lines()
-        .filter_map(parse_porcelain_line)
-        .collect())
+    Ok(stdout.lines().filter_map(parse_porcelain_line).collect())
 }
 
 #[tauri::command]
-pub async fn get_git_diff(
-    workspace_path: String,
-    file_path: String,
-) -> Result<String, String> {
+pub async fn get_git_diff(workspace_path: String, file_path: String) -> Result<String, String> {
     let cwd = resolve_workspace_dir(&workspace_path)?;
     if !is_git_repo(&cwd) {
         return Err("not a git repository".to_string());

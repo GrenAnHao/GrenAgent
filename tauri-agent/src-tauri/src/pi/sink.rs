@@ -16,15 +16,17 @@ pub struct TauriSink {
 impl EventSink for TauriSink {
     fn emit_event(&self, workspace: &str, event: &Value) {
         use tauri::Emitter;
-        let _ = self
-            .app
-            .emit("pi://event", json!({ "workspace": workspace, "event": event }));
+        let _ = self.app.emit(
+            "pi://event",
+            json!({ "workspace": workspace, "event": event }),
+        );
     }
     fn emit_ui_request(&self, workspace: &str, request: &Value) {
         use tauri::Emitter;
-        let _ = self
-            .app
-            .emit("pi://ui-request", json!({ "workspace": workspace, "request": request }));
+        let _ = self.app.emit(
+            "pi://ui-request",
+            json!({ "workspace": workspace, "request": request }),
+        );
     }
     fn emit_exit(&self, workspace: &str, code: Option<i32>) {
         use tauri::Emitter;

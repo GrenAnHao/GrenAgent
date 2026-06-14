@@ -7,16 +7,27 @@ use tokio::process::Command;
 #[serde(tag = "type")]
 pub enum TerminalEvent {
     #[serde(rename = "output")]
-    Output { data: String },
+    Output {
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
     #[serde(rename = "exit")]
-    Exit { exit_code: i32 },
+    Exit {
+        exit_code: i32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
 }
 
 async fn emit_output(window: &tauri::Window, data: String) -> Result<(), String> {
     window
         .emit(
             "terminal-output",
-            &TerminalEvent::Output { data },
+            &TerminalEvent::Output {
+                data,
+                session_id: None,
+            },
         )
         .map_err(|e| e.to_string())
 }
@@ -50,7 +61,8 @@ pub async fn execute_command(
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| security::sanitize_error(format!("spawn failed: {}", e)))?;
 
     if let Some(stdout) = child.stdout.take() {
@@ -95,7 +107,10 @@ pub async fn execute_command(
     window
         .emit(
             "terminal-output",
-            &TerminalEvent::Exit { exit_code: code },
+            &TerminalEvent::Exit {
+                exit_code: code,
+                session_id: None,
+            },
         )
         .map_err(|e| e.to_string())?;
 

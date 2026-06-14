@@ -1,10 +1,8 @@
 use std::path::Path;
 
 static ALLOWED_COMMANDS: &[&str] = &[
-    "node", "npm", "pnpm", "yarn", "bun",
-    "python", "python3", "pip", "pip3",
-    "git", "cargo", "rustc", "go", "make", "cmake",
-    "ls", "dir", "cat", "echo", "pwd",
+    "node", "npm", "pnpm", "yarn", "bun", "python", "python3", "pip", "pip3", "git", "cargo",
+    "rustc", "go", "make", "cmake", "ls", "dir", "cat", "echo", "pwd",
 ];
 
 pub fn validate_command(command: &str) -> Result<(), String> {
@@ -13,10 +11,7 @@ pub fn validate_command(command: &str) -> Result<(), String> {
         .and_then(|n| n.to_str())
         .unwrap_or(command);
 
-    let normalized = cmd_name
-        .to_lowercase()
-        .trim_end_matches(".exe")
-        .to_string();
+    let normalized = cmd_name.to_lowercase().trim_end_matches(".exe").to_string();
 
     if ALLOWED_COMMANDS.contains(&normalized.as_str()) {
         Ok(())

@@ -221,8 +221,8 @@ pub async fn write_file(workspace: String, path: String, content: String) -> Res
 
 #[tauri::command]
 pub async fn read_file_binary(workspace: String, path: String) -> Result<BinaryFile, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::security;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let workspace_root = resolve_workspace_dir(&workspace)?;
     let safe_path = security::validate_path_in_workspace(&workspace_root, &path)

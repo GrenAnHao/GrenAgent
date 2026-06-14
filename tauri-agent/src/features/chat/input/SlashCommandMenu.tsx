@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { EditorSlashMenu, type EditorSlashMenuOption } from '@lobehub/ui';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { pi } from '../../../lib/pi';
 import { useChatInput } from './ChatInputContext';
@@ -30,7 +30,7 @@ function focusTextAreaAt(textareaRef: React.RefObject<TextAreaRef | null>, curso
   });
 }
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   itemRow: css`
     display: flex;
     flex: 1;
@@ -50,9 +50,9 @@ const useStyles = createStyles(({ token, css }) => ({
     flex: 1;
     min-width: 0;
 
-    font-family: ${token.fontFamilyCode};
+    font-family: ${cssVar.fontFamilyCode};
     font-size: 12px;
-    color: ${token.colorTextTertiary};
+    color: ${cssVar.colorTextTertiary};
     text-align: end;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -72,7 +72,6 @@ export function SlashCommandMenu({
   const { workspace, store } = useAgentStoreContext();
   const { setValue } = useChatInput();
   const { items } = useSlashCommands(open, workspace);
-  const { styles } = useStyles();
 
   const handleSelect = useCallback(
     (item: EditorSlashMenuOption) => {

@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -25,10 +26,17 @@ pub fn parse_session_header(contents: &str, path: &str) -> Option<SessionInfo> {
         return None;
     }
     Some(SessionInfo {
-        id: v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        id: v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string(),
         path: path.to_string(),
         cwd: v.get("cwd").and_then(|x| x.as_str()).map(str::to_string),
-        timestamp: v.get("timestamp").and_then(|x| x.as_str()).map(str::to_string),
+        timestamp: v
+            .get("timestamp")
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
         name: v.get("name").and_then(|x| x.as_str()).map(str::to_string),
     })
 }
@@ -90,10 +98,7 @@ fn collect_session_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf
 /// Tauri 开发时进程 cwd 常在 `src-tauri`，需上溯到项目根目录。
 fn project_base_dir() -> Result<std::path::PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let name = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if name == "src-tauri" {
         return cwd
             .parent()
@@ -128,9 +133,14 @@ pub fn canonical_display_path(path: &Path) -> String {
         .to_string()
 }
 
+fn perf_log(label: &str, elapsed_ms: u128) {
+    eprintln!("[PERF-startup] {label}: {elapsed_ms}ms");
+}
+
 /// 列出某工作区（cwd）的会话，按 timestamp 倒序。
 #[tauri::command]
 pub async fn list_pi_sessions(workspace: String) -> Result<Vec<SessionInfo>, String> {
+    let t0 = Instant::now();
     let cwd = workspace_cwd(&workspace);
     let dir = match sessions_dir() {
         Some(d) => d,
@@ -156,13 +166,14 @@ pub async fn list_pi_sessions(workspace: String) -> Result<Vec<SessionInfo>, Str
         }
     }
     out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    perf_log(
+        &format!("list_pi_sessions:{workspace} count={}", out.len()),
+        t0.elapsed().as_millis(),
+    );
     Ok(out)
 }
 
-async fn pi_get_session_file(
-    mgr: &PiManager,
-    workspace: &str,
-) -> Result<Option<String>, String> {
+async fn pi_get_session_file(mgr: &PiManager, workspace: &str) -> Result<Option<String>, String> {
     let client = mgr
         .get(workspace)
         .await
@@ -174,9 +185,11 @@ async fn pi_get_session_file(
     if !resp.success {
         return Err(resp.error.unwrap_or_else(|| "get_state failed".into()));
     }
-    Ok(resp
-        .data
-        .and_then(|d| d.get("sessionFile").and_then(|v| v.as_str()).map(str::to_string)))
+    Ok(resp.data.and_then(|d| {
+        d.get("sessionFile")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }))
 }
 
 /// 删除会话文件。若删除的是当前活跃会话，先 new_session 再删文件。
@@ -190,8 +203,8 @@ pub async fn delete_pi_session(
 
     // 1. 规范化会话目录
     let sessions_root = sessions_dir().ok_or("sessions directory unavailable")?;
-    let canonical_sessions = std::fs::canonicalize(&sessions_root)
-        .map_err(security::sanitize_error)?;
+    let canonical_sessions =
+        std::fs::canonicalize(&sessions_root).map_err(security::sanitize_error)?;
 
     // 2. 规范化目标路径
     let path = Path::new(&session_path);
@@ -199,8 +212,7 @@ pub async fn delete_pi_session(
         return Err("session file not found".into());
     }
 
-    let canonical_target = std::fs::canonicalize(path)
-        .map_err(|_| "session file not found")?;
+    let canonical_target = std::fs::canonicalize(path).map_err(|_| "session file not found")?;
 
     // 3. 检查边界
     if !canonical_target.starts_with(&canonical_sessions) {
@@ -261,8 +273,7 @@ pub async fn request_workspace_approval(
     path: String,
     store: State<'_, crate::state::AppStateStore>,
 ) -> Result<(), String> {
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|e| format!("invalid path: {}", e))?;
+    let canonical = std::fs::canonicalize(&path).map_err(|e| format!("invalid path: {}", e))?;
     let canonical_str = canonical.to_string_lossy().to_string();
 
     store.update(|st| st.approve_workspace(canonical_str)).await;
@@ -274,8 +285,7 @@ pub async fn is_workspace_approved(
     path: String,
     store: State<'_, crate::state::AppStateStore>,
 ) -> Result<bool, String> {
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|e| format!("invalid path: {}", e))?;
+    let canonical = std::fs::canonicalize(&path).map_err(|e| format!("invalid path: {}", e))?;
     let canonical_str = canonical.to_string_lossy().to_string();
 
     Ok(store.is_approved(&canonical_str).await)
@@ -286,6 +296,7 @@ pub async fn is_workspace_approved(
 /// 本命令返回 `~/.pi/agent/sessions` 下全部带 cwd 的会话，供侧边栏按项目分组。
 #[tauri::command]
 pub async fn list_all_sessions() -> Result<Vec<SessionInfo>, String> {
+    let t0 = Instant::now();
     let dir = match sessions_dir() {
         Some(d) => d,
         None => return Ok(vec![]),
@@ -306,6 +317,10 @@ pub async fn list_all_sessions() -> Result<Vec<SessionInfo>, String> {
         }
     }
     out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    perf_log(
+        &format!("list_all_sessions count={}", out.len()),
+        t0.elapsed().as_millis(),
+    );
     Ok(out)
 }
 
@@ -347,7 +362,13 @@ mod tests {
         let with_cwd =
             "{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"/ws/a\",\"timestamp\":\"2026-06-10T00:00:00Z\"}\n";
         let no_cwd = "{\"type\":\"session\",\"id\":\"b\",\"timestamp\":\"2026-06-10T00:00:00Z\"}\n";
-        assert!(parse_session_header(with_cwd, "/tmp/a.jsonl").unwrap().cwd.is_some());
-        assert!(parse_session_header(no_cwd, "/tmp/b.jsonl").unwrap().cwd.is_none());
+        assert!(parse_session_header(with_cwd, "/tmp/a.jsonl")
+            .unwrap()
+            .cwd
+            .is_some());
+        assert!(parse_session_header(no_cwd, "/tmp/b.jsonl")
+            .unwrap()
+            .cwd
+            .is_none());
     }
 }

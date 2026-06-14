@@ -99,7 +99,9 @@ mod tests {
         ));
 
         let mgr = PiManager::new();
-        mgr.get_or_open("/ws/a", || Ok(client.clone())).await.unwrap();
+        mgr.get_or_open("/ws/a", || Ok(client.clone()))
+            .await
+            .unwrap();
         mgr.close("/ws/a").await;
 
         assert!(mgr.get("/ws/a").await.is_none());

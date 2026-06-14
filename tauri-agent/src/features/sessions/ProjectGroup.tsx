@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Icon } from '@lobehub/ui';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { ChevronDown } from 'lucide-react';
 import type { ProjectGroup as Group } from './useProjectGroups';
 import { ProjectItem } from './ProjectItem';
@@ -8,19 +8,19 @@ import { SessionItem } from './SessionItem';
 
 const DEFAULT_VISIBLE = 5;
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   more: css`
     display: flex;
     align-items: center;
     gap: 5px;
     margin: 0 6px;
     padding: 2px 10px 4px 28px;
-    color: ${token.colorTextTertiary};
+    color: ${cssVar.colorTextTertiary};
     font-size: 12px;
     cursor: pointer;
 
     &:hover {
-      color: ${token.colorText};
+      color: ${cssVar.colorText};
     }
   `,
 }));
@@ -45,8 +45,7 @@ export interface ProjectGroupProps {
   isSessionPinned: (path: string) => boolean;
 }
 
-export function ProjectGroup(p: ProjectGroupProps) {
-  const { styles } = useStyles();
+export const ProjectGroup = memo(function ProjectGroup(p: ProjectGroupProps) {
   const [showAll, setShowAll] = useState(false);
   const g = p.group;
   const visible = showAll ? g.sessions : g.sessions.slice(0, DEFAULT_VISIBLE);
@@ -89,4 +88,4 @@ export function ProjectGroup(p: ProjectGroupProps) {
       )}
     </>
   );
-}
+});

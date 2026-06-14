@@ -246,7 +246,8 @@ mod tests {
 
     #[test]
     fn unknown_or_missing_type_falls_back_to_event() {
-        let unknown: PiInbound = serde_json::from_str(r#"{"type":"totally_new_event","x":1}"#).unwrap();
+        let unknown: PiInbound =
+            serde_json::from_str(r#"{"type":"totally_new_event","x":1}"#).unwrap();
         assert!(matches!(unknown, PiInbound::Event(_)));
 
         let missing: PiInbound = serde_json::from_str(r#"{"foo":"bar"}"#).unwrap();

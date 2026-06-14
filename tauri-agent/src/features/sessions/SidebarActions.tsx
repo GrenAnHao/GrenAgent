@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Icon } from '@lobehub/ui';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { MessageSquarePlus, Search } from 'lucide-react';
 import { useSessionStore } from '../../store/session';
 import { SearchBox } from './SearchBox';
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   wrap: css`
     display: flex;
     flex-direction: column;
@@ -19,11 +19,11 @@ const useStyles = createStyles(({ token, css }) => ({
     height: 32px;
     padding: 0 10px;
     border-radius: 7px;
-    color: ${token.colorText};
+    color: ${cssVar.colorText};
     cursor: pointer;
 
     &:hover {
-      background: ${token.colorFillTertiary};
+      background: ${cssVar.colorFillTertiary};
     }
   `,
 }));
@@ -33,7 +33,6 @@ interface SidebarActionsProps {
 }
 
 export function SidebarActions({ onNew }: SidebarActionsProps) {
-  const { styles } = useStyles();
   const [searching, setSearching] = useState(false);
   const setKeyword = useSessionStore((s) => s.setSearchKeyword);
 

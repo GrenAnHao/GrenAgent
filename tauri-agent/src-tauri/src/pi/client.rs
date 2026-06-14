@@ -75,7 +75,10 @@ impl PiClient {
                 self.sink.emit_event(&self.workspace, &v);
             }
             Err(e) => {
-                eprintln!("[pi:{}] skip unparsable line: {e}: {trimmed}", self.workspace);
+                eprintln!(
+                    "[pi:{}] skip unparsable line: {e}: {trimmed}",
+                    self.workspace
+                );
             }
         }
     }
@@ -165,11 +168,18 @@ mod tests {
     async fn correlates_response_to_request() {
         let (transport, mut outbox) = ChannelTransport::new();
         let sink = CollectingSink::default();
-        let client = Arc::new(PiClient::new("ws1".into(), Arc::new(transport), Arc::new(sink)));
+        let client = Arc::new(PiClient::new(
+            "ws1".into(),
+            Arc::new(transport),
+            Arc::new(sink),
+        ));
 
         let client2 = client.clone();
         let handle = tokio::spawn(async move {
-            client2.send(PiOutbound::GetState { id: None }).await.unwrap()
+            client2
+                .send(PiOutbound::GetState { id: None })
+                .await
+                .unwrap()
         });
 
         let line = outbox.recv().await.unwrap();
@@ -214,7 +224,9 @@ mod tests {
         let client = PiClient::new("ws1".into(), Arc::new(transport), Arc::new(sink.clone()));
 
         client
-            .handle_line(r#"{"type":"extension_ui_request","id":"u1","method":"confirm","title":"OK?"}"#)
+            .handle_line(
+                r#"{"type":"extension_ui_request","id":"u1","method":"confirm","title":"OK?"}"#,
+            )
             .await;
 
         let reqs = sink.ui_requests.lock().unwrap();
@@ -230,7 +242,9 @@ mod tests {
         let client = PiClient::new("ws1".into(), Arc::new(transport), Arc::new(sink.clone()));
 
         client.handle_line("not json").await;
-        client.handle_line(r#"{"type":"agent_end","messages":[]}"#).await;
+        client
+            .handle_line(r#"{"type":"agent_end","messages":[]}"#)
+            .await;
         assert_eq!(sink.events.lock().unwrap().len(), 1);
     }
 
@@ -257,10 +271,15 @@ mod tests {
     async fn handle_exit_rejects_pending_and_emits_exit() {
         let (transport, mut outbox) = ChannelTransport::new();
         let sink = CollectingSink::default();
-        let client = Arc::new(PiClient::new("ws1".into(), Arc::new(transport), Arc::new(sink.clone())));
+        let client = Arc::new(PiClient::new(
+            "ws1".into(),
+            Arc::new(transport),
+            Arc::new(sink.clone()),
+        ));
 
         let client2 = client.clone();
-        let handle = tokio::spawn(async move { client2.send(PiOutbound::GetState { id: None }).await });
+        let handle =
+            tokio::spawn(async move { client2.send(PiOutbound::GetState { id: None }).await });
 
         // 确保命令已发出、pending 已注册
         let _ = outbox.recv().await.unwrap();

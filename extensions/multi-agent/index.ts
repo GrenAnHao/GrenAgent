@@ -31,11 +31,18 @@ export default function (pi: ExtensionAPI) {
         const r = await spawnPiAgent(ctx.cwd, single, {
           signal: signal ?? undefined,
           onUpdate: onUpdate
-            ? (output) => onUpdate({ content: [{ type: "text", text: output }], details: { streaming: true } })
+            ? (u) =>
+                onUpdate({
+                  content: [{ type: "text", text: u.text }],
+                  details: { streaming: true, transcript: u.transcript },
+                })
             : undefined,
         });
         if (!r.ok) throw new Error(`sub-agent failed (exit ${r.exitCode}): ${r.error ?? "unknown error"}`);
-        return { content: [{ type: "text", text: r.output || "(no output)" }], details: { exitCode: r.exitCode } };
+        return {
+          content: [{ type: "text", text: r.output || "(no output)" }],
+          details: { exitCode: r.exitCode, transcript: r.transcript },
+        };
       }
 
       const tasks = single ? [single, ...many] : many;

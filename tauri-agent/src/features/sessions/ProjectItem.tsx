@@ -1,11 +1,11 @@
 import { Dropdown } from 'antd';
 import { Icon } from '@lobehub/ui';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { ChevronDown, ChevronRight, FolderClosed, FolderOpen } from 'lucide-react';
 import { RowActions } from './RowActions';
 import { buildProjectMenuItems } from './useProjectMenu';
 
-const useStyles = createStyles(({ token, css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   row: css`
     display: flex;
     align-items: center;
@@ -14,16 +14,16 @@ const useStyles = createStyles(({ token, css }) => ({
     margin: 0 6px;
     padding: 0 8px 0 10px;
     border-radius: 7px;
-    color: ${token.colorText};
+    color: ${cssVar.colorText};
     cursor: pointer;
 
     &:hover {
-      background: ${token.colorFillTertiary};
+      background: ${cssVar.colorFillTertiary};
     }
   `,
   car: css`
     display: inline-flex;
-    color: ${token.colorTextQuaternary};
+    color: ${cssVar.colorTextQuaternary};
   `,
   name: css`
     overflow: hidden;
@@ -33,9 +33,9 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
   badge: css`
     padding: 0 5px;
-    border: 1px solid ${token.colorBorderSecondary};
+    border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 4px;
-    color: ${token.colorTextTertiary};
+    color: ${cssVar.colorTextTertiary};
     font-size: 10px;
   `,
   acts: css`
@@ -61,7 +61,6 @@ export interface ProjectItemProps {
 }
 
 export function ProjectItem(p: ProjectItemProps) {
-  const { styles, cx } = useStyles();
   const items = buildProjectMenuItems({
     pinned: p.pinned,
     onPinToggle: p.onPinToggle,

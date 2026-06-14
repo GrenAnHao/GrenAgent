@@ -1,17 +1,29 @@
 import { DraggablePanel, type DraggablePanelProps } from '@lobehub/ui';
-import { createStyles } from 'antd-style';
+import { createStaticStyles, cx } from 'antd-style';
 import { useState, type ReactNode } from 'react';
 
 type ResizePlacement = 'left' | 'right' | 'top' | 'bottom';
 
 // DraggablePanel 的 <aside> 自身不设主轴外的尺寸，仅靠 flex 拉伸（height/width 为 auto），
 // 导致内部 Resizable 的 height:100% 无法解析、内容塌陷。显式补足交叉轴尺寸让百分比链路可解析。
-const useStyles = createStyles(({ css }) => ({
+const styles = createStaticStyles(({ css }) => ({
   fillHeight: css`
     height: 100%;
+    contain: layout style;
   `,
   fillWidth: css`
     width: 100%;
+    contain: layout style;
+  `,
+  contentShell: css`
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    contain: layout style paint;
+  `,
+  contentHidden: css`
+    visibility: hidden;
+    pointer-events: none;
   `,
 }));
 
@@ -44,7 +56,6 @@ export function ResizeHandle({
   onExpandChange,
   children,
 }: ResizeHandleProps) {
-  const { styles } = useStyles();
   const isVertical = placement === 'top' || placement === 'bottom';
   // 受控 size：折叠(expand=false)时 DraggablePanel 内部把面板尺寸动画到 0（靠 styles.panel
   // 自带的 transition），展开时回到这里记录的尺寸，精确恢复用户拖拽过的宽/高（对齐 lobehub RightPanel）。
@@ -90,7 +101,7 @@ export function ResizeHandle({
       onSizeDragging={handleSizeDragging}
       onSizeChange={handleSizeChange}
     >
-      {children}
+      <div className={cx(styles.contentShell, !expand && styles.contentHidden)}>{children}</div>
     </DraggablePanel>
   );
 }

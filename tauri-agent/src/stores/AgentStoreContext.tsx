@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createAgentStore, type AgentStoreApi } from './agent';
 
 interface AgentStoreContextValue {
   workspace: string;
   store: AgentStoreApi;
+  workspaceReady: boolean;
+  setWorkspaceReady: (ready: boolean) => void;
 }
 
 const AgentStoreContext = createContext<AgentStoreContextValue | null>(null);
@@ -19,12 +21,20 @@ interface AgentStoreProviderProps {
  */
 export function AgentStoreProvider({ workspace, children }: AgentStoreProviderProps) {
   const store = useMemo(() => createAgentStore(workspace), [workspace]);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+
+  useEffect(() => {
+    setWorkspaceReady(false);
+  }, [workspace]);
 
   useEffect(() => {
     return () => store.destroy();
   }, [store]);
 
-  const value = useMemo(() => ({ workspace, store }), [workspace, store]);
+  const value = useMemo(
+    () => ({ workspace, store, workspaceReady, setWorkspaceReady }),
+    [workspace, store, workspaceReady],
+  );
 
   return <AgentStoreContext.Provider value={value}>{children}</AgentStoreContext.Provider>;
 }

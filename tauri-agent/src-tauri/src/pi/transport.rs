@@ -47,8 +47,7 @@ impl PiTransport for ChannelTransport {
         Ok(())
     }
     async fn kill(&self) -> Result<()> {
-        self.killed
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.killed.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 }

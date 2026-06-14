@@ -45,7 +45,12 @@ const { piMock, resetMock, setValueMock } = vi.hoisted(() => ({
 
 vi.mock('../../../../lib/pi', () => ({ pi: piMock }));
 vi.mock('../../../../stores/AgentStoreContext', () => ({
-  useAgentStoreContext: () => ({ workspace: '/ws', store: { reset: resetMock } }),
+  useAgentStoreContext: () => ({
+    workspace: '/ws',
+    store: { reset: resetMock },
+    workspaceReady: true,
+    setWorkspaceReady: vi.fn(),
+  }),
 }));
 
 import ThinkingAction from './ThinkingAction';

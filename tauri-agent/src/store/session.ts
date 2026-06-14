@@ -8,6 +8,7 @@ interface SessionStore {
   activeSessionPath: string | null;
   searchKeyword: string;
   isLoading: boolean;
+  allSessionsLoading: boolean;
   error: string | null;
 
   setSessions: (sessions: SessionInfo[]) => void;
@@ -16,6 +17,7 @@ interface SessionStore {
   setActiveSession: (path: string) => void;
   setSearchKeyword: (kw: string) => void;
   setLoading: (loading: boolean) => void;
+  setAllSessionsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
 }
 
@@ -26,6 +28,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
   activeSessionPath: null,
   searchKeyword: '',
   isLoading: false,
+  allSessionsLoading: false,
   error: null,
 
   setSessions: (sessions) => set({ sessions }),
@@ -34,5 +37,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
   setActiveSession: (path) => set({ activeSessionPath: path }),
   setSearchKeyword: (searchKeyword) => set({ searchKeyword }),
   setLoading: (isLoading) => set({ isLoading }),
+  setAllSessionsLoading: (allSessionsLoading) => set({ allSessionsLoading }),
   setError: (error) => set({ error }),
 }));
