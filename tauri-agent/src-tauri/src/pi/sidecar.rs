@@ -39,7 +39,7 @@ impl PiTransport for SidecarTransport {
 
 /// Bun 编译的 pi 需在 exe 旁放 theme/assets；Tauri 只复制 sidecar 本体到 target/debug，
 /// 因此通过 PI_PACKAGE_DIR 指向 `src-tauri/binaries/`（build:sidecar 产物目录）。
-fn pi_package_dir() -> PathBuf {
+pub(crate) fn pi_package_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
 }
 

@@ -1,11 +1,15 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::State;
+use tauri_plugin_shell::ShellExt;
 
 use crate::commands::sessions::{
     collect_session_files, parse_session_header, paths_equivalent, read_first_line, sessions_dir,
 };
+use crate::pi::types::PiOutbound;
 use crate::pi::PiManager;
 use crate::state::AppStateStore;
 
@@ -142,19 +146,16 @@ pub async fn remove_project(
     Ok(())
 }
 
-#[allow(dead_code)]
 const LITE_KEYWORDS: &[&str] = &[
     "haiku", "mini", "flash", "lite", "small", "nano", "air", "8b", "7b", "4b", "1b",
 ];
 
-#[allow(dead_code)]
 fn is_lite(id: &str) -> bool {
     let l = id.to_lowercase();
     LITE_KEYWORDS.iter().any(|k| l.contains(k))
 }
 
 /// 标题小模型「启发式 + 兜底」：models = (provider, id, reasoning)。
-#[allow(dead_code)]
 fn pick_title_model(
     models: &[(String, String, bool)],
     current_provider: Option<&str>,
@@ -175,7 +176,6 @@ fn pick_title_model(
 }
 
 /// 清洗 LLM 标题输出：去 <think> 段、取首个非空行、>100 字符截断为 97+"..."。
-#[allow(dead_code)]
 fn clean_title(raw: &str) -> Option<String> {
     let mut s = String::new();
     let mut rest = raw;
@@ -200,6 +200,181 @@ fn clean_title(raw: &str) -> Option<String> {
     } else {
         Some(line.to_string())
     }
+}
+
+/// 从 get_messages 的 data 里取第一条 user 文本。
+fn extract_first_user_text(data: Option<Value>) -> Option<String> {
+    let msgs = data?.get("messages")?.as_array()?.clone();
+    for m in msgs {
+        if m.get("role").and_then(|r| r.as_str()) != Some("user") {
+            continue;
+        }
+        if let Some(s) = m.get("content").and_then(|c| c.as_str()) {
+            if !s.trim().is_empty() {
+                return Some(s.to_string());
+            }
+        }
+        if let Some(arr) = m.get("content").and_then(|c| c.as_array()) {
+            let text: String = arr
+                .iter()
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+/// (provider, id) 取自 RpcSessionState.model。
+fn extract_provider_model(state: &Value) -> (Option<String>, Option<String>) {
+    let m = state.get("model");
+    let p = m
+        .and_then(|m| m.get("provider"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let id = m
+        .and_then(|m| m.get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    (p, id)
+}
+
+/// 起临时 print-mode sidecar 生成标题（一次性，不写会话/不用工具）。
+async fn run_pi_print_title(
+    app: &tauri::AppHandle,
+    cwd: &str,
+    provider: &str,
+    model: &str,
+    prompt: &str,
+    env: HashMap<String, String>,
+) -> Result<String, String> {
+    let package_dir = crate::pi::sidecar::pi_package_dir();
+    let output = app
+        .shell()
+        .sidecar("pi")
+        .map_err(|e| format!("sidecar lookup failed: {e}"))?
+        .args([
+            "-p",
+            "--no-session",
+            "--no-tools",
+            "--provider",
+            provider,
+            "--model",
+            model,
+            prompt,
+        ])
+        .env("PI_PACKAGE_DIR", &package_dir)
+        .envs(env)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("title sidecar failed: {e}"))?;
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// FR-7：为对话生成并写回标题；失败静默返回 None。
+#[tauri::command]
+pub async fn auto_title_session(
+    workspace: String,
+    app: tauri::AppHandle,
+    mgr: State<'_, Arc<PiManager>>,
+    store: State<'_, AppStateStore>,
+) -> Result<Option<String>, String> {
+    let client = match mgr.get(&workspace).await {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // 1) 首条 user 消息
+    let msgs = client
+        .send(PiOutbound::GetMessages { id: None })
+        .await
+        .map_err(|e| e.to_string())?;
+    if !msgs.success {
+        return Ok(None);
+    }
+    let first_user = match extract_first_user_text(msgs.data) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // 2) 当前 provider/model
+    let state = client
+        .send(PiOutbound::GetState { id: None })
+        .await
+        .ok()
+        .and_then(|r| r.data);
+    let (cur_provider, cur_model) = match &state {
+        Some(s) => extract_provider_model(s),
+        None => (None, None),
+    };
+
+    // 3) 选模型：设置项 → 启发式 → 兜底当前
+    let settings = store.settings_all().await;
+    let (provider, model) = if let Some(tm) = settings
+        .get("titleModel")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        match tm.split_once('/') {
+            Some((p, m)) => (p.to_string(), m.to_string()),
+            None => return Ok(None),
+        }
+    } else {
+        let avail = client
+            .send(PiOutbound::GetAvailableModels { id: None })
+            .await
+            .ok()
+            .and_then(|r| r.data);
+        let list: Vec<(String, String, bool)> = avail
+            .and_then(|d| d.get("models").and_then(|m| m.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| {
+                Some((
+                    m.get("provider")?.as_str()?.to_string(),
+                    m.get("id")?.as_str()?.to_string(),
+                    m.get("reasoning").and_then(|r| r.as_bool()).unwrap_or(false),
+                ))
+            })
+            .collect();
+        let cur = match (&cur_provider, &cur_model) {
+            (Some(p), Some(m)) => Some((p.as_str(), m.as_str())),
+            _ => None,
+        };
+        match pick_title_model(&list, cur_provider.as_deref(), cur) {
+            Some(pm) => pm,
+            None => return Ok(None),
+        }
+    };
+
+    // 4) 临时 sidecar 生成
+    let prompt = format!("Generate a title for this conversation:\n{first_user}");
+    let env = store.settings_env().await;
+    let raw = match run_pi_print_title(&app, &workspace, &provider, &model, &prompt, env).await {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+    let title = match clean_title(&raw) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // 5) 写回 set_session_name
+    let resp = client
+        .send(PiOutbound::SetSessionName {
+            id: None,
+            name: title.clone(),
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.success {
+        return Ok(None);
+    }
+    Ok(Some(title))
 }
 
 #[cfg(test)]

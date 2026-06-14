@@ -70,6 +70,7 @@ pub fn run() {
             commands::workspaces::get_works_dir,
             commands::workspaces::delete_conversation,
             commands::workspaces::remove_project,
+            commands::workspaces::auto_title_session,
             commands::extension_ui_respond,
             commands::request_workspace_approval,
             commands::is_workspace_approved,
