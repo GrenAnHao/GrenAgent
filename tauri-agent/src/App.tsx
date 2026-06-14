@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, memo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, memo } from 'react';
 import { ThemeProvider, Flexbox } from '@lobehub/ui';
 import { ThemeBridge } from './components/ThemeBridge';
 import { ExtensionUiHost } from './features/extensionUi/ExtensionUiHost';
@@ -10,7 +10,7 @@ import { DockDndProvider } from './features/dock/DockDndProvider';
 import { useDockStore } from './stores/dockStore';
 import { Titlebar } from './components/Titlebar';
 import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreContext';
-import { agentStoreRegistry } from './stores/agentStoreRegistry';
+import { agentStoreRegistry, useAgentRegistryStore } from './stores/agentStoreRegistry';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
 import { MainColumnHeader } from './features/layout/MainColumnHeader';
@@ -116,7 +116,7 @@ const MainChatColumn = memo(function MainChatColumn() {
 });
 
 const SidebarPanel = memo(function SidebarPanel({
-  runningSessionPath,
+  runningSessionPaths,
   onNewConversation,
   onOpenProject,
   onNewSession,
@@ -126,7 +126,7 @@ const SidebarPanel = memo(function SidebarPanel({
   onRemoveProject,
   onSubmitRename,
 }: {
-  runningSessionPath: string | null;
+  runningSessionPaths: Set<string>;
   onNewConversation: () => void;
   onOpenProject: () => void;
   onNewSession: (cwd: string) => void;
@@ -141,7 +141,7 @@ const SidebarPanel = memo(function SidebarPanel({
   return (
     <SidebarShell>
       <Sidebar
-        runningSessionPath={runningSessionPath}
+        runningSessionPaths={runningSessionPaths}
         onNewConversation={onNewConversation}
         onOpenProject={onOpenProject}
         onNewSession={onNewSession}
@@ -225,6 +225,7 @@ function Workspace() {
         if (!alive) return;
 
         const path = useSessionStore.getState().activeSessionPath;
+        if (path) useSessionStore.getState().setWorkspaceSessionPath(workspace, path);
         if (path && !sessionAlreadyActive(path, openResult)) {
           perf.start('switchSession');
           try {
@@ -289,6 +290,7 @@ function Workspace() {
     async (cwd: string, path: string) => {
       const st = useSessionStore.getState();
       st.setActiveSession(path);
+      st.setWorkspaceSessionPath(cwd, path);
       if (st.activeWorkspace !== cwd) {
         await switchProject(cwd);
       } else {
@@ -408,7 +410,18 @@ function Workspace() {
     return () => un?.();
   }, []);
 
-  const runningSessionPath = isStreaming ? activeSessionPath : null;
+  const runningWorkspaces = useAgentRegistryStore((s) => s.runningWorkspaces);
+  const workspaceSessionPaths = useSessionStore((s) => s.workspaceSessionPaths);
+  const runningSessionPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const ws of runningWorkspaces) {
+      const p = workspaceSessionPaths[ws];
+      if (p) set.add(p);
+    }
+    // 兜底：当前 active 正在 streaming（首条消息可能早于映射落地）
+    if (isStreaming && activeSessionPath) set.add(activeSessionPath);
+    return set;
+  }, [runningWorkspaces, workspaceSessionPaths, isStreaming, activeSessionPath]);
 
   return (
     <Flexbox style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -420,7 +433,7 @@ function Workspace() {
             chat={
               <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%' }}>
                 <SidebarPanel
-                  runningSessionPath={runningSessionPath}
+                  runningSessionPaths={runningSessionPaths}
                   onNewConversation={handleNewConversation}
                   onOpenProject={handleOpenProject}
                   onNewSession={handleNewSession}

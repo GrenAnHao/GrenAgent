@@ -29,7 +29,7 @@ export interface ProjectGroupProps {
   group: Group;
   expanded: boolean;
   activeSessionPath: string | null;
-  runningSessionPath: string | null;
+  runningSessionPaths: Set<string>;
   renamingPath: string | null;
   onToggleExpand: () => void;
   onNewInProject: (cwd: string) => void;
@@ -73,7 +73,7 @@ export const ProjectGroup = memo(function ProjectGroup(p: ProjectGroupProps) {
             key={s.path}
             title={s.name || 'Untitled'}
             active={p.activeSessionPath === s.path}
-            running={p.runningSessionPath === s.path}
+            running={p.runningSessionPaths.has(s.path)}
             pinned={p.isSessionPinned(s.path)}
             editing={p.renamingPath === s.path}
             onClick={() => p.onOpenSession(g.cwd, s.path)}

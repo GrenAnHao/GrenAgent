@@ -42,7 +42,7 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export interface SidebarProps {
-  runningSessionPath: string | null;
+  runningSessionPaths: Set<string>;
   onNewConversation: () => void;
   onOpenProject: () => void;
   onNewSession: (cwd: string) => void;
@@ -56,7 +56,7 @@ export interface SidebarProps {
 
 interface GroupListProps {
   groups: Group[];
-  runningSessionPath: string | null;
+  runningSessionPaths: Set<string>;
   activeSessionPath: string | null;
   renamingPath: string | null;
   onNewSession: (cwd: string) => void;
@@ -69,7 +69,7 @@ interface GroupListProps {
 
 const GroupList = memo(function GroupList({
   groups,
-  runningSessionPath,
+  runningSessionPaths,
   activeSessionPath,
   renamingPath,
   onNewSession,
@@ -108,7 +108,7 @@ const GroupList = memo(function GroupList({
           group={g}
           expanded={!isCollapsed(g.cwd, !g.isCurrent)}
           activeSessionPath={activeSessionPath}
-          runningSessionPath={runningSessionPath}
+          runningSessionPaths={runningSessionPaths}
           renamingPath={renamingPath}
           onToggleExpand={() => toggleCollapsed(g.cwd, !g.isCurrent)}
           onNewInProject={onNewSession}
@@ -163,7 +163,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   }, []);
 
   const listProps: GroupListProps = {
-    runningSessionPath: props.runningSessionPath,
+    runningSessionPaths: props.runningSessionPaths,
     activeSessionPath,
     renamingPath,
     onNewSession: props.onNewSession,
@@ -192,7 +192,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
     <Flexbox height="100%" style={{ minHeight: 0, background: 'var(--gren-sidebar-bg, transparent)' }}>
       <PanelHeader
         title="Pi Agent"
-        actions={<ActionIcon icon={PanelLeftClose} title="收起" onClick={props.onToggleSidebar} />}
+        actions={<ActionIcon icon={PanelLeftClose} size="small" title="收起" onClick={props.onToggleSidebar} />}
       />
       <SidebarActions />
       <div className={styles.scroll}>
@@ -219,7 +219,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
             key={c.cwd}
             title={c.name}
             active={activeSessionPath === c.sessionPath}
-            running={props.runningSessionPath === c.sessionPath}
+            running={props.runningSessionPaths.has(c.sessionPath)}
             pinned={false}
             editing={renamingPath === c.sessionPath}
             onClick={() => props.onOpenSession(c.cwd, c.sessionPath)}
