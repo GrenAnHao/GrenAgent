@@ -29,16 +29,18 @@ vi.mock('./SubAgentConversation', () => ({
 }));
 
 import { RightPanel } from './RightPanel';
+import { useRightPanelStore } from '../../stores/rightPanelStore';
 
 afterEach(() => {
   cleanup();
   messagesRef.current = [];
+  useRightPanelStore.setState({ pageTabs: [], activeId: null });
 });
 
 describe('RightPanel sub-agent tabs', () => {
-  it('shows an empty hint when there are no sub-agents', () => {
+  it('shows an empty hint when there is no content', () => {
     render(<RightPanel />);
-    expect(screen.getByTestId('subagent-panel').textContent).toContain('暂无子代理');
+    expect(screen.getByTestId('subagent-panel').textContent).toContain('暂无内容');
   });
 
   it('renders a tab per spawn_agent (ignoring other tools) and shows the active conversation', () => {

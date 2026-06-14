@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
-import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { ActionIcon, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { PanelRightClose } from 'lucide-react';
+import { Globe, PanelRightClose, X } from 'lucide-react';
 
 import { PanelHeader } from '../../components/PanelHeader';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import type { ChatMessage } from '../../stores/agentReducer';
-import { useRightPanelStore } from '../../stores/rightPanelStore';
+import { useRightPanelStore, type PageView } from '../../stores/rightPanelStore';
 import { SubAgentConversation } from './SubAgentConversation';
 import { PageContentViewer } from './PageContentViewer';
 import { taskLabel } from './subagentUtils';
@@ -41,9 +40,9 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    max-width: 160px;
+    max-width: 180px;
     height: 26px;
-    padding: 0 10px;
+    padding: 0 8px;
     border: 1px solid transparent;
     border-radius: 7px;
     background: transparent;
@@ -66,6 +65,20 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
+  tabClose: css`
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    margin-inline-start: 2px;
+    border-radius: 4px;
+    color: ${cssVar.colorTextTertiary};
+
+    &:hover {
+      background: ${cssVar.colorFillTertiary};
+      color: ${cssVar.colorText};
+    }
+  `,
   dot: css`
     flex: 0 0 auto;
     width: 7px;
@@ -82,74 +95,103 @@ function statusColor(status: ToolMessage['status']): string {
   return '#4ade80';
 }
 
+type PanelTab =
+  | { id: string; kind: 'subagent'; title: string; sa: ToolMessage }
+  | { id: string; kind: 'page'; title: string; page: PageView };
+
 interface RightPanelProps {
   /** 收起右面板（显示为 header 折叠图标）。 */
   onCollapse?: () => void;
 }
 
+/** 通用右侧 TabControl：子代理对话与抓取页面等各占一个可切换/关闭的 tab。 */
 export function RightPanel({ onCollapse }: RightPanelProps) {
   const store = useAgentStore();
   const messages = store.useStore((s) => s.messages);
-  const page = useRightPanelStore((s) => s.page);
-  const closePage = useRightPanelStore((s) => s.closePage);
+  const pageTabs = useRightPanelStore((s) => s.pageTabs);
+  const activeId = useRightPanelStore((s) => s.activeId);
+  const setActive = useRightPanelStore((s) => s.setActive);
+  const closeTab = useRightPanelStore((s) => s.closeTab);
+
   const subAgents = messages.filter(
     (m): m is ToolMessage => m.kind === 'tool' && m.toolName === 'spawn_agent',
   );
 
-  const [activeId, setActiveId] = useState<string | null>(null);
-  // 新子代理出现时默认切到最新；当前选中被移除时回退到最后一个。
-  const latestId = subAgents.length ? subAgents[subAgents.length - 1].id : null;
-  useEffect(() => {
-    setActiveId((cur) => (cur && subAgents.some((s) => s.id === cur) ? cur : latestId));
-  }, [latestId, subAgents]);
+  const tabs: PanelTab[] = [
+    ...subAgents.map(
+      (sa, i): PanelTab => ({
+        id: sa.id,
+        kind: 'subagent',
+        title: `#${i + 1} ${taskLabel(sa.args)}`,
+        sa,
+      }),
+    ),
+    ...pageTabs.map((t): PanelTab => ({ id: t.id, kind: 'page', title: t.title, page: t.page })),
+  ];
 
-  const active = subAgents.find((s) => s.id === activeId) ?? subAgents[subAgents.length - 1];
+  // 选中：显式选中优先，否则回退到最后一个 tab（新内容默认聚焦）。
+  const active = tabs.find((t) => t.id === activeId) ?? tabs.at(-1) ?? null;
 
   const collapseAction = onCollapse ? (
     <ActionIcon icon={PanelRightClose} title="Collapse panel" onClick={onCollapse} />
   ) : undefined;
 
-  if (page) {
-    return (
-      <Flexbox className={styles.container}>
-        <PanelHeader title="联网内容" actions={collapseAction} />
-        <PageContentViewer page={page} onClose={closePage} />
-      </Flexbox>
-    );
-  }
-
   return (
     <Flexbox className={styles.container}>
-      <PanelHeader title="子代理" actions={collapseAction} />
-      {subAgents.length === 0 || !active ? (
+      <PanelHeader title="面板" actions={collapseAction} />
+      {tabs.length === 0 || !active ? (
         <div className={styles.empty} data-testid="subagent-panel">
-          暂无子代理。用 <code>spawn_agent</code> 委派任务后，这里以独立 tab 实时显示每个子代理的对话。
+          暂无内容。点击工具卡片（如 fetch_url 结果）或用 <code>spawn_agent</code> 委派任务，
+          会在这里以独立 tab 打开。
         </div>
       ) : (
         <Flexbox flex={1} style={{ minHeight: 0 }} data-testid="subagent-panel">
           <div className={styles.tabBar} role="tablist">
-            {subAgents.map((sa, i) => (
+            {tabs.map((t) => (
               <button
-                key={sa.id}
+                key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={sa.id === active.id}
-                data-testid={`subagent-tab-${sa.toolCallId}`}
-                className={cx(styles.tab, sa.id === active.id && styles.tabActive)}
-                onClick={() => setActiveId(sa.id)}
+                aria-selected={t.id === active.id}
+                data-testid={
+                  t.kind === 'subagent' ? `subagent-tab-${t.sa.toolCallId}` : `page-tab-${t.id}`
+                }
+                className={cx(styles.tab, t.id === active.id && styles.tabActive)}
+                onClick={() => setActive(t.id)}
               >
-                <span className={styles.dot} style={{ background: statusColor(sa.status) }} />
-                <span className={styles.tabLabel}>{`#${i + 1} ${taskLabel(sa.args)}`}</span>
+                {t.kind === 'subagent' ? (
+                  <span className={styles.dot} style={{ background: statusColor(t.sa.status) }} />
+                ) : (
+                  <Icon icon={Globe} size={12} style={{ flex: 'none' }} />
+                )}
+                <span className={styles.tabLabel}>{t.title}</span>
+                {t.kind === 'page' ? (
+                  <span
+                    className={styles.tabClose}
+                    role="button"
+                    aria-label="关闭"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(t.id);
+                    }}
+                  >
+                    <Icon icon={X} size={11} />
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
-          <SubAgentConversation
-            key={active.id}
-            data-testid={`subagent-${active.toolCallId}`}
-            task={taskLabel(active.args)}
-            result={active.result}
-            status={active.status}
-          />
+          {active.kind === 'subagent' ? (
+            <SubAgentConversation
+              key={active.id}
+              data-testid={`subagent-${active.sa.toolCallId}`}
+              task={taskLabel(active.sa.args)}
+              result={active.sa.result}
+              status={active.sa.status}
+            />
+          ) : (
+            <PageContentViewer key={active.id} page={active.page} onClose={() => closeTab(active.id)} />
+          )}
         </Flexbox>
       )}
     </Flexbox>

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useLayoutStore } from './layoutStore';
 
-/** A crawled page surfaced in the right panel (clicked from a fetch_url card). */
+/** A crawled page surfaced in the right panel (opened from a fetch_url card). */
 export interface PageView {
   url: string;
   content: string;
@@ -10,22 +10,47 @@ export interface PageView {
   crawler?: string;
 }
 
+/** A manually-opened right-panel tab (currently page content; extensible to more kinds). */
+export interface PageTab {
+  id: string;
+  title: string;
+  page: PageView;
+}
+
 interface RightPanelState {
-  /** Active page viewer target; null = show the default sub-agent panel. */
-  page: PageView | null;
+  /** Manually-opened tabs (sub-agent tabs are derived from messages in RightPanel). */
+  pageTabs: PageTab[];
+  /** Active tab id — may be a page tab id or a sub-agent message id. */
+  activeId: string | null;
   openPage: (page: PageView) => void;
-  closePage: () => void;
+  closeTab: (id: string) => void;
+  setActive: (id: string) => void;
 }
 
 /**
- * Drives the right panel's "page content" viewer (lobe web-browsing style):
- * clicking a fetch_url card opens the full crawled page here and reveals the panel.
+ * Generic right-panel tab control: any content can be opened as a tab and switched
+ * between. fetch_url cards open page tabs here; sub-agents appear as tabs too.
  */
 export const useRightPanelStore = create<RightPanelState>((set) => ({
-  page: null,
+  pageTabs: [],
+  activeId: null,
   openPage: (page) => {
-    set({ page });
+    const id = `page:${page.url}`;
+    set((s) => ({
+      pageTabs: s.pageTabs.some((t) => t.id === id)
+        ? s.pageTabs.map((t) => (t.id === id ? { ...t, page, title: page.title || page.url } : t))
+        : [...s.pageTabs, { id, title: page.title || page.url, page }],
+      activeId: id,
+    }));
     useLayoutStore.getState().setRightPanelOpen(true);
   },
-  closePage: () => set({ page: null }),
+  closeTab: (id) =>
+    set((s) => {
+      const pageTabs = s.pageTabs.filter((t) => t.id !== id);
+      return {
+        pageTabs,
+        activeId: s.activeId === id ? (pageTabs.at(-1)?.id ?? null) : s.activeId,
+      };
+    }),
+  setActive: (id) => set({ activeId: id }),
 }));
