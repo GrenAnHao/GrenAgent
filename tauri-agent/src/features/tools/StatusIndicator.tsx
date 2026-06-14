@@ -1,6 +1,6 @@
-import { Block, Icon } from '@lobehub/ui';
+import { Block, Icon, NeuralNetworkLoading } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
-import { Atom, Check, Loader2, X } from 'lucide-react';
+import { Atom, Check, X } from 'lucide-react';
 
 export type StatusKind = 'running' | 'done' | 'error' | 'thinking';
 
@@ -8,26 +8,23 @@ interface StatusIndicatorProps {
   status: StatusKind;
 }
 
+/** 工具/思考状态块：对齐 lobe-chat —— 24×24 outlined Block + 真 NeuralNetworkLoading（运行中）。 */
 export function StatusIndicator({ status }: StatusIndicatorProps) {
-  let icon = <Icon icon={Loader2} size={14} spin />;
-  // 中性态（running / thinking）对齐原型：text-secondary 静音色。
-  let color: string | undefined = cssVar.colorTextSecondary;
+  let icon = <NeuralNetworkLoading size={16} />;
 
   switch (status) {
     case 'done':
-      icon = <Icon icon={Check} size={14} />;
-      color = cssVar.colorSuccess;
+      icon = <Icon color={cssVar.colorSuccess} icon={Check} size={14} />;
       break;
     case 'error':
-      icon = <Icon icon={X} size={14} />;
-      color = cssVar.colorError;
+      icon = <Icon color={cssVar.colorError} icon={X} size={14} />;
       break;
     case 'thinking':
-      icon = <Icon icon={Atom} size={14} />;
+      icon = <Icon color={cssVar.colorTextSecondary} icon={Atom} size={14} />;
       break;
     case 'running':
     default:
-      icon = <Icon icon={Loader2} size={14} spin />;
+      icon = <NeuralNetworkLoading size={16} />;
       break;
   }
 
@@ -35,9 +32,11 @@ export function StatusIndicator({ status }: StatusIndicatorProps) {
     <Block
       horizontal
       align="center"
+      flex="none"
+      gap={4}
       justify="center"
       variant="outlined"
-      style={{ flex: 'none', width: 24, height: 24, fontSize: 12, color }}
+      style={{ width: 24, height: 24, fontSize: 12 }}
     >
       {icon}
     </Block>

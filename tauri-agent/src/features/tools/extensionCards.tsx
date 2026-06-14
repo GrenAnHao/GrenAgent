@@ -1,4 +1,4 @@
-import { ActionIcon, Flexbox, Icon } from '@lobehub/ui';
+import { ActionIcon, Flexbox, Icon, SearchResultCards } from '@lobehub/ui';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
   BookPlus,
@@ -13,9 +13,8 @@ import {
   Square,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties, type FC, type ReactNode } from 'react';
+import type { CSSProperties, FC, ReactNode } from 'react';
 import { LazyMarkdown } from '../chat/LazyMarkdown';
-import { useCardStyles } from './cardStyles';
 import { extractText, getDetails } from './toolUtils';
 
 export interface ExtensionCardProps {
@@ -211,29 +210,11 @@ const TodoCard: FC<ExtensionCardProps> = ({ result }) => {
   );
 };
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
 const WebSearchCard: FC<ExtensionCardProps> = ({ result }) => {
-  const { styles, cx } = useCardStyles();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [atEnd, setAtEnd] = useState(false);
   const d = getDetails(result);
   const results = Array.isArray(d?.results)
     ? (d!.results as Array<{ title?: unknown; url?: unknown }>)
     : [];
-
-  // 初始 / 结果变化时判断是否已到末尾（不可横滑时也视为到底，隐藏渐隐）。
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
-  }, [results.length]);
 
   if (results.length === 0) {
     const text = extractText(result);
@@ -242,40 +223,14 @@ const WebSearchCard: FC<ExtensionCardProps> = ({ result }) => {
     );
   }
 
-  // ScrollShadow 横滑结果卡：隐藏原生滚动条 + 右缘渐隐（滚到底淡出，对齐 lobehub web-browsing）。
+  // lobehub 真 SearchResultCards：ScrollShadow 横滑 + 真结果卡（favicon + 标题 + 域名）。
+  const dataSource = results
+    .map((r) => ({ title: asString(r.title) || asString(r.url), url: asString(r.url) }))
+    .filter((item) => item.url);
+
   return (
-    <div
-      className={cx(styles.resultsWrap, !atEnd && styles.resultsWrapFade)}
-      data-testid="card-web_search"
-    >
-      <div
-        ref={scrollRef}
-        className={styles.results}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
-        }}
-      >
-        {results.map((r, i) => {
-          const url = asString(r.url);
-          const host = hostOf(url);
-          return (
-            <a
-              key={i}
-              className={styles.rcard}
-              href={url || undefined}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span className={styles.rtitle}>{asString(r.title) || url}</span>
-              <span className={styles.rfoot}>
-                <span className={styles.favi}>{(host || '?').charAt(0)}</span>
-                <span className={styles.rhost}>{host || url}</span>
-              </span>
-            </a>
-          );
-        })}
-      </div>
+    <div data-testid="card-web_search">
+      <SearchResultCards dataSource={dataSource} />
     </div>
   );
 };
