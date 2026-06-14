@@ -4,6 +4,7 @@ import { useAgentStore } from '../../stores/AgentStoreContext';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from './groupMessages';
 import { ChatMessageItems } from './ChatMessageItems';
+import { PreparingIndicator } from './PreparingIndicator';
 
 const styles = createStaticStyles(({ css }) => ({
   scroll: css`
@@ -49,6 +50,16 @@ export function ChatListView({ bottomOffset = 88 }: ChatListViewProps) {
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   });
 
+  // 等待占位（对齐 lobehub 的「准备响应中…」）：流式中但助手尚无可见内容时显示。
+  const last = display[display.length - 1];
+  const showPreparing =
+    isStreaming &&
+    (!last
+      ? true
+      : last.kind === 'assistantGroup'
+        ? !last.text && !last.thinking && last.tools.length === 0
+        : last.kind !== 'tool');
+
   return (
     <div
       ref={scrollRef}
@@ -58,6 +69,7 @@ export function ChatListView({ bottomOffset = 88 }: ChatListViewProps) {
     >
       <div className={styles.list} style={{ paddingBottom: bottomOffset }}>
         <ChatMessageItems messages={display} />
+        {showPreparing ? <PreparingIndicator /> : null}
       </div>
     </div>
   );

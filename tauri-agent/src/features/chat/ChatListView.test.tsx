@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import type { ChatMessage } from '../../stores/agentReducer';
 
@@ -76,5 +76,30 @@ describe('ChatListView', { timeout: 30_000 }, () => {
       </ThemeProvider>,
     );
     expect(document.querySelector('[data-testid="chat-scroll"]')).not.toBeNull();
+  });
+
+  it('streaming 且助手尚无内容时显示「准备响应中…」加载态', () => {
+    mockState.isStreaming = true;
+    setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('准备响应中…')).toBeTruthy();
+  });
+
+  it('助手已有正文时不显示加载态', () => {
+    mockState.isStreaming = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '回答中', thinking: '', streaming: true } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByText('准备响应中…')).toBeNull();
   });
 });
