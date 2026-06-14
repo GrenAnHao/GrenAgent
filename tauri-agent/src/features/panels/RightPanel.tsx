@@ -7,6 +7,7 @@ import { PanelHeader } from '../../components/PanelHeader';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import type { ChatMessage } from '../../stores/agentReducer';
 import { SubAgentConversation } from './SubAgentConversation';
+import { taskLabel } from './subagentUtils';
 
 const styles = createStaticStyles(({ css }) => ({
   container: css`
@@ -72,13 +73,6 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 type ToolMessage = Extract<ChatMessage, { kind: 'tool' }>;
-
-function taskLabel(args: unknown): string {
-  const a = (args ?? {}) as { task?: string; tasks?: string[] };
-  if (a.task?.trim()) return a.task.trim();
-  if (a.tasks?.length) return `${a.tasks.length} 个并行任务`;
-  return '子代理任务';
-}
 
 function statusColor(status: ToolMessage['status']): string {
   if (status === 'running') return '#fbbf24';

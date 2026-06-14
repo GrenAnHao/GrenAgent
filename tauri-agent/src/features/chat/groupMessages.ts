@@ -54,7 +54,12 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
         };
         break;
       case 'tool':
-        if (pending) {
+        // 子代理（spawn_agent）作为流内一等公民单独成项（前面的助手叙述照常成组），
+        // 由 ChatMessageItems 渲染为可折叠的 SubAgentInline，而非埋进工具列表。
+        if (msg.toolName === 'spawn_agent') {
+          flush();
+          out.push(msg);
+        } else if (pending) {
           pending.tools.push({
             id: msg.id,
             toolCallId: msg.toolCallId,
