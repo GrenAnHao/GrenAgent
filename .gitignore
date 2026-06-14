@@ -7,3 +7,27 @@ output/
 *.log
 .env
 .env.local
+
+# Nested pi monorepo (has its own .git)
+/pi/
+
+# Reference material
+/archive/
+
+# Tool caches / indexes / configs
+/.codegraph/
+/.claude/
+/.codex/
+/.superpowers/
+/openspec/
+/.cursor/mcp.json
+
+# Pi runtime data (per-project)
+/tauri-agent/.pi/
+/tauri-agent/.backup/
+/tauri-agent/.playwright-mcp/
+/tauri-agent/.superpowers/
+/tauri-agent/.vscode/
+
+# Windows junk
+nul
