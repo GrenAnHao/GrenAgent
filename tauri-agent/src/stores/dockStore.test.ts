@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useDockStore, defaultTerminalTitle, type DockTab } from './dockStore';
+import { useDockStore, defaultTerminalTitle } from './dockStore';
 import { useLayoutStore } from './layoutStore';
 import type { ChatMessage } from './agentReducer';
 

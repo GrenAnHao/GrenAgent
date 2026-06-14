@@ -29,14 +29,14 @@ export function SortableDockTab({ tab, active, tone, onActivate, onClose }: Sort
   return (
     <div
       ref={setNodeRef}
-      role="tab"
-      aria-selected={active}
-      data-testid={`dock-tab-${tab.id}`}
       className={cx(dockTabStyles.tab, active && dockTabStyles.tabActive)}
       style={{ opacity: isDragging ? 0.4 : undefined, transform: CSS.Transform.toString(transform), transition }}
       onClick={onActivate}
       {...attributes}
       {...listeners}
+      role="tab"
+      aria-selected={active}
+      data-testid={`dock-tab-${tab.id}`}
     >
       {tab.kind === 'page' ? (
         <Icon icon={Globe} size={12} style={{ flex: 'none' }} />

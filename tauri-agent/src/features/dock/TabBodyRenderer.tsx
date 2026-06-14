@@ -2,19 +2,15 @@ import type { ComponentType } from 'react';
 import type { DockTab, DockTabKind } from '../../stores/dockStore';
 import { PageBody } from './PageBody';
 import { SubAgentBody } from './SubAgentBody';
+import { TerminalBody } from './TerminalBody';
 
 export interface DockBodyProps {
   tab: DockTab;
   active: boolean;
 }
 
-// T5 会把 terminal 替换为真正的 TerminalBody。
-function TerminalBodyPlaceholder() {
-  return null;
-}
-
 const BODY_RENDERERS: Record<DockTabKind, ComponentType<DockBodyProps>> = {
-  terminal: TerminalBodyPlaceholder,
+  terminal: TerminalBody,
   page: PageBody,
   subagent: SubAgentBody,
   // file: FileBody,        // 阶段 2
