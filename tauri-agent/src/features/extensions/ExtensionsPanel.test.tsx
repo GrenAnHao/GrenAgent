@@ -17,7 +17,11 @@ vi.mock('../../lib/pi', () => ({
 // parseCommands passthrough so the test feeds PiCommand[] directly via getCommands.
 vi.mock('../chat/input/commandUtils', () => ({ parseCommands: (raw: unknown) => raw }));
 
+import { ThemeProvider } from '@lobehub/ui';
 import { ExtensionsPanel } from './ExtensionsPanel';
+
+// jsdom 下 Modal/Switch 重渲染较慢，放宽超时避免误判。
+vi.setConfig({ testTimeout: 20000 });
 
 afterEach(() => {
   cleanup();
@@ -35,17 +39,55 @@ describe('ExtensionsPanel', () => {
     expect(screen.getByTestId('mcp-server-api').textContent).toContain('sse');
   });
 
-  it('lists skills (apiSource=skill only) and toggles disabled state', async () => {
+  it('switches to the skills tab and lists skills (apiSource=skill only), toggling via the switch', async () => {
     getSettings.mockResolvedValueOnce({});
     getCommands.mockResolvedValueOnce([
       { name: 'openspec-propose', description: 'propose a change', source: 'api', apiSource: 'skill' },
       { name: 'bash', source: 'api', apiSource: 'builtin' },
     ]);
     render(<ExtensionsPanel />);
+    // 默认展示「插件」(MCP) 页，切到「技能」页才渲染 skills。
+    fireEvent.click(screen.getByTestId('ext-tab-skills'));
     await waitFor(() => expect(screen.getByTestId('skill-openspec-propose')).toBeTruthy());
     expect(screen.queryByTestId('skill-bash')).toBeNull();
-    expect(screen.getByTestId('skill-toggle-openspec-propose').textContent).toContain('已启用');
-    fireEvent.click(screen.getByTestId('skill-toggle-openspec-propose'));
-    expect(screen.getByTestId('skill-toggle-openspec-propose').textContent).toContain('已禁用');
+    const toggle = screen.getByTestId('skill-toggle-openspec-propose');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('skill-toggle-openspec-propose').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('hides the restart button until a change, then persists and restarts the sidecar', async () => {
+    getSettings.mockResolvedValueOnce({});
+    getCommands.mockResolvedValueOnce([{ name: 'demo-skill', source: 'api', apiSource: 'skill' }]);
+    render(<ExtensionsPanel />);
+    // 无改动时不显示「重启生效」按钮。
+    expect(screen.queryByTestId('ext-restart')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('ext-tab-skills'));
+    await waitFor(() => expect(screen.getByTestId('skill-toggle-demo-skill')).toBeTruthy());
+
+    // 拨动开关后出现「重启生效」按钮。
+    fireEvent.click(screen.getByTestId('skill-toggle-demo-skill'));
+    fireEvent.click(screen.getByTestId('ext-restart'));
+
+    // 点击后：持久化 + 重启 sidecar（close + open）。
+    await waitFor(() => {
+      expect(setSettings).toHaveBeenCalled();
+      expect(closeWorkspace).toHaveBeenCalled();
+      expect(openWorkspace).toHaveBeenCalled();
+    });
+    // 重启完成后按钮再次隐藏。
+    await waitFor(() => expect(screen.queryByTestId('ext-restart')).toBeNull());
+  });
+
+  it('opens the add modal from the add button', async () => {
+    getSettings.mockResolvedValueOnce({});
+    render(
+      <ThemeProvider>
+        <ExtensionsPanel />
+      </ThemeProvider>,
+    );
+    fireEvent.click(screen.getByTestId('mcp-add'));
+    await waitFor(() => expect(screen.getByTestId('add-mcp-modal')).toBeTruthy());
   });
 });
