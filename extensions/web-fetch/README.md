@@ -9,6 +9,7 @@
 | 类型 | 名称 | 说明 |
 |---|---|---|
 | 工具(LLM 可调) | `fetch_url` | 抓取 `url`,返回正文 markdown(默认)或纯文本(`format:"text"`) |
+| 工具(LLM 可调) | `fetch_llms` | 探测站点 `<origin>/llms.txt`(为 AI 准备的文档索引)、`full:true` 时优先 `llms-full.txt`(全文内联)。读文档站前优先用它——命中时最省 token;站点没有则返回明确提示,回退 `fetch_url`。 |
 
 ## 安装 / 加载
 
@@ -21,7 +22,7 @@ pi -e ./extensions/web-fetch/index.ts
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `FETCH_MAX_CHARS` | `20000` | 单次返回的最大字符数(超出截断) |
+| `FETCH_MAX_CHARS` | `0` | 喂给模型的最大字符数。`0`=不截断(返回全文)。设为 >0 时:超长页面只把 **head+tail 预览**喂给模型,并把**全文落盘**到 `<cwd>/.pi/web-fetch/<id>.md`,模型可用 `read`/`grep` 按需读回被省略的中间部分(落盘文件 7 天后自动清理)。 |
 | `FETCH_TIMEOUT_MS` | `15000` | 请求超时(毫秒) |
 
 ## 安全(SSRF 防护)
@@ -41,7 +42,7 @@ pi -e ./extensions/web-fetch/index.ts
 
 ```text
 web-fetch/
-├── index.ts       # fetch_url 工具(SSRF 检查 + 超时 + 截断)
+├── index.ts       # fetch_url + fetch_llms 工具(SSRF + head+tail 截断 + 全文落盘 + llms.txt 探测)
 ├── html.ts        # HTML → markdown / text 转换 + isSafeUrl
 ├── package.json
 └── README.md
