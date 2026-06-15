@@ -11,3 +11,11 @@ export function writeMcpPolicy(content: string): Promise<void> {
 export function readMcpAudit(): Promise<string> {
   return invoke<string>('read_mcp_audit');
 }
+
+export function readMcpToolsCache(): Promise<string> {
+  return invoke<string>('read_mcp_tools_cache');
+}
+
+export function probeMcpServer(configJson: string): Promise<string> {
+  return invoke<string>('probe_mcp_server', { configJson });
+}
