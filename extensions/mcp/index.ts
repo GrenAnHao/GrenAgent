@@ -1,184 +1,94 @@
-// mcp: connect external MCP servers (stdio / SSE) and expose their tools to the
-// agent as `mcp__<server>__<tool>`.
-//
-// Servers HOT-RELOAD at runtime: a fs.watch on the runtime config (via
-// _shared/runtime-config) re-diffs MCP_SERVERS on change and connects new /
-// disconnects removed / re-connects changed servers — no sidecar restart.
-// Tools are registered dynamically (pi.registerTool refreshes the registry) and
-// activated via setActiveTools; removal deactivates them + closes the client.
-
+// mcp: 把外部 MCP server（stdio/SSE）的工具暴露给 agent，名为 mcp__<server>__<tool>。
+// 连接/热更新在进程级管理器（manager.ts），跨会话存活；本文件只做每会话薄绑定：
+// session_start 用新鲜 pi 登记+激活当前目录并订阅变化，session_shutdown 解绑。
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Type } from "typebox";
-import { getAllConfig, getConfig, watchConfig } from "../_shared/runtime-config.js";
-import { injectDefaultServers, type McpServerConfig, parseMcpServers, sanitize } from "./config.js";
-import { writeToolsCacheEntry } from "./toolsCache.js";
-import { diffServers } from "./diff.js";
+import { sanitize } from "./config.js";
+import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
 
-const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
-
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
-  ]);
+export interface ServerSummary {
+  name: string;
+  status: string;
+  tools: number;
+  toolNames: string[];
 }
 
-async function connect(s: McpServerConfig): Promise<Client> {
-  const client = new Client({ name: "grenagent", version: "0.1.0" });
-  const transport =
-    s.transport === "sse"
-      ? new SSEClientTransport(new URL(s.url ?? ""))
-      : new StdioClientTransport({
-          command: s.command ?? "",
-          args: s.args ?? [],
-          env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
-        });
-  try {
-    await withTimeout(client.connect(transport), MCP_TIMEOUT_MS);
-  } catch (e) {
-    await client.close().catch(() => {});
-    throw e;
+// 与旧 summary() 形状一致：每 server 的 status / 工具数 / 注册全名（权限面板依赖）。
+export function summary(snap: McpSnapshot): ServerSummary[] {
+  return [...snap.servers.entries()].map(([name, e]) => ({
+    name,
+    status: e.status,
+    tools: e.tools.length,
+    toolNames: e.tools.map((t) => `mcp__${sanitize(name)}__${sanitize(t.name)}`),
+  }));
+}
+
+interface ProjectablePi {
+  registerTool: ExtensionAPI["registerTool"];
+  getActiveTools: ExtensionAPI["getActiveTools"];
+  setActiveTools: ExtensionAPI["setActiveTools"];
+}
+
+// 把当前目录投射进会话：登记已连工具，激活它们，停用已不在连接中的 mcp__ 工具。
+export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">): void {
+  const connected: string[] = [];
+  for (const [server, entry] of snap.servers) {
+    if (entry.status !== "connected") continue;
+    for (const t of entry.tools) {
+      const full = `mcp__${sanitize(server)}__${sanitize(t.name)}`;
+      connected.push(full);
+      pi.registerTool({
+        name: full,
+        label: `${server}: ${t.name}`,
+        description: t.description ?? `MCP tool "${t.name}" from server "${server}".`,
+        parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
+        async execute(_toolCallId, params) {
+          const r = await mgr.callTool(server, t.name, (params ?? {}) as Record<string, unknown>);
+          return { content: [{ type: "text", text: r.text }], details: { server, tool: t.name } };
+        },
+      });
+    }
   }
-  return client;
+  try {
+    const connectedSet = new Set(connected);
+    const active = pi.getActiveTools();
+    const next = active.filter((n) => !n.startsWith("mcp__") || connectedSet.has(n));
+    for (const n of connected) if (!next.includes(n)) next.push(n);
+    pi.setActiveTools(next);
+  } catch {
+    // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活
+  }
 }
 
-type McpStatus = "connecting" | "connected" | "failed";
+export function bind(pi: ExtensionAPI, mgr: McpManager): void {
+  let alive = false;
+  let unsub: (() => void) | undefined;
 
-export default function (pi: ExtensionAPI) {
-  const readServers = (): McpServerConfig[] =>
-    injectDefaultServers(parseMcpServers(getConfig("MCP_SERVERS") ?? ""), getAllConfig(), process.platform);
-
-  let currentServers = readServers();
-  const clients = new Map<string, Client>();
-  const registry = new Map<string, { status: McpStatus; tools: number; error?: string; toolNames?: string[] }>();
-  for (const s of currentServers) registry.set(s.name, { status: "connecting", tools: 0 });
-
-  let pushStatus: (() => void) | undefined;
-  const summary = () =>
-    [...registry.entries()].map(([name, r]) => ({
-      name,
-      status: r.status,
-      tools: r.tools,
-      toolNames: r.toolNames ?? [],
-    }));
-
-  const connectServer = async (s: McpServerConfig): Promise<void> => {
-    try {
-      const client = await connect(s);
-      clients.set(s.name, client);
-      const { tools } = await withTimeout(client.listTools(), MCP_TIMEOUT_MS);
-      const newNames: string[] = [];
-      for (const t of tools) {
-        const name = `mcp__${sanitize(s.name)}__${sanitize(t.name)}`;
-        pi.registerTool({
-          name,
-          label: `${s.name}: ${t.name}`,
-          description: t.description ?? `MCP tool "${t.name}" from server "${s.name}".`,
-          parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
-          async execute(_toolCallId, params) {
-            const r = await client.callTool({
-              name: t.name,
-              arguments: (params ?? {}) as Record<string, unknown>,
-            });
-            const blocks = Array.isArray(r.content) ? r.content : [];
-            const text =
-              blocks
-                .filter((b): b is { type: "text"; text: string } => !!b && (b as { type?: string }).type === "text")
-                .map((b) => b.text)
-                .join("\n") || "(no output)";
-            return { content: [{ type: "text", text }], details: { server: s.name, tool: t.name } };
-          },
-        });
-        newNames.push(name);
-      }
-      if (newNames.length) {
+  pi.on("session_start", (_event, ctx) => {
+    mgr.init();
+    alive = true;
+    const render = (snap: McpSnapshot): void => {
+      if (!alive) return;
+      project(pi, snap, mgr);
+      if (ctx.hasUI) {
         try {
-          const active = pi.getActiveTools();
-          pi.setActiveTools([...new Set([...active, ...newNames])]);
+          ctx.ui.setStatus("mcp", JSON.stringify(summary(snap)));
         } catch {
-          // Active-tool plumbing not ready yet; tools stay registered and become callable later.
+          // 状态推送 best-effort
         }
       }
-      registry.set(s.name, { status: "connected", tools: tools.length, toolNames: newNames });
-      try {
-        writeToolsCacheEntry(s.name, { ok: true, toolNames: newNames });
-      } catch (cacheErr) {
-        console.error(`[mcp] tools-cache write failed for "${s.name}": ${cacheErr instanceof Error ? cacheErr.message : cacheErr}`);
-      }
-      console.error(`[mcp] connected "${s.name}" (${s.transport}); ${tools.length} tools registered`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      registry.set(s.name, { status: "failed", tools: 0, error: msg });
-      try {
-        writeToolsCacheEntry(s.name, { ok: false, toolNames: [], error: msg });
-      } catch {
-        // best-effort cache; ignore
-      }
-      console.error(`[mcp] failed to connect "${s.name}": ${msg}`);
-    }
-    pushStatus?.();
-  };
-
-  const disconnectServer = async (name: string): Promise<void> => {
-    const client = clients.get(name);
-    const toolNames = registry.get(name)?.toolNames ?? [];
-    if (client) await client.close().catch(() => {});
-    clients.delete(name);
-    if (toolNames.length) {
-      try {
-        const active = pi.getActiveTools();
-        pi.setActiveTools(active.filter((t) => !toolNames.includes(t)));
-      } catch {
-        // ignore: deactivation best-effort
-      }
-    }
-    registry.delete(name);
-    console.error(`[mcp] disconnected "${name}"`);
-    pushStatus?.();
-  };
-
-  let started = false;
-  pi.on("session_start", async (_event, ctx) => {
-    if (ctx.hasUI) {
-      pushStatus = () => {
-        try {
-          ctx.ui.setStatus("mcp", JSON.stringify(summary()));
-        } catch {
-          // Stale ctx after session replacement; the next session_start rebinds pushStatus.
-        }
-      };
-      pushStatus();
-    }
-    if (started) return;
-    started = true;
-    void Promise.all(currentServers.map(connectServer));
-
-    // 运行时热更新：MCP_SERVERS 变化 → 先断（移除+变更），再连（新增+变更）。
-    watchConfig(() => {
-      void (async () => {
-        const desired = readServers();
-        const { added, removed, changed } = diffServers(currentServers, desired);
-        if (!added.length && !removed.length && !changed.length) return;
-        currentServers = desired;
-        await Promise.all([...removed, ...changed.map((c) => c.name)].map((n) => disconnectServer(n)));
-        await Promise.all(
-          [...added, ...changed].map((s) => {
-            registry.set(s.name, { status: "connecting", tools: 0 });
-            return connectServer(s);
-          }),
-        );
-        pushStatus?.();
-      })();
-    });
+    };
+    render(mgr.snapshot());
+    unsub = mgr.subscribe(render);
   });
 
-  const cleanup = () => {
-    for (const c of clients.values()) void c.close().catch(() => {});
-  };
-  process.on("exit", cleanup);
-  process.on("SIGTERM", cleanup);
-  process.on("SIGINT", cleanup);
+  pi.on("session_shutdown", () => {
+    alive = false;
+    unsub?.();
+    unsub = undefined;
+  });
+}
+
+export default function (pi: ExtensionAPI) {
+  bind(pi, getMcpManager());
 }
