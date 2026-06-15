@@ -4,6 +4,7 @@ pub mod create;
 pub mod files;
 pub mod git;
 pub mod knowledge;
+pub mod mcp_policy;
 pub mod memory;
 pub mod review;
 pub mod sessions;
