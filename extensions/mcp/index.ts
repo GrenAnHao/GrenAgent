@@ -12,7 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Type } from "typebox";
-import { getConfig, watchConfig } from "../_shared/runtime-config.js";
+import { getAllConfig, getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { injectDefaultServers, type McpServerConfig, parseMcpServers, sanitize } from "./config.js";
 import { diffServers } from "./diff.js";
 
@@ -48,7 +48,7 @@ type McpStatus = "connecting" | "connected" | "failed";
 
 export default function (pi: ExtensionAPI) {
   const readServers = (): McpServerConfig[] =>
-    injectDefaultServers(parseMcpServers(getConfig("MCP_SERVERS") ?? ""), process.env, process.platform);
+    injectDefaultServers(parseMcpServers(getConfig("MCP_SERVERS") ?? ""), getAllConfig(), process.platform);
 
   let currentServers = readServers();
   const clients = new Map<string, Client>();
