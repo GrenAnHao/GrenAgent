@@ -128,3 +128,45 @@ export function summarize(args: Record<string, unknown>, max = 500): string {
   const s = JSON.stringify(args ?? {});
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
+
+// Priority: disabled > param rule > danger upgrade > tool permission > default.
+// Explicit `never` outranks the danger heuristic (user opt-out). Only a pure
+// permission=needs_approval prompt (no rule hit) is recordable ("总是允许").
+export function decide(
+  policy: Policy,
+  toolName: string,
+  args: Record<string, unknown>,
+  hasUI: boolean,
+): Decision {
+  if (!toolName.startsWith("mcp__")) return { action: "pass" };
+
+  const entry = policy.tools[toolName];
+  const perm = entry?.permission ?? policy.defaultPermission ?? "auto";
+  if (perm === "disabled") {
+    return { action: "block", code: "disabled", reason: "该工具已被禁用，可在 MCP 权限设置中启用" };
+  }
+
+  const rulePolicy = matchRules(entry?.rules, args);
+  const danger = matchDanger(args);
+
+  let needApproval: boolean;
+  let recordable: boolean;
+  if (rulePolicy === "never") {
+    needApproval = false;
+    recordable = false;
+  } else if (rulePolicy === "always" || rulePolicy === "required") {
+    needApproval = true;
+    recordable = false;
+  } else {
+    needApproval = perm === "needs_approval";
+    recordable = needApproval;
+  }
+  if (danger && rulePolicy !== "never") {
+    needApproval = true;
+    recordable = false;
+  }
+
+  if (!needApproval) return { action: "pass" };
+  if (!hasUI) return { action: "block", code: "headless", reason: "需要审批但当前无界面（headless），已阻止" };
+  return { action: "prompt", recordable, summary: summarize(args) };
+}

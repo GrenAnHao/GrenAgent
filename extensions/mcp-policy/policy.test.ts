@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { globMatch, matchDanger, matchRules, parsePolicy, summarize, type Rule } from "./policy.js";
+import {
+  decide,
+  globMatch,
+  matchDanger,
+  matchRules,
+  parsePolicy,
+  summarize,
+  type Policy,
+  type Rule,
+  type ToolEntry,
+} from "./policy.js";
 
 describe("parsePolicy", () => {
   it("returns defaults for empty / invalid json", () => {
@@ -90,5 +100,58 @@ describe("summarize", () => {
   });
   it("returns compact json for short args", () => {
     expect(summarize({ a: "short" })).toBe('{"a":"short"}');
+  });
+});
+
+describe("decide", () => {
+  const base: Policy = { version: 1, defaultPermission: "auto", tools: {}, audit: { enabled: true } };
+  const withTool = (entry: ToolEntry): Policy => ({ ...base, tools: { mcp__s__t: entry } });
+
+  it("passes non-mcp tools untouched (even dangerous)", () => {
+    expect(decide(base, "bash", { command: "rm -rf /" }, true)).toEqual({ action: "pass" });
+  });
+  it("auto passes", () => {
+    expect(decide(withTool({ permission: "auto" }), "mcp__s__t", { q: "ok" }, true)).toEqual({ action: "pass" });
+  });
+  it("unknown tool uses defaultPermission (auto)", () => {
+    expect(decide(base, "mcp__s__t", { q: "ok" }, true)).toEqual({ action: "pass" });
+  });
+  it("disabled blocks", () => {
+    expect(decide(withTool({ permission: "disabled" }), "mcp__s__t", {}, true)).toMatchObject({
+      action: "block",
+      code: "disabled",
+    });
+  });
+  it("needs_approval prompts (recordable) with UI", () => {
+    expect(decide(withTool({ permission: "needs_approval" }), "mcp__s__t", {}, true)).toMatchObject({
+      action: "prompt",
+      recordable: true,
+    });
+  });
+  it("needs_approval blocks when headless", () => {
+    expect(decide(withTool({ permission: "needs_approval" }), "mcp__s__t", {}, false)).toMatchObject({
+      action: "block",
+      code: "headless",
+    });
+  });
+  it("required rule prompts but is not recordable", () => {
+    const p = withTool({ permission: "auto", rules: [{ match: { p: "x" }, policy: "required" }] });
+    expect(decide(p, "mcp__s__t", { p: "x" }, true)).toMatchObject({ action: "prompt", recordable: false });
+  });
+  it("never rule passes and exempts danger", () => {
+    const p = withTool({ permission: "needs_approval", rules: [{ policy: "never" }] });
+    expect(decide(p, "mcp__s__t", { command: "rm -rf /" }, true)).toEqual({ action: "pass" });
+  });
+  it("danger upgrades auto to prompt, not recordable", () => {
+    expect(decide(withTool({ permission: "auto" }), "mcp__s__t", { command: "rm -rf /" }, true)).toMatchObject({
+      action: "prompt",
+      recordable: false,
+    });
+  });
+  it("danger under headless blocks", () => {
+    expect(decide(withTool({ permission: "auto" }), "mcp__s__t", { command: "sudo x" }, false)).toMatchObject({
+      action: "block",
+      code: "headless",
+    });
   });
 });
