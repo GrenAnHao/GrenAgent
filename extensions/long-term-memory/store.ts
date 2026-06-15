@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "../_shared/sqlite.js";
 import { type EmbeddingConfig, embedTexts } from "./embedding.js";
+import { vecNorm } from "./ranking.js";
 
 export interface Memory {
   id: string;
@@ -88,6 +89,8 @@ interface MemoryRow {
 
 export class MemoryStore {
   private db: DatabaseSync | undefined;
+  // id → 预解码向量 + 预算 norm。null 表示尚未懒初始化。
+  private vecCache: Map<string, { vec: Float32Array; norm: number }> | null = null;
 
   constructor(private readonly file: string) {}
 
@@ -142,6 +145,37 @@ export class MemoryStore {
     return this.db as DatabaseSync;
   }
 
+  private ensureVecCache(): Map<string, { vec: Float32Array; norm: number }> {
+    if (this.vecCache) return this.vecCache;
+    const cache = new Map<string, { vec: Float32Array; norm: number }>();
+    const rows = this.database
+      .prepare("SELECT id, embedding FROM memories")
+      .all() as unknown as Array<{ id: string; embedding: Uint8Array | null }>;
+    for (const r of rows) {
+      const emb = decodeEmbedding(r.embedding);
+      if (emb) {
+        const vec = Float32Array.from(emb);
+        cache.set(r.id, { vec, norm: vecNorm(vec) });
+      }
+    }
+    this.vecCache = cache;
+    return cache;
+  }
+
+  private cachePut(id: string, emb: number[] | undefined): void {
+    if (!this.vecCache) return;
+    if (!emb || !emb.length) {
+      this.vecCache.delete(id);
+      return;
+    }
+    const vec = Float32Array.from(emb);
+    this.vecCache.set(id, { vec, norm: vecNorm(vec) });
+  }
+
+  private cacheDelete(id: string): void {
+    this.vecCache?.delete(id);
+  }
+
   stats(): { count: number; categories: number } {
     const c = this.database.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number };
     const cat = this.database.prepare("SELECT COUNT(DISTINCT category) AS n FROM memories WHERE category IS NOT NULL").get() as {
@@ -152,10 +186,12 @@ export class MemoryStore {
 
   clear(): void {
     this.database.exec("DELETE FROM memories;");
+    this.vecCache = null;
   }
 
   forget(id: string): boolean {
     const info = this.database.prepare("DELETE FROM memories WHERE id = ?").run(id);
+    this.cacheDelete(id);
     return Number(info.changes) > 0;
   }
 
@@ -227,6 +263,7 @@ export class MemoryStore {
     this.database
       .prepare("INSERT INTO memories(id, text, category, createdAt, updatedAt, version, embedding) VALUES(?, ?, ?, ?, ?, ?, ?)")
       .run(id, clean, category, now, now, 1, encodeEmbedding(embedding));
+    this.cachePut(id, embedding);
     this.recordHistory({
       memoryId: id,
       op: "ADD",
@@ -261,6 +298,7 @@ export class MemoryStore {
     this.database
       .prepare("UPDATE memories SET text = ?, category = ?, updatedAt = ?, version = ?, embedding = ? WHERE id = ?")
       .run(newText, newCategory, now, version, encodeEmbedding(embedding), id);
+    this.cachePut(id, embedding);
     this.recordHistory({
       memoryId: id,
       op: "UPDATE",
@@ -282,6 +320,7 @@ export class MemoryStore {
     const version = this.currentVersion(id) + 1;
     const now = Date.now();
     this.database.prepare("DELETE FROM memories WHERE id = ?").run(id);
+    this.cacheDelete(id);
     this.recordHistory({
       memoryId: id,
       op: "DELETE",
@@ -317,6 +356,7 @@ export class MemoryStore {
       if (cur) {
         const version = this.currentVersion(row.memoryId) + 1;
         this.database.prepare("DELETE FROM memories WHERE id = ?").run(row.memoryId);
+        this.cacheDelete(row.memoryId);
         this.recordHistory({
           memoryId: row.memoryId,
           op: "ROLLBACK",
@@ -340,6 +380,7 @@ export class MemoryStore {
       this.database
         .prepare("UPDATE memories SET text = ?, category = ?, updatedAt = ?, version = ?, embedding = ? WHERE id = ?")
         .run(clean, row.oldCategory, now, version, encodeEmbedding(embedding), row.memoryId);
+      this.cachePut(row.memoryId, embedding);
       this.recordHistory({
         memoryId: row.memoryId,
         op: "ROLLBACK",
@@ -356,6 +397,7 @@ export class MemoryStore {
       this.database
         .prepare("INSERT INTO memories(id, text, category, createdAt, updatedAt, version, embedding) VALUES(?, ?, ?, ?, ?, ?, ?)")
         .run(row.memoryId, clean, row.oldCategory, now, now, 1, encodeEmbedding(embedding));
+      this.cachePut(row.memoryId, embedding);
       this.recordHistory({
         memoryId: row.memoryId,
         op: "ROLLBACK",
@@ -391,6 +433,7 @@ export class MemoryStore {
     this.database
       .prepare("INSERT OR REPLACE INTO memories(id, text, category, createdAt, updatedAt, version, embedding) VALUES(?, ?, ?, ?, ?, ?, ?)")
       .run(id, clean, category, now, now, 1, encodeEmbedding(embedding));
+    this.cachePut(id, embedding);
     this.recordHistory({
       memoryId: id,
       op: "ADD",
