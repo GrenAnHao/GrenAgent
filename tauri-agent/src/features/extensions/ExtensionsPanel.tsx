@@ -1,8 +1,9 @@
-import { Flexbox } from '@lobehub/ui';
+import { Button, Flexbox } from '@lobehub/ui';
 import { Switch } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Boxes, Plus, RotateCw, Sparkles } from 'lucide-react';
+import { Boxes, Plus, RotateCw, ScrollText, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { readMcpPolicy, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useMcpStatusStore } from '../../stores/mcpStatusStore';
@@ -10,6 +11,7 @@ import type { PiCommand } from '../chat/input/commandTypes';
 import { parseCommands } from '../chat/input/commandUtils';
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
+import { AuditModal } from './AuditModal';
 import { McpServerCard } from './McpServerCard';
 import {
   listEntries,
@@ -21,6 +23,8 @@ import {
   type McpConfig,
   type McpEntry,
 } from './mcpConfig';
+import { parsePolicyDoc, serializePolicyDoc, setToolPerm, setToolRules, type Perm } from './mcpPolicy';
+import { ToolPermissionModal } from './ToolPermissionModal';
 
 const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -162,24 +166,6 @@ const styles = createStaticStyles(({ css }) => ({
     font-weight: 600;
     color: ${cssVar.colorText};
   `,
-  addBtn: css`
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-    padding: 6px 13px;
-    border: none;
-    border-radius: 9px;
-    background: ${cssVar.colorPrimary};
-    color: #fff;
-    font-size: 12px;
-    cursor: pointer;
-    transition: background 0.16s ease;
-
-    &:hover {
-      background: ${cssVar.colorPrimaryHover};
-    }
-  `,
   count: css`
     margin-inline-start: 8px;
     padding: 1px 8px;
@@ -292,6 +278,27 @@ export function ExtensionsPanel() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<McpEntry | undefined>(undefined);
   const touchedRef = useRef(false);
+  const [policyRaw, setPolicyRaw] = useState<Record<string, unknown>>({});
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [rulesTarget, setRulesTarget] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readMcpPolicy()
+      .then((t) => {
+        if (!cancelled) setPolicyRaw(parsePolicyDoc(t));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const writePolicy = (next: Record<string, unknown>) => {
+    setPolicyRaw(next);
+    void writeMcpPolicy(serializePolicyDoc(next)).catch(() => {});
+  };
+  const onPermChange = (fullName: string, perm: Perm) => writePolicy(setToolPerm(policyRaw, fullName, perm));
 
   useEffect(() => {
     if (!workspace) return;
@@ -404,18 +411,28 @@ export function ExtensionsPanel() {
                     {entries.length > 0 ? <span className={styles.count}>{entries.length}</span> : null}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  data-testid="mcp-add"
-                  className={styles.addBtn}
-                  onClick={() => {
-                    setEditing(undefined);
-                    setModalOpen(true);
-                  }}
-                >
-                  <Plus size={14} />
-                  添加 MCP
-                </button>
+                <Flexbox horizontal align="center" gap={8}>
+                  <Button
+                    size="small"
+                    icon={<ScrollText size={14} />}
+                    data-testid="mcp-audit-open"
+                    onClick={() => setAuditOpen(true)}
+                  >
+                    审计
+                  </Button>
+                  <Button
+                    type="primary"
+                    size="small"
+                    data-testid="mcp-add"
+                    icon={<Plus size={14} />}
+                    onClick={() => {
+                      setEditing(undefined);
+                      setModalOpen(true);
+                    }}
+                  >
+                    添加 MCP
+                  </Button>
+                </Flexbox>
               </div>
               <div className={styles.heroDesc}>
                 连接外部 MCP server，其工具以 <code className={styles.code}>mcp__server__tool</code> 暴露给 agent（改动自动保存，重启后生效）。
@@ -434,12 +451,15 @@ export function ExtensionsPanel() {
                     config={e.config}
                     enabled={e.enabled}
                     live={liveMcpByName.get(e.name)}
+                    policyRaw={policyRaw}
                     onToggle={(v) => handleToggleMcp(e.name, v)}
                     onEdit={() => {
                       setEditing(e);
                       setModalOpen(true);
                     }}
                     onDelete={() => handleDeleteMcp(e.name)}
+                    onPermChange={onPermChange}
+                    onOpenRules={(full) => setRulesTarget(full)}
                   />
                 ))
               )}
@@ -452,6 +472,18 @@ export function ExtensionsPanel() {
                 onSubmitImport={handleSubmitImport}
                 onClose={() => setModalOpen(false)}
               />
+              {rulesTarget ? (
+                <ToolPermissionModal
+                  open={!!rulesTarget}
+                  fullName={rulesTarget}
+                  policyRaw={policyRaw}
+                  onSave={(full, perm, rules) =>
+                    writePolicy(setToolRules(setToolPerm(policyRaw, full, perm), full, rules))
+                  }
+                  onClose={() => setRulesTarget(undefined)}
+                />
+              ) : null}
+              <AuditModal open={auditOpen} onClose={() => setAuditOpen(false)} />
             </>
           ) : (
             <>
