@@ -71,6 +71,46 @@ function extractText(msg: AgentMessage): { text: string; thinking: string } {
   return { text, thinking };
 }
 
+interface PendingToolCall {
+  toolName: string;
+  args: unknown;
+}
+
+/** 从 assistant 消息的 content 块提取 toolCall（供历史还原时匹配 args）。 */
+function extractToolCalls(msg: AgentMessage): Array<{ id: string; toolName: string; args: unknown }> {
+  const content = msg.content;
+  if (!Array.isArray(content)) return [];
+  const out: Array<{ id: string; toolName: string; args: unknown }> = [];
+  for (const block of content as Array<Record<string, unknown> | null>) {
+    if (!block || block.type !== 'toolCall') continue;
+    const id = typeof block.id === 'string' ? block.id : '';
+    const toolName = typeof block.name === 'string' ? block.name : '';
+    if (!id || !toolName) continue;
+    out.push({
+      id,
+      toolName,
+      args: block.arguments ?? block.input ?? {},
+    });
+  }
+  return out;
+}
+
+function registerToolCalls(pending: Map<string, PendingToolCall>, msg: AgentMessage): void {
+  for (const tc of extractToolCalls(msg)) {
+    pending.set(tc.id, { toolName: tc.toolName, args: tc.args });
+  }
+}
+
+/** 把 pi toolResult 消息还原成与 tool_execution_end 一致的 result 形状。 */
+function toolResultPayload(msg: AgentMessage): unknown {
+  const raw = msg as { content?: unknown; details?: unknown };
+  if (raw.content == null && raw.details === undefined) return {};
+  return {
+    ...(raw.content != null ? { content: raw.content } : {}),
+    ...(raw.details !== undefined ? { details: raw.details } : {}),
+  };
+}
+
 /** 把 pi 的 CustomMessage（role:'custom', display:true）转成一条去重的 notice。 */
 function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
   if ((msg as { display?: unknown }).display !== true) return state;
@@ -286,6 +326,8 @@ export function messagesFromAgent(
   getDuration?: (timestamp: number | undefined) => number | undefined,
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
+  const pendingToolCalls = new Map<string, PendingToolCall>();
+
   for (const msg of msgs) {
     if (msg.role === 'custom') {
       const content = typeof msg.content === 'string' ? msg.content : '';
@@ -299,7 +341,10 @@ export function messagesFromAgent(
     if (msg.role === 'user') {
       const { text } = extractText(msg);
       if (text.trim()) out.push({ kind: 'user', id: nextId(), text });
-    } else if (msg.role === 'assistant') {
+      continue;
+    }
+    if (msg.role === 'assistant') {
+      registerToolCalls(pendingToolCalls, msg);
       const { text, thinking } = extractText(msg);
       if (text.trim() || thinking.trim()) {
         const timestamp = messageTimestamp(msg);
@@ -313,6 +358,24 @@ export function messagesFromAgent(
           thinkingDuration: thinking.trim() ? getDuration?.(timestamp) : undefined,
         });
       }
+      continue;
+    }
+    if (msg.role === 'toolResult') {
+      const raw = msg as { toolCallId?: unknown; toolName?: unknown; isError?: unknown };
+      const toolCallId = typeof raw.toolCallId === 'string' ? raw.toolCallId : nextId();
+      const pending = pendingToolCalls.get(toolCallId);
+      const toolName =
+        typeof raw.toolName === 'string' ? raw.toolName : pending?.toolName ?? 'unknown';
+      out.push({
+        kind: 'tool',
+        id: nextId(),
+        toolCallId,
+        toolName,
+        args: pending?.args ?? {},
+        result: toolResultPayload(msg),
+        status: raw.isError === true ? 'error' : 'done',
+      });
+      pendingToolCalls.delete(toolCallId);
     }
   }
   return out;

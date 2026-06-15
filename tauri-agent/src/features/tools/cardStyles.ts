@@ -79,6 +79,9 @@ export const useCardStyles = createStyles(({ css, cssVar }) => ({
     border: none;
     border-block-start: 1px dashed ${cssVar.colorBorder};
   `,
+  detailScroll: css`
+    max-height: min(50vh, 420px);
+  `,
   pageCard: css`
     display: flex;
     max-width: 420px;

@@ -105,7 +105,11 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
 
   // 监听本 shell 的输出/退出。
   useEffect(() => {
+    // listen() 是异步的：cleanup 可能早于 promise resolve 执行（StrictMode 双挂载 / 快速卸载）。
+    // 用 disposed 标志确保 resolve 时若已清理则立刻注销，避免泄漏出永不注销的重复监听器
+    // （重复监听会把每个输出字节写入 xterm 两次：终端重复、打字回显翻倍、TUI 错位）。
     let un: (() => void) | undefined;
+    let disposed = false;
     void terminal
       .onShellOutput((event) => {
         if (!event.session_id || event.session_id !== shellIdRef.current) return;
@@ -117,9 +121,16 @@ export function TerminalBody({ tab, active }: DockBodyProps) {
         }
       })
       .then((fn) => {
+        if (disposed) {
+          fn();
+          return;
+        }
         un = fn;
       });
-    return () => un?.();
+    return () => {
+      disposed = true;
+      un?.();
+    };
   }, [tab.id, setTerminalStatus, write]);
 
   // 卸载（tab 关闭）时停止 shell。

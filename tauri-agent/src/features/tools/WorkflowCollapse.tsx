@@ -77,22 +77,20 @@ export function WorkflowCollapse({ tools }: { tools: AssistantToolItem[] }) {
       onExpandedChange={(keys) => setOpen(keys.includes('workflow'))}
     >
       <AccordionItem itemKey="workflow" paddingBlock={4} paddingInline={4} title={title}>
-        {open ? (
-          <div ref={listRef} className={styles.list} onScroll={handleScroll}>
-            <Suspense fallback={null}>
-              {tools.map((t) => (
-                <ToolExecution
-                  key={t.id}
-                  toolName={t.toolName}
-                  toolCallId={t.toolCallId}
-                  args={t.args}
-                  result={t.result}
-                  status={t.status}
-                />
-              ))}
-            </Suspense>
-          </div>
-        ) : null}
+        <div ref={listRef} className={styles.list} onScroll={handleScroll}>
+          <Suspense fallback={null}>
+            {tools.map((t) => (
+              <ToolExecution
+                key={t.id}
+                toolName={t.toolName}
+                toolCallId={t.toolCallId}
+                args={t.args}
+                result={t.result}
+                status={t.status}
+              />
+            ))}
+          </Suspense>
+        </div>
       </AccordionItem>
     </Accordion>
   );

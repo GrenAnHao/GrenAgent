@@ -1,4 +1,5 @@
 import { ChatListView } from './ChatListView';
+import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
 import type { PromptImage } from './input/ChatInputContext';
 import { pi } from '../../lib/pi';
@@ -7,7 +8,7 @@ import { commandLanes } from '../../lib/commandLanes';
 import { awaitStreamingEnd } from '../../lib/streamingGate';
 
 export function ChatView() {
-  const { workspace, store } = useAgentStoreContext();
+  const { workspace, store, workspaceReady } = useAgentStoreContext();
 
   const handleSend = async (message: string, images?: PromptImage[]) => {
     const text = message.trim();
@@ -29,7 +30,7 @@ export function ChatView() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        <ChatListView />
+        {workspaceReady ? <ChatListView /> : <ChatListSkeleton />}
       </div>
       <ChatInput onSend={handleSend} onAbort={handleAbort} />
     </div>

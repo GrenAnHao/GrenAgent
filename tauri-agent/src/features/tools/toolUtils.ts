@@ -69,7 +69,9 @@ export function toolMeta(toolName: string): { icon: LucideIcon } {
   if (name === 'generate_image') return { icon: Image };
   if (name === 'spawn_agent') return { icon: Network };
   if (name === 'fetch_url') return { icon: Globe };
-  if (name === 'web_search') return { icon: Search };
+  if (name === 'fetch_llms') return { icon: FileText };
+  if (name === 'web_search' || name === 'search') return { icon: Search };
+  if (name.startsWith('fetch_')) return { icon: Globe };
   if (name === 'speak') return { icon: Volume2 };
   if (name === 'todo') return { icon: ListChecks };
   return { icon: Wrench };

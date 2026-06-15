@@ -42,7 +42,7 @@ const styles = createStaticStyles(({ css }) => ({
     height: 18px;
     border-radius: 50%;
     background: ${cssVar.colorPrimary};
-    color: #fff;
+    color: ${cssVar.colorBgContainer};
   `,
   title: css`
     display: flex;

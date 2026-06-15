@@ -19,6 +19,8 @@ export const useAgentRegistryStore = create<RegistryStatus>(() => ({ runningWork
 export interface AgentStoreRegistry {
   getOrCreate: (workspace: string) => AgentStoreApi;
   get: (workspace: string) => AgentStoreApi | undefined;
+  /** 该 workspace 的 store 是否已常驻（决定切换时是否需要全屏 loading）。 */
+  has: (workspace: string) => boolean;
   release: (workspace: string) => void;
   setActive: (workspace: string | null) => void;
   keys: () => string[];
@@ -93,6 +95,7 @@ export function createAgentStoreRegistry(max = DEFAULT_MAX): AgentStoreRegistry 
   return {
     getOrCreate,
     get: (workspace) => map.get(workspace)?.store,
+    has: (workspace) => map.has(workspace),
     release,
     setActive,
     keys: () => [...map.keys()],

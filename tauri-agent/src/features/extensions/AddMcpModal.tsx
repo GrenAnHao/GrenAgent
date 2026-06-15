@@ -1,4 +1,4 @@
-import { Modal } from '@lobehub/ui';
+import { Button, Modal } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useEffect, useState } from 'react';
 import { KeyValueEditor } from './KeyValueEditor';
@@ -125,20 +125,6 @@ const styles = createStaticStyles(({ css }) => ({
     justify-content: flex-end;
     gap: 10px;
     margin-block-start: 16px;
-  `,
-  btn: css`
-    padding: 6px 16px;
-    border: none;
-    border-radius: 9px;
-    background: ${cssVar.colorPrimary};
-    color: #fff;
-    font-size: 13px;
-    cursor: pointer;
-  `,
-  ghost: css`
-    background: transparent;
-    border: 1px solid ${cssVar.colorBorder};
-    color: ${cssVar.colorText};
   `,
 }));
 
@@ -321,12 +307,10 @@ export function AddMcpModal({
           )}
 
           <div className={styles.foot}>
-            <button type="button" className={`${styles.btn} ${styles.ghost}`} onClick={onClose}>
-              取消
-            </button>
-            <button type="button" className={styles.btn} data-testid="mcp-submit" onClick={submitConfig}>
+            <Button onClick={onClose}>取消</Button>
+            <Button type="primary" data-testid="mcp-submit" onClick={submitConfig}>
               {editing ? '保存' : '添加'}
-            </button>
+            </Button>
           </div>
         </>
       ) : (
@@ -339,12 +323,10 @@ export function AddMcpModal({
             placeholder={JSON_PLACEHOLDER}
           />
           <div className={styles.foot}>
-            <button type="button" className={`${styles.btn} ${styles.ghost}`} onClick={onClose}>
-              取消
-            </button>
-            <button type="button" className={styles.btn} data-testid="mcp-import" onClick={submitJson}>
+            <Button onClick={onClose}>取消</Button>
+            <Button type="primary" data-testid="mcp-import" onClick={submitJson}>
               导入
-            </button>
+            </Button>
           </div>
         </>
       )}

@@ -36,7 +36,7 @@ function NoticePillInner({ customType, content }: NoticePillProps) {
                 <span>{title}</span>
               </Flexbox>
             ),
-            children: expanded ? <LazyMarkdown>{content}</LazyMarkdown> : null,
+            children: <LazyMarkdown>{content}</LazyMarkdown>,
           },
         ]}
       />

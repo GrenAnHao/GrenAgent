@@ -1,4 +1,4 @@
-import { Accordion, AccordionItem, Block, Flexbox, Icon } from '@lobehub/ui';
+import { Accordion, AccordionItem, Block, Flexbox, Icon, ScrollArea } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { ChevronRight, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -40,8 +40,8 @@ function ToolInspector({
 }) {
   const { styles } = useCardStyles();
 
-  // web_search：读作「搜索：<高亮查询词>（N）」，而非通用 toolName › 参数摘要。
-  if (toolName.toLowerCase() === 'web_search') {
+  // web_search / search：读作「搜索：<高亮查询词>（N）」。
+  if (toolName.toLowerCase() === 'web_search' || toolName.toLowerCase() === 'search') {
     const query = getArgString(args, 'query');
     const details = getDetails(result);
     const countRaw = details?.count;
@@ -77,7 +77,7 @@ function ToolInspector({
           {query ? (
             <span className={styles.queryHighlight}>{query}</span>
           ) : (
-            <span className={styles.toolName}>web_search</span>
+            <span className={styles.toolName}>{toolName.toLowerCase()}</span>
           )}
           {count != null ? <span className={styles.searchCount}>（{count}）</span> : null}
         </div>
@@ -142,7 +142,12 @@ function ToolDetail({
   const { styles } = useCardStyles();
   const extensionCard = renderExtensionCard({ toolName, args, result, status });
   if (extensionCard) {
-    return <ErrorBoundary>{extensionCard}</ErrorBoundary>;
+    // 统一给扩展卡片留出与上方 inspector 标题行的间距（对齐 lobe，避免贴在一起）。
+    return (
+      <ErrorBoundary>
+        <div style={{ marginBlockStart: 10 }}>{extensionCard}</div>
+      </ErrorBoundary>
+    );
   }
   const name = toolName.toLowerCase();
   const text = extractText(result);
@@ -301,12 +306,12 @@ export function ToolExecution({ toolName, args, result, status }: ToolExecutionP
         onExpandedChange={(keys) => setExpanded(keys.includes('tool'))}
       >
         <AccordionItem itemKey="tool" paddingBlock={4} paddingInline={4} title={inspector}>
-          {expanded ? (
+          <ScrollArea disableContentFit scrollFade viewportProps={{ className: styles.detailScroll }}>
             <Flexbox gap={8} paddingBlock={8}>
               <ToolDetail toolName={toolName} args={args} result={result} status={status} />
               <div className={styles.divDash} />
             </Flexbox>
-          ) : null}
+          </ScrollArea>
         </AccordionItem>
       </Accordion>
     </div>

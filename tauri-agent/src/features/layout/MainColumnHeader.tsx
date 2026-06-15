@@ -12,7 +12,7 @@ export const SidebarToggleButton = memo(function SidebarToggleButton() {
 
   if (sidebarOpen) return null;
 
-  return <ActionIcon icon={PanelLeftOpen} title="Sidebar" onClick={toggleSidebar} />;
+  return <ActionIcon icon={PanelLeftOpen} size="small" title="Sidebar" onClick={toggleSidebar} />;
 });
 
 /** 主题与面板开关，与聊天区解耦订阅。 */
@@ -27,11 +27,12 @@ export const MainHeaderActions = memo(function MainHeaderActions() {
       <ActionIcon
         icon={SquareTerminal}
         active={terminalOpen}
+        size="small"
         title="Terminal"
         onClick={toggleTerminal}
       />
       {!rightPanelOpen && (
-        <ActionIcon icon={PanelRightOpen} title="Panel" onClick={toggleRightPanel} />
+        <ActionIcon icon={PanelRightOpen} size="small" title="Panel" onClick={toggleRightPanel} />
       )}
     </>
   );

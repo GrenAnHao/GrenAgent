@@ -101,6 +101,63 @@ describe('applyEvent', () => {
     expect(text(msgs[1])).toBe('hi');
   });
 
+  it('messagesFromAgent restores tools from toolResult and toolCall args', () => {
+    const msgs = messagesFromAgent([
+      { role: 'user', content: 'run ls' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'I will list files' },
+          { type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'ls' } },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'file.txt' }],
+        details: { exitCode: 0 },
+        isError: false,
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done listing.' }],
+      },
+    ] as never);
+    expect(msgs).toHaveLength(4);
+    expect(msgs[2].kind).toBe('tool');
+    if (msgs[2].kind === 'tool') {
+      expect(msgs[2].toolCallId).toBe('c1');
+      expect(msgs[2].toolName).toBe('bash');
+      expect(msgs[2].args).toEqual({ command: 'ls' });
+      expect(msgs[2].status).toBe('done');
+      expect(msgs[2].result).toMatchObject({
+        content: [{ type: 'text', text: 'file.txt' }],
+        details: { exitCode: 0 },
+      });
+    }
+    expect(msgs[1].kind === 'assistant' ? msgs[1].thinking : '').toBe('I will list files');
+    expect(text(msgs[3]!)).toBe('Done listing.');
+  });
+
+  it('messagesFromAgent skips assistant bubbles that only contain tool calls', () => {
+    const msgs = messagesFromAgent([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'c1', name: 'grep', arguments: { q: 'x' } }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'c1',
+        toolName: 'grep',
+        content: [{ type: 'text', text: 'match' }],
+        isError: false,
+      },
+    ] as never);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].kind).toBe('tool');
+  });
+
   it('accumulates thinking from thinking_delta and keeps it after message_end', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);

@@ -26,4 +26,8 @@ if (typeof window !== 'undefined') {
   if (!Element.prototype.scrollTo) {
     Element.prototype.scrollTo = () => {};
   }
+  // @base-ui 的 ScrollArea viewport 会调用 Web Animations API；jsdom 未实现，补空垫片。
+  if (!Element.prototype.getAnimations) {
+    Element.prototype.getAnimations = () => [];
+  }
 }
