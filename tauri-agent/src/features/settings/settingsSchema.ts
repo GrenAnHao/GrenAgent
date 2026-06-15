@@ -11,6 +11,9 @@ export interface SelectOption {
   label: string;
 }
 
+/** 生效方式：instant=App 后端实时读；hot=扩展运行时读(改完即生效)；restart=需重启 sidecar。省略＝hot。 */
+export type SettingEffect = 'instant' | 'hot' | 'restart';
+
 export interface SettingField {
   key: string; // env 名（不变）
   label: string;
@@ -18,6 +21,7 @@ export interface SettingField {
   description?: string;
   placeholder?: string;
   options?: SelectOption[];
+  effect?: SettingEffect; // 省略＝hot
 }
 
 export interface SettingSection {
@@ -32,6 +36,11 @@ export interface SettingCategory {
   icon: LucideIcon;
   fields?: SettingField[];
   sections?: SettingSection[];
+}
+
+/** 字段生效方式，省略时默认 hot（扩展运行时读，改完即生效）。 */
+export function fieldEffect(field: SettingField): SettingEffect {
+  return field.effect ?? 'hot';
 }
 
 export const SETTINGS_SCHEMA: SettingCategory[] = [
@@ -54,6 +63,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         type: 'text',
         placeholder: '如 anthropic/claude-haiku',
         description: 'provider/id；留空＝自动选轻量模型',
+        effect: 'instant',
       },
     ],
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_SCHEMA, SETTING_GROUPS } from './settingsSchema';
+import { fieldEffect, SETTINGS_SCHEMA, SETTING_GROUPS } from './settingsSchema';
 
 describe('SETTINGS_SCHEMA', () => {
   it('every category has group + icon + title', () => {
@@ -26,5 +26,14 @@ describe('SETTINGS_SCHEMA', () => {
   it('memory category is split into sections', () => {
     const mem = SETTINGS_SCHEMA.find((c) => c.id === 'memory');
     expect(mem?.sections?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('titleModel effect is instant; unmarked fields default to hot', () => {
+    const allFields = SETTINGS_SCHEMA.flatMap((c) => c.sections?.flatMap((s) => s.fields) ?? c.fields ?? []);
+    const titleModel = allFields.find((f) => f.key === 'titleModel');
+    expect(titleModel?.effect).toBe('instant');
+    expect(fieldEffect(titleModel!)).toBe('instant');
+    const apiKey = allFields.find((f) => f.key === 'OPENAI_API_KEY');
+    expect(fieldEffect(apiKey!)).toBe('hot');
   });
 });
