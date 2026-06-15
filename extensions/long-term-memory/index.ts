@@ -17,7 +17,7 @@ import { Type } from "typebox";
 import { type AppliedOp, type AskFn, consolidate, extractFacts } from "./consolidate.js";
 import { type EmbeddingConfig, resolveEmbeddingConfig } from "./embedding.js";
 import { askMemoryLlm, resolveMemoryModel } from "./llm.js";
-import { type MemoryHit, MemoryStore } from "./store.js";
+import { type MemoryHit, MemoryStore, type RecallFilters } from "./store.js";
 
 const AUTO_INJECT = (process.env.MEMORY_AUTO_INJECT ?? "1") !== "0";
 const AUTO_INJECT_TOPK = Number(process.env.MEMORY_AUTO_TOPK ?? "5") || 5;
@@ -71,11 +71,12 @@ export default function (pi: ExtensionAPI) {
     query: string,
     topK: number,
     config: EmbeddingConfig,
+    filters?: RecallFilters,
   ): Promise<ScopedHit[]> => {
     const { project, global } = ensureStores(cwd);
     const [p, g] = await Promise.all([
-      project.recall(query, topK, config).catch(() => []),
-      global.recall(query, topK, config).catch(() => []),
+      project.recall(query, topK, config, undefined, filters).catch(() => []),
+      global.recall(query, topK, config, undefined, filters).catch(() => []),
     ]);
     const tagged: ScopedHit[] = [
       ...p.map((h) => ({ ...h, scope: "project" as const })),
@@ -237,10 +238,16 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "What to recall about" }),
       topK: Type.Optional(Type.Number({ description: "Max memories to return (default 5)" })),
+      categories: Type.Optional(
+        Type.Array(Type.String(), { description: "Filter by category (preference/decision/convention/fact)" }),
+      ),
+      since: Type.Optional(Type.Number({ description: "Only memories created at/after this Unix ms" })),
+      until: Type.Optional(Type.Number({ description: "Only memories created at/before this Unix ms" })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const config = resolveEmbeddingConfig();
-      const hits = await recallMerged(ctx.cwd, params.query, params.topK ?? 5, config).catch(() => []);
+      const filters: RecallFilters = { categories: params.categories, from: params.since, to: params.until };
+      const hits = await recallMerged(ctx.cwd, params.query, params.topK ?? 5, config, filters).catch(() => []);
       if (!hits.length) {
         return { content: [{ type: "text", text: "No relevant memories." }], details: { hits: [] } };
       }
