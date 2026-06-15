@@ -78,3 +78,26 @@ export function parsePolicy(json: string): Policy {
     audit: { enabled: auditRaw.enabled !== false },
   };
 }
+
+// Minimal glob: `*` matches any run of characters (including `/`), `?` one char.
+// All other regex metacharacters are escaped. Used to test rule patterns.
+export function globMatch(pattern: string, value: string): boolean {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(value);
+}
+
+export function matchRules(rules: Rule[] | undefined, args: Record<string, unknown>): RulePolicy | undefined {
+  if (!rules) return undefined;
+  for (const rule of rules) {
+    if (!rule.match) return rule.policy; // bare rule ⇒ catch-all
+    const hit = Object.entries(rule.match).every(([k, pat]) => {
+      const v = args[k];
+      return typeof v === "string" && globMatch(pat, v);
+    });
+    if (hit) return rule.policy;
+  }
+  return undefined;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePolicy } from "./policy.js";
+import { globMatch, matchRules, parsePolicy, type Rule } from "./policy.js";
 
 describe("parsePolicy", () => {
   it("returns defaults for empty / invalid json", () => {
@@ -42,5 +42,32 @@ describe("parsePolicy", () => {
   it("audit defaults true; false only when explicitly disabled", () => {
     expect(parsePolicy("{}").audit.enabled).toBe(true);
     expect(parsePolicy(JSON.stringify({ audit: { enabled: false } })).audit.enabled).toBe(false);
+  });
+});
+
+describe("globMatch", () => {
+  it("matches * across slashes and exact strings", () => {
+    expect(globMatch("/etc/**", "/etc/passwd")).toBe(true);
+    expect(globMatch("**/.ssh/**", "/home/u/.ssh/id_rsa")).toBe(true);
+    expect(globMatch("npx", "npx")).toBe(true);
+    expect(globMatch("/etc/*", "/var/log")).toBe(false);
+  });
+  it("escapes regex metacharacters", () => {
+    expect(globMatch("a.b", "axb")).toBe(false);
+    expect(globMatch("a.b", "a.b")).toBe(true);
+  });
+});
+
+describe("matchRules", () => {
+  const rules: Rule[] = [{ match: { path: "/etc/**" }, policy: "always" }, { policy: "never" }];
+  it("first matching rule wins; bare rule is catch-all", () => {
+    expect(matchRules(rules, { path: "/etc/passwd" })).toBe("always");
+    expect(matchRules(rules, { path: "/tmp/x" })).toBe("never");
+  });
+  it("returns undefined when no rules", () => {
+    expect(matchRules(undefined, {})).toBeUndefined();
+  });
+  it("non-string arg value does not match", () => {
+    expect(matchRules([{ match: { n: "1" }, policy: "required" }], { n: 1 })).toBeUndefined();
   });
 });
