@@ -1,0 +1,19 @@
+{
+  "name": "pi-session-search",
+  "version": "0.1.0",
+  "description": "Cross-session history keyword search for the Pi coding agent.",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "history"],
+  "license": "MIT",
+  "pi": { "extensions": ["./index.ts"] },
+  "scripts": { "test": "vitest run" },
+  "peerDependencies": { "typebox": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "typebox": "*",
+    "vitest": "^4.1.8"
+  }
+}

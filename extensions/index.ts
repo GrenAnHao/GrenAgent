@@ -21,6 +21,7 @@ import safety from "./safety/index.js";
 import todo from "./todo/index.js";
 import tts from "./tts/index.js";
 import webFetch from "./web-fetch/index.js";
+import sessionSearch from "./session-search/index.js";
 import webSearch from "./web-search/index.js";
 
 export {
@@ -37,6 +38,7 @@ export {
   sessionMemory,
   webFetch,
   webSearch,
+  sessionSearch,
   mcp,
   mcpPolicy,
   imageGen,
@@ -61,6 +63,7 @@ export const allExtensions = [
   sessionMemory,
   webFetch,
   webSearch,
+  sessionSearch,
   mcp,
   mcpPolicy,
   imageGen,
