@@ -18,6 +18,7 @@ import sessionMemory from "./session-memory/index.js";
 import mcp from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
 import multiAgent from "./multi-agent/index.js";
+import codeIntel from "./code-intel/index.js";
 import planMode from "./plan-mode/index.js";
 import safety from "./safety/index.js";
 import todo from "./todo/index.js";
@@ -47,6 +48,7 @@ export {
   codeReview,
   diagnostics,
   multiAgent,
+  codeIntel,
   codeSearch,
   tts,
   imGateway,
@@ -74,6 +76,7 @@ export const allExtensions = [
   codeReview,
   diagnostics,
   multiAgent,
+  codeIntel,
   codeSearch,
   tts,
   imGateway,
