@@ -1,0 +1,23 @@
+{
+  "name": "pi-hashline",
+  "version": "0.1.0",
+  "description": "Hashline edit for the Pi coding agent: content-hash (#TAG) anchored, line-addressed edits with stale detection (ported subset of @oh-my-pi/hashline).",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "hashline", "edit", "patch"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*",
+    "vitest": "^4.1.8"
+  }
+}
