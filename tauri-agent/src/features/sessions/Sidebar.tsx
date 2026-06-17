@@ -19,7 +19,7 @@ const styles = createStaticStyles(({ css }) => ({
   sec: css`
     padding: 12px 14px 4px;
     color: ${cssVar.colorTextTertiary};
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
   `,
@@ -31,7 +31,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   secLabel: css`
     color: ${cssVar.colorTextTertiary};
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
   `,

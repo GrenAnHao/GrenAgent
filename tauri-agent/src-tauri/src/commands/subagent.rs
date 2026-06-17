@@ -15,6 +15,8 @@ pub struct SubAgentItem {
     pub task: String,
     pub status: String,
     pub model: Option<String>,
+    /// 已解析能力档案的 JSON（含 fs/name 等），前端据此推断「类型（只读/工作）」。
+    pub profile: Option<String>,
     pub output: Option<String>,
     pub error: Option<String>,
     pub exit_code: Option<i64>,
@@ -54,7 +56,7 @@ fn read_subagent_list(path: &Path, limit: i64) -> Result<Vec<SubAgentItem>, Stri
     }
     let mut stmt = conn
         .prepare(
-            "SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt \
+            "SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile \
              FROM subagents ORDER BY createdAt DESC LIMIT ?1",
         )
         .map_err(|e| e.to_string())?;
@@ -70,6 +72,7 @@ fn read_subagent_list(path: &Path, limit: i64) -> Result<Vec<SubAgentItem>, Stri
                 exit_code: r.get(6)?,
                 created_at: r.get(7)?,
                 updated_at: r.get(8)?,
+                profile: r.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -159,6 +162,43 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, "sa-1");
         assert_eq!(list[0].status, "running");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn list_includes_profile_json() {
+        let dir = tmp_dir();
+        let db = dir.join("registry.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE subagents(
+                   id TEXT PRIMARY KEY,
+                   task TEXT NOT NULL,
+                   profile TEXT,
+                   model TEXT,
+                   status TEXT NOT NULL,
+                   output TEXT,
+                   error TEXT,
+                   exitCode INTEGER,
+                   createdAt INTEGER NOT NULL,
+                   updatedAt INTEGER NOT NULL
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO subagents(id,task,profile,model,status,output,error,exitCode,createdAt,updatedAt)
+                 VALUES('sa-p','t','{\"name\":\"explore\",\"fs\":\"readonly\"}',NULL,'done',NULL,NULL,NULL,100,100)",
+                [],
+            )
+            .unwrap();
+        }
+        let list = read_subagent_list(&db, 50).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list[0].profile.as_deref(),
+            Some("{\"name\":\"explore\",\"fs\":\"readonly\"}")
+        );
         fs::remove_dir_all(dir).ok();
     }
 

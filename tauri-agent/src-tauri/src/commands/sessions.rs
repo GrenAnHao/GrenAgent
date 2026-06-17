@@ -55,6 +55,40 @@ pub(crate) fn read_first_line(path: &std::path::Path) -> std::io::Result<String>
     Ok(line)
 }
 
+/// 从单行 jsonl 解析 `session_info` entry 的非空 name。供 `read_session_name` 与测试复用。
+fn session_info_name(line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(line.trim().trim_end_matches('\r')).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_info") {
+        return None;
+    }
+    let name = v.get("name").and_then(|x| x.as_str())?.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// pi 的会话标题不在首行 header，而是 `set_session_name` 追加到文件尾部的
+/// `{"type":"session_info","name":"..."}` entry（实测为 snake_case，非文档里的 camelCase）。
+/// 这里逐行扫描全文件，取最后一个（最新）非空 name；无则返回 None。
+pub(crate) fn read_session_name(path: &std::path::Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let file = std::fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let mut latest: Option<String> = None;
+    for line in reader.lines().map_while(Result::ok) {
+        // 预筛：绝大多数行是 message，不含 session_info，跳过可避免无谓的 JSON 解析。
+        if !line.contains("\"session_info\"") {
+            continue;
+        }
+        if let Some(name) = session_info_name(&line) {
+            latest = Some(name);
+        }
+    }
+    latest
+}
+
 /// 规范化路径字符串用于比较：统一分隔符为 '/'、去掉尾部 '/'。
 fn normalize_path_str(p: &str) -> String {
     p.replace('\\', "/").trim_end_matches('/').to_string()
@@ -153,13 +187,16 @@ pub async fn list_pi_sessions(workspace: String) -> Result<Vec<SessionInfo>, Str
     for path in files {
         if let Ok(contents) = read_first_line(&path) {
             let path_str = canonical_display_path(&path);
-            if let Some(info) = parse_session_header(&contents, &path_str) {
+            if let Some(mut info) = parse_session_header(&contents, &path_str) {
                 let matches = info
                     .cwd
                     .as_deref()
                     .map(|c| paths_equivalent(c, &cwd))
                     .unwrap_or(false);
                 if matches {
+                    if info.name.is_none() {
+                        info.name = read_session_name(&path);
+                    }
                     out.push(info);
                 }
             }
@@ -308,9 +345,12 @@ pub async fn list_all_sessions() -> Result<Vec<SessionInfo>, String> {
     for path in files {
         if let Ok(contents) = read_first_line(&path) {
             let path_str = canonical_display_path(&path);
-            if let Some(info) = parse_session_header(&contents, &path_str) {
+            if let Some(mut info) = parse_session_header(&contents, &path_str) {
                 // 仅保留带 cwd 的会话（cwd 即"项目"，无 cwd 无法分组）
                 if info.cwd.is_some() {
+                    if info.name.is_none() {
+                        info.name = read_session_name(&path);
+                    }
                     out.push(info);
                 }
             }
@@ -370,5 +410,52 @@ mod tests {
             .unwrap()
             .cwd
             .is_none());
+    }
+
+    #[test]
+    fn session_info_name_parses_snake_case_entry() {
+        // pi 实测：标题以 snake_case 的 session_info entry 持久化
+        let line = r#"{"type":"session_info","id":"x","name":"我的标题"}"#;
+        assert_eq!(session_info_name(line).as_deref(), Some("我的标题"));
+    }
+
+    #[test]
+    fn session_info_name_rejects_empty_and_wrong_type() {
+        assert!(session_info_name(r#"{"type":"session_info","name":"  "}"#).is_none());
+        assert!(session_info_name(r#"{"type":"session_info"}"#).is_none());
+        // toolCall 的 name 字段不应被误认为会话标题
+        assert!(session_info_name(r#"{"type":"message","name":"bash"}"#).is_none());
+    }
+
+    #[test]
+    fn read_session_name_picks_latest_non_empty() {
+        let dir = std::env::temp_dir().join(format!("pi-sess-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let content = concat!(
+            "{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"/ws/a\",\"timestamp\":\"t\"}\n",
+            "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"user\"}}\n",
+            "{\"type\":\"session_info\",\"id\":\"s1\",\"name\":\"first title\"}\n",
+            "{\"type\":\"message\",\"id\":\"m2\",\"message\":{\"role\":\"assistant\"}}\n",
+            "{\"type\":\"session_info\",\"id\":\"s2\",\"name\":\"latest title\"}\n",
+        );
+        std::fs::write(&path, content).unwrap();
+        assert_eq!(read_session_name(&path).as_deref(), Some("latest title"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_session_name_none_when_absent() {
+        let dir = std::env::temp_dir().join(format!("pi-sess-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        // 仅有 toolCall name，没有 session_info entry → 不应误判出标题
+        let content = concat!(
+            "{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"/ws/a\",\"timestamp\":\"t\"}\n",
+            "{\"type\":\"message\",\"id\":\"m1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"name\":\"bash\"}]}}\n",
+        );
+        std::fs::write(&path, content).unwrap();
+        assert!(read_session_name(&path).is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

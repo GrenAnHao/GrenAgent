@@ -90,9 +90,10 @@ export function profileToEnv(p: CapabilityProfile): Record<string, string> {
     env.SAFETY_READONLY = "1";
     env.SAFETY_WRITE_ALLOW = p.fs.writeAllow.join(",");
   }
-  // P0 MCP: off (default) or explicit allowlist. `true` (full open) deliberately
-  // treated as off here — revisit when MCP fan-out cost/recursion is addressed.
-  env.MCP_SERVERS = Array.isArray(p.mcp) ? p.mcp.join(",") : "";
+  // NOTE: MCP_SERVERS is intentionally NOT set here. A sub-agent's MCP access
+  // depends on the PARENT's MCP_SERVERS (a JSON blob) which this pure transform
+  // can't see, so resolveMcpServers(profile.mcp, parentMcp) is applied by the
+  // runner when it derives the child runtime config.
   const deny: string[] = [];
   if (p.net === false) deny.push("web_search", "web_fetch", "web_crawler");
   if (p.tools?.deny?.length) deny.push(...p.tools.deny);
@@ -108,4 +109,41 @@ export function profileLimits(p: CapabilityProfile): { timeoutMs?: number; maxCo
     ...(typeof t === "number" && t > 0 ? { timeoutMs: Math.floor(t) } : {}),
     ...(typeof c === "number" && c >= 1 ? { maxConcurrency: Math.floor(c) } : {}),
   };
+}
+
+/**
+ * Resolve a sub-agent's MCP_SERVERS from its `profile.mcp` and the PARENT's
+ * MCP_SERVERS (the JSON blob `{"mcpServers": {...}}` the main agent runs with).
+ *
+ * On-demand allocation + least privilege — a sub-agent never gets more than the
+ * parent already has:
+ *   - false / undefined → "" (no MCP; the safe, fast default — each sub-agent is
+ *     its own process, so granting MCP means it cold-starts its own stdio servers)
+ *   - true              → the parent's full set (same MCP tools as the main agent)
+ *   - string[]          → the parent trimmed down to the named servers (config cut)
+ *
+ * Unknown allowlist names are dropped (can't grant what the parent lacks). Any
+ * parse failure falls back to "" (deny) rather than leaking the full set.
+ */
+export function resolveMcpServers(
+  mcp: boolean | string[] | undefined,
+  parentMcp: string | undefined,
+): string {
+  if (!mcp) return "";
+  const parent = (parentMcp ?? "").trim();
+  if (mcp === true) return parent;
+  if (!parent) return "";
+  try {
+    const obj = JSON.parse(parent) as { mcpServers?: Record<string, unknown> };
+    const servers = obj?.mcpServers;
+    if (!servers || typeof servers !== "object") return "";
+    const allow = new Set(mcp);
+    const filtered: Record<string, unknown> = {};
+    for (const [name, def] of Object.entries(servers)) {
+      if (allow.has(name)) filtered[name] = def;
+    }
+    return Object.keys(filtered).length ? JSON.stringify({ mcpServers: filtered }) : "";
+  } catch {
+    return "";
+  }
 }

@@ -8,6 +8,12 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
+/* Inter 字体的密码掩码圆点(•)字形偏宽，会让 API Key 等密码框的圆点间距过大。
+   密码态改用系统字体让圆点紧凑；点“显示”后 type 变为 text，不命中此规则，明文仍用主字体。 */
+input[type='password'] {
+  font-family: system-ui, 'Segoe UI', Tahoma, sans-serif !important;
+}
+
 #root {
   width: 100%;
   height: 100vh;

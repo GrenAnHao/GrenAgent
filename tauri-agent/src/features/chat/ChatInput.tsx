@@ -16,6 +16,7 @@ import { AttachmentPreview } from './input/AttachmentPreview';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
 import { SlashCommandMenu } from './input/SlashCommandMenu';
 import { useSlashMenu } from './input/useSlashMenu';
+import { ContextUsageTag } from './input/ContextUsageTag';
 
 const styles = createStaticStyles(({ css }) => ({
   surface: css`
@@ -162,9 +163,12 @@ function InputSurface({ leftActions, rightActions }: InputSurfaceProps) {
             onClose={closeSlashMenu}
           />
         </div>
-        <Flexbox horizontal align="center" justify="space-between">
+        <Flexbox horizontal align="center" gap={8}>
           <ActionBar actions={leftActions} />
-          <SendArea actions={rightActions} />
+          <Flexbox horizontal align="center" gap={8} style={{ flexShrink: 0 }}>
+            <ContextUsageTag />
+            <SendArea actions={rightActions} />
+          </Flexbox>
         </Flexbox>
       </Flexbox>
     </div>

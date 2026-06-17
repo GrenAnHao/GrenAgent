@@ -2,8 +2,15 @@ import { messagesFromTranscript } from '../../stores/agentReducer';
 
 /** 从 spawn_agent 工具入参里取一个人类可读的任务标签（主对话内联块与右侧面板 tab 共用）。 */
 export function taskLabel(args: unknown): string {
-  const a = (args ?? {}) as { task?: string; tasks?: Array<string | { task?: string }> };
-  if (a.task?.trim()) return a.task.trim();
+  const a = (args ?? {}) as {
+    task?: string;
+    tasks?: Array<string | { task?: string }>;
+    chain?: Array<{ task?: string }>;
+    agent?: string;
+  };
+  const agent = a.agent?.trim();
+  if (a.task?.trim()) return agent ? `${agent}: ${a.task.trim()}` : a.task.trim();
+  if (a.chain?.length) return `${a.chain.length} 步链式`;
   if (a.tasks?.length) return `${a.tasks.length} 个并行任务`;
   return '子代理任务';
 }

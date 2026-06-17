@@ -1,31 +1,23 @@
 import { Flexbox, Icon } from '@lobehub/ui';
 import { createStyles } from 'antd-style';
-import { useState } from 'react';
-import { fieldEffect, SETTINGS_SCHEMA, SETTING_GROUPS, type SettingCategory } from './settingsSchema';
+import { useEffect, useState } from 'react';
+import { SETTINGS_SCHEMA, SETTING_GROUPS, type SettingCategory } from './settingsSchema';
 import { SettingCard } from './SettingCard';
 import { SettingFieldInput } from './SettingField';
 import { useSettingsForm } from './useSettingsForm';
 import { AppearanceSettings } from './AppearanceSettings';
+import { ProvidersSettings } from './ProvidersSettings';
+import { CapabilityModelField } from './CapabilityModelField';
+import { migratePhase2 } from './phase2Migration';
+import { pi } from '../../lib/pi';
 
 const useStyles = createStyles(({ css, token }) => ({
   root: css`
     height: 100%;
     min-height: 0;
   `,
-  header: css`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 16px;
-    border-block-end: 1px solid ${token.colorBorderSecondary};
-    flex: 0 0 auto;
-  `,
-  hint: css`
-    font-size: 13px;
-    color: ${token.colorTextSecondary};
-  `,
   saveBtn: css`
-    padding: 4px 14px;
+    padding: 5px 18px;
     border: 1px solid ${token.colorBorder};
     border-radius: ${token.borderRadius}px;
     cursor: pointer;
@@ -78,6 +70,13 @@ const useStyles = createStyles(({ css, token }) => ({
   content: css`
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  `,
+  scroll: css`
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 20px 24px;
   `,
@@ -90,35 +89,53 @@ const useStyles = createStyles(({ css, token }) => ({
   inner: css`
     max-width: 720px;
   `,
-  errorBar: css`
-    padding: 6px 16px;
-    font-size: 12px;
+  innerWide: css`
+    max-width: none;
+  `,
+  footer: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 0 0 auto;
+    padding: 10px 24px;
+    border-block-start: 1px solid ${token.colorBorderSecondary};
+  `,
+  footerMsg: css`
+    font-size: 13px;
+    color: ${token.colorTextSecondary};
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  footerMsgError: css`
     color: ${token.colorError};
   `,
 }));
 
 export function SettingsPanel() {
   const { styles, cx } = useStyles();
-  const { values, setValue, save, saving, loading, error } = useSettingsForm();
+  const { values, setValue, persist, saving, loading, error, dirty } = useSettingsForm();
   const [activeId, setActiveId] = useState(SETTINGS_SCHEMA[0].id);
   const cat: SettingCategory = SETTINGS_SCHEMA.find((c) => c.id === activeId) ?? SETTINGS_SCHEMA[0];
   const sections = cat.sections ?? [{ title: '', fields: cat.fields ?? [] }];
-  // 是否存在需重启才生效的设置项（当前 schema 全为即时/热更新，故默认无重启按钮）。
-  const hasRestart = SETTINGS_SCHEMA.some((c) =>
-    (c.sections?.flatMap((s) => s.fields) ?? c.fields ?? []).some((f) => fieldEffect(f) === 'restart'),
-  );
+
+  // 一次性迁移：旧 IMAGE/TTS/KB_EMBED/MEMORY_EMBED 的 key/baseURL → provider+model（幂等）。
+  useEffect(() => {
+    void (async () => {
+      const [settings, cfg] = await Promise.all([pi.getSettings(), pi.getProviderConfig()]);
+      const r = migratePhase2(settings, cfg.modelsJson, cfg.authJson);
+      if (!r.changed) return;
+      await pi.setProviderConfig(r.modelsJson, r.authJson);
+      await pi.setSettings(r.nextSettings);
+    })().catch(() => {});
+  }, []);
+
+  const showSaveBar = activeId !== 'providers' && activeId !== 'appearance';
 
   return (
     <Flexbox className={styles.root} data-testid="settings-panel">
-      <div className={styles.header}>
-        <span className={styles.hint}>{loading ? '加载中…' : '改动即时保存生效，无需重启'}</span>
-        {hasRestart ? (
-          <button data-testid="set-save" onClick={() => void save()} disabled={saving} className={styles.saveBtn}>
-            {saving ? '重启中…' : '重启生效'}
-          </button>
-        ) : null}
-      </div>
-      {error ? <div className={styles.errorBar}>{error}</div> : null}
       <div className={styles.body}>
         <nav className={styles.nav}>
           {SETTING_GROUPS.map((g) => {
@@ -143,25 +160,48 @@ export function SettingsPanel() {
           })}
         </nav>
         <div className={styles.content}>
-          <div className={styles.inner}>
-            <div className={styles.pageTitle}>{cat.title}</div>
-            {activeId === 'appearance' ? (
-              <AppearanceSettings />
-            ) : (
-              sections.map((sec, i) => (
-                <SettingCard key={sec.title || i} title={sec.title || undefined}>
-                  {sec.fields.map((f) => (
-                    <SettingFieldInput
-                      key={f.key}
-                      field={f}
-                      value={values[f.key] ?? ''}
-                      onChange={(v) => setValue(f.key, v)}
-                    />
-                  ))}
-                </SettingCard>
-              ))
-            )}
+          <div className={styles.scroll}>
+            <div className={cx(styles.inner, activeId === 'providers' && styles.innerWide)}>
+              <div className={styles.pageTitle}>{cat.title}</div>
+              {activeId === 'appearance' ? (
+                <AppearanceSettings />
+              ) : activeId === 'providers' ? (
+                <ProvidersSettings />
+              ) : (
+                sections.map((sec, i) => (
+                  <SettingCard key={sec.title || i} title={sec.title || undefined}>
+                    {sec.fields.map((f) =>
+                      f.type === 'capability' ? (
+                        <CapabilityModelField key={f.key} field={f} values={values} setValue={setValue} />
+                      ) : (
+                        <SettingFieldInput
+                          key={f.key}
+                          field={f}
+                          value={values[f.key] ?? ''}
+                          onChange={(v) => setValue(f.key, v)}
+                        />
+                      ),
+                    )}
+                  </SettingCard>
+                ))
+              )}
+            </div>
           </div>
+          {showSaveBar ? (
+            <div className={styles.footer}>
+              <span className={cx(styles.footerMsg, !!error && styles.footerMsgError)}>
+                {error ? error : loading ? '加载中…' : dirty ? '有未保存改动' : '手动保存，无需重启'}
+              </span>
+              <button
+                data-testid="set-save"
+                onClick={() => void persist()}
+                disabled={saving || !dirty}
+                className={styles.saveBtn}
+              >
+                {saving ? '保存中…' : '保存'}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </Flexbox>

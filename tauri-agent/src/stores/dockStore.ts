@@ -5,7 +5,7 @@ import type { ChatMessage } from './agentReducer';
 import { taskLabel } from '../features/panels/subagentUtils';
 
 export type DockRegion = 'right' | 'bottom';
-export type DockTabKind = 'terminal' | 'page' | 'subagent';
+export type DockTabKind = 'terminal' | 'page' | 'subagent' | 'subagentLog';
 // 后续阶段：| 'file' | 'diff' | 'sidechat'
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
@@ -32,7 +32,15 @@ export interface SubAgentPayload {
   toolCallId: string;
 }
 
-export type DockTabPayload = TerminalPayload | PagePayload | SubAgentPayload;
+/** registry 后端子代理（无对应主对话消息时的兜底视图，仅有最终 output 文本）。 */
+export interface SubAgentLogPayload {
+  agentId: string;
+  task: string;
+  output: string;
+  status: 'running' | 'done' | 'error';
+}
+
+export type DockTabPayload = TerminalPayload | PagePayload | SubAgentPayload | SubAgentLogPayload;
 
 export interface DockTab {
   id: string;
@@ -56,6 +64,7 @@ interface DockState {
   reorderTabs: (region: DockRegion, fromIndex: number, toIndex: number) => void;
   moveTabRegion: (id: string, targetRegion: DockRegion, insertIndex?: number) => void;
   openPage: (page: PageView) => void;
+  openSubAgentLog: (input: SubAgentLogPayload) => void;
   syncSubAgentTabs: (messages: ChatMessage[]) => void;
   resetWorkspaceTabs: () => void;
 }
@@ -189,6 +198,29 @@ export const useDockStore = create<DockState>()(
         useLayoutStore.getState().setRightPanelOpen(true);
       },
 
+      openSubAgentLog: (input) => {
+        const id = `salog:${input.agentId}`;
+        set((s) => {
+          const exists = s.tabs.some((t) => t.id === id);
+          const tabs = exists
+            ? s.tabs.map((t) => (t.id === id ? { ...t, title: input.task, payload: { ...input } } : t))
+            : [
+                ...s.tabs,
+                {
+                  id,
+                  kind: 'subagentLog' as const,
+                  region: 'right' as const,
+                  title: input.task,
+                  closable: true,
+                  order: nextOrder(s.tabs, 'right'),
+                  payload: { ...input },
+                },
+              ];
+          return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
+        });
+        useLayoutStore.getState().setRightPanelOpen(true);
+      },
+
       syncSubAgentTabs: (messages) =>
         set((s) => {
           const spawn = messages.filter((m): m is ToolMessage => m.kind === 'tool' && m.toolName === 'spawn_agent');
@@ -222,6 +254,26 @@ export const useDockStore = create<DockState>()(
               activeByRegion[region] = tabs.filter((t) => t.region === region).at(-1)?.id ?? null;
             }
           });
+          // 子代理流式中 messages 每帧变化都会调到这里，但 spawn_agent 的 id/标题/顺序通常没变。
+          // 结构等价时返回原 state，避免每帧重建 tabs 触发整坞（TabStrip/TabBodyStack）重渲染。
+          const sameTabs =
+            tabs.length === s.tabs.length &&
+            tabs.every((t, i) => {
+              const o = s.tabs[i];
+              return (
+                !!o &&
+                o.id === t.id &&
+                o.kind === t.kind &&
+                o.region === t.region &&
+                o.title === t.title &&
+                o.order === t.order &&
+                o.closable === t.closable
+              );
+            });
+          const sameActive =
+            activeByRegion.right === s.activeByRegion.right &&
+            activeByRegion.bottom === s.activeByRegion.bottom;
+          if (sameTabs && sameActive) return s;
           return { tabs, activeByRegion };
         }),
 
@@ -249,10 +301,11 @@ export const useDockStore = create<DockState>()(
     }),
     {
       name: 'hermes-dock',
-      // 终端 runtime shellId 不持久化，重置为 idle；subagent tab 由 messages 同步重建，不持久化。
+      // 终端 runtime shellId 不持久化，重置为 idle；subagent / subagentLog tab
+      // 由 messages 同步或浮动列表点击重建，不持久化（output 可能很大）。
       partialize: (s) => ({
         tabs: s.tabs
-          .filter((t) => t.kind !== 'subagent')
+          .filter((t) => t.kind !== 'subagent' && t.kind !== 'subagentLog')
           .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t)),
         activeByRegion: s.activeByRegion,
       }),

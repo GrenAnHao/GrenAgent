@@ -47,7 +47,7 @@ export default function (pi: ExtensionAPI) {
     if (!prompt) return undefined;
 
     const kb = ensureStore(ctx.cwd);
-    const config = resolveEmbeddingConfig();
+    const config = await resolveEmbeddingConfig(ctx.modelRegistry);
     const hits = await kb.search(prompt, autoInjectTopK(), config).catch(() => []);
     if (!hits.length) return undefined;
 
@@ -81,7 +81,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const kb = ensureStore(ctx.cwd);
-      const config = resolveEmbeddingConfig();
+      const config = await resolveEmbeddingConfig(ctx.modelRegistry);
       const hits = await kb.search(params.query, params.topK ?? 5, config, signal ?? undefined);
 
       if (!hits.length) {
@@ -133,7 +133,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error("Provide non-empty 'text' or a readable 'path'.");
       }
 
-      const config = resolveEmbeddingConfig();
+      const config = await resolveEmbeddingConfig(ctx.modelRegistry);
       const chunks = await kb.addDocument(params.source, text, config, signal ?? undefined);
 
       return {
@@ -177,7 +177,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const abs = isAbsolute(p) ? p : resolve(ctx.cwd, p);
-        const config = resolveEmbeddingConfig();
+        const config = await resolveEmbeddingConfig(ctx.modelRegistry);
         const chunks = await kb.addDocument(p, readFileSync(abs, "utf8"), config);
         ctx.ui.notify(`Indexed ${p} into ${chunks} chunk(s).`, "success");
         return;

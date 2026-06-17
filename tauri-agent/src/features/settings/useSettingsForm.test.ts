@@ -43,14 +43,17 @@ describe('useSettingsForm', () => {
     expect(openWorkspace).toHaveBeenCalledWith('/ws');
   });
 
-  it('setValue debounced-autosaves without restarting', async () => {
+  it('setValue marks dirty; persist saves without restart', async () => {
     const { result } = renderHook(() => useSettingsForm());
     await waitFor(() => expect(result.current.values.OPENAI_API_KEY).toBe('sk-old'));
     act(() => result.current.setValue('IMAGE_MODEL', 'x'));
-    await waitFor(() =>
-      expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ IMAGE_MODEL: 'x' })),
-    );
+    expect(result.current.dirty).toBe(true);
+    expect(setSettings).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.persist();
+    });
+    expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ IMAGE_MODEL: 'x' }));
     expect(closeWorkspace).not.toHaveBeenCalled();
-    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(result.current.dirty).toBe(false);
   });
 });

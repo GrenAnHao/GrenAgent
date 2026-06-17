@@ -44,15 +44,12 @@ export function ChatListView() {
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   });
 
-  // 等待占位（对齐 lobehub 的「准备响应中…」）：流式中但助手尚无可见内容时显示。
+  // 等待占位（对齐 lobehub 的「准备响应中…」）：仅在「还没有助手槽」时用独立占位
+  //（如刚发完用户消息、助手组尚未建立）。一旦存在助手组(assistantGroup)，由 AssistantMessage
+  // 在槽内显示「准备中」，使首字到达时原地替换、不产生抖动。tool 运行中不显示。
   const last = display[display.length - 1];
   const showPreparing =
-    isStreaming &&
-    (!last
-      ? true
-      : last.kind === 'assistantGroup'
-        ? !last.text && !last.thinking && last.tools.length === 0
-        : last.kind !== 'tool');
+    isStreaming && (!last || (last.kind !== 'assistantGroup' && last.kind !== 'tool'));
 
   return (
     <div

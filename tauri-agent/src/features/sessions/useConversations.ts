@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { SessionInfo } from '../../lib/pi';
+import { mergeAllSessions } from '../../lib/mergeSessions';
 import { useSessionStore } from '../../store/session';
 import { isUnder } from '../../lib/pathUtils';
 
@@ -52,11 +53,12 @@ export function buildConversations(
 
 export function useConversations(): ConversationItem[] {
   const all = useSessionStore((s) => s.allSessions);
+  const optimistic = useSessionStore((s) => s.optimisticSessions);
   const worksDir = useSessionStore((s) => s.worksDir);
   const current = useSessionStore((s) => s.activeWorkspace);
   const keyword = useSessionStore((s) => s.searchKeyword);
   return useMemo(
-    () => buildConversations(all, worksDir, current, keyword),
-    [all, worksDir, current, keyword],
+    () => buildConversations(mergeAllSessions(all, optimistic), worksDir, current, keyword),
+    [all, optimistic, worksDir, current, keyword],
   );
 }

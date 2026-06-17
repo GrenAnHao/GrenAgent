@@ -1,4 +1,4 @@
-import { Brain, FileSearch, History, Image, Library, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
+import { BarChart3, Brain, FileSearch, History, Image, Library, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 
 interface ModuleDef {
@@ -17,6 +17,7 @@ const MODULES: ModuleDef[] = [
   { id: 'checkpoints', label: '检查点', Icon: History },
   { id: 'connections', label: '连接', Icon: Webhook },
   { id: 'extensions', label: '扩展', Icon: Plug },
+  { id: 'usage', label: '用量', Icon: BarChart3 },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },
 ];
 

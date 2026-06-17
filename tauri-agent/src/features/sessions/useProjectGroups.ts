@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import type { SessionInfo } from '../../lib/pi';
+import { mergeAllSessions } from '../../lib/mergeSessions';
+import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
-import { isUnder } from '../../lib/pathUtils';
 
 export interface ProjectGroup {
   cwd: string;
@@ -20,12 +21,14 @@ interface BuildParams {
   aliases: Record<string, string>;
   keyword: string;
   worksDir: string;
+  registeredProjects: string[];
 }
 
 const basename = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams): ProjectGroup[] {
-  const { current, pinnedProjects, hiddenProjects, aliases, keyword, worksDir } = params;
+  const { current, pinnedProjects, hiddenProjects, aliases, keyword, worksDir, registeredProjects } =
+    params;
   const kw = keyword.trim().toLowerCase();
 
   const byCwd = new Map<string, SessionInfo[]>();
@@ -51,6 +54,20 @@ export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams)
     });
   }
 
+  for (const cwd of registeredProjects) {
+    if (hiddenProjects.includes(cwd)) continue;
+    if (worksDir && isUnder(cwd, worksDir)) continue;
+    if (groups.some((g) => pathsEquivalent(g.cwd, cwd))) continue;
+    groups.push({
+      cwd,
+      name: aliases[cwd] || basename(cwd),
+      isCurrent: cwd === current,
+      pinned: pinnedProjects.includes(cwd),
+      sessions: [],
+      lastActivity: '',
+    });
+  }
+
   // 关键字过滤：项目名命中 → 整组保留；否则保留命中标题的会话
   if (kw) {
     groups = groups
@@ -62,11 +79,12 @@ export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams)
       .filter((g): g is ProjectGroup => g !== null);
   }
 
-  // 排序：当前项目 > 置顶 > 最近活跃
+  // 排序：当前项目 > 置顶 > 最近活跃（无 session 的新开项目靠 isCurrent 靠前）
   groups.sort((a, b) => {
     if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return (b.lastActivity ?? '').localeCompare(a.lastActivity ?? '');
+    if (a.lastActivity !== b.lastActivity) return (b.lastActivity ?? '').localeCompare(a.lastActivity ?? '');
+    return a.name.localeCompare(b.name);
   });
 
   return groups;
@@ -74,6 +92,8 @@ export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams)
 
 export function useProjectGroups(): ProjectGroup[] {
   const allSessions = useSessionStore((s) => s.allSessions);
+  const optimisticSessions = useSessionStore((s) => s.optimisticSessions);
+  const registeredProjects = useSessionStore((s) => s.registeredProjects);
   const current = useSessionStore((s) => s.activeWorkspace);
   const keyword = useSessionStore((s) => s.searchKeyword);
   const worksDir = useSessionStore((s) => s.worksDir);
@@ -83,14 +103,25 @@ export function useProjectGroups(): ProjectGroup[] {
 
   return useMemo(
     () =>
-      buildProjectGroups(allSessions, {
+      buildProjectGroups(mergeAllSessions(allSessions, optimisticSessions), {
         current,
         pinnedProjects,
         hiddenProjects,
         aliases,
         keyword,
         worksDir,
+        registeredProjects,
       }),
-    [allSessions, current, pinnedProjects, hiddenProjects, aliases, keyword, worksDir],
+    [
+      allSessions,
+      optimisticSessions,
+      registeredProjects,
+      current,
+      pinnedProjects,
+      hiddenProjects,
+      aliases,
+      keyword,
+      worksDir,
+    ],
   );
 }

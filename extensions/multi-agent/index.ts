@@ -6,10 +6,12 @@ import { Type } from "typebox";
 import { spawnPiAgent } from "./runner.js";
 import { normalizeTasks } from "./tasks.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
+import { discoverAgents, type AgentScope } from "./agents.js";
 import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
 import { cancelSubAgent, installCancelWatcher } from "./cancel.js";
 import { getConfig } from "../_shared/runtime-config.js";
+import { registerWorkflows } from "./workflows.js";
 import { join } from "node:path";
 
 const MAX_CONCURRENCY = 4;
@@ -62,15 +64,22 @@ function reapStuck(reg: SubAgentRegistry): void {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Workflow slash-commands (/implement, /scout-and-plan, /implement-and-review)
+  // + seed default named agents (scout/planner/reviewer/worker).
+  registerWorkflows(pi);
+
   pi.registerTool({
     name: "spawn_agent",
     label: "Spawn Sub-agent",
     description:
       "Delegate a task to an isolated sub-agent (a separate pi process with its own context window). " +
-      "Provide `task` for one, or `tasks` for several run in parallel. Returns the sub-agent output(s).",
+      "Modes: `task` (single) | `tasks` (parallel) | `chain` (sequential, with {previous} placeholder). " +
+      "`agent` picks a named agent (system prompt + tools + model) from ~/.pi/agent/agents/*.md. " +
+      "Returns the sub-agent output(s).",
     promptGuidelines: [
       "Use spawn_agent to parallelize independent sub-tasks or to isolate a large exploration from the main context.",
       "Each sub-agent starts fresh — include all context it needs in the task text.",
+      "Use `agent` for a specialized role (e.g. scout/planner/reviewer); use `chain` to pipe one step's output into the next via {previous}.",
     ],
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
@@ -79,9 +88,31 @@ export default function (pi: ExtensionAPI) {
         Type.Array(
           Type.Union([
             Type.String(),
-            Type.Object({ task: Type.String(), model: Type.Optional(Type.String()) }),
+            Type.Object({
+              task: Type.String(),
+              model: Type.Optional(Type.String()),
+              agent: Type.Optional(Type.String()),
+            }),
           ]),
-          { description: "Multiple tasks in parallel; each item may be a string or { task, model }." },
+          { description: "Multiple tasks in parallel; each item may be a string or { task, model, agent }." },
+        ),
+      ),
+      agent: Type.Optional(
+        Type.String({ description: "Named agent (from ~/.pi/agent/agents/*.md): applies its system prompt + tools + model." }),
+      ),
+      agentScope: Type.Optional(
+        Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("both")], {
+          description: 'Where to discover named agents. Default "user"; "both"/"project" also reads repo .pi/agents.',
+        }),
+      ),
+      chain: Type.Optional(
+        Type.Array(
+          Type.Object({
+            task: Type.String(),
+            agent: Type.Optional(Type.String()),
+            model: Type.Optional(Type.String()),
+          }),
+          { description: "Sequential steps; each step's task may contain {previous} (replaced by the prior step's output)." },
         ),
       ),
       profile: Type.Optional(
@@ -202,12 +233,81 @@ export default function (pi: ExtensionAPI) {
       const profileEnv = params.profile ? profileToEnv(profile) : {};
       const limits = profileLimits(profile);
 
+      // Named-agent resolution (markdown agents in ~/.pi/agent/agents + .pi/agents).
+      // A named agent contributes its system prompt + tool allowlist + model.
+      const agentScope = (params.agentScope as AgentScope | undefined) ?? "user";
+      const discovered = discoverAgents(ctx.cwd, agentScope).agents;
+      const agentLayer = (name: string | undefined): { systemPrompt?: string; tools?: string[]; model?: string } => {
+        const n = name?.trim();
+        if (!n) return {};
+        const a = discovered.find((x) => x.name === n);
+        if (!a) {
+          const avail = discovered.map((x) => x.name).join(", ") || "none";
+          throw new Error(`unknown agent "${n}". Available agents: ${avail}`);
+        }
+        return { systemPrompt: a.systemPrompt, tools: a.tools, model: a.model };
+      };
+
+      // Chain mode: run steps sequentially; each step's {previous} is replaced by
+      // the prior step's output. Stops at the first failing step.
+      if (params.chain && params.chain.length > 0) {
+        if (action === "spawn") throw new Error("chain 暂不支持后台 spawn（请用 action:run）");
+        if (wantWorktree) throw new Error("worktree 隔离暂不支持 chain（请用非隔离档案）");
+        const steps = params.chain;
+        const chainResults: Array<{ step: number; agent?: string; task: string; ok: boolean; output: string; error?: string }> = [];
+        let previous = "";
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          const taskText = step.task.replace(/\{previous\}/g, previous);
+          const stepAgent = step.agent ?? params.agent;
+          const layer = agentLayer(stepAgent);
+          const id = SubAgentRegistry.genId();
+          registry.create({
+            id,
+            task: taskText,
+            profile: params.profile ? JSON.stringify(profile) : null,
+            model: step.model ?? layer.model ?? profileModel ?? null,
+          });
+          const r = await spawnPiAgent(ctx.cwd, taskText, {
+            model: step.model ?? layer.model ?? profileModel,
+            systemPrompt: layer.systemPrompt,
+            tools: layer.tools,
+            env: profileEnv,
+            mcp: profile.mcp,
+            timeoutMs: limits.timeoutMs,
+            signal: signal ?? undefined,
+            onUpdate: () => registry.touch(id),
+          });
+          registry.finish(
+            id,
+            r.ok
+              ? { status: "done", output: r.output, exitCode: r.exitCode }
+              : { status: signal?.aborted ? "cancelled" : "error", output: r.output, error: r.error, exitCode: r.exitCode },
+          );
+          chainResults.push({ step: i + 1, agent: stepAgent, task: taskText, ok: r.ok, output: r.output, error: r.error });
+          if (!r.ok) {
+            return {
+              content: [{ type: "text", text: `Chain stopped at step ${i + 1}${stepAgent ? ` (${stepAgent})` : ""}: ${r.error ?? "failed"}` }],
+              details: { mode: "chain", stoppedAt: i + 1, results: chainResults },
+              isError: true,
+            };
+          }
+          previous = r.output;
+        }
+        const last = chainResults[chainResults.length - 1];
+        return {
+          content: [{ type: "text", text: last.output || "(no output)" }],
+          details: { mode: "chain", results: chainResults },
+        };
+      }
+
       if (action === "spawn") {
         if (list.length !== 1) throw new Error("background spawn 仅支持单任务");
         if (wantWorktree) throw new Error("background spawn 暂不支持 worktree 隔离（请用 action:run）");
-        const { task, model } = list[0];
+        const { task, model, agent } = list[0];
+        const layer = agentLayer(agent);
         const id = SubAgentRegistry.genId();
-        const chosenModel = model ?? profileModel;
+        const chosenModel = model ?? layer.model ?? profileModel;
         registry.create({
           id,
           task,
@@ -220,7 +320,10 @@ export default function (pi: ExtensionAPI) {
         // the terminal state to the registry, which `wait`/`status` then read.
         void spawnPiAgent(ctx.cwd, task, {
           model: chosenModel,
+          systemPrompt: layer.systemPrompt,
+          tools: layer.tools,
           env: profileEnv,
+          mcp: profile.mcp,
           timeoutMs: limits.timeoutMs,
           signal: controller.signal,
           onUpdate: () => registry.touch(id), // heartbeat → stuck detection
@@ -252,7 +355,8 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (list.length === 1) {
-        const { task, model } = list[0];
+        const { task, model, agent } = list[0];
+        const layer = agentLayer(agent);
         const wt = wantWorktree ? await createWorktree(ctx.cwd) : null;
         if (wantWorktree && !wt && getConfig("ISOLATE_FALLBACK") !== "1") {
           throw new Error(
@@ -265,12 +369,15 @@ export default function (pi: ExtensionAPI) {
           id,
           task,
           profile: params.profile ? JSON.stringify(profile) : null,
-          model: model ?? profileModel ?? null,
+          model: model ?? layer.model ?? profileModel ?? null,
         });
         try {
           const r = await spawnPiAgent(runCwd, task, {
-            model: model ?? profileModel,
+            model: model ?? layer.model ?? profileModel,
+            systemPrompt: layer.systemPrompt,
+            tools: layer.tools,
             env: profileEnv,
+            mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             signal: signal ?? undefined,
             onUpdate: (u) => {
@@ -312,16 +419,20 @@ export default function (pi: ExtensionAPI) {
         const batch = list.slice(i, i + concurrency);
         const settled = await Promise.all(
           batch.map(async (t) => {
+            const layer = agentLayer(t.agent);
             const id = SubAgentRegistry.genId();
             registry.create({
               id,
               task: t.task,
               profile: params.profile ? JSON.stringify(profile) : null,
-              model: t.model ?? profileModel ?? null,
+              model: t.model ?? layer.model ?? profileModel ?? null,
             });
             const r = await spawnPiAgent(ctx.cwd, t.task, {
-              model: t.model ?? profileModel,
+              model: t.model ?? layer.model ?? profileModel,
+              systemPrompt: layer.systemPrompt,
+              tools: layer.tools,
               env: profileEnv,
+              mcp: profile.mcp,
               timeoutMs: limits.timeoutMs,
               signal: signal ?? undefined,
               onUpdate: () => registry.touch(id),

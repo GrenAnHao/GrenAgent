@@ -96,6 +96,20 @@ async function run(): Promise<void> {
 
   // RPC mode (Tauri) → our own runtime so skillsOverride can filter skills.
   if (isRpcMode(argv)) {
+    // Orphan guard: stdin is our RPC command channel and the parent (Tauri) keeps
+    // it open for as long as it lives. When the parent dies — graceful close, crash,
+    // or force-kill — the OS closes its end of the pipe and our stdin hits EOF. That
+    // is a reliable "parent is gone" signal even while we're idle (awaiting the next
+    // command) or blocked on a network call, cases where the EPIPE-on-write guard
+    // above never fires. Exit so we don't linger as an orphan process.
+    //
+    // We don't resume() stdin here: runRpcMode owns the read side and putting the
+    // stream into flowing mode before it attaches its reader could drop early
+    // commands. These listeners fire once runRpcMode starts reading and hits EOF.
+    const exitOnParentGone = () => process.exit(0);
+    process.stdin.on("end", exitOnParentGone);
+    process.stdin.on("close", exitOnParentGone);
+
     const cwd = process.cwd();
     const runtime = await createAgentSessionRuntime(createRuntime, {
       cwd,

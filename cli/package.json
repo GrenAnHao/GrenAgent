@@ -6,7 +6,9 @@
   "bin": {
     "grenagent-sidecar": "dist/main.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.5.0"
   },
@@ -16,10 +18,11 @@
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"#!/usr/bin/env node\" --external:@earendil-works/pi-coding-agent --outfile=dist/main.js"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.79.4",
     "typebox": "*"
   },
   "devDependencies": {
+    "@types/node": "^22.19.21",
     "esbuild": "^0.23.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"

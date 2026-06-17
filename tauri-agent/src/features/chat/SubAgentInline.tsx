@@ -1,9 +1,8 @@
 import { ActionIcon, Block, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { ChevronRight, CircleStop, Loader2, Network, PanelRightOpen } from 'lucide-react';
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { CircleStop, Loader2, Network, PanelRightOpen } from 'lucide-react';
+import { memo, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useCardStyles } from '../tools/cardStyles';
-import { SubAgentConversation } from '../panels/SubAgentConversation';
 import { isBackgroundSpawn, subAgentId, subAgentStepCount } from '../panels/subagentUtils';
 import { useDockStore } from '../../stores/dockStore';
 import { useLayoutStore } from '../../stores/layoutStore';
@@ -47,21 +46,6 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 11px;
     color: ${cssVar.colorTextTertiary};
   `,
-  chev: css`
-    flex: none;
-    display: inline-flex;
-    color: ${cssVar.colorTextQuaternary};
-    transition: transform 0.15s;
-  `,
-  chevOpen: css`
-    transform: rotate(90deg);
-  `,
-  nested: css`
-    margin-block-start: 4px;
-    margin-inline-start: 11px;
-    padding-inline-start: 16px;
-    border-inline-start: 2px solid ${cssVar.colorBorderSecondary};
-  `,
 }));
 
 interface SubAgentInlineProps {
@@ -80,12 +64,11 @@ function mapRegistryStatus(status: string | undefined): 'running' | 'done' | 'er
 }
 
 /**
- * 流内内联子代理：可折叠外壳（Network 状态块 + 「子代理 #N · 任务」+ chevron），
- * 展开为左侧细线缩进的嵌套子会话（复用 SubAgentConversation）。运行中自动展开 + shimmer，
- * 完成后自动收起为摘要（用户仍可手动切换）。另提供「在右侧 Dock 打开」深看入口，
- * 点击激活右坞对应 subagent tab。
+ * 流内内联子代理：主对话里只渲染一张「子代理 #N · 任务 + 状态徽章」的状态卡片，
+ * 不内联展开子代理的完整对话（详情点击卡片在右侧 Dock 查看）。这样既让主会话保持干净、
+ * 只反映子代理执行状态，也避免流式中在主对话里反复解析/重渲染子代理 transcript 造成卡顿。
  */
-export function SubAgentInline({ messageId, index, task, result, status }: SubAgentInlineProps) {
+function SubAgentInlineInner({ messageId, index, task, result, status }: SubAgentInlineProps) {
   const { styles: card } = useCardStyles();
   const { workspace } = useAgentStoreContext();
   const agentId = useMemo(() => subAgentId(result), [result]);
@@ -97,7 +80,6 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
     if (background && bgStatus) return mapRegistryStatus(bgStatus);
     return status;
   }, [status, background, bgStatus]);
-  const [open, setOpen] = useState(effectiveStatus === 'running');
 
   useEffect(() => {
     if (!background || !agentId) return;
@@ -126,8 +108,8 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
     };
   }, [workspace, background, agentId]);
 
-  const openInDock = (e: MouseEvent) => {
-    e.stopPropagation();
+  const openInDock = (e?: MouseEvent) => {
+    e?.stopPropagation();
     useDockStore.getState().setActive('right', messageId);
     useLayoutStore.getState().setRightPanelOpen(true);
   };
@@ -144,10 +126,6 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
     }
   };
 
-  useEffect(() => {
-    setOpen(effectiveStatus === 'running');
-  }, [effectiveStatus]);
-
   const running = effectiveStatus === 'running';
   const color =
     effectiveStatus === 'done'
@@ -156,7 +134,8 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
         ? cssVar.colorError
         : cssVar.colorTextSecondary;
 
-  const steps = useMemo(() => subAgentStepCount(result), [result]);
+  // 步数仅在结束态解析一次：运行中频繁更新的 transcript 不在主对话里反复解析（性能）。
+  const steps = useMemo(() => (running ? 0 : subAgentStepCount(result)), [running, result]);
   const badge =
     effectiveStatus === 'done'
       ? `已完成${steps ? ` · ${steps} 步` : ''}`
@@ -164,13 +143,11 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
         ? bgStatus === 'cancelled'
           ? '已停止'
           : `出错${steps ? ` · ${steps} 步` : ''}`
-        : steps
-          ? `${steps} 步`
-          : '';
+        : '';
 
   return (
     <div data-testid="subagent-inline">
-      <div className={styles.head} onClick={() => setOpen((v) => !v)}>
+      <div className={styles.head} onClick={() => openInDock()} title="在右侧面板查看子代理详情">
         <Block
           horizontal
           align="center"
@@ -194,15 +171,11 @@ export function SubAgentInline({ messageId, index, task, result, status }: SubAg
           title="在右侧面板打开"
           onClick={openInDock}
         />
-        <span className={cx(styles.chev, open && styles.chevOpen)}>
-          <Icon icon={ChevronRight} size={16} />
-        </span>
       </div>
-      {open ? (
-        <div className={styles.nested}>
-          <SubAgentConversation task={task} result={result} status={effectiveStatus} />
-        </div>
-      ) : null}
     </div>
   );
 }
+
+// memo：状态卡只在本子代理自身 result/status 变化时重渲染（result 对未变消息引用稳定），
+// 避免主对话其他消息流式更新时整张卡片被动重渲染。
+export const SubAgentInline = memo(SubAgentInlineInner);

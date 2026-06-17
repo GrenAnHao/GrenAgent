@@ -1,7 +1,7 @@
 import { Accordion, AccordionItem, Block, Flexbox, Icon, ScrollArea } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { ChevronRight, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { LazyHighlighter } from './LazyHighlighter';
 import { useCardStyles } from './cardStyles';
@@ -266,7 +266,7 @@ function ToolDetail({
   );
 }
 
-export function ToolExecution({ toolName, args, result, status }: ToolExecutionProps) {
+function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionProps) {
   const { styles } = useCardStyles();
   const [expanded, setExpanded] = useState(status === 'running');
   const hasDetail = useMemo(() => {
@@ -317,3 +317,7 @@ export function ToolExecution({ toolName, args, result, status }: ToolExecutionP
     </div>
   );
 }
+
+// memo：工具卡片只在自身 args/result/status 变化时重渲染。store 对未变消息保持引用稳定，
+// 故流式中其他消息更新时，本卡片不会被动重渲染（避免每帧重解析 result）。
+export const ToolExecution = memo(ToolExecutionInner);

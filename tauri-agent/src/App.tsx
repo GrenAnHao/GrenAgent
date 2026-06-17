@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, memo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo, type ReactNode } from 'react';
 import { ThemeProvider, Flexbox, ConfigProvider } from '@lobehub/ui';
 import { m } from 'motion/react';
 import { ThemeBridge } from './components/ThemeBridge';
@@ -22,7 +22,7 @@ import { FullscreenLoading } from './components/FullscreenLoading';
 import { onPiEvent, pi, type OpenWorkspaceResult } from './lib/pi';
 import { pickDirectory } from './lib/dialog';
 import { createStartupPerf } from './lib/startupPerf';
-import { isUnder, pathsEquivalent } from './lib/pathUtils';
+import { pathsEquivalent } from './lib/pathUtils';
 import {
   getAllSessionsInflight,
   getCachedAllSessions,
@@ -57,19 +57,19 @@ async function refreshSessions(
 
 /** 拉取所有项目的全量会话（供侧边栏按项目分组），带短期缓存。 */
 async function refreshAllSessions(force = false): Promise<void> {
-  const { setAllSessions, setAllSessionsLoading, setError } = useSessionStore.getState();
+  const { syncAllSessions, setAllSessionsLoading, setError } = useSessionStore.getState();
 
   if (!force) {
     const cached = getCachedAllSessions();
     if (cached) {
-      setAllSessions(cached);
+      syncAllSessions(cached);
       return;
     }
     const inflight = getAllSessionsInflight();
     if (inflight) {
       setAllSessionsLoading(true);
       try {
-        setAllSessions(await inflight);
+        syncAllSessions(await inflight);
       } finally {
         setAllSessionsLoading(false);
       }
@@ -82,7 +82,7 @@ async function refreshAllSessions(force = false): Promise<void> {
     .listAllSessions()
     .then((sessions) => {
       setCachedAllSessions(sessions);
-      setAllSessions(sessions);
+      syncAllSessions(sessions);
       return sessions;
     })
     .catch((err) => {
@@ -167,6 +167,45 @@ const RightPanelColumn = memo(function RightPanelColumn() {
   );
 });
 
+const MainAndRightRow = memo(function MainAndRightRow() {
+  return (
+    <Flexbox horizontal flex={1} style={{ minHeight: 0, minWidth: 0 }}>
+      <MainChatColumn />
+      <RightPanelColumn />
+    </Flexbox>
+  );
+});
+
+// 量「侧栏 + 对话区 + 右面板」整行的真实可用宽度写入 layoutStore，作为面板自适应折叠/封顶的依据。
+// 仅用 ref + ResizeObserver 写 store（自身不订阅 availableWidth、不持有 state），故 resize 不会重渲染本组件子树；
+// 用 useLayoutEffect 在首帧绘制前就量好，避免持久化的过宽面板闪一下再收回。
+const ChatColumns = memo(function ChatColumns({ sidebar }: { sidebar: ReactNode }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const setAvailableWidth = useLayoutStore((s) => s.setAvailableWidth);
+
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const update = () => setAvailableWidth(el.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [setAvailableWidth]);
+
+  return (
+    <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%', minWidth: 0 }} ref={rowRef}>
+      {sidebar}
+      <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
+        <DockDndProvider>
+          <MainAndRightRow />
+          <TerminalColumn />
+        </DockDndProvider>
+      </Flexbox>
+    </Flexbox>
+  );
+});
+
 const TerminalColumn = memo(function TerminalColumn() {
   return (
     <TerminalShell>
@@ -177,7 +216,6 @@ const TerminalColumn = memo(function TerminalColumn() {
 
 function Workspace() {
   const { store, workspace, setWorkspaceReady, appBooted } = useAgentStoreContext();
-  const isStreaming = store.useStore((s) => s.isStreaming);
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const messages = store.useStore((s) => s.messages);
   const prevWorkspaceRef = useRef(workspace);
@@ -297,6 +335,25 @@ function Workspace() {
     const st = useSessionStore.getState();
     st.setActiveSession('');
     await pi.newSession(cwd);
+    // 取新会话 path：(1) 写回 workspaceSessionPaths，避免运行指示停留在上一个会话；
+    // (2) 乐观占位，让新会话立刻出现在侧栏（pi 延迟落盘，list_all_sessions 当下扫不到）。
+    try {
+      const state = (await pi.getState(cwd)) as { sessionFile?: string };
+      const path = state.sessionFile;
+      if (path) {
+        st.setActiveSession(path);
+        st.setWorkspaceSessionPath(cwd, path);
+        st.upsertOptimisticSession({
+          id: `opt-${path}`,
+          path,
+          cwd,
+          timestamp: new Date().toISOString(),
+          name: null,
+        });
+      }
+    } catch {
+      /* getState 失败则退回原有刷新路径 */
+    }
     invalidateAllSessionsCache();
     if (st.activeWorkspace !== cwd) {
       st.setActiveWorkspace(cwd);
@@ -324,14 +381,39 @@ function Workspace() {
   );
 
   const handleDeleteSession = useCallback(async (cwd: string, path: string) => {
+    // 删除前判定是否为会话区正在显示的会话（pathsEquivalent 兜底分隔符/大小写差异）。
+    const wasActive = pathsEquivalent(useSessionStore.getState().activeSessionPath ?? '', path);
     await pi.deleteSession(cwd, path);
     invalidateAllSessionsCache();
-    if (useSessionStore.getState().activeSessionPath === path) {
-      useSessionStore.getState().setActiveSession('');
+    // 清掉该会话的乐观占位，否则磁盘文件已删、它匹配不到磁盘会话、永不被 prune → 侧栏残留。
+    useSessionStore.getState().removeOptimisticSession(path);
+    if (wasActive) {
+      // 删的是会话区正在显示的会话：后端 delete_pi_session 删活跃会话前已 new_session 切到新空会话。
+      // 前端须同步 store.reset() 清空会话区并对齐到该新会话，否则被删会话的消息会残留在会话区。
+      const st = useSessionStore.getState();
+      store.reset();
+      st.setActiveSession('');
+      try {
+        const state = (await pi.getState(cwd)) as { sessionFile?: string };
+        const newPath = state.sessionFile;
+        if (newPath) {
+          st.setActiveSession(newPath);
+          st.setWorkspaceSessionPath(cwd, newPath);
+          st.upsertOptimisticSession({
+            id: `opt-${newPath}`,
+            path: newPath,
+            cwd,
+            timestamp: new Date().toISOString(),
+            name: null,
+          });
+        }
+      } catch {
+        /* getState 失败则保持空会话区，由下方 refreshSessions 兜底选择会话 */
+      }
     }
     await refreshSessions(cwd);
     void refreshAllSessions(true);
-  }, []);
+  }, [store]);
 
   const handleSubmitRename = useCallback(async (cwd: string, _path: string, name: string) => {
     if (cwd !== useSessionStore.getState().activeWorkspace) {
@@ -375,8 +457,10 @@ function Workspace() {
   const handleOpenProject = useCallback(async () => {
     const dir = await pickDirectory();
     if (!dir) return;
+    await pi.openWorkspace(dir);
     const st = useSessionStore.getState();
     st.setActiveSession('');
+    st.registerProject(dir);
     st.setActiveWorkspace(dir);
     void refreshAllSessions(true);
   }, []);
@@ -385,6 +469,7 @@ function Workspace() {
     async (cwd: string) => {
       await pi.deleteConversation(cwd);
       invalidateAllSessionsCache();
+      useSessionStore.getState().removeOptimisticByCwd(cwd);
       if (useSessionStore.getState().activeWorkspace === cwd) {
         await goToSafeWorkspace();
       } else {
@@ -398,6 +483,8 @@ function Workspace() {
     async (cwd: string) => {
       await pi.removeProject(cwd);
       invalidateAllSessionsCache();
+      useSessionStore.getState().unregisterProject(cwd);
+      useSessionStore.getState().removeOptimisticByCwd(cwd);
       if (useSessionStore.getState().activeWorkspace === cwd) {
         await goToSafeWorkspace();
       } else {
@@ -420,17 +507,12 @@ function Workspace() {
 
   useEffect(() => {
     let un: (() => void) | undefined;
+    // 标题由 sidecar 内的 auto-title 扩展在 agent_end 时「进程内」生成并写回；写回时 pi
+    // 广播 session_info_changed。这里据此刷新侧边栏，让新标题立即显示（不再起冷子进程）。
     void onPiEvent((e) => {
-      if (e.event.type !== 'agent_end') return;
-      const ws = e.workspace;
-      if (!isUnder(ws, useSessionStore.getState().worksDir)) return;
-      void (async () => {
-        const title = await pi.autoTitleSession(ws);
-        if (title) {
-          invalidateAllSessionsCache();
-          void refreshAllSessions(true);
-        }
-      })();
+      if (e.event.type !== 'session_info_changed') return;
+      invalidateAllSessionsCache();
+      void refreshAllSessions(true);
     }).then((f) => {
       un = f;
     });
@@ -442,13 +524,14 @@ function Workspace() {
   const runningSessionPaths = useMemo(() => {
     const set = new Set<string>();
     for (const ws of runningWorkspaces) {
-      const p = workspaceSessionPaths[ws];
+      // 当前 workspace 的运行会话以 activeSessionPath 为准：workspaceSessionPaths[ws]
+      // 在「项目内新建会话」后可能仍指向上一个会话，若再叠加 activeSessionPath，会把同
+      // 项目里的旧会话也点亮成「执行中」。后台 workspace 仍用其映射路径。
+      const p = pathsEquivalent(ws, workspace) ? activeSessionPath : workspaceSessionPaths[ws];
       if (p) set.add(p);
     }
-    // 兜底：当前 active 正在 streaming（首条消息可能早于映射落地）
-    if (isStreaming && activeSessionPath) set.add(activeSessionPath);
     return set;
-  }, [runningWorkspaces, workspaceSessionPaths, isStreaming, activeSessionPath]);
+  }, [runningWorkspaces, workspaceSessionPaths, workspace, activeSessionPath]);
 
   return (
     <Flexbox style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -458,28 +541,21 @@ function Workspace() {
         <Flexbox flex={1} style={{ minWidth: 0, height: '100%', background: 'var(--gren-content-bg, transparent)' }}>
           <ModuleContainer
             chat={
-              <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%' }}>
-                <SidebarPanel
-                  runningSessionPaths={runningSessionPaths}
-                  onNewConversation={handleNewConversation}
-                  onOpenProject={handleOpenProject}
-                  onNewSession={handleNewSession}
-                  onOpenSession={handleOpenSession}
-                  onDeleteSession={handleDeleteSession}
-                  onDeleteConversation={handleDeleteConversation}
-                  onRemoveProject={handleRemoveProject}
-                  onSubmitRename={handleSubmitRename}
-                />
-                <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
-                  <DockDndProvider>
-                    <Flexbox horizontal flex={1} style={{ minHeight: 0 }}>
-                      <MainChatColumn />
-                      <RightPanelColumn />
-                    </Flexbox>
-                    <TerminalColumn />
-                  </DockDndProvider>
-                </Flexbox>
-              </Flexbox>
+              <ChatColumns
+                sidebar={
+                  <SidebarPanel
+                    runningSessionPaths={runningSessionPaths}
+                    onNewConversation={handleNewConversation}
+                    onOpenProject={handleOpenProject}
+                    onNewSession={handleNewSession}
+                    onOpenSession={handleOpenSession}
+                    onDeleteSession={handleDeleteSession}
+                    onDeleteConversation={handleDeleteConversation}
+                    onRemoveProject={handleRemoveProject}
+                    onSubmitRename={handleSubmitRename}
+                  />
+                }
+              />
             }
           />
         </Flexbox>

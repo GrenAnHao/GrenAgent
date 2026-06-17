@@ -39,6 +39,16 @@ impl PiManager {
         self.clients.lock().await.get(workspace).cloned()
     }
 
+    /// 返回所有已打开 workspace 的 (路径, client) 快照，用于向全部 pi 进程广播。
+    pub async fn all(&self) -> Vec<(String, Arc<PiClient>)> {
+        self.clients
+            .lock()
+            .await
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     pub async fn close(&self, workspace: &str) {
         if let Some(c) = self.clients.lock().await.remove(workspace) {
             if let Err(e) = c.kill().await {
@@ -85,6 +95,22 @@ mod tests {
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&c1, &c2));
+    }
+
+    #[tokio::test]
+    async fn all_returns_every_open_client() {
+        let mgr = PiManager::new();
+        mgr.get_or_open("/ws/a", || Ok(fake_client("/ws/a")))
+            .await
+            .unwrap();
+        mgr.get_or_open("/ws/b", || Ok(fake_client("/ws/b")))
+            .await
+            .unwrap();
+        let all = mgr.all().await;
+        assert_eq!(all.len(), 2);
+        let mut keys: Vec<String> = all.into_iter().map(|(k, _)| k).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["/ws/a".to_string(), "/ws/b".to_string()]);
     }
 
     #[tokio::test]

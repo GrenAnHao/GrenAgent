@@ -1,4 +1,4 @@
-import { AudioLines, BookOpen, Boxes, Brain, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, BookOpen, Brain, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability';
@@ -260,28 +260,6 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
           },
           { key: 'PI_BIN', label: '子代理可执行文件', type: 'text', description: '留空＝复用本体 sidecar' },
         ],
-      },
-    ],
-  },
-  {
-    id: 'mcp',
-    title: 'MCP 服务器',
-    group: '扩展与安全',
-    icon: Boxes,
-    fields: [
-      {
-        key: 'MCP_SERVERS',
-        label: 'MCP Servers（JSON）',
-        type: 'text',
-        placeholder: '{"mcpServers":{...}}',
-        description: '其工具以 mcp__server__tool 暴露给 agent',
-      },
-      {
-        key: 'OPEN_WEBSEARCH',
-        label: 'open-webSearch MCP',
-        type: 'text',
-        placeholder: '0',
-        description: '已内置 baidu/csdn/掘金；填 1 才额外拉起 npx MCP',
       },
     ],
   },

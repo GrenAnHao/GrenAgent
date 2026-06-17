@@ -2,15 +2,16 @@ import { memo } from 'react';
 import { ActionIcon } from '@lobehub/ui';
 import { PanelLeftOpen, PanelRightOpen, SquareTerminal } from 'lucide-react';
 import { PanelHeader } from '../../components/PanelHeader';
-import { useLayoutStore } from '../../stores/layoutStore';
+import { useLayoutStore, selectSidebarVisible, selectRightPanelVisible } from '../../stores/layoutStore';
 import { usePlanModeStore } from '../../stores/planModeStore';
+import { SubAgentMenuButton } from '../subagents/SubAgentMenuButton';
 
-/** 仅订阅侧栏开关，避免布局其它变化时重渲染主列 header。 */
+/** 仅订阅侧栏实际可见性，避免布局其它变化时重渲染主列 header。 */
 export const SidebarToggleButton = memo(function SidebarToggleButton() {
-  const sidebarOpen = useLayoutStore((s) => s.sidebarOpen);
+  const sidebarVisible = useLayoutStore(selectSidebarVisible);
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
 
-  if (sidebarOpen) return null;
+  if (sidebarVisible) return null;
 
   return <ActionIcon icon={PanelLeftOpen} size="small" title="Sidebar" onClick={toggleSidebar} />;
 });
@@ -19,11 +20,12 @@ export const SidebarToggleButton = memo(function SidebarToggleButton() {
 export const MainHeaderActions = memo(function MainHeaderActions() {
   const terminalOpen = useLayoutStore((s) => s.terminalOpen);
   const toggleTerminal = useLayoutStore((s) => s.toggleTerminal);
-  const rightPanelOpen = useLayoutStore((s) => s.rightPanelOpen);
+  const rightPanelVisible = useLayoutStore(selectRightPanelVisible);
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel);
 
   return (
     <>
+      <SubAgentMenuButton />
       <ActionIcon
         icon={SquareTerminal}
         active={terminalOpen}
@@ -31,7 +33,7 @@ export const MainHeaderActions = memo(function MainHeaderActions() {
         title="Terminal"
         onClick={toggleTerminal}
       />
-      {!rightPanelOpen && (
+      {!rightPanelVisible && (
         <ActionIcon icon={PanelRightOpen} size="small" title="Panel" onClick={toggleRightPanel} />
       )}
     </>

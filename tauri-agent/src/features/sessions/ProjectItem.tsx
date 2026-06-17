@@ -10,11 +10,12 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 30px;
+    height: 32px;
     margin: 0 6px;
     padding: 0 8px 0 10px;
     border-radius: 7px;
     color: ${cssVar.colorText};
+    font-size: 13px;
     cursor: pointer;
 
     &:hover {

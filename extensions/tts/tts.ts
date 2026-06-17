@@ -2,6 +2,7 @@
 // Returns raw audio bytes; requires TTS_API_KEY or OPENAI_API_KEY.
 
 import { getConfig } from "../_shared/runtime-config.js";
+import { resolveCapabilityEndpoint, type RegistryLike } from "../_shared/provider-endpoint.js";
 
 export interface TtsConfig {
   enabled: boolean;
@@ -12,17 +13,9 @@ export interface TtsConfig {
   format: string;
 }
 
-export function resolveTtsConfig(): TtsConfig {
-  const apiKey = getConfig("TTS_API_KEY") ?? getConfig("OPENAI_API_KEY") ?? "";
-  const baseUrl = (getConfig("TTS_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-  return {
-    enabled: apiKey.length > 0,
-    baseUrl,
-    apiKey,
-    model: getConfig("TTS_MODEL") ?? "gpt-4o-mini-tts",
-    voice: getConfig("TTS_VOICE") ?? "alloy",
-    format: getConfig("TTS_FORMAT") ?? "mp3",
-  };
+export async function resolveTtsConfig(registry: RegistryLike): Promise<TtsConfig> {
+  const ep = await resolveCapabilityEndpoint(registry, getConfig("TTS_PROVIDER"), getConfig("TTS_MODEL"), "gpt-4o-mini-tts");
+  return { ...ep, voice: getConfig("TTS_VOICE") ?? "alloy", format: getConfig("TTS_FORMAT") ?? "mp3" };
 }
 
 export async function synthesizeSpeech(
@@ -30,7 +23,7 @@ export async function synthesizeSpeech(
   config: TtsConfig,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  if (!config.enabled) throw new Error("TTS disabled: set TTS_API_KEY or OPENAI_API_KEY");
+  if (!config.enabled) throw new Error("TTS disabled: 请在设置-供应商选择 TTS 供应商并配置其 API Key");
 
   const res = await fetch(`${config.baseUrl}/audio/speech`, {
     method: "POST",

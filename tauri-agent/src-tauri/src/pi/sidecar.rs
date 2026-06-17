@@ -4,12 +4,14 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tauri::async_runtime;
+use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
 
 use crate::pi::client::PiClient;
 use crate::pi::framing::JsonlBuffer;
+use crate::pi::guard::ProcessGuard;
 use crate::pi::transport::PiTransport;
 
 /// 基于 Tauri shell sidecar 的传输。
@@ -64,6 +66,15 @@ pub fn spawn_pi_client(
         .current_dir(cwd)
         .spawn()
         .map_err(|e| anyhow!("sidecar spawn failed: {e}"))?;
+
+    // 把 sidecar 加入 kill-on-close job：主进程崩溃时由 OS 兜底回收。失败仅降级，
+    // cli 侧 stdin-EOF 自杀仍覆盖常见崩溃。spawn→assign 之间的极短窗口也由后者兜住。
+    if let Some(guard) = app.try_state::<Arc<ProcessGuard>>() {
+        let pid = child.pid();
+        if let Err(e) = guard.assign(pid) {
+            eprintln!("[pi] failed to assign sidecar (pid {pid}) to job: {e}");
+        }
+    }
 
     let transport = Arc::new(SidecarTransport {
         child: Mutex::new(Some(child)),

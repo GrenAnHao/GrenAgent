@@ -4,6 +4,7 @@
 // extension always works out of the box.
 
 import { getConfig } from "../_shared/runtime-config.js";
+import { resolveCapabilityEndpoint, type RegistryLike } from "../_shared/provider-endpoint.js";
 
 export interface EmbeddingConfig {
   enabled: boolean;
@@ -12,15 +13,8 @@ export interface EmbeddingConfig {
   model: string;
 }
 
-export function resolveEmbeddingConfig(): EmbeddingConfig {
-  const apiKey = getConfig("KB_EMBED_API_KEY") ?? getConfig("OPENAI_API_KEY") ?? "";
-  const baseUrl = (getConfig("KB_EMBED_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-  return {
-    enabled: apiKey.length > 0,
-    baseUrl,
-    apiKey,
-    model: getConfig("KB_EMBED_MODEL") ?? "text-embedding-3-small",
-  };
+export function resolveEmbeddingConfig(registry: RegistryLike): Promise<EmbeddingConfig> {
+  return resolveCapabilityEndpoint(registry, getConfig("KB_EMBED_PROVIDER"), getConfig("KB_EMBED_MODEL"), "text-embedding-3-small");
 }
 
 export async function embedTexts(
@@ -28,7 +22,7 @@ export async function embedTexts(
   config: EmbeddingConfig,
   signal?: AbortSignal,
 ): Promise<number[][]> {
-  if (!config.enabled) throw new Error("embedding disabled: no KB_EMBED_API_KEY / OPENAI_API_KEY");
+  if (!config.enabled) throw new Error("embedding disabled: 请在设置-知识库选择 embedding 供应商");
   if (texts.length === 0) return [];
 
   const res = await fetch(`${config.baseUrl}/embeddings`, {

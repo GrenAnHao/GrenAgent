@@ -67,6 +67,11 @@ export function useAgentStoreContext(): AgentStoreContextValue {
   return ctx;
 }
 
+/** 可选版：无 Provider 时返回 null（供可在无工作区上下文中渲染的组件安全降级）。 */
+export function useOptionalAgentStoreContext(): AgentStoreContextValue | null {
+  return useContext(AgentStoreContext);
+}
+
 /** 便捷获取当前工作区的 agent store API（含 useStore 选择器）。 */
 export function useAgentStore(): AgentStoreApi {
   return useAgentStoreContext().store;

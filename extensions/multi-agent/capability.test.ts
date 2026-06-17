@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRESETS, resolveProfile, profileToModel, profileToEnv, profileLimits } from "./capability.js";
+import { PRESETS, resolveProfile, profileToModel, profileToEnv, profileLimits, resolveMcpServers } from "./capability.js";
 
 describe("resolveProfile", () => {
   it("undefined → default preset", () => {
@@ -65,7 +65,10 @@ describe("profileToEnv", () => {
     const e = profileToEnv({ fs: "readonly" });
     expect(e.SAFETY_READONLY).toBe("1");
     expect(e.SAFETY_WRITE_ALLOW).toBe("");
-    expect(e.MCP_SERVERS).toBe("");
+  });
+  it("does not set MCP_SERVERS (the runner resolves it from the parent config)", () => {
+    expect(profileToEnv({ mcp: ["github"] }).MCP_SERVERS).toBeUndefined();
+    expect(profileToEnv({ mcp: true }).MCP_SERVERS).toBeUndefined();
   });
   it("fs writeAllow → readonly + joined prefixes", () => {
     const e = profileToEnv({ fs: { writeAllow: ["plans/", "docs/"] } });
@@ -77,9 +80,6 @@ describe("profileToEnv", () => {
   });
   it("net=false → deny web tools", () => {
     expect(profileToEnv({ net: false }).SAFETY_DENY_TOOLS).toBe("web_search,web_fetch,web_crawler");
-  });
-  it("mcp allowlist → MCP_SERVERS", () => {
-    expect(profileToEnv({ mcp: ["github"] }).MCP_SERVERS).toBe("github");
   });
   it("tools.deny merges into deny list", () => {
     expect(profileToEnv({ net: false, tools: { deny: ["bash"] } }).SAFETY_DENY_TOOLS).toBe(
@@ -104,5 +104,32 @@ describe("profileLimits", () => {
       timeoutMs: 1500,
       maxConcurrency: 3,
     });
+  });
+});
+
+describe("resolveMcpServers", () => {
+  const parent = JSON.stringify({
+    mcpServers: { context7: { command: "npx" }, codegraph: { command: "codegraph" } },
+  });
+  it("false / undefined → no MCP (least privilege default)", () => {
+    expect(resolveMcpServers(false, parent)).toBe("");
+    expect(resolveMcpServers(undefined, parent)).toBe("");
+  });
+  it("true → inherits the parent's full set verbatim", () => {
+    expect(resolveMcpServers(true, parent)).toBe(parent);
+  });
+  it("allowlist → parent trimmed to the named servers", () => {
+    const out = JSON.parse(resolveMcpServers(["codegraph"], parent)) as { mcpServers: Record<string, unknown> };
+    expect(Object.keys(out.mcpServers)).toEqual(["codegraph"]);
+  });
+  it("allowlist never exceeds the parent (unknown names dropped → empty)", () => {
+    expect(resolveMcpServers(["nope"], parent)).toBe("");
+  });
+  it("true but no parent → empty", () => {
+    expect(resolveMcpServers(true, undefined)).toBe("");
+    expect(resolveMcpServers(true, "")).toBe("");
+  });
+  it("malformed parent JSON → empty (deny, never leak)", () => {
+    expect(resolveMcpServers(["x"], "not json")).toBe("");
   });
 });

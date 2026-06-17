@@ -30,8 +30,8 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "^0.79.4",
+    "@earendil-works/pi-coding-agent": "^0.79.4",
     "typebox": "*"
   },
   "dependencies": {

@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
       const prompt = (params.prompt ?? "").trim();
       if (!prompt) throw new Error("prompt must be non-empty");
 
-      const config = resolveImageConfig();
+      const config = await resolveImageConfig(ctx.modelRegistry);
       const bytes = await generateImage(prompt, { ...config, size: params.size ?? config.size }, signal ?? undefined);
 
       const dir = join(ctx.cwd, ".pi", "images");

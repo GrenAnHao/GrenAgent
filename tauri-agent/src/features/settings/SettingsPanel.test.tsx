@@ -1,17 +1,19 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { getSettings, setSettings, closeWorkspace, openWorkspace } = vi.hoisted(() => ({
+const { getSettings, setSettings, closeWorkspace, openWorkspace, getProviderConfig, setProviderConfig } = vi.hoisted(() => ({
   getSettings: vi.fn(() => Promise.resolve({ OPENAI_API_KEY: 'sk-old', titleModel: 'haiku' })),
   setSettings: vi.fn(() => Promise.resolve()),
   closeWorkspace: vi.fn(() => Promise.resolve()),
   openWorkspace: vi.fn(() => Promise.resolve({})),
+  getProviderConfig: vi.fn(() => Promise.resolve({ modelsJson: '{}', authJson: '{}', agentDir: '/a' })),
+  setProviderConfig: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
 }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
 vi.mock('../../lib/pi', () => ({
-  pi: { getSettings, setSettings, closeWorkspace, openWorkspace },
+  pi: { getSettings, setSettings, closeWorkspace, openWorkspace, getProviderConfig, setProviderConfig },
 }));
 
 import { SettingsPanel } from './SettingsPanel';
@@ -53,11 +55,12 @@ describe('SettingsPanel', () => {
   );
 
   it(
-    'edits a field and autosaves without restart',
+    'edits a field and saves on button click without restart',
     async () => {
       render(<SettingsPanel />);
       await waitFor(() => expect(screen.getByTestId('set-field-titleModel')).toBeTruthy());
       fireEvent.change(screen.getByTestId('set-field-titleModel'), { target: { value: 'gpt-x' } });
+      fireEvent.click(screen.getByTestId('set-save'));
       await waitFor(
         () => expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ titleModel: 'gpt-x' })),
         { timeout: 3000 },

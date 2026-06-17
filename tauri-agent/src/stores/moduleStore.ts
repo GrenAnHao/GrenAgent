@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export type ModuleId =
   | 'chat'
@@ -10,6 +9,7 @@ export type ModuleId =
   | 'checkpoints'
   | 'connections'
   | 'extensions'
+  | 'usage'
   | 'settings';
 
 interface ModuleState {
@@ -17,15 +17,8 @@ interface ModuleState {
   setActiveModule: (module: ModuleId) => void;
 }
 
-export const useModuleStore = create<ModuleState>()(
-  persist(
-    (set) => ({
-      activeModule: 'chat',
-      setActiveModule: (module) => set({ activeModule: module }),
-    }),
-    {
-      name: 'grenagent-module',
-      partialize: (state) => ({ activeModule: state.activeModule }),
-    },
-  ),
-);
+// 首启一律进对话页：activeModule 不再持久化，避免重启恢复到上次停留的设置/其他页面。
+export const useModuleStore = create<ModuleState>((set) => ({
+  activeModule: 'chat',
+  setActiveModule: (module) => set({ activeModule: module }),
+}));

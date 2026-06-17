@@ -59,15 +59,18 @@ describe('buildSidebarItems', () => {
     expect(items.filter((i) => i.type === 'more')).toHaveLength(0);
   });
 
-  it('adds pinned label before pinned groups', () => {
+  it('adds pinned label before pinned groups and above conversations', () => {
     const items = buildSidebarItems({
-      conversations: [],
+      conversations: [conv],
       pinnedGroups: [{ ...group, cwd: '/p/pin', pinned: true }],
       normalGroups: [],
       collapsed: { '/p/pin': true },
       pinnedSessions: [],
       showAllCwds: new Set(),
     });
-    expect(items.some((i) => i.type === 'pinned-label')).toBe(true);
+    const types = items.map((i) => i.type);
+    expect(types[0]).toBe('pinned-label');
+    expect(types.indexOf('pinned-label')).toBeLessThan(types.indexOf('section'));
+    expect(types.indexOf('conversation')).toBeGreaterThan(types.indexOf('pinned-label'));
   });
 });

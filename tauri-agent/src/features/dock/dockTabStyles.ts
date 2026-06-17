@@ -1,6 +1,6 @@
 import { createStaticStyles, cssVar, useTheme } from 'antd-style';
 import { HEADER_HEIGHT } from '../../components/PanelHeader';
-import type { DockTab, TerminalPayload } from '../../stores/dockStore';
+import type { DockTab, SubAgentLogPayload, TerminalPayload } from '../../stores/dockStore';
 
 export type DotTone = 'neutral' | 'success' | 'warning' | 'error';
 type AppTheme = ReturnType<typeof useTheme>;
@@ -165,6 +165,13 @@ export function resolveTone(tab: DockTab, subAgentStatus?: 'running' | 'done' | 
     if (subAgentStatus === 'done') return 'success';
     if (subAgentStatus === 'running') return 'warning';
     if (subAgentStatus === 'error') return 'error';
+    return 'neutral';
+  }
+  if (tab.kind === 'subagentLog') {
+    const s = (tab.payload as SubAgentLogPayload).status;
+    if (s === 'done') return 'success';
+    if (s === 'running') return 'warning';
+    if (s === 'error') return 'error';
     return 'neutral';
   }
   return 'neutral';

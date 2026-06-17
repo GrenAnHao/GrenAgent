@@ -27,7 +27,7 @@ describe('GroupSessionRow', () => {
     expect(onOpen).toHaveBeenCalledWith('/proj/p1', '/proj/p1/s.json');
   });
 
-  it('falls back to Untitled for empty name', () => {
+  it('falls back to 新对话 for empty name', () => {
     render(
       <GroupSessionRow
         cwd="/proj/p1"
@@ -43,6 +43,6 @@ describe('GroupSessionRow', () => {
         onPinToggle={vi.fn()}
       />,
     );
-    expect(screen.getByText('Untitled')).toBeTruthy();
+    expect(screen.getByText('新对话')).toBeTruthy();
   });
 });

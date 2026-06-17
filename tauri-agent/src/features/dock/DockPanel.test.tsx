@@ -28,15 +28,19 @@ vi.mock('../panels/SubAgentConversation', () => ({
 
 import { DockPanel } from './DockPanel';
 import { useDockStore } from '../../stores/dockStore';
+import { useLayoutStore } from '../../stores/layoutStore';
 
 afterEach(() => {
   cleanup();
   messagesRef.current = [];
   localStorage.clear();
   useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
+  useLayoutStore.setState({ rightPanelOpen: false });
 });
 
 function renderRight() {
+  // 子代理会话仅在右侧面板打开时渲染（dock body keep-alive，折叠时不解析 transcript）。
+  useLayoutStore.setState({ rightPanelOpen: true });
   return render(
     <DndContext>
       <DockPanel region="right" />

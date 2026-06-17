@@ -20,7 +20,24 @@ describe('buildProjectGroups worksDir filter', () => {
       aliases: {},
       keyword: '',
       worksDir: '/home/.pi/agent/works',
+      registeredProjects: [],
     });
     expect(groups.map((g) => g.cwd)).toEqual(['/proj/a']);
+  });
+
+  it('includes registered projects with no sessions yet', () => {
+    const groups = buildProjectGroups([], {
+      current: '/proj/new',
+      pinnedProjects: [],
+      hiddenProjects: [],
+      aliases: {},
+      keyword: '',
+      worksDir: '/home/.pi/agent/works',
+      registeredProjects: ['/proj/new'],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].cwd).toBe('/proj/new');
+    expect(groups[0].sessions).toHaveLength(0);
+    expect(groups[0].isCurrent).toBe(true);
   });
 });

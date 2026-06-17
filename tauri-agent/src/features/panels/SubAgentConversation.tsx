@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { createStaticStyles } from 'antd-style';
 import { type ChatMessage, messagesFromTranscript } from '../../stores/agentReducer';
+import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
 
@@ -50,17 +51,19 @@ interface SubAgentConversationProps {
 
 /** 单个子代理的对话视图：把子代理 JSONL 还原成消息，用主对话同款气泡渲染。 */
 export function SubAgentConversation({ task, result, status, 'data-testid': testId }: SubAgentConversationProps) {
+  // 运行中 result（transcript）每帧增长，100ms 节流避免每个 token 都重解析整段 JSONL（与主对话同口径）。
+  const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
   const messages = useMemo<ChatMessage[]>(() => {
     const out: ChatMessage[] = [{ kind: 'user', id: 'sa-task', text: task }];
-    const transcript = transcriptOf(result);
+    const transcript = transcriptOf(liveResult);
     if (transcript) {
       out.push(...messagesFromTranscript(transcript));
     } else {
-      const text = fallbackText(result);
+      const text = fallbackText(liveResult);
       if (text) out.push({ kind: 'assistant', id: 'sa-out', text, thinking: '', streaming: status === 'running' });
     }
     return out;
-  }, [task, result, status]);
+  }, [task, liveResult, status]);
 
   const display = useMemo(() => groupMessages(messages), [messages]);
 

@@ -55,6 +55,12 @@ function messageTimestamp(msg: AgentMessage): number | undefined {
   return typeof ts === 'number' && Number.isFinite(ts) ? ts : undefined;
 }
 
+/** 读取 pi assistant 消息上的 errorMessage（模型/供应商失败时 Pi 会带上，此前被 UI 丢弃）。 */
+function messageError(msg: AgentMessage): string | undefined {
+  const raw = (msg as { errorMessage?: unknown }).errorMessage;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+}
+
 function extractText(msg: AgentMessage): { text: string; thinking: string } {
   let text = '';
   let thinking = '';
@@ -182,12 +188,16 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message);
       if (ev.message.role !== 'assistant') return state;
       const { text, thinking } = extractText(ev.message);
+      const errMsg = messageError(ev.message);
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
       if (idx < 0) {
-        if (!text && !thinking) return state;
+        if (!text && !thinking) {
+          return errMsg ? { ...state, lastError: errMsg } : state;
+        }
         return {
           ...state,
+          ...(errMsg ? { lastError: errMsg } : {}),
           messages: [
             ...messages,
             {
@@ -218,7 +228,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           ...thinkingTiming(cur, finalThinking, text, true),
         };
       }
-      return { ...state, messages };
+      return errMsg ? { ...state, messages, lastError: errMsg } : { ...state, messages };
     }
 
     case 'message_update': {
@@ -304,8 +314,14 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return { ...state, lastError: ev.error };
     }
 
-    default:
+    default: {
+      // 兜底：捕获未显式建模、但带 string error 字段的错误事件，避免失败被静默吞掉。
+      const maybeError = (event as { error?: unknown }).error;
+      if (typeof maybeError === 'string' && maybeError.trim()) {
+        return { ...state, lastError: maybeError, isStreaming: false };
+      }
       return state;
+    }
   }
 }
 

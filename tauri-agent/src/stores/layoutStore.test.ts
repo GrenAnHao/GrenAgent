@@ -1,141 +1,140 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  panelMaxWidth,
+  resolvePanelVisibility,
+  selectSidebarVisible,
+  selectRightPanelVisible,
   useLayoutStore,
-  DEFAULT_SIDEBAR_WIDTH,
-  DEFAULT_RIGHT_PANEL_WIDTH,
-  DEFAULT_TERMINAL_HEIGHT,
-  SIDEBAR_MIN_WIDTH,
-  SIDEBAR_MAX_WIDTH,
-  RIGHT_PANEL_MIN_WIDTH,
+  MAIN_COLUMN_MIN_WIDTH,
   RIGHT_PANEL_MAX_WIDTH,
-  TERMINAL_MIN_HEIGHT,
-  TERMINAL_MAX_HEIGHT,
+  RIGHT_PANEL_MIN_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
 } from './layoutStore';
 
-describe('layoutStore', () => {
-  beforeEach(() => {
-    useLayoutStore.setState({
-      sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
-      sidebarOpen: true,
-      rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
-      rightPanelOpen: false,
-      terminalHeight: DEFAULT_TERMINAL_HEIGHT,
-      terminalOpen: false,
+const base = {
+  sidebarOpen: true,
+  rightPanelOpen: true,
+  sidebarWidth: 240,
+  rightPanelWidth: 320,
+};
+
+describe('resolvePanelVisibility', () => {
+  it('尚未量到宽度（<=0）时直接按意图，不折叠', () => {
+    expect(resolvePanelVisibility({ ...base, availableWidth: 0 })).toEqual({
+      sidebarVisible: true,
+      rightPanelVisible: true,
     });
   });
 
-  it('should have default values', () => {
-    const state = useLayoutStore.getState();
-    expect(state.sidebarWidth).toBe(DEFAULT_SIDEBAR_WIDTH);
-    expect(state.rightPanelWidth).toBe(DEFAULT_RIGHT_PANEL_WIDTH);
-    expect(state.terminalHeight).toBe(DEFAULT_TERMINAL_HEIGHT);
-    expect(state.sidebarOpen).toBe(true);
-    expect(state.rightPanelOpen).toBe(false);
-    expect(state.terminalOpen).toBe(false);
+  it('空间充足时两个都显示', () => {
+    // 240 + 320 + 320 = 880 <= 1000
+    expect(resolvePanelVisibility({ ...base, availableWidth: 1000 })).toEqual({
+      sidebarVisible: true,
+      rightPanelVisible: true,
+    });
   });
 
-  it('should update sidebar width', () => {
-    useLayoutStore.getState().setSidebarWidth(300);
-    expect(useLayoutStore.getState().sidebarWidth).toBe(300);
+  it('挤压（窗口变窄）时默认先收左侧栏，保留右面板', () => {
+    // 880 > 664，先收左侧栏；右面板 320 + 320 = 640 <= 664 保留
+    expect(resolvePanelVisibility({ ...base, availableWidth: 664 })).toEqual({
+      sidebarVisible: false,
+      rightPanelVisible: true,
+    });
   });
 
-  it('should toggle sidebar', () => {
-    useLayoutStore.getState().toggleSidebar();
-    expect(useLayoutStore.getState().sidebarOpen).toBe(false);
-    useLayoutStore.getState().toggleSidebar();
-    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
+  it('正在拖宽左侧栏时改为挤掉右面板（谁被操作谁优先）', () => {
+    expect(resolvePanelVisibility({ ...base, availableWidth: 664, dragging: 'sidebar' })).toEqual({
+      sidebarVisible: true,
+      rightPanelVisible: false,
+    });
   });
 
-  it('should update right panel width', () => {
-    useLayoutStore.getState().setRightPanelWidth(400);
-    expect(useLayoutStore.getState().rightPanelWidth).toBe(400);
+  it('正在拖宽右面板时挤掉左侧栏', () => {
+    expect(resolvePanelVisibility({ ...base, availableWidth: 664, dragging: 'right' })).toEqual({
+      sidebarVisible: false,
+      rightPanelVisible: true,
+    });
   });
 
-  it('should toggle right panel', () => {
+  it('空间极小到右面板也放不下时只剩对话区', () => {
+    expect(
+      resolvePanelVisibility({
+        availableWidth: 400,
+        sidebarOpen: false,
+        rightPanelOpen: true,
+        sidebarWidth: 240,
+        rightPanelWidth: 320,
+      }),
+    ).toEqual({ sidebarVisible: false, rightPanelVisible: false });
+  });
+});
+
+describe('panelMaxWidth', () => {
+  it('未量到宽度时回退静态上限', () => {
+    expect(panelMaxWidth(0, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH)).toBe(RIGHT_PANEL_MAX_WIDTH);
+  });
+
+  it('常规情况只给对话区保留 MAIN_COLUMN_MIN_WIDTH', () => {
+    expect(panelMaxWidth(1000, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH)).toBe(
+      1000 - MAIN_COLUMN_MIN_WIDTH,
+    );
+  });
+
+  it('窗口很窄时不低于面板最小宽度', () => {
+    expect(panelMaxWidth(400, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH)).toBe(RIGHT_PANEL_MIN_WIDTH);
+    expect(panelMaxWidth(400, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)).toBe(SIDEBAR_MIN_WIDTH);
+  });
+
+  it('空间很大时不超过静态上限', () => {
+    expect(panelMaxWidth(5000, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH)).toBe(RIGHT_PANEL_MAX_WIDTH);
+  });
+});
+
+describe('useLayoutStore 挤位与自动恢复', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useLayoutStore.setState({
+      sidebarOpen: true,
+      rightPanelOpen: false,
+      sidebarWidth: 240,
+      rightPanelWidth: 320,
+      availableWidth: 664,
+      liveSidebarWidth: null,
+      liveRightPanelWidth: null,
+    });
+  });
+
+  it('放不下时手动打开右面板会挤掉左侧栏', () => {
     useLayoutStore.getState().toggleRightPanel();
     expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
-    useLayoutStore.getState().toggleRightPanel();
+    expect(useLayoutStore.getState().sidebarOpen).toBe(false);
+  });
+
+  it('放不下时手动打开左侧栏会挤掉右面板', () => {
+    useLayoutStore.setState({ sidebarOpen: false, rightPanelOpen: true });
+    useLayoutStore.getState().toggleSidebar();
+    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
     expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
   });
 
-  it('should update terminal height', () => {
-    useLayoutStore.getState().setTerminalHeight(300);
-    expect(useLayoutStore.getState().terminalHeight).toBe(300);
+  it('尚未量到宽度时打开右面板不挤掉左侧栏（兼容初始/测试态）', () => {
+    useLayoutStore.setState({ sidebarOpen: true, rightPanelOpen: false, availableWidth: 0 });
+    useLayoutStore.getState().setRightPanelOpen(true);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
   });
 
-  it('should toggle terminal', () => {
-    useLayoutStore.getState().toggleTerminal();
-    expect(useLayoutStore.getState().terminalOpen).toBe(true);
-    useLayoutStore.getState().toggleTerminal();
-    expect(useLayoutStore.getState().terminalOpen).toBe(false);
-  });
-
-  it('should set terminal open explicitly (idempotent)', () => {
-    useLayoutStore.getState().setTerminalOpen(true);
-    expect(useLayoutStore.getState().terminalOpen).toBe(true);
-    useLayoutStore.getState().setTerminalOpen(true);
-    expect(useLayoutStore.getState().terminalOpen).toBe(true);
-    useLayoutStore.getState().setTerminalOpen(false);
-    expect(useLayoutStore.getState().terminalOpen).toBe(false);
-  });
-
-  it('should clamp sidebar width to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH]', () => {
-    useLayoutStore.getState().setSidebarWidth(SIDEBAR_MIN_WIDTH - 1);
-    expect(useLayoutStore.getState().sidebarWidth).toBe(SIDEBAR_MIN_WIDTH);
-    useLayoutStore.getState().setSidebarWidth(SIDEBAR_MAX_WIDTH + 1);
-    expect(useLayoutStore.getState().sidebarWidth).toBe(SIDEBAR_MAX_WIDTH);
-  });
-
-  it('should clamp right panel width to [RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH]', () => {
-    useLayoutStore.getState().setRightPanelWidth(RIGHT_PANEL_MIN_WIDTH - 1);
-    expect(useLayoutStore.getState().rightPanelWidth).toBe(RIGHT_PANEL_MIN_WIDTH);
-    useLayoutStore.getState().setRightPanelWidth(RIGHT_PANEL_MAX_WIDTH + 1);
-    expect(useLayoutStore.getState().rightPanelWidth).toBe(RIGHT_PANEL_MAX_WIDTH);
-  });
-
-  it('should clamp terminal height to [TERMINAL_MIN_HEIGHT, TERMINAL_MAX_HEIGHT]', () => {
-    useLayoutStore.getState().setTerminalHeight(TERMINAL_MIN_HEIGHT - 1);
-    expect(useLayoutStore.getState().terminalHeight).toBe(TERMINAL_MIN_HEIGHT);
-    useLayoutStore.getState().setTerminalHeight(TERMINAL_MAX_HEIGHT + 1);
-    expect(useLayoutStore.getState().terminalHeight).toBe(TERMINAL_MAX_HEIGHT);
-  });
-
-  describe('persistence (hermes-layout)', () => {
-    it('should write state to localStorage on update', () => {
-      localStorage.clear();
-      useLayoutStore.getState().setSidebarWidth(300);
-
-      const raw = localStorage.getItem('hermes-layout');
-      expect(raw).not.toBeNull();
-      expect(JSON.parse(raw!).state.sidebarWidth).toBe(300);
-    });
-
-    it('should rehydrate state from localStorage', async () => {
-      localStorage.clear();
-      localStorage.setItem(
-        'hermes-layout',
-        JSON.stringify({
-          state: {
-            sidebarWidth: 321,
-            sidebarOpen: false,
-            rightPanelWidth: 456,
-            rightPanelOpen: true,
-            terminalHeight: 234,
-            terminalOpen: true,
-          },
-          version: 0,
-        }),
-      );
-
-      await useLayoutStore.persist.rehydrate();
-
-      const state = useLayoutStore.getState();
-      expect(state.sidebarWidth).toBe(321);
-      expect(state.sidebarOpen).toBe(false);
-      expect(state.rightPanelWidth).toBe(456);
-      expect(state.rightPanelOpen).toBe(true);
-      expect(state.terminalHeight).toBe(234);
-      expect(state.terminalOpen).toBe(true);
-    });
+  it('窗口变大后被挤压收起的面板自动恢复（纯派生，不改意图）', () => {
+    useLayoutStore.setState({ sidebarOpen: true, rightPanelOpen: true, availableWidth: 664 });
+    // 挤压态：左侧栏被收起
+    expect(selectSidebarVisible(useLayoutStore.getState())).toBe(false);
+    expect(selectRightPanelVisible(useLayoutStore.getState())).toBe(true);
+    // 意图仍是打开
+    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
+    // 窗口变大 → 自动恢复
+    useLayoutStore.getState().setAvailableWidth(1000);
+    expect(selectSidebarVisible(useLayoutStore.getState())).toBe(true);
+    expect(selectRightPanelVisible(useLayoutStore.getState())).toBe(true);
   });
 });

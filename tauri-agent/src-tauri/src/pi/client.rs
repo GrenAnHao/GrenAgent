@@ -72,6 +72,21 @@ impl PiClient {
                 self.sink.emit_ui_request(&self.workspace, &v);
             }
             Ok(PiInbound::Event(v)) => {
+                // 诊断日志：打印每轮事件类型（跳过高频 delta），附带 error 字段（若有）。
+                if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
+                    if t != "message_update" && t != "tool_execution_update" {
+                        let err = v
+                            .get("error")
+                            .or_else(|| v.get("errorMessage"))
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        if err.is_empty() {
+                            eprintln!("[pi event:{}] {t}", self.workspace);
+                        } else {
+                            eprintln!("[pi event:{}] {t} error={err}", self.workspace);
+                        }
+                    }
+                }
                 self.sink.emit_event(&self.workspace, &v);
             }
             Err(e) => {

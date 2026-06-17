@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
       const text = (params.text ?? "").trim();
       if (!text) throw new Error("text must be non-empty");
 
-      const config = resolveTtsConfig();
+      const config = await resolveTtsConfig(ctx.modelRegistry);
       const cfg = params.voice ? { ...config, voice: params.voice } : config;
       const bytes = await synthesizeSpeech(text, cfg, signal ?? undefined);
 

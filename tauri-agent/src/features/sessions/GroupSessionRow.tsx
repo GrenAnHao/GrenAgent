@@ -38,7 +38,7 @@ export const GroupSessionRow = memo(function GroupSessionRow({
 
   return (
     <SessionItem
-      title={session.name || 'Untitled'}
+      title={session.name || '新对话'}
       active={active}
       running={running}
       pinned={pinned}

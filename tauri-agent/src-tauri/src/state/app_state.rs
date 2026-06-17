@@ -90,10 +90,11 @@ impl AppState {
     }
 
     /// 返回要注入 sidecar 的 env（过滤空值/空白）。
+    /// titleModel 也注入：sidecar 内的 auto-title 扩展据此选标题模型（经 getConfig 读取）。
     pub fn settings_env(&self) -> HashMap<String, String> {
         self.settings
             .iter()
-            .filter(|(k, v)| k.as_str() != "titleModel" && !v.trim().is_empty())
+            .filter(|(_, v)| !v.trim().is_empty())
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     }
@@ -180,7 +181,11 @@ mod tests {
         let env = reloaded.settings_env();
         assert_eq!(env.get("OPENAI_API_KEY").map(|s| s.as_str()), Some("sk-x"));
         assert!(!env.contains_key("IMAGE_SIZE"));
-        assert!(!env.contains_key("titleModel"));
+        // titleModel 现在也注入 sidecar（供 auto-title 扩展读取标题模型）。
+        assert_eq!(
+            env.get("titleModel").map(|s| s.as_str()),
+            Some("anthropic/claude-haiku")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

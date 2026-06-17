@@ -34,8 +34,10 @@ interface ResizeHandleProps {
   defaultSize: number;
   minSize: number;
   maxSize: number;
-  /** 拖拽结束后回调，传回新的主轴尺寸（px 数值） */
+  /** 拖拽结束后回调，传回新的主轴尺寸（px 数值），用于持久化 */
   onResize: (size: number) => void;
+  /** 拖拽过程中持续回调实时尺寸（px），用于让另一侧面板实时让位；结束时传 null 由 onResize 落定 */
+  onResizeLive?: (size: number | null) => void;
   /**
    * 折叠/展开状态（受控）。为 false 时面板以 0.2s 动画收起到 0；省略时恒展开。
    * 启用后请让面板始终挂载（不要再用条件渲染包裹），否则没有动画。
@@ -52,6 +54,7 @@ export function ResizeHandle({
   minSize,
   maxSize,
   onResize,
+  onResizeLive,
   expand = true,
   onExpandChange,
   children,
@@ -60,6 +63,9 @@ export function ResizeHandle({
   // 受控 size：折叠(expand=false)时 DraggablePanel 内部把面板尺寸动画到 0（靠 styles.panel
   // 自带的 transition），展开时回到这里记录的尺寸，精确恢复用户拖拽过的宽/高（对齐 lobehub RightPanel）。
   const [size, setSize] = useState(defaultSize);
+  // 渲染前把尺寸钳进 [minSize, maxSize]：maxSize 可能随容器（窗口/侧栏）收缩而变小，
+  // 此时面板跟着缩回、贴齐参考边并收在窗口内；容器变大后又回到用户偏好的 size，不覆盖持久化值。
+  const clampedSize = Math.min(Math.max(size, minSize), maxSize);
 
   const readMainSize = (
     next: { width?: string | number; height?: string | number } | undefined,
@@ -71,17 +77,22 @@ export function ResizeHandle({
   };
 
   // 拖拽过程中实时更新受控尺寸，否则受控值会在每次渲染把拖拽“拽回去”→表现为无法拖动。
+  // 同时把实时尺寸上报（onResizeLive），让另一侧面板在拖到极限时实时让位/收起。
   const handleSizeDragging: DraggablePanelProps['onSizeDragging'] = (_delta, next) => {
     const value = readMainSize(next);
-    if (value != null) setSize(value);
+    if (value != null) {
+      setSize(value);
+      onResizeLive?.(value);
+    }
   };
 
-  // 拖拽结束时持久化到 layoutStore。
+  // 拖拽结束时持久化到 layoutStore，并清空实时尺寸。
   const handleSizeChange: DraggablePanelProps['onSizeChange'] = (_delta, next) => {
     const value = readMainSize(next);
     if (value != null) {
       setSize(value);
       onResize(value);
+      onResizeLive?.(null);
     }
   };
 
@@ -92,7 +103,7 @@ export function ResizeHandle({
       expandable={false}
       expand={expand}
       className={isVertical ? styles.fillWidth : styles.fillHeight}
-      size={isVertical ? { width: '100%', height: size } : { height: '100%', width: size }}
+      size={isVertical ? { width: '100%', height: clampedSize } : { height: '100%', width: clampedSize }}
       minWidth={isVertical ? undefined : minSize}
       maxWidth={isVertical ? undefined : maxSize}
       minHeight={isVertical ? minSize : undefined}

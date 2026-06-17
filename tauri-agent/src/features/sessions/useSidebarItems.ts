@@ -30,13 +30,6 @@ export function buildSidebarItems(params: BuildParams): SidebarItem[] {
   const pinnedSet = new Set(pinnedSessions);
   const items: SidebarItem[] = [];
 
-  items.push({ type: 'section', key: 'sec-conv', label: '对话', action: 'new-conversation' });
-  for (const c of conversations) {
-    items.push({ type: 'conversation', key: `conv-${c.cwd}`, item: c });
-  }
-
-  items.push({ type: 'section', key: 'sec-proj', label: '项目', action: 'new-project' });
-
   const pushGroup = (g: ProjectGroup) => {
     const expanded = collapsed[g.cwd] === undefined ? g.isCurrent : !collapsed[g.cwd];
     items.push({ type: 'project', key: `proj-${g.cwd}`, group: g, expanded });
@@ -50,8 +43,18 @@ export function buildSidebarItems(params: BuildParams): SidebarItem[] {
     if (hidden > 0) items.push({ type: 'more', key: `more-${g.cwd}`, cwd: g.cwd, total: g.sessions.length });
   };
 
-  if (pinnedGroups.length > 0) items.push({ type: 'pinned-label', key: 'pinned-label' });
-  for (const g of pinnedGroups) pushGroup(g);
+  // 置顶项目放在「对话」分区之上（对齐 Codex 侧栏顺序）
+  if (pinnedGroups.length > 0) {
+    items.push({ type: 'pinned-label', key: 'pinned-label' });
+    for (const g of pinnedGroups) pushGroup(g);
+  }
+
+  items.push({ type: 'section', key: 'sec-conv', label: '对话', action: 'new-conversation' });
+  for (const c of conversations) {
+    items.push({ type: 'conversation', key: `conv-${c.cwd}`, item: c });
+  }
+
+  items.push({ type: 'section', key: 'sec-proj', label: '项目', action: 'new-project' });
   for (const g of normalGroups) pushGroup(g);
 
   return items;

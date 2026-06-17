@@ -8,6 +8,7 @@ import { SettingsPanel } from '../settings/SettingsPanel';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
 import { CheckpointsPanel } from '../checkpoints/CheckpointsPanel';
+import { UsagePanel } from '../usage/UsagePanel';
 
 /** 非 chat 模块面板：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
@@ -28,6 +29,8 @@ function ActivePanel({ module }: { module: ModuleId }) {
       return <ExtensionsPanel />;
     case 'checkpoints':
       return <CheckpointsPanel />;
+    case 'usage':
+      return <UsagePanel />;
     default:
       return null;
   }

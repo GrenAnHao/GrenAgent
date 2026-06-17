@@ -2,6 +2,7 @@
 // Returns raw PNG bytes; requires IMAGE_API_KEY or OPENAI_API_KEY.
 
 import { getConfig } from "../_shared/runtime-config.js";
+import { resolveCapabilityEndpoint, type RegistryLike } from "../_shared/provider-endpoint.js";
 
 export interface ImageConfig {
   enabled: boolean;
@@ -11,16 +12,9 @@ export interface ImageConfig {
   size: string;
 }
 
-export function resolveImageConfig(): ImageConfig {
-  const apiKey = getConfig("IMAGE_API_KEY") ?? getConfig("OPENAI_API_KEY") ?? "";
-  const baseUrl = (getConfig("IMAGE_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-  return {
-    enabled: apiKey.length > 0,
-    baseUrl,
-    apiKey,
-    model: getConfig("IMAGE_MODEL") ?? "gpt-image-1",
-    size: getConfig("IMAGE_SIZE") ?? "1024x1024",
-  };
+export async function resolveImageConfig(registry: RegistryLike): Promise<ImageConfig> {
+  const ep = await resolveCapabilityEndpoint(registry, getConfig("IMAGE_PROVIDER"), getConfig("IMAGE_MODEL"), "gpt-image-1");
+  return { ...ep, size: getConfig("IMAGE_SIZE") ?? "1024x1024" };
 }
 
 export async function generateImage(
@@ -28,7 +22,7 @@ export async function generateImage(
   config: ImageConfig,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  if (!config.enabled) throw new Error("image generation disabled: set IMAGE_API_KEY or OPENAI_API_KEY");
+  if (!config.enabled) throw new Error("image generation disabled: 请在设置-供应商选择图像供应商并配置其 API Key");
 
   const res = await fetch(`${config.baseUrl}/images/generations`, {
     method: "POST",

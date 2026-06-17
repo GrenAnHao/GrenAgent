@@ -82,6 +82,25 @@ describe('applyEvent', () => {
     expect(s.messages).toHaveLength(0);
   });
 
+  it('message_end surfaces assistant errorMessage as lastError when content is empty', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, {
+      type: 'message_start',
+      message: { role: 'assistant', content: [] },
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: '403 Your request was blocked.',
+      },
+    } as AgentEvent);
+    expect(s.messages).toHaveLength(0);
+    expect(s.lastError).toBe('403 Your request was blocked.');
+  });
+
   it('reuses streaming assistant on duplicate message_start', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);

@@ -33,7 +33,7 @@ describe('SETTINGS_SCHEMA', () => {
     const titleModel = allFields.find((f) => f.key === 'titleModel');
     expect(titleModel?.effect).toBe('instant');
     expect(fieldEffect(titleModel!)).toBe('instant');
-    const apiKey = allFields.find((f) => f.key === 'OPENAI_API_KEY');
-    expect(fieldEffect(apiKey!)).toBe('hot');
+    const hotField = allFields.find((f) => f.key === 'KB_AUTO_INJECT');
+    expect(fieldEffect(hotField!)).toBe('hot');
   });
 });

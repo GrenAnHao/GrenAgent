@@ -12,7 +12,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AppliedOp, type AskFn, consolidate, extractFacts } from "./consolidate.js";
 import { type EmbeddingConfig, resolveEmbeddingConfig } from "./embedding.js";
@@ -98,7 +98,7 @@ export default function (pi: ExtensionAPI) {
 
   type AskCtx = {
     model?: unknown;
-    modelRegistry?: { find: (p: string, m: string) => unknown };
+    modelRegistry?: ModelRegistry;
     signal?: AbortSignal;
   };
   type SaveCtx = AskCtx & { cwd: string };
@@ -117,7 +117,7 @@ export default function (pi: ExtensionAPI) {
   const smartSave = async (ctx: SaveCtx, text: string, scope: "project" | "global"): Promise<AppliedOp[]> => {
     const { project, global } = ensureStores(ctx.cwd);
     const store = scope === "global" ? global : project;
-    const config = resolveEmbeddingConfig();
+    const config = await resolveEmbeddingConfig(ctx.modelRegistry);
     const ask = smart() ? makeAsk(ctx) : undefined;
     if (!ask) {
       // MEMORY_SMART=0 or no model → naive dedup save.
@@ -144,7 +144,7 @@ export default function (pi: ExtensionAPI) {
     if (!prompt) return undefined;
 
     const { project } = ensureStores(ctx.cwd);
-    const config = resolveEmbeddingConfig();
+    const config = await resolveEmbeddingConfig(ctx.modelRegistry);
 
     // Auto-capture: explicit "记住: ..." / "remember: ..." statements only (low noise).
     if (autoCapture()) {
@@ -246,7 +246,7 @@ export default function (pi: ExtensionAPI) {
       until: Type.Optional(Type.Number({ description: "Only memories created at/before this Unix ms" })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const config = resolveEmbeddingConfig();
+      const config = await resolveEmbeddingConfig(ctx.modelRegistry);
       const filters: RecallFilters = { categories: params.categories, from: params.since, to: params.until };
       const hits = await recallMerged(ctx.cwd, params.query, params.topK ?? 5, config, filters).catch(() => []);
       if (!hits.length) {
@@ -295,7 +295,7 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`No project memory ${id}.`, "warn");
           return;
         }
-        const config = resolveEmbeddingConfig();
+        const config = await resolveEmbeddingConfig(ctx.modelRegistry);
         await global.save(m.text, m.category ?? null, config);
         project.forget(id);
         ctx.ui.notify(`Promoted ${id} to global memory.`, "success");
@@ -350,7 +350,7 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("Usage: /memory rollback <historyId>", "warn");
           return;
         }
-        const config = resolveEmbeddingConfig();
+        const config = await resolveEmbeddingConfig(ctx.modelRegistry);
         const r = (await project.rollback(hid, config)) ?? (await global.rollback(hid, config));
         ctx.ui.notify(r ? `Rolled back to history #${hid} (memory ${r.id}).` : `No history #${hid}.`, r ? "success" : "warn");
         return;

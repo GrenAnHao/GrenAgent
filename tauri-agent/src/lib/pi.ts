@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
+import type { UsageReport } from './usageReport';
+export type { UsageReport } from './usageReport';
 
 export interface PiEventEnvelope {
   workspace: string;
@@ -124,11 +126,23 @@ export interface ImageItem {
   modifiedMs: number;
 }
 
+export interface ProviderConfigPayload {
+  modelsJson: string | null;
+  authJson: string | null;
+  agentDir: string;
+}
+export interface RefreshResult {
+  refreshed: string[];
+  failed: { workspace: string; error: string }[];
+}
+
 export interface SubAgentItem {
   id: string;
   task: string;
   status: 'running' | 'done' | 'error' | 'cancelled' | string;
   model?: string | null;
+  /** 已解析能力档案 JSON（含 fs/name），前端据此推断「类型（只读/工作）」。 */
+  profile?: string | null;
   output?: string | null;
   error?: string | null;
   exitCode?: number | null;
@@ -177,12 +191,11 @@ export const pi = {
     invoke<void>('delete_conversation', { workspace }),
   removeProject: (workspace: string) =>
     invoke<void>('remove_project', { workspace }),
-  autoTitleSession: (workspace: string) =>
-    invoke<string | null>('auto_title_session', { workspace }),
   respondUi: (workspace: string, response: Record<string, unknown>) =>
     invoke<void>('extension_ui_respond', { workspace, response }),
   getSessionStats: (workspace: string) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
+  getUsageReport: () => invoke<UsageReport>('usage_report'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
   kbStats: (workspace: string) => invoke<KbStats>('kb_stats', { workspace }),
   kbSources: (workspace: string) => invoke<KbSource[]>('kb_sources', { workspace }),
@@ -201,6 +214,12 @@ export const pi = {
   getSettings: () => invoke<Record<string, string>>('get_settings'),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
+  getProviderConfig: () => invoke<ProviderConfigPayload>('get_provider_config'),
+  setProviderConfig: (modelsJson: string, authJson: string) =>
+    invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),
+  refreshModelRegistry: () => invoke<RefreshResult>('refresh_model_registry'),
+  fetchProviderModels: (baseUrl: string, apiKey: string, api: string) =>
+    invoke<string[]>('fetch_provider_models', { baseUrl, apiKey, api }),
   subagentList: (workspace: string) => invoke<SubAgentItem[]>('subagent_list', { workspace }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
