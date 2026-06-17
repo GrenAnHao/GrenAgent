@@ -118,7 +118,7 @@ omp 工具注册表（`packages/coding-agent/src/tools/index.ts:415` `BUILTIN_TO
 
 | 已有扩展 | omp 对应 | 可采纳的更优做法 | 波次 |
 |---|---|---|---|
-| `hashline`（独立 `hl_*`，锚点过期直接拒绝 `hashline/index.ts:70`）| edit 补丁 + stale-anchor recovery + noop-loop-guard（`index.ts:319/340`）| 锚点过期**自动恢复**（快照重建模型锚定版本）而非直接拒绝；连续 no-op 编辑**升级为错误**防子代理死循环 | 波1 |
+| `hashline`（独立 `hl_*`）| edit 补丁 + stale-anchor recovery + noop-loop-guard | [已实现] 锚点过期 **3-way merge 自动恢复**（hl_read 快照 + diff fuzzFactor 0；spec `2026-06-17-hashline-recovery-design.md`）；[后续] 连续 no-op 升级为错误 | 波1 |
 | `code-exec`（仅 Python `py_run/py_reset`）| eval 双内核 + 工具桥 + display | 加 JS 内核、cell 批量、display 富输出 | 波1 |
 | `multi-agent`（`spawn_agent`，文本输出）| task（typed output schema + irc + agent://）| **输出 schema 校验**（机器可读结果）、agent 间 irc、`agent://` 取字段 | 波2 |
 | `diagnostics`（手动）| lsp 写后自动回灌 | edit/write 后**自动诊断** | 波1 |
