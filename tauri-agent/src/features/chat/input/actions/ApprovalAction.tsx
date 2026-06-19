@@ -3,6 +3,7 @@ import { Select } from '@lobehub/ui/base-ui';
 import { Hand, Shield, ShieldAlert, type LucideIcon } from 'lucide-react';
 import { pi } from '../../../../lib/pi';
 import {
+  APPROVAL_HINTS,
   APPROVAL_LABELS,
   APPROVAL_POLICIES,
   type ApprovalPolicy,
@@ -39,12 +40,21 @@ export default function ApprovalAction() {
       disabled={!workspaceReady}
       value={level}
       options={APPROVAL_POLICIES.map((p) => ({ label: APPROVAL_LABELS[p], value: p }))}
-      optionRender={(option) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon icon={ICONS[option.value as ApprovalPolicy]} size={14} />
-          {APPROVAL_LABELS[option.value as ApprovalPolicy]}
-        </span>
-      )}
+      optionRender={(option) => {
+        const p = option.value as ApprovalPolicy;
+        return (
+          <span
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+            title={APPROVAL_HINTS[p]}
+          >
+            <Icon icon={ICONS[p]} size={14} />
+            <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1.25 }}>
+              <span>{APPROVAL_LABELS[p]}</span>
+              <span style={{ fontSize: 11, opacity: 0.6 }}>{APPROVAL_HINTS[p]}</span>
+            </span>
+          </span>
+        );
+      }}
       placeholder="审批"
       prefix={ICONS[level]}
       style={{ width: 'auto', maxWidth: 120 }}
