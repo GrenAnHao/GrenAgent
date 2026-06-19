@@ -52,9 +52,14 @@ export default function (pi: ExtensionAPI) {
     // ④ 请求批准（ask）：仅在有 UI 时逐次确认；headless（子代理）无法确认 → 降级为 auto 行为
     //    （不阻断，避免继承 ask 的子代理被全拦），仍受 ⑤ 危险命令/受保护路径门控。
     if (policy === "ask" && ctx.hasUI) {
-      if (NET_TOOLS.has(event.toolName)) {
-        const choice = await ctx.ui.select(`请求批准：允许联网？\n\n  工具：${event.toolName}`, ["允许", "拒绝"]);
-        if (choice !== "允许") return { block: true, reason: "用户拒绝联网" };
+      // 外部 MCP 工具（名为 mcp__server__tool，含 fetch 等）与内置联网工具 → 逐次确认。
+      const isMcp = event.toolName.startsWith("mcp__");
+      if (isMcp || NET_TOOLS.has(event.toolName)) {
+        const choice = await ctx.ui.select(
+          `请求批准：允许使用${isMcp ? "外部 MCP" : "联网"}工具？\n\n  ${event.toolName}`,
+          ["允许", "拒绝"],
+        );
+        if (choice !== "允许") return { block: true, reason: `用户拒绝使用工具：${event.toolName}` };
       }
       if (event.toolName === "write" || event.toolName === "edit") {
         const p = extractPath((event.input ?? {}) as Record<string, unknown>);

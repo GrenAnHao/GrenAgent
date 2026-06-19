@@ -64,6 +64,22 @@ describe("safety approval gating", () => {
     expect(r?.block).toBe(true);
   });
 
+  it("ask: confirms MCP tools (mcp__*, e.g. fetch) and blocks on decline", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    const ui = { select: vi.fn().mockResolvedValue("拒绝") };
+    const r = await setup()({ toolName: "mcp__user_fetch__fetch", input: {} }, { hasUI: true, cwd, ui });
+    expect(ui.select).toHaveBeenCalled();
+    expect(r?.block).toBe(true);
+  });
+
+  it("auto: does NOT confirm MCP tools (minimal prompts)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    const ui = { select: vi.fn() };
+    const r = await setup()({ toolName: "mcp__user_fetch__fetch", input: {} }, { hasUI: true, cwd, ui });
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(r).toBeUndefined();
+  });
+
   it("ask: confirms mutating bash when sandbox unavailable", async () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("ask");
     vi.mocked(sandboxAvailable).mockResolvedValue(false);
