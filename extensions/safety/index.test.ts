@@ -57,10 +57,11 @@ describe("safety approval gating", () => {
     expect(r).toBeUndefined();
   });
 
-  it("ask: blocks network tool when user declines", async () => {
+  it("ask: blocks network tool when user declines (real tool name fetch_url)", async () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("ask");
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
-    const r = await setup()({ toolName: "web_fetch", input: { url: "http://x" } }, { hasUI: true, cwd, ui });
+    const r = await setup()({ toolName: "fetch_url", input: { url: "http://x" } }, { hasUI: true, cwd, ui });
+    expect(ui.select).toHaveBeenCalled();
     expect(r?.block).toBe(true);
   });
 
@@ -111,5 +112,40 @@ describe("safety approval gating", () => {
     const r = await setup()({ toolName: "bash", input: { command: "ls" } }, { hasUI: true, cwd, ui: {} });
     expect(r?.block).toBe(true);
     expect(r?.reason).toContain("sandbox_sh");
+  });
+
+  it("readonly blocks ast_edit / hl_edit (write-allowlist bypass writers)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    vi.mocked(getConfig).mockImplementation((k: string) => (k === "SAFETY_READONLY" ? "1" : undefined));
+    const r1 = await setup()({ toolName: "ast_edit", input: {} }, { hasUI: true, cwd, ui: {} });
+    expect(r1?.block).toBe(true);
+    const r2 = await setup()({ toolName: "hl_edit", input: {} }, { hasUI: true, cwd, ui: {} });
+    expect(r2?.block).toBe(true);
+  });
+
+  it("ask: confirms host code execution (py_run) when sandbox unavailable", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    vi.mocked(sandboxAvailable).mockResolvedValue(false);
+    const ui = { select: vi.fn().mockResolvedValue("拒绝") };
+    const r = await setup()({ toolName: "py_run", input: { code: "x=1" } }, { hasUI: true, cwd, ui });
+    expect(ui.select).toHaveBeenCalled();
+    expect(r?.block).toBe(true);
+  });
+
+  it("ask: does NOT confirm py_run when sandbox available (runs sandboxed)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    vi.mocked(sandboxAvailable).mockResolvedValue(true);
+    const ui = { select: vi.fn() };
+    const r = await setup()({ toolName: "py_run", input: { code: "x=1" } }, { hasUI: true, cwd, ui });
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(r).toBeUndefined();
+  });
+
+  it("ask: confirms dap_launch (always host execution, even with sandbox)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    vi.mocked(sandboxAvailable).mockResolvedValue(true);
+    const ui = { select: vi.fn().mockResolvedValue("拒绝") };
+    const r = await setup()({ toolName: "dap_launch", input: { program: "x.py" } }, { hasUI: true, cwd, ui });
+    expect(r?.block).toBe(true);
   });
 });

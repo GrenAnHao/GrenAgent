@@ -3,9 +3,19 @@ import { extractPath, isDangerousBash, isMutatingBash, isUnderCwd, matchProtecte
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { sandboxAvailable, sandboxOn } from "../_shared/sandbox-gate.js";
+import {
+  HOST_FALLBACK_EXEC_TOOLS,
+  HOST_ONLY_EXEC_TOOLS,
+  NET_TOOLS as NET_TOOL_NAMES,
+  WRITE_TOOLS,
+} from "../_shared/tool-groups.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
-const NET_TOOLS = new Set(["web_search", "web_fetch", "web_crawler"]);
+// 工具分组取自单一真相源（_shared/tool-groups），避免与 capability 能力闸各维护一份而漂移失配。
+const NET_TOOLS = new Set<string>(NET_TOOL_NAMES);
+const WRITE_BYPASS_TOOLS = new Set<string>(WRITE_TOOLS);
+const HOST_FALLBACK_EXEC = new Set<string>(HOST_FALLBACK_EXEC_TOOLS);
+const HOST_ONLY_EXEC = new Set<string>(HOST_ONLY_EXEC_TOOLS);
 
 export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
@@ -26,6 +36,11 @@ export default function (pi: ExtensionAPI) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (readonly) {
+      // ast_edit/hl_edit 直接 writeFileSync 写盘，不经下面的 write/edit 白名单检查 → 只读下直接禁，
+      // 否则 fs 隔离（reviewer/explore 子代理、im-platforms 受限会话）可被它们绕过。
+      if (WRITE_BYPASS_TOOLS.has(event.toolName)) {
+        return { block: true, reason: `只读模式：禁止 ${event.toolName}（绕过写白名单的写盘工具）` };
+      }
       if (event.toolName === "write" || event.toolName === "edit") {
         const p = extractPath((event.input ?? {}) as Record<string, unknown>);
         if (!p || !matchWriteAllowed(p, writeAllow)) {
@@ -75,6 +90,12 @@ export default function (pi: ExtensionAPI) {
           ["允许", "拒绝"],
         );
         if (choice !== "允许") return { block: true, reason: "用户拒绝改动文件的命令" };
+      }
+      // 宿主代码执行：dap_* 总在宿主跑；py_run/js_run 在沙箱不可用时回退宿主内核（node:vm 可逃逸 /
+      // python 子进程）。这些不经 ③ 的 bash 闸，ask 下单独确认；沙箱可用时 py_run/js_run 进沙箱、免确认。
+      if (HOST_ONLY_EXEC.has(event.toolName) || (HOST_FALLBACK_EXEC.has(event.toolName) && !(await sandboxAvailable()))) {
+        const choice = await ctx.ui.select(`请求批准：允许在宿主执行代码？\n\n  ${event.toolName}`, ["允许", "拒绝"]);
+        if (choice !== "允许") return { block: true, reason: `用户拒绝在宿主执行代码：${event.toolName}` };
       }
     }
 

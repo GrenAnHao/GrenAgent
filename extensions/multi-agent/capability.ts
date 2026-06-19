@@ -3,6 +3,8 @@
 // effective profile, then translates it into spawn-time model + child env.
 // Pure module (no I/O) so it is fully unit-testable.
 
+import { CODE_EXEC_TOOLS, NET_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
+
 export interface CapabilityProfile {
   name?: string;
   /** Tool gating. P0 consumes `deny` only; `allow` is reserved for a later phase. */
@@ -83,6 +85,8 @@ export function profileToModel(
 /** Translate an effective profile into child-process env consumed by the safety extension. */
 export function profileToEnv(p: CapabilityProfile): Record<string, string> {
   const env: Record<string, string> = {};
+  const restrictedFs =
+    p.fs === "readonly" || (typeof p.fs === "object" && p.fs !== null && Array.isArray(p.fs.writeAllow));
   if (p.fs === "readonly") {
     env.SAFETY_READONLY = "1";
     env.SAFETY_WRITE_ALLOW = "";
@@ -95,9 +99,13 @@ export function profileToEnv(p: CapabilityProfile): Record<string, string> {
   // can't see, so resolveMcpServers(profile.mcp, parentMcp) is applied by the
   // runner when it derives the child runtime config.
   const deny: string[] = [];
-  if (p.net === false) deny.push("web_search", "web_fetch", "web_crawler");
+  // 受限文件能力（readonly / 仅允许某些前缀）时，连带禁掉「绕过写白名单」的写盘工具与代码执行工具：
+  // 它们不经 safety 的 write/edit 路径检查（SAFETY_WRITE_ALLOW），否则 fs 隔离可被
+  // ast_edit/hl_edit/py_run/js_run/sandbox_sh/dap_* 绕过（如 reviewer/explore 子代理）。
+  if (restrictedFs) deny.push(...WRITE_TOOLS, ...CODE_EXEC_TOOLS);
+  if (p.net === false) deny.push(...NET_TOOLS);
   if (p.tools?.deny?.length) deny.push(...p.tools.deny);
-  if (deny.length) env.SAFETY_DENY_TOOLS = deny.join(",");
+  if (deny.length) env.SAFETY_DENY_TOOLS = [...new Set(deny)].join(",");
   return env;
 }
 

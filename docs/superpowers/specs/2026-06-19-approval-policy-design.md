@@ -149,3 +149,12 @@ sandboxOn() = getApprovalPolicy() !== "full" && await sandboxAvailable()
 - **子代理策略继承**：`approval` 扩展 `session_start` 回读顺序为 session entry → `APPROVAL_POLICY` env（父进程注入）→ 默认 auto；multi-agent spawn 时注入 `profileEnv.APPROVAL_POLICY = getApprovalPolicy()`。能力硬限（①）在 full 之前先行，full 不越子代理 deny/readonly 闸。
 - **双层 MCP 审批去重**：`ask` 策略下 safety 已统一确认所有 `mcp__*`，`mcp-policy` 经 `decide(..., approvalAsk=true)` 把 needs_approval/danger 的 prompt 降级为 pass，避免二次弹窗；`disabled` 硬禁用与 headless 拦截不受影响。
 - **前端图标**：`Hand`/`Shield`/`ShieldAlert`（对齐 Codex），非早期设计的 `ShieldAlert/ShieldCheck/ShieldOff`。
+
+## 9. 执行/写/网工具的能力闸与审批覆盖加固（2026-06-19）
+
+一次自递归审查发现多个「自有副作用工具」绕过能力闸/审批，已修复，并引入 `extensions/_shared/tool-groups.ts` 作为工具分组的**单一真相源**（safety 与 multi-agent/im-platforms 共用，避免两处清单漂移）：
+
+- **NET_TOOLS 工具名失配（严重）**：safety 与 capability 原用 `web_fetch`/`web_crawler`（不存在的幻影名），漏掉真实联网工具 `search`/`fetch_url`/`fetch_llms`/`fetch_github_readme`/`fetch_web_content`/`github` → `ask` 联网确认与 `net:false` 几乎只命中 `web_search`。现统一为 `NET_TOOLS` 真实全集。
+- **写盘工具绕过 readonly**：`ast_edit`/`hl_edit` 直接 `writeFileSync`，不经 write/edit 白名单。safety readonly 现直接拦 `WRITE_TOOLS`；capability `fs:readonly`/`writeAllow` 一并 deny。
+- **代码执行绕过**：`py_run`/`js_run`/`sandbox_sh`/`dap_launch`/`dap_evaluate` 不经 bash 闸。capability 受限 fs 时 deny `CODE_EXEC_TOOLS`；safety `ask` 对宿主执行（`dap_*`，及沙箱不可用时的 `py_run`/`js_run`）二次确认（沙箱可用时 `py_run`/`js_run` 进沙箱、免确认）。
+- **im-platforms 受限会话**：deny 拆为「始终禁」（写盘/调试执行/github，不经沙箱、绕过隔离）+「无沙箱额外禁」（bash/可沙箱化执行），保留联网查询能力（受限会话靠它读取信息回答问题）。

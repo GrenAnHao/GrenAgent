@@ -78,13 +78,26 @@ describe("profileToEnv", () => {
   it("fs=workspace → no SAFETY_READONLY", () => {
     expect(profileToEnv({ fs: "workspace" }).SAFETY_READONLY).toBeUndefined();
   });
-  it("net=false → deny web tools", () => {
-    expect(profileToEnv({ net: false }).SAFETY_DENY_TOOLS).toBe("web_search,web_fetch,web_crawler");
+  it("net=false → deny all real networking tools", () => {
+    expect(profileToEnv({ net: false }).SAFETY_DENY_TOOLS).toBe(
+      "web_search,search,fetch_url,fetch_llms,fetch_github_readme,fetch_web_content,github",
+    );
   });
   it("tools.deny merges into deny list", () => {
     expect(profileToEnv({ net: false, tools: { deny: ["bash"] } }).SAFETY_DENY_TOOLS).toBe(
-      "web_search,web_fetch,web_crawler,bash",
+      "web_search,search,fetch_url,fetch_llms,fetch_github_readme,fetch_web_content,github,bash",
     );
+  });
+  it("restricted fs denies bypass writers + code-exec tools", () => {
+    const ro = (profileToEnv({ fs: "readonly" }).SAFETY_DENY_TOOLS ?? "").split(",");
+    for (const t of ["ast_edit", "hl_edit", "py_run", "js_run", "sandbox_sh", "dap_launch", "dap_evaluate"]) {
+      expect(ro).toContain(t);
+    }
+    // writeAllow（仅允许某些前缀）同样视为受限 fs，照样禁绕过工具。
+    expect((profileToEnv({ fs: { writeAllow: ["docs/"] } }).SAFETY_DENY_TOOLS ?? "").split(",")).toContain("py_run");
+  });
+  it("fs=workspace does NOT deny code-exec (executor keeps py_run/ast_edit)", () => {
+    expect(profileToEnv({ fs: "workspace" }).SAFETY_DENY_TOOLS).toBeUndefined();
   });
 });
 

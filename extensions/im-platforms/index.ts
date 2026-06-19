@@ -33,6 +33,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { sandboxAvailable } from "../_shared/sandbox-gate.js";
+import { HOST_ONLY_EXEC_TOOLS, SANDBOXABLE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
 import { spawnPiAgent } from "../multi-agent/runner.js";
 import { createImContextStore, type ImContextStore, renderPrompt } from "./context.js";
 import { startWeixinOc, type WeixinOcHandle } from "./wechat.js";
@@ -58,14 +59,15 @@ const IM_SYSTEM_PROMPT_RESTRICTED_SANDBOXED =
   "但写文件仅限当前 workspace、网络默认禁、不能用内置 bash。" +
   "只回复用户最新的问题，不要主动寒暄、不要复述历史、不要使用 emoji。";
 
-// Restricted mode tool deny-list (on top of SAFETY_READONLY, which blocks
-// write/edit + mutating bash): all code execution, ast writes, shell, and gh
-// (which can push/mutate). sandbox_sh is denied too — this list is used only on
-// the no-owner + sandbox-UNAVAILABLE path (when sandboxed, we set SANDBOX_ENABLE=on
-// instead of this deny-list), where sandbox_sh can't run anyway; denying it makes
-// the restriction explicit rather than relying on its self-guard. Only the owner
-// (WECHAT_OC_OWNER) gets full capability.
-const RESTRICTED_DENY_TOOLS = "bash,sandbox_sh,py_run,py_reset,js_run,js_reset,ast_edit,github";
+// 受限（无主人）会话的 deny 清单。SAFETY_READONLY 已锁内置 write/edit + mutating bash；
+// 这里再禁「不经沙箱、会绕过隔离」的宿主副作用工具。仅 owner（WECHAT_OC_OWNER）拥有完整能力。
+//
+// 始终禁：宿主写盘工具（ast_edit/hl_edit，绕过写白名单）、宿主调试执行（dap_*，启动/求值代码）、
+// github（gh CLI 需 auth、可访问私有仓库）。这些不经 WSL2 沙箱，故沙箱可用与否都禁。
+// 保留联网查询（web_search/search/fetch_*）：受限会话靠它读取信息回答问题（见 RESTRICTED persona）。
+const RESTRICTED_DENY_ALWAYS = [...WRITE_TOOLS, ...HOST_ONLY_EXEC_TOOLS, "github"];
+// 沙箱不可用时额外禁：内置 bash 与可沙箱化的代码执行（沙箱可用时它们走沙箱、受限执行，故允许）。
+const RESTRICTED_DENY_NO_SANDBOX = ["bash", ...SANDBOXABLE_EXEC_TOOLS, "py_reset", "js_reset"];
 
 interface WechatStatus {
   enabled: boolean;
@@ -196,11 +198,13 @@ async function runImTurn(fromUser: string, text: string): Promise<void> {
   const env: Record<string, string> = { GOAL_ENABLED: "0", LOOP_GUARD: "1" };
   if (restricted) {
     env.SAFETY_READONLY = "1"; // 宿主 write/edit 锁；写只能经 sandbox_sh（沙箱内、限 workspace）
+    const deny = [...RESTRICTED_DENY_ALWAYS]; // 宿主写/调试/github 永不允许（不经沙箱、绕过隔离）
     if (sandboxed) {
       env.SANDBOX_ENABLE = "on"; // 子进程 code-exec/sandbox_sh 走沙箱；safety 禁内置 bash
     } else {
-      env.SAFETY_DENY_TOOLS = RESTRICTED_DENY_TOOLS; // 无沙箱兜底 → 纯禁执行
+      deny.push(...RESTRICTED_DENY_NO_SANDBOX); // 无沙箱兜底 → 连 bash/可沙箱化执行也禁
     }
+    env.SAFETY_DENY_TOOLS = [...new Set(deny)].join(",");
   }
   const result = await spawnPiAgent(st.cwd, renderPrompt(store.history(key)), {
     systemPrompt: restricted
