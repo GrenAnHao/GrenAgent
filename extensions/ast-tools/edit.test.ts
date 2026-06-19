@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -49,6 +49,23 @@ describe("runAstEdit", () => {
     });
     expect(res.totalReplacements).toBe(1);
     expect(readFileSync(file, "utf8")).toBe("A(1); b(2);\n");
+  });
+
+  it("skips protected paths (node_modules) even when explicitly targeted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ast-edit-"));
+    mkdirSync(join(root, "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "dep", "index.ts"), "log(1)");
+    writeFileSync(join(root, "a.ts"), "log(2)");
+    const res = await runAstEdit({
+      ops: [{ pat: "log($X)", out: "warn($X)" }],
+      paths: ["node_modules/dep/index.ts", "a.ts"],
+      dryRun: false,
+      cwd: root,
+    });
+    expect(res.totalReplacements).toBe(1); // 仅 a.ts
+    expect(readFileSync(join(root, "node_modules", "dep", "index.ts"), "utf8")).toBe("log(1)"); // 未触碰
+    expect(readFileSync(join(root, "a.ts"), "utf8")).toBe("warn(2)");
+    expect(res.parseErrors.some((e) => e.includes("node_modules") && e.includes("受保护"))).toBe(true);
   });
 
   it("rejects when files exceed maxFiles", async () => {

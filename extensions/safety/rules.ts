@@ -13,17 +13,9 @@ export function isDangerousBash(command: string): boolean {
   return DANGEROUS_BASH.some((re) => re.test(command));
 }
 
-const PROTECTED = [
-  /(^|[\\/])\.env(\.|$)/i,
-  /(^|[\\/])\.git([\\/]|$)/i,
-  /(^|[\\/])node_modules([\\/]|$)/i,
-  /\.(pem|key)$/i,
-];
-
-export function matchProtectedPath(p: string): boolean {
-  if (!p) return false;
-  return PROTECTED.some((re) => re.test(p));
-}
+// 受保护路径判定移至 _shared/protected-paths：safety 的 write/edit 拦截与绕过型写工具
+// （ast_edit/hl_edit）的写盘前自检共用同一份清单。此处 re-export 保持既有导入路径不变。
+export { matchProtectedPath } from "../_shared/protected-paths.js";
 
 export function extractPath(input: Record<string, unknown>): string | undefined {
   const v = input?.path ?? input?.file_path ?? input?.filePath;

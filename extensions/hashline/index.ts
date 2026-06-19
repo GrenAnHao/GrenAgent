@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { matchProtectedPath } from "../_shared/protected-paths.js";
 import { applyOps } from "./apply.js";
 import { parsePatch } from "./parser.js";
 import { HASHLINE_PROMPT } from "./prompt.js";
@@ -65,6 +66,12 @@ export default function (pi: ExtensionAPI) {
       const rejected: string[] = [];
       for (const section of parsed.sections) {
         const abs = isAbsolute(section.path) ? section.path : resolve(ctx.cwd, section.path);
+        // hl_edit 直接 writeFileSync，不经 safety 的 write/edit 保护路径闸；故此处自检，
+        // 否则 .env/.git/keys 可借补丁内嵌路径绕过保护（safety ⑤ 只认 write/edit 工具名）。
+        if (matchProtectedPath(section.path) || matchProtectedPath(abs)) {
+          rejected.push(`${section.path}: 受保护路径，已拒绝写入（.env/.git/node_modules/*.pem/*.key）`);
+          continue;
+        }
         let content: string;
         try {
           content = readFileSync(abs, "utf8");

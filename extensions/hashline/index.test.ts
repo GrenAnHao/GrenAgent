@@ -68,4 +68,14 @@ describe("hashline auto-recovery (integration)", () => {
     expect(edit).toContain("无可用快照");
     expect(readFileSync(file, "utf8")).toBe("a\nb\n");
   });
+
+  it("refuses to write protected paths (.env) — bypasses safety write/edit guard", async () => {
+    const { root } = setup("x\n");
+    const tools = load();
+    const ctx = { cwd: root };
+    writeFileSync(join(root, ".env"), "SECRET=1\n");
+    const edit = text(await tools.hl_edit("9", { patch: "[.env#ffff]\nSWAP 1:\n+SECRET=2" }, null, null, ctx));
+    expect(edit).toContain("受保护路径");
+    expect(readFileSync(join(root, ".env"), "utf8")).toBe("SECRET=1\n"); // 未被改写
+  });
 });

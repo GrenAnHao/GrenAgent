@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { type SgNode, parse } from "@ast-grep/napi";
+import { matchProtectedPath } from "../_shared/protected-paths.js";
 import { type CoreLang, collectFiles } from "./lang.js";
 import { type MetaResolver, expandTemplate } from "./rewrite.js";
 
@@ -60,7 +61,12 @@ function applyOpsToSource(source: string, lang: CoreLang, ops: AstEditOp[]): { n
 
 export async function runAstEdit(args: AstEditArgs): Promise<AstEditResult> {
   const maxFiles = args.maxFiles ?? DEFAULT_MAX_FILES;
-  const files = await collectFiles(args.paths, args.cwd);
+  const collected = await collectFiles(args.paths, args.cwd);
+  // 受保护路径（.env/.git/node_modules/*.pem/*.key）即便被 glob 命中也跳过——ast_edit 直接
+  // writeFileSync，不经 safety 的保护路径闸（仅认 write/edit 工具名），否则 `**/*.js` 之类会改到
+  // node_modules。被跳过的文件在 parseErrors 里说明，不计入 maxFiles。
+  const isProtected = (f: { rel: string; abs: string }) => matchProtectedPath(f.rel) || matchProtectedPath(f.abs);
+  const files = collected.filter((f) => !isProtected(f));
   if (files.length > maxFiles) {
     return {
       files: [],
@@ -71,7 +77,9 @@ export async function runAstEdit(args: AstEditArgs): Promise<AstEditResult> {
     };
   }
   const results: AstEditFileResult[] = [];
-  const parseErrors: string[] = [];
+  const parseErrors: string[] = collected
+    .filter(isProtected)
+    .map((f) => `${f.rel}: 受保护路径，已跳过（.env/.git/node_modules/*.pem/*.key）`);
   let total = 0;
   for (const f of files) {
     let src: string;
