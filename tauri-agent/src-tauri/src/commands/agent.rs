@@ -374,6 +374,28 @@ pub async fn agent_set_mode(
     .await
 }
 
+/// 切换审批策略（ask / auto / full）。底层走 prompt 通道发送 `/approval <level>`，
+/// 由 sidecar 的 approval 扩展执行（设共享策略 + 持久化），不调用 LLM；
+/// 切换后新策略经 setStatus 推回前端供选择器回读。
+#[tauri::command]
+pub async fn agent_set_approval(
+    workspace: String,
+    level: String,
+    mgr: State<'_, Arc<PiManager>>,
+) -> Result<Value, String> {
+    send(
+        &mgr,
+        &workspace,
+        PiOutbound::Prompt {
+            id: None,
+            message: format!("/approval {level}"),
+            images: None,
+            streaming_behavior: None,
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn agent_compact(
     workspace: String,
