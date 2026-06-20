@@ -7,6 +7,8 @@ import { LazyHighlighter } from './LazyHighlighter';
 import { cardStyles } from './cardStyles';
 import { StatusIndicator } from './StatusIndicator';
 import { renderExtensionCard } from './extensionCards';
+import { AnsweredQuestionsCard } from './AnsweredQuestionsCard';
+import { InlineQuestionCard } from '../chat/InlineQuestionCard';
 import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 import {
   argSummary,
@@ -440,6 +442,15 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
   // 一体（自带标题/提示词/操作/预览），再套通用「工具行 + 折叠 + 引导线 + 虚线分隔」反而冗余难看。
   // 在 hooks 之后再 early return，保证 hooks 调用顺序稳定。
   const bareName = toolName.toLowerCase();
+
+  // ask_user：运行中 → 内联选择卡（接管 InlineQuestionCard）；完成 → 紧凑问答摘要。
+  if (bareName === 'ask_user') {
+    if (status === 'done') {
+      return <AnsweredQuestionsCard args={args} result={result} />;
+    }
+    return <InlineQuestionCard />;
+  }
+
   if (bareName === 'todo' || bareName === 'generate_image') {
     const card = renderExtensionCard({ toolName, args, result, status });
     if (card) {
