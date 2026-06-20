@@ -20,7 +20,7 @@ output/
 /.codex/
 /.superpowers/
 /openspec/
-/.cursor/mcp.json
+/.cursor/
 
 # Pi runtime data (per-project)
 /tauri-agent/.pi/

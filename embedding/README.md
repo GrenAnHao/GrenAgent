@@ -1,15 +1,27 @@
 # embedding —— TypeScript 极简本地向量服务（Node.js SEA 单体打包）
 
-在本地 CPU 上用 \`@huggingface/transformers\` 跑 \`Xenova/all-MiniLM-L6-v2\`，
-对外暴露 \`POST /embed\` HTTP 接口，并用 Node v25.5+ 的 \`--build-sea\`
-打成 \`vector-service.exe\`。
+在本地 CPU 上用 `@huggingface/transformers` 跑 **`Xenova/bge-small-zh-v1.5`**（BAAI bge-small-zh 中文版，512 维），
+对外暴露 **OpenAI 兼容** `POST /v1/embeddings`，并保留 legacy `POST /embed`。
+可用 Node v25.5+ 的 `--build-sea` 打成 `vector-service.exe`。
 
-已在 Node 25.5.0 + Windows 上端到端验证：
+## Pi 接入示例
 
-- \`npm run typecheck\` 通过
-- \`npm run build:bundle\` 通过
-- \`npm run build:sea\` 生成 exe
-- \`vector-service.exe\` 启动后 \`/embed\` 返回 384 维向量
+在供应商库新增 provider（`models.json`）：
+
+```json
+{
+  "name": "local-embed",
+  "api": "openai-completions",
+  "baseUrl": "http://127.0.0.1:8787/v1",
+  "apiKey": "local",
+  "models": [{ "id": "bge-small-zh-v1.5" }]
+}
+```
+
+设置里把 `KB_EMBED_PROVIDER` / `MEMORY_EMBED_PROVIDER` 指到该 provider，`model` 填 `bge-small-zh-v1.5`。
+`apiKey` 不能为空（Pi 要求），填任意占位符即可；服务端默认不校验，设 `EMBED_API_KEY` 后可启用 Bearer 校验。
+
+**注意**：从云端 embedding（如 Jina）切到本地 512 维模型后，需重建知识库 / 记忆 / 代码索引向量。
 
 ## 目录结构
 
@@ -62,18 +74,39 @@ set HF_ENDPOINT=https://hf-mirror.com
 npm start
 \`\`\`
 
-测试：
+测试 OpenAI 兼容接口：
 
 \`\`\`cmd
-curl -X POST http://localhost:8787/embed -H "content-type: application/json" -d "{\\\"text\\\":\\\"你好世界\\\"}"
+curl -X POST http://localhost:8787/v1/embeddings ^
+  -H "content-type: application/json" ^
+  -H "authorization: Bearer local" ^
+  -d "{\"model\":\"bge-small-zh-v1.5\",\"input\":\"你好世界\"}"
 \`\`\`
 
-返回格式：
+Legacy 单条接口：
+
+\`\`\`cmd
+curl -X POST http://localhost:8787/embed -H "content-type: application/json" -d "{\"text\":\"你好世界\"}"
+\`\`\`
+
+OpenAI 返回格式：
 
 \`\`\`json
 {
-  "dim": 384,
-  "vector": [0.01, -0.02]
+  "object": "list",
+  "data": [{ "object": "embedding", "index": 0, "embedding": [0.01, -0.02] }],
+  "model": "bge-small-zh-v1.5",
+  "usage": { "prompt_tokens": 0, "total_tokens": 0 }
+}
+\`\`\`
+
+Legacy 返回格式（512 维）：
+
+\`\`\`json
+{
+  "dim": 512,
+  "vector": [0.01, -0.02],
+  "model": "bge-small-zh-v1.5"
 }
 \`\`\`
 
@@ -100,12 +133,13 @@ set HF_ENDPOINT=https://hf-mirror.com
 vector-service.exe
 \`\`\`
 
-改端口：
-
-\`\`\`cmd
-set PORT=9000
-vector-service.exe
-\`\`\`
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PORT` | `8787` | 监听端口 |
+| `EMBED_MODEL` | `Xenova/bge-small-zh-v1.5` | transformers.js 模型 ID |
+| `EMBED_OPENAI_MODEL` | `bge-small-zh-v1.5` | OpenAI 响应里的 model 字段 |
+| `HF_ENDPOINT` | （无） | 设为 `https://hf-mirror.com` 加速国内下载 |
+| `EMBED_API_KEY` | （无） | 设值后要求 `Authorization: Bearer <key>` |
 
 ## 关键实现点
 

@@ -15,9 +15,13 @@ type TransformerEnv = {
 
 type TensorLike = {
   data: Iterable<number> | ArrayLike<number>;
+  dims?: number[];
 };
 
-type FeatureExtractor = (text: string, options: { pooling: 'mean'; normalize: boolean }) => Promise<TensorLike>;
+type FeatureExtractor = (
+  text: string | string[],
+  options: { pooling: 'mean'; normalize: boolean },
+) => Promise<TensorLike>;
 
 type Transformers = {
   env: TransformerEnv;
@@ -34,36 +38,27 @@ try { sea = require('node:sea') as SeaApi; } catch (_) { sea = null; }
 export const isSea = !!(sea && typeof sea.isSea === 'function' && sea.isSea());
 
 // SEA 中 __dirname 指向 blob 内部（只读），改用可执行文件所在目录做运行时根目录。
-// 普通环境就是 embedding/ 本身。
 export const APP_ROOT = isSea ? path.dirname(process.execPath) : __dirname;
 
-// ---------- 2) SEA 下「能读磁盘」的 require ----------
-//
-// 关键限制：Node 25 SEA 的 main 脚本里，require() 被 SEA 内部的 embedderRequire
-// 接管，只认 node: 内置模块；require 第三方包会抛 ERR_UNKNOWN_BUILTIN_MODULE。
-// （注意：patch Module._load 无效，因为 embedderRequire 走 node:internal/main，
-//  绕过了 Module._load。）
-//
-// 解法放在打包阶段：build:bundle 用 esbuild banner 把 sea-banner.js 的内容注入
-// 到 bundle IIFE 之前。banner 里在 bundle 顶层作用域重新声明 require，对第三方
-// 裸包名走 createRequire(磁盘)，对 node: 内置模块透传。
 const realRequire = Module.createRequire(path.join(APP_ROOT, 'package.json'));
 (globalThis as typeof globalThis & { __seaRequire?: NodeRequire }).__seaRequire = realRequire;
 
-// ---------- 3) 模型加载 ----------
+// ---------- 2) 模型 ----------
+/** transformers.js 模型 ID（ONNX 权重由 Xenova 维护）。 */
+export const DEFAULT_MODEL_ID = 'Xenova/bge-small-zh-v1.5';
+/** OpenAI 兼容响应里的 model 字段（Pi settings 里填这个或任意字符串均可）。 */
+export const DEFAULT_OPENAI_MODEL = process.env.EMBED_OPENAI_MODEL || 'bge-small-zh-v1.5';
+
+const MODEL_ID = process.env.EMBED_MODEL || DEFAULT_MODEL_ID;
+
 let pipe: FeatureExtractor | null = null;
-const MODEL_ID = process.env.EMBED_MODEL || 'Xenova/all-MiniLM-L6-v2';
 
 async function getPipeline(): Promise<FeatureExtractor> {
   if (pipe) return pipe;
 
-  // transformers.js v3 同时提供 CJS 与 ESM 入口。
-  // esbuild 已将其 inline 进 bundle；SEA 下 external 原生包由 sea-banner.js 的 require shim 加载。
   const { pipeline, env } = require('@huggingface/transformers') as Transformers;
   env.cacheDir = path.join(APP_ROOT, '.models');
 
-  // 国内网络兜底：HF_ENDPOINT=https://hf-mirror.com。
-  // 设为 "0" / "false" 可关闭，强制用官方源。
   const endpoint = process.env.HF_ENDPOINT;
   if (endpoint && !['0', 'false', ''].includes(endpoint.toLowerCase())) {
     env.remoteHost = endpoint.replace(/\/$/, '');
@@ -73,14 +68,52 @@ async function getPipeline(): Promise<FeatureExtractor> {
   return pipe;
 }
 
-/**
- * 把一段文本转换成向量（L2 归一化后的浮点数组）。
- */
-export async function getEmbedding(text: string): Promise<number[]> {
-  if (typeof text !== 'string' || !text.trim()) {
-    throw new Error('text must be a non-empty string');
+function tensorToVectors(out: TensorLike, count: number): number[][] {
+  const flat = Array.from(out.data as ArrayLike<number>);
+  const dims = out.dims;
+  // 批量：[batch, dim]；单条：[dim] 或 [1, dim]。
+  if (count === 1) {
+    const dim = dims && dims.length >= 2 ? dims[dims.length - 1] : flat.length;
+    return [flat.slice(flat.length - dim)];
   }
+  const dim = dims && dims.length >= 2 ? dims[dims.length - 1] : Math.floor(flat.length / count);
+  const vectors: number[][] = [];
+  for (let i = 0; i < count; i += 1) vectors.push(flat.slice(i * dim, (i + 1) * dim));
+  return vectors;
+}
+
+/**
+ * 批量文本 → L2 归一化向量。空串会被跳过；若全部为 empty 则抛错。
+ */
+export async function getEmbeddings(texts: string[]): Promise<number[][]> {
+  const cleaned = texts.map((t) => (t ?? '').trim()).filter(Boolean);
+  if (cleaned.length === 0) throw new Error('input must contain at least one non-empty string');
+
   const extractor = await getPipeline();
-  const out = await extractor(text, { pooling: 'mean', normalize: true });
-  return Array.from(out.data as ArrayLike<number>);
+  if (cleaned.length === 1) {
+    const out = await extractor(cleaned[0], { pooling: 'mean', normalize: true });
+    return tensorToVectors(out, 1);
+  }
+
+  // transformers.js 支持数组输入；失败时逐条回退（兼容旧行为）。
+  try {
+    const out = await extractor(cleaned, { pooling: 'mean', normalize: true });
+    const vectors = tensorToVectors(out, cleaned.length);
+    if (vectors.length === cleaned.length) return vectors;
+  } catch {
+    /* fall through */
+  }
+
+  const vectors: number[][] = [];
+  for (const text of cleaned) {
+    const out = await extractor(text, { pooling: 'mean', normalize: true });
+    vectors.push(...tensorToVectors(out, 1));
+  }
+  return vectors;
+}
+
+/** 单条便捷封装（legacy /embed）。 */
+export async function getEmbedding(text: string): Promise<number[]> {
+  const [vector] = await getEmbeddings([text]);
+  return vector;
 }

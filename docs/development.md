@@ -104,7 +104,7 @@ export default function (pi: ExtensionAPI) {
 
 ## 本地向量服务（embedding，独立模块）
 
-`embedding/` 是一个独立的本地向量服务，目前尚未集成进 sidecar 或桌面应用，可单独构建与运行。它在本地 CPU 上用 `@huggingface/transformers` 跑 `Xenova/all-MiniLM-L6-v2`，对外暴露 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
+`embedding/` 是一个独立的本地向量服务，目前尚未集成进 sidecar 或桌面应用，可单独构建与运行。它在本地 CPU 上用 `@huggingface/transformers` 跑 `Xenova/bge-small-zh-v1.5`，对外暴露 OpenAI 兼容 `POST /v1/embeddings`（512 维），并可用 Node.js SEA 打成单文件可执行程序。
 
 以下命令在 `embedding/` 目录执行：
 
