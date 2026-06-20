@@ -54,16 +54,6 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorBgContainer};
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   `,
-  bar: css`
-    height: 3px;
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  barFill: css`
-    height: 100%;
-    background: ${cssVar.colorPrimary};
-    border-radius: 0 2px 2px 0;
-    transition: width 0.2s ease;
-  `,
   head: css`
     display: flex;
     gap: 7px;
@@ -89,29 +79,30 @@ const styles = createStaticStyles(({ css }) => ({
     margin-inline-start: auto;
   `,
   step: css`
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 1.5px solid ${cssVar.colorTextTertiary};
-    font-size: 9px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 5px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    font-size: 10px;
     color: ${cssVar.colorTextTertiary};
     display: inline-flex;
     align-items: center;
     justify-content: center;
   `,
   stepDone: css`
+    background: rgba(126, 226, 168, 0.15);
+    border-color: transparent;
+    color: #7ee2a8;
+  `,
+  stepCur: css`
     background: ${cssVar.colorPrimary};
     border-color: ${cssVar.colorPrimary};
     color: ${cssVar.colorBgContainer};
-  `,
-  stepCur: css`
-    border-color: ${cssVar.colorPrimary};
-    color: ${cssVar.colorPrimary};
+    font-weight: 700;
   `,
   body: css`
     padding: 12px 14px;
-    max-height: 260px;
-    overflow: auto;
   `,
   question: css`
     font-size: 14px;
@@ -125,19 +116,13 @@ const styles = createStaticStyles(({ css }) => ({
     flex-direction: column;
     gap: 7px;
   `,
-  option: css`
+  optionWrap: css`
     display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    width: 100%;
-    padding: 9px 11px;
+    flex-direction: column;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 9px;
     background: ${cssVar.colorFillQuaternary};
-    color: ${cssVar.colorText};
-    font-size: 13px;
-    text-align: start;
-    cursor: pointer;
+    overflow: hidden;
     transition:
       border-color 0.12s ease,
       background 0.12s ease;
@@ -146,9 +131,22 @@ const styles = createStaticStyles(({ css }) => ({
       border-color: ${cssVar.colorPrimary};
     }
   `,
-  optionSelected: css`
+  optionWrapSel: css`
     border-color: ${cssVar.colorPrimary};
     background: ${cssVar.colorPrimaryBg};
+  `,
+  option: css`
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    width: 100%;
+    padding: 9px 11px;
+    border: none;
+    background: transparent;
+    color: ${cssVar.colorText};
+    font-size: 13px;
+    text-align: start;
+    cursor: pointer;
   `,
   letter: css`
     flex: none;
@@ -182,14 +180,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   customInput: css`
     width: 100%;
-    margin-block-start: 7px;
-    padding: 8px 10px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
-    background: ${cssVar.colorFillQuaternary};
+    padding: 7px 11px;
+    border: none;
+    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
+    background: transparent;
     color: ${cssVar.colorText};
     font-size: 13px;
-    resize: vertical;
+    outline: none;
   `,
   footer: css`
     display: flex;
@@ -261,15 +258,9 @@ export const QuestionSelector = memo(function QuestionSelector({
   const answeredCount = questions.filter((qq) => questionSatisfied(qq, selected, customTexts)).length;
   const picked = q ? (selected[q.id] ?? []) : [];
   const pickedCount = picked.filter((id) => id !== CUSTOM_OPTION_ID || customTexts[q?.id ?? '']?.trim()).length;
-  const showCustom = q?.allowCustom && picked.includes(CUSTOM_OPTION_ID) && onCustomTextChange;
 
   return (
     <div className={cx(styles.root, className)} data-testid={testId}>
-      {paged ? (
-        <div className={styles.bar}>
-          <div className={styles.barFill} style={{ width: `${((idx + 1) / questions.length) * 100}%` }} />
-        </div>
-      ) : null}
 
       <div className={styles.head}>
         <Icon icon={MessageCircleQuestion} size={13} />
@@ -281,7 +272,7 @@ export const QuestionSelector = memo(function QuestionSelector({
           <span className={styles.dots}>
             {questions.map((qq, i) => (
               <span key={qq.id} className={cx(styles.step, i < idx && styles.stepDone, i === idx && styles.stepCur)}>
-                {i < idx ? '✓' : i + 1}
+                {i + 1}
               </span>
             ))}
           </span>
@@ -304,34 +295,37 @@ export const QuestionSelector = memo(function QuestionSelector({
           <div className={styles.options}>
             {q.options.map((o, oi) => {
               const isSel = picked.includes(o.id);
+              const isCustom = o.id === CUSTOM_OPTION_ID;
               return (
-                <button
-                  key={o.id}
-                  className={cx(styles.option, isSel && styles.optionSelected)}
-                  data-testid={`${testId}-opt-${q.id}-${o.id}`}
-                  disabled={disabled}
-                  onClick={() => onToggle(q.id, o.id, Boolean(q.allowMultiple))}
-                  type="button"
-                >
-                  <span className={cx(styles.letter, q.allowMultiple && styles.letterMulti, isSel && styles.letterSelected)}>
-                    {String.fromCharCode(65 + oi)}
-                  </span>
-                  <span className={styles.optionLabel}>{o.label}</span>
-                  {isSel ? <Icon className={styles.check} icon={Check} size={14} /> : null}
-                </button>
+                <div key={o.id} className={cx(styles.optionWrap, isSel && styles.optionWrapSel)}>
+                  <button
+                    className={styles.option}
+                    data-testid={`${testId}-opt-${q.id}-${o.id}`}
+                    disabled={disabled}
+                    onClick={() => onToggle(q.id, o.id, Boolean(q.allowMultiple))}
+                    type="button"
+                  >
+                    <span className={cx(styles.letter, q.allowMultiple && styles.letterMulti, isSel && styles.letterSelected)}>
+                      {String.fromCharCode(65 + oi)}
+                    </span>
+                    <span className={styles.optionLabel}>{o.label}</span>
+                    {isSel ? <Icon className={styles.check} icon={Check} size={14} /> : null}
+                  </button>
+                  {isCustom && isSel && onCustomTextChange ? (
+                    <input
+                      className={styles.customInput}
+                      data-testid={`${testId}-custom-${q.id}`}
+                      onChange={(e) => onCustomTextChange(q.id, e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="请输入自定义答案"
+                      type="text"
+                      value={customTexts[q.id] ?? ''}
+                    />
+                  ) : null}
+                </div>
               );
             })}
           </div>
-          {showCustom ? (
-            <textarea
-              className={styles.customInput}
-              data-testid={`${testId}-custom-${q.id}`}
-              onChange={(e) => onCustomTextChange(q.id, e.target.value)}
-              placeholder="请输入自定义答案"
-              rows={2}
-              value={customTexts[q.id] ?? ''}
-            />
-          ) : null}
         </div>
       ) : null}
 
