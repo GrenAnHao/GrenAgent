@@ -1,6 +1,6 @@
 ## Delegation
 
-Use `spawn_agent` for broad fan-out, parallel independent subtasks, or isolated large contexts.
+Use `spawn_agent` when a task splits into several independent subtasks you can run in parallel, or when one exploration is large enough that its output would bloat your own context.
 
 Do it yourself for known paths/symbols or a few-file lookup.
 

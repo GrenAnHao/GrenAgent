@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { Button, Icon } from '@lobehub/ui';
 import { MessageCircleQuestion, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
+import { QuestionSelector } from '../../../components/QuestionSelector';
 import { extensionUiRespond } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
@@ -54,44 +55,6 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
     white-space: pre-wrap;
   `,
-  options: css`
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-block-start: 8px;
-  `,
-  option: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
-    background: ${cssVar.colorFillQuaternary};
-    color: ${cssVar.colorText};
-    font-size: 13px;
-    text-align: start;
-    cursor: pointer;
-
-    &:hover {
-      border-color: ${cssVar.colorPrimary};
-      background: ${cssVar.colorPrimaryBg};
-    }
-  `,
-  letter: css`
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    background: ${cssVar.colorFillSecondary};
-    font-size: 11px;
-    font-weight: 600;
-    color: ${cssVar.colorTextSecondary};
-  `,
   row: css`
     display: flex;
     gap: 8px;
@@ -112,18 +75,19 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 /**
- * ChatInput 上方的内联「交互请求」卡片：渲染扩展经 ctx.ui.select / confirm / input 发起的请求
- * （由 ExtensionUiHost 写入 uiPromptStore），用户应答经 extension_ui_response 回传——取代原先的
- * 全局 Modal 弹窗，做成像 GoalPill 那样的输入框上方引导卡片，不打断、不弹窗。
+ * ChatInput 上方的内联「交互请求」：扩展经 ctx.ui.select / confirm / input 发起。
+ * select 与对话流 QuestionsCard 共用 QuestionSelector（Cursor 风格选项行）。
  */
 export const PromptRequestCard = memo(function PromptRequestCard() {
   const { workspace } = useAgentStoreContext();
   const item = useUiPromptStore((s) => s.byWorkspace[workspace]);
   const [text, setText] = useState('');
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
 
   const requestId = item?.request.id;
   useEffect(() => {
     setText(item?.request.prefill ? String(item.request.prefill) : '');
+    setSelected({});
   }, [requestId, item?.request.prefill]);
 
   const respond = useCallback(
@@ -143,13 +107,19 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const { request } = item;
   const isConfirm = request.method === 'confirm';
   const isInput = request.method === 'input';
+  const isSelect = !isConfirm && !isInput;
   const options = request.options?.length ? request.options : ['确定', '取消'];
-
-  // confirm 的提示在 message；select/input 的提示在 title（统一渲染到 body）。
-  const heading = isConfirm ? (request.title ?? '确认') : '请确认';
-  const body = isConfirm ? (request.message ?? request.title ?? '') : (request.title ?? '');
-
+  const heading = isConfirm ? (request.title ?? '确认') : isSelect ? '请选择' : '请确认';
+  const body = isConfirm ? (request.message ?? request.title ?? '') : isInput ? (request.title ?? '') : '';
   const dismiss = () => respond(isConfirm ? { confirmed: false } : { cancelled: true });
+  const selectQuestion = {
+    id: 'select',
+    title: request.title ?? '请选择一个选项',
+    options: options.map((label, i) => ({ id: `o${i + 1}`, label })),
+  };
+  const chosen = selected.select?.[0];
+  const chosenLabel =
+    chosen != null ? selectQuestion.options.find((o) => o.id === chosen)?.label : undefined;
 
   return (
     <div className={styles.card} data-testid="prompt-request-card">
@@ -166,7 +136,7 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
           <Icon icon={X} size={14} />
         </button>
       </div>
-      {body ? <div className={styles.body}>{body}</div> : null}
+      {body && !isSelect ? <div className={styles.body}>{body}</div> : null}
 
       {isConfirm ? (
         <div className={styles.row}>
@@ -207,20 +177,30 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
           </div>
         </>
       ) : (
-        <div className={styles.options}>
-          {options.map((opt, i) => (
-            <button
-              className={styles.option}
-              data-testid={`prompt-request-opt-${i}`}
-              key={opt}
-              onClick={() => respond({ value: opt })}
-              type="button"
-            >
-              <span className={styles.letter}>{String.fromCharCode(65 + i)}</span>
-              <span>{opt}</span>
-            </button>
-          ))}
-        </div>
+        <QuestionSelector
+          continueLabel="确定"
+          data-testid="prompt-request-select"
+          headerTitle="请选择"
+          onContinue={() => {
+            if (chosenLabel) respond({ value: chosenLabel });
+          }}
+          onSkip={dismiss}
+          onToggle={(questionId, optionId, allowMultiple) => {
+            setSelected((prev) => {
+              const cur = prev[questionId] ?? [];
+              if (allowMultiple) {
+                return {
+                  ...prev,
+                  [questionId]: cur.includes(optionId) ? cur.filter((x) => x !== optionId) : [...cur, optionId],
+                };
+              }
+              return { ...prev, [questionId]: [optionId] };
+            });
+          }}
+          questions={[selectQuestion]}
+          selected={selected}
+          skipLabel="取消"
+        />
       )}
     </div>
   );

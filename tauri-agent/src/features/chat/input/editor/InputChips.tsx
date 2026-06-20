@@ -1,6 +1,7 @@
-import { ActionIcon, Flexbox, Icon } from '@lobehub/ui';
-import { FileText, X } from 'lucide-react';
+import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
+import FileIcon from '../../../../components/FileIcon';
 import { useChatInput } from '../ChatInputContext';
 import { pastedLabel } from './pastedText';
 
@@ -50,15 +51,18 @@ export function InputChips() {
           />
         </div>
       ))}
-      {pastedTexts.map((p) => (
-        <div key={p.id} className={styles.chip}>
-          <Icon icon={FileText} size={14} />
-          <span className={styles.chipLabel} title={p.text.slice(0, 2000)}>
-            {pastedLabel(p)}
-          </span>
-          <ActionIcon icon={X} size="small" title="移除" onClick={() => removePastedText(p.id)} />
-        </div>
-      ))}
+      {pastedTexts.map((p) => {
+        const fileName = p.source?.split('/').pop() || p.source || '粘贴文本';
+        return (
+          <div key={p.id} className={styles.chip}>
+            <FileIcon fileName={fileName} size={14} variant="raw" />
+            <span className={styles.chipLabel} title={p.text.slice(0, 2000)}>
+              {pastedLabel(p)}
+            </span>
+            <ActionIcon icon={X} size="small" title="移除" onClick={() => removePastedText(p.id)} />
+          </div>
+        );
+      })}
     </Flexbox>
   );
 }

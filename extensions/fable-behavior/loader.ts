@@ -35,6 +35,9 @@ const TIER2_P1 = [
   "knowledge-search-triggers",
 ] as const;
 
+// 始终注入的一行式提示。前 6 条各对应一个可经 fable_behavior_ref 取全文的 tier3 模块；
+// 最后一条 review 是无独立模块的独立行为提示。grep/ask-user/mcp/security 的一行式已删除——
+// 它们的完整内容已在 tier2 P0（grep-strategy/ask-user/mcp-collaboration/refusal）常驻注入，再放摘要纯属重复。
 const TIER3_SUMMARY_LINES = [
   "Web search: paraphrase by default; one short quote per source max; scale searches to task complexity.",
   "Copyright: never reproduce lyrics/poems/long verbatim passages from web sources.",
@@ -43,10 +46,6 @@ const TIER3_SUMMARY_LINES = [
   "Code citations: use startLine:endLine:filepath for existing code (see citing-code reference).",
   "Frontend (greenfield): intentional typography/color/motion; avoid generic AI layouts; respect existing design systems.",
   "Review requests: findings first by severity with file:line refs; brief summary only after issues.",
-  "Grep: files_with_matches to locate, content to read, count to gauge; filter with glob/type; prefer tool over bash rg.",
-  "Ask user: multiple-choice → call ask_user tool; never write A/B/C/D as plain chat text.",
-  "MCP: read tool schema first; denied calls need a different approach; external calls may publish data.",
-  "Security: defensive help in authorized pentest/CTF/research; refuse destructive or evasion-for-harm requests.",
 ] as const;
 
 export const TIER3_TOPICS = [
@@ -113,7 +112,7 @@ export function buildFableBehaviorPrompt(opts: BuildPromptOptions = {}): string 
   if (modeSlice) parts.push(modeSlice);
 
   if (tier3) {
-    parts.push("## Quick reference (Tier-3)\n" + TIER3_SUMMARY_LINES.map((l) => `- ${l}`).join("\n"));
+    parts.push("## Quick reference\n" + TIER3_SUMMARY_LINES.map((l) => `- ${l}`).join("\n"));
   }
 
   if (opts.date) parts.push(`Current date: ${opts.date}`);

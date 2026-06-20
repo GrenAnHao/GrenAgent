@@ -5,7 +5,7 @@ import { $getSelection, $isRangeSelection } from 'lexical';
 import { files } from '../../../../lib/files';
 import { binaryToImageAttachment } from './imageAttachment';
 import { fileMentionMeta } from './mention';
-import { countLines, isLongPaste, makePastedText } from './pastedText';
+import { countLines, isLongPaste, makeFileReference, makePastedText } from './pastedText';
 import { loadFiles } from './useFileMention';
 import type { ImageAttachment } from '../ChatInputContext';
 import type { PastedText } from './types';
@@ -241,15 +241,22 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
             }
             if (bin.data.length <= MAX_TEXT_B64 && isTextFile(normPath, bin.mime_type)) {
               const content = decodeText(bin.data);
-              // 短文本：直接读内容做文件块 chip（方便查看）；
-              // 超长文本：不在此拼接，落到下方 @ 引用，让 agent 按需读取，避免上下文爆炸。
-              if (content && content.length <= LARGE_TEXT_CHARS && countLines(content) <= LARGE_TEXT_LINES) {
-                onPastedText(makePastedText(content, rel ?? name));
-                continue;
+              if (content) {
+                const lines = countLines(content);
+                const chars = content.length;
+                // 短文本：嵌入内容的文件块 chip；超长文本：同位置的引用 chip（发送时 @path）。
+                if (chars <= LARGE_TEXT_CHARS && lines <= LARGE_TEXT_LINES) {
+                  onPastedText(makePastedText(content, rel ?? name));
+                  continue;
+                }
+                const refPath = rel ?? (await files.importDropped(workspace, normPath).catch(() => null));
+                if (refPath) {
+                  onPastedText(makeFileReference(refPath, { lines, chars }));
+                  continue;
+                }
               }
             }
-            // 二进制 / 超长文本 / 解码失败：落地工作区让 agent 用 read/python 等工具按需读取解析。
-            // 工作区内直接 @ 原相对路径；工作区外复制进 .pi/dropped/ 再 @ 相对路径（工具才读得到）。
+            // 二进制 / 解码失败 / 区外复制失败：回退为编辑器内 @ 引用 pill。
             if (rel) {
               insertMention(rel, normPath, name, false);
               continue;

@@ -39,4 +39,16 @@ describe('composeMessage', () => {
       '看这个\n\n<pi:attachment type="file" path="src/a.ts" lines="1">\nconst x = 1\n</pi:attachment>',
     );
   });
+
+  it('大文件引用 chip 发送为 @path，不嵌入全文', () => {
+    const ref: PastedText = {
+      id: 'r',
+      text: '',
+      lines: 900,
+      chars: 100_000,
+      source: 'docs/big.md',
+      referenceOnly: true,
+    };
+    expect(composeMessage('总结', [ref])).toBe('总结\n\n@docs/big.md');
+  });
 });

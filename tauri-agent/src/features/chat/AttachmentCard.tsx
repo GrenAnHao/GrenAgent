@@ -1,7 +1,8 @@
 import { memo, useState } from 'react';
 import { Icon } from '@lobehub/ui';
-import { ChevronRight, ClipboardList, FileText } from 'lucide-react';
+import { ChevronRight, ClipboardList } from 'lucide-react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
+import FileIcon from '../../components/FileIcon';
 import type { AttachmentBlock } from './attachment';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -98,12 +99,15 @@ function metaOf(block: AttachmentBlock): string {
 
 function AttachmentCardInner({ block }: { block: AttachmentBlock }) {
   const [open, setOpen] = useState(false);
-  const icon = block.attType === 'file' ? FileText : ClipboardList;
   return (
     <div className={styles.card}>
       <div className={styles.head} onClick={() => setOpen((v) => !v)} title={block.path}>
         <span className={styles.ico}>
-          <Icon icon={icon} size={15} />
+          {block.attType === 'file' && block.path ? (
+            <FileIcon fileName={baseName(block.path)} size={15} variant="raw" />
+          ) : (
+            <Icon icon={ClipboardList} size={15} />
+          )}
         </span>
         <span className={styles.title}>{titleOf(block)}</span>
         <span className={styles.meta}>{metaOf(block)}</span>

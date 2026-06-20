@@ -1,15 +1,10 @@
 import { Icon } from '@lobehub/ui';
-import { File, FolderClosed, ToyBrick } from 'lucide-react';
+import { ToyBrick } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
+import FileIcon from '../../../../../components/FileIcon';
 import { CATEGORY_ICON as CMD_CATEGORY_ICON, COMMAND_ICON } from '../../commandIcons';
 import type { ChatTagCategory, ChatTagCommandGroup } from './types';
-
-const CATEGORY_ICON: Record<ChatTagCategory, LucideIcon> = {
-  file: File,
-  directory: FolderClosed,
-  command: ToyBrick,
-};
 
 /**
  * chip 只拿得到命令名（value），拿不到 source/apiSource：技能命令（`skill:` 前缀）用技能图标，
@@ -67,13 +62,17 @@ export function ChatTagView({
   label: string;
   value: string;
 }) {
-  const icon = category === 'command' ? commandIcon(value) : CATEGORY_ICON[category];
   // 工具命令(extension) chip 用 #BCE641 突出；其它命令/文件/目录沿用各自类目色。
   const colorClass =
     category === 'command' && commandGroup === 'extension' ? styles.toolCommand : styles[category];
+  const fileName = label.split('/').pop() || label;
   return (
     <span className={cx(styles.tag, colorClass)}>
-      <Icon icon={icon} size={13} />
+      {category === 'file' || category === 'directory' ? (
+        <FileIcon fileName={fileName} isDirectory={category === 'directory'} size={13} variant="raw" />
+      ) : (
+        <Icon icon={commandIcon(value)} size={13} />
+      )}
       <span>{label}</span>
     </span>
   );

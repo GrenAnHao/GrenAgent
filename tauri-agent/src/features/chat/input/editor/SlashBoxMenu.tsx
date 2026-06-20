@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type FC, type RefObject } from 'react';
+import { isValidElement, memo, useEffect, useMemo, useRef, useState, type FC, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon, LOBE_THEME_APP_ID } from '@lobehub/ui';
 import type { LucideIcon } from 'lucide-react';
@@ -94,6 +94,12 @@ function isDivider(o: ISlashOption): o is { type: 'divider'; label?: string } {
   return 'type' in o && o.type === 'divider';
 }
 
+function renderMenuIcon(icon: ISlashMenuOption['icon']) {
+  if (!icon) return null;
+  if (isValidElement(icon)) return icon;
+  return <Icon icon={icon as LucideIcon} size={15} />;
+}
+
 /**
  * 菜单锚定在输入框（anchor）正上方，宽度与输入框齐宽——不跟随光标，避免输入时乱跳。
  * 键盘导航交给编辑器（activeKey/Enter/方向键），这里负责渲染、悬停高亮、点击选中。
@@ -185,7 +191,7 @@ export function createBoxMenu(anchorRef: RefObject<HTMLElement | null>): FC<Menu
                     onMouseEnter={() => setActiveKey(key)}
                     onClick={() => onSelect?.(item)}
                   >
-                    {item.icon ? <Icon icon={item.icon as LucideIcon} size={15} /> : null}
+                    {renderMenuIcon(item.icon)}
                     <span className={styles.label}>{item.label}</span>
                     {item.extra ? <span className={styles.extra}>{item.extra}</span> : null}
                   </div>

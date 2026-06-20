@@ -14,8 +14,8 @@ export function isAgentMode(v: unknown): v is AgentMode {
 
 // ask：纯只读问答。白名单为经核实存在的只读工具（工具名取自各扩展的 registerTool）：
 //   - pi 内置：read / grep / find / ls
-//   - 联网只读：fetch_url / fetch_llms（web-fetch）、web_search / web_search_multi / fetch_web_content /
-//     fetch_github_readme（web-search）
+//   - 联网只读：fetch_url / fetch_llms / fetch_html / fetch_markdown / fetch_txt / fetch_json（web-fetch）、
+//     web_search / web_search_multi / fetch_web_content / fetch_github_readme（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、code_search（code-search）、kb_search（knowledge-rag）、
 //     memory_recall（long-term-memory）、history_search（session-search）、git_diff（code-review）
 //   - 交互/只读视图（不改文件）：ask_user（agent-mode 提问卡）、hl_read（hashline 带 #TAG 的只读视图）
@@ -29,6 +29,10 @@ export const ASK_TOOLS: readonly string[] = [
   "ls",
   "fetch_url",
   "fetch_llms",
+  "fetch_html",
+  "fetch_markdown",
+  "fetch_txt",
+  "fetch_json",
   "web_search",
   "web_search_multi",
   "fetch_web_content",

@@ -21,4 +21,6 @@ export interface PastedText {
   chars: number;
   /** 来源文件的相对路径（拖拽文件读入时设置）；纯文本粘贴时为空。 */
   source?: string;
+  /** 仅引用路径、不嵌入内容（大文件拖入）；发送时序列化为 `@path`。 */
+  referenceOnly?: boolean;
 }

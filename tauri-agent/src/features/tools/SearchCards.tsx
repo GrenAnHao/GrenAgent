@@ -1,6 +1,5 @@
-import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { FileText } from 'lucide-react';
+import FileIcon from '../../components/FileIcon';
 import { memo } from 'react';
 import { extractText } from './toolUtils';
 import { parseCodeSearchHits, parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
@@ -126,7 +125,7 @@ export const GrepCard = memo(function GrepCard({ result }: { result: unknown }) 
         return (
           <div key={f.path} className={styles.file}>
             <div className={styles.fileHead} title={f.path}>
-              <Icon icon={FileText} size={13} />
+              <FileIcon fileName={name} size={13} variant="raw" />
               <span className={styles.fileName}>{name}</span>
               {dir && <span className={styles.dir}>{dir}</span>}
               <span className={styles.count}>{f.matches.length}</span>
@@ -157,7 +156,7 @@ export const GlobCard = memo(function GlobCard({ result }: { result: unknown }) 
         const { dir, name } = splitPath(p);
         return (
           <div className={styles.row} key={p} title={p}>
-            <Icon icon={FileText} size={13} />
+            <FileIcon fileName={name} size={13} variant="raw" />
             <span className={styles.fileName}>{name}</span>
             {dir && <span className={styles.dir}>{dir}</span>}
           </div>
@@ -184,7 +183,7 @@ export const CodeSearchCard = memo(function CodeSearchCard({ result }: { result:
             : '';
         return (
           <div className={styles.row} key={i} title={h.file}>
-            <Icon icon={FileText} size={13} />
+            <FileIcon fileName={name} size={13} variant="raw" />
             <span className={styles.fileName}>
               {name}
               {range}

@@ -1,9 +1,9 @@
-## Frontend design (greenfield)
+## Frontend design (new UI, not an existing design system)
 
-When building new UI (not extending an existing design system), avoid generic "AI slop" layouts.
+When building new UI (not extending an existing design system), avoid generic, templated layouts that look auto-generated.
 
 - Typography: purposeful fonts; avoid default Inter/Roboto/Arial stacks unless the repo already uses them.
-- Color: pick a clear direction with CSS variables; avoid purple-on-white or dark-mode-by-default clichés.
+- Color: pick a clear direction with CSS variables; avoid the overused purple-on-white and default dark-mode looks.
 - Motion: a few meaningful entrance/stagger animations beat generic micro-motion everywhere.
 - Background: prefer gradients, shapes, or subtle texture over flat single-color fills.
 - Layout: vary structure across projects; avoid interchangeable hero + three-card templates.

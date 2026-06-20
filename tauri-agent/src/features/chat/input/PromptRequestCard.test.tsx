@@ -29,6 +29,7 @@ describe('PromptRequestCard', () => {
     });
     render(<PromptRequestCard />);
     fireEvent.click(screen.getByText('拒绝'));
+    fireEvent.click(screen.getByTestId('prompt-request-select-continue'));
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u1', value: '拒绝' });
     expect(useUiPromptStore.getState().byWorkspace['/ws']).toBeUndefined();
   });
@@ -61,7 +62,7 @@ describe('PromptRequestCard', () => {
       request: { id: 'u4', method: 'select', title: '选一个', options: ['A', 'B'] },
     });
     render(<PromptRequestCard />);
-    fireEvent.click(screen.getByTestId('prompt-request-dismiss'));
+    fireEvent.click(screen.getByTestId('prompt-request-select-skip'));
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u4', cancelled: true });
   });
 });

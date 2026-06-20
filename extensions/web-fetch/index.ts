@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isSafeUrl } from "./html.js";
+import { fetchHtml, fetchJson, fetchMarkdown, fetchTxt } from "./fetcher.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
 import { headTailSlice, isUsableLlmsBody } from "./truncate.js";
 import { getConfig } from "../_shared/runtime-config.js";
@@ -77,6 +78,46 @@ function buildResult(full: string, sourceUrl: string, baseDetails: Record<string
 
 const llmsTimeoutMs = () => Number(getConfig("FETCH_TIMEOUT_MS") ?? "15000") || 15000;
 
+const fetchUrlParams = Type.Object({
+  url: Type.String({ description: "Absolute http(s) URL" }),
+  headers: Type.Optional(
+    Type.Unsafe<Record<string, string>>({
+      type: "object",
+      additionalProperties: { type: "string" },
+      description: "Optional HTTP headers to include in the request",
+    }),
+  ),
+});
+
+type FetchUrlParams = { url: string; headers?: Record<string, string> };
+
+function registerDirectFetchTool(
+  pi: ExtensionAPI,
+  spec: {
+    name: string;
+    label: string;
+    description: string;
+    promptSnippet: string;
+    format: "html" | "markdown" | "txt" | "json";
+    fetch: (params: FetchUrlParams, signal: AbortSignal | undefined) => Promise<string>;
+  },
+): void {
+  pi.registerTool({
+    name: spec.name,
+    label: spec.label,
+    description: spec.description,
+    promptSnippet: spec.promptSnippet,
+    parameters: fetchUrlParams,
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const safe = isSafeUrl(params.url);
+      if (!safe.ok) throw new Error(`Refused to fetch: ${safe.reason}`);
+
+      const full = await spec.fetch({ url: params.url, headers: params.headers }, signal ?? undefined);
+      return buildResult(full, params.url, { url: params.url, format: spec.format }, ctx.cwd);
+    },
+  });
+}
+
 // Direct (non-crawler) probe for a site's llms.txt-style file. Returns the raw text,
 // or null when missing / not actually a text index (e.g. a soft-404 HTML page).
 async function probeLlms(url: string, signal: AbortSignal | undefined): Promise<string | null> {
@@ -99,6 +140,42 @@ async function probeLlms(url: string, signal: AbortSignal | undefined): Promise<
 }
 
 export default function (pi: ExtensionAPI) {
+  registerDirectFetchTool(pi, {
+    name: "fetch_html",
+    label: "Fetch HTML",
+    description: "Fetch a website and return the raw HTML content.",
+    promptSnippet: "Fetch a web page and return raw HTML.",
+    format: "html",
+    fetch: fetchHtml,
+  });
+
+  registerDirectFetchTool(pi, {
+    name: "fetch_markdown",
+    label: "Fetch Markdown",
+    description: "Fetch a website and return the content converted to Markdown.",
+    promptSnippet: "Fetch a web page and return Markdown.",
+    format: "markdown",
+    fetch: fetchMarkdown,
+  });
+
+  registerDirectFetchTool(pi, {
+    name: "fetch_txt",
+    label: "Fetch Text",
+    description: "Fetch a website and return plain text (HTML tags, scripts, and styles removed).",
+    promptSnippet: "Fetch a web page and return plain text.",
+    format: "txt",
+    fetch: fetchTxt,
+  });
+
+  registerDirectFetchTool(pi, {
+    name: "fetch_json",
+    label: "Fetch JSON",
+    description: "Fetch a JSON resource from a URL and return the parsed JSON as text.",
+    promptSnippet: "Fetch a JSON file or API endpoint.",
+    format: "json",
+    fetch: fetchJson,
+  });
+
   pi.registerTool({
     name: "fetch_url",
     label: "Fetch URL",

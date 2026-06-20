@@ -11,6 +11,7 @@ export interface MessageActionContext {
 /** 轻量提示句柄（解耦 antd MessageInstance，便于测试）。 */
 export interface Notify {
   success: (content: string) => void;
+  error: (content: string) => void;
 }
 
 /** bar / menu 里的槽位 key。'divider' 仅用于菜单分隔。 */

@@ -11,95 +11,51 @@
 <table>
   <tr>
     <td width="50%" valign="top">
+      <img src="images/workspace-context.png" alt="多会话与项目管理" width="100%"><br>
       <strong>多会话与项目管理</strong><br>
       按项目分组的侧栏，支持置顶、重命名、右键菜单、在资源管理器中打开。
     </td>
-    <td width="50%">
-      <img src="images/workspace-context.png" alt="多会话与项目管理" width="100%">
-    </td>
-  </tr>
-</table>
-
-<p></p>
-
-<table>
-  <tr>
-    <td width="50%">
-      <img src="images/chat-diagram.png" alt="流式对话" width="100%">
-    </td>
     <td width="50%" valign="top">
+      <img src="images/chat-diagram.png" alt="流式对话" width="100%"><br>
       <strong>流式对话</strong><br>
       工具卡片、Mermaid 渲染、Plan / Questions / Answer 卡片、子代理（Sub-Agent）内联视图。
     </td>
   </tr>
-</table>
-
-<p></p>
-
-<table>
   <tr>
     <td width="50%" valign="top">
+      <img src="images/code-index.png" alt="代码智能" width="100%"><br>
       <strong>代码智能</strong><br>
       内置 CodeGraph，离线、零配置，基于 tree-sitter 与 SQLite。
     </td>
-    <td width="50%">
-      <img src="images/code-index.png" alt="代码智能" width="100%">
-    </td>
-  </tr>
-</table>
-
-<p></p>
-
-<table>
-  <tr>
-    <td width="50%">
-      <img src="images/git-graph.png" alt="Git 集成" width="100%">
-    </td>
     <td width="50%" valign="top">
+      <img src="images/git-graph.png" alt="Git 集成" width="100%"><br>
       <strong>Git 集成</strong><br>
       改动 diff、分支切换、提交图谱，与 workspace 上下文一体。
     </td>
   </tr>
-</table>
-
-<p></p>
-
-<table>
   <tr>
     <td width="50%" valign="top">
+      <img src="images/providers.png" alt="多供应商" width="100%"><br>
       <strong>多供应商</strong><br>
       多模型供应商配置与模型同步，生图、TTS、Embedding 等能力可分别选源。
     </td>
-    <td width="50%">
-      <img src="images/providers.png" alt="多供应商" width="100%">
-    </td>
-  </tr>
-</table>
-
-<p></p>
-
-<table>
-  <tr>
-    <td width="50%">
-      <img src="images/mcp-servers.png" alt="MCP 扩展" width="100%">
-    </td>
     <td width="50%" valign="top">
+      <img src="images/mcp-servers.png" alt="MCP 扩展" width="100%"><br>
       <strong>MCP 扩展</strong><br>
       连接外部 MCP server，工具以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 暴露给 Agent，面板内测试连接与权限配置。
     </td>
   </tr>
-</table>
-
-<p></p>
-
-<table>
   <tr>
-    <td width="50%" valign="top">
-      <strong>Skills 工作流</strong><br>
-      从 <code>~/.agents/skills</code> 加载技能，<code>/skill:name</code> 调用，面板内启用/禁用。
-    </td>
-    <td width="50%">
-      <img src="images/skills.png" alt="Skills 工作流" width="100%">
+    <td colspan="2" align="center" valign="top">
+      <table width="50%">
+        <tr>
+          <td valign="top">
+            <img src="images/skills.png" alt="Skills 工作流" width="100%"><br>
+            <strong>Skills 工作流</strong><br>
+            从 <code>~/.agents/skills</code> 加载技能，<code>/skill:name</code> 调用，面板内启用/禁用。
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
 </table>

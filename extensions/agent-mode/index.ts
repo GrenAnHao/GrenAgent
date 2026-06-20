@@ -25,8 +25,7 @@ import {
   toolWhitelist,
 } from "./modes.js";
 import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
-import { promptForMode } from "./prompts.js";
-import { makeQuestionsId, normalizeQuestions, type RawQuestion } from "./questions.js";
+import { makeQuestionsId, normalizeQuestions, collectAnswers, type RawAskUserParams } from "./questions.js";
 import { type TodoItem, extractTodoItems, markCompletedSteps } from "./utils.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -166,10 +165,24 @@ export default function (pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      "向用户提一个或多个选择题，在对话流内渲染为可多选的卡片（不弹窗）。" +
-      "当你需要用户在若干选项中做决策（选方案 / 选框架 / 确认方向 / 选文件路径 / 风险操作前确认等）时调用。" +
-      "调用后请停止当前回合，等待用户在卡片上选择并回复——不要替用户作答。",
+      "向用户提一个或多个选择题，让用户在可点击的选项卡上做选择。" +
+      "当你需要用户在若干选项中做决策（选方案 / 测验答题 / 确认方向 / 风险操作前确认等）时调用。" +
+      "禁止在 assistant 正文里写 A/B/C/D 纯文本选项——必须用本工具。" +
+      "本工具会阻塞直到用户作答，并把用户的选择作为工具结果返回（形如 [我的选择] …）——不要替用户作答，也不要预测答案。",
+    promptGuidelines: [
+      "When a decision has 2+ concrete viable options for the user to pick — approach/scope/tradeoff, framework or file-path choice, quiz answer, plan-mode clarification, or confirmation before a risky/irreversible action — call ask_user instead of deciding silently.",
+      "This is the ONLY way to surface choices: never write A/B/C/D (or numbered) option lists in your reply text — plain-text options are not clickable and the user cannot answer them.",
+      "Autonomy still applies: when the answer is discoverable from the repo (read/grep first) or a single recommendation is obviously right, just act — reserve ask_user for genuine forks where the user's preference changes the outcome.",
+      "ask_user BLOCKS until the user answers and returns their choice as the tool result (a `[我的选择]` block) — never pre-fill, guess, or answer the question yourself. State your recommendation in the question text; keep 2–5 short, mutually exclusive options.",
+    ],
     parameters: Type.Object({
+      allowExtra: Type.Optional(
+        Type.Boolean({ description: "是否允许用户填写补充说明（文本，可选贴图），默认 false" }),
+      ),
+      allowExtraImages: Type.Optional(
+        Type.Boolean({ description: "allowExtra 为 true 时是否允许贴图，默认 true" }),
+      ),
+      extraPlaceholder: Type.Optional(Type.String({ description: "补充说明输入框占位提示" })),
       questions: Type.Array(
         Type.Object({
           question: Type.String({ description: "问题文本" }),
@@ -179,22 +192,46 @@ export default function (pi: ExtensionAPI) {
                 id: Type.Optional(Type.String({ description: "选项 id（省略则自动编号）" })),
                 label: Type.String({ description: "选项显示文本" }),
               }),
-              { description: "选项列表（建议 2-4 个）" },
+              { description: "选项列表（建议 2-5 个）" },
             ),
           ),
           allowMultiple: Type.Optional(Type.Boolean({ description: "是否允许多选，默认单选" })),
+          allowCustom: Type.Optional(
+            Type.Boolean({ description: "是否提供「其他/自定义」选项（选中后需填写文本）" }),
+          ),
+          customLabel: Type.Optional(Type.String({ description: "自定义选项标签，默认「其他（自定义）」" })),
         }),
         { description: "一个或多个问题（逐题在卡片内渲染）" },
       ),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const id = makeQuestionsId();
-      const data = normalizeQuestions((params.questions ?? []) as unknown as RawQuestion[], id);
+      const p = params as RawAskUserParams;
+      const data = normalizeQuestions(p.questions ?? [], id, {
+        allowExtra: p.allowExtra,
+        allowExtraImages: p.allowExtraImages,
+        extraPlaceholder: p.extraPlaceholder,
+      });
       if (!data) {
         return {
           content: [{ type: "text", text: "ask_user：未提供有效问题（每个问题至少要有 question 文本）。" }],
         };
       }
+
+      // 阻塞式 elicitation：经 harness 的 ctx.ui.*（前端渲染为 ChatInput 上方的内联选项卡）
+      // 逐题等待用户作答，工具直到拿到选择才返回——与 MCP 交互一致，模型无法替用户抢答。
+      // ctx.ui.select 仅单选，多选/自定义在 collectAnswers 里用循环 select + select→input 补回；
+      // 贴图无法经 ctx.ui 收集，阻塞模式下不提供。
+      if (ctx.hasUI) {
+        const opts = { signal };
+        const text = await collectAnswers(data, {
+          select: (title, options) => ctx.ui.select(title, options, opts),
+          input: (title, placeholder) => ctx.ui.input(title, placeholder, opts),
+        });
+        return { content: [{ type: "text", text }] };
+      }
+
+      // 非交互模式（print / 无对话框 UI）：退回到对话流卡片（非阻塞），并提示模型停下等待。
       pi.sendMessage(
         { customType: "agent-questions", content: JSON.stringify(data), display: true },
         { triggerTurn: false },
@@ -204,7 +241,7 @@ export default function (pi: ExtensionAPI) {
           {
             type: "text",
             text:
-              `已在对话流展示提问卡片（${data.questions.length} 个问题）。` +
+              `已在对话流展示提问卡片（${data.questions.length} 个问题）。当前环境不支持阻塞式对话框，` +
               "请停止当前回合，等待用户在卡片上选择并回复后再继续——不要替用户作答。",
           },
         ],
@@ -215,7 +252,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event) => gateToolCall(currentMode, event.toolName, event.input));
 
   pi.on("before_agent_start", async () => {
-    // 执行阶段（currentMode 已切回 agent，但仍带着待办步骤）：注入剩余步骤而非模式 prompt。
+    // 执行阶段（currentMode 已切回 agent，但仍带着待办步骤）：注入剩余步骤。
+    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，
+    // 此处不再注入中文模式 prompt，避免双份重复占用 token。
     if (executionMode && todoItems.length > 0) {
       const remaining = todoItems
         .filter((t) => !t.completed)
@@ -224,14 +263,10 @@ export default function (pi: ExtensionAPI) {
       return {
         message: {
           customType: "plan-execution-context",
-          content: `[EXECUTING PLAN / 执行计划]\n剩余步骤：\n${remaining}\n按顺序执行；每完成一步在回复中加 [DONE:n] 标记。`,
+          content: `[EXECUTING PLAN]\nRemaining steps:\n${remaining}\nExecute in order; mark each finished step with [DONE:n] in your reply.`,
           display: false,
         },
       };
-    }
-    const prompt = promptForMode(currentMode);
-    if (prompt) {
-      return { message: { customType: "agent-mode-context", content: prompt, display: false } };
     }
     return undefined;
   });

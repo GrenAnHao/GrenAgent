@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { createElement, useCallback, useEffect, useRef } from 'react';
 import type { IEditor, ISlashMenuOption } from '@lobehub/editor';
-import { File, Folder } from 'lucide-react';
+import FileIcon from '../../../../components/FileIcon';
 import { files } from '../../../../lib/files';
 import { INSERT_CHAT_TAG_COMMAND } from './ChatTag/command';
 import { fileMentionMeta } from './mention';
@@ -90,7 +90,12 @@ export function useFileMention(workspace: string) {
         key: f.path,
         label: f.name,
         extra: clampPath(f.path),
-        icon: f.isDirectory ? Folder : File,
+        icon: createElement(FileIcon, {
+          fileName: f.name,
+          isDirectory: f.isDirectory,
+          size: 16,
+          variant: 'raw',
+        }),
         metadata: fileMentionMeta(f.path, f.name, f.isDirectory),
       }));
     },

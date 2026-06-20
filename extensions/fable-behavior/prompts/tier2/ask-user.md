@@ -1,44 +1,69 @@
 ## Ask User (interactive selector)
 
-When the user must pick among concrete options, call the **`ask_user` tool**. The UI renders a Cursor-style card with clickable A/B/C/D rows and Continue / Skip.
+When the user must pick among concrete options, call the **`ask_user` tool**. It renders an interactive option card:
 
-**Never** write multiple-choice options as plain markdown in your assistant text (e.g. `A. … B. …`). That renders as dead inline tags — not a selector — and the user cannot answer.
+- **Single or multi-select** per question (`allowMultiple`)
+- **Custom "Other" option** (`allowCustom`) — user fills text after selecting it
+- **Optional extra section** (`allowExtra`) — supplementary text + pasted/uploaded images
 
-### When to call `ask_user`
+**Never** write A/B/C/D lists as plain markdown — that is not interactive.
 
-- Material product or technical decisions (approach, scope, tradeoff)
-- Quizzes / assessments where the user should answer interactively
-- Plan-mode clarifications after you explored the repo
-- Risky operations where you need an explicit choice before proceeding
+### Tool parameters
 
-### When not to call `ask_user`
+| Field | Purpose |
+|-------|---------|
+| `questions[].allowMultiple` | `true` = multi-select; default single |
+| `questions[].allowCustom` | Adds an "Other" row; user must type when selected |
+| `questions[].customLabel` | Label for the Other row (default: 其他（自定义）) |
+| `allowExtra` | Show bottom supplementary text area |
+| `allowExtraImages` | When `allowExtra`, allow paste/upload images (default true) |
+| `extraPlaceholder` | Placeholder for supplementary text |
 
-- The answer is discoverable from the repo — read/grep first
-- You only need to inform; give a recommendation and offer to change course
-- Trivial yes/no where a short confirmation sentence is enough
-
-### Rules
-
-- **One material question per call** (or one card with closely related sub-questions)
-- **2–5 options**; short, mutually exclusive labels
-- State your **recommendation in the question text** when you have one
-- After calling `ask_user`, **stop the turn** — do not answer the question yourself or continue the task until the user submits the card
-
-### Example
+### Example — quiz + custom + extra images
 
 ```json
 {
+  "allowExtra": true,
+  "allowExtraImages": true,
+  "extraPlaceholder": "如有补充说明或截图可在此填写",
   "questions": [{
-    "question": "Deleting a Derived* through Base* without a virtual destructor — what happens?",
+    "question": "Deleting Derived* via Base* without virtual destructor — output?",
+    "allowCustom": true,
     "options": [
-      { "label": "Only ~Base() runs" },
-      { "label": "Only ~Derived() runs" },
-      { "label": "~Derived() then ~Base()" },
-      { "label": "Compile error" },
+      { "label": "Only ~Base()" },
       { "label": "Undefined behavior" }
     ]
   }]
 }
 ```
 
-User reply arrives as `[我的选择]` followed by numbered answers — treat that as authoritative.
+### Example — multi-select preferences
+
+```json
+{
+  "questions": [{
+    "question": "Which areas should the plan cover?",
+    "allowMultiple": true,
+    "options": [
+      { "label": "API layer" },
+      { "label": "Database" },
+      { "label": "Frontend" }
+    ]
+  }]
+}
+```
+
+### Rules
+
+- One material question per call (or one card with closely related sub-questions)
+- `ask_user` **blocks** until the user answers and returns their choice as the tool result — never pre-answer, guess, or keep working past the call
+
+The tool result is authoritative and looks like:
+
+```
+[我的选择]
+1. <question>：<selected labels or 其他：custom text>
+补充说明：<optional>
+```
+
+Treat this as the user's decision.

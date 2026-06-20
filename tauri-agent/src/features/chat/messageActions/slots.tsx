@@ -19,8 +19,16 @@ export function buildActionItem(
         icon: Copy,
         label: '复制',
         onClick: async () => {
-          await navigator.clipboard?.writeText(ctx.text);
-          notify.success('已复制');
+          if (!navigator.clipboard?.writeText) {
+            notify.error('复制失败：当前环境不支持剪贴板');
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(ctx.text);
+            notify.success('已复制');
+          } catch {
+            notify.error('复制失败');
+          }
         },
       };
     case 'edit':

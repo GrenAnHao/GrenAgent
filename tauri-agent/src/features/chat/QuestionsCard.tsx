@@ -1,108 +1,9 @@
 import { memo, useCallback, useState } from 'react';
-import { Button, Icon } from '@lobehub/ui';
-import { Check, MessageCircleQuestion } from 'lucide-react';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { App } from 'antd';
 import { pi } from '../../lib/pi';
+import type { ImageAttachment } from '../chat/input/ChatInputContext';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
-
-const styles = createStaticStyles(({ css }) => ({
-  card: css`
-    width: 100%;
-    max-width: 560px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 12px;
-    background: ${cssVar.colorBgContainer};
-    overflow: hidden;
-  `,
-  head: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 12px 14px 0;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
-  `,
-  question: css`
-    padding: 10px 14px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: ${cssVar.colorText};
-  `,
-  options: css`
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px 14px 0;
-  `,
-  option: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
-    background: ${cssVar.colorFillQuaternary};
-    color: ${cssVar.colorText};
-    font-size: 13px;
-    text-align: start;
-    cursor: pointer;
-
-    &:hover {
-      border-color: ${cssVar.colorPrimary};
-      background: ${cssVar.colorPrimaryBg};
-    }
-  `,
-  optionSelected: css`
-    border-color: ${cssVar.colorPrimary};
-    background: ${cssVar.colorPrimaryBg};
-  `,
-  optionDone: css`
-    cursor: default;
-    &:hover {
-      border-color: ${cssVar.colorBorderSecondary};
-      background: ${cssVar.colorFillQuaternary};
-    }
-  `,
-  letter: css`
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    background: ${cssVar.colorFillSecondary};
-    font-size: 11px;
-    font-weight: 600;
-    color: ${cssVar.colorTextSecondary};
-  `,
-  optionLabel: css`
-    flex: 1;
-  `,
-  check: css`
-    flex: none;
-    color: ${cssVar.colorPrimary};
-  `,
-  footer: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: flex-end;
-    margin-block-start: 12px;
-    padding: 10px 14px;
-    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  doneText: css`
-    margin-block-start: 12px;
-    padding: 10px 14px;
-    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    background: ${cssVar.colorFillQuaternary};
-    font-size: 12px;
-    color: ${cssVar.colorTextTertiary};
-  `,
-}));
+import { CUSTOM_OPTION_ID, QuestionSelector } from '../../components/QuestionSelector';
 
 interface QuestionOption {
   id: string;
@@ -114,12 +15,16 @@ interface QuestionSpec {
   title: string;
   options: QuestionOption[];
   allowMultiple: boolean;
+  allowCustom?: boolean;
 }
 
 interface QuestionsData {
   kind: 'questions';
   id: string;
   questions: QuestionSpec[];
+  allowExtra?: boolean;
+  allowExtraImages?: boolean;
+  extraPlaceholder?: string;
 }
 
 /** content 为 ask_user 写入的 QuestionsCardData JSON；非本结构返回 null（调用方回退）。 */
@@ -129,13 +34,26 @@ export function parseQuestions(content: string): QuestionsData | null {
     if (d && d.kind === 'questions' && Array.isArray(d.questions)) {
       const questions: QuestionSpec[] = d.questions
         .filter((q): q is QuestionSpec => Boolean(q) && typeof q.title === 'string' && Array.isArray(q.options))
-        .map((q) => ({
-          id: String(q.id ?? ''),
+        .map((q, i) => ({
+          id: String(q.id ?? '').trim() || `q${i + 1}`,
           title: q.title,
-          options: q.options.map((o) => ({ id: String(o?.id ?? ''), label: String(o?.label ?? '') })),
+          options: q.options.map((o, oi) => ({
+            id: String(o?.id ?? '').trim() || `o${oi + 1}`,
+            label: String(o?.label ?? ''),
+          })),
           allowMultiple: Boolean(q.allowMultiple),
+          allowCustom: Boolean(q.allowCustom),
         }));
-      if (questions.length > 0) return { kind: 'questions', id: String(d.id ?? ''), questions };
+      if (questions.length > 0) {
+        return {
+          kind: 'questions',
+          id: String(d.id ?? ''),
+          questions,
+          allowExtra: Boolean(d.allowExtra),
+          allowExtraImages: d.allowExtraImages !== false,
+          extraPlaceholder: typeof d.extraPlaceholder === 'string' ? d.extraPlaceholder : undefined,
+        };
+      }
     }
   } catch {
     /* not our JSON */
@@ -143,21 +61,42 @@ export function parseQuestions(content: string): QuestionsData | null {
   return null;
 }
 
+function formatChoiceLabels(
+  q: QuestionSpec,
+  ids: string[],
+  customTexts?: Record<string, string>,
+): string[] {
+  return ids
+    .map((oid) => {
+      if (oid === CUSTOM_OPTION_ID) {
+        const t = customTexts?.[q.id]?.trim();
+        return t ? `其他：${t}` : '其他';
+      }
+      return q.options.find((o) => o.id === oid)?.label;
+    })
+    .filter((x): x is string => Boolean(x));
+}
+
 /** 把用户的选择拼成人类可读、AI 可解析的回传文本。 */
-export function formatAnswers(data: QuestionsData, selected: Record<string, string[]>): string {
+export function formatAnswers(
+  data: QuestionsData,
+  selected: Record<string, string[]>,
+  customTexts?: Record<string, string>,
+  extraNote?: string,
+  imageCount?: number,
+): string {
   const lines = data.questions.map((q, i) => {
-    const labels = (selected[q.id] ?? [])
-      .map((oid) => q.options.find((o) => o.id === oid)?.label)
-      .filter((x): x is string => Boolean(x));
+    const labels = formatChoiceLabels(q, selected[q.id] ?? [], customTexts);
     return `${i + 1}. ${q.title}：${labels.length > 0 ? labels.join('、') : '(未选)'}`;
   });
+  const note = extraNote?.trim();
+  if (note) lines.push(`补充说明：${note}`);
+  if (imageCount && imageCount > 0) lines.push(`补充图片：${imageCount} 张（见消息附件）`);
   return `[我的选择]\n${lines.join('\n')}`;
 }
 
 /**
- * 对话流内的「提问卡」（对标 Cursor Plan Mode 的 Questions）：逐题渲染 A/B/C/D 选项（可多选），
- * 底部 Continue / Skip。Continue 经 pi.prompt 回传用户选择并触发 AI 下一轮，卡片随即转为已答态。
- * `answered`（由历史推断：卡片之后已有用户消息）使旧卡片定格为只读已答。
+ * 对话流内的「提问卡」：`ask_user` 产出 agent-questions 消息，支持单选/多选、自定义选项、补充说明（可贴图）。
  */
 export const QuestionsCard = memo(function QuestionsCard({
   content,
@@ -167,102 +106,94 @@ export const QuestionsCard = memo(function QuestionsCard({
   answered?: boolean;
 }) {
   const { workspace } = useAgentStoreContext();
+  const { message } = App.useApp();
   const data = parseQuestions(content);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
+  const [extraText, setExtraText] = useState('');
+  const [extraImages, setExtraImages] = useState<ImageAttachment[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [skipped, setSkipped] = useState(false);
 
   const done = Boolean(answered) || submitted || skipped;
 
-  const toggle = useCallback(
-    (q: QuestionSpec, optId: string) => {
-      setSelected((prev) => {
-        const cur = prev[q.id] ?? [];
-        if (q.allowMultiple) {
-          return { ...prev, [q.id]: cur.includes(optId) ? cur.filter((x) => x !== optId) : [...cur, optId] };
-        }
-        return { ...prev, [q.id]: cur.includes(optId) ? [] : [optId] };
-      });
-    },
-    [],
-  );
+  const toggle = useCallback((questionId: string, optionId: string, allowMultiple: boolean) => {
+    setSelected((prev) => {
+      const cur = prev[questionId] ?? [];
+      if (allowMultiple) {
+        return {
+          ...prev,
+          [questionId]: cur.includes(optionId) ? cur.filter((x) => x !== optionId) : [...cur, optionId],
+        };
+      }
+      return { ...prev, [questionId]: cur.includes(optionId) ? [] : [optionId] };
+    });
+  }, []);
 
   const onContinue = useCallback(async () => {
     if (!data) return;
     setSubmitted(true);
     try {
-      await pi.prompt(workspace, formatAnswers(data, selected));
-    } catch {
+      const images = extraImages.map(({ type, mimeType, data: imgData }) => ({
+        type,
+        mimeType,
+        data: imgData,
+      }));
+      await pi.prompt(
+        workspace,
+        formatAnswers(data, selected, customTexts, extraText, images.length),
+        undefined,
+        images.length ? images : undefined,
+      );
+    } catch (e) {
       setSubmitted(false);
+      message.error(`提交失败：${e instanceof Error ? e.message : '请重试'}`);
     }
-  }, [data, selected, workspace]);
+  }, [customTexts, data, extraImages, extraText, message, selected, workspace]);
 
   const onSkip = useCallback(async () => {
     setSkipped(true);
     try {
       await pi.prompt(workspace, '[跳过提问] 用户选择暂不回答上面的问题，请继续。');
-    } catch {
+    } catch (e) {
       setSkipped(false);
+      message.error(`提交失败：${e instanceof Error ? e.message : '请重试'}`);
     }
-  }, [workspace]);
+  }, [message, workspace]);
 
   if (!data) {
     return (
-      <div className={styles.card} data-testid="questions-card">
-        <div className={styles.question}>{content}</div>
-      </div>
+      <QuestionSelector
+        data-testid="questions-card"
+        disabled
+        headerTitle="Questions"
+        onToggle={() => {}}
+        questions={[{ id: 'fallback', title: content, options: [] }]}
+        selected={{}}
+      />
     );
   }
 
-  // 有选项的题都至少选了一项，Continue 才可用（无选项的开放题不阻塞）。
-  const canContinue = data.questions.every(
-    (q) => q.options.length === 0 || (selected[q.id]?.length ?? 0) > 0,
-  );
-
   return (
-    <div className={styles.card} data-testid="questions-card">
-      <div className={styles.head}>
-        <Icon icon={MessageCircleQuestion} size={13} />
-        <span>Questions{data.questions.length > 1 ? ` · ${data.questions.length}` : ''}</span>
-      </div>
-
-      {data.questions.map((q) => (
-        <div key={q.id}>
-          <div className={styles.question}>{q.title}</div>
-          <div className={styles.options}>
-            {q.options.map((o, oi) => {
-              const isSel = (selected[q.id] ?? []).includes(o.id);
-              return (
-                <button
-                  className={`${styles.option}${isSel ? ` ${styles.optionSelected}` : ''}${done ? ` ${styles.optionDone}` : ''}`}
-                  data-testid={`question-opt-${q.id}-${o.id}`}
-                  disabled={done}
-                  key={o.id}
-                  onClick={() => toggle(q, o.id)}
-                  type="button"
-                >
-                  <span className={styles.letter}>{String.fromCharCode(65 + oi)}</span>
-                  <span className={styles.optionLabel}>{o.label}</span>
-                  {isSel ? <Icon className={styles.check} icon={Check} size={14} /> : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-
-      {done ? (
-        <div className={styles.doneText}>{skipped ? '已跳过' : '已回答'}</div>
-      ) : (
-        <div className={styles.footer}>
-          <Button onClick={() => void onSkip()} size="small">
-            Skip
-          </Button>
-          <Button disabled={!canContinue} onClick={() => void onContinue()} size="small" type="primary">
-            Continue
-          </Button>
-        </div>
-      )}
-    </div>
+    <QuestionSelector
+      allowExtra={data.allowExtra}
+      allowExtraImages={data.allowExtraImages !== false}
+      customTexts={customTexts}
+      data-testid="questions-card"
+      disabled={done}
+      doneLabel={done ? (skipped ? '已跳过' : '已回答') : undefined}
+      extraImages={extraImages}
+      extraPlaceholder={data.extraPlaceholder}
+      extraText={extraText}
+      headerTitle="Questions"
+      onContinue={done ? undefined : () => void onContinue()}
+      onCustomTextChange={done ? undefined : (qid, value) => setCustomTexts((prev) => ({ ...prev, [qid]: value }))}
+      onExtraImagesChange={done ? undefined : setExtraImages}
+      onExtraTextChange={done || !data.allowExtra ? undefined : setExtraText}
+      onSkip={done ? undefined : () => void onSkip()}
+      onToggle={toggle}
+      questions={data.questions}
+      selected={selected}
+    />
   );
 });

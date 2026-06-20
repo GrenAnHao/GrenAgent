@@ -10,6 +10,7 @@ export function composeMessage(markdown: string, pastedTexts: PastedText[]): str
   const base = markdown.trim();
   const blocks = pastedTexts
     .map((p) => {
+      if (p.referenceOnly && p.source) return `@${p.source}`;
       const content = p.text.replace(/\s+$/, '');
       if (!content) return '';
       return wrapAttachment({

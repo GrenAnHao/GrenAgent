@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
     name: "debug_log",
     label: "Debug Log",
     description:
-      "Runtime debugging via code instrumentation (Cursor Debug Mode style). Start a local log collector, " +
+      "Runtime debugging via code instrumentation. Start a local log collector, " +
       "instrument code to POST diagnostics (variable values, execution paths, timing), have the user reproduce " +
       "the bug, then read back the captured runtime data to pinpoint the root cause and make a minimal fix. " +
       "Actions: start | instrument | read | status | clear | stop.",

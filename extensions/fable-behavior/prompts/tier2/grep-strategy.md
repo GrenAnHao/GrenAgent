@@ -18,4 +18,4 @@
 
 - Combine `pattern` with `glob` (e.g. `*.{ts,tsx}`) or `type` (e.g. `py`, `rust`) to cut noise.
 - Use `head_limit` when results may be huge.
-- Exploration flow: `glob`/`find` for candidate files, then `grep` for contents — or delegate broad fan-out to scout.
+- Exploration flow: `glob`/`find` for candidate files, then `grep` for contents — or delegate many independent searches to a scout sub-agent.

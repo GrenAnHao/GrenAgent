@@ -16,7 +16,10 @@ interface MessageActionBarProps {
 /** 通用消息操作栏：声明式 slot → ActionIcon 条 + Dropdown 溢出菜单。 */
 export const MessageActionBar = memo<MessageActionBarProps>(({ ctx, bar, menu }) => {
   const { message } = App.useApp();
-  const notify = { success: (c: string) => message.success(c) };
+  const notify = {
+    success: (c: string) => message.success(c),
+    error: (c: string) => message.error(c),
+  };
 
   const menuItems: MenuProps['items'] = menu?.map((slot, i) => {
     if (slot === 'divider') return { type: 'divider', key: `divider-${i}` };

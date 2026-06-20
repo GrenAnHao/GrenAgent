@@ -54,7 +54,7 @@ describe("sidecar injection coexistence", () => {
     const fable = messages.find((m) => m?.customType === "fable-behavior");
     expect(fable?.display).toBe(false);
     expect(fable?.content).toContain("[Fable Behavior]");
-    expect(fable?.content).toContain("Ground in the environment");
+    expect(fable?.content).toContain("Explore the repo first");
 
     const diagram = messages.find((m) => m?.customType === "diagram-hint");
     expect(diagram?.content).toBe(DIAGRAM_HINT);

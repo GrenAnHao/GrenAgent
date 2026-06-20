@@ -28,6 +28,19 @@ export function makePastedText(text: string, source?: string): PastedText {
   };
 }
 
+/** 大文件拖入：chip 展示文件名与行数，发送时用 `@path` 引用而非嵌入全文。 */
+export function makeFileReference(path: string, stats: { lines: number; chars: number }): PastedText {
+  seq += 1;
+  return {
+    id: `ref-${Date.now().toString(36)}-${seq}`,
+    text: '',
+    lines: stats.lines,
+    chars: stats.chars,
+    source: path,
+    referenceOnly: true,
+  };
+}
+
 /** chip 上的简短描述：拖入文件显示「文件名 · 19 行」，纯文本粘贴显示「粘贴文本 · 19 行」。 */
 export function pastedLabel(p: Pick<PastedText, 'lines' | 'chars' | 'source'>): string {
   if (p.source) {

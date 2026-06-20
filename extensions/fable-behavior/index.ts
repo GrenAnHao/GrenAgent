@@ -2,7 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig } from "../_shared/runtime-config.js";
-import { buildFableBehaviorPrompt, readTier3Module, resolveAgentModeFromEntries } from "./loader.js";
+import { buildFableBehaviorPrompt, readTier3Module, resolveAgentModeFromEntries, TIER3_TOPICS } from "./loader.js";
 import { seedFableAgents } from "./seed.js";
 
 const enabled = () => (getConfig("FABLE_BEHAVIOR") ?? "1") !== "0";
@@ -11,15 +11,9 @@ const tier2P1 = () => (getConfig("FABLE_BEHAVIOR_TIER2_P1") ?? "1") !== "0";
 const tier3 = () => (getConfig("FABLE_BEHAVIOR_TIER3_GUIDELINES") ?? "1") !== "0";
 const tier3Tool = () => (getConfig("FABLE_BEHAVIOR_TIER3_TOOL") ?? "1") !== "0";
 
+// topic 单一真相源在 loader.ts（TIER3_TOPICS）；此处直接复用，避免两处枚举漂移失配。
 const RefParams = Type.Object({
-  topic: StringEnum([
-    "search-full",
-    "copyright",
-    "wellbeing",
-    "evenhandedness",
-    "citing-code",
-    "frontend-design",
-  ] as const),
+  topic: StringEnum(TIER3_TOPICS),
 });
 
 export default function (pi: ExtensionAPI) {

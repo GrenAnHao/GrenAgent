@@ -99,10 +99,10 @@ export function instrumentSnippet(lang: InstrumentLang, endpoint: string): strin
   }
 }
 
-/** 总指南：把 Cursor Debug Mode 的闭环讲清楚，附 endpoint 与落盘路径。 */
+/** 总指南：把插桩取证闭环讲清楚，附 endpoint 与落盘路径。 */
 export function instrumentGuide(endpoint: string, logFile: string): string {
   return [
-    "调试插桩闭环（对标 Cursor Debug Mode：调查先于动手）：",
+    "调试插桩闭环（先取证、再改代码）：",
     "1. 先列 2-4 个根因假设；针对每个假设在关键路径插入下面的日志片段，把要观察的变量放进 data。",
     `2. 日志经 HTTP 发到本地收集器 ${endpoint}（仅监听 127.0.0.1），同时落盘到 ${logFile}。`,
     '3. 用 tag 区分不同假设/位置（如 "hypo1-entry"、"loop-iter"、"before-return"）。',

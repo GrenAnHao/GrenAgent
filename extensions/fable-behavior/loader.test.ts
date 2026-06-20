@@ -20,7 +20,7 @@ describe("buildFableBehaviorPrompt", () => {
     expect(p).toContain("Conventions first");
   });
 
-  it("adds debug mode slice with evidence loop", () => {
+  it("adds debug mode slice with hypothesis-first evidence steps", () => {
     const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "debug" });
     expect(p).toContain("Hypothesize");
     expect(p).toContain("debug_log");
@@ -39,7 +39,7 @@ describe("buildFableBehaviorPrompt", () => {
 
   it("adds plan mode slice with three phases", () => {
     const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "plan" });
-    expect(p).toContain("Ground in the environment");
+    expect(p).toContain("Explore the repo first");
     expect(p).toContain("decision-complete");
   });
 
