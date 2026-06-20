@@ -50,7 +50,14 @@ const styles = createStaticStyles(({ css }) => ({
     &:last-child { border-block-end: none; }
   `,
   qlabel: css`font-size: 11px; color: ${cssVar.colorTextTertiary};`,
-  qtext: css`font-size: 13px; color: ${cssVar.colorTextSecondary}; line-height: 1.4;`,
+  qtext: css`
+    font-size: 13px;
+    color: ${cssVar.colorTextSecondary};
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  `,
   apill: css`
     display: flex;
     gap: 8px;
@@ -77,17 +84,23 @@ function extractQTitles(args: unknown): string[] {
   if (!Array.isArray(qs)) return [];
   return qs
     .filter((q): q is { question?: unknown } => Boolean(q) && typeof q === 'object')
-    .map((q) => String(q.question ?? '').trim())
+    .map((q) => {
+      const full = String(q.question ?? '').trim();
+      // Take only the first non-empty line — strips trailing code blocks from long titles
+      return full.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
+    })
     .filter(Boolean);
 }
 
 function parseAnswerLines(result: unknown): string[] {
   const text = extractText(result);
   if (!text) return [];
-  return text
-    .split('\n')
-    .filter((l) => /^\d+\./.test(l.trim()))
-    .map((l) => l.replace(/^\d+\.\s*[^：]*：/, '').trim());
+  // Split into per-question blocks at each "N. " marker (title may span multiple lines)
+  const chunks = text.replace(/^\[我的选择\]\n?/, '').split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\./.test(s.trimStart()));
+  return chunks.map((chunk) => {
+    const colonIdx = chunk.lastIndexOf('：');
+    return colonIdx >= 0 ? chunk.slice(colonIdx + 1).trim() : chunk.replace(/^\d+\.\s*/, '').trim();
+  });
 }
 
 export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
