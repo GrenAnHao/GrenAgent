@@ -6,6 +6,7 @@ import { extractText } from './toolUtils';
 
 const styles = createStaticStyles(({ css }) => ({
   card: css`
+    max-width: 600px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 10px;
     background: ${cssVar.colorBgContainer};
@@ -18,7 +19,6 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 8px 12px;
     font-size: 11px;
     color: ${cssVar.colorTextTertiary};
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
   `,
   headBtn: css`
     display: flex;
@@ -46,8 +46,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 6px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-    &:last-child { border-block-end: none; }
+    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
   `,
   qlabel: css`font-size: 11px; color: ${cssVar.colorTextTertiary};`,
   qtext: css`
@@ -69,6 +68,20 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 13px;
     color: ${cssVar.colorText};
   `,
+  badge: css`
+    flex: none;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: ${cssVar.colorPrimary};
+    color: ${cssVar.colorBgContainer};
+    font-size: 10px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-block-start: 1px;
+  `,
   rest: css`
     display: grid;
     grid-template-rows: 0fr;
@@ -78,51 +91,71 @@ const styles = createStaticStyles(({ css }) => ({
   restInner: css`min-height: 0; overflow: hidden;`,
 }));
 
-function extractQTitles(args: unknown): string[] {
+interface QData { title: string; options: string[] }
+
+function extractQData(args: unknown): QData[] {
   if (!args || typeof args !== 'object') return [];
   const qs = (args as { questions?: unknown[] }).questions;
   if (!Array.isArray(qs)) return [];
   return qs
-    .filter((q): q is { question?: unknown } => Boolean(q) && typeof q === 'object')
-    .map((q) => {
-      const full = String(q.question ?? '').trim();
-      // Take only the first non-empty line — strips trailing code blocks from long titles
-      return full.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
-    })
-    .filter(Boolean);
+    .filter((q): q is { question?: unknown; options?: unknown[] } => Boolean(q) && typeof q === 'object')
+    .map((q) => ({
+      title: String(q.question ?? '').split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '',
+      options: Array.isArray(q.options)
+        ? q.options.map((o) => String(typeof o === 'string' ? o : (o as { label?: unknown }).label ?? '').trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((q) => q.title);
 }
 
-function parseAnswerLines(result: unknown): string[] {
+function parseAnswers(result: unknown): string[] {
   const text = extractText(result);
   if (!text) return [];
-  // Split into per-question blocks at each "N. " marker (title may span multiple lines)
-  const chunks = text.replace(/^\[我的选择\]\n?/, '').split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\./.test(s.trimStart()));
+  const chunks = text
+    .replace(/^\[我的选择\]\n?/, '')
+    .split(/(?=^\d+\.\s)/m)
+    .filter((s) => /^\d+\./.test(s.trimStart()));
   return chunks.map((chunk) => {
     const colonIdx = chunk.lastIndexOf('：');
     return colonIdx >= 0 ? chunk.slice(colonIdx + 1).trim() : chunk.replace(/^\d+\.\s*/, '').trim();
   });
 }
 
+function optionLetter(options: string[], answerText: string): string | null {
+  const idx = options.findIndex((opt) => answerText === opt || answerText.startsWith(opt) || opt === answerText.split('、')[0]);
+  return idx >= 0 ? String.fromCharCode(65 + idx) : null;
+}
+
 export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
-  args,
-  result,
-}: {
-  args: unknown;
-  result: unknown;
-}) {
+  args, result,
+}: { args: unknown; result: unknown }) {
   const [open, setOpen] = useState(false);
-  const titles = extractQTitles(args);
-  const answers = parseAnswerLines(result);
+  const qdata = extractQData(args);
+  const answers = parseAnswers(result);
 
-  if (titles.length === 0 && answers.length === 0) return null;
+  const count = Math.max(qdata.length, answers.length);
+  if (count === 0) return null;
 
-  const count = Math.max(titles.length, answers.length);
   const items = Array.from({ length: count }, (_, i) => ({
-    q: titles[i] ?? '',
+    q: qdata[i]?.title ?? '',
     a: answers[i] ?? '',
+    letter: qdata[i] ? optionLetter(qdata[i].options, answers[i] ?? '') : null,
   }));
   const multi = items.length > 1;
   const [first, ...rest] = items;
+
+  const renderItem = (item: typeof items[0], nth: number) => (
+    <div className={styles.item} key={nth}>
+      {multi && <span className={styles.qlabel}>第 {nth + 1} 题</span>}
+      {item.q && <div className={styles.qtext}>{item.q}</div>}
+      {item.a && (
+        <div className={styles.apill}>
+          {item.letter && <span className={styles.badge}>{item.letter}</span>}
+          <span>{item.a}</span>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className={styles.card}>
@@ -131,38 +164,19 @@ export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
           <button className={styles.headBtn} onClick={() => setOpen((v) => !v)} type="button">
             <span className={styles.ok}>✓</span>
             <span className={styles.title}>已回答全部 {items.length} 题</span>
-            <Icon
-              className={cx(styles.chevron, open && styles.chevronOpen)}
-              icon={ChevronDown}
-              size={12}
-            />
+            <Icon className={cx(styles.chevron, open && styles.chevronOpen)} icon={ChevronDown} size={12} />
           </button>
         ) : (
-          <>
-            <span className={styles.ok}>✓</span>
-            <span className={styles.title}>已回答</span>
-          </>
+          <><span className={styles.ok}>✓</span><span className={styles.title}>已回答</span></>
         )}
       </div>
 
-      {first && (
-        <div className={styles.item}>
-          {multi && <span className={styles.qlabel}>第 1 题</span>}
-          {first.q && <div className={styles.qtext}>{first.q}</div>}
-          {first.a && <div className={styles.apill}>{first.a}</div>}
-        </div>
-      )}
+      {first && renderItem(first, 0)}
 
       {multi && rest.length > 0 && (
         <div className={cx(styles.rest, open && styles.restOpen)}>
           <div className={styles.restInner}>
-            {rest.map((item, i) => (
-              <div className={styles.item} key={i}>
-                <span className={styles.qlabel}>第 {i + 2} 题</span>
-                {item.q && <div className={styles.qtext}>{item.q}</div>}
-                {item.a && <div className={styles.apill}>{item.a}</div>}
-              </div>
-            ))}
+            {rest.map((item, i) => renderItem(item, i + 1))}
           </div>
         </div>
       )}
