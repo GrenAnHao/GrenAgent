@@ -25,7 +25,7 @@ import {
   toolWhitelist,
 } from "./modes.js";
 import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
-import { makeQuestionsId, normalizeQuestions, collectAnswers, type RawAskUserParams } from "./questions.js";
+import { makeQuestionsId, normalizeQuestions, type RawAskUserParams } from "./questions.js";
 import { type TodoItem, extractTodoItems, markCompletedSteps } from "./utils.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -208,6 +208,9 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const id = makeQuestionsId();
       const p = params as RawAskUserParams;
+      if ((p.questions?.length ?? 0) > 8) {
+        console.error(`[ask_user] 题目数 ${p.questions?.length} 超过上限 8，已截断。`);
+      }
       const data = normalizeQuestions(p.questions ?? [], id, {
         allowExtra: p.allowExtra,
         allowExtraImages: p.allowExtraImages,
@@ -219,17 +222,16 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // 阻塞式 elicitation：经 harness 的 ctx.ui.*（前端渲染为 ChatInput 上方的内联选项卡）
-      // 逐题等待用户作答，工具直到拿到选择才返回——与 MCP 交互一致，模型无法替用户抢答。
-      // ctx.ui.select 仅单选，多选/自定义在 collectAnswers 里用循环 select + select→input 补回；
-      // 贴图无法经 ctx.ui 收集，阻塞模式下不提供。
+      // 阻塞式富卡：整张卡 JSON 作载荷经 ctx.ui.input 传给前端；前端识别哨兵后在消息流末尾
+      // 内联渲染富卡（皮肤/步骤/多选），用户作答后回传 `[我的选择] …` 文本 resolve 本次调用——
+      // 与 MCP 交互一致，模型拿到真实答案前不会继续。ctx.ui 协议无法承载结构化数据，故走 input.title。
       if (ctx.hasUI) {
-        const opts = { signal };
-        const text = await collectAnswers(data, {
-          select: (title, options) => ctx.ui.select(title, options, opts),
-          input: (title, placeholder) => ctx.ui.input(title, placeholder, opts),
-        });
-        return { content: [{ type: "text", text }] };
+        const payload = JSON.stringify({ __askUser: 1, data });
+        const answer = await ctx.ui.input(payload, undefined, { signal });
+        if (typeof answer === "string" && answer.trim()) {
+          return { content: [{ type: "text", text: answer }] };
+        }
+        return { content: [{ type: "text", text: "用户取消了 ask_user 选择（未作答）。" }] };
       }
 
       // 非交互模式（print / 无对话框 UI）：退回到对话流卡片（非阻塞），并提示模型停下等待。
