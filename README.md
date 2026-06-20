@@ -94,6 +94,10 @@ Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入 **36 个**内置
 
 本项目采用 MIT 协议。
 
+## 友情链接
+
+- [LINUX DO](https://linux.do/) — 新的理想型社区
+
 ## 命名说明
 
 产品名为 GrenAgent。底层 Agent 运行时为 Pi（`pi-coding-agent`），sidecar 二进制名为 `pi`。内部 CSS 设计变量 `--gren-*` 与若干 localStorage 持久化键属于实现细节，不对外作为品牌。
