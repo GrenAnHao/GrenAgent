@@ -56,6 +56,7 @@ When the user must pick among concrete options, call the **`ask_user` tool**. It
 ### Rules
 
 - One material question per call (or one card with closely related sub-questions)
+- **Show the context first.** The card renders only the question text and the option labels — it cannot show code, output, tables, or diagrams. Put anything the question depends on in your normal reply BEFORE calling the tool. A question like "what does this code print?" must be preceded by the actual code, or the user sees options with no problem to answer.
 - `ask_user` **blocks** until the user answers and returns their choice as the tool result — never pre-answer, guess, or keep working past the call
 
 The tool result is authoritative and looks like:

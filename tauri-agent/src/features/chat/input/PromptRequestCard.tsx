@@ -72,6 +72,9 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 13px;
     resize: vertical;
   `,
+  selectWrap: css`
+    margin-bottom: 8px;
+  `,
 }));
 
 /**
@@ -108,19 +111,40 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const isConfirm = request.method === 'confirm';
   const isInput = request.method === 'input';
   const isSelect = !isConfirm && !isInput;
-  const options = request.options?.length ? request.options : ['确定', '取消'];
-  const heading = isConfirm ? (request.title ?? '确认') : isSelect ? '请选择' : '请确认';
-  const body = isConfirm ? (request.message ?? request.title ?? '') : isInput ? (request.title ?? '') : '';
   const dismiss = () => respond(isConfirm ? { confirmed: false } : { cancelled: true });
-  const selectQuestion = {
-    id: 'select',
-    title: request.title ?? '请选择一个选项',
-    options: options.map((label, i) => ({ id: `o${i + 1}`, label })),
-  };
-  const chosen = selected.select?.[0];
-  const chosenLabel =
-    chosen != null ? selectQuestion.options.find((o) => o.id === chosen)?.label : undefined;
 
+  // select：QuestionSelector 本身已是完整卡片（头部 + 题面 + 选项 + 页脚），直接渲染、
+  // 不再套外层卡，避免「卡中卡」与「请选择」标题重复。题面（如代码）由 assistant 正文先给出。
+  if (isSelect) {
+    const options = request.options?.length ? request.options : ['确定', '取消'];
+    const selectQuestion = {
+      id: 'select',
+      title: request.title ?? '请选择一个选项',
+      options: options.map((label, i) => ({ id: `o${i + 1}`, label })),
+    };
+    const chosen = selected.select?.[0];
+    const chosenLabel =
+      chosen != null ? selectQuestion.options.find((o) => o.id === chosen)?.label : undefined;
+    return (
+      <QuestionSelector
+        className={styles.selectWrap}
+        continueLabel="确定"
+        data-testid="prompt-request-select"
+        headerTitle="请选择"
+        onContinue={() => {
+          if (chosenLabel) respond({ value: chosenLabel });
+        }}
+        onSkip={dismiss}
+        onToggle={(questionId, optionId) => setSelected({ [questionId]: [optionId] })}
+        questions={[selectQuestion]}
+        selected={selected}
+        skipLabel="取消"
+      />
+    );
+  }
+
+  const heading = isConfirm ? (request.title ?? '确认') : '请输入';
+  const body = isConfirm ? (request.message ?? request.title ?? '') : (request.title ?? '');
   return (
     <div className={styles.card} data-testid="prompt-request-card">
       <div className={styles.head}>
@@ -136,7 +160,7 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
           <Icon icon={X} size={14} />
         </button>
       </div>
-      {body && !isSelect ? <div className={styles.body}>{body}</div> : null}
+      {body ? <div className={styles.body}>{body}</div> : null}
 
       {isConfirm ? (
         <div className={styles.row}>
@@ -152,7 +176,7 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
             确定
           </Button>
         </div>
-      ) : isInput ? (
+      ) : (
         <>
           <textarea
             className={styles.textarea}
@@ -176,31 +200,6 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
             </Button>
           </div>
         </>
-      ) : (
-        <QuestionSelector
-          continueLabel="确定"
-          data-testid="prompt-request-select"
-          headerTitle="请选择"
-          onContinue={() => {
-            if (chosenLabel) respond({ value: chosenLabel });
-          }}
-          onSkip={dismiss}
-          onToggle={(questionId, optionId, allowMultiple) => {
-            setSelected((prev) => {
-              const cur = prev[questionId] ?? [];
-              if (allowMultiple) {
-                return {
-                  ...prev,
-                  [questionId]: cur.includes(optionId) ? cur.filter((x) => x !== optionId) : [...cur, optionId],
-                };
-              }
-              return { ...prev, [questionId]: [optionId] };
-            });
-          }}
-          questions={[selectQuestion]}
-          selected={selected}
-          skipLabel="取消"
-        />
       )}
     </div>
   );

@@ -172,6 +172,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "When a decision has 2+ concrete viable options for the user to pick — approach/scope/tradeoff, framework or file-path choice, quiz answer, plan-mode clarification, or confirmation before a risky/irreversible action — call ask_user instead of deciding silently.",
       "This is the ONLY way to surface choices: never write A/B/C/D (or numbered) option lists in your reply text — plain-text options are not clickable and the user cannot answer them.",
+      "The card shows only the question text and the option labels — it cannot render code, command output, tables, or diagrams. Put any context the question depends on in your reply BEFORE calling the tool (e.g. show the code, then ask what it prints).",
       "Autonomy still applies: when the answer is discoverable from the repo (read/grep first) or a single recommendation is obviously right, just act — reserve ask_user for genuine forks where the user's preference changes the outcome.",
       "ask_user BLOCKS until the user answers and returns their choice as the tool result (a `[我的选择]` block) — never pre-fill, guess, or answer the question yourself. State your recommendation in the question text; keep 2–5 short, mutually exclusive options.",
     ],
