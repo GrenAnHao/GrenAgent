@@ -42,7 +42,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。权威清单是 `extensions/index.ts` 的 `allExtensions`（当前 **36 个**），由 sidecar 的 `extensionFactories` 一并编译进 `binaries/pi`。`extensions/package.json` 的 `pi.extensions` 字段仅用于独立安装时的元数据，与 sidecar 实际加载列表可能不一致。
+包名 `pi-extensions-pack`。权威清单是 `extensions/index.ts` 的 `allExtensions`（当前 **37 个**），由 sidecar 的 `extensionFactories` 一并编译进 `binaries/pi`。`extensions/package.json` 的 `pi.extensions` 字段仅用于独立安装时的元数据，与 sidecar 实际加载列表可能不一致。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -62,11 +62,12 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `debug-tools` | 调试日志工具 | `debug_log` |
 | `dap` | Debug Adapter Protocol 调试 | `dap_launch`、`dap_set_breakpoints`、`dap_evaluate` 等 |
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
+| `fable-behavior` | Fable 5 + coding-agent 行为层（Tier 注入 + 子 agent 种子 + `fable_behavior_ref`） | `fable_behavior_ref` |
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
 | `knowledge-rag` | 知识库 RAG：分块、向量或关键词检索 | `kb_search`、`kb_add`、`/kb` |
 | `long-term-memory` | 跨会话长期记忆存取 | `memory_save`、`memory_recall`、`/memory` |
 | `session-memory` | 会话结构化工作状态，压缩后重锚 | `/session-state` |
-| `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms` |
+| `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms`、`fetch_html`、`fetch_markdown`、`fetch_txt`、`fetch_json` |
 | `web-search` | 多引擎联网搜索与站点 / GitHub 抓取 | `web_search`、`web_search_multi`、`fetch_web_content` |
 | `session-search` | 跨会话历史搜索 | `history_search`、`/history` |
 | `mcp` | 外部 MCP server 工具桥接 | `mcp__<server>__<tool>`（动态） |

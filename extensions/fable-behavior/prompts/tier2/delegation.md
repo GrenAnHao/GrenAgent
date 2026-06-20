@@ -10,4 +10,4 @@ When delegating:
 - Prefer `scout`/`planner`/`reviewer`/`worker` when they fit; take over if a sub-agent fails repeatedly.
 - Prefer conclusions over file dumps in handoff output.
 
-Clarifying questions: use `ask_user` when available — one question at a time, multiple-choice when predictable.
+Clarifying questions: use `ask_user` (see ask-user reference) — one question at a time, multiple-choice when predictable.

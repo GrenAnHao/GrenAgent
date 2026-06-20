@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allExtensions, approval, multiAgent, safety } from "./index.js";
+import { allExtensions, approval, diagramHint, fableBehavior, multiAgent, safety } from "./index.js";
 
 // allExtensions 是 cli/src/main.ts 编译进 sidecar 二进制的整包扩展（既喂给 RPC 运行时，也喂给
 // 子代理的 `--mode json -p` 路径 main(argv, { extensionFactories: allExtensions })）。因为是编译进去
@@ -10,6 +10,12 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
     expect(allExtensions).toContain(safety);
     expect(allExtensions).toContain(approval);
     expect(allExtensions).toContain(multiAgent);
+    expect(allExtensions).toContain(fableBehavior);
+  });
+
+  it("loads fable-behavior immediately after diagram-hint in the bundle", () => {
+    expect(allExtensions.indexOf(diagramHint)).toBeGreaterThan(-1);
+    expect(allExtensions.indexOf(fableBehavior)).toBe(allExtensions.indexOf(diagramHint) + 1);
   });
 
   it("registers safety first so its tool_call guard intercepts earliest", () => {

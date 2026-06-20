@@ -27,6 +27,7 @@ afterEach(() => {
   delete process.env.FABLE_BEHAVIOR_TIER2;
   delete process.env.FABLE_BEHAVIOR_TIER2_P1;
   delete process.env.FABLE_BEHAVIOR_TIER3_GUIDELINES;
+  delete process.env.FABLE_BEHAVIOR_TIER3_TOOL;
 });
 
 describe("fable-behavior extension", () => {
@@ -81,6 +82,29 @@ describe("fable-behavior extension", () => {
     const content = res?.message?.content ?? "";
     expect(content).toContain("Tool discipline");
     expect(content).not.toContain("Delegation");
+  });
+
+  it("registers fable_behavior_ref by default", () => {
+    const tools: string[] = [];
+    const pi = {
+      on: () => {},
+      registerTool: (t: { name: string }) => tools.push(t.name),
+      registerCommand: () => {},
+    } as never;
+    fableBehavior(pi);
+    expect(tools).toContain("fable_behavior_ref");
+  });
+
+  it("FABLE_BEHAVIOR_TIER3_TOOL=0 skips ref tool", () => {
+    process.env.FABLE_BEHAVIOR_TIER3_TOOL = "0";
+    const tools: string[] = [];
+    const pi = {
+      on: () => {},
+      registerTool: (t: { name: string }) => tools.push(t.name),
+      registerCommand: () => {},
+    } as never;
+    fableBehavior(pi);
+    expect(tools).not.toContain("fable_behavior_ref");
   });
 });
 

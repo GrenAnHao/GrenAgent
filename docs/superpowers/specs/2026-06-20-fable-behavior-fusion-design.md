@@ -1,7 +1,7 @@
 # Fable Behavior Fusion — System Prompt Layer
 
 - Date: 2026-06-20
-- Status: approved, implementing
+- Status: shipped
 - Sources: `CLAUDE-FABLE-5-full.md`, [asgeirtj/system_prompts_leaks](https://github.com/asgeirtj/system_prompts_leaks) (Claude Code, Cursor, Copilot, Codex, OpenCode)
 - Delivery: extension `extensions/fable-behavior/` with Tier C priority injection
 
@@ -29,7 +29,8 @@ buildSystemPrompt()           # unchanged
 | `FABLE_BEHAVIOR_TIER2` | `1` | Include Tier-2 modules |
 | `FABLE_BEHAVIOR_TIER2_P1` | `1` | Include Tier-2 P1 extended modules (delegation, terminal-harness, verify-baseline, etc.) |
 | `FABLE_BEHAVIOR_TIER3_GUIDELINES` | `1` | Append Tier-3 summary block |
-| `FABLE_BEHAVIOR_SEED_AGENTS` | `1` | Seed enriched sub-agent templates if absent |
+| `FABLE_BEHAVIOR_TIER3_TOOL` | `1` | Register `fable_behavior_ref` for on-demand Tier-3 full text |
+| `FABLE_BEHAVIOR_SEED_AGENTS` | `1` | Seed enriched sub-agent templates if absent (`force` overwrites) |
 
 ## Module map
 
@@ -49,6 +50,7 @@ buildSystemPrompt()           # unchanged
 | File | Source |
 |------|--------|
 | `tool-discipline.md` | Cursor + Claude grep-tool + Copilot priority |
+| `ask-user.md` | Cursor/Copilot ask_user + QuestionsCard UI |
 | `grep-strategy.md` | Claude Code grep-tool (output modes, regex, filter) |
 | `mcp-collaboration.md` | Claude Code Opus 4.8 MCP harness rules |
 | `refusal.md` | Fable + Opus authorized security boundaries |
@@ -73,7 +75,7 @@ buildSystemPrompt()           # unchanged
 | ask | search tier-3 summary |
 | plan | Codex plan_mode three phases + non-mutating boundary (also in enhanced PLAN_PROMPT) |
 | debug | Codex/Cursor evidence loop + debug_log alignment |
-| agent | none |
+| agent | ask_user reminder (QuestionsCard) |
 
 ## Boundaries
 
@@ -99,5 +101,6 @@ Tier-2 P1 (optional): conventions-first, verify-baseline, git-hygiene, editing-c
 
 ## Tests
 
-- `loader.test.ts`: module assembly, mode slices, empty when disabled
+- `loader.test.ts` / `index.test.ts` / `seed.test.ts`: module assembly, config switches
+- `integration.test.ts`: coexistence with `diagram-hint` + `agent-mode` (sidecar multi-hook)
 - Smoke: `FABLE_BEHAVIOR=1` yields non-empty `before_agent_start` message

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFableBehaviorPrompt, estimatePromptTokens, resolveAgentModeFromEntries } from "./loader.js";
+import { buildFableBehaviorPrompt, estimatePromptTokens, readTier3Module, resolveAgentModeFromEntries } from "./loader.js";
 
 describe("buildFableBehaviorPrompt", () => {
   it("includes tier1 harness rules", () => {
@@ -12,6 +12,7 @@ describe("buildFableBehaviorPrompt", () => {
   it("includes tier2 when enabled", () => {
     const p = buildFableBehaviorPrompt({ tier2: true, tier3Guidelines: false });
     expect(p).toContain("Tool discipline");
+    expect(p).toContain("Ask User");
     expect(p).toContain("Grep and glob strategy");
     expect(p).toContain("MCP collaboration");
     expect(p).toContain("Verify baseline");
@@ -25,15 +26,26 @@ describe("buildFableBehaviorPrompt", () => {
     expect(p).toContain("debug_log");
   });
 
+  it("readTier3Module returns citing-code body", () => {
+    const text = readTier3Module("citing-code");
+    expect(text).toContain("startLine:endLine:filepath");
+    expect(readTier3Module("nope")).toBeUndefined();
+  });
+
+  it("adds ask mode slice", () => {
+    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "ask" });
+    expect(p.toLowerCase()).toContain("read-only");
+  });
+
   it("adds plan mode slice with three phases", () => {
     const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "plan" });
     expect(p).toContain("Ground in the environment");
     expect(p).toContain("decision-complete");
   });
 
-  it("adds ask mode slice", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "ask" });
-    expect(p.toLowerCase()).toContain("read-only");
+  it("adds agent mode slice for ask_user", () => {
+    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "agent" });
+    expect(p).toContain("ask_user");
   });
 
   it("adds tier3 summary when enabled", () => {

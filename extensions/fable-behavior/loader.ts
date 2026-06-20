@@ -17,6 +17,7 @@ const TIER1 = [
 
 const TIER2_P0 = [
   "tool-discipline",
+  "ask-user",
   "grep-strategy",
   "mcp-collaboration",
   "refusal",
@@ -43,16 +44,33 @@ const TIER3_SUMMARY_LINES = [
   "Frontend (greenfield): intentional typography/color/motion; avoid generic AI layouts; respect existing design systems.",
   "Review requests: findings first by severity with file:line refs; brief summary only after issues.",
   "Grep: files_with_matches to locate, content to read, count to gauge; filter with glob/type; prefer tool over bash rg.",
+  "Ask user: multiple-choice → call ask_user tool; never write A/B/C/D as plain chat text.",
   "MCP: read tool schema first; denied calls need a different approach; external calls may publish data.",
   "Security: defensive help in authorized pentest/CTF/research; refuse destructive or evasion-for-harm requests.",
 ] as const;
+
+export const TIER3_TOPICS = [
+  "search-full",
+  "copyright",
+  "wellbeing",
+  "evenhandedness",
+  "citing-code",
+  "frontend-design",
+] as const;
+
+export type Tier3Topic = (typeof TIER3_TOPICS)[number];
 
 function readModule(subdir: string, name: string): string {
   return readFileSync(join(ROOT, subdir, `${name}.md`), "utf8").trim();
 }
 
+/** Read a full Tier-3 reference module (on-demand via fable_behavior_ref tool). */
+export function readTier3Module(topic: string): string | undefined {
+  if (!(TIER3_TOPICS as readonly string[]).includes(topic)) return undefined;
+  return readModule("tier3", topic);
+}
+
 function readModeSlice(mode: FableAgentMode): string {
-  if (mode === "agent") return "";
   try {
     return readModule("modes", mode);
   } catch {
