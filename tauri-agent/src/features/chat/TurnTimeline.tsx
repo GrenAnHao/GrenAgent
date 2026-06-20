@@ -1,5 +1,6 @@
 import { Suspense, lazy, memo } from 'react';
 import { ChatItemShell } from './ChatItemShell';
+import { MessageActionBar } from './messageActions/MessageActionBar';
 import { ReasoningInline } from './ReasoningInline';
 import { LazyMarkdown } from './LazyMarkdown';
 import type { TimelineSegment } from './groupMessages';
@@ -87,8 +88,15 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
  */
 export function TurnTimeline({ segments }: TurnTimelineProps) {
   const rows = buildTurnRows(segments);
+  const text = segments
+    .map((s) => (s.kind === 'text' ? s.content : ''))
+    .join('\n')
+    .trim();
+  const actions = text ? (
+    <MessageActionBar ctx={{ role: 'assistant', text }} bar={['copy']} />
+  ) : undefined;
   return (
-    <ChatItemShell placement="left">
+    <ChatItemShell placement="left" actions={actions}>
       {rows.map((row) =>
         row.kind === 'context' ? (
           <Suspense key={row.id} fallback={null}>

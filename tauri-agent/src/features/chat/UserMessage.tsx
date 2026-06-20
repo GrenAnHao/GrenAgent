@@ -3,6 +3,8 @@ import { Image } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import { ChatItemShell } from './ChatItemShell';
 import { chatStyles } from './chatStyles';
+import { MessageActionBar } from './messageActions/MessageActionBar';
+import type { MessageActionContext } from './messageActions/types';
 import { renderMessageTags } from './messageTags';
 import { parseAttachments } from './attachment';
 import { AttachmentCard } from './AttachmentCard';
@@ -40,8 +42,21 @@ function UserMessageInner({ text, images }: UserMessageProps) {
   const hasImages = Boolean(images?.length);
   const hasBubble = hasImages || bodyText.length > 0;
 
+  const actions = bodyText
+    ? (() => {
+        const ctx: MessageActionContext = { role: 'user', text: bodyText };
+        return (
+          <MessageActionBar
+            ctx={ctx}
+            bar={['regenerate', 'edit', 'copy']}
+            menu={['edit', 'copy', 'divider', 'regenerate', 'del']}
+          />
+        );
+      })()
+    : undefined;
+
   return (
-    <ChatItemShell placement="right" bubble={false}>
+    <ChatItemShell placement="right" bubble={false} actions={actions}>
       <div className={styles.col}>
         {hasBubble ? (
           <div className={chatStyles.bubble}>

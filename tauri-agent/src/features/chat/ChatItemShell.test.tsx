@@ -27,4 +27,22 @@ describe('ChatItemShell', { timeout: 30_000 }, () => {
     );
     expect(screen.getByText('yo')).toBeTruthy();
   });
+
+  it('actions 渲染在 .chat-actions 容器内', () => {
+    const { container } = wrap(
+      <ChatItemShell placement="right" bubble actions={<button>复制</button>}>
+        正文
+      </ChatItemShell>,
+    );
+    const actions = container.querySelector('.chat-actions');
+    expect(actions).not.toBeNull();
+    expect(actions!.textContent).toContain('复制');
+  });
+
+  it('无 actions 时不渲染 .chat-actions', () => {
+    const { container } = wrap(
+      <ChatItemShell placement="left">正文</ChatItemShell>,
+    );
+    expect(container.querySelector('.chat-actions')).toBeNull();
+  });
 });

@@ -12,6 +12,11 @@ export const chatStyles = createStaticStyles(({ css }) => ({
        contain-intrinsic-size 为屏外项提供占位高度（auto 让浏览器记住上次实测值），减少滚动跳动。 */
     content-visibility: auto;
     contain-intrinsic-size: auto 64px;
+
+    &:hover .chat-actions,
+    &:focus-within .chat-actions {
+      opacity: 1;
+    }
   `,
   itemUser: css`
     align-items: flex-end;
@@ -35,5 +40,19 @@ export const chatStyles = createStaticStyles(({ css }) => ({
     line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
+  `,
+  actions: css`
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 28px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  `,
+  actionsRight: css`
+    align-self: flex-end;
+  `,
+  actionsLeft: css`
+    align-self: flex-start;
   `,
 }));
