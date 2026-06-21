@@ -183,10 +183,12 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 7px 11px;
     border: none;
     border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    background: transparent;
+    background: ${cssVar.colorFillSecondary};
     color: ${cssVar.colorText};
     font-size: 13px;
     outline: none;
+    &::placeholder { color: ${cssVar.colorTextTertiary}; }
+    &:focus { background: ${cssVar.colorFillTertiary}; }
   `,
   footer: css`
     display: flex;
@@ -313,6 +315,8 @@ export const QuestionSelector = memo(function QuestionSelector({
                   </button>
                   {isCustom && isSel && onCustomTextChange ? (
                     <input
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus
                       className={styles.customInput}
                       data-testid={`${testId}-custom-${q.id}`}
                       onChange={(e) => onCustomTextChange(q.id, e.target.value)}
