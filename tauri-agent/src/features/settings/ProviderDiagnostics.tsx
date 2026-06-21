@@ -230,6 +230,8 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
               <span style={{ fontSize: 12, color: cssVar.colorTextDescription }}>请先配置 API Key</span>
             ) : null}
           </div>
+          {/* 流式内容：实时显示，result 到来前就已可见 */}
+          {streamContent ? <pre className={styles.preview}>{streamContent}{running ? '▌' : ''}</pre> : null}
           {result ? (
             <>
               <div className={styles.metrics}>
@@ -265,7 +267,6 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
                   {result.error}
                 </div>
               ) : null}
-              {streamContent ? <pre className={styles.preview}>{streamContent}</pre> : null}
             </>
           ) : null}
         </div>

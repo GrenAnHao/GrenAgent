@@ -791,7 +791,12 @@ pub async fn diagnose_provider_model(
     let entry = provider_entry(&app, &provider_id)?;
     let user = if prompt.trim().is_empty() { "Who are you?".to_string() } else { prompt };
 
-    if stream && (entry.api.as_str() == "openai-completions" || entry.api.is_empty()) {
+    // OpenAI 兼容类型（含未显式指定 api 的默认情况）均支持流式
+    let is_openai_compat = entry.api.is_empty()
+        || entry.api.starts_with("openai")
+        || entry.api == "openai-completions"
+        || entry.api == "openai-responses";
+    if stream && is_openai_compat {
         return diagnose_openai_stream(&entry, &model_id, &user, &on_chunk).await;
     }
 
