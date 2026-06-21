@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
 use crate::pi::types::PiOutbound;
@@ -647,6 +648,7 @@ async fn diagnose_openai_stream(
     entry: &ProviderEntry,
     model_id: &str,
     prompt: &str,
+    on_chunk: &Channel<String>,
 ) -> Result<DiagnoseResult, String> {
     use futures_util::StreamExt;
     use std::time::Instant;
@@ -740,6 +742,7 @@ async fn diagnose_openai_stream(
                         ttft_ms = start.elapsed().as_millis() as u64;
                     }
                     content.push_str(delta);
+                    let _ = on_chunk.send(delta.to_string());
                 }
             }
         }
@@ -780,49 +783,30 @@ pub async fn diagnose_provider_model(
     model_id: String,
     prompt: String,
     stream: bool,
+    on_chunk: Channel<String>,
     app: tauri::AppHandle,
 ) -> Result<DiagnoseResult, String> {
     use std::time::Instant;
 
     let entry = provider_entry(&app, &provider_id)?;
-    let user = if prompt.trim().is_empty() {
-        "Who are you?".to_string()
-    } else {
-        prompt
-    };
+    let user = if prompt.trim().is_empty() { "Who are you?".to_string() } else { prompt };
 
     if stream && (entry.api.as_str() == "openai-completions" || entry.api.is_empty()) {
-        return diagnose_openai_stream(&entry, &model_id, &user).await;
+        return diagnose_openai_stream(&entry, &model_id, &user, &on_chunk).await;
     }
 
-    // 其它 API 类型：非流式一次性请求，TTFT 近似为总耗时。
+    // 非流式：一次性请求，内容整体推给前端一次
     let start = Instant::now();
     match call_llm_oneshot(&entry, &model_id, "", &user).await {
         Ok(content) => {
+            let _ = on_chunk.send(content.clone());
             let total_ms = start.elapsed().as_millis() as u64;
-            Ok(DiagnoseResult {
-                ok: true,
-                error: None,
-                content,
-                ttft_ms: total_ms,
-                total_ms,
-                prompt_tokens: None,
-                completion_tokens: None,
-                total_tokens: None,
-                tokens_per_sec: None,
-            })
+            Ok(DiagnoseResult { ok: true, error: None, content, ttft_ms: total_ms, total_ms,
+                prompt_tokens: None, completion_tokens: None, total_tokens: None, tokens_per_sec: None })
         }
-        Err(e) => Ok(DiagnoseResult {
-            ok: false,
-            error: Some(e),
-            content: String::new(),
-            ttft_ms: 0,
-            total_ms: start.elapsed().as_millis() as u64,
-            prompt_tokens: None,
-            completion_tokens: None,
-            total_tokens: None,
-            tokens_per_sec: None,
-        }),
+        Err(e) => Ok(DiagnoseResult { ok: false, error: Some(e), content: String::new(),
+            ttft_ms: 0, total_ms: start.elapsed().as_millis() as u64,
+            prompt_tokens: None, completion_tokens: None, total_tokens: None, tokens_per_sec: None }),
     }
 }
 

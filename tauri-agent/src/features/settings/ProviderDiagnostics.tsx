@@ -1,5 +1,6 @@
 import { Button, Icon } from '@lobehub/ui';
-import { Input, Radio, Select } from 'antd';
+import { Channel } from '@tauri-apps/api/core';
+import { Input, Select, Switch } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Activity, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -138,6 +139,7 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [stream, setStream] = useState(true);
   const [running, setRunning] = useState(false);
+  const [streamContent, setStreamContent] = useState('');
   const [result, setResult] = useState<DiagnoseResult | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -150,17 +152,14 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
     if (!modelId.trim() || !hasApiKey) return;
     setRunning(true);
     setResult(null);
+    setStreamContent('');
     try {
-      const out = await pi.diagnoseProviderModel(providerId, modelId.trim(), prompt, stream);
+      const onChunk = new Channel<string>();
+      onChunk.onmessage = (chunk) => setStreamContent((prev) => prev + chunk);
+      const out = await pi.diagnoseProviderModel(providerId, modelId.trim(), prompt, stream, onChunk);
       setResult(out);
     } catch (e) {
-      setResult({
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-        content: '',
-        ttftMs: 0,
-        totalMs: 0,
-      });
+      setResult({ ok: false, error: e instanceof Error ? e.message : String(e), content: '', ttftMs: 0, totalMs: 0 });
     } finally {
       setRunning(false);
     }
@@ -210,16 +209,11 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
               onChange={(e) => setPrompt(e.target.value)}
             />
           </div>
-          <div className={styles.field}>
-            <div className={styles.label}>请求模式</div>
-            <Radio.Group
-              data-testid="prov-diag-stream"
-              value={stream}
-              onChange={(e) => setStream(Boolean(e.target.value))}
-            >
-              <Radio value={true}>流式（SSE，测 TTFT / token 速率）</Radio>
-              <Radio value={false}>非流式（一次性，部分供应商仅支持此模式）</Radio>
-            </Radio.Group>
+          <div className={styles.field} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Switch checked={stream} onChange={setStream} size="small" data-testid="prov-diag-stream" />
+            <span className={styles.label} style={{ marginBottom: 0 }}>
+              {stream ? '流式（SSE）' : '非流式'}
+            </span>
           </div>
           <div className={styles.actions}>
             <Button
@@ -271,7 +265,7 @@ export function ProviderDiagnostics({ providerId, modelIds, hasApiKey }: Props) 
                   {result.error}
                 </div>
               ) : null}
-              {result.content ? <pre className={styles.preview}>{result.content}</pre> : null}
+              {streamContent ? <pre className={styles.preview}>{streamContent}</pre> : null}
             </>
           ) : null}
         </div>

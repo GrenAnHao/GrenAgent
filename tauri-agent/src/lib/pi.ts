@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
@@ -267,8 +267,8 @@ export const pi = {
   /** Mermaid 渲染失败时的非流式一次性修复：用当前会话模型生成修正后的 mermaid 代码（不进对话历史）。 */
   fixMermaid: (workspace: string, code: string, error: string) =>
     invoke<string>('fix_mermaid_diagram', { workspace, code, error }),
-  diagnoseProviderModel: (providerId: string, modelId: string, prompt: string, stream: boolean) =>
-    invoke<DiagnoseResult>('diagnose_provider_model', { providerId, modelId, prompt, stream }),
+  diagnoseProviderModel: (providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: Channel<string>) =>
+    invoke<DiagnoseResult>('diagnose_provider_model', { providerId, modelId, prompt, stream, onChunk }),
   subagentList: (workspace: string) => invoke<SubAgentItem[]>('subagent_list', { workspace }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
