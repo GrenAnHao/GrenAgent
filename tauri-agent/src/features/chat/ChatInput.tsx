@@ -46,7 +46,8 @@ export function ChatInput({
   const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
 
   // 读当前编辑器正文（markdown）。
-  const readDraft = useCallback(() => String(editor.getDocument('markdown') || ''), [editor]);
+  // @lobehub/editor 的 markdown 序列化会把 _ 转义成 \_，对 AI 消息无意义，这里还原。
+  const readDraft = useCallback(() => String(editor.getDocument('markdown') || '').replace(/\\_/g, '_'), [editor]);
 
   // 草稿持久化：debounce 写，避免每键都落 localStorage。
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
