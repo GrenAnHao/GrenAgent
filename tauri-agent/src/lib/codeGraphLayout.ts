@@ -9,7 +9,6 @@ import {
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from 'd3-force';
-import type { FileGraph } from './codeGraphIo';
 
 export interface NodePosition {
   x: number;
@@ -40,7 +39,7 @@ export function topLevelDir(path: string): string {
  * 种子位置按目录锚点 + 索引确定性抖动，保证结果稳定（同输入同布局）。
  */
 export function computeForceLayout(
-  graph: FileGraph,
+  graph: { nodes: { path: string }[]; edges: { source: string; target: string }[] },
   opts: ForceLayoutOptions = {},
 ): Map<string, NodePosition> {
   const n = graph.nodes.length;

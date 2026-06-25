@@ -146,6 +146,7 @@ pub fn run() {
             commands::code_intel::code_intel_reindex,
             commands::code_intel::code_intel_is_initialized,
             commands::code_intel::code_intel_file_graph,
+            commands::code_intel::code_intel_rich_graph,
             commands::sandbox::sandbox_status,
             commands::sandbox::sandbox_install,
         ])

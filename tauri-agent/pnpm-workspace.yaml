@@ -5,6 +5,12 @@ allowBuilds:
   '@lobehub/editor': true
   esbuild: true
 
+minimumReleaseAgeExclude:
+  - '@lobehub/ui@5.16.1'
+  - framer-motion@12.41.0
+  - motion-dom@12.41.0
+  - motion@12.41.0
+
 onlyBuiltDependencies:
   - '@lobehub/editor'
   - esbuild

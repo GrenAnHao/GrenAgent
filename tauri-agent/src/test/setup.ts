@@ -1,3 +1,7 @@
+import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
+afterEach(cleanup);
 // jsdom 缺少的浏览器 API 垫片（antd / @lobehub/ui 组件测试需要）。
 if (typeof window !== 'undefined') {
   if (!window.matchMedia) {
