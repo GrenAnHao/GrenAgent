@@ -14,6 +14,7 @@
   },
   "scripts": {
     "dev": "node --import tsx src/main.ts --mode rpc",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"import { createRequire as __cjsCreateRequire } from 'node:module'; const require = __cjsCreateRequire(import.meta.url);\" --external:@earendil-works/pi-coding-agent --external:@ast-grep/napi --outfile=dist/main.js"
   },
