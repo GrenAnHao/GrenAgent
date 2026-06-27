@@ -8,8 +8,8 @@ const styles = createStaticStyles(({ css }) => ({
   card: css`
     max-width: 600px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
     overflow: hidden;
   `,
   head: css`

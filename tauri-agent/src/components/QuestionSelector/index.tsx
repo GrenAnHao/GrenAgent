@@ -50,9 +50,8 @@ const styles = createStaticStyles(({ css }) => ({
     max-width: 600px;
     overflow: hidden;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 12px;
-    background: ${cssVar.colorBgContainer};
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
   `,
   head: css`
     display: flex;
@@ -120,7 +119,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 9px;
+    border-radius: 6px;
     background: ${cssVar.colorFillQuaternary};
     overflow: hidden;
     transition:

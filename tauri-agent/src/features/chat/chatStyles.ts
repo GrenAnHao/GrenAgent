@@ -34,8 +34,9 @@ export const chatStyles = createStaticStyles(({ css }) => ({
   `,
   bubble: css`
     padding: 8px 12px;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillTertiary};
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;

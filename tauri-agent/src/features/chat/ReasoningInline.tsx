@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { Icon } from '@lobehub/ui';
-import { ChevronDown } from 'lucide-react';
+import { createStaticStyles, cssVar } from 'antd-style';
+import { Brain } from 'lucide-react';
+import { MutedLine } from './conv/MutedLine';
 import { LazyMarkdown } from './LazyMarkdown';
 import { cardStyles } from '../tools/cardStyles';
 
@@ -36,30 +36,6 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 13px;
     line-height: 1.55;
   `,
-  summary: css`
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 0;
-    border: none;
-    background: transparent;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 13px;
-    line-height: 1.55;
-    cursor: pointer;
-    transition: color 0.15s ease;
-
-    &:hover {
-      color: ${cssVar.colorTextSecondary};
-    }
-  `,
-  chevron: css`
-    display: inline-flex;
-    transition: transform 0.2s ease;
-  `,
-  chevronCollapsed: css`
-    transform: rotate(-90deg);
-  `,
   scroll: css`
     max-height: ${REASONING_MAX_HEIGHT}px;
     overflow-y: auto;
@@ -78,9 +54,9 @@ interface ReasoningInlineProps {
 }
 
 /**
- * 轻量推理段：对齐 MiMo / PiAgentUI 的内联推理展示。
- * - 流式中：限高窗口 + 自动滚到底 + 顶部渐隐，盯着最新一段，不把正文挤下去；
- * - 结束后：自动收起为浅色摘要行（点「已深度思考」可展开完整推理）。
+ * 轻量推理段（L1 低调）：
+ * - 流式中：限高窗口 + 自动滚到底 + 顶部渐隐，盯着最新一段；
+ * - 结束后：收起为 MutedLine 摘要行（点「已深度思考」可展开完整推理）。
  */
 function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlineProps) {
   const text = content.trim();
@@ -88,7 +64,6 @@ function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlin
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
-  // 流式时把推理窗口滚到底，始终看见最新一段；并据此判断是否需要顶部渐隐。
   useEffect(() => {
     if (!streaming) return;
     const el = scrollRef.current;
@@ -127,17 +102,7 @@ function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlin
 
   return (
     <div className={styles.wrap} data-testid="reasoning-inline">
-      <button
-        type="button"
-        className={styles.summary}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span>{label}</span>
-        <span className={cx(styles.chevron, !expanded && styles.chevronCollapsed)}>
-          <Icon icon={ChevronDown} size={12} />
-        </span>
-      </button>
+      <MutedLine icon={Brain} text={label} open={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
         <LazyMarkdown variant="chat" fontSize={13}>
           {text}

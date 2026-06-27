@@ -1,29 +1,17 @@
 import { memo } from 'react';
-import { Icon } from '@lobehub/ui';
 import { CircleHelp } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
+import { ConvCard } from './conv/ConvCard';
 
 const styles = createStaticStyles(({ css }) => ({
-  card: css`
-    width: 100%;
+  body: css`
     max-width: 520px;
-    padding: 10px 12px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
-  `,
-  head: css`
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    margin-block-end: 6px;
-    font-size: 12px;
-    color: ${cssVar.colorTextTertiary};
+    padding: 9px 12px;
   `,
   question: css`
     margin-block-end: 4px;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     color: ${cssVar.colorText};
   `,
   answer: css`
@@ -49,25 +37,24 @@ export function parseAnswer(content: string): ParsedAnswer | null {
   return null;
 }
 
-/** 对话流内的「问题 + 答案」卡片（对应一次选择题的结果，持久留痕，参考 Cursor 的 Answer 卡）。 */
+/** 对话流内的「问题 + 答案」卡（L4，ConvCard surface），对应一次选择题的结果，持久留痕。 */
 export const AnswerCard = memo(function AnswerCard({ content }: { content: string }) {
   const data = parseAnswer(content);
-  // 解析失败（非预期 JSON）时回退为纯文本展示，避免消息「凭空消失」。
   if (!data) {
     return (
-      <div className={styles.card} data-testid="answer-card">
-        <div className={styles.answer}>{content}</div>
-      </div>
+      <ConvCard label="Answer" icon={CircleHelp} data-testid="answer-card">
+        <div className={styles.body}>
+          <div className={styles.answer}>{content}</div>
+        </div>
+      </ConvCard>
     );
   }
   return (
-    <div className={styles.card} data-testid="answer-card">
-      <div className={styles.head}>
-        <Icon icon={CircleHelp} size={13} />
-        <span>Answer</span>
+    <ConvCard label="Answer" icon={CircleHelp} data-testid="answer-card">
+      <div className={styles.body}>
+        <div className={styles.question}>{data.title}</div>
+        <div className={styles.answer}>{data.answer}</div>
       </div>
-      <div className={styles.question}>{data.title}</div>
-      <div className={styles.answer}>{data.answer}</div>
-    </div>
+    </ConvCard>
   );
 });

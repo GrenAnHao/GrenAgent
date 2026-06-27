@@ -40,8 +40,8 @@ describe('ToolExecution skill invocation inspector', { timeout: 30_000 }, () => 
   });
 });
 
-describe('ToolExecution bash terminal card', { timeout: 30_000 }, () => {
-  it('renders command with prompt and output inside a terminal card', () => {
+describe('ToolExecution bash row', { timeout: 30_000 }, () => {
+  it('shows command in the row and output in the body (no redundant $ prompt)', () => {
     wrap(
       <ToolExecution
         toolName="bash"
@@ -50,10 +50,9 @@ describe('ToolExecution bash terminal card', { timeout: 30_000 }, () => {
         status="running"
       />,
     );
-    // 命令文本单独成节点（终端卡内 $ 提示符后）；输出、bash 标签、提示符同时可见。
+    // 命令进行内 args、输出进展开 body；工具名 bash 可见。去冗余后不再重复 $ 提示符。
     expect(screen.getByText('echo hi')).toBeTruthy();
     expect(document.body.textContent).toContain('hi there');
     expect(document.body.textContent).toContain('bash');
-    expect(document.body.textContent).toContain('$');
   });
 });

@@ -1,7 +1,7 @@
-import { Collapse, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Sparkles } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
+import { MutedLine } from './conv/MutedLine';
 import { LazyMarkdown } from './LazyMarkdown';
 
 const TITLES: Record<string, string> = {
@@ -16,17 +16,10 @@ const TITLES: Record<string, string> = {
 };
 
 const styles = createStaticStyles(({ css }) => ({
-  label: css`
-    font-size: 12px;
-    color: ${cssVar.colorTextTertiary};
-  `,
-  count: css`
-    color: ${cssVar.colorTextQuaternary};
-  `,
-  // 注入内容收进限高滚动区，记忆/上下文再多也不会把对话流撑长；正文整体压紧、标题降级，
-  // 不再是生硬的大 h1。
+  // 注入内容收进限高滚动区；正文整体压紧、标题降级，不再是生硬的大 h1。
   body: css`
     max-height: 200px;
+    margin-block-start: 4px;
     overflow: auto;
     padding-inline-end: 4px;
     scrollbar-width: thin;
@@ -68,7 +61,7 @@ function NoticePillInner({ customType, content }: NoticePillProps) {
   const [expanded, setExpanded] = useState(false);
   const title = TITLES[customType] ?? '已注入上下文';
 
-  // 剥离扩展注入的首个标题行（与折叠头标题重复、显得生硬），并数出条目数放到折叠头。
+  // 剥离扩展注入的首个标题行（与折叠头标题重复），并数出条目数放到折叠头。
   const { body, count } = useMemo(() => {
     const stripped = content.replace(/^\s*#{1,6}[ \t]+.*(?:\r?\n)+/, '').trim();
     const text = stripped || content.trim();
@@ -78,36 +71,20 @@ function NoticePillInner({ customType, content }: NoticePillProps) {
 
   return (
     <div data-testid="notice-pill" style={{ paddingInlineStart: 4, maxWidth: '100%' }}>
-      <Collapse
-        variant="borderless"
-        gap={4}
-        activeKey={expanded ? ['notice'] : []}
-        onChange={(keys) => {
-          const arr = Array.isArray(keys) ? keys : [keys];
-          setExpanded(arr.includes('notice'));
-        }}
-        items={[
-          {
-            key: 'notice',
-            label: (
-              <Flexbox horizontal align="center" gap={6} className={styles.label}>
-                <Icon icon={Sparkles} size={13} />
-                <span>
-                  {title}
-                  {count > 0 ? <span className={styles.count}> · {count} 条</span> : null}
-                </span>
-              </Flexbox>
-            ),
-            children: (
-              <div className={styles.body}>
-                <LazyMarkdown variant="chat" fontSize={12}>
-                  {body}
-                </LazyMarkdown>
-              </div>
-            ),
-          },
-        ]}
+      <MutedLine
+        icon={Sparkles}
+        text={title}
+        count={count > 0 ? count : undefined}
+        open={expanded}
+        onToggle={() => setExpanded((v) => !v)}
       />
+      {expanded ? (
+        <div className={styles.body}>
+          <LazyMarkdown variant="chat" fontSize={12}>
+            {body}
+          </LazyMarkdown>
+        </div>
+      ) : null}
     </div>
   );
 }

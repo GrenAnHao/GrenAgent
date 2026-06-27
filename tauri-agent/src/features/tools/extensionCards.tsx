@@ -268,8 +268,8 @@ const genImageStyles = createStaticStyles(({ css }) => ({
     max-width: 100%;
     padding: 12px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
   `,
   head: css`
     display: flex;
@@ -652,8 +652,8 @@ const fetchStyles = createStaticStyles(({ css }) => ({
     width: 100%;
     max-width: 360px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
     transition: border-color 0.2s;
 
     &:hover {
@@ -802,8 +802,8 @@ const speakCardStyles = createStaticStyles(({ css }) => ({
     min-width: 0;
     padding: 10px 12px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
   `,
   head: css`
     display: flex;
@@ -873,8 +873,8 @@ const todoCardStyles = createStaticStyles(({ css }) => ({
     width: 100%;
     max-width: 520px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
   `,
   header: css`
     display: flex;
@@ -1003,8 +1003,8 @@ const searchCardStyles = createStaticStyles(({ css }) => ({
     width: 100%;
     max-width: 520px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 10px;
-    background: ${cssVar.colorBgContainer};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
   `,
   header: css`
     display: flex;

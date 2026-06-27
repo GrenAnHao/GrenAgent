@@ -1,4 +1,4 @@
-import { ActionIcon, Block, Icon } from '@lobehub/ui';
+import { ActionIcon, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
   CheckCircle2,
@@ -151,15 +151,12 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
   return (
     <div className={styles.group} data-testid="subagent-group">
       <div className={styles.head}>
-        <Block
-          horizontal
-          align="center"
-          justify="center"
-          variant="outlined"
-          style={{ flex: 'none', width: 24, height: 24, color: cssVar.colorTextSecondary }}
-        >
-          <Icon icon={running ? Loader2 : groupIcon} size={14} spin={running} />
-        </Block>
+        <Icon
+          icon={running ? Loader2 : groupIcon}
+          size={14}
+          spin={running}
+          style={{ flex: 'none', color: cssVar.colorTextSecondary }}
+        />
         <span className={cx(styles.headTitle, running && card.shinyText)}>
           {groupLabel}{' '}
           <span className={styles.count}>

@@ -4,35 +4,21 @@ import { CheckCircle2, Circle, FileText, ListChecks, Play } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { pi } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { ConvCard } from './conv/ConvCard';
 import { LazyMarkdown } from './LazyMarkdown';
 import ModelAction from './input/actions/ModelAction';
 
 const styles = createStaticStyles(({ css }) => ({
-  card: css`
-    width: 100%;
-    max-width: 560px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 12px;
-    background: ${cssVar.colorBgContainer};
-    overflow: hidden;
-  `,
-  head: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 12px 14px 0;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
-  `,
   title: css`
-    padding: 4px 14px 0;
-    font-size: 15px;
+    padding: 9px 12px 0;
+    font-size: 14px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: ${cssVar.colorText};
   `,
   summary: css`
-    padding: 6px 14px 0;
-    font-size: 13px;
+    padding: 4px 12px 0;
+    font-size: 12.5px;
     line-height: 1.5;
     color: ${cssVar.colorTextSecondary};
     white-space: pre-wrap;
@@ -40,8 +26,8 @@ const styles = createStaticStyles(({ css }) => ({
   todos: css`
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 12px 14px 4px;
+    gap: 6px;
+    padding: 10px 12px;
   `,
   todo: css`
     display: flex;
@@ -60,19 +46,9 @@ const styles = createStaticStyles(({ css }) => ({
     text-decoration: line-through;
   `,
   more: css`
-    padding: 2px 14px 0;
+    padding: 2px 12px 0;
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
-  `,
-  footer: css`
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin-block-start: 8px;
-    padding: 10px 14px;
-    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    background: ${cssVar.colorFillQuaternary};
   `,
   right: css`
     display: flex;
@@ -82,6 +58,12 @@ const styles = createStaticStyles(({ css }) => ({
   docError: css`
     font-size: 13px;
     color: ${cssVar.colorTextTertiary};
+  `,
+  fallback: css`
+    padding: 10px 12px;
+    font-size: 13px;
+    color: ${cssVar.colorTextSecondary};
+    white-space: pre-wrap;
   `,
 }));
 
@@ -124,9 +106,8 @@ export function parsePlan(content: string): PlanData | null {
 }
 
 /**
- * 对话流内的「计划摘要卡」（对标 Cursor Plan Mode）：标题 + 摘要 + todo 预览，
- * 底部可 View Plan 看完整计划（读 .pi/plans/<id>.md）、选执行模型、点「开始执行」转入执行。
- * 解析失败回退纯文本，避免历史消息「凭空消失」。
+ * 对话流内的「计划摘要卡」（L4，ConvCard surface）：标题 + 摘要 + todo 预览，
+ * 底部 View Plan 看完整计划、选执行模型、开始执行。解析失败回退纯文本。
  */
 export const PlanCard = memo(function PlanCard({ content }: { content: string }) {
   const { workspace } = useAgentStoreContext();
@@ -157,9 +138,9 @@ export const PlanCard = memo(function PlanCard({ content }: { content: string })
 
   if (!data) {
     return (
-      <div className={styles.card} data-testid="plan-card">
-        <div className={styles.summary}>{content}</div>
-      </div>
+      <ConvCard label="Plan" icon={ListChecks} data-testid="plan-card">
+        <div className={styles.fallback}>{content}</div>
+      </ConvCard>
     );
   }
 
@@ -167,11 +148,31 @@ export const PlanCard = memo(function PlanCard({ content }: { content: string })
   const more = data.todos.length - shown.length;
 
   return (
-    <div className={styles.card} data-testid="plan-card">
-      <div className={styles.head}>
-        <Icon icon={ListChecks} size={13} />
-        <span>Plan</span>
-      </div>
+    <ConvCard
+      label="Plan"
+      icon={ListChecks}
+      tag={`${data.todos.length} steps`}
+      data-testid="plan-card"
+      footer={
+        <>
+          <Button icon={<FileText size={14} />} onClick={openPlan} size="small">
+            View Plan
+          </Button>
+          <div className={styles.right}>
+            <ModelAction />
+            <Button
+              disabled={built}
+              icon={<Play size={14} />}
+              onClick={onBuild}
+              size="small"
+              type="primary"
+            >
+              {built ? '执行中' : '开始执行'}
+            </Button>
+          </div>
+        </>
+      }
+    >
       <div className={styles.title}>{data.title}</div>
       {data.summary ? <div className={styles.summary}>{data.summary}</div> : null}
 
@@ -179,36 +180,14 @@ export const PlanCard = memo(function PlanCard({ content }: { content: string })
         {shown.length > 0 ? (
           shown.map((t, i) => (
             <div className={styles.todo} key={i}>
-              <Icon
-                className={styles.todoIcon}
-                icon={t.done ? CheckCircle2 : Circle}
-                size={14}
-              />
+              <Icon className={styles.todoIcon} icon={t.done ? CheckCircle2 : Circle} size={14} />
               <span className={t.done ? styles.todoDone : undefined}>{t.text || '（未命名步骤）'}</span>
             </div>
           ))
         ) : (
           <div className={styles.more}>计划步骤将在执行阶段由模型补充</div>
         )}
-      </div>
-      {more > 0 ? <div className={styles.more}>+{more} 个步骤…</div> : null}
-
-      <div className={styles.footer}>
-        <Button icon={<FileText size={14} />} onClick={openPlan} size="small">
-          View Plan
-        </Button>
-        <div className={styles.right}>
-          <ModelAction />
-          <Button
-            disabled={built}
-            icon={<Play size={14} />}
-            onClick={onBuild}
-            size="small"
-            type="primary"
-          >
-            {built ? '执行中' : '开始执行'}
-          </Button>
-        </div>
+        {more > 0 ? <div className={styles.more}>+{more} 个步骤…</div> : null}
       </div>
 
       <Modal footer={null} onCancel={() => setOpen(false)} open={open} title={data.title} width={760}>
@@ -220,6 +199,6 @@ export const PlanCard = memo(function PlanCard({ content }: { content: string })
           <LazyMarkdown>{doc}</LazyMarkdown>
         )}
       </Modal>
-    </div>
+    </ConvCard>
   );
 });
