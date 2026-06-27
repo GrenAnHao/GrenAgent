@@ -10,6 +10,7 @@ vi.mock("./agents.js", () => ({
   discoverAgents: () => ({ agents: [], projectAgentsDir: null }),
   resolveAgent: () => undefined,
   suggestAgent: () => undefined,
+  withBuiltinDefaults: (agents: unknown) => agents,
 }));
 vi.mock("./registry.js", () => {
   class SubAgentRegistry {

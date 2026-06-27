@@ -8,15 +8,31 @@ import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { sandboxAvailable } from "../_shared/sandbox-gate.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
-import { discoverAgents, resolveAgent, suggestAgent, type AgentScope } from "./agents.js";
+import { discoverAgents, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
 import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
 import { cancelSubAgent, installCancelWatcher } from "./cancel.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { registerWorkflows } from "./workflows.js";
 import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const MAX_CONCURRENCY = 4;
+
+// 子代理 `--mode json` 的 stdout 随消息呈 O(n^2) 膨胀。运行中若把全量 transcript 每帧经 IPC
+// 推给前端，会压垮 IPC 反序列化 + state 存储（卡爆/OOM）。故运行中只推尾部定长片段供实时预览，
+// 完整 transcript 仅终态返回一次；终态也设上限，防极端超大串写进 session 后重开历史再次卡爆。
+const LIVE_TRANSCRIPT_TAIL = 65536; // 运行中实时预览 transcript 尾部上限（字符）
+const TRANSCRIPT_CAP = 4_000_000; // 终态完整 transcript 上限（字符）
+
+/** 取尾部至多 maxLen 字符，并丢弃因截断产生的首个半行，保持 JSONL 行完整。 */
+function tailLines(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(s.length - maxLen);
+  const nl = cut.indexOf("\n");
+  return nl >= 0 ? cut.slice(nl + 1) : cut;
+}
 
 // Background sub-agent control plane (pull model): one sqlite registry + a map of
 // in-flight AbortControllers per cwd. Lives across tool calls inside the long-lived
@@ -261,13 +277,31 @@ export default function (pi: ExtensionAPI) {
       // Named-agent resolution (markdown agents in ~/.pi/agent/agents + .pi/agents).
       // A named agent contributes its system prompt + tool allowlist + model.
       const agentScope = (params.agentScope as AgentScope | undefined) ?? "user";
-      const discovered = discoverAgents(ctx.cwd, agentScope).agents;
+      // Built-in defaults (scout/planner/reviewer/worker) are unioned in as a fallback
+      // so a request for a known default never hard-fails when disk discovery is empty
+      // (e.g. agentScope:"project" with no repo .pi/agents, cold start before seeding,
+      // or a relocated/cleared agent dir). Disk agents still win on name clash.
+      const discovered = withBuiltinDefaults(discoverAgents(ctx.cwd, agentScope).agents);
       const agentLayer = (name: string | undefined): { systemPrompt?: string; tools?: string[]; model?: string } => {
         const n = name?.trim();
         if (!n) return {};
         const a = resolveAgent(discovered, n);
         if (!a) {
           const avail = discovered.map((x) => x.name).join(", ") || "none";
+          if (discovered.length === 0) {
+            // 一个 agent 都没发现，多为冷启动 seed 时机 / agentDir 偏移：打印运行时真实路径，
+            // 便于下次复现时直接拿到 sidecar 实际的 getAgentDir 与目录内容。
+            try {
+              const ad = getAgentDir();
+              const udir = join(ad, "agents");
+              const entries = existsSync(udir) ? readdirSync(udir).join(",") : "";
+              console.error(
+                `[multi-agent] no agents discovered (scope=${agentScope}): agentDir=${ad} userDir=${udir} exists=${existsSync(udir)} entries=[${entries}]`,
+              );
+            } catch (e) {
+              console.error(`[multi-agent] agent-dir diag failed: ${String((e as Error)?.message ?? e)}`);
+            }
+          }
           const suggestion = suggestAgent(discovered, n);
           const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
           throw new Error(`unknown agent "${n}".${hint} Available agents: ${avail}`);
@@ -414,7 +448,9 @@ export default function (pi: ExtensionAPI) {
               if (onUpdate) {
                 onUpdate({
                   content: [{ type: "text", text: u.text }],
-                  details: { streaming: true, transcript: u.transcript },
+                  // 运行中只推尾部截断的 transcript（定长），完整版终态再给一次；
+                  // 避免 O(n^2) 全量串每帧经 IPC → 前端卡爆/OOM。
+                  details: { streaming: true, transcriptTail: tailLines(u.transcript, LIVE_TRANSCRIPT_TAIL) },
                 });
               }
             },
@@ -439,7 +475,7 @@ export default function (pi: ExtensionAPI) {
             details: {
               agentId: id,
               exitCode: r.exitCode,
-              transcript: r.transcript,
+              transcript: tailLines(r.transcript, TRANSCRIPT_CAP),
               isolated: !!wt,
               diff,
               ...(isolationDowngraded ? { isolationDowngraded: true } : {}),

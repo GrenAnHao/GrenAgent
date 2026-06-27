@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_AGENT_TEMPLATES } from "../fable-behavior/default-agents.js";
 
 export type AgentScope = "user" | "project" | "both";
 
@@ -107,6 +108,57 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
     for (const a of projectAgents) agentMap.set(a.name, a);
   }
   return { agents: [...agentMap.values()], projectAgentsDir };
+}
+
+let builtinCache: AgentConfig[] | undefined;
+
+/**
+ * Built-in default agents (scout/planner/reviewer/worker) parsed from the bundled
+ * `DEFAULT_AGENT_TEMPLATES`. These ship inside the binary, so they are available
+ * regardless of disk state — used as a resolution fallback so a request for a known
+ * default never hard-fails when discovery is empty (project scope with no repo
+ * agents, cold start before seeding, a deleted/relocated agent dir). Memoized:
+ * templates are static constants.
+ */
+export function builtinDefaultAgents(): AgentConfig[] {
+  if (builtinCache) return builtinCache;
+  const out: AgentConfig[] = [];
+  for (const [name, content] of Object.entries(DEFAULT_AGENT_TEMPLATES)) {
+    const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+    if (!frontmatter.name || !frontmatter.description) continue;
+    const tools = frontmatter.tools
+      ?.split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    out.push({
+      name: frontmatter.name,
+      description: frontmatter.description,
+      tools: tools && tools.length > 0 ? tools : undefined,
+      model: frontmatter.model,
+      systemPrompt: body,
+      source: "user",
+      filePath: `<builtin:${name}>`,
+    });
+  }
+  builtinCache = out;
+  return out;
+}
+
+/**
+ * Union discovered agents with the built-in defaults; disk-discovered agents win on
+ * name clash (case-insensitive), so user/project customizations always take
+ * precedence and only MISSING defaults are filled in. Built-ins are bundled and
+ * trusted (they never read an untrusted repo), so this is safe to apply under any
+ * `agentScope` — it guarantees scout/planner/reviewer/worker stay resolvable even
+ * when discovery returns nothing.
+ */
+export function withBuiltinDefaults(discovered: AgentConfig[]): AgentConfig[] {
+  const have = new Set(discovered.map((a) => a.name.toLowerCase()));
+  const merged = [...discovered];
+  for (const d of builtinDefaultAgents()) {
+    if (!have.has(d.name.toLowerCase())) merged.push(d);
+  }
+  return merged;
 }
 
 // Semantic aliases for the default seeded agents (scout/planner/reviewer/worker).

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,22 +18,24 @@ describe("seedFableAgents", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("writes templates when absent", () => {
+  it("writes templates when absent and records a JSON manifest", () => {
     dir = mkdtempSync(join(tmpdir(), "pi-seed-"));
     vi.mocked(getAgentDir).mockReturnValue(dir);
     seedFableAgents();
     expect(existsSync(join(dir, "agents", "scout.md"))).toBe(true);
-    expect(readFileSync(join(dir, "agents", ".fable-behavior-seed-version"), "utf8").trim()).toBe(
-      FABLE_AGENT_SEED_VERSION,
-    );
+    const manifest = JSON.parse(readFileSync(join(dir, "agents", ".fable-behavior-seed-version"), "utf8")) as {
+      version: string;
+      hashes: Record<string, string>;
+    };
+    expect(manifest.version).toBe(FABLE_AGENT_SEED_VERSION);
+    expect(manifest.hashes.scout).toBeTruthy();
   });
 
-  it("skips existing files in if-absent mode", () => {
+  it("preserves a file the user edited after our write (auto mode)", () => {
     dir = mkdtempSync(join(tmpdir(), "pi-seed-"));
     vi.mocked(getAgentDir).mockReturnValue(dir);
     seedFableAgents();
     const scout = join(dir, "agents", "scout.md");
-    mkdirSync(join(dir, "agents"), { recursive: true });
     writeFileSync(scout, "CUSTOM\n", "utf8");
     seedFableAgents();
     expect(readFileSync(scout, "utf8")).toBe("CUSTOM\n");

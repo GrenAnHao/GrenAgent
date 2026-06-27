@@ -55,21 +55,25 @@ Point `PI_RUNTIME_CONFIG` at your JSON file for hot reload (see `extensions/_sha
 
 ## Sub-agent template migration
 
-On `session_start`, enriched `scout` / `planner` / `reviewer` / `worker` templates seed into `~/.pi/agent/agents/` **only when the file is missing** (default).
+On `session_start`, enriched `scout` / `planner` / `reviewer` / `worker` templates seed into `~/.pi/agent/agents/`. The seeder is **self-healing**: it tracks a content hash per file in `~/.pi/agent/agents/.fable-behavior-seed-version` (now a JSON manifest) so a template change automatically **upgrades the copies we previously wrote** — while a file you have edited yourself is detected (hash mismatch) and **preserved**. Upgrades/preserves are logged to stderr.
 
-To upgrade after a release bumps `FABLE_AGENT_SEED_VERSION`:
+`FABLE_BEHAVIOR_SEED_AGENTS` modes:
+
+- `1` / unset → **auto** (default): create missing, upgrade unmodified-ours, preserve user edits.
+- `if-absent` → only create missing files; never overwrite (opt out of auto-upgrade).
+- `force` → overwrite every template (then resumes tracking).
+- `0` → off.
+
+To force a full re-seed from repo templates (e.g. to discard your edits):
 
 ```bash
-# backup first
+# backup first if you have hand-edited globals
 cp -r ~/.pi/agent/agents ~/.pi/agent/agents.bak
 
-# force re-seed from repo templates
 FABLE_BEHAVIOR_SEED_AGENTS=force pi ...
 ```
 
-Or set `"FABLE_BEHAVIOR_SEED_AGENTS": "force"` in `PI_RUNTIME_CONFIG` for one session, then revert to `"1"`.
-
-Check `~/.pi/agent/agents/.fable-behavior-seed-version` against `FABLE_AGENT_SEED_VERSION` in `seed.ts`.
+The same self-healing seeder backs self-evolve's `dream` / `distill` personas (`.self-evolve-seed-version`, `SELF_EVOLVE_SEED`). Shared logic: `extensions/_shared/seed-agents.ts`.
 
 ## Layering vs other extensions
 

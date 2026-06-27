@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_ALIASES, resolveAgent, suggestAgent, type AgentConfig } from "./agents.js";
+import {
+  AGENT_ALIASES,
+  builtinDefaultAgents,
+  resolveAgent,
+  suggestAgent,
+  withBuiltinDefaults,
+  type AgentConfig,
+} from "./agents.js";
 
 function agent(name: string): AgentConfig {
   return {
@@ -83,5 +90,56 @@ describe("AGENT_ALIASES", () => {
   it("maps explorer/explore onto the scout agent", () => {
     expect(AGENT_ALIASES.scout).toContain("explorer");
     expect(AGENT_ALIASES.scout).toContain("explore");
+  });
+});
+
+describe("builtinDefaultAgents", () => {
+  it("parses the four bundled default agents with valid frontmatter", () => {
+    const names = builtinDefaultAgents()
+      .map((a) => a.name)
+      .sort();
+    expect(names).toEqual(["planner", "reviewer", "scout", "worker"]);
+    for (const a of builtinDefaultAgents()) {
+      expect(a.description).toBeTruthy();
+      expect(a.systemPrompt.trim()).toBeTruthy();
+    }
+  });
+});
+
+describe("withBuiltinDefaults", () => {
+  it("makes scout/planner/reviewer/worker resolvable when discovery is empty (the bug)", () => {
+    const merged = withBuiltinDefaults([]);
+    expect(resolveAgent(merged, "worker")?.name).toBe("worker");
+    expect(resolveAgent(merged, "scout")?.name).toBe("scout");
+    // aliases work through the fallback too
+    expect(resolveAgent(merged, "executor")?.name).toBe("worker");
+  });
+
+  it("lets a disk agent win on name clash (case-insensitive)", () => {
+    const custom: AgentConfig = {
+      name: "worker",
+      description: "custom worker",
+      systemPrompt: "CUSTOM-WORKER-PROMPT",
+      source: "project",
+      filePath: "/repo/.pi/agents/worker.md",
+    };
+    const merged = withBuiltinDefaults([custom]);
+    expect(merged.filter((a) => a.name.toLowerCase() === "worker")).toHaveLength(1);
+    expect(resolveAgent(merged, "worker")?.systemPrompt).toBe("CUSTOM-WORKER-PROMPT");
+  });
+
+  it("keeps non-default disk agents and fills in missing defaults", () => {
+    const dream: AgentConfig = {
+      name: "dream",
+      description: "dream",
+      systemPrompt: "p",
+      source: "user",
+      filePath: "/agents/dream.md",
+    };
+    const merged = withBuiltinDefaults([dream]);
+    const names = merged.map((a) => a.name);
+    expect(names).toContain("dream");
+    expect(names).toContain("worker");
+    expect(names).toContain("scout");
   });
 });

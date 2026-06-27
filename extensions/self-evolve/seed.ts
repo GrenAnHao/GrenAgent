@@ -1,26 +1,24 @@
-// 把默认 persona 播种到 ~/.pi/agent/agents/{dream,distill}.md（if-absent），用户可覆盖。
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+// 把默认 persona 播种到 ~/.pi/agent/agents/{dream,distill}.md，自愈升级我们写过且未被
+// 用户改动的副本（见 _shared/seed-agents.ts），保留用户自定义。
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getConfig } from "../_shared/runtime-config.js";
+import { seedAgentTemplates, seedModeFromConfig } from "../_shared/seed-agents.js";
 import { DISTILL_PERSONA, DREAM_PERSONA } from "./personas.js";
 
-export const SELF_EVOLVE_SEED_VERSION = "2026-06-26";
+export const SELF_EVOLVE_SEED_VERSION = "2026-06-27";
 
 export function seedPersonas(): void {
-  if ((getConfig("SELF_EVOLVE_SEED") ?? "1") === "0") return;
   try {
-    const dir = join(getAgentDir(), "agents");
-    mkdirSync(dir, { recursive: true });
-    for (const [name, content] of [
-      ["dream", DREAM_PERSONA],
-      ["distill", DISTILL_PERSONA],
-    ] as const) {
-      const file = join(dir, `${name}.md`);
-      if (existsSync(file)) continue;
-      writeFileSync(file, content, "utf8");
-    }
-    writeFileSync(join(dir, ".self-evolve-seed-version"), `${SELF_EVOLVE_SEED_VERSION}\n`, "utf8");
+    const r = seedAgentTemplates({
+      templates: { dream: DREAM_PERSONA, distill: DISTILL_PERSONA },
+      dir: join(getAgentDir(), "agents"),
+      manifestFile: ".self-evolve-seed-version",
+      version: SELF_EVOLVE_SEED_VERSION,
+      mode: seedModeFromConfig(getConfig("SELF_EVOLVE_SEED")),
+    });
+    if (r.upgraded.length) console.error(`[self-evolve] upgraded personas: ${r.upgraded.join(", ")}`);
+    if (r.preserved.length) console.error(`[self-evolve] preserved user-edited personas: ${r.preserved.join(", ")}`);
   } catch {
     /* best-effort */
   }
