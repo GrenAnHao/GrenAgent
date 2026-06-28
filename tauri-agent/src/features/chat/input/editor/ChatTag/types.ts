@@ -1,7 +1,7 @@
 import type { CommandApiSource } from '../../commandTypes';
 
 /** 行内彩色标签的类别。 */
-export type ChatTagCategory = 'file' | 'directory' | 'command';
+export type ChatTagCategory = 'file' | 'directory' | 'command' | 'link';
 
 /** 命令标签的类目（与 slash 菜单分组一致）：用于按类目给 chip 着色。 */
 export type ChatTagCommandGroup = CommandApiSource | 'frontend';

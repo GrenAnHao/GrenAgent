@@ -13,4 +13,8 @@ describe('tagToText', () => {
   it('命令写成 /名称', () => {
     expect(tagToText('command', 'compact')).toBe('/compact');
   });
+
+  it('链接写成原始 URL（无前缀）', () => {
+    expect(tagToText('link', 'https://vercel.com/docs')).toBe('https://vercel.com/docs');
+  });
 });
