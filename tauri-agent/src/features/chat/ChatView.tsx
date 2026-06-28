@@ -3,11 +3,13 @@ import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { Icon } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
+import { App } from 'antd';
 import { ChatListView } from './ChatListView';
 import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { PromptImage } from './input/ChatInputContext';
+import { isExecutiveCommandMessage } from './input/commandClassification';
 import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
@@ -87,6 +89,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 export function ChatView() {
   const { workspace, store, workspaceReady } = useAgentStoreContext();
+  const { message: messageApi } = App.useApp();
   const worksDir = useSessionStore((s) => s.worksDir);
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
@@ -110,6 +113,19 @@ export function ChatView() {
     if (!text && !images?.length) return;
     // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
     userAbortedRef.current = false;
+
+    // 执行性命令（/dream 等）：不产生对话轮次。跳过乐观气泡与 awaitingResponse，
+    // 改瞬态 toast，仍 pi.prompt 让 Pi 执行——切换/重载后不再有幽灵气泡。
+    if (text && isExecutiveCommandMessage(text)) {
+      const cmd = text.split(/\s/, 1)[0];
+      try {
+        await pi.prompt(workspace, text, undefined, images);
+        messageApi.info(`已执行 ${cmd}`);
+      } catch (e) {
+        messageApi.error(`${cmd} 执行失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
 
     // 执行中发送：引导（steer）当前回合或排队（followUp）下一轮。乐观插入用户消息
     // （live 事件流不回显 user 消息），交给 pi 把消息注入正在跑的回合；不跑「无返回」兜底检查。
