@@ -9,7 +9,8 @@ export function isSingleUrl(text: string): boolean {
 
 /**
  * chip 上展示的精简 URL：host（去 www）+ 路径。
- * 根路径只显示 host；单段显示 host/段；多段折叠为 host/.../末段。完整 URL 存 value。
+ * 根路径只显示 host；≤2 段全显示 host/段…；≥3 段折叠为 host/.../末两段（保留如 pull/123 的上下文）。
+ * 完整 URL 存 value。
  */
 export function formatUrlLabel(url: string): string {
   let parsed: URL;
@@ -21,8 +22,8 @@ export function formatUrlLabel(url: string): string {
   const host = parsed.hostname.replace(/^www\./, '');
   const segs = parsed.pathname.split('/').filter(Boolean);
   if (segs.length === 0) return host;
-  if (segs.length === 1) return `${host}/${segs[0]}`;
-  return `${host}/.../${segs[segs.length - 1]}`;
+  if (segs.length <= 2) return `${host}/${segs.join('/')}`;
+  return `${host}/.../${segs.slice(-2).join('/')}`;
 }
 
 /** 把粘贴文本解析成链接标签数据；非单条 URL 返回 null（由调用方放行默认粘贴）。 */

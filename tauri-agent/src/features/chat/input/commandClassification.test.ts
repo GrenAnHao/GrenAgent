@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { isExecutiveCommand, isExecutiveCommandMessage } from './commandClassification';
 
 describe('isExecutiveCommand', () => {
-  it('命中已知动作命令（忽略大小写 / skill: 前缀）', () => {
+  it('命中已知动作命令（忽略大小写）', () => {
     expect(isExecutiveCommand('dream')).toBe(true);
     expect(isExecutiveCommand('newSession')).toBe(true);
     expect(isExecutiveCommand('COMPACT')).toBe(true);
   });
   it('提示词 / 技能 / 不确定命令保留气泡', () => {
     expect(isExecutiveCommand('skill:tdd')).toBe(false);
+    // 与白名单同名的技能（如 skill:new）也必须保留气泡——技能必产生轮次。
+    expect(isExecutiveCommand('skill:new')).toBe(false);
     expect(isExecutiveCommand('deep-research')).toBe(false);
     expect(isExecutiveCommand('review')).toBe(false);
   });

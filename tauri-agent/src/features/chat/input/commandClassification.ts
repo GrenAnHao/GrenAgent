@@ -13,13 +13,10 @@ export const EXECUTIVE_COMMANDS = new Set<string>([
   'session', 'sessions', 'help', 'exit', 'quit',
 ]);
 
-function bareName(name: string): string {
-  return (name.startsWith('skill:') ? name.slice(6) : name).toLowerCase();
-}
-
-/** 命令名是否属于执行性命令（去 skill: 前缀、小写比较）。 */
+/** 命令名是否属于执行性命令（小写比较）。skill: 前缀命令必展开成提示词轮次，永不执行性。 */
 export function isExecutiveCommand(name: string): boolean {
-  return EXECUTIVE_COMMANDS.has(bareName(name));
+  if (name.startsWith('skill:')) return false;
+  return EXECUTIVE_COMMANDS.has(name.toLowerCase());
 }
 
 /** 整条消息是否就是单个执行性命令（可带参数）→ 发送时不留气泡。 */

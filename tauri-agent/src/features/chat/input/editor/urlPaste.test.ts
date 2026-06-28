@@ -23,8 +23,11 @@ describe('formatUrlLabel', () => {
   it('单段路径显示 host/段', () => {
     expect(formatUrlLabel('https://vercel.com/docs')).toBe('vercel.com/docs');
   });
-  it('深路径折叠为 host/.../末段', () => {
-    expect(formatUrlLabel('https://github.com/lobehub/lobe-chat/pull/123')).toBe('github.com/.../123');
+  it('深路径折叠为 host/.../末两段', () => {
+    expect(formatUrlLabel('https://github.com/lobehub/lobe-chat/pull/123')).toBe('github.com/.../pull/123');
+  });
+  it('两段路径全显示', () => {
+    expect(formatUrlLabel('https://a.com/x/y')).toBe('a.com/x/y');
   });
   it('非法 URL 原样返回', () => {
     expect(formatUrlLabel('not a url')).toBe('not a url');
