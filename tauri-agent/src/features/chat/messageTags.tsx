@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
+import { formatUrlLabel } from './input/editor/urlPaste';
 
 export type MessageSegment =
   | { type: 'text'; text: string }
   | { type: 'file'; path: string }
-  | { type: 'skill'; name: string };
+  | { type: 'skill'; name: string }
+  | { type: 'link'; url: string };
 
 // Pi expands a `/skill:<name>` command into the full SKILL.md wrapped in
 // `<skill name="..." location="...">...</skill>`. The optimistic (just-sent)
@@ -12,8 +14,8 @@ export type MessageSegment =
 // compact skill chip so the bubble stays consistent before and after a reload
 // (no more "wall of SKILL.md text" when switching back to a conversation).
 const SKILL_BLOCK_RE = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
-// `/skill:name` only at line start / after whitespace (mirrors the @file rule).
-const INLINE_RE = /(^|\s)(\/skill:(\S+)|@(\S+))/g;
+// URL（http/https）/ `/skill:name` / `@path`，均限「行首或空白后」。
+const INLINE_RE = /(^|\s)(https?:\/\/\S+|\/skill:(\S+)|@(\S+))/g;
 
 function bareSkillName(name: string): string {
   const n = name.trim();
@@ -30,8 +32,10 @@ function parseInline(text: string, segments: MessageSegment[]): void {
     if (tokenStart > last) segments.push({ type: 'text', text: text.slice(last, tokenStart) });
     if (m[3] !== undefined) {
       segments.push({ type: 'skill', name: bareSkillName(m[3]) });
-    } else {
+    } else if (m[4] !== undefined) {
       segments.push({ type: 'file', path: m[4] });
+    } else {
+      segments.push({ type: 'link', url: m[2] });
     }
     last = INLINE_RE.lastIndex;
   }
@@ -70,6 +74,9 @@ export function renderMessageTags(text: string): ReactNode {
       return (
         <ChatTagView key={i} category="command" commandGroup="skill" label={seg.name} value={`skill:${seg.name}`} />
       );
+    }
+    if (seg.type === 'link') {
+      return <ChatTagView key={i} category="link" label={formatUrlLabel(seg.url)} value={seg.url} />;
     }
     return <span key={i}>{seg.text}</span>;
   });

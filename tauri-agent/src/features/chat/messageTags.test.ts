@@ -54,4 +54,23 @@ describe('parseMessageTags', () => {
     expect(segs[0]).toEqual({ type: 'skill', name: 'review' });
     expect(segs[1]).toEqual({ type: 'text', text: ' 然后帮我改' });
   });
+
+  it('把行内 URL 切成 link 段', () => {
+    const segs = parseMessageTags('看 https://vercel.com/docs 这个');
+    expect(segs).toEqual([
+      { type: 'text', text: '看 ' },
+      { type: 'link', url: 'https://vercel.com/docs' },
+      { type: 'text', text: ' 这个' },
+    ]);
+  });
+
+  it('URL 在开头', () => {
+    const segs = parseMessageTags('https://a.com is up');
+    expect(segs[0]).toEqual({ type: 'link', url: 'https://a.com' });
+  });
+
+  it('不误伤 email 与普通路径', () => {
+    expect(parseMessageTags('user@host.com').every((s) => s.type === 'text')).toBe(true);
+    expect(parseMessageTags('see /src/foo.ts')[0].type).toBe('text');
+  });
 });
