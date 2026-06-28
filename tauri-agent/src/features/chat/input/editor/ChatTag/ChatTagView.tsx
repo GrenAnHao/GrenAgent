@@ -1,5 +1,5 @@
 import { Icon } from '@lobehub/ui';
-import { ToyBrick } from 'lucide-react';
+import { Link2, ToyBrick } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import FileIcon from '../../../../../components/FileIcon';
@@ -48,6 +48,10 @@ const styles = createStaticStyles(({ css }) => ({
     color: #bce641;
     background: color-mix(in srgb, #bce641 16%, transparent);
   `,
+  link: css`
+    color: ${cssVar.cyan};
+    background: color-mix(in srgb, ${cssVar.cyan} 16%, transparent);
+  `,
 }));
 
 /** lobehub ActionTag 风格的行内彩色标签：图标 + 文本，按类别着色；命令按功能取图标。 */
@@ -66,12 +70,13 @@ export function ChatTagView({
   const colorClass =
     category === 'command' && commandGroup === 'extension' ? styles.toolCommand : styles[category];
   const fileName = label.split('/').pop() || label;
+  const isFileLike = category === 'file' || category === 'directory';
   return (
-    <span className={cx(styles.tag, colorClass)}>
-      {category === 'file' || category === 'directory' ? (
+    <span className={cx(styles.tag, colorClass)} title={category === 'link' ? value : undefined}>
+      {isFileLike ? (
         <FileIcon fileName={fileName} isDirectory={category === 'directory'} size={13} variant="raw" />
       ) : (
-        <Icon icon={commandIcon(value)} size={13} />
+        <Icon icon={category === 'link' ? Link2 : commandIcon(value)} size={13} />
       )}
       <span>{label}</span>
     </span>
