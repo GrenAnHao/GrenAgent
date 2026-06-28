@@ -3,6 +3,23 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import type { ChatMessage } from '../../stores/agentReducer';
 
+// virtua 在 jsdom 无真实测高 → VList 首屏渲染 0 条，内容/footer 进不了 DOM。
+// mock 成直通容器（带假 handle 防 scrollToIndex 崩），以验证渲染管线与「准备响应中」footer。
+vi.mock('virtua', async () => {
+  const React = await import('react');
+  return {
+    VList: React.forwardRef(function MockVList({ children, ...props }: any, ref: any) {
+      React.useImperativeHandle(ref, () => ({
+        scrollToIndex: () => {},
+        scrollOffset: 0,
+        viewportSize: 0,
+        scrollSize: 0,
+      }));
+      return React.createElement('div', props, children);
+    }),
+  };
+});
+
 // AgentStoreContext mock：直通假 useAgentStore（zustand-like 选择器）。excluded 供气泡上下文控制动作订阅。
 const mockState: { messages: ChatMessage[]; isStreaming: boolean; excluded: Set<number> } = {
   messages: [],

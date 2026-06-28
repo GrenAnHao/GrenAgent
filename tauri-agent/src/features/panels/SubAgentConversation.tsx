@@ -1,23 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { createStaticStyles } from 'antd-style';
+import { useMemo } from 'react';
 import { type ChatMessage, messagesFromTranscript } from '../../stores/agentReducer';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
-
-const styles = createStaticStyles(({ css }) => ({
-  scroll: css`
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  `,
-  list: css`
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 1rem;
-  `,
-}));
+import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
 
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript）。 */
 function transcriptOf(result: unknown): string {
@@ -51,7 +37,7 @@ interface SubAgentConversationProps {
   'data-testid'?: string;
 }
 
-/** 单个子代理的对话视图：把子代理 JSONL 还原成消息，用主对话同款气泡渲染。 */
+/** 单个子代理的对话视图：把子代理 JSONL 还原成消息，用主对话同款气泡 + 虚拟化渲染。 */
 export function SubAgentConversation({ task, result, status, 'data-testid': testId }: SubAgentConversationProps) {
   // 运行中 result（transcript）每帧增长，100ms 节流避免每个 token 都重解析整段 JSONL（与主对话同口径）。
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
@@ -68,25 +54,16 @@ export function SubAgentConversation({ task, result, status, 'data-testid': test
   }, [task, liveResult, status]);
 
   const display = useMemo(() => groupMessages(messages), [messages]);
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const atBottomRef = useRef(true);
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 120;
-  };
-  // 流式增长时若用户停在底部则跟随滚动；用户上滑后不打扰。
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
-  });
+  const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
+  const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
 
   return (
-    <div ref={scrollRef} className={styles.scroll} onScroll={handleScroll} data-testid={testId}>
-      <div className={styles.list}>
-        <ChatMessageItems messages={display} />
-      </div>
-    </div>
+    <ChatMessageItems
+      messages={display}
+      unitsByMessage={unitsByMessage}
+      answeredQuestions={answeredQuestions}
+      paddingInline={16}
+      data-testid={testId}
+    />
   );
 }
