@@ -69,7 +69,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: tauri-agent
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build sidecar
         working-directory: tauri-agent
