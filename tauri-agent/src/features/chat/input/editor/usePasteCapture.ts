@@ -8,6 +8,8 @@ interface Options {
   targetRef: RefObject<HTMLElement | null>;
   onImages: (items: ImageAttachment[]) => void;
   onPastedText: (text: PastedText) => void;
+  /** 短文本粘贴时尝试转成链接标签；返回 true 表示已处理，应阻止默认粘贴。 */
+  onUrlText?: (text: string) => boolean;
   /** 短文本粘贴时尝试转成命令标签；返回 true 表示已处理，应阻止默认粘贴。 */
   onCommandText?: (text: string) => boolean;
 }
@@ -16,7 +18,7 @@ interface Options {
  * 捕获阶段拦截粘贴：图片转附件、超阈值长文本转「粘贴文本」chip、`/命令` 转命令标签。
  * 用 capture + stopPropagation 抢在 Lexical 的粘贴处理之前，其余短文本放行走编辑器默认粘贴。
  */
-export function usePasteCapture({ targetRef, onImages, onPastedText, onCommandText }: Options) {
+export function usePasteCapture({ targetRef, onImages, onPastedText, onUrlText, onCommandText }: Options) {
   useEffect(() => {
     const el = targetRef.current;
     if (!el) return;
@@ -47,6 +49,12 @@ export function usePasteCapture({ targetRef, onImages, onPastedText, onCommandTe
         return;
       }
 
+      if (onUrlText?.(text)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       if (onCommandText?.(text)) {
         e.preventDefault();
         e.stopPropagation();
@@ -55,5 +63,5 @@ export function usePasteCapture({ targetRef, onImages, onPastedText, onCommandTe
 
     el.addEventListener('paste', handler, true);
     return () => el.removeEventListener('paste', handler, true);
-  }, [targetRef, onImages, onPastedText, onCommandText]);
+  }, [targetRef, onImages, onPastedText, onUrlText, onCommandText]);
 }

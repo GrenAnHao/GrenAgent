@@ -16,6 +16,7 @@ import { InputChips } from './InputChips';
 import { createBoxMenu } from './SlashBoxMenu';
 import ReactChatTagPlugin from './ChatTag/ReactChatTagPlugin';
 import { useCommandPaste } from './useCommandPaste';
+import { useUrlPaste } from './useUrlPaste';
 import { usePasteCapture } from './usePasteCapture';
 import { useFileMention } from './useFileMention';
 import { useSlashOptions } from './useSlashOptions';
@@ -115,11 +116,13 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     editor.cleanDocument(),
   );
   const { tryCommandPaste } = useCommandPaste(workspace, editor);
+  const { tryUrlPaste } = useUrlPaste(editor);
 
   usePasteCapture({
     targetRef: zoneRef,
     onImages: addAttachments,
     onPastedText: addPastedText,
+    onUrlText: tryUrlPaste,
     onCommandText: tryCommandPaste,
   });
   const { dragOver, dragKind } = useTauriFileDrop({
