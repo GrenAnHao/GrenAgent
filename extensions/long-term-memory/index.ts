@@ -187,10 +187,14 @@ export default function (pi: ExtensionAPI) {
 
     const ask = makeAsk(ctx);
     if (!ask) return; // no model available → skip extraction
-    const facts = await extractFacts(ask, convo).catch(() => []);
-    for (const fact of facts.slice(0, 10)) {
-      await smartSave(ctx, fact, "project").catch(() => {});
-    }
+    // 后台非阻塞：抽取是一次额外模型调用，绝不能拖住 agent_end / UI「运行中」。回合已结束，
+    // 抽取 + 落盘在后台慢慢做即可（best-effort，失败静默）。
+    void (async () => {
+      const facts = await extractFacts(ask, convo).catch(() => []);
+      for (const fact of facts.slice(0, 10)) {
+        await smartSave(ctx, fact, "project").catch(() => {});
+      }
+    })();
   });
 
   pi.registerTool({

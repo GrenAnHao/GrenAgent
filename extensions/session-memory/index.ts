@@ -44,7 +44,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_end", async (event, ctx) => {
     if (!enabled()) return;
-    if (turnsSinceWrite >= everyTurns()) await writeFrom(ctx, event.messages as unknown[]);
+    if (turnsSinceWrite < everyTurns()) return;
+    // 后台非阻塞：状态提炼是一次额外模型调用，不该拖住 agent_end / UI「运行中」。先同步重置计数，
+    // 避免后台写入在途时下一轮 agent_end 重复触发（writeFrom 内部仍会再置 0，幂等无害）。
+    turnsSinceWrite = 0;
+    void writeFrom(ctx, event.messages as unknown[]).catch(() => {});
   });
 
   pi.on("session_before_compact", async (event, ctx) => {

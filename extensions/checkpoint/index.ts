@@ -59,7 +59,9 @@ export default function (pi: ExtensionAPI) {
   // After each turn: snapshot the changes the turn just made, so a checkpoint
   // reflecting that change appears immediately (track() skips no-op turns).
   pi.on("agent_end", async (_event, ctx) => {
-    await snapshot(ctx.cwd, lastPrompt.slice(0, 80) || "(turn)", "auto").catch(() => {});
+    // 后台非阻塞：回合快照不该拖住 agent_end，否则 UI 会一直停在「运行中」直到快照落盘。回合结束到
+    // 下一次 before_agent_start 之间工作区是稳定的，延后快照不影响正确性（best-effort）。
+    void snapshot(ctx.cwd, lastPrompt.slice(0, 80) || "(turn)", "auto").catch(() => {});
   });
 
   pi.registerCommand("checkpoint", {

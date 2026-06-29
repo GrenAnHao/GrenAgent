@@ -59,12 +59,19 @@ export default function (pi: ExtensionAPI) {
       const firstUser = firstUserText(messages);
       if (!firstUser) return;
 
-      const title = await summarize(ctx, firstUser, {
-        systemPrompt: TITLE_PROMPT,
-        maxChars: 80,
-        signal: ctx.signal,
-      });
-      if (title) await pi.setSessionName(title);
+      // 后台非阻塞：标题生成是一次额外模型调用，不该拖住首轮 agent_end / UI「运行中」。
+      void (async () => {
+        try {
+          const title = await summarize(ctx, firstUser, {
+            systemPrompt: TITLE_PROMPT,
+            maxChars: 80,
+            signal: ctx.signal,
+          });
+          if (title) await pi.setSessionName(title);
+        } catch (err) {
+          console.error("[auto-title] error:", err instanceof Error ? (err.stack ?? err.message) : String(err));
+        }
+      })();
     } catch (err) {
       console.error("[auto-title] error:", err instanceof Error ? (err.stack ?? err.message) : String(err));
     }
