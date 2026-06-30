@@ -25,10 +25,10 @@ jobs:
             args: '--target x86_64-apple-darwin'
             rust_targets: x86_64-apple-darwin
             sidecar_target: x86_64-apple-darwin
-          # 24.04: glibc >= 2.38 for bundled codebase-memory-mcp; AppImage tooling needs
-          # APPIMAGE_EXTRACT_AND_RUN + NO_STRIP on modern ELF (see tauri-apps/tauri#11149).
+          # 24.04: glibc >= 2.38 for bundled codebase-memory-mcp. AppImage/linuxdeploy is
+          # flaky on GHA (FUSE/strip/size); ship .deb from CI instead.
           - platform: ubuntu-24.04
-            args: ''
+            args: '--bundles deb'
             rust_targets: ''
             sidecar_target: ''
           - platform: windows-latest
