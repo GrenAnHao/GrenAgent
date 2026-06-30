@@ -25,7 +25,9 @@ jobs:
             args: '--target x86_64-apple-darwin'
             rust_targets: x86_64-apple-darwin
             sidecar_target: x86_64-apple-darwin
-          - platform: ubuntu-22.04
+          # 24.04: glibc >= 2.38 for bundled codebase-memory-mcp; AppImage tooling needs
+          # APPIMAGE_EXTRACT_AND_RUN + NO_STRIP on modern ELF (see tauri-apps/tauri#11149).
+          - platform: ubuntu-24.04
             args: ''
             rust_targets: ''
             sidecar_target: ''
@@ -37,6 +39,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       NODE_OPTIONS: --max-old-space-size=8192
+      # linuxdeploy is an AppImage; CI runners have no FUSE. NO_STRIP avoids outdated
+      # bundled strip choking on .relr.dyn sections. Harmless on Win/macOS.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+      NO_STRIP: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +58,7 @@ jobs:
           targets: ${{ matrix.rust_targets }}
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -65,7 +71,8 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libfuse2
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -87,6 +94,7 @@ jobs:
       - name: Read release notes
         if: startsWith(github.ref, 'refs/tags/')
         id: notes
+        shell: bash
         run: |
           NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
           if [ ! -f "$NOTES" ]; then
