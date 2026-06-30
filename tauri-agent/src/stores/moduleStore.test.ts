@@ -17,7 +17,7 @@ describe('moduleStore', () => {
   });
 
   it('setActiveWorkspaceView switches the active workspace view', () => {
-    useModuleStore.getState().setActiveWorkspaceView('checkpoints');
-    expect(useModuleStore.getState().activeWorkspaceView).toBe('checkpoints');
+    useModuleStore.getState().setActiveWorkspaceView('knowledge');
+    expect(useModuleStore.getState().activeWorkspaceView).toBe('knowledge');
   });
 });

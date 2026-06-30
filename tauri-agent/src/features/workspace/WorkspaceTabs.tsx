@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { FileSearch, History, Library, type LucideIcon, MessageSquare } from 'lucide-react';
+import { Library, type LucideIcon, MessageSquare } from 'lucide-react';
 import { useModuleStore, type WorkspaceView } from '../../stores/moduleStore';
 
 interface TabDef {
@@ -11,8 +11,6 @@ interface TabDef {
 /** 主列内的工作区视图 tab：项目级面板（绑定当前工作区），侧栏常驻、上下文不丢。 */
 const TABS: TabDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
-  { id: 'checkpoints', label: '检查点', Icon: History },
-  { id: 'review', label: '审查', Icon: FileSearch },
   { id: 'knowledge', label: '知识库', Icon: Library },
 ];
 

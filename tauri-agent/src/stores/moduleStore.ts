@@ -8,9 +8,9 @@ export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'memory
 
 /**
  * 工作区视图：项目级、绑定当前活跃工作区，渲染在主列内（对话区位置），侧栏常驻。
- * 'chat' 为默认视图；检查点/审查/知识库均只读 <工作区>/.pi 下的数据，属纯项目级。
+ * 'chat' 为默认视图；知识库只读 <工作区>/.pi 下的数据，属纯项目级。
  */
-export type WorkspaceView = 'chat' | 'checkpoints' | 'review' | 'knowledge';
+export type WorkspaceView = 'chat' | 'knowledge';
 
 interface ModuleState {
   activeModule: ModuleId;

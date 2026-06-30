@@ -20,8 +20,6 @@ import { MainColumnHeader } from './features/layout/MainColumnHeader';
 import { RightPanelShell, SidebarShell, TerminalShell } from './features/layout/PanelShells';
 import { ModuleRail } from './features/layout/ModuleRail';
 import { ModuleContainer } from './features/workspace/ModuleContainer';
-import { CheckpointsPanel } from './features/checkpoints/CheckpointsPanel';
-import { ReviewPanel } from './features/review/ReviewPanel';
 import { KnowledgePanel } from './features/knowledge/KnowledgePanel';
 import { useModuleStore, type WorkspaceView } from './stores/moduleStore';
 import { FullscreenLoading } from './components/FullscreenLoading';
@@ -149,10 +147,6 @@ async function acquireDraftScratch(): Promise<string> {
 /** 项目级工具面板（绑定当前工作区）：在主列内渲染，侧栏常驻、项目上下文不丢。 */
 function WorkspacePanel({ view }: { view: Exclude<WorkspaceView, 'chat'> }) {
   switch (view) {
-    case 'checkpoints':
-      return <CheckpointsPanel />;
-    case 'review':
-      return <ReviewPanel />;
     case 'knowledge':
       return <KnowledgePanel />;
     default:

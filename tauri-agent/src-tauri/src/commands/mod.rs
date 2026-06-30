@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod checkpoint;
 pub mod code_intel;
 pub mod create;
 pub mod files;
@@ -8,8 +7,6 @@ pub mod knowledge;
 pub mod mcp_policy;
 pub mod memory;
 pub mod providers;
-pub mod review;
-pub mod sandbox;
 pub mod sessions;
 pub mod shell;
 pub mod skills;

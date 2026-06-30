@@ -3,11 +3,9 @@
 // (no -e / no pi install needed — they're compiled into the product).
 
 import autoTitle from "./auto-title/index.js";
-import checkpoint from "./checkpoint/index.js";
 import compactionPolicy from "./compaction-policy/index.js";
 import loopGuard from "./loop-guard/index.js";
 import rulebook from "./rulebook/index.js";
-import codeReview from "./code-review/index.js";
 import codeSearch from "./code-search/index.js";
 import astTools from "./ast-tools/index.js";
 import github from "./github/index.js";
@@ -48,9 +46,7 @@ export {
   loopGuard,
   rulebook,
   compactionPolicy,
-  autoTitle,
-  checkpoint,
-  todo,
+  autoTitle,  todo,
   agentMode,
   debugTools,
   dap,
@@ -66,9 +62,7 @@ export {
   sessionSearch,
   mcp,
   mcpPolicy,
-  imageGen,
-  codeReview,
-  diagnostics,
+  imageGen,  diagnostics,
   multiAgent,
   codeIntel,
   lsp,
@@ -91,9 +85,7 @@ export const allExtensions = [
   loopGuard,
   rulebook,
   compactionPolicy,
-  autoTitle,
-  checkpoint,
-  todo,
+  autoTitle,  todo,
   agentMode,
   debugTools,
   dap,
@@ -109,9 +101,7 @@ export const allExtensions = [
   sessionSearch,
   mcp,
   mcpPolicy,
-  imageGen,
-  codeReview,
-  diagnostics,
+  imageGen,  diagnostics,
   multiAgent,
   codeIntel,
   lsp,
@@ -136,7 +126,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "rulebook", factory: rulebook },
   { name: "compaction-policy", factory: compactionPolicy },
   { name: "auto-title", factory: autoTitle },
-  { name: "checkpoint", factory: checkpoint },
   { name: "todo", factory: todo },
   { name: "agent-mode", factory: agentMode },
   { name: "debug-tools", factory: debugTools },
@@ -154,7 +143,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "mcp", factory: mcp },
   { name: "mcp-policy", factory: mcpPolicy },
   { name: "image-gen", factory: imageGen },
-  { name: "code-review", factory: codeReview },
   { name: "diagnostics", factory: diagnostics },
   { name: "multi-agent", factory: multiAgent },
   { name: "code-intel", factory: codeIntel },

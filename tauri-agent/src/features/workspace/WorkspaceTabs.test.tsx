@@ -14,7 +14,7 @@ afterEach(() => {
 describe('WorkspaceTabs', () => {
   it('renders all workspace view tabs', () => {
     render(<WorkspaceTabs />);
-    for (const id of ['chat', 'checkpoints', 'review', 'knowledge']) {
+    for (const id of ['chat', 'knowledge']) {
       expect(screen.getByTestId(`workspace-tab-${id}`)).toBeTruthy();
     }
   });
@@ -26,14 +26,14 @@ describe('WorkspaceTabs', () => {
 
   it('switches the active workspace view on click', () => {
     render(<WorkspaceTabs />);
-    fireEvent.click(screen.getByTestId('workspace-tab-checkpoints'));
-    expect(useModuleStore.getState().activeWorkspaceView).toBe('checkpoints');
+    fireEvent.click(screen.getByTestId('workspace-tab-knowledge'));
+    expect(useModuleStore.getState().activeWorkspaceView).toBe('knowledge');
   });
 
   it('marks the active view with aria-pressed', () => {
-    useModuleStore.setState({ activeWorkspaceView: 'review' });
+    useModuleStore.setState({ activeWorkspaceView: 'knowledge' });
     render(<WorkspaceTabs />);
-    expect(screen.getByTestId('workspace-tab-review').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('workspace-tab-knowledge').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('workspace-tab-chat').getAttribute('aria-pressed')).toBe('false');
   });
 });

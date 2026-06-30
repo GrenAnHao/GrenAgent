@@ -123,9 +123,6 @@ pub fn run() {
             commands::memory::mem_stats,
             commands::memory::mem_list,
             commands::memory::mem_history,
-            commands::checkpoint::cp_list,
-            commands::checkpoint::cp_diff,
-            commands::review::rv_list,
             commands::create::create_list,
             commands::create::create_image,
             commands::get_settings,
@@ -151,8 +148,6 @@ pub fn run() {
             commands::code_intel::code_intel_is_initialized,
             commands::code_intel::code_intel_file_graph,
             commands::code_intel::code_intel_rich_graph,
-            commands::sandbox::sandbox_status,
-            commands::sandbox::sandbox_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

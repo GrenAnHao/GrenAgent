@@ -21,7 +21,7 @@ describe('ModuleRail', () => {
 
   it('does not render project-scoped modules (moved to workspace tabs)', () => {
     render(<ModuleRail />);
-    for (const id of ['knowledge', 'review', 'checkpoints']) {
+    for (const id of ['knowledge']) {
       expect(screen.queryByTestId(`module-${id}`)).toBeNull();
     }
   });

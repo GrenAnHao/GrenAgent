@@ -11,7 +11,6 @@ export const CHAT_EXCLUDED = new Set<string>([
   "code-exec",
   "debug-tools",
   "diagnostics",
-  "code-review",
   "after-tool-feedback",
 ]);
 

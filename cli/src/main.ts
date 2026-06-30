@@ -28,7 +28,7 @@ import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-pr
 
 // Distinctive startup marker on stderr. The Tauri backend (pi/sidecar.rs) probes
 // for it after spawn: if absent, the spawned `pi` is likely a plain upstream
-// binary WITHOUT our compiled-in guardrails (safety/permission/sandbox), so the
+// binary WITHOUT our compiled-in guardrails (safety/permission), so the
 // backend warns loudly. `safety=on` additionally confirms the security extension
 // is in the bundle (it is, by static import — this is a tripwire, not a gate).
 function emitReadyBanner(): void {
