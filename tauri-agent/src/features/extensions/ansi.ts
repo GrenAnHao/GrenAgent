@@ -1,13 +1,10 @@
-// Lightweight ANSI/SGR parsing for the Code Intelligence panel.
+// Lightweight ANSI/SGR parsing + status parsing for the Code Intelligence panel.
 //
-// codegraph's CLI emits ANSI colour codes (\x1b[..m) even when its stdout is a
-// pipe (non-TTY), so the raw `status` text returned over the Tauri command
-// arrives sprinkled with escape sequences. Rendered as-is they show up as
-// garbage like "[1m" / "[36m" / "[0m" (the ESC byte itself is invisible).
-//
-// We parse those sequences into styled segments so the log can be rendered like
-// a real terminal, and additionally pull the key index metrics out of the
-// stripped text to drive the stat cards.
+// parseAnsi/stripAnsi are generic terminal-output helpers (used to render any raw
+// command output in the panel; harmless on plain text/JSON). parseCodegraphStatus
+// turns the normalized JSON status from the `code_intel_status` Tauri command
+// (codebase-memory `cli list_projects`) into the stat cards. (The old codegraph
+// engine emitted ANSI status text; codebase-memory returns JSON.)
 
 export interface AnsiSegment {
   text: string;
@@ -117,37 +114,55 @@ export interface CodeGraphStatus {
   indexed: boolean;
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+}
+
 /**
- * Best-effort parse of `codegraph status` output into structured metrics.
- * Resilient to ANSI codes and missing fields; returns an empty/indexed=false
- * result for error strings or un-indexed workspaces so callers can fall back to
- * rendering the raw log.
+ * Parse the normalized status JSON emitted by the `code_intel_status` Tauri
+ * command (backed by codebase-memory `cli list_projects`) into structured
+ * metrics. Tolerant of both the normalized shape
+ * ({indexed, project, nodes, edges, sizeBytes, rootPath}) and the raw
+ * `index_repository` result ({project, status, nodes, edges}). Returns an
+ * empty/indexed=false result for error strings or non-JSON so callers can fall
+ * back to rendering the raw output.
  */
 export function parseCodegraphStatus(raw: string): CodeGraphStatus {
-  const clean = stripAnsi(raw);
-  const grab = (re: RegExp): string | undefined => clean.match(re)?.[1]?.trim();
-  const count = (label: string) => grab(new RegExp(`${label}\\s*:?\\s*([\\d,]+)\\b`, 'i'));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { stats: [], details: [], indexed: false };
+  }
+  if (!parsed || typeof parsed !== 'object') return { stats: [], details: [], indexed: false };
+  const o = parsed as Record<string, unknown>;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+  const nodes = num(o.nodes);
+  const edges = num(o.edges);
+  const size = num(o.sizeBytes) ?? num(o.size_bytes);
+  const project = str(o.project) ?? str(o.name);
+  const rootPath = str(o.rootPath) ?? str(o.root_path);
+  const statusStr = str(o.status);
+  const indexedFlag =
+    o.indexed === true || statusStr === 'indexed' || statusStr === 'ready' || (nodes !== undefined && nodes > 0);
 
   const stats: CodeGraphStat[] = [];
-  const files = count('Files');
-  const nodes = count('Nodes');
-  const edges = count('Edges');
-  const dbSize = grab(/DB\s*Size\s*:?\s*([\d.]+\s*[KMGTP]?i?B)/i);
-  if (files) stats.push({ label: 'Files', value: files });
-  if (nodes) stats.push({ label: 'Nodes', value: nodes });
-  if (edges) stats.push({ label: 'Edges', value: edges });
-  if (dbSize) stats.push({ label: 'DB Size', value: dbSize });
+  if (nodes !== undefined) stats.push({ label: 'Nodes', value: nodes.toLocaleString() });
+  if (edges !== undefined) stats.push({ label: 'Edges', value: edges.toLocaleString() });
+  if (size !== undefined) stats.push({ label: 'DB Size', value: formatBytes(size) });
 
   const details: CodeGraphStat[] = [];
-  const backend = grab(/Backend\s*:?\s*([^\n]+)/i);
-  const journal = grab(/Journal\s*:?\s*([^\n]+)/i);
-  if (backend) details.push({ label: 'Backend', value: backend });
-  if (journal) details.push({ label: 'Journal', value: journal });
+  if (rootPath) details.push({ label: 'Root', value: rootPath });
 
-  return {
-    stats,
-    details,
-    project: grab(/Project\s*:?\s*([^\n]+)/i),
-    indexed: stats.length > 0,
-  };
+  return { stats, details, project, indexed: indexedFlag && stats.length > 0 };
 }

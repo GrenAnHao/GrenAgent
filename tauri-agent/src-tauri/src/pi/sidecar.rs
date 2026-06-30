@@ -63,6 +63,9 @@ pub fn spawn_pi_client(
         .map_err(|e| anyhow!("sidecar lookup failed: {e}"))?
         .args(["--mode", "rpc"])
         .env("PI_PACKAGE_DIR", &package_dir)
+        // 与画布侧共用同一索引目录：agent 的 codebase-memory MCP server 经 process.env
+        // 继承 CBM_CACHE_DIR，确保 explore 子代理查到的 project 与画布 index 的是同一份。
+        .env("CBM_CACHE_DIR", crate::commands::code_intel::cbm_cache_dir(app))
         .env("PI_RUNTIME_CONFIG", runtime_config)
         .envs(env)
         .current_dir(cwd)
@@ -84,7 +87,7 @@ pub fn spawn_pi_client(
     let client = Arc::new(PiClient::new(workspace, transport, sink));
 
     // 守卫探针：定制 sidecar 启动会在 stderr 打 `[grenagent-sidecar] ready ... safety=on`。
-    // 若 spawn 到的是上游原版 pi（未编译进 safety/permission/sandbox 护栏），这条 marker 不会出现 →
+    // 若 spawn 到的是上游原版 pi（未编译进 safety/permission 护栏），这条 marker 不会出现 →
     // 超时后大声告警，避免护栏静默失效却无人察觉（例如忘了跑 `npm run build:sidecar`）。
     let banner_seen = Arc::new(AtomicBool::new(false));
     {
@@ -93,7 +96,7 @@ pub fn spawn_pi_client(
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             if !banner_for_timer.load(Ordering::Relaxed) {
                 forward_log(
-                    "[pi] WARNING: GrenAgent sidecar startup marker not seen within 10s. The spawned `pi` may be a plain upstream binary WITHOUT GrenAgent guardrails (safety/permission/sandbox). Rebuild the sidecar via `npm run build:sidecar`."
+                    "[pi] WARNING: GrenAgent sidecar startup marker not seen within 10s. The spawned `pi` may be a plain upstream binary WITHOUT GrenAgent guardrails (safety/permission). Rebuild the sidecar via `npm run build:sidecar`."
                 );
             }
         });

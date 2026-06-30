@@ -129,7 +129,7 @@ fn prune_orphans_in(works_root: &std::path::Path, used: &[String], keep: &[Strin
 /// 会留下无会话的空壳。启动时调用此命令清掉历史与崩溃残留，配合「统一复用未使用 draft」把空目录
 /// 数量收敛到最多 1 个。
 ///
-/// 安全：works 是「对话」模式自动建的临时 cwd，从不含用户文件（仅 app 生成的 .pi / .codegraph），
+/// 安全：works 是「对话」模式自动建的临时 cwd，从不含用户文件（仅 app 生成的 .pi 等），
 /// 故「无会话即可整目录删除」是安全的。绝不触碰用户自选的「项目」目录（它们不在 works 根下）。
 #[tauri::command]
 pub async fn prune_orphan_conversations(keep: Vec<String>) -> Result<usize, String> {

@@ -107,7 +107,7 @@ pub async fn open_workspace(
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     // Code Intelligence 自动 init 开关（在 env 被 move 进 spawn 闭包前读取）。
-    let auto_init_codegraph = env
+    let auto_init_code_intel = env
         .get("CODE_INTEL")
         .map(|v| v.as_str() != "off")
         .unwrap_or(true)
@@ -167,13 +167,23 @@ pub async fn open_workspace(
     );
 
     // Code Intelligence：首次打开未索引项目时后台自动 init（非阻塞，失败仅日志）。
+    // codebase-memory 的索引落在 CBM_CACHE_DIR/<slug>.db（不在工作区内），故用
+    // code_intel_is_initialized 判定是否已索引（在 spawn 内做，连 stat 都不挡 open）。
     // 对话工作区（~/.pi/agent/works/<uuid>）是临时目录，不建代码索引——与
-    // apply_conversation_tool_policy 给对话关闭 MCP 的策略保持一致，避免在临时对话目录里
-    // 残留 .codegraph 索引。
-    if auto_init_codegraph && !is_conversation_workspace(&cwd) && !cwd.join(".codegraph").is_dir() {
+    // apply_conversation_tool_policy 给对话关闭 MCP 的策略保持一致。
+    if auto_init_code_intel && !is_conversation_workspace(&cwd) {
         let app_for_init = app.clone();
         let ws_for_init = workspace.clone();
         tauri::async_runtime::spawn(async move {
+            let indexed = crate::commands::code_intel::code_intel_is_initialized(
+                app_for_init.clone(),
+                ws_for_init.clone(),
+            )
+            .await
+            .unwrap_or(false);
+            if indexed {
+                return;
+            }
             if let Err(e) =
                 crate::commands::code_intel::code_intel_init(app_for_init, ws_for_init).await
             {

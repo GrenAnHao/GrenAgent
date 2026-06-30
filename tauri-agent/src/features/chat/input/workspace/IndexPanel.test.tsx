@@ -2,7 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { codeIntelStatus, codeIntelInit, codeIntelSync, codeIntelReindex } = vi.hoisted(() => ({
-  codeIntelStatus: vi.fn(() => Promise.resolve('Files: 10\nNodes: 99')),
+  codeIntelStatus: vi.fn(() =>
+    Promise.resolve(JSON.stringify({ indexed: true, project: 'ws', nodes: 99, edges: 10 })),
+  ),
   codeIntelInit: vi.fn(() => Promise.resolve('initialized')),
   codeIntelSync: vi.fn(() => Promise.resolve('synced')),
   codeIntelReindex: vi.fn(() => Promise.resolve('rebuilt')),

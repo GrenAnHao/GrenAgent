@@ -1,69 +1,106 @@
-// One-shot CodeGraph CLI invocations backing the Code Intelligence management UI
-// (status / init / sync / reindex) plus an init-state probe.
+// Code Intelligence management UI + canvas data, backed by the codebase-memory-mcp
+// CLI (`<bin> cli <tool> <json-args>`). codebase-memory ships as a SINGLE static
+// binary placed under src-tauri/binaries/codebase-memory/ by build-codebasememory.mjs
+// and shipped via tauri.conf.json `bundle.resources`.
 //
-// CodeGraph ships as a directory bundle (a vendored Node runtime + lib/dist + a
-// bin launcher), NOT a single-file binary, so it cannot be a tauri externalBin
-// sidecar. build-codegraph.mjs places it under src-tauri/binaries/codegraph and
-// tauri.conf.json ships it via `bundle.resources`. We resolve the bundle dir
-// (packaged resource first, dev binaries/ fallback) and run the platform
-// launcher directly:
-//   unix : <dir>/bin/codegraph <args>
-//   win32: <dir>/node.exe --liftoff-only <dir>/lib/dist/bin/codegraph.js <args>
-// (Windows cannot spawn the bundle's .cmd directly — CVE-2024-27980 hardening —
-//  so we invoke the bundled node.exe against the app entry; --liftoff-only also
-//  keeps tree-sitter's WASM grammars off V8's turboshaft tier to avoid an OOM.)
-use std::path::{Path, PathBuf};
+// Two consumer groups, both via the CLI (one-shot tool calls):
+//   - management UI: status / init / sync / reindex / is_initialized
+//   - canvas: file_graph / rich_graph, built from `query_graph` Cypher results
+//
+// Project location: codebase-memory is multi-project and stores indexes under
+// CBM_CACHE_DIR (we point it at <app_data_dir>/codebase-memory, shared with the
+// agent path so both read the same DBs). Query tools REQUIRE an explicit
+// `project` slug — we derive it from the workspace path (see `project_slug`,
+// reproducing cbm_project_name_from_path).
+//
+// Output convention: the CLI prints log lines to stderr and the JSON result to
+// stdout, so we parse stdout only. Cypher returns numeric columns as STRINGS
+// (e.g. weight "1"), and external/empty endpoints as file_path "{}" or "" — both
+// filtered on the consumer side, along with self-loops (a == b).
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use tauri::path::BaseDirectory;
 use tauri::Manager;
 
-/// Resolve the CodeGraph bundle directory: packaged resource first (prod),
-/// then the dev build output (src-tauri/binaries/codegraph).
-fn codegraph_dir(app: &tauri::AppHandle) -> PathBuf {
-    if let Ok(p) = app
-        .path()
-        .resolve("binaries/codegraph", tauri::path::BaseDirectory::Resource)
-    {
+/// Resolve the codebase-memory binary: packaged resource first (prod), then the
+/// dev build output (src-tauri/binaries/codebase-memory).
+fn cbm_binary(app: &tauri::AppHandle) -> PathBuf {
+    let exe = if cfg!(windows) {
+        "codebase-memory-mcp.exe"
+    } else {
+        "codebase-memory-mcp"
+    };
+    if let Ok(p) = app.path().resolve("binaries/codebase-memory", BaseDirectory::Resource) {
         if p.is_dir() {
-            return p;
+            return p.join(exe);
         }
     }
-    crate::pi::sidecar::pi_package_dir().join("codegraph")
+    crate::pi::sidecar::pi_package_dir()
+        .join("codebase-memory")
+        .join(exe)
 }
 
-/// (program, leading-args) for the bundled launcher on this platform.
-fn launcher(dir: &Path) -> (PathBuf, Vec<String>) {
-    if cfg!(windows) {
-        (
-            dir.join("node.exe"),
-            vec![
-                "--liftoff-only".to_string(),
-                // 相对入口（解析自 cwd = bundle dir，见 run_codegraph）。绝对入口若含空格
-                // （如 "D:\\OneDrive\\Project Files\\..."），codegraph 在非 TTY / piped 下用
-                // child_process 拉起索引 worker 时会在空格处截断入口，报
-                // "Cannot find module 'D:\\OneDrive\\Project'" / lstat 'D:'。相对入口规避。
-                "lib/dist/bin/codegraph.js".to_string(),
-            ],
-        )
+/// Shared cache dir for cbm indexes = <app_data_dir>/codebase-memory. Set as
+/// CBM_CACHE_DIR for every CLI call here AND when spawning the agent (see
+/// pi/sidecar.rs), so the canvas and the agent's MCP server read the same DBs.
+pub(crate) fn cbm_cache_dir(app: &tauri::AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("codebase-memory"))
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Reproduce cbm_project_name_from_path (fqn.c): map every char outside
+/// [A-Za-z0-9._-] to '-', collapse consecutive '-' and '.', trim leading '-'/'.'
+/// and trailing '-'. Deterministic — matches the indexed project name exactly.
+fn project_slug(path: &str) -> String {
+    let mapped: String = path
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut collapsed = String::with_capacity(mapped.len());
+    let mut prev = '\0';
+    for c in mapped.chars() {
+        if (c == '-' && prev == '-') || (c == '.' && prev == '.') {
+            continue;
+        }
+        collapsed.push(c);
+        prev = c;
+    }
+    let trimmed = collapsed.trim_start_matches(['-', '.']).trim_end_matches('-');
+    if trimmed.is_empty() {
+        "root".to_string()
     } else {
-        (dir.join("bin").join("codegraph"), Vec::new())
+        trimmed.to_string()
     }
 }
 
-async fn run_codegraph(app: &tauri::AppHandle, args: &[&str]) -> Result<String, String> {
-    let dir = codegraph_dir(app);
-    let (program, mut full_args) = launcher(&dir);
-    full_args.extend(args.iter().map(|s| s.to_string()));
-    // cwd = bundle dir（不是 workspace）：win32 相对入口据此解析，且让 codegraph 的索引
-    // worker 子进程以无空格的相对入口启动。workspace 始终经命令行参数显式传入
-    // （init/status/sync/index <workspace>），不依赖 cwd。
+/// Normalize path separators for tolerant root_path comparison.
+fn norm_path(p: &str) -> String {
+    p.replace('\\', "/")
+}
+
+/// Run a one-shot CLI tool call. Returns trimmed stdout (the JSON result; logs
+/// go to stderr). `args` is e.g. ["cli", "list_projects", "{}"].
+async fn run_cbm(app: &tauri::AppHandle, args: &[&str]) -> Result<String, String> {
+    let program = cbm_binary(app);
+    let cache = cbm_cache_dir(app);
+    std::fs::create_dir_all(&cache).ok();
     let output = tokio::process::Command::new(&program)
-        .args(&full_args)
-        .current_dir(&dir)
+        .args(args)
+        .env("CBM_CACHE_DIR", &cache)
         .output()
         .await
-        .map_err(|e| format!("codegraph spawn failed ({}): {e}", program.display()))?;
+        .map_err(|e| format!("codebase-memory spawn failed ({}): {e}", program.display()))?;
     if !output.status.success() {
         return Err(format!(
-            "codegraph {:?} exited ({:?}): {}",
+            "codebase-memory {:?} exited ({:?}): {}",
             args,
             output.status.code(),
             String::from_utf8_lossy(&output.stderr)
@@ -72,45 +109,86 @@ async fn run_codegraph(app: &tauri::AppHandle, args: &[&str]) -> Result<String, 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Index status + statistics (`codegraph status <ws>`), human-readable text.
+/// Index status + statistics for the current workspace, as a normalized JSON
+/// string for the panel: {indexed, project, nodes, edges, sizeBytes, rootPath}.
 #[tauri::command]
 pub async fn code_intel_status(app: tauri::AppHandle, workspace: String) -> Result<String, String> {
-    run_codegraph(&app, &["status", workspace.as_str()]).await
+    let slug = project_slug(&workspace);
+    let raw = run_cbm(&app, &["cli", "list_projects", "{}"]).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+    let empty = vec![];
+    let projects = parsed
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .unwrap_or(&empty);
+    let ws_norm = norm_path(&workspace);
+    let found = projects.iter().find(|p| {
+        p.get("name").and_then(|n| n.as_str()) == Some(slug.as_str())
+            || p.get("root_path")
+                .and_then(|r| r.as_str())
+                .map(norm_path)
+                .as_deref()
+                == Some(ws_norm.as_str())
+    });
+    let status = match found {
+        Some(p) => {
+            let nodes = p.get("nodes").and_then(|n| n.as_i64()).unwrap_or(0);
+            serde_json::json!({
+                "indexed": nodes > 0,
+                "project": slug,
+                "nodes": nodes,
+                "edges": p.get("edges").and_then(|n| n.as_i64()).unwrap_or(0),
+                "sizeBytes": p.get("size_bytes").and_then(|n| n.as_i64()),
+                "rootPath": p.get("root_path").and_then(|n| n.as_str()),
+            })
+        }
+        None => serde_json::json!({ "indexed": false, "project": slug }),
+    };
+    Ok(status.to_string())
 }
 
-/// Initialize CodeGraph and build the initial index (`codegraph init <ws>`).
-/// Idempotent: re-running on an initialized project is a no-op/refresh upstream.
+/// Initialize / build the index for the workspace (`cli index_repository`).
+/// Incremental on subsequent runs (cbm hashes files), so safe to re-run.
 #[tauri::command]
 pub async fn code_intel_init(app: tauri::AppHandle, workspace: String) -> Result<String, String> {
-    run_codegraph(&app, &["init", workspace.as_str()]).await
+    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
-/// Incremental sync since last index (`codegraph sync <ws>`).
+/// Incremental sync since last index — cbm auto-detects changes, so this is the
+/// same `index_repository` call as init.
 #[tauri::command]
 pub async fn code_intel_sync(app: tauri::AppHandle, workspace: String) -> Result<String, String> {
-    run_codegraph(&app, &["sync", workspace.as_str()]).await
+    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
-/// Full rebuild (`codegraph index -f <ws>`).
+/// Rebuild — cbm's index_repository refreshes in place (no separate force flag in
+/// the CLI surface); re-running picks up all changes.
 #[tauri::command]
 pub async fn code_intel_reindex(
     app: tauri::AppHandle,
     workspace: String,
 ) -> Result<String, String> {
-    run_codegraph(&app, &["index", "-f", workspace.as_str()]).await
+    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
-/// Whether the workspace already has an index (presence of `.codegraph/`).
+/// Whether the workspace already has an index: cbm stores it at
+/// <cache>/<slug>.db, so stat that file (cheap — no process spawn).
 #[tauri::command]
-pub async fn code_intel_is_initialized(workspace: String) -> Result<bool, String> {
-    Ok(Path::new(&workspace).join(".codegraph").is_dir())
+pub async fn code_intel_is_initialized(
+    app: tauri::AppHandle,
+    workspace: String,
+) -> Result<bool, String> {
+    let db = cbm_cache_dir(&app).join(format!("{}.db", project_slug(&workspace)));
+    Ok(db.is_file())
 }
 
 // ── 文件依赖图（代码图谱可视化） ─────────────────────────────────────────────
-// 直接只读 CodeGraph 的 SQLite 索引（.codegraph/codegraph.db），把符号级/文件级的
-// `imports` 边按文件归并成「文件 → 文件」依赖图，供前端 reactflow 渲染。
-// schema 取自 CodeGraph 源码：nodes(id,kind,name,file_path,...) / edges(source,target,kind,...)
-// / files(path,language,node_count,...)；edges.source/target 为 nodes.id。
+// 经 `query_graph` 取 cbm 的图谱数据，把符号级 import / call 边按文件归并成
+// 「文件 → 文件」依赖图，供前端 reactflow 渲染。FileGraph/RichGraph 结构体与旧版
+// 完全一致 → 前端画布零改动。
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,88 +213,170 @@ pub struct FileGraph {
     pub edges: Vec<FileGraphEdge>,
 }
 
-/// 只读打开 codegraph.db。路径含空格/反斜杠时直接传 Path（非 URI）最稳。
-fn open_codegraph_db(workspace: &str) -> Result<rusqlite::Connection, String> {
-    let db = Path::new(workspace)
-        .join(".codegraph")
-        .join("codegraph.db");
-    if !db.is_file() {
-        return Err("当前 workspace 尚未建立 CodeGraph 索引（请先在「索引」里初始化）".to_string());
+/// Cypher returns numeric columns as JSON strings (e.g. "546"); be tolerant.
+fn cell_str(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => String::new(),
     }
-    rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| format!("打开 codegraph.db 失败: {e}"))
+}
+fn cell_i64(v: &serde_json::Value) -> i64 {
+    match v {
+        serde_json::Value::String(s) => s.trim().parse().unwrap_or(0),
+        serde_json::Value::Number(n) => n.as_i64().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Run a `query_graph` Cypher query for the given project slug, returning rows
+/// (each a Vec of cells). Surfaces a query-level `{"error":...}` as Err.
+async fn query_rows(
+    app: &tauri::AppHandle,
+    slug: &str,
+    cypher: &str,
+) -> Result<Vec<Vec<serde_json::Value>>, String> {
+    let arg = serde_json::json!({ "project": slug, "query": cypher }).to_string();
+    let out = run_cbm(app, &["cli", "query_graph", arg.as_str()]).await?;
+    let v: serde_json::Value = serde_json::from_str(&out)
+        .map_err(|e| format!("query_graph JSON parse failed: {e}"))?;
+    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("query_graph: {err}"));
+    }
+    let rows = v
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .map(|r| r.as_array().cloned().unwrap_or_default())
+        .collect())
+}
+
+/// Map a file extension (cbm File.extension) to a coarse language label for the
+/// canvas. Falls back to the bare extension when unknown.
+fn lang_from_ext(ext: &str, path: &str) -> String {
+    let e = ext.trim_start_matches('.').to_ascii_lowercase();
+    let e = if e.is_empty() {
+        path.rsplit('.').next().unwrap_or("").to_ascii_lowercase()
+    } else {
+        e
+    };
+    match e.as_str() {
+        "ts" | "mts" | "cts" => "typescript",
+        "tsx" => "typescript",
+        "js" | "mjs" | "cjs" => "javascript",
+        "jsx" => "javascript",
+        "py" => "python",
+        "rs" => "rust",
+        "go" => "go",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" => "cpp",
+        "cs" => "csharp",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+        "md" | "mdx" => "markdown",
+        "json" => "json",
+        "" => "",
+        other => return other.to_string(),
+    }
+    .to_string()
 }
 
 /// 文件依赖图：节点=文件，边=文件间 import（按符号级 import 归并、按 weight 取前 N）。
 /// 只返回参与 import 边的文件（连通子图），避免孤立文件刷屏。
 #[tauri::command]
 pub async fn code_intel_file_graph(
+    app: tauri::AppHandle,
     workspace: String,
     limit: Option<u32>,
 ) -> Result<FileGraph, String> {
-    let conn = open_codegraph_db(&workspace)?;
-    let max_edges = limit.unwrap_or(1500).clamp(1, 20000);
+    let slug = project_slug(&workspace);
+    let max_edges = limit.unwrap_or(1500).clamp(1, 20000) as usize;
 
-    // import 边按文件归并（对符号级与文件级 import 都鲁棒）；按 weight 取前 N。
-    let mut stmt = conn
-        .prepare(
-            "SELECT src.file_path AS source, tgt.file_path AS target, COUNT(*) AS weight \
-             FROM edges e \
-             JOIN nodes src ON e.source = src.id \
-             JOIN nodes tgt ON e.target = tgt.id \
-             WHERE e.kind = 'imports' AND src.file_path <> tgt.file_path \
-             GROUP BY src.file_path, tgt.file_path \
-             ORDER BY weight DESC \
-             LIMIT ?1",
-        )
-        .map_err(|e| format!("查询依赖边失败: {e}"))?;
-    let edges: Vec<FileGraphEdge> = stmt
-        .query_map([max_edges], |row| {
-            Ok(FileGraphEdge {
-                source: row.get(0)?,
-                target: row.get(1)?,
-                weight: row.get(2)?,
+    // import 边（外部包目标 file_path 为 "{}"，过滤；自环与空串在消费侧再滤）。
+    let rows = query_rows(
+        &app,
+        &slug,
+        "MATCH (a)-[:IMPORTS]->(b) WHERE b.file_path <> '{}' \
+         RETURN a.file_path AS source, b.file_path AS target, count(*) AS weight",
+    )
+    .await?;
+    let mut edges: Vec<FileGraphEdge> = rows
+        .iter()
+        .filter_map(|r| {
+            if r.len() < 3 {
+                return None;
+            }
+            let source = cell_str(&r[0]);
+            let target = cell_str(&r[1]);
+            if source.is_empty() || target.is_empty() || source == target {
+                return None;
+            }
+            Some(FileGraphEdge {
+                source,
+                target,
+                weight: cell_i64(&r[2]),
             })
         })
-        .map_err(|e| format!("查询依赖边失败: {e}"))?
-        .collect::<Result<_, _>>()
-        .map_err(|e| format!("读取依赖边失败: {e}"))?;
+        .collect();
+    edges.sort_by(|a, b| b.weight.cmp(&a.weight));
+    edges.truncate(max_edges);
+
+    // 每文件节点数（结果含空串 file_path 行，过滤）。
+    let nc_rows = query_rows(
+        &app,
+        &slug,
+        "MATCH (n) WHERE n.file_path <> '{}' RETURN n.file_path AS path, count(*) AS nodeCount",
+    )
+    .await?;
+    let mut node_count: HashMap<String, i64> = HashMap::new();
+    for r in &nc_rows {
+        if r.len() >= 2 {
+            let p = cell_str(&r[0]);
+            if !p.is_empty() {
+                node_count.insert(p, cell_i64(&r[1]));
+            }
+        }
+    }
+
+    // File 元信息（extension → language）。
+    let meta_rows = query_rows(
+        &app,
+        &slug,
+        "MATCH (f:File) RETURN f.file_path AS path, f.extension AS ext",
+    )
+    .await?;
+    let mut ext_by_path: HashMap<String, String> = HashMap::new();
+    for r in &meta_rows {
+        if r.len() >= 2 {
+            let p = cell_str(&r[0]);
+            if !p.is_empty() {
+                ext_by_path.insert(p, cell_str(&r[1]));
+            }
+        }
+    }
 
     // 连通文件集合。
-    let mut paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut paths: HashSet<String> = HashSet::new();
     for e in &edges {
         paths.insert(e.source.clone());
         paths.insert(e.target.clone());
     }
 
-    // 文件元信息（language / node_count），仅对连通集合产出节点。
-    let mut meta = conn
-        .prepare("SELECT path, language, node_count FROM files")
-        .map_err(|e| format!("查询文件失败: {e}"))?;
-    let mut by_path: std::collections::HashMap<String, (String, i64)> =
-        std::collections::HashMap::new();
-    let rows = meta
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })
-        .map_err(|e| format!("查询文件失败: {e}"))?;
-    for r in rows {
-        let (path, language, node_count) = r.map_err(|e| format!("读取文件失败: {e}"))?;
-        by_path.insert(path, (language, node_count));
-    }
-
     let mut nodes: Vec<FileGraphNode> = paths
         .into_iter()
         .map(|p| {
-            let (language, node_count) = by_path.get(&p).cloned().unwrap_or_default();
+            let language = lang_from_ext(ext_by_path.get(&p).map(|s| s.as_str()).unwrap_or(""), &p);
+            let nc = node_count.get(&p).copied().unwrap_or(0);
             FileGraphNode {
                 path: p,
                 language,
-                node_count,
+                node_count: nc,
             }
         })
         .collect();
@@ -225,19 +385,25 @@ pub async fn code_intel_file_graph(
     Ok(FileGraph { nodes, edges })
 }
 
-// ── RichGraph（全边类型，文件级归并） ─────────────────────────────────────────
+// ── RichGraph（文件级归并，import + call 两类边） ───────────────────────────
 
 /// 顶层目录作为聚类键；根文件（无目录分隔符）归到 '·'。
 fn top_level_dir(path: &str) -> String {
     let segs: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
-    if segs.len() > 1 { segs[0].to_string() } else { "\u{00B7}".to_string() }
+    if segs.len() > 1 {
+        segs[0].to_string()
+    } else {
+        "\u{00B7}".to_string()
+    }
 }
 
 /// 力导布局：同目录节点锚定同一圆上的扇区，Euler 积分 420 步收敛。
 /// 返回与 `paths` 同序的 (x, y) 坐标列表。
 fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, f32)> {
     let n = paths.len();
-    if n == 0 { return vec![]; }
+    if n == 0 {
+        return vec![];
+    }
 
     let spacing = 190.0_f32;
     let size = 1000.0_f32.max((n as f32).sqrt() * spacing);
@@ -250,28 +416,43 @@ fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, 
         let mut seen = std::collections::HashSet::<String>::new();
         for p in paths {
             let d = top_level_dir(p);
-            if seen.insert(d.clone()) { dir_list.push(d); }
+            if seen.insert(d.clone()) {
+                dir_list.push(d);
+            }
         }
     }
     let nd = dir_list.len();
 
     // 各目录锚点（多目录均匀分布在大圆上，单目录锚在中心）
-    let anchors: Vec<(f32, f32)> = dir_list.iter().enumerate().map(|(i, _)| {
-        if nd <= 1 { (cx, cy) } else {
-            let a = (i as f32 / nd as f32) * std::f32::consts::TAU;
-            (cx + a.cos() * radius, cy + a.sin() * radius)
-        }
-    }).collect();
+    let anchors: Vec<(f32, f32)> = dir_list
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if nd <= 1 {
+                (cx, cy)
+            } else {
+                let a = (i as f32 / nd as f32) * std::f32::consts::TAU;
+                (cx + a.cos() * radius, cy + a.sin() * radius)
+            }
+        })
+        .collect();
 
     // 每个节点对应的锚点索引
-    let node_anchor: Vec<usize> = paths.iter().map(|p| {
-        let d = top_level_dir(p);
-        dir_list.iter().position(|x| x == &d).unwrap_or(0)
-    }).collect();
+    let node_anchor: Vec<usize> = paths
+        .iter()
+        .map(|p| {
+            let d = top_level_dir(p);
+            dir_list.iter().position(|x| x == &d).unwrap_or(0)
+        })
+        .collect();
 
     // 初始位置：锚点 + 确定性抖动（与 TS 端 ((i*53)%100−50 相同）
-    let mut px: Vec<f32> = (0..n).map(|i| anchors[node_anchor[i]].0 + ((i * 53) % 100) as f32 - 50.0).collect();
-    let mut py: Vec<f32> = (0..n).map(|i| anchors[node_anchor[i]].1 + ((i * 97) % 100) as f32 - 50.0).collect();
+    let mut px: Vec<f32> = (0..n)
+        .map(|i| anchors[node_anchor[i]].0 + ((i * 53) % 100) as f32 - 50.0)
+        .collect();
+    let mut py: Vec<f32> = (0..n)
+        .map(|i| anchors[node_anchor[i]].1 + ((i * 97) % 100) as f32 - 50.0)
+        .collect();
     let mut vx = vec![0.0_f32; n];
     let mut vy = vec![0.0_f32; n];
 
@@ -288,8 +469,10 @@ fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, 
                 let dy = py[j] - py[i];
                 let d2 = (dx * dx + dy * dy).max(1.0);
                 let f = -450.0 * alpha / d2; // 负 = 斥力
-                vx[i] += dx * f;  vy[i] += dy * f;
-                vx[j] -= dx * f;  vy[j] -= dy * f;
+                vx[i] += dx * f;
+                vy[i] += dy * f;
+                vx[j] -= dx * f;
+                vy[j] -= dy * f;
             }
         }
 
@@ -299,8 +482,10 @@ fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, 
             let dy = py[ti] + vy[ti] - py[si] - vy[si];
             let l = (dx * dx + dy * dy).sqrt().max(1e-6);
             let s = (l - 120.0) / l * alpha * 0.08;
-            vx[ti] -= dx * s * 0.5;  vy[ti] -= dy * s * 0.5;
-            vx[si] += dx * s * 0.5;  vy[si] += dy * s * 0.5;
+            vx[ti] -= dx * s * 0.5;
+            vy[ti] -= dy * s * 0.5;
+            vx[si] += dx * s * 0.5;
+            vy[si] += dy * s * 0.5;
         }
 
         // 锚力 + 中心引力
@@ -314,8 +499,10 @@ fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, 
 
         // 速度衰减 + 积分
         for i in 0..n {
-            vx[i] *= 0.6;  vy[i] *= 0.6; // velocity_decay=0.4 → keep 0.6
-            px[i] += vx[i];  py[i] += vy[i];
+            vx[i] *= 0.6;
+            vy[i] *= 0.6; // velocity_decay=0.4 → keep 0.6
+            px[i] += vx[i];
+            py[i] += vy[i];
         }
 
         // 防重叠（2 遍位置修正，radius=70）
@@ -327,15 +514,20 @@ fn compute_layout(paths: &[String], edge_pairs: &[(usize, usize)]) -> Vec<(f32, 
                     let d2 = dx * dx + dy * dy;
                     if d2 < 140.0 * 140.0 && d2 > 0.0 {
                         let push = (140.0 / d2.sqrt() - 1.0) * 0.5;
-                        px[i] -= dx * push;  py[i] -= dy * push;
-                        px[j] += dx * push;  py[j] += dy * push;
+                        px[i] -= dx * push;
+                        py[i] -= dy * push;
+                        px[j] += dx * push;
+                        py[j] += dy * push;
                     }
                 }
             }
         }
     }
 
-    px.into_iter().zip(py).map(|(x, y)| (x.round(), y.round())).collect()
+    px.into_iter()
+        .zip(py)
+        .map(|(x, y)| (x.round(), y.round()))
+        .collect()
 }
 
 #[derive(serde::Serialize)]
@@ -380,57 +572,73 @@ fn db_kind_to_edge_kind(k: &str) -> &'static str {
 
 #[tauri::command]
 pub async fn code_intel_rich_graph(
+    app: tauri::AppHandle,
     workspace: String,
     limit: Option<u32>,
 ) -> Result<RichGraph, String> {
-    let conn = open_codegraph_db(&workspace)?;
+    let slug = project_slug(&workspace);
     // Default capped low: the canvas renders edges on-demand (focused view), so we
     // only need the strongest edges for the skeleton + neighborhood expansion.
-    // Callers can still request more via `limit`.
-    let max_edges = limit.unwrap_or(800).clamp(1, 20000);
+    let max_edges = limit.unwrap_or(800).clamp(1, 20000) as usize;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT src.file_path, tgt.file_path, e.kind, COUNT(*) \
-             FROM edges e \
-             JOIN nodes src ON e.source = src.id \
-             JOIN nodes tgt ON e.target = tgt.id \
-             WHERE src.file_path <> tgt.file_path \
-             GROUP BY src.file_path, tgt.file_path, e.kind \
-             ORDER BY COUNT(*) DESC \
-             LIMIT ?1",
-        )
-        .map_err(|e| format!("query edges failed: {e}"))?;
+    // cbm 只有单一 IMPORTS（不分 type/reexport/dynamic）+ CALLS；`type(r)` 不支持，
+    // 故按 [:TYPE] 分别查再合并。端点为 Function/Method，按 file_path 归并。
+    let mut raw_edges: Vec<(String, String, String, i64)> = Vec::new();
+    for (cypher, kind) in [
+        (
+            "MATCH (a)-[:IMPORTS]->(b) WHERE a.file_path <> '{}' AND b.file_path <> '{}' \
+             RETURN a.file_path AS source, b.file_path AS target, count(*) AS weight",
+            "imports",
+        ),
+        (
+            "MATCH (a)-[:CALLS]->(b) WHERE a.file_path <> '{}' AND b.file_path <> '{}' \
+             RETURN a.file_path AS source, b.file_path AS target, count(*) AS weight",
+            "calls",
+        ),
+    ] {
+        let rows = query_rows(&app, &slug, cypher).await?;
+        for r in &rows {
+            if r.len() < 3 {
+                continue;
+            }
+            let source = cell_str(&r[0]);
+            let target = cell_str(&r[1]);
+            if source.is_empty() || target.is_empty() || source == target {
+                continue;
+            }
+            raw_edges.push((source, target, kind.to_string(), cell_i64(&r[2])));
+        }
+    }
+    raw_edges.sort_by(|a, b| b.3.cmp(&a.3));
+    raw_edges.truncate(max_edges);
 
-    let raw_edges: Vec<(String, String, String, i64)> = stmt
-        .query_map([max_edges], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })
-        .map_err(|e| format!("query edges failed: {e}"))?
-        .collect::<Result<_, _>>()
-        .map_err(|e| format!("read edges failed: {e}"))?;
-
-    let mut in_degree: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut in_degree: HashMap<String, i64> = HashMap::new();
     for (_, tgt, _, _) in &raw_edges {
         *in_degree.entry(tgt.clone()).or_insert(0) += 1;
     }
 
-    let mut path_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut path_set: HashSet<String> = HashSet::new();
     for (src, tgt, _, _) in &raw_edges {
         path_set.insert(src.clone());
         path_set.insert(tgt.clone());
     }
 
-    let mut meta_stmt = conn
-        .prepare("SELECT path, node_count FROM files")
-        .map_err(|e| format!("query files failed: {e}"))?;
-    let meta: std::collections::HashMap<String, i64> = meta_stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
-        .map_err(|e| format!("query files failed: {e}"))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("read files failed: {e}"))?
-        .into_iter()
-        .collect();
+    // 每文件节点数（画布节点大小 / complexity 归一化）。
+    let nc_rows = query_rows(
+        &app,
+        &slug,
+        "MATCH (n) WHERE n.file_path <> '{}' RETURN n.file_path AS path, count(*) AS nodeCount",
+    )
+    .await?;
+    let mut meta: HashMap<String, i64> = HashMap::new();
+    for r in &nc_rows {
+        if r.len() >= 2 {
+            let p = cell_str(&r[0]);
+            if !p.is_empty() {
+                meta.insert(p, cell_i64(&r[1]));
+            }
+        }
+    }
 
     let max_nc = meta.values().copied().max().unwrap_or(1).max(1);
     let mut nodes: Vec<RichGraphNode> = {
@@ -453,15 +661,13 @@ pub async fn code_intel_rich_graph(
         v
     };
 
-    // 计算力导布局（Rust 侧，420 步 Euler 积分）
+    // 力导布局（Rust 侧，420 步 Euler 积分）
     let paths: Vec<String> = nodes.iter().map(|n| n.path.clone()).collect();
-    let path_idx: std::collections::HashMap<&str, usize> =
+    let path_idx: HashMap<&str, usize> =
         paths.iter().enumerate().map(|(i, p)| (p.as_str(), i)).collect();
     let edge_idx: Vec<(usize, usize)> = raw_edges
         .iter()
-        .filter_map(|(src, tgt, _, _)| {
-            Some((*path_idx.get(src.as_str())?, *path_idx.get(tgt.as_str())?))
-        })
+        .filter_map(|(src, tgt, _, _)| Some((*path_idx.get(src.as_str())?, *path_idx.get(tgt.as_str())?)))
         .collect();
     for (node, (x, y)) in nodes.iter_mut().zip(compute_layout(&paths, &edge_idx)) {
         node.x = x;
@@ -478,5 +684,9 @@ pub async fn code_intel_rich_graph(
         })
         .collect();
 
-    Ok(RichGraph { nodes, edges, circular_paths: vec![] })
+    Ok(RichGraph {
+        nodes,
+        edges,
+        circular_paths: vec![],
+    })
 }

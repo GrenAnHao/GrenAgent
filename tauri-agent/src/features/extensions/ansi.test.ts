@@ -57,28 +57,39 @@ describe('parseAnsi', () => {
 });
 
 describe('parseCodegraphStatus', () => {
-  it('extracts headline metrics from a real status payload', () => {
-    const r = parseCodegraphStatus(SAMPLE);
+  it('extracts metrics from the normalized status JSON', () => {
+    const r = parseCodegraphStatus(
+      JSON.stringify({
+        indexed: true,
+        project: 'D-OneDrive-x',
+        nodes: 506,
+        edges: 440,
+        sizeBytes: 4_520_000,
+        rootPath: 'D:/System Dir/Downloads/lobehub',
+      }),
+    );
     expect(r.indexed).toBe(true);
-    expect(r.stats).toEqual([
-      { label: 'Files', value: '62' },
-      { label: 'Nodes', value: '506' },
-      { label: 'Edges', value: '440' },
-      { label: 'DB Size', value: '4.31 MB' },
-    ]);
-    expect(r.project).toBe('D:/System Dir/Downloads/lobehub');
-    expect(r.details).toContainEqual({ label: 'Backend', value: 'mode:sqlite - built-in (full WAL)' });
-    expect(r.details).toContainEqual({ label: 'Journal', value: 'wal' });
+    expect(r.stats).toContainEqual({ label: 'Nodes', value: '506' });
+    expect(r.stats).toContainEqual({ label: 'Edges', value: '440' });
+    expect(r.stats.find((s) => s.label === 'DB Size')).toBeTruthy();
+    expect(r.project).toBe('D-OneDrive-x');
+    expect(r.details).toContainEqual({ label: 'Root', value: 'D:/System Dir/Downloads/lobehub' });
   });
 
-  it('handles thousands separators in counts', () => {
-    const r = parseCodegraphStatus('Files: 1,234\nNodes: 56,789\nEdges: 9,000');
-    expect(r.stats).toContainEqual({ label: 'Files', value: '1,234' });
-    expect(r.stats).toContainEqual({ label: 'Nodes', value: '56,789' });
+  it('parses the index_repository result shape (status:indexed)', () => {
+    const r = parseCodegraphStatus(JSON.stringify({ project: 'D-x', status: 'indexed', nodes: 231, edges: 546 }));
+    expect(r.indexed).toBe(true);
+    expect(r.stats).toContainEqual({ label: 'Nodes', value: '231' });
   });
 
-  it('degrades gracefully for error / un-indexed output', () => {
-    const r = parseCodegraphStatus('codegraph ["status"] exited (1): not initialized');
+  it('degrades gracefully for a not-indexed project', () => {
+    const r = parseCodegraphStatus(JSON.stringify({ indexed: false, project: 'D-x' }));
+    expect(r.indexed).toBe(false);
+    expect(r.stats).toEqual([]);
+  });
+
+  it('degrades gracefully for error / non-JSON output', () => {
+    const r = parseCodegraphStatus('codebase-memory ["list_projects"] exited (1): boom');
     expect(r.indexed).toBe(false);
     expect(r.stats).toEqual([]);
   });
