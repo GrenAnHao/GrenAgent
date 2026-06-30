@@ -86,6 +86,34 @@ fn norm_path(p: &str) -> String {
     p.replace('\\', "/")
 }
 
+/// Serialize JSON args for the cbm CLI as PURE ASCII, escaping every non-ASCII
+/// scalar to `\uXXXX` (surrogate pairs for astral chars).
+///
+/// REQUIRED on Windows. The cbm CLI takes its tool args as a single argv JSON
+/// string, and the C runtime hands `main()` argv in the system ANSI code page
+/// (e.g. GBK on a zh-CN install), NOT UTF-8. A workspace path with non-ASCII
+/// chars (e.g. `...\神经网络`) arrives as ANSI bytes that are invalid UTF-8, so
+/// cbm's `yyjson_read(args, …, 0)` rejects the whole document and `repo_path`
+/// reads back NULL → "repo_path is required" (and nothing ever gets indexed).
+/// ASCII-only argv survives the code-page round-trip untouched; yyjson decodes
+/// the `\uXXXX` escapes back to the correct UTF-8 string, which cbm then feeds to
+/// its wide-char file APIs. No-op for ASCII-only args.
+fn ascii_json(value: &serde_json::Value) -> String {
+    let s = value.to_string();
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch.is_ascii() {
+            out.push(ch);
+        } else {
+            let mut units = [0u16; 2];
+            for u in ch.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{:04x}", u));
+            }
+        }
+    }
+    out
+}
+
 /// Run a one-shot CLI tool call. Returns trimmed stdout (the JSON result; logs
 /// go to stderr). `args` is e.g. ["cli", "list_projects", "{}"].
 async fn run_cbm(app: &tauri::AppHandle, args: &[&str]) -> Result<String, String> {
@@ -151,7 +179,7 @@ pub async fn code_intel_status(app: tauri::AppHandle, workspace: String) -> Resu
 /// Incremental on subsequent runs (cbm hashes files), so safe to re-run.
 #[tauri::command]
 pub async fn code_intel_init(app: tauri::AppHandle, workspace: String) -> Result<String, String> {
-    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    let arg = ascii_json(&serde_json::json!({ "repo_path": workspace }));
     run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
@@ -159,7 +187,7 @@ pub async fn code_intel_init(app: tauri::AppHandle, workspace: String) -> Result
 /// same `index_repository` call as init.
 #[tauri::command]
 pub async fn code_intel_sync(app: tauri::AppHandle, workspace: String) -> Result<String, String> {
-    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    let arg = ascii_json(&serde_json::json!({ "repo_path": workspace }));
     run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
@@ -170,7 +198,7 @@ pub async fn code_intel_reindex(
     app: tauri::AppHandle,
     workspace: String,
 ) -> Result<String, String> {
-    let arg = serde_json::json!({ "repo_path": workspace }).to_string();
+    let arg = ascii_json(&serde_json::json!({ "repo_path": workspace }));
     run_cbm(&app, &["cli", "index_repository", arg.as_str()]).await
 }
 
@@ -236,7 +264,7 @@ async fn query_rows(
     slug: &str,
     cypher: &str,
 ) -> Result<Vec<Vec<serde_json::Value>>, String> {
-    let arg = serde_json::json!({ "project": slug, "query": cypher }).to_string();
+    let arg = ascii_json(&serde_json::json!({ "project": slug, "query": cypher }));
     let out = run_cbm(app, &["cli", "query_graph", arg.as_str()]).await?;
     let v: serde_json::Value = serde_json::from_str(&out)
         .map_err(|e| format!("query_graph JSON parse failed: {e}"))?;
@@ -689,4 +717,69 @@ pub async fn code_intel_rich_graph(
         edges,
         circular_paths: vec![],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression for the CJK-workspace indexing failure: a workspace path with
+    // non-ASCII chars is handed to the cbm CLI as a single argv JSON string. On a
+    // zh-CN Windows the C runtime decodes argv in the ANSI code page (GBK), so the
+    // non-ASCII bytes reach cbm as invalid UTF-8, its `yyjson_read(args, …, 0)`
+    // rejects the whole document, and `repo_path` reads back NULL → the CLI prints
+    // "repo_path is required" and nothing is ever indexed (which then makes
+    // query_graph report "project not found or not indexed").
+    const CJK_WS: &str = "D:\\OneDrive\\Project Files\\神经网络";
+
+    #[test]
+    fn naive_json_arg_is_not_ascii_for_cjk_path() {
+        // Documents the pre-fix failure mode: the plain serialization carries raw
+        // non-ASCII bytes into argv, where Windows' ANSI code page corrupts them.
+        let naive = serde_json::json!({ "repo_path": CJK_WS }).to_string();
+        assert!(
+            !naive.is_ascii(),
+            "precondition: the naive CLI arg is non-ASCII — this is what the fix removes"
+        );
+    }
+
+    #[test]
+    fn ascii_json_arg_is_pure_ascii_and_round_trips_for_cjk_path() {
+        let arg = ascii_json(&serde_json::json!({ "repo_path": CJK_WS }));
+        // (1) pure ASCII → survives the Windows ANSI(GBK) argv round-trip untouched.
+        assert!(arg.is_ascii(), "cbm CLI arg must be pure ASCII");
+        // (2) any RFC-8259 parser (cbm's yyjson) decodes the \uXXXX escapes back to
+        //     the exact path, which cbm then feeds to its wide-char file APIs.
+        let parsed: serde_json::Value = serde_json::from_str(&arg).unwrap();
+        assert_eq!(parsed["repo_path"].as_str(), Some(CJK_WS));
+    }
+
+    #[test]
+    fn ascii_json_is_noop_for_ascii_args() {
+        // query_graph args are ASCII-only (slug + Cypher); escaping must not alter them.
+        let value = serde_json::json!({
+            "project": "D-OneDrive-Project-Files",
+            "query": "MATCH (n) WHERE n.file_path <> '{}' RETURN n.file_path"
+        });
+        assert_eq!(ascii_json(&value), value.to_string());
+    }
+
+    #[test]
+    fn ascii_json_handles_astral_scalars_via_surrogate_pairs() {
+        // An astral scalar (CJK Ext-B U+20000) must emit two \uXXXX units and still
+        // round-trip — guards char::encode_utf16 surrogate handling.
+        let value = serde_json::json!({ "repo_path": "C:\\x\\\u{20000}" });
+        let arg = ascii_json(&value);
+        assert!(arg.is_ascii());
+        let parsed: serde_json::Value = serde_json::from_str(&arg).unwrap();
+        assert_eq!(parsed["repo_path"].as_str(), Some("C:\\x\\\u{20000}"));
+    }
+
+    #[test]
+    fn project_slug_matches_cbm_for_cjk_path() {
+        // cbm_project_name_from_path maps non-[A-Za-z0-9._-] → '-', collapses runs,
+        // and trims; a fully-CJK segment collapses to one '-' then trims away. Pi's
+        // project_slug must agree so query_graph resolves the indexed project.
+        assert_eq!(project_slug(CJK_WS), "D-OneDrive-Project-Files");
+    }
 }
