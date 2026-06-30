@@ -33,8 +33,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
-import { sandboxAvailable } from "../_shared/sandbox-gate.js";
-import { HOST_ONLY_EXEC_TOOLS, SANDBOXABLE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
+import { CODE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
 import { spawnPiAgent } from "../multi-agent/runner.js";
 import { createImContextStore, type ImContextStore, renderPrompt } from "./context.js";
 import { acquireLock, refreshLock, releaseLock } from "./lock.js";
@@ -54,38 +53,25 @@ const IM_SYSTEM_PROMPT_RESTRICTED =
   "若对方要求做这些，简短说明当前为受限模式、需主人配置 ID 后才可用。" +
   "只回复用户最新的问题，不要主动寒暄、不要复述历史、不要使用 emoji。";
 
-// Restricted + sandbox-available persona: chat AND sandboxed execution.
-const IM_SYSTEM_PROMPT_RESTRICTED_SANDBOXED =
-  "你是通过微信接入、与一位访客私聊的 AI 助手，当前为沙箱受限模式：可以正常对话，" +
-  "也可在隔离沙箱内执行（用 sandbox_sh 跑 shell，或 py_run/js_run 跑代码）——" +
-  "但写文件仅限当前 workspace、网络默认禁、不能用内置 bash。" +
-  "只回复用户最新的问题，不要主动寒暄、不要复述历史、不要使用 emoji。";
-
 // 受限（无主人）会话的 deny 清单。SAFETY_READONLY 已锁内置 write/edit + mutating bash；
-// 这里再禁「不经沙箱、会绕过隔离」的宿主副作用工具。仅 owner（WECHAT_OC_OWNER）拥有完整能力。
+// 这里再禁会绕过隔离的宿主副作用工具——受限访客一律「只对话 + 读取检索」，不执行任何代码 / 命令。
+// 仅 owner（WECHAT_OC_OWNER）拥有完整能力。
 //
-// 始终禁：
-// - 内置 bash —— 它永远不走沙箱（走沙箱的是 sandbox_sh）。受限会话一律不给内置 bash，由 safety ①
-//   按工具名硬禁（任何审批策略含 full 都不可越过）；不依赖策略感知的「沙箱模式禁 bash」闸 ③——
-//   ③ 在 owner 选「完全访问」时会被短路，曾使受限会话的内置 bash 在宿主漏出（已修）。
-// - 宿主写盘工具（ast_edit/hl_edit，绕过写白名单）、宿主调试执行（dap_*，启动/求值代码）、
-//   github（gh CLI 需 auth、可访问私有仓库）。这些不经 WSL2 沙箱，故沙箱可用与否都禁。
+// 禁：
+// - 内置 bash —— 受限会话一律不给，由 safety ① 按工具名硬禁（任何审批策略含 full 都不可越过）。
+// - 宿主写盘工具（ast_edit/hl_edit，绕过写白名单）、全部代码执行（py_run/js_run/dap_*，在宿主跑可逃逸）、
+//   py_reset/js_reset、github（gh CLI 需 auth、可访问私有仓库）。
 // 保留联网查询（web_search/search/fetch_*）：受限会话靠它读取信息回答问题（见 RESTRICTED persona）。
-const RESTRICTED_DENY_ALWAYS = ["bash", ...WRITE_TOOLS, ...HOST_ONLY_EXEC_TOOLS, "github"];
-// 沙箱不可用时额外禁：可沙箱化的代码执行（沙箱可用时它们走沙箱、受限执行，故允许）。
-const RESTRICTED_DENY_NO_SANDBOX = [...SANDBOXABLE_EXEC_TOOLS, "py_reset", "js_reset"];
+const RESTRICTED_DENY = ["bash", ...WRITE_TOOLS, ...CODE_EXEC_TOOLS, "py_reset", "js_reset", "github"];
 
 /**
- * SAFETY_DENY_TOOLS for a restricted (no-owner) IM session. Built-in bash plus the
- * host write/exec bypass tools are ALWAYS denied by name (enforced in safety ①,
- * which no approval policy — including full — can override). Sandboxable code-exec
- * is denied only when no sandbox is available; with a sandbox it runs isolated via
- * sandbox_sh. Exported for unit testing the capability floor.
+ * SAFETY_DENY_TOOLS for a restricted (no-owner) IM session: built-in bash, host
+ * write/exec bypass tools, all code execution, and github are denied by name
+ * (enforced in safety ①, which no approval policy — including full — can override).
+ * Exported for unit testing the capability floor.
  */
-export function restrictedDenyTools(sandboxed: boolean): string[] {
-  const deny = [...RESTRICTED_DENY_ALWAYS];
-  if (!sandboxed) deny.push(...RESTRICTED_DENY_NO_SANDBOX);
-  return [...new Set(deny)];
+export function restrictedDenyTools(): string[] {
+  return [...new Set(RESTRICTED_DENY)];
 }
 
 interface WechatStatus {
@@ -285,26 +271,18 @@ async function processTurn(fromUser: string): Promise<void> {
   // forwards the owner's messages, so reaching here means full capability is
   // authorized. Either way auto drivers stay OFF so the agent can't self-spam.
   const restricted = !wechatConfig().owner;
-  // 无主人 + 沙箱可用 → 升级为"沙箱内可执行"；不可用 → 维持纯 deny 兜底。
-  // 用 sandboxAvailable（不看 owner 审批策略）：不可信会话的隔离不应被 owner 的「完全访问」关掉。
-  const sandboxed = restricted && (await sandboxAvailable());
   const env: Record<string, string> = { GOAL_ENABLED: "0", LOOP_GUARD: "1" };
   if (restricted) {
-    env.SAFETY_READONLY = "1"; // 宿主 write/edit 锁；写只能经 sandbox_sh（沙箱内、限 workspace）
-    // 受限访客会话绝不继承 owner 的「完全访问」：full 会让 safety ② 直接放行（跳过 ③④⑤），且
+    env.SAFETY_READONLY = "1"; // 宿主 write/edit 锁
+    // 受限访客会话绝不继承 owner 的「完全访问」：full 会让 safety ② 直接放行（跳过 ③④），且
     // headless 子进程无法做 ask 的 UI 确认。把 full 降到 auto（与 multi-agent 自主子代理一致），
-    // 保证 ⑤ 危险命令/受保护路径等门控仍生效；能力硬限（① deny/readonly）本就不受策略影响。
+    // 保证 ④ 危险命令/受保护路径等门控仍生效；能力硬限（① deny/readonly）本就不受策略影响。
     const ownerPolicy = getApprovalPolicy();
     env.APPROVAL_POLICY = ownerPolicy === "full" ? "auto" : ownerPolicy;
-    if (sandboxed) env.SANDBOX_ENABLE = "on"; // 子进程 code-exec/sandbox_sh 走沙箱（内置 bash 已在 deny 里硬禁）
-    env.SAFETY_DENY_TOOLS = restrictedDenyTools(sandboxed).join(",");
+    env.SAFETY_DENY_TOOLS = restrictedDenyTools().join(",");
   }
   const result = await spawnPiAgent(st.cwd, renderPrompt(history), {
-    systemPrompt: restricted
-      ? sandboxed
-        ? IM_SYSTEM_PROMPT_RESTRICTED_SANDBOXED
-        : IM_SYSTEM_PROMPT_RESTRICTED
-      : IM_SYSTEM_PROMPT_FULL,
+    systemPrompt: restricted ? IM_SYSTEM_PROMPT_RESTRICTED : IM_SYSTEM_PROMPT_FULL,
     model: getConfig("IM_MODEL") || undefined,
     timeoutMs: Number(getConfig("IM_TIMEOUT_MS")) || undefined,
     env,

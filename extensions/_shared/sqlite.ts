@@ -42,6 +42,17 @@ export class DatabaseSync {
 
   constructor(file: string) {
     this.db = new NativeDatabase(file);
+    // 并发健壮性：同一库文件常被多方同时访问——本进程（Node/bun 写入端）+ GrenAgent 的 Rust UI
+    // 只读高频轮询（任务托盘 / 子代理日志）。SQLite 默认 busy_timeout=0：拿不到锁的一方会立刻抛
+    // "database is locked"（SQLITE_BUSY），而不是等一下重试。子代理 registry 在运行期被流式高频
+    // 写入，与只读轮询撞锁后整串异常会从子进程 stdout 流泵里逃逸（详见 multi-agent/registry.ts）。
+    // 设一个较大的 busy_timeout，把短暂的读写争用变成「短等重试」而非「立即报错」。
+    // PRAGMA 失败不致命（个别驱动/平台不支持时退回默认行为）。
+    try {
+      this.db.exec("PRAGMA busy_timeout = 5000");
+    } catch {
+      /* 不支持 PRAGMA 时忽略：退回默认（busy_timeout=0）行为 */
+    }
   }
 
   exec(sql: string): void {

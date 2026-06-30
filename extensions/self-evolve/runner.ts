@@ -137,7 +137,9 @@ export function startEvolveJob(
       tools: EVOLVE_TOOLS,
       timeoutMs: opts.timeoutMs,
       env: evolveEnv(chosenModel),
-      onUpdate: () => registry.touch(id),
+      // 把子代理的流式 JSONL transcript 增量写进 registry（替代纯心跳 touch——progress 内部也 bump
+      // updatedAt，故心跳作用保留）。前端右坞面板轮询 registry 即可像主对话一样实时回放工具调用+文本流。
+      onUpdate: (u) => registry.progress(id, u.transcript),
     })
       .then((r) => {
         registry.finish(id, {
@@ -145,6 +147,7 @@ export function startEvolveJob(
           output: r.output,
           error: r.error ?? null,
           exitCode: r.exitCode,
+          transcript: r.transcript,
         });
         const result: EvolveJobResult = {
           id,
