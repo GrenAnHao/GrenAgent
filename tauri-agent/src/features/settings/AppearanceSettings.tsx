@@ -20,10 +20,16 @@ const APPEARANCES: { value: Appearance; label: string; icon: LucideIcon }[] = [
 ];
 
 // 色板取自 @lobehub/ui 的预设色源（不硬编码 hex）；选中的“名字”对应 ThemeProvider customTheme。
-// 第一项透明色 = “默认”（ColorSwatches 约定：透明项 + 未选值 = 恢复库默认色），点它即清除自定义色。
-const DEFAULT_SWATCH = { color: 'rgba(0, 0, 0, 0)', title: '默认' };
-const primarySwatches = [DEFAULT_SWATCH, ...primaryColorsSwatches.map((color) => ({ color }))];
-const neutralSwatches = [DEFAULT_SWATCH, ...neutralColorsSwatches.map((color) => ({ color }))];
+// 第一项透明色 = 未选（ColorSwatches 约定：透明项 + 未选值 = 清除自定义色），点它即回落到默认来源：
+// 主题色回落到配色方案自带的主色，中性色回落到库默认。
+const primarySwatches = [
+  { color: 'rgba(0, 0, 0, 0)', title: '跟随方案' },
+  ...primaryColorsSwatches.map((color) => ({ color })),
+];
+const neutralSwatches = [
+  { color: 'rgba(0, 0, 0, 0)', title: '默认' },
+  ...neutralColorsSwatches.map((color) => ({ color })),
+];
 
 const styles = createStaticStyles(({ css }) => ({
   themeRow: css`

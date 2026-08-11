@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo, type ReactNode } from 'react';
 import { ThemeProvider, Flexbox, ConfigProvider } from '@lobehub/ui';
 import { m } from 'motion/react';
-import { ThemeBridge } from './components/ThemeBridge';
+import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
 import { ExtensionUiHost } from './features/extensionUi/ExtensionUiHost';
 import { useThemeStore } from './stores/themeStore';
-import { schemeTokens } from './theme/colorSchemes';
+import { schemePrimary, schemeTokens } from './theme/colorSchemes';
 import { ChatView } from './features/chat/ChatView';
 import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
 import { Sidebar } from './features/sessions/Sidebar';
@@ -769,9 +769,11 @@ export default function App() {
   const antdTheme = useMemo(() => {
     const token = schemeTokens(colorScheme, isDark);
     // hashed:false 配合 cssVar：组件样式只有一份（不按 token 哈希隔离），切主题仅换变量值。
-    // cssVar 用空对象 = 启用 cssVar + 默认配置（等价旧的 `true`，antd v6 类型要求 object 形式）；
-    // 运行时行为完全一致，仍走「切主题只换变量值」的同帧路径，不会退回全量样式重序列化。
-    return { cssVar: {}, hashed: false, ...(token ? { token } : {}) };
+    // cssVar.key 必须显式指定：留空时 antd 用 useId 生成随机 key（如 css-var-_r_0_），
+    // 而整份 --ant-* 只被序列化成 `.<key>{...}` 这一条类规则，antd 又从不把该 key 加到任何
+    // 元素上。于是靠继承取 --ant-* 的消费者（@lobehub/ui 组件、cssVar.* 静态样式、--gren-*）
+    // 全部取空值 → 深色下退回浅色兜底。给定固定 key 后由 ThemeBridge 挂到根元素上。
+    return { cssVar: { key: ANTD_CSS_VAR_KEY }, hashed: false, ...(token ? { token } : {}) };
   }, [colorScheme, isDark]);
   const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
   const worksDir = useSessionStore((s) => s.worksDir);
@@ -839,8 +841,28 @@ export default function App() {
     };
   }, []);
 
+  // appearance 必须显式传确定亮暗。@lobehub/ui 的 ThemeProvider 把 theme 作为函数交给
+  // antd-style 的 AntdProvider，后者调 themeProp(appearance) 拿到 createLobeAntdTheme 的结果，
+  // 再拼成 algorithm: [baseAlgorithm, ...lobe算法]。lobe 的算法在数组末位、会覆盖 baseAlgorithm，
+  // 所以真正决定颜色的是传进 themeProp 的 appearance，而不是 isDarkMode：实测 appearance='light'
+  // 配 darkAlgorithm 仍算出 colorBgContainer/colorBgElevated=#ffffff（与纯浅色完全一致）。
+  // 而只传 themeMode 时 appearance 是非受控的、初值恒为 'light'，要等内部 ThemeObserver 在
+  // useLayoutEffect 里 setAppearance 才纠正，themeMode='auto' 更要多绕一层 setTimeout。
+  // 传确定值让首帧就算对，同时消掉 auto 那次注定被覆盖的多余状态更新；跟随系统已由上面的 isDark 处理。
+  const resolvedMode = isDark ? 'dark' : 'light';
+
+  // 主题色只能走 customTheme.primaryColor（预设名）：lobe 的算法在 antd 基础算法之后无条件展开
+  // 自己的 base token，那份 token 把整套 primary 家族写成灰阶，所以 theme.token.colorPrimary
+  // 一定被覆盖，见 theme/colorSchemes 的注释。用户在设置里显式选过的色优先于方案自带的默认色。
+  const resolvedPrimary = primaryColor ?? schemePrimary(colorScheme, isDark);
+
   return (
-    <ThemeProvider themeMode={appearance} customTheme={{ primaryColor, neutralColor }} theme={antdTheme}>
+    <ThemeProvider
+      themeMode={resolvedMode}
+      appearance={resolvedMode}
+      customTheme={{ primaryColor: resolvedPrimary, neutralColor }}
+      theme={antdTheme}
+    >
       <ConfigProvider motion={m}>
         <ThemeBridge />
         <ExtensionUiHost />

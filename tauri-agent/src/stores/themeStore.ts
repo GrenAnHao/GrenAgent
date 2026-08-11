@@ -1,23 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEFAULT_COLOR_SCHEME } from '../theme/colorSchemes';
+import { DEFAULT_COLOR_SCHEME, type PrimaryColorName } from '../theme/colorSchemes';
 
 export type Appearance = 'light' | 'dark' | 'auto';
 
-/** 主题色名（取值与 @lobehub/ui customTheme.primaryColor 预设一致）。undefined = 库默认色。 */
-export type PrimaryColor =
-  | 'blue'
-  | 'cyan'
-  | 'geekblue'
-  | 'gold'
-  | 'green'
-  | 'lime'
-  | 'magenta'
-  | 'orange'
-  | 'purple'
-  | 'red'
-  | 'volcano'
-  | 'yellow';
+/** 主题色名（取值与 @lobehub/ui customTheme.primaryColor 预设一致）。undefined = 跟随配色方案。 */
+export type PrimaryColor = PrimaryColorName;
 
 /** 中性色名（取值与 @lobehub/ui customTheme.neutralColor 预设一致）。undefined = 库默认。 */
 export type NeutralColor = 'mauve' | 'olive' | 'sage' | 'sand' | 'slate';
@@ -26,7 +14,7 @@ interface ThemeState {
   appearance: Appearance;
   primaryColor?: PrimaryColor;
   neutralColor?: NeutralColor;
-  /** 配色预设 id（见 theme/colorSchemes）；驱动表面/文字/边框/主色的整体方案。 */
+  /** 配色预设 id（见 theme/colorSchemes）；驱动表面/文字/边框的整体方案，并给出默认主题色。 */
   colorScheme: string;
   setAppearance: (appearance: Appearance) => void;
   setPrimaryColor: (color?: PrimaryColor) => void;

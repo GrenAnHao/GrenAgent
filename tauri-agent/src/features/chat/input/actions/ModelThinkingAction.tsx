@@ -3,8 +3,6 @@ import { Icon, Popover } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx, useThemeMode } from 'antd-style';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
-import { useThemeStore } from '../../../../stores/themeStore';
-import { schemeTokens } from '../../../../theme/colorSchemes';
 import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
 import { pi } from '../../../../lib/pi';
 import { loadProviderList } from '../../../settings/providerListCache';
@@ -227,22 +225,12 @@ function writeCache(workspace: string, patch: Partial<WsCache>): void {
 
 export default function ModelThinkingAction() {
   const { workspace, workspaceReady } = useAgentStoreContext();
-  // 选中态高亮用内联 style，主色必须是「实际 hex 值」而非 var() 引用：antd v6 cssVar 模式下
-  // useTheme()/cssVar 的 colorPrimary 都是 var(--ant-color-primary)，CSS 类能递归解析、但 React
-  // 内联 style 在 Popover portal 里解析不出（之前白块的根因）。这里直接取项目配色方案的实际 hex。
-  const colorScheme = useThemeStore((s) => s.colorScheme);
-  // isDarkMode 与 base-ui 同源（antd-style）：trigger 据此切 filled/outlined，和左侧 Mode/Approval 一致；
-  // 选中态高亮也复用它，避免和 trigger 的明暗判断分叉。
+  // isDarkMode 与 base-ui 同源（antd-style）：trigger 据此切 filled/outlined，和左侧 Mode/Approval 一致。
   const { isDarkMode } = useThemeMode();
-  // 选中态用「中性提亮」而非品牌主色（蓝在深灰主题里太跳）：背景用半透明中性（明暗各一），
-  // 文字用方案的实际 colorText hex。全用实际值，不经 cssVar 的 var() 引用（Popover portal 内 var() 解析不出）。
-  const { selBg, selFg } = useMemo(
-    () => ({
-      selBg: isDarkMode ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.06)',
-      selFg: schemeTokens(colorScheme, isDarkMode)?.colorText ?? (isDarkMode ? '#e6edf3' : '#1f2328'),
-    }),
-    [isDarkMode, colorScheme],
-  );
+  // 选中态用「中性提亮」而非品牌主色（主色在深灰主题里太跳）：底用中性半透明填充，文字用正文色。
+  // 走 cssVar 的 var() 引用即可 —— ThemeBridge 已把 --ant-* 变量表挂到 <html>，portal 里同样能继承。
+  const selBg = cssVar.colorFillSecondary;
+  const selFg = cssVar.colorText;
 
   const { models: polledModels, loading: modelsLoading } = useAvailableModelsState(
     workspaceReady ? workspace : undefined,

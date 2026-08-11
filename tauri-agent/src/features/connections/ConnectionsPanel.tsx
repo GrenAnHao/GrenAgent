@@ -25,7 +25,9 @@ const bubbleStyle = (role: 'user' | 'assistant'): CSSProperties => ({
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
   background: role === 'user' ? cssVar.colorPrimary : 'var(--gren-surface, rgba(255,255,255,0.06))',
-  color: role === 'user' ? '#fff' : cssVar.colorText,
+  // 主色实底上的文字用 colorTextLightSolid，而不是写死白色：暗色主题下 colorPrimary 可能是
+  // 高亮度色（lobe 默认就是近白的中性主色），白字叠上去等于看不见。
+  color: role === 'user' ? cssVar.colorTextLightSolid : cssVar.colorText,
 });
 
 // 网络配置项（齿轮弹窗）= 微信字段去掉「启用」开关本身（启用由卡片上的接入开关控制）。

@@ -1,3 +1,4 @@
+import { cssVar } from 'antd-style';
 import type { EdgeKind } from '../../../../lib/codeGraphTypes';
 import type { GraphState } from './useGraphState';
 
@@ -5,6 +6,8 @@ const KIND_LABELS: Record<EdgeKind, string> = {
   'import-value': 'import', 'import-type': 'type', 'reexport': 're-exp',
   'dynamic': 'lazy', 'call': 'call', 'circular': 'circular',
 };
+// 分类色：图例与画布连线共用的「边类型身份色」，刻意不跟主题走——同一类型在明暗两套下必须
+// 是同一个色相才认得出。它只用在边框和 13% 淡底上（文字色走 token），所以明暗底上都够看。
 const KIND_COLORS: Record<EdgeKind, string> = {
   'import-value': '#6b7280', 'import-type': '#818cf8', 'reexport': '#34d399',
   'dynamic': '#f59e0b', 'call': '#38bdf8', 'circular': '#ef4444',
@@ -26,9 +29,14 @@ export function GraphToolbar({ state, onSearch, onDepth, onToggleKind }: Props) 
         placeholder="搜索文件名…"
         value={state.searchQuery}
         onChange={(e) => onSearch(e.target.value)}
-        style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid #374151', background: '#1f2937', color: '#e2e8f0', fontSize: 11 }}
+        style={{
+          padding: '3px 8px', borderRadius: 6, fontSize: 11,
+          border: `1px solid ${cssVar.colorBorder}`,
+          background: cssVar.colorBgContainer,
+          color: cssVar.colorText,
+        }}
       />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#9ca3af' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: cssVar.colorTextSecondary }}>
         深度
         <input
           type="range" min={1} max={4} step={1}
@@ -37,9 +45,9 @@ export function GraphToolbar({ state, onSearch, onDepth, onToggleKind }: Props) 
           onChange={(e) => onDepth(Number(e.target.value) as 1 | 2 | 3 | 4)}
           aria-label="depth"
         />
-        <span style={{ color: '#a78bfa', fontWeight: 600 }}>{state.depth}</span>
+        <span style={{ color: cssVar.colorPrimary, fontWeight: 600 }}>{state.depth}</span>
       </label>
-      <div style={{ width: 1, height: 18, background: '#374151' }} />
+      <div style={{ width: 1, height: 18, background: cssVar.colorBorderSecondary }} />
       {(Object.keys(KIND_LABELS) as EdgeKind[]).map((k) => {
         const active = state.visibleKinds.has(k);
         return (
@@ -49,9 +57,9 @@ export function GraphToolbar({ state, onSearch, onDepth, onToggleKind }: Props) 
             onClick={() => onToggleKind(k)}
             style={{
               padding: '2px 7px', borderRadius: 4, fontSize: 10, cursor: 'pointer',
-              border: `1px solid ${active ? KIND_COLORS[k] : '#374151'}`,
-              background: active ? `${KIND_COLORS[k]}22` : '#1f2937',
-              color: active ? KIND_COLORS[k] : '#6b7280',
+              border: `1px solid ${active ? KIND_COLORS[k] : cssVar.colorBorder}`,
+              background: active ? `${KIND_COLORS[k]}22` : cssVar.colorFillQuaternary,
+              color: active ? cssVar.colorText : cssVar.colorTextTertiary,
             }}
           >
             {KIND_LABELS[k]}

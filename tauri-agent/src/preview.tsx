@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { ConfigProvider, ThemeProvider } from '@lobehub/ui';
 import { m } from 'motion/react';
 import { Bot, Boxes, FilePen, FileText, Moon, Sparkles, Sun, Terminal } from 'lucide-react';
-import { ThemeBridge } from './components/ThemeBridge';
+import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
+import { schemePrimary, schemeTokens } from './theme/colorSchemes';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToolExecution } from './features/tools/ToolExecution';
 import { renderExtensionCard } from './features/tools/extensionCards';
@@ -326,7 +327,16 @@ function Gallery() {
 function Root() {
   const [dark, setDark] = useState(true);
   return (
-    <ThemeProvider themeMode={dark ? 'dark' : 'light'} theme={{ cssVar: {}, hashed: false }}>
+    <ThemeProvider
+      themeMode={dark ? 'dark' : 'light'}
+      appearance={dark ? 'dark' : 'light'}
+      customTheme={{ primaryColor: schemePrimary('github', dark) }}
+      theme={{
+        cssVar: { key: ANTD_CSS_VAR_KEY },
+        hashed: false,
+        token: schemeTokens('github', dark),
+      }}
+    >
       <ConfigProvider motion={m}>
         <ThemeBridge />
         <button

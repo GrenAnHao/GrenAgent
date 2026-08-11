@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { cssVar, useTheme } from 'antd-style';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls,
   useReactFlow, MarkerType, Handle, Position,
@@ -8,6 +9,8 @@ import '@xyflow/react/dist/style.css';
 import type { EdgeKind, RichGraph } from '../../../../lib/codeGraphTypes';
 import { topLevelDir } from '../../../../lib/codeGraphLayout';
 
+// 目录分类色：按目录名散列取色，用来一眼分辨节点归属，刻意不跟主题走——同一目录在明暗两套下
+// 必须是同一个色相才认得出。只画成小圆点（非文字），中间调在明暗底上都看得见。
 const DIR_PALETTE = [
   '#60a5fa','#818cf8','#34d399','#fb923c',
   '#f472b6','#a78bfa','#38bdf8','#4ade80','#facc15','#f87171',
@@ -19,6 +22,7 @@ function dirColor(dir: string): string {
 }
 function basename(p: string) { return p.split(/[/\\]/).at(-1) ?? p; }
 
+// 边类型分类色，同上：身份色，不跟主题走（GraphToolbar 的图例用同一套色相）。
 const EDGE_COLOR: Record<EdgeKind, string> = {
   'import-value': '#3b82f6',
   'import-type':  '#6366f1',
@@ -55,7 +59,7 @@ function FileNode({ data }: NodeProps & { data: FileNodeData }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: data.dimmed ? 0.15 : 1 }}>
       <Handle type="target" position={Position.Top} style={HANDLE_STYLE} isConnectable={false} />
       <div style={{ width: data.dotSize, height: data.dotSize, borderRadius: '50%', background: data.color, flexShrink: 0 }} />
-      <span style={{ fontSize: 10, color: '#e4e4ed', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 10, color: cssVar.colorText, fontFamily: cssVar.fontFamilyCode, whiteSpace: 'nowrap' }}>
         {data.label}
       </span>
       <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} isConnectable={false} />
@@ -76,6 +80,10 @@ interface Props {
 
 function Inner({ graph, highlightSet, pathEdges, visibleKinds, searchQuery, onNodeClick, onPaneClick }: Props) {
   const { setCenter } = useReactFlow();
+  // React Flow 自己的 chrome（Controls 按钮、Background 网点）不吃 antd 变量，得显式喂当前主题。
+  // Background 的 color 最终落到 SVG 的 fill 属性上，属性里 var() 不会被解析，所以必须用
+  // useTheme() 的真实色值（antd 的 useToken 返回 realToken），不能用 cssVar.*。
+  const theme = useTheme();
 
   const hasAny = highlightSet.size > 0;
   const sq = (searchQuery ?? '').trim().toLowerCase();
@@ -164,7 +172,7 @@ function Inner({ graph, highlightSet, pathEdges, visibleKinds, searchQuery, onNo
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      colorMode="dark"
+      colorMode={theme.isDarkMode ? 'dark' : 'light'}
       fitView
       minZoom={0.02}
       maxZoom={5}
@@ -176,7 +184,7 @@ function Inner({ graph, highlightSet, pathEdges, visibleKinds, searchQuery, onNo
       onNodeClick={(e, node) => onNodeClick(node.id, (e as React.MouseEvent).shiftKey)}
       onPaneClick={onPaneClick}
     >
-      <Background color="#2a2a3a" gap={24} size={1} />
+      <Background color={theme.colorBorder} gap={24} size={1} />
       <Controls showInteractive={false} />
     </ReactFlow>
   );

@@ -136,6 +136,9 @@ const d = createStaticStyles(({ css }) => ({
       color: ${cssVar.colorText};
     }
   `,
+  // 原始输出面：故意不跟主题走，明暗两套下都是深色终端面。里面的字色来自 parseAnsi 的
+  // 16 色 SGR 板，那套板是按深色终端底调的（见 extensions/ansi.ts），换成浅底会让亮色系
+  // ANSI 前景全部糊掉。下面的 hairline 边框同理，是「深面上的描边」，与 app 明暗无关。
   log: css`
     margin: 8px 0 0;
     padding: 12px 14px;
