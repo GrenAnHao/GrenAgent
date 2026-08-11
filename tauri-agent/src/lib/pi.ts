@@ -272,6 +272,9 @@ export const pi = {
   diagnoseProviderModel: (providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: Channel<string>) =>
     invoke<DiagnoseResult>('diagnose_provider_model', { providerId, modelId, prompt, stream, onChunk }),
   subagentList: (workspace: string) => invoke<SubAgentItem[]>('subagent_list', { workspace }),
+  /** 按需拉取单个子代理的完整 JSONL transcript（打开详情面板时调用，不在轮询路径中）。 */
+  subagentGetTranscript: (workspace: string, agentId: string) =>
+    invoke<string | null>('subagent_get_transcript', { workspace, agentId }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
   readUiHistory: (workspace: string, sessionKey: string) =>

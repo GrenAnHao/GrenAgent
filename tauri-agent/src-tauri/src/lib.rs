@@ -135,6 +135,7 @@ pub fn run() {
             commands::providers::fix_mermaid_diagram,
             commands::providers::diagnose_provider_model,
             commands::subagent_list,
+            commands::subagent_get_transcript,
             commands::subagent_cancel,
             commands::ui_history_read,
             commands::ui_history_write,

@@ -2,15 +2,15 @@ import { ActionIcon, Icon } from '@lobehub/ui';
 import { Popover } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Bot, Eraser } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { pi, type SubAgentItem } from '../../lib/pi';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useDockStore } from '../../stores/dockStore';
 import { useLayoutStore } from '../../stores/layoutStore';
+import { useSubAgentLiveStore, selectSubAgentList } from '../../stores/subagentLiveStore';
 import { mapSubAgentStatus, subAgentId } from '../panels/subagentUtils';
 import { SubAgentCard } from './SubAgentCard';
 
-const POLL_MS = 2500;
 // 终态（完成/失败/取消）结束这么久后自动从列表淡出（总览面板比输入框托盘给更久的回看窗口）。
 const FADE_MS = 300_000;
 // 折叠：默认最多显示这么多个最近终态，更旧的收进「显示全部」。
@@ -88,53 +88,29 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-/** 列表签名：仅在子代理集合 / 状态 / 活跃时间变化时才触发渲染。 */
-function signature(items: SubAgentItem[]): string {
-  return items.map((i) => `${i.id}:${i.status}:${i.updatedAt}`).join('|');
-}
-
 /**
  * 顶部工具栏的子代理入口：放在命令行按钮左侧，图标带运行中角标。
  * 点击向下弹出当前工作区子代理卡片列表（数据来自 .pi/subagents/registry.db，轮询刷新）。
- * 点击卡片在右坞打开会话：优先复用主对话消息的完整 transcript，跨会话则用 registry output 兜底。
+ * 点击卡片在右坞打开会话：优先复用主对话消息的完整 transcript，跨会话则由面板按需拉取。
  */
 export function SubAgentMenuButton() {
   const ctx = useOptionalAgentStoreContext();
   const workspace = ctx?.workspace ?? '';
   const store = ctx?.store ?? null;
-  const [items, setItems] = useState<SubAgentItem[]>([]);
   const [open, setOpen] = useState(false);
   const [clearCutoff, setClearCutoff] = useState(0);
   const [showAll, setShowAll] = useState(false);
-  const sigRef = useRef('');
+
+  // 订阅 subagentLiveStore 单例（不再自行 setInterval 轮询）
+  const startPolling = useSubAgentLiveStore((s) => s.startPolling);
+  // 稳定化 selector 引用，避免每次渲染传入新函数导致 Zustand/useSyncExternalStore 无限循环。
+  const listSelector = useMemo(() => selectSubAgentList(workspace), [workspace]);
+  const items = useSubAgentLiveStore(listSelector);
 
   useEffect(() => {
-    if (!workspace) {
-      setItems([]);
-      sigRef.current = '';
-      return;
-    }
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const rows = await pi.subagentList(workspace);
-        if (cancelled) return;
-        const sig = signature(rows);
-        if (sig !== sigRef.current) {
-          sigRef.current = sig;
-          setItems(rows);
-        }
-      } catch {
-        // 跨进程读 registry 偶发 SQLITE_BUSY：保留上次结果，下个 tick 再试。
-      }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [workspace]);
+    if (!workspace) return;
+    return startPolling(workspace);
+  }, [workspace, startPolling]);
 
   // workspace 切换时重读该工作区的「清除」cutoff，并重置展开态。
   useEffect(() => {
@@ -155,14 +131,13 @@ export function SubAgentMenuButton() {
         useLayoutStore.getState().setRightPanelOpen(true);
         return;
       }
-      // 兜底：跨会话 / 后台 spawn（主对话里没有对应 spawn_agent 消息）。带上 registry 的 transcript，
-      // 面板即可像主对话一样实时回放完整工具调用+文本流；无 transcript（旧数据）时退回纯 output 文本。
+      // 兜底：跨会话 / 后台 spawn。transcript 不再从列表携带，
+      // SubAgentConversation 会通过 workspace + agentId 按需拉取。
       useDockStore.getState().openSubAgentLog({
         agentId: item.id,
         task: item.task,
         output: item.output ?? '',
         status: mapSubAgentStatus(item.status),
-        transcript: item.transcript ?? undefined,
       });
     },
     [store],
@@ -171,7 +146,6 @@ export function SubAgentMenuButton() {
   const stopAgent = useCallback(
     (item: SubAgentItem) => {
       void pi.subagentCancel(workspace, item.id);
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, status: 'cancelled' } : i)));
     },
     [workspace],
   );

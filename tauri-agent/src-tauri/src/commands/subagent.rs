@@ -56,23 +56,11 @@ fn read_subagent_list(path: &Path, limit: i64) -> Result<Vec<SubAgentItem>, Stri
     if exists == 0 {
         return Ok(vec![]);
     }
-    // 旧库（v1）可能没有 transcript 列：先探测，缺列时用 `NULL as transcript` 占位，
-    // 避免直接 SELECT transcript 触发 "no such column"（Rust 端只读，不负责迁移加列）。
-    let has_transcript = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('subagents') WHERE name='transcript'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|c| c > 0)
-        .unwrap_or(false);
-    let sql = if has_transcript {
-        "SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile, transcript \
-         FROM subagents ORDER BY createdAt DESC LIMIT ?1"
-    } else {
-        "SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile, NULL as transcript \
-         FROM subagents ORDER BY createdAt DESC LIMIT ?1"
-    };
+    // transcript 列不在列表查询里返回：单个子代理的完整 JSONL 可达数 MB，50 行同时传输
+    // 会造成显著的 IPC 压力与 JS heap 峰值。需要时通过 subagent_get_transcript 按需单独拉取。
+    let sql = "SELECT id, task, status, model, output, error, exitCode, \
+               createdAt, updatedAt, profile \
+               FROM subagents ORDER BY createdAt DESC LIMIT ?1";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([limit], |r| {
@@ -87,7 +75,7 @@ fn read_subagent_list(path: &Path, limit: i64) -> Result<Vec<SubAgentItem>, Stri
                 created_at: r.get(7)?,
                 updated_at: r.get(8)?,
                 profile: r.get(9)?,
-                transcript: r.get(10)?,
+                transcript: None, // 不在列表查询中返回；使用 subagent_get_transcript 按需获取
             })
         })
         .map_err(|e| e.to_string())?;
@@ -119,6 +107,50 @@ fn append_cancel_request(path: &Path, agent_id: &str) -> Result<(), String> {
 #[tauri::command]
 pub fn subagent_list(workspace: String) -> Result<Vec<SubAgentItem>, String> {
     read_subagent_list(&registry_db_path(&workspace)?, 50)
+}
+
+/// 从已打开的 registry DB 读取单个代理的 transcript（IO 逻辑，便于单测）。
+fn read_transcript(path: &Path, agent_id: &str) -> Result<Option<String>, String> {
+    let Some(conn) = open_readonly(path)? else {
+        return Ok(None);
+    };
+    conn.busy_timeout(Duration::from_millis(500))
+        .map_err(|e| e.to_string())?;
+    // 探测 transcript 列是否存在（旧库可能无该列）
+    let has_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('subagents') WHERE name='transcript'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_col == 0 {
+        return Ok(None);
+    }
+    let result: rusqlite::Result<Option<String>> = conn.query_row(
+        "SELECT transcript FROM subagents WHERE id = ?1",
+        [agent_id],
+        |r| r.get(0),
+    );
+    match result {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 按需拉取单个子代理的完整 JSONL transcript（用于打开详情面板，不在轮询路径中）。
+/// transcript 列不存在或该代理不存在时返回 None（非错误）。
+#[tauri::command]
+pub fn subagent_get_transcript(
+    workspace: String,
+    agent_id: String,
+) -> Result<Option<String>, String> {
+    let id = agent_id.trim();
+    if id.is_empty() {
+        return Err("agentId is required".into());
+    }
+    read_transcript(&registry_db_path(&workspace)?, id)
 }
 
 #[tauri::command]
@@ -240,7 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn list_includes_transcript_when_column_present() {
+    fn list_never_returns_transcript_even_when_column_present() {
+        // transcript 列存在也不在 list 查询里返回——避免 50 行全量 JSONL 走 IPC。
         let dir = tmp_dir();
         let db = dir.join("registry.db");
         {
@@ -270,22 +303,75 @@ mod tests {
         }
         let list = read_subagent_list(&db, 50).unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(
-            list[0].transcript.as_deref(),
-            Some("{\"type\":\"message_update\"}")
-        );
+        // list 永远不返回 transcript，应为 None
+        assert_eq!(list[0].transcript, None);
         fs::remove_dir_all(dir).ok();
     }
 
     #[test]
-    fn list_handles_legacy_db_without_transcript_column() {
-        // 旧库（无 transcript 列）走 `NULL as transcript` 分支：transcript 应为 None，不报 "no such column"。
+    fn list_works_without_transcript_column() {
+        // 旧库（无 transcript 列）不报错——查询不再引用该列。
         let dir = tmp_dir();
         let db = dir.join("registry.db");
         make_registry(&db, &[("sa-old", "task", "done")]);
         let list = read_subagent_list(&db, 50).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].transcript, None);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn get_transcript_returns_jsonl_when_present() {
+        let dir = tmp_dir();
+        let db = dir.join("registry.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE subagents(
+                   id TEXT PRIMARY KEY,
+                   task TEXT NOT NULL,
+                   profile TEXT,
+                   model TEXT,
+                   status TEXT NOT NULL,
+                   output TEXT,
+                   error TEXT,
+                   exitCode INTEGER,
+                   transcript TEXT,
+                   createdAt INTEGER NOT NULL,
+                   updatedAt INTEGER NOT NULL
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO subagents(id,task,profile,model,status,output,error,exitCode,transcript,createdAt,updatedAt)
+                 VALUES('sa-t','my task',NULL,NULL,'done',NULL,NULL,NULL,'{\"type\":\"agent_end\"}',100,100)",
+                [],
+            )
+            .unwrap();
+        }
+        let t = read_transcript(&db, "sa-t").unwrap();
+        assert_eq!(t.as_deref(), Some("{\"type\":\"agent_end\"}"));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn get_transcript_returns_none_for_missing_id() {
+        let dir = tmp_dir();
+        let db = dir.join("registry.db");
+        make_registry(&db, &[("sa-1", "t", "done")]);
+        let t = read_transcript(&db, "nonexistent").unwrap();
+        assert_eq!(t, None);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn get_transcript_returns_none_without_transcript_column() {
+        let dir = tmp_dir();
+        let db = dir.join("registry.db");
+        make_registry(&db, &[("sa-1", "t", "done")]);
+        // make_registry 建的是无 transcript 列的旧库
+        let t = read_transcript(&db, "sa-1").unwrap();
+        assert_eq!(t, None);
         fs::remove_dir_all(dir).ok();
     }
 }

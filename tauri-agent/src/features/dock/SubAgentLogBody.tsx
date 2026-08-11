@@ -1,78 +1,55 @@
 import { useEffect, useState } from 'react';
-import { pi } from '../../lib/pi';
+import { useSubAgentLiveStore, selectSubAgentById } from '../../stores/subagentLiveStore';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { SubAgentLogPayload } from '../../stores/dockStore';
 import { mapSubAgentStatus } from '../panels/subagentUtils';
 import { SubAgentConversation } from '../panels/SubAgentConversation';
 import type { DockBodyProps } from './TabBodyRenderer';
 
-const POLL_MS = 2500;
-
 /**
- * registry 后端子代理的兜底会话视图：当浮动列表点击的子代理在当前主对话里
- * 找不到对应 spawn_agent 消息（跨会话 / 后台 spawn）时使用。
+ * registry 后端子代理的兜底会话视图（跨会话 / 后台 spawn）。
  *
- * registry 运行期会增量写入子代理的原始 JSONL transcript，故这里轮询到 transcript 后直接
- * 交给 SubAgentConversation 用主对话同款渲染（完整工具调用 + 文本流）实时回放；没有 transcript
- *（旧数据）时退回 registry 的 output 文本。
- *
- * payload 是「点击卡片那一刻」的 registry 快照；后台子代理（如 Dream/Distill）此刻多半还在运行，
- * 而 tab payload 不随浮层轮询刷新。故运行中这里按 agentId 自轮询 registry，实时回填 transcript/output，
- * 跑完把状态翻成 done 并停止轮询。
+ * 原先自行轮询 subagentList（全量 50 行 + transcript），现在：
+ * - 状态来自 subagentLiveStore 单例（轻量、无 transcript）
+ * - transcript 由 SubAgentConversation 通过 subagentGetTranscript 按需拉取
+ * 本组件只负责把 workspace / agentId / status 传下去即可。
  */
 export function SubAgentLogBody({ tab }: DockBodyProps) {
   const payload = tab.payload as SubAgentLogPayload;
   const workspace = useOptionalAgentStoreContext()?.workspace ?? '';
-  const [live, setLive] = useState<{ output: string; transcript: string; status: 'running' | 'done' | 'error' }>({
-    output: payload.output ?? '',
-    transcript: payload.transcript ?? '',
-    status: payload.status,
-  });
+  const startPolling = useSubAgentLiveStore((s) => s.startPolling);
 
-  // 再次点击卡片会用新快照覆盖 payload：同步一次，保持与外部一致。
+  // 用 subagentLiveStore 获取最新状态（轻量，无 transcript）
+  const liveItem = useSubAgentLiveStore(
+    selectSubAgentById(workspace, payload.agentId),
+  );
+
+  // 初始状态来自 payload 快照；一旦 store 有数据就用 store 的
+  const [initStatus] = useState(() => payload.status);
+  const status: 'running' | 'done' | 'error' =
+    liveItem ? mapSubAgentStatus(liveItem.status) : initStatus;
+  const output = liveItem?.output ?? payload.output ?? '';
+
+  // 在运行中时启动轮询（store 引用计数，多个消费者共享一个 interval）
   useEffect(() => {
-    setLive({ output: payload.output ?? '', transcript: payload.transcript ?? '', status: payload.status });
-  }, [payload.agentId, payload.output, payload.transcript, payload.status]);
+    if (!workspace || status !== 'running') return;
+    return startPolling(workspace);
+  }, [workspace, status, startPolling]);
 
-  // 运行中按 agentId 轮询 registry；进入终态（done/error）后停止轮询。
-  useEffect(() => {
-    if (!workspace || live.status !== 'running') return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const rows = await pi.subagentList(workspace);
-        if (cancelled) return;
-        const row = rows.find((r) => r.id === payload.agentId);
-        if (row)
-          setLive({
-            output: row.output ?? '',
-            transcript: row.transcript ?? '',
-            status: mapSubAgentStatus(row.status),
-          });
-      } catch {
-        // 跨进程读 registry 偶发 SQLITE_BUSY：保留上次结果，下个 tick 再试。
-      }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [workspace, payload.agentId, live.status]);
+  // 用 result 形状包装 output（无 transcript 时的纯文本兜底）
+  const result = output
+    ? { content: [{ type: 'text', text: output }] }
+    : undefined;
 
-  // 有 transcript → 走 details.transcript 的完整 JSONL 回放（与主对话内联 spawn_agent 同款渲染）；
-  // 无 transcript（旧数据 / 首帧未到）→ 退回纯 output 文本兜底。
-  const result = live.transcript
-    ? { details: { transcript: live.transcript } }
-    : { content: [{ type: 'text', text: live.output || '(暂无输出)' }] };
   return (
     <SubAgentConversation
       key={tab.id}
       data-testid={`subagent-log-${payload.agentId}`}
       task={payload.task}
       result={result}
-      status={live.status}
+      status={status}
+      workspace={workspace}
+      agentId={payload.agentId}
     />
   );
 }
