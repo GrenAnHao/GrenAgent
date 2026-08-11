@@ -72,7 +72,10 @@ function makeFixture(): ChatMessage[] {
   ];
 }
 
-describe('ChatListView', { timeout: 30_000 }, () => {
+// 超时给到 60s：本文件每个用例都要首渲整条消息管线（lobe UI + markdown + 各类工具卡片），
+// 单独跑 4 例就要约 26s，贴着原来的 30s 上限；全量跑时要和另外 145 个文件抢 CPU，必然越线
+// （表现为只在整套跑时挂、单独跑就过）。这里不是掩盖问题，是原上限对并发场景配得不足。
+describe('ChatListView', { timeout: 60_000 }, () => {
   it('渲染自研滚动容器（无 lobe ChatList 包装）', () => {
     setMessages(makeFixture());
     render(

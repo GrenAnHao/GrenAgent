@@ -20,8 +20,6 @@ vi.mock('../../lib/pi', () => ({ pi: { memStats, memList, memHistory, runCommand
 
 import { MemoryPanel } from './MemoryPanel';
 
-// jsdom 下 @lobehub/ui Modal + antd-style 重渲染较慢，放宽超时避免误判。
-vi.setConfig({ testTimeout: 20000 });
 
 const renderPanel = () =>
   render(

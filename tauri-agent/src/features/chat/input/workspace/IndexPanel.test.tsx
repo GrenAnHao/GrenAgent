@@ -23,7 +23,6 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
 import { ThemeProvider } from '@lobehub/ui';
 import { IndexButton, IndexView } from './IndexPanel';
 
-vi.setConfig({ testTimeout: 20000 });
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();

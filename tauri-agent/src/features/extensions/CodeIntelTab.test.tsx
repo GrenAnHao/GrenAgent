@@ -11,7 +11,6 @@ vi.mock('../settings/ModelSelectField', () => ({
 import { ThemeProvider } from '@lobehub/ui';
 import { CodeIntelTab } from './CodeIntelTab';
 
-vi.setConfig({ testTimeout: 20000 });
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();

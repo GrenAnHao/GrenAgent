@@ -3,8 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@lobehub/ui';
 import { AddMcpModal } from './AddMcpModal';
 
-// jsdom 下 @lobehub/ui Modal + antd-style 多次重渲染较慢，放宽超时避免误判。
-vi.setConfig({ testTimeout: 20000 });
 
 afterEach(cleanup);
 
