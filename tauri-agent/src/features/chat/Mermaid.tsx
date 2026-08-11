@@ -688,7 +688,7 @@ export const Mermaid = memo(({ code, streaming }: { code: string; streaming?: bo
             alt=""
             src={dataUrl}
             style={{ display: 'none' }}
-            preview={{ onVisibleChange: (v) => setZoomed(v), visible: zoomed }}
+            preview={{ onVisibleChange: (v: boolean) => setZoomed(v), visible: zoomed } as import('antd/es/image').PreviewConfig}
           />
         ) : null}
       </div>
