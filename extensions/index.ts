@@ -36,6 +36,7 @@ import safety from "./safety/index.js";
 import approval from "./approval/index.js";
 import todo from "./todo/index.js";
 import tts from "./tts/index.js";
+import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
 import sessionSearch from "./session-search/index.js";
 import webSearch from "./web-search/index.js";
@@ -73,6 +74,7 @@ export {
   codeExec,
   hashline,
   tts,
+  visualCompanion,
   imGateway,
   imPlatforms,
   afterToolFeedback,
@@ -112,6 +114,7 @@ export const allExtensions = [
   codeExec,
   hashline,
   tts,
+  visualCompanion,
   imGateway,
   imPlatforms,
   afterToolFeedback,
@@ -154,6 +157,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "code-exec", factory: codeExec },
   { name: "hashline", factory: hashline },
   { name: "tts", factory: tts },
+  { name: "visual-companion", factory: visualCompanion },
   { name: "im-gateway", factory: imGateway },
   { name: "im-platforms", factory: imPlatforms },
   { name: "after-tool-feedback", factory: afterToolFeedback },
