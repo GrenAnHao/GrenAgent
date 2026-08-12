@@ -6,6 +6,7 @@ import { NoticePill } from './NoticePill';
 import { AnswerCard } from './AnswerCard';
 import { PlanCard } from './PlanCard';
 import { QuestionsCard } from './QuestionsCard';
+import { VisualCard } from '../visual/VisualCard';
 import { VirtualizedMessageList } from './VirtualizedMessageList';
 import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
@@ -80,6 +81,7 @@ export function renderMessageBody(
       if (msg.customType === 'agent-questions') {
         return <QuestionsCard answered={answeredQuestions.has(msg.id)} content={msg.content} />;
       }
+      if (msg.customType === 'visual-inline') return <VisualCard />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
     default:
       return null;
