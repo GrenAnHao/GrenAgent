@@ -10,6 +10,8 @@ import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
 import { Sidebar } from './features/sessions/Sidebar';
 import { DockPanel } from './features/dock/DockPanel';
 import { DockDndProvider } from './features/dock/DockDndProvider';
+import { VisualPanel } from './features/visual/VisualPanel';
+import { useVisualStore } from './stores/visualStore';
 import { useDockStore } from './stores/dockStore';
 import { Titlebar } from './components/Titlebar';
 import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreContext';
@@ -222,10 +224,23 @@ const SidebarPanel = memo(function SidebarPanel({
 
 const RightPanelColumn = memo(function RightPanelColumn() {
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel);
+  const setRightPanelOpen = useLayoutStore((s) => s.setRightPanelOpen);
+  const visualMode = useVisualStore((s) => s.mode);
+  const visualHtml = useVisualStore((s) => s.html);
+
+  useEffect(() => {
+    if (visualMode === 'panel' && visualHtml) {
+      setRightPanelOpen(true);
+    }
+  }, [visualMode, visualHtml, setRightPanelOpen]);
 
   return (
     <RightPanelShell>
-      <DockPanel region="right" onCollapse={toggleRightPanel} />
+      {visualMode === 'panel' && visualHtml ? (
+        <VisualPanel onClose={() => { toggleRightPanel(); }} />
+      ) : (
+        <DockPanel region="right" onCollapse={toggleRightPanel} />
+      )}
     </RightPanelShell>
   );
 });
