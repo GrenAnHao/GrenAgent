@@ -11,6 +11,7 @@ import { parseAskUserPayload } from '../../components/QuestionSelector/answers';
 import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
+import { useVisualStore } from '../../stores/visualStore';
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -104,6 +105,13 @@ export function ExtensionUiHost() {
           }
         } else if (r.statusKey === 'approval-policy') {
           if (isApprovalPolicy(r.statusText)) useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+        } else if (r.statusKey === 'visual') {
+          try {
+            const d = typeof r.statusText === 'string' ? JSON.parse(r.statusText) : null;
+            if (d?.action === 'show' && typeof d.html === 'string') {
+              useVisualStore.getState().setVisual(d.html, d.mode === 'panel' ? 'panel' : 'inline');
+            }
+          } catch { /* ignore malformed */ }
         }
         return;
       }
@@ -120,6 +128,16 @@ export function ExtensionUiHost() {
           useInlineQuestionStore.getState().setRequest({ workspace: e.workspace, id: e.request.id, data });
           return;
         }
+        // visual choice 哨兵：read_visual_choice 阻塞中，标记 pending 并记录 requestId
+        try {
+          const titleStr = typeof (e.request as { title?: unknown }).title === 'string'
+            ? (e.request as { title: string }).title : null;
+          const sentinel = titleStr ? JSON.parse(titleStr) : null;
+          if (sentinel?.__visualChoice === 1) {
+            useVisualStore.getState().setPending(true, e.request.id);
+            return;
+          }
+        } catch { /* not visual */ }
       }
       // 其余交互请求 → 输入框上方内联卡片（PromptRequestCard 渲染并回传），不弹窗。
       if (method === 'confirm' || method === 'select' || method === 'input') {
