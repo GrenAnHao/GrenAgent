@@ -2,9 +2,9 @@
 // 无 I/O，便于单测。状态机与副作用（setActiveTools/setStatus/persist）在 index.ts。
 import { isSafeCommand } from "./utils.js";
 
-export type AgentMode = "agent" | "ask" | "debug" | "plan";
+export type AgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
 
-export const AGENT_MODES: readonly AgentMode[] = ["agent", "ask", "debug", "plan"] as const;
+export const AGENT_MODES: readonly AgentMode[] = ["agent", "ask", "debug", "plan", "brainstorm"] as const;
 
 export const DEFAULT_MODE: AgentMode = "agent";
 
@@ -55,10 +55,18 @@ export const ASK_TOOLS: readonly string[] = [
 // plan：在 ask 的只读集之上额外放行 bash（再由 isSafeCommand 限定为只读命令），与既有规划模式一致。
 export const PLAN_TOOLS: readonly string[] = [...ASK_TOOLS, "bash"];
 
+// brainstorm：ask 只读集 + visual-companion 工具，用于展示原型和选项。
+export const BRAINSTORM_TOOLS: readonly string[] = [
+  ...ASK_TOOLS,
+  "show_visual",
+  "read_visual_choice",
+];
+
 // 受限模式返回白名单；agent/debug 用完整工具集（返回 undefined 表示不限制）。
 export function toolWhitelist(mode: AgentMode): readonly string[] | undefined {
   if (mode === "ask") return ASK_TOOLS;
   if (mode === "plan") return PLAN_TOOLS;
+  if (mode === "brainstorm") return BRAINSTORM_TOOLS;
   return undefined;
 }
 
@@ -78,9 +86,10 @@ export interface ToolGateResult {
 }
 
 // tool_call 兜底拦截（setActiveTools 之外的第二道防线，防止动态注册的工具绕过白名单）：
-//   ask  : 白名单之外一律拦（含 bash/write/edit/MCP/写类扩展工具）
-//   plan : 白名单（只读检索 + 只读 bash）之外一律拦（禁 write/edit 与 py_run/hl_edit/dap_* 等写/执行类）
-//   agent/debug : 不拦（debug 的危险命令仍由 safety 扩展把关）
+//   ask        : 白名单之外一律拦（含 bash/write/edit/MCP/写类扩展工具）
+//   plan       : 白名单（只读检索 + 只读 bash）之外一律拦（禁 write/edit 与 py_run/hl_edit/dap_* 等写/执行类）
+//   brainstorm : 白名单（只读检索 + visual-companion）之外一律拦
+//   agent/debug: 不拦（debug 的危险命令仍由 safety 扩展把关）
 export function gateToolCall(mode: AgentMode, toolName: string, input: unknown): ToolGateResult | undefined {
   if (mode === "ask") {
     if (ASK_TOOLS.includes(toolName)) return undefined;
@@ -114,6 +123,15 @@ export function gateToolCall(mode: AgentMode, toolName: string, input: unknown):
     }
     return undefined;
   }
+  if (mode === "brainstorm") {
+    if (BRAINSTORM_TOOLS.includes(toolName)) return undefined;
+    return {
+      block: true,
+      reason:
+        `头脑风暴模式（只读）：已禁用工具「${toolName}」。本模式仅允许只读检索与视觉伴侣工具，` +
+        `不能修改文件或执行命令。如需动手实施，请切换到 Agent 模式。`,
+    };
+  }
   return undefined;
 }
 
@@ -132,6 +150,8 @@ export function modeBadge(mode: AgentMode): string | undefined {
       return "Debug";
     case "plan":
       return "Plan";
+    case "brainstorm":
+      return "Brainstorm";
     default:
       return undefined;
   }
@@ -146,6 +166,8 @@ export function modeLabel(mode: AgentMode): string {
       return "调试";
     case "plan":
       return "规划";
+    case "brainstorm":
+      return "头脑风暴";
     default:
       return "Agent";
   }

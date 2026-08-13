@@ -151,3 +151,57 @@ describe("modeBadge / modeLabel", () => {
     expect(modeLabel("plan")).toBeTruthy();
   });
 });
+
+describe("brainstorm mode", () => {
+  it("isAgentMode recognizes brainstorm", () => {
+    expect(isAgentMode("brainstorm")).toBe(true);
+  });
+
+  it("parseModeArg parses brainstorm", () => {
+    expect(parseModeArg("brainstorm")).toBe("brainstorm");
+    expect(parseModeArg("BRAINSTORM")).toBe("brainstorm");
+  });
+
+  it("toolWhitelist restricts brainstorm", () => {
+    expect(toolWhitelist("brainstorm")).toBeDefined();
+  });
+
+  it("brainstorm includes show_visual and read_visual_choice", () => {
+    const wl = toolWhitelist("brainstorm")!;
+    expect(wl).toContain("show_visual");
+    expect(wl).toContain("read_visual_choice");
+  });
+
+  it("brainstorm includes ask tools (read/grep)", () => {
+    const wl = toolWhitelist("brainstorm")!;
+    expect(wl).toContain("read");
+    expect(wl).toContain("grep");
+  });
+
+  it("brainstorm excludes write/edit/bash", () => {
+    const all = ["read", "grep", "write", "edit", "bash", "show_visual", "read_visual_choice"];
+    const active = activeToolsFor("brainstorm", all)!;
+    expect(active).not.toContain("write");
+    expect(active).not.toContain("edit");
+    expect(active).not.toContain("bash");
+    expect(active).toContain("show_visual");
+  });
+
+  it("gateToolCall blocks write in brainstorm", () => {
+    const result = gateToolCall("brainstorm", "write", {});
+    expect(result?.block).toBe(true);
+  });
+
+  it("gateToolCall allows show_visual in brainstorm", () => {
+    const result = gateToolCall("brainstorm", "show_visual", {});
+    expect(result).toBeUndefined();
+  });
+
+  it("modeBadge returns Brainstorm", () => {
+    expect(modeBadge("brainstorm")).toBe("Brainstorm");
+  });
+
+  it("modeLabel returns 头脑风暴", () => {
+    expect(modeLabel("brainstorm")).toBe("头脑风暴");
+  });
+});
