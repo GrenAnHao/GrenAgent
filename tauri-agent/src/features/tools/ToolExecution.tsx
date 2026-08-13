@@ -281,6 +281,22 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
     return <InlineQuestionCard />;
   }
 
+  // show_visual / read_visual_choice：UI 通过 VisualCard 呈现，工具行仅显示标题行，不展开 body。
+  if (bareName === 'show_visual' || bareName === 'read_visual_choice') {
+    const vtitle = toolTitle(toolName, args, result, status);
+    return (
+      <div className={cardStyles.toolRow}>
+        <ConvRow
+          data-testid="tool-execution"
+          status={status}
+          icon={vtitle.icon}
+          name={vtitle.name}
+          args={vtitle.args}
+        />
+      </div>
+    );
+  }
+
   // todo / generate_image：作为独立卡片常驻展示，不套通用工具行。
   if (bareName === 'todo' || bareName === 'generate_image') {
     const card = renderExtensionCard({ toolName, args, result, status });
