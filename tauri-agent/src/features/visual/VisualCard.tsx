@@ -113,17 +113,31 @@ export const VisualCard = memo(function VisualCard() {
           ?? (el.querySelector('.letter') as HTMLElement | null)?.textContent?.trim()
           ?? choice;
 
+        if (!choice) return;
+
         // 视觉反馈：移除其他选中，高亮当前
         const container = el.closest('.options, .cards');
         container?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
         el.classList.add('selected');
 
-        if (!choice) return;
-        const rid = useVisualStore.getState().requestId;
-        if (!rid) return;
-        setSubmitted(true);
-        extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
-        useVisualStore.getState().setPending(false);
+        // 如果 requestId 已有，立即回传；否则轮询等待（最多 5s）
+        const trySubmit = () => {
+          const rid = useVisualStore.getState().requestId;
+          if (!rid) return false;
+          setSubmitted(true);
+          extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
+          useVisualStore.getState().setPending(false);
+          return true;
+        };
+
+        if (!trySubmit()) {
+          // requestId 还没到，轮询等待
+          let attempts = 0;
+          const poll = setInterval(() => {
+            attempts++;
+            if (trySubmit() || attempts > 50) clearInterval(poll); // 50 * 100ms = 5s
+          }, 100);
+        }
       };
 
       doc.querySelectorAll('[data-choice]').forEach(el => {
