@@ -1,6 +1,6 @@
 import { Icon } from '@lobehub/ui';
 import { Select } from '@lobehub/ui/base-ui';
-import { Bot, Bug, ListChecks, MessageCircleQuestion, type LucideIcon } from 'lucide-react';
+import { Bot, Brain, Bug, ListChecks, MessageCircleQuestion, type LucideIcon } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { pi } from '../../../../lib/pi';
 import { AGENT_MODES, MODE_LABELS, useModeStore, type AgentMode } from '../../../../stores/modeStore';
@@ -11,10 +11,11 @@ const MODE_ICONS: Record<AgentMode, LucideIcon> = {
   ask: MessageCircleQuestion,
   debug: Bug,
   plan: ListChecks,
+  brainstorm: Brain,
 };
 
 /**
- * 模式选择器：Agent / Ask / Debug / Plan 互斥单选，每项带图标。
+ * 模式选择器：Agent / Ask / Debug / Plan / Brainstorm 互斥单选，每项带图标。
  * 当前模式由 sidecar 的 agent-mode 扩展经 setStatus 推送到 modeStore（切会话/刷新后回读）；
  * 切换走 agent_set_mode（底层 /mode 命令，不调 LLM），并乐观更新本地状态即时反馈。
  */
@@ -24,12 +25,10 @@ export default function ModeAction() {
 
   const onChange = (next: string) => {
     const target = next as AgentMode;
-    // 乐观更新，避免等待后端 setStatus 回推的延迟；后端确认后会再推一次（值一致，无抖动）。
     useModeStore.getState().setMode(workspace, target);
     void pi.setMode(workspace, target);
   };
 
-  // 下拉项用 optionRender 带图标；trigger 的当前图标用 prefix——两者分离，避免触发器上图标重复。
   const options = AGENT_MODES.map((m) => ({ label: MODE_LABELS[m], value: m }));
 
   return (
