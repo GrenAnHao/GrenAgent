@@ -78,3 +78,19 @@ describe("resolveAgentModeFromEntries", () => {
     expect(resolveAgentModeFromEntries([])).toBe("agent");
   });
 });
+
+describe("resolveAgentModeFromEntries — brainstorm", () => {
+  it("returns brainstorm when last agent-mode entry has mode=brainstorm", () => {
+    const entries = [
+      { type: "custom", customType: "agent-mode", data: { mode: "brainstorm" } },
+    ];
+    expect(resolveAgentModeFromEntries(entries)).toBe("brainstorm");
+  });
+
+  it("falls back to agent for unknown mode", () => {
+    const entries = [
+      { type: "custom", customType: "agent-mode", data: { mode: "unknown" } },
+    ];
+    expect(resolveAgentModeFromEntries(entries)).toBe("agent");
+  });
+});

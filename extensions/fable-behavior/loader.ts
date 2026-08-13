@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type FableAgentMode = "agent" | "ask" | "debug" | "plan";
+export type FableAgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "prompts");
 
@@ -123,6 +123,6 @@ export function resolveAgentModeFromEntries(
 ): FableAgentMode {
   const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
   const mode = (entry?.data as { mode?: string } | undefined)?.mode;
-  if (mode === "ask" || mode === "debug" || mode === "plan" || mode === "agent") return mode;
+  if (mode === "ask" || mode === "debug" || mode === "plan" || mode === "agent" || mode === "brainstorm") return mode;
   return "agent";
 }
