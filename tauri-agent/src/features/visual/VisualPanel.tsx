@@ -74,7 +74,7 @@ export const VisualPanel = memo(function VisualPanel({ onClose }: VisualPanelPro
       if (submitted || !pending || !requestId) return;
       setSubmitted(true);
       const answer = JSON.stringify({ choice, text: text ?? '', timestamp: Date.now() });
-      extensionUiRespond(workspace, { id: requestId, value: answer });
+      extensionUiRespond(workspace, { type: 'extension_ui_response', id: requestId, value: answer });
       useVisualStore.getState().setPending(false);
     },
     [submitted, pending, requestId, workspace],

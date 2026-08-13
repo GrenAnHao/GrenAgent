@@ -65,7 +65,7 @@ export const VisualCard = memo(function VisualCard() {
         const rid = useVisualStore.getState().requestId;
         if (submitted || !rid) return;
         setSubmitted(true);
-        extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
+          extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
         useVisualStore.getState().setPending(false);
       }
     },
@@ -134,7 +134,7 @@ export const VisualCard = memo(function VisualCard() {
           const rid = useVisualStore.getState().requestId;
           if (!rid) return false;
           setSubmitted(true);
-          extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
+          extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
           useVisualStore.getState().setPending(false);
           return true;
         };
