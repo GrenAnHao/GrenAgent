@@ -4,194 +4,130 @@
  */
 
 // 从 brainstorming skill 的 frame-template.html 提取的 CSS
-export const FRAME_CSS = `/*
- * BRAINSTORM COMPANION FRAME TEMPLATE
- *
- * This template provides a consistent frame with:
- * - OS-aware light/dark theming
- * - Fixed header and selection indicator bar
- * - Scrollable main content area
- * - CSS helpers for common UI patterns
- *
- * Content is injected via placeholder comment in #claude-content.
- */
-
+// 强制深色主题（Tauri WebView 内 prefers-color-scheme 不可靠，直接写死深色变量）
+export const FRAME_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; }
+html, body { height: auto; overflow: visible; }
 
-/* ===== THEME VARIABLES ===== */
+/* ===== THEME VARIABLES — 固定深色，与 GrenAgent 界面一致 ===== */
 :root {
-  --bg-primary: #f5f5f7;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #e5e5e7;
-  --border: #d1d1d6;
-  --text-primary: #1d1d1f;
-  --text-secondary: #86868b;
-  --text-tertiary: #aeaeb2;
-  --accent: #0071e3;
-  --accent-hover: #0077ed;
-  --success: #34c759;
-  --warning: #ff9f0a;
-  --error: #ff3b30;
-  --selected-bg: #e8f4fd;
-  --selected-border: #0071e3;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #1d1d1f;
-    --bg-secondary: #2d2d2f;
-    --bg-tertiary: #3d3d3f;
-    --border: #424245;
-    --text-primary: #f5f5f7;
-    --text-secondary: #86868b;
-    --text-tertiary: #636366;
-    --accent: #0a84ff;
-    --accent-hover: #409cff;
-    --selected-bg: rgba(10, 132, 255, 0.15);
-    --selected-border: #0a84ff;
-  }
+  --bg-primary: #141416;
+  --bg-secondary: #1e1e22;
+  --bg-tertiary: #28282e;
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.14);
+  --text-primary: #f0f0f2;
+  --text-secondary: #8c8c99;
+  --text-tertiary: #55555e;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-dim: rgba(99,102,241,0.15);
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --selected-bg: rgba(99,102,241,0.12);
+  --selected-border: #6366f1;
+  --radius: 10px;
 }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
-  display: flex;
-  flex-direction: column;
-  line-height: 1.5;
-}
-
-/* ===== FRAME STRUCTURE ===== */
-.header {
-  background: var(--bg-secondary);
-  padding: 0.5rem 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.header h1 { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); }
-.header .status { font-size: 0.7rem; color: var(--success); display: flex; align-items: center; gap: 0.4rem; }
-.header .status::before { content: ''; width: 6px; height: 6px; background: var(--success); border-radius: 50%; }
-
-.main { flex: 1; overflow-y: auto; }
-#claude-content { padding: 2rem; min-height: 100%; }
-
-.indicator-bar {
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-  padding: 0.5rem 1.5rem;
-  flex-shrink: 0;
-  text-align: center;
-}
-.indicator-bar span {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-}
-.indicator-bar .selected-text {
-  color: var(--accent);
-  font-weight: 500;
+  line-height: 1.55;
+  padding: 16px;
+  font-size: 14px;
 }
 
 /* ===== TYPOGRAPHY ===== */
-h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
-h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem; }
-.subtitle { color: var(--text-secondary); margin-bottom: 1.5rem; }
-.section { margin-bottom: 2rem; }
-.label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 4px; color: var(--text-primary); }
+h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 2px; color: var(--text-primary); }
+h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+p { color: var(--text-secondary); font-size: 0.88rem; margin: 0; }
+code { font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 0.82rem; background: var(--bg-tertiary); border-radius: 4px; padding: 1px 5px; }
+.subtitle { color: var(--text-secondary); margin-bottom: 16px; font-size: 0.88rem; }
+.section { margin-bottom: 20px; }
+.label { font-size: 0.7rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; display: block; }
 
-/* ===== OPTIONS (for A/B/C choices) ===== */
-.options { display: flex; flex-direction: column; gap: 0.75rem; }
+/* ===== OPTIONS (A/B/C choices) ===== */
+.options { display: flex; flex-direction: column; gap: 8px; }
 .option {
   background: var(--bg-secondary);
-  border: 2px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px 16px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.12s ease, background 0.12s ease;
   display: flex;
-  align-items: flex-start;
-  gap: 1rem;
+  align-items: center;
+  gap: 12px;
+  user-select: none;
 }
-.option:hover { border-color: var(--accent); }
+.option:hover { border-color: var(--accent); background: var(--bg-tertiary); }
 .option.selected { background: var(--selected-bg); border-color: var(--selected-border); }
 .option .letter {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  width: 1.75rem; height: 1.75rem;
+  width: 28px; height: 28px; min-width: 28px;
   border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 600; font-size: 0.85rem; flex-shrink: 0;
+  font-weight: 700; font-size: 0.82rem; flex-shrink: 0;
+  border: 1px solid var(--border-strong);
 }
-.option.selected .letter { background: var(--accent); color: white; }
-.option .content { flex: 1; }
-.option .content h3 { font-size: 0.95rem; margin-bottom: 0.15rem; }
-.option .content p { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+.option.selected .letter { background: var(--accent); color: #fff; border-color: transparent; }
+.option .content { flex: 1; min-width: 0; }
+.option .content h3 { font-size: 0.9rem; margin-bottom: 0; }
+.option .content p { color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px; }
 
-/* ===== CARDS (for showing designs/mockups) ===== */
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+/* ===== CARDS ===== */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .card {
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius);
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.12s, transform 0.12s;
 }
-.card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.card:hover { border-color: var(--accent); transform: translateY(-2px); }
 .card.selected { border-color: var(--selected-border); border-width: 2px; }
-.card-image { background: var(--bg-tertiary); aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center; }
-.card-body { padding: 1rem; }
-.card-body h3 { margin-bottom: 0.25rem; }
-.card-body p { color: var(--text-secondary); font-size: 0.85rem; }
+.card-image { background: var(--bg-tertiary); aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 0.8rem; }
+.card-body { padding: 12px; }
+.card-body h3 { margin-bottom: 4px; }
+.card-body p { color: var(--text-secondary); font-size: 0.82rem; }
 
-/* ===== MOCKUP CONTAINER ===== */
-.mockup {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  margin-bottom: 1.5rem;
-}
-.mockup-header {
-  background: var(--bg-tertiary);
-  padding: 0.5rem 1rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
-}
-.mockup-body { padding: 1.5rem; }
+/* ===== MOCKUP ===== */
+.mockup { background: var(--bg-secondary); border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+.mockup-header { background: var(--bg-tertiary); padding: 8px 14px; font-size: 0.75rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.mockup-body { padding: 16px; }
 
-/* ===== SPLIT VIEW (side-by-side comparison) ===== */
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-@media (max-width: 700px) { .split { grid-template-columns: 1fr; } }
+/* ===== SPLIT VIEW ===== */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 640px) { .split { grid-template-columns: 1fr; } }
 
 /* ===== PROS/CONS ===== */
-.pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
-.pros, .cons { background: var(--bg-secondary); border-radius: 8px; padding: 1rem; }
-.pros h4 { color: var(--success); font-size: 0.85rem; margin-bottom: 0.5rem; }
-.cons h4 { color: var(--error); font-size: 0.85rem; margin-bottom: 0.5rem; }
-.pros ul, .cons ul { margin-left: 1.25rem; font-size: 0.85rem; color: var(--text-secondary); }
-.pros li, .cons li { margin-bottom: 0.25rem; }
+.pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.pros, .cons { background: var(--bg-secondary); border-radius: 8px; padding: 12px; border: 1px solid var(--border); }
+.pros h4 { color: var(--success); }
+.cons h4 { color: var(--error); }
+.pros ul, .cons ul { margin-left: 16px; font-size: 0.85rem; color: var(--text-secondary); }
+.pros li, .cons li { margin-bottom: 4px; }
 
-/* ===== PLACEHOLDER (for mockup areas) ===== */
-.placeholder {
-  background: var(--bg-tertiary);
-  border: 2px dashed var(--border);
-  border-radius: 8px;
-  padding: 2rem;
-  text-align: center;
-  color: var(--text-tertiary);
-}
+/* ===== PLACEHOLDER ===== */
+.placeholder { background: var(--bg-tertiary); border: 2px dashed var(--border-strong); border-radius: 8px; padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 0.85rem; }
 
 /* ===== INLINE MOCKUP ELEMENTS ===== */
-.mock-nav { background: var(--accent); color: white; padding: 0.75rem 1rem; display: flex; gap: 1.5rem; font-size: 0.9rem; }
-.mock-sidebar { background: var(--bg-tertiary); padding: 1rem; min-width: 180px; }
-.mock-content { padding: 1.5rem; flex: 1; }
-.mock-button { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; }
-.mock-input { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; width: 100%; }`;
+.mock-nav { background: var(--bg-tertiary); color: var(--text-primary); padding: 10px 16px; display: flex; gap: 20px; font-size: 0.88rem; border-bottom: 1px solid var(--border); }
+.mock-sidebar { background: var(--bg-secondary); padding: 12px; min-width: 160px; border-right: 1px solid var(--border); }
+.mock-content { padding: 16px; flex: 1; }
+.mock-button { background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; cursor: pointer; }
+.mock-button:hover { background: var(--accent-hover); }
+.mock-input { background: var(--bg-secondary); border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px 10px; width: 100%; color: var(--text-primary); font-size: 0.88rem; }
+
+/* ===== 指示条（inline 时隐藏，保留功能性） ===== */
+.indicator-bar { display: none; }
+.header { display: none; }
+#claude-content { padding: 0; }`;
 
 // 改造后的 helper.js（WebSocket 替换为 postMessage，适配 GrenAgent iframe）
 export const HELPER_JS = `(function() {

@@ -12,24 +12,24 @@ const styles = createStaticStyles(({ css }) => ({
     margin: 4px 0;
     border-radius: 10px;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    background: ${cssVar.colorBgContainer};
+    background: #141416;
     overflow: hidden;
   `,
   header: css`
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    padding: 6px 12px;
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: ${cssVar.colorPrimary};
     text-transform: uppercase;
+    opacity: 0.7;
   `,
   dot: css`
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: ${cssVar.colorPrimary};
     flex-shrink: 0;
@@ -38,12 +38,6 @@ const styles = createStaticStyles(({ css }) => ({
     border: none;
     width: 100%;
     display: block;
-  `,
-  done: css`
-    padding: 8px 12px;
-    font-size: 12px;
-    color: ${cssVar.colorTextTertiary};
-    text-align: center;
   `,
 }));
 
@@ -55,17 +49,19 @@ export const VisualCard = memo(function VisualCard() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameHeight, setFrameHeight] = useState(200);
   const [submitted, setSubmitted] = useState(false);
+  const [choiceLabel, setChoiceLabel] = useState('');
 
-  // postMessage fallback（helper.js 路径）
+  // postMessage fallback
   const onMessage = useCallback(
     (e: MessageEvent) => {
       if (!e.data || typeof e.data !== 'object') return;
-      const msg = e.data as { type?: string; choice?: string; text?: string; height?: number };
+      const msg = e.data as { type?: string; choice?: string; text?: string };
       if (msg.type === 'visual-choice' && msg.choice) {
         const rid = useVisualStore.getState().requestId;
         if (submitted || !rid) return;
         setSubmitted(true);
-          extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
+        setChoiceLabel(msg.text || msg.choice);
+        extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
         useVisualStore.getState().setPending(false);
       }
     },
@@ -77,7 +73,6 @@ export const VisualCard = memo(function VisualCard() {
     return () => window.removeEventListener('message', onMessage);
   }, [onMessage]);
 
-  // 主路径：onLoad 后直接操作 contentDocument
   const onIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -85,19 +80,12 @@ export const VisualCard = memo(function VisualCard() {
       const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
       if (!doc) return;
 
-      // 1. 修复 CSS：取消 overflow:hidden / height:100%，让 body 自由伸展
-      const styleEl = doc.createElement('style');
-      styleEl.textContent = `html, body { height: auto !important; overflow: visible !important; }`;
-      doc.head.appendChild(styleEl);
-
-      // 2. 测量真实高度并调整 iframe
+      // 高度自适应
       const measure = () => {
         const h = doc.body.scrollHeight;
         if (h > 0) setFrameHeight(h + 8);
       };
-      // 稍微等 style 应用
-      requestAnimationFrame(() => { measure(); });
-      // ResizeObserver 持续同步
+      requestAnimationFrame(measure);
       if (typeof ResizeObserver !== 'undefined') {
         const ro = new ResizeObserver(measure);
         ro.observe(doc.body);
@@ -106,80 +94,47 @@ export const VisualCard = memo(function VisualCard() {
         (iframe as HTMLIFrameElement & { _ro?: ResizeObserver })._ro = ro;
       }
 
-      // 3. 直接给每个 .option/.card 加点击监听
-      // 同时支持 data-choice（标准）和 data-value（AI 有时生成的替代属性）
-      const CHOICE_SELECTOR = '[data-choice], [data-value]';
+      // 点击处理：同时支持 data-choice 和 data-value
+      const SELECTOR = '[data-choice], [data-value]';
 
       const handleClick = (el: Element) => {
-        const choice = el.getAttribute('data-choice')
-          ?? el.getAttribute('data-value')
-          ?? el.closest('[data-choice]')?.getAttribute('data-choice')
-          ?? el.closest('[data-value]')?.getAttribute('data-value')
-          ?? '';
-        const text = (el.querySelector('h3, .content h3, .card-body h3, .title') as HTMLElement | null)?.textContent?.trim()
-          ?? (el.querySelector('.letter') as HTMLElement | null)?.textContent?.trim()
+        const choice = el.getAttribute('data-choice') ?? el.getAttribute('data-value') ?? '';
+        const text = (el.querySelector('h3, .content h3, .card-body h3') as HTMLElement | null)?.textContent?.trim()
           ?? el.textContent?.trim().slice(0, 80)
           ?? choice;
 
         if (!choice) return;
 
         // 视觉反馈
-        const container = el.closest('.options, .cards');
-        container?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
+        el.closest('.options, .cards')?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
         el.classList.add('selected');
-
-        console.log('[VisualCard] choice=', choice, 'text=', text, 'requestId=', useVisualStore.getState().requestId);
 
         const trySubmit = () => {
           const rid = useVisualStore.getState().requestId;
           if (!rid) return false;
           setSubmitted(true);
+          setChoiceLabel(text);
           extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
           useVisualStore.getState().setPending(false);
           return true;
         };
 
         if (!trySubmit()) {
-          let attempts = 0;
-          const poll = setInterval(() => {
-            attempts++;
-            if (trySubmit() || attempts > 50) clearInterval(poll);
-          }, 100);
+          let n = 0;
+          const poll = setInterval(() => { if (trySubmit() || ++n > 50) clearInterval(poll); }, 100);
         }
       };
 
-      const choiceEls = doc.querySelectorAll(CHOICE_SELECTOR);
-      console.log('[VisualCard] onLoad: found', choiceEls.length, 'clickable elements');
-      if (choiceEls.length === 0) {
-        console.log('[VisualCard] body innerHTML (first 500):', doc.body.innerHTML.slice(0, 500));
-      }
-
-      choiceEls.forEach(el => {
-        el.addEventListener('click', (e) => { e.stopPropagation(); handleClick(el); });
-      });
-
-      // 兜底：body 级委托，捕获动态元素或嵌套点击
+      // body 级委托（单一监听器，避免重复绑定）
       doc.body.addEventListener('click', (e) => {
-        const target = (e.target as Element).closest(CHOICE_SELECTOR);
+        const target = (e.target as Element).closest(SELECTOR);
         if (target) handleClick(target);
       });
 
-      doc.querySelectorAll('[data-choice]').forEach(el => {
-        el.addEventListener('click', () => handleClick(el));
-      });
-
-      // 兜底：监听整个 body 的点击
-      doc.body.addEventListener('click', (e) => {
-        const target = (e.target as Element).closest('[data-choice]');
-        if (target) handleClick(target);
-      });
-
-    } catch {
-      // contentDocument 不可访问时什么都不做
-    }
+    } catch { /* contentDocument 不可访问时忽略 */ }
   }, [submitted, workspace]);
 
-  useEffect(() => { setSubmitted(false); setFrameHeight(200); }, [sessionId]);
+  useEffect(() => { setSubmitted(false); setChoiceLabel(''); setFrameHeight(200); }, [sessionId]);
 
   if (!html) return null;
 
@@ -188,22 +143,26 @@ export const VisualCard = memo(function VisualCard() {
       <div className={styles.header}>
         <span className={styles.dot} />
         Visual
-        {submitted ? ' · 已选择' : pending ? ' · 等待选择' : ''}
+        {submitted
+          ? <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'inherit', opacity: 0.6 }}>
+              {' '}· 已选择{choiceLabel ? `：${choiceLabel}` : ''}
+            </span>
+          : pending
+            ? <span style={{ opacity: 0.5, fontWeight: 400 }}>{' '}· 等待选择</span>
+            : null
+        }
       </div>
-      {submitted ? (
-        <div className={styles.done}>已提交选择</div>
-      ) : (
-        <iframe
-          key={sessionId}
-          ref={iframeRef}
-          className={styles.frame}
-          sandbox="allow-scripts allow-same-origin"
-          srcDoc={buildSrcDoc(html)}
-          style={{ height: frameHeight }}
-          title="Visual Companion"
-          onLoad={onIframeLoad}
-        />
-      )}
+      {/* 始终保留 iframe，选择后变透明度降低但不消失 */}
+      <iframe
+        key={sessionId}
+        ref={iframeRef}
+        className={styles.frame}
+        sandbox="allow-scripts allow-same-origin"
+        srcDoc={buildSrcDoc(html)}
+        style={{ height: frameHeight, opacity: submitted ? 0.45 : 1, pointerEvents: submitted ? 'none' : 'auto', transition: 'opacity 0.2s' }}
+        title="Visual Companion"
+        onLoad={onIframeLoad}
+      />
     </div>
   );
 });
