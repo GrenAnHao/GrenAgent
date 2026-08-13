@@ -60,12 +60,10 @@ interface VisualPanelProps {
 
 export const VisualPanel = memo(function VisualPanel({ onClose }: VisualPanelProps) {
   const { workspace } = useAgentStoreContext();
-  const { html, sessionId, pending, requestId } = useVisualStore((s) => ({
-    html: s.html,
-    sessionId: s.sessionId,
-    pending: s.pending,
-    requestId: s.requestId,
-  }));
+  const html = useVisualStore((s) => s.html);
+  const sessionId = useVisualStore((s) => s.sessionId);
+  const pending = useVisualStore((s) => s.pending);
+  const requestId = useVisualStore((s) => s.requestId);
   const [submitted, setSubmitted] = useState(false);
 
   const onMessage = useCallback(
