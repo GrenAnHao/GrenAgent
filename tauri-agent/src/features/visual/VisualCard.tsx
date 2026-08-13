@@ -11,9 +11,9 @@ const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
     margin: 4px 0;
     border-radius: 10px;
-    overflow: visible;
     border: 1px solid ${cssVar.colorBorderSecondary};
     background: ${cssVar.colorBgContainer};
+    overflow: hidden;
   `,
   header: css`
     display: flex;
@@ -26,7 +26,6 @@ const styles = createStaticStyles(({ css }) => ({
     letter-spacing: 0.05em;
     color: ${cssVar.colorPrimary};
     text-transform: uppercase;
-    border-radius: 10px 10px 0 0;
   `,
   dot: css`
     width: 6px;
@@ -35,16 +34,10 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorPrimary};
     flex-shrink: 0;
   `,
-  frameWrap: css`
-    width: 100%;
-    border-radius: 0 0 10px 10px;
-    overflow: hidden;
-  `,
   frame: css`
     border: none;
     width: 100%;
     display: block;
-    min-height: 120px;
   `,
   done: css`
     padding: 8px 12px;
@@ -54,40 +47,25 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-/**
- * 内联视觉卡片：渲染 visualStore 中的 html（iframe sandbox）。
- * 挂载点：ChatMessageItems → notice customType="visual-inline"
- */
 export const VisualCard = memo(function VisualCard() {
   const { workspace } = useAgentStoreContext();
   const html = useVisualStore((s) => s.html);
   const sessionId = useVisualStore((s) => s.sessionId);
   const pending = useVisualStore((s) => s.pending);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // 初始给一个宽松的大高度，避免内容被截；resize 消息到来后精确调整
-  const [frameHeight, setFrameHeight] = useState(600);
+  const [frameHeight, setFrameHeight] = useState(200);
   const [submitted, setSubmitted] = useState(false);
 
-  // 处理来自 iframe 的 postMessage
+  // postMessage fallback（helper.js 路径）
   const onMessage = useCallback(
     (e: MessageEvent) => {
       if (!e.data || typeof e.data !== 'object') return;
       const msg = e.data as { type?: string; choice?: string; text?: string; height?: number };
-
-      // 高度调整
-      if (msg.type === 'visual-resize' && typeof msg.height === 'number') {
-        // +24 给底部留一点喘息空间，防止滚动条出现
-        setFrameHeight(Math.max(120, Math.min(msg.height + 24, 1200)));
-        return;
-      }
-
-      // 选项点击回传：只要有 requestId 就回传，不依赖 pending 时序
       if (msg.type === 'visual-choice' && msg.choice) {
-        const currentRequestId = useVisualStore.getState().requestId;
-        if (submitted || !currentRequestId) return;
+        const rid = useVisualStore.getState().requestId;
+        if (submitted || !rid) return;
         setSubmitted(true);
-        const answer = JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() });
-        extensionUiRespond(workspace, { id: currentRequestId, value: answer });
+        extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
         useVisualStore.getState().setPending(false);
       }
     },
@@ -99,40 +77,71 @@ export const VisualCard = memo(function VisualCard() {
     return () => window.removeEventListener('message', onMessage);
   }, [onMessage]);
 
-  // iframe onLoad 后用 ResizeObserver 测量实际高度（比 postMessage 更可靠）
+  // 主路径：onLoad 后直接操作 contentDocument
   const onIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
     try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
       if (!doc) return;
+
+      // 1. 修复 CSS：取消 overflow:hidden / height:100%，让 body 自由伸展
+      const styleEl = doc.createElement('style');
+      styleEl.textContent = `html, body { height: auto !important; overflow: visible !important; }`;
+      doc.head.appendChild(styleEl);
+
+      // 2. 测量真实高度并调整 iframe
       const measure = () => {
-        const h = doc.documentElement.scrollHeight || doc.body?.scrollHeight;
-        if (h && h > 0) setFrameHeight(Math.max(120, Math.min(h + 24, 1200)));
+        const h = doc.body.scrollHeight;
+        if (h > 0) setFrameHeight(h + 8);
       };
-      measure();
-      // 用 ResizeObserver 监听 iframe 内容高度变化
+      // 稍微等 style 应用
+      requestAnimationFrame(() => { measure(); });
+      // ResizeObserver 持续同步
       if (typeof ResizeObserver !== 'undefined') {
         const ro = new ResizeObserver(measure);
-        ro.observe(doc.documentElement);
-        // 返回清理函数，但 useCallback 不支持直接返回，用 ref 存
-        (iframeRef as React.MutableRefObject<HTMLIFrameElement & { _ro?: ResizeObserver }>).current._ro?.disconnect();
-        (iframeRef as React.MutableRefObject<HTMLIFrameElement & { _ro?: ResizeObserver }>).current._ro = ro;
+        ro.observe(doc.body);
+        const prev = (iframe as HTMLIFrameElement & { _ro?: ResizeObserver })._ro;
+        prev?.disconnect();
+        (iframe as HTMLIFrameElement & { _ro?: ResizeObserver })._ro = ro;
       }
+
+      // 3. 直接给每个 .option/.card 加点击监听，不依赖 helper.js postMessage
+      const handleClick = (el: Element) => {
+        const choice = el.getAttribute('data-choice') ?? el.closest('[data-choice]')?.getAttribute('data-choice') ?? '';
+        const text = (el.querySelector('h3, .content h3, .card-body h3') as HTMLElement | null)?.textContent?.trim()
+          ?? (el.querySelector('.letter') as HTMLElement | null)?.textContent?.trim()
+          ?? choice;
+
+        // 视觉反馈：移除其他选中，高亮当前
+        const container = el.closest('.options, .cards');
+        container?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
+        el.classList.add('selected');
+
+        if (!choice) return;
+        const rid = useVisualStore.getState().requestId;
+        if (!rid) return;
+        setSubmitted(true);
+        extensionUiRespond(workspace, { id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
+        useVisualStore.getState().setPending(false);
+      };
+
+      doc.querySelectorAll('[data-choice]').forEach(el => {
+        el.addEventListener('click', () => handleClick(el));
+      });
+
+      // 兜底：监听整个 body 的点击
+      doc.body.addEventListener('click', (e) => {
+        const target = (e.target as Element).closest('[data-choice]');
+        if (target) handleClick(target);
+      });
+
     } catch {
-      // 跨域 iframe 无法访问 contentDocument，忽略
+      // contentDocument 不可访问时什么都不做
     }
-  }, []);
+  }, [submitted, workspace]);
 
-  useEffect(() => {
-    return () => {
-      // 清理 ResizeObserver
-      const iframe = iframeRef.current as (HTMLIFrameElement & { _ro?: ResizeObserver }) | null;
-      iframe?._ro?.disconnect();
-    };
-  }, [sessionId]);
-
-  useEffect(() => { setSubmitted(false); setFrameHeight(600); }, [sessionId]);
+  useEffect(() => { setSubmitted(false); setFrameHeight(200); }, [sessionId]);
 
   if (!html) return null;
 
@@ -146,18 +155,16 @@ export const VisualCard = memo(function VisualCard() {
       {submitted ? (
         <div className={styles.done}>已提交选择</div>
       ) : (
-        <div className={styles.frameWrap}>
-          <iframe
-            key={sessionId}
-            ref={iframeRef}
-            className={styles.frame}
-            sandbox="allow-scripts allow-same-origin"
-            srcDoc={buildSrcDoc(html)}
-            style={{ height: frameHeight }}
-            title="Visual Companion"
-            onLoad={onIframeLoad}
-          />
-        </div>
+        <iframe
+          key={sessionId}
+          ref={iframeRef}
+          className={styles.frame}
+          sandbox="allow-scripts allow-same-origin"
+          srcDoc={buildSrcDoc(html)}
+          style={{ height: frameHeight }}
+          title="Visual Companion"
+          onLoad={onIframeLoad}
+        />
       )}
     </div>
   );
