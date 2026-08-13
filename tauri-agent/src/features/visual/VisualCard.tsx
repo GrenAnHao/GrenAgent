@@ -46,26 +46,33 @@ export const VisualCard = memo(function VisualCard() {
   const html = useVisualStore((s) => s.html);
   const sessionId = useVisualStore((s) => s.sessionId);
   const pending = useVisualStore((s) => s.pending);
+  const submittedIds = useVisualStore((s) => s.submittedIds);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameHeight, setFrameHeight] = useState(200);
-  const [submitted, setSubmitted] = useState(false);
+  // submitted 从 store 的 submittedIds 派生，防止重新加载对话后重置
+  const isSubmitted = submittedIds.has(sessionId);
   const [choiceLabel, setChoiceLabel] = useState('');
+
+  const doSubmit = useCallback((choice: string, text: string) => {
+    const rid = useVisualStore.getState().requestId;
+    if (!rid) return false;
+    useVisualStore.getState().markSubmitted(sessionId);
+    setChoiceLabel(text);
+    extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
+    useVisualStore.getState().setPending(false);
+    return true;
+  }, [sessionId, workspace]);
 
   // postMessage fallback
   const onMessage = useCallback(
     (e: MessageEvent) => {
       if (!e.data || typeof e.data !== 'object') return;
       const msg = e.data as { type?: string; choice?: string; text?: string };
-      if (msg.type === 'visual-choice' && msg.choice) {
-        const rid = useVisualStore.getState().requestId;
-        if (submitted || !rid) return;
-        setSubmitted(true);
-        setChoiceLabel(msg.text || msg.choice);
-        extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice: msg.choice, text: msg.text ?? '', timestamp: Date.now() }) });
-        useVisualStore.getState().setPending(false);
+      if (msg.type === 'visual-choice' && msg.choice && !isSubmitted) {
+        doSubmit(msg.choice, msg.text ?? msg.choice);
       }
     },
-    [submitted, workspace],
+    [isSubmitted, doSubmit],
   );
 
   useEffect(() => {
@@ -94,6 +101,9 @@ export const VisualCard = memo(function VisualCard() {
         (iframe as HTMLIFrameElement & { _ro?: ResizeObserver })._ro = ro;
       }
 
+      // 已提交状态：不绑定点击，仅降低透明度
+      if (isSubmitted) return;
+
       // 点击处理：同时支持 data-choice 和 data-value
       const SELECTOR = '[data-choice], [data-value]';
 
@@ -109,32 +119,21 @@ export const VisualCard = memo(function VisualCard() {
         el.closest('.options, .cards')?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
         el.classList.add('selected');
 
-        const trySubmit = () => {
-          const rid = useVisualStore.getState().requestId;
-          if (!rid) return false;
-          setSubmitted(true);
-          setChoiceLabel(text);
-          extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
-          useVisualStore.getState().setPending(false);
-          return true;
-        };
-
-        if (!trySubmit()) {
+        if (!doSubmit(choice, text)) {
           let n = 0;
-          const poll = setInterval(() => { if (trySubmit() || ++n > 50) clearInterval(poll); }, 100);
+          const poll = setInterval(() => { if (doSubmit(choice, text) || ++n > 50) clearInterval(poll); }, 100);
         }
       };
 
-      // body 级委托（单一监听器，避免重复绑定）
       doc.body.addEventListener('click', (e) => {
         const target = (e.target as Element).closest(SELECTOR);
         if (target) handleClick(target);
       });
 
     } catch { /* contentDocument 不可访问时忽略 */ }
-  }, [submitted, workspace]);
+  }, [isSubmitted, doSubmit]);
 
-  useEffect(() => { setSubmitted(false); setChoiceLabel(''); setFrameHeight(200); }, [sessionId]);
+  useEffect(() => { setChoiceLabel(''); setFrameHeight(200); }, [sessionId]);
 
   if (!html) return null;
 
@@ -143,7 +142,7 @@ export const VisualCard = memo(function VisualCard() {
       <div className={styles.header}>
         <span className={styles.dot} />
         Visual
-        {submitted
+        {isSubmitted
           ? <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'inherit', opacity: 0.6 }}>
               {' '}· 已选择{choiceLabel ? `：${choiceLabel}` : ''}
             </span>
@@ -159,7 +158,7 @@ export const VisualCard = memo(function VisualCard() {
         className={styles.frame}
         sandbox="allow-scripts allow-same-origin"
         srcDoc={buildSrcDoc(html)}
-        style={{ height: frameHeight, opacity: submitted ? 0.45 : 1, pointerEvents: submitted ? 'none' : 'auto', transition: 'opacity 0.2s' }}
+        style={{ height: frameHeight, opacity: isSubmitted ? 0.45 : 1, pointerEvents: isSubmitted ? 'none' : 'auto', transition: 'opacity 0.2s' }}
         title="Visual Companion"
         onLoad={onIframeLoad}
       />

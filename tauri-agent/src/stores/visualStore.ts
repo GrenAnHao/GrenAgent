@@ -3,14 +3,14 @@ import { create } from 'zustand';
 export interface VisualState {
   html: string | null;
   mode: 'inline' | 'panel' | null;
-  /** true = read_visual_choice 正在等待用户选择 */
   pending: boolean;
-  /** 每次 setVisual 递增，用于 key 强制重挂载 iframe */
   sessionId: number;
-  /** 当前 pending 对应的 ui-request id（用于 respondUi 回传） */
   requestId: string | null;
+  /** 已提交过的 sessionId 集合——会话内持久，防止重新切回对话后卡片变成可点击 */
+  submittedIds: Set<number>;
   setVisual: (html: string, mode: 'inline' | 'panel') => void;
   setPending: (pending: boolean, requestId?: string) => void;
+  markSubmitted: (id: number) => void;
   clearVisual: () => void;
 }
 
@@ -20,16 +20,16 @@ export const useVisualStore = create<VisualState>()((set, get) => ({
   pending: false,
   sessionId: 0,
   requestId: null,
+  submittedIds: new Set(),
 
   setVisual: (html, mode) =>
-    set((s) => ({
-      html,
-      mode,
-      sessionId: s.sessionId + 1,
-    })),
+    set((s) => ({ html, mode, sessionId: s.sessionId + 1 })),
 
   setPending: (pending, requestId) =>
     set({ pending, requestId: requestId ?? get().requestId }),
+
+  markSubmitted: (id) =>
+    set((s) => ({ submittedIds: new Set([...s.submittedIds, id]) })),
 
   clearVisual: () => set({ html: null, mode: null, pending: false, requestId: null }),
 }));
