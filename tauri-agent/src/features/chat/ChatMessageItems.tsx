@@ -81,7 +81,7 @@ export function renderMessageBody(
       if (msg.customType === 'agent-questions') {
         return <QuestionsCard answered={answeredQuestions.has(msg.id)} content={msg.content} />;
       }
-      if (msg.customType === 'visual-inline') return <VisualCard />;
+      if (msg.customType === 'visual-inline') return <VisualCard content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
     default:
       return null;

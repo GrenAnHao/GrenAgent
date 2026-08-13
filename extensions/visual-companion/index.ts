@@ -37,10 +37,11 @@ export default function (pi: ExtensionAPI) {
       const payload = JSON.stringify({ action: "show", html, mode });
       ctx.ui.setStatus("visual", payload);
 
-      // inline 模式：往对话流追加一条 visual-inline notice，为 VisualCard 提供挂载点
+      // inline 模式：往对话流追加一条 visual-inline notice，content 里携带 HTML
+      // 这样历史回放时 VisualCard 直接从消息读 html，不依赖 store
       if (mode === "inline") {
         pi.sendMessage(
-          { customType: "visual-inline", content: "visual-inline", display: true },
+          { customType: "visual-inline", content: html, display: true },
           { triggerTurn: false },
         );
       }

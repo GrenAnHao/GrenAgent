@@ -41,22 +41,26 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-export const VisualCard = memo(function VisualCard() {
+export const VisualCard = memo(function VisualCard({ content }: { content: string }) {
   const { workspace } = useAgentStoreContext();
-  const html = useVisualStore((s) => s.html);
+  // html 优先从 notice content 读（持久），fallback 到 store（当前会话实时推送）
+  const storeHtml = useVisualStore((s) => s.html);
+  const html = content && content !== 'visual-inline' ? content : (storeHtml ?? '');
   const sessionId = useVisualStore((s) => s.sessionId);
   const pending = useVisualStore((s) => s.pending);
   const submittedIds = useVisualStore((s) => s.submittedIds);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameHeight, setFrameHeight] = useState(200);
   // submitted 从 store 的 submittedIds 派生，防止重新加载对话后重置
-  const isSubmitted = submittedIds.has(sessionId);
+  // 用 content 的 hash 作为 submitted key（content 不变则认为是同一张卡）
+  const cardKey = sessionId; // 同一 sessionId = 同一次 show_visual
+  const isSubmitted = submittedIds.has(cardKey);
   const [choiceLabel, setChoiceLabel] = useState('');
 
   const doSubmit = useCallback((choice: string, text: string) => {
     const rid = useVisualStore.getState().requestId;
     if (!rid) return false;
-    useVisualStore.getState().markSubmitted(sessionId);
+    useVisualStore.getState().markSubmitted(cardKey);
     setChoiceLabel(text);
     extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
     useVisualStore.getState().setPending(false);
