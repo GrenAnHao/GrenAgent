@@ -37,7 +37,7 @@ export default function (pi: ExtensionAPI) {
       // inline 模式：往对话流追加一条 visual-inline notice，为 VisualCard 提供挂载点
       if (mode === "inline") {
         pi.sendMessage(
-          { customType: "visual-inline", content: "", display: true },
+          { customType: "visual-inline", content: "visual-inline", display: true },
           { triggerTurn: false },
         );
       }
