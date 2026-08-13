@@ -10,7 +10,10 @@ export default function (pi: ExtensionAPI) {
     description:
       "在 GrenAgent 界面展示 HTML 视觉内容（选项卡、原型、架构图等）。" +
       "mode='auto'（默认）：含 .mockup/.split/.cards 类 → 右侧面板；其余 → 聊天流内联卡片。" +
-      "调用后立即返回；用 read_visual_choice 阻塞等待用户选择。",
+      "调用后立即返回；用 read_visual_choice 阻塞等待用户选择。\n\n" +
+      "【重要】生成选项 HTML 时必须使用 data-choice 属性（不是 data-value），例如：\n" +
+      '<div class="option" data-choice="a" onclick="toggleSelect(this)">' +
+      '<div class="letter">A</div><div class="content"><h3>选项标题</h3></div></div>',
     parameters: Type.Object({
       html: Type.String({ description: "HTML 片段或完整文档（支持 frame-template CSS 类）" }),
       mode: Type.Optional(

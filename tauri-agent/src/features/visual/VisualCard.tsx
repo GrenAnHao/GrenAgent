@@ -106,21 +106,30 @@ export const VisualCard = memo(function VisualCard() {
         (iframe as HTMLIFrameElement & { _ro?: ResizeObserver })._ro = ro;
       }
 
-      // 3. 直接给每个 .option/.card 加点击监听，不依赖 helper.js postMessage
+      // 3. 直接给每个 .option/.card 加点击监听
+      // 同时支持 data-choice（标准）和 data-value（AI 有时生成的替代属性）
+      const CHOICE_SELECTOR = '[data-choice], [data-value]';
+
       const handleClick = (el: Element) => {
-        const choice = el.getAttribute('data-choice') ?? el.closest('[data-choice]')?.getAttribute('data-choice') ?? '';
-        const text = (el.querySelector('h3, .content h3, .card-body h3') as HTMLElement | null)?.textContent?.trim()
+        const choice = el.getAttribute('data-choice')
+          ?? el.getAttribute('data-value')
+          ?? el.closest('[data-choice]')?.getAttribute('data-choice')
+          ?? el.closest('[data-value]')?.getAttribute('data-value')
+          ?? '';
+        const text = (el.querySelector('h3, .content h3, .card-body h3, .title') as HTMLElement | null)?.textContent?.trim()
           ?? (el.querySelector('.letter') as HTMLElement | null)?.textContent?.trim()
+          ?? el.textContent?.trim().slice(0, 80)
           ?? choice;
 
         if (!choice) return;
 
-        // 视觉反馈：移除其他选中，高亮当前
+        // 视觉反馈
         const container = el.closest('.options, .cards');
         container?.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
         el.classList.add('selected');
 
-        // 如果 requestId 已有，立即回传；否则轮询等待（最多 5s）
+        console.log('[VisualCard] choice=', choice, 'text=', text, 'requestId=', useVisualStore.getState().requestId);
+
         const trySubmit = () => {
           const rid = useVisualStore.getState().requestId;
           if (!rid) return false;
@@ -131,14 +140,29 @@ export const VisualCard = memo(function VisualCard() {
         };
 
         if (!trySubmit()) {
-          // requestId 还没到，轮询等待
           let attempts = 0;
           const poll = setInterval(() => {
             attempts++;
-            if (trySubmit() || attempts > 50) clearInterval(poll); // 50 * 100ms = 5s
+            if (trySubmit() || attempts > 50) clearInterval(poll);
           }, 100);
         }
       };
+
+      const choiceEls = doc.querySelectorAll(CHOICE_SELECTOR);
+      console.log('[VisualCard] onLoad: found', choiceEls.length, 'clickable elements');
+      if (choiceEls.length === 0) {
+        console.log('[VisualCard] body innerHTML (first 500):', doc.body.innerHTML.slice(0, 500));
+      }
+
+      choiceEls.forEach(el => {
+        el.addEventListener('click', (e) => { e.stopPropagation(); handleClick(el); });
+      });
+
+      // 兜底：body 级委托，捕获动态元素或嵌套点击
+      doc.body.addEventListener('click', (e) => {
+        const target = (e.target as Element).closest(CHOICE_SELECTOR);
+        if (target) handleClick(target);
+      });
 
       doc.querySelectorAll('[data-choice]').forEach(el => {
         el.addEventListener('click', () => handleClick(el));
