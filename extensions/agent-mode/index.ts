@@ -134,6 +134,25 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
+  // AI 在确认设计、准备开始实施时调用，省去用户手动切换模式的操作。
+  pi.registerCommand("brainstorm-deliver", {
+    description: "从头脑风暴切换到 Agent 模式并开始实施（由 AI 在交付阶段调用）",
+    handler: async (args, ctx) => {
+      if (currentMode !== "brainstorm") {
+        ctx.ui.notify("当前不在头脑风暴模式，无需切换。", "info");
+        return;
+      }
+      applyMode("agent", ctx, { silent: true });
+      ctx.ui.notify("已自动切换到 Agent 模式，开始实施。", "success");
+      const deliverMessage = args.trim() || "设计已确认，现在开始实施。请按已讨论的方案动手。";
+      pi.sendMessage(
+        { customType: "brainstorm-deliver", content: deliverMessage, display: true },
+        { triggerTurn: true },
+      );
+    },
+  });
+
   // Plan 卡片「开始执行」按钮触发（前端 runCommand('/plan-build')）：切回 agent 拿全工具，
   // 保留 todoItems 进入执行阶段，并启动一轮执行。模型可由卡片先行切换（pi.setModel）。
   pi.registerCommand("plan-build", {
