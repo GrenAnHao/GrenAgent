@@ -162,34 +162,32 @@ describe("brainstorm mode", () => {
     expect(parseModeArg("BRAINSTORM")).toBe("brainstorm");
   });
 
-  it("toolWhitelist restricts brainstorm", () => {
-    expect(toolWhitelist("brainstorm")).toBeDefined();
+  it("toolWhitelist does NOT restrict brainstorm (full toolset)", () => {
+    expect(toolWhitelist("brainstorm")).toBeUndefined();
   });
 
-  it("brainstorm includes show_visual and read_visual_choice", () => {
-    const wl = toolWhitelist("brainstorm")!;
-    expect(wl).toContain("show_visual");
-    expect(wl).toContain("read_visual_choice");
+  it("brainstorm does NOT include visual-choice in whitelist (no whitelist)", () => {
+    // brainstorm 无白名单，toolWhitelist 返回 undefined——show_visual 通过完整工具集可用
+    expect(toolWhitelist("brainstorm")).toBeUndefined();
   });
 
   it("brainstorm includes ask tools (read/grep)", () => {
-    const wl = toolWhitelist("brainstorm")!;
-    expect(wl).toContain("read");
-    expect(wl).toContain("grep");
+    // brainstorm 不限制工具集，toolWhitelist 返回 undefined
+    expect(toolWhitelist("brainstorm")).toBeUndefined();
   });
 
-  it("brainstorm excludes write/edit/bash", () => {
+  it("brainstorm does NOT restrict write/edit (full toolset)", () => {
+    // brainstorm = 完整工具集（与 agent 相同），不限制写文件
     const all = ["read", "grep", "write", "edit", "bash", "show_visual", "read_visual_choice"];
-    const active = activeToolsFor("brainstorm", all)!;
-    expect(active).not.toContain("write");
-    expect(active).not.toContain("edit");
-    expect(active).not.toContain("bash");
-    expect(active).toContain("show_visual");
+    const active = activeToolsFor("brainstorm", all);
+    // 返回 undefined 表示不限制（使用全量工具集）
+    expect(active).toBeUndefined();
   });
 
-  it("gateToolCall blocks write in brainstorm", () => {
+  it("gateToolCall does NOT block write in brainstorm", () => {
+    // brainstorm 允许写文件——这是设计意图，头脑风暴可以生成文件
     const result = gateToolCall("brainstorm", "write", {});
-    expect(result?.block).toBe(true);
+    expect(result).toBeUndefined();
   });
 
   it("gateToolCall allows show_visual in brainstorm", () => {
