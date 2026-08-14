@@ -152,6 +152,7 @@ pub fn run() {
             commands::code_intel::code_intel_is_initialized,
             commands::code_intel::code_intel_file_graph,
             commands::code_intel::code_intel_rich_graph,
+            commands::files::write_temp_html,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

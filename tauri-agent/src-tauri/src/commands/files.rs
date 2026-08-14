@@ -367,3 +367,17 @@ pub fn import_dropped_file(
 
     Ok(format!(".pi/dropped/{sub}/{name}"))
 }
+
+/// 将 HTML 内容写入系统临时目录，返回文件绝对路径。
+/// 前端用 tauri-plugin-opener 的 openPath 打开（Blob URL 在 Tauri WebView 里不可用）。
+#[tauri::command]
+pub async fn write_temp_html(content: String) -> Result<String, String> {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let filename = format!("gren-visual-{}.html", ms);
+    let path = std::env::temp_dir().join(&filename);
+    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+    path.to_str().ok_or_else(|| "invalid path".to_string()).map(|s| s.to_owned())
+}

@@ -1,13 +1,13 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Expand, ExternalLink } from 'lucide-react';
+import { Expand, ExternalLink, Minimize2 } from 'lucide-react';
 import { ActionIcon } from '@lobehub/ui';
 import { useVisualStore } from '../../stores/visualStore';
 import { buildSrcDoc } from './frameAssets';
 import { extensionUiRespond } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 
-// 卡片最大高度：超出后内部滚动，不撑开整个对话流
 const MAX_CARD_HEIGHT = 480;
 
 const styles = createStaticStyles(({ css }) => ({
@@ -44,15 +44,14 @@ const styles = createStaticStyles(({ css }) => ({
     border: none;
     width: 100%;
     display: block;
-    /* 内部可滚动，超出 MAX_CARD_HEIGHT 不再撑开卡片 */
     overflow: auto;
   `,
-  // 全屏遮罩
+  // 全屏遮罩：通过 Portal 挂到 document.body，彻底脱离父容器截断
   overlay: css`
     position: fixed;
     inset: 0;
-    z-index: 9000;
-    background: rgba(0, 0, 0, 0.92);
+    z-index: 99999;
+    background: #0a0a0e;
     display: flex;
     flex-direction: column;
   `,
@@ -60,18 +59,19 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    background: #18181f;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: #141418;
     flex-shrink: 0;
   `,
   overlayTitle: css`
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
     color: ${cssVar.colorPrimary};
     text-transform: uppercase;
     flex: 1;
+    opacity: 0.75;
   `,
   overlayFrame: css`
     flex: 1;
@@ -107,14 +107,17 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     return true;
   }, [cardKey, workspace]);
 
-  // 打开系统浏览器（写临时 HTML 文件再用 Tauri opener 打开）
-  const openInBrowser = useCallback(() => {
+  // 浏览器打开：写临时文件 → Tauri opener 打开（Blob URL 在 WebView 里不工作）
+  const openInBrowser = useCallback(async () => {
     if (!html) return;
-    const blob = new Blob([buildSrcDoc(html)], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    // 短暂后清理 URL
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const { openPath } = await import('@tauri-apps/plugin-opener');
+      const path = await invoke<string>('write_temp_html', { content: buildSrcDoc(html) });
+      await openPath(path);
+    } catch (e) {
+      console.error('[VisualCard] openInBrowser failed:', e);
+    }
   }, [html]);
 
   const onMessage = useCallback(
@@ -133,7 +136,6 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     return () => window.removeEventListener('message', onMessage);
   }, [onMessage]);
 
-  // 为给定的 doc 绑定点击事件
   const bindClicks = useCallback((doc: Document) => {
     if (isSubmitted) return;
     const SELECTOR = '[data-choice], [data-value]';
@@ -161,7 +163,6 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     try {
       const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
       if (!doc) return;
-      // 测量真实高度，上限 MAX_CARD_HEIGHT
       const measure = () => {
         const h = doc.body.scrollHeight;
         if (h > 0) setFrameHeight(Math.min(h + 8, MAX_CARD_HEIGHT));
@@ -189,7 +190,6 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
 
   useEffect(() => { setChoiceLabel(''); setFrameHeight(200); setShowOverlay(false); }, [sessionId]);
 
-  // ESC 关闭遮罩
   useEffect(() => {
     if (!showOverlay) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowOverlay(false); };
@@ -200,6 +200,34 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
   if (!html) return null;
 
   const srcDoc = buildSrcDoc(html);
+
+  // Portal 遮罩：挂到 document.body，真正覆盖整个 Tauri 窗口
+  const fullscreenPortal = showOverlay ? createPortal(
+    <div className={styles.overlay}>
+      <div className={styles.overlayHeader}>
+        <span className={styles.overlayTitle}>● VISUAL</span>
+        {isSubmitted
+          ? <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>已选择{choiceLabel ? `：${choiceLabel}` : ''}</span>
+          : pending
+            ? <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 400 }}>等待选择</span>
+            : null
+        }
+        <span style={{ flex: 1 }} />
+        <ActionIcon icon={ExternalLink} size="small" title="在浏览器中打开" onClick={() => void openInBrowser()} style={{ opacity: 0.6 }} />
+        <ActionIcon icon={Minimize2} size="small" title="关闭全屏（ESC）" onClick={() => setShowOverlay(false)} style={{ opacity: 0.6 }} />
+      </div>
+      <iframe
+        key={`overlay-${sessionId}`}
+        ref={overlayIframeRef}
+        className={styles.overlayFrame}
+        sandbox="allow-scripts allow-same-origin"
+        srcDoc={srcDoc}
+        title="Visual Companion (Fullscreen)"
+        onLoad={onOverlayIframeLoad}
+      />
+    </div>,
+    document.body
+  ) : null;
 
   return (
     <>
@@ -216,22 +244,8 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
               : null
           }
           <span className={styles.spacer} />
-          {/* 全屏遮罩按钮 */}
-          <ActionIcon
-            icon={Expand}
-            size="small"
-            title="全屏查看"
-            onClick={() => setShowOverlay(true)}
-            style={{ opacity: 0.6 }}
-          />
-          {/* 浏览器打开按钮 */}
-          <ActionIcon
-            icon={ExternalLink}
-            size="small"
-            title="在浏览器中打开"
-            onClick={openInBrowser}
-            style={{ opacity: 0.6 }}
-          />
+          <ActionIcon icon={Expand} size="small" title="全屏查看" onClick={() => setShowOverlay(true)} style={{ opacity: 0.6 }} />
+          <ActionIcon icon={ExternalLink} size="small" title="在浏览器中打开" onClick={() => void openInBrowser()} style={{ opacity: 0.6 }} />
         </div>
         <iframe
           key={sessionId}
@@ -244,28 +258,7 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
           onLoad={onIframeLoad}
         />
       </div>
-
-      {/* 全屏遮罩 */}
-      {showOverlay && (
-        <div className={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) setShowOverlay(false); }}>
-          <div className={styles.overlayHeader}>
-            <span className={styles.overlayTitle}>Visual</span>
-            <ActionIcon icon={ExternalLink} size="small" title="在浏览器中打开" onClick={openInBrowser} style={{ opacity: 0.7 }} />
-            <ActionIcon icon={Expand} size="small" title="关闭（ESC）" onClick={() => setShowOverlay(false)} style={{ opacity: 0.7 }} />
-          </div>
-          <iframe
-            key={`overlay-${sessionId}`}
-            ref={overlayIframeRef}
-            className={styles.overlayFrame}
-            sandbox="allow-scripts allow-same-origin"
-            srcDoc={srcDoc}
-            title="Visual Companion (Fullscreen)"
-            onLoad={onOverlayIframeLoad}
-          />
-        </div>
-      )}
+      {fullscreenPortal}
     </>
   );
 });
-
-
