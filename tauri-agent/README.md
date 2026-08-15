@@ -13,9 +13,10 @@ npm run tauri dev    # 桌面端（Tauri + Rust）
 ## 构建
 
 ```bash
-npm run build            # tsc && vite build
-npm run build:sidecar    # 构建 Agent sidecar 二进制
-npm run build:codegraph  # 构建 CodeGraph 二进制
+npm run build                    # 校验已打包运行时后执行 tsc && vite build
+npm run build:sidecar            # 构建 Agent sidecar 二进制
+npm run build:codebasememory     # 构建 codebase-memory 二进制
+npm run build:tencentdb-memory   # 构建当前平台的 TencentDB MemoryCore/Knowledge 运行时
 ```
 
 ## 验证

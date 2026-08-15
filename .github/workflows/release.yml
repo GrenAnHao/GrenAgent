@@ -91,6 +91,10 @@ jobs:
         working-directory: tauri-agent
         run: bun run build:codebasememory
 
+      - name: Build TencentDB Agent Memory runtime
+        working-directory: tauri-agent
+        run: bun run build:tencentdb-memory
+
       - name: Read release notes
         if: startsWith(github.ref, 'refs/tags/')
         id: notes
