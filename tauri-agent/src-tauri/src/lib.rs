@@ -2,6 +2,7 @@ mod commands;
 mod pi;
 mod security;
 mod state;
+pub mod tencentdb;
 
 use std::sync::Arc;
 
@@ -10,6 +11,7 @@ use tauri::Manager;
 use commands::shell::ShellManager;
 use pi::{PiManager, ProcessGuard};
 use state::AppStateStore;
+use tencentdb::MemoryRuntime;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,6 +32,7 @@ pub fn run() {
             app_handle.manage(commands::files::DroppedAllowlist::default());
             app_handle.manage(Arc::new(PiManager::new()));
             app_handle.manage(Arc::new(ShellManager::new()));
+            app_handle.manage(Arc::new(MemoryRuntime::new()));
 
             // OS 级孤儿兜底：主进程一旦消失（含崩溃），job 内的 pi sidecar 全被回收。
             // 创建失败不致命——降级为仅依赖 cli 侧 stdin-EOF 自杀。
@@ -45,7 +48,16 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(mgr) = window.app_handle().try_state::<Arc<PiManager>>() {
                     let mgr = mgr.inner().clone();
-                    tauri::async_runtime::block_on(async move { mgr.close_all().await });
+                    let memory_runtime = window
+                        .app_handle()
+                        .try_state::<Arc<MemoryRuntime>>()
+                        .map(|runtime| runtime.inner().clone());
+                    tauri::async_runtime::block_on(async move {
+                        mgr.close_all().await;
+                        if let Some(memory_runtime) = memory_runtime {
+                            let _ = memory_runtime.stop().await;
+                        }
+                    });
                 }
             }
         })
