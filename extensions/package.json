@@ -37,6 +37,7 @@
   "dependencies": {
     "@ast-grep/napi": "^0.43.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tencentdb-agent-memory/memory-sdk-ts-v2": "1.0.1-beta.1",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
     "tinyglobby": "^0.2.17"

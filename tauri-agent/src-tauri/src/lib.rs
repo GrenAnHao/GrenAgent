@@ -164,6 +164,11 @@ pub fn run() {
             commands::code_intel::code_intel_is_initialized,
             commands::code_intel::code_intel_file_graph,
             commands::code_intel::code_intel_rich_graph,
+            commands::tencentdb::tencentdb_get_status,
+            commands::tencentdb::tencentdb_save_connection,
+            commands::tencentdb::tencentdb_test_connection,
+            commands::tencentdb::tencentdb_start_local,
+            commands::tencentdb::tencentdb_stop_local,
             commands::files::write_temp_html,
         ])
         .run(tauri::generate_context!())

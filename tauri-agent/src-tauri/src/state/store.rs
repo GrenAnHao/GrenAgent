@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::state::AppState;
+use crate::tencentdb::MemoryConnectionConfig;
 
 /// 线程安全的 AppState 持有者 + 持久化路径。作为 Tauri managed state。
 #[derive(Clone)]
@@ -61,6 +62,14 @@ impl AppStateStore {
     /// 整体替换设置并持久化。
     pub async fn replace_settings(&self, settings: std::collections::HashMap<String, String>) {
         self.update(|st| st.replace_settings(settings)).await;
+    }
+
+    pub async fn tencentdb_config(&self) -> MemoryConnectionConfig {
+        self.inner.lock().await.tencentdb_memory.clone()
+    }
+
+    pub async fn replace_tencentdb_config(&self, config: MemoryConnectionConfig) {
+        self.update(|st| st.tencentdb_memory = config).await;
     }
 
     /// 运行时配置文件路径（注入 sidecar 供扩展 fs.watch 热更新）。

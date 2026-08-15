@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -11,6 +12,12 @@ use tokio::sync::Mutex;
 pub enum MemoryMode {
     Local,
     Remote,
+}
+
+impl Default for MemoryMode {
+    fn default() -> Self {
+        Self::Local
+    }
 }
 
 impl MemoryMode {
@@ -27,6 +34,200 @@ pub struct GatewayStatus {
     pub knowledge_endpoint: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryConnectionConfig {
+    #[serde(default)]
+    pub mode: MemoryMode,
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default = "default_service_id")]
+    pub service_id: String,
+    #[serde(default = "default_team_id")]
+    pub team_id: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default = "default_user_id")]
+    pub user_id: String,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub llm_base_url: Option<String>,
+    #[serde(default)]
+    pub llm_model: Option<String>,
+    #[serde(default)]
+    pub last_success_at: Option<String>,
+}
+
+impl Default for MemoryConnectionConfig {
+    fn default() -> Self {
+        Self {
+            mode: MemoryMode::Local,
+            endpoint: String::new(),
+            service_id: default_service_id(),
+            team_id: default_team_id(),
+            agent_id: default_agent_id(),
+            user_id: default_user_id(),
+            task_id: None,
+            llm_base_url: None,
+            llm_model: None,
+            last_success_at: None,
+        }
+    }
+}
+
+impl MemoryConnectionConfig {
+    pub fn normalized(mut self) -> Result<Self> {
+        self.service_id = required_value("serviceId", self.service_id)?;
+        self.team_id = required_value("teamId", self.team_id)?;
+        self.agent_id = required_value("agentId", self.agent_id)?;
+        self.user_id = required_value("userId", self.user_id)?;
+        self.task_id = optional_value(self.task_id);
+        self.llm_base_url = optional_value(self.llm_base_url);
+        self.llm_model = optional_value(self.llm_model);
+
+        if self
+            .task_id
+            .as_deref()
+            .is_some_and(looks_like_local_path)
+        {
+            bail!("TencentDB taskId must not be a local absolute path");
+        }
+
+        self.endpoint = self.endpoint.trim().trim_end_matches('/').to_string();
+        if self.mode == MemoryMode::Remote {
+            let url = reqwest::Url::parse(&self.endpoint)
+                .context("TencentDB remote endpoint must be a valid URL")?;
+            if !matches!(url.scheme(), "http" | "https") {
+                bail!("TencentDB remote endpoint must use HTTP or HTTPS");
+            }
+        }
+        Ok(self)
+    }
+
+    pub fn sidecar_env(&self, endpoint: &str, api_key: &str) -> HashMap<String, String> {
+        let mut env = HashMap::from([
+            ("TDAI_MEMORY_ENDPOINT".to_string(), endpoint.to_string()),
+            ("TDAI_MEMORY_API_KEY".to_string(), api_key.to_string()),
+            (
+                "TDAI_MEMORY_SERVICE_ID".to_string(),
+                self.service_id.clone(),
+            ),
+            ("TDAI_MEMORY_TEAM_ID".to_string(), self.team_id.clone()),
+            (
+                "TDAI_MEMORY_AGENT_ID".to_string(),
+                self.agent_id.clone(),
+            ),
+            ("TDAI_MEMORY_USER_ID".to_string(), self.user_id.clone()),
+        ]);
+        if let Some(task_id) = &self.task_id {
+            env.insert("TDAI_MEMORY_TASK_ID".to_string(), task_id.clone());
+        }
+        env
+    }
+}
+
+pub struct MemoryCredentialStore;
+
+impl MemoryCredentialStore {
+    const SERVICE: &'static str = "com.rxstudio.grenagent.tencentdb-memory";
+    const GATEWAY_ACCOUNT: &'static str = "gateway-api-key";
+    const LLM_ACCOUNT: &'static str = "llm-api-key";
+
+    pub fn gateway_api_key() -> Result<Option<String>> {
+        Self::read(Self::GATEWAY_ACCOUNT)
+    }
+
+    pub fn set_gateway_api_key(value: &str) -> Result<()> {
+        Self::write(Self::GATEWAY_ACCOUNT, value)
+    }
+
+    pub fn clear_gateway_api_key() -> Result<()> {
+        Self::clear(Self::GATEWAY_ACCOUNT)
+    }
+
+    pub fn llm_api_key() -> Result<Option<String>> {
+        Self::read(Self::LLM_ACCOUNT)
+    }
+
+    pub fn set_llm_api_key(value: &str) -> Result<()> {
+        Self::write(Self::LLM_ACCOUNT, value)
+    }
+
+    pub fn clear_llm_api_key() -> Result<()> {
+        Self::clear(Self::LLM_ACCOUNT)
+    }
+
+    fn entry(account: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(Self::SERVICE, account).context("failed to open OS credential store")
+    }
+
+    fn read(account: &str) -> Result<Option<String>> {
+        match Self::entry(account)?.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error).context("failed to read OS credential store"),
+        }
+    }
+
+    fn write(account: &str, value: &str) -> Result<()> {
+        let value = value.trim();
+        if value.is_empty() {
+            bail!("credential must not be empty");
+        }
+        Self::entry(account)?
+            .set_password(value)
+            .context("failed to write OS credential store")
+    }
+
+    fn clear(account: &str) -> Result<()> {
+        match Self::entry(account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error).context("failed to clear OS credential store"),
+        }
+    }
+}
+
+fn default_service_id() -> String {
+    "personal-memory".to_string()
+}
+
+fn default_team_id() -> String {
+    "personal:local".to_string()
+}
+
+fn default_agent_id() -> String {
+    "pi-personal".to_string()
+}
+
+fn default_user_id() -> String {
+    "local".to_string()
+}
+
+fn required_value(name: &str, value: String) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("TencentDB {name} must not be empty");
+    }
+    Ok(value.to_string())
+}
+
+fn optional_value(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+fn looks_like_local_path(value: &str) -> bool {
+    Path::new(value).is_absolute()
+        || value.starts_with("\\\\")
+        || value
+            .as_bytes()
+            .get(1)
+            .is_some_and(|separator| *separator == b':')
+}
+
 #[derive(Clone, Debug)]
 pub struct BundledLayout {
     root: PathBuf,
@@ -35,7 +236,10 @@ pub struct BundledLayout {
 impl BundledLayout {
     pub fn from_resource_dir(resource_dir: &Path) -> Self {
         Self {
-            root: resource_dir.join("tencentdb-memory").join(platform_dir()),
+            root: resource_dir
+                .join("binaries")
+                .join("tencentdb-memory")
+                .join(platform_dir()),
         }
     }
 
@@ -209,6 +413,45 @@ impl MemoryRuntime {
         kill_child(&mut processes.core, "MemoryCore")?;
         Ok(())
     }
+
+    pub async fn local_status(&self) -> GatewayStatus {
+        let mut processes = self.processes.lock().await;
+        let Some(running) = processes.as_mut() else {
+            return GatewayStatus {
+                mode: MemoryMode::Local,
+                state: "stopped".to_string(),
+                endpoint: String::new(),
+                knowledge_endpoint: None,
+            };
+        };
+
+        let core_running = running.core.try_wait().ok().flatten().is_none();
+        let knowledge_running = running.knowledge.try_wait().ok().flatten().is_none();
+        if core_running && knowledge_running {
+            return GatewayStatus {
+                mode: MemoryMode::Local,
+                state: "ready".to_string(),
+                endpoint: running.core_endpoint.clone(),
+                knowledge_endpoint: Some(running.knowledge_endpoint.clone()),
+            };
+        }
+
+        if core_running {
+            let _ = running.core.kill();
+        }
+        if knowledge_running {
+            let _ = running.knowledge.kill();
+        }
+        let endpoint = running.core_endpoint.clone();
+        let knowledge_endpoint = Some(running.knowledge_endpoint.clone());
+        *processes = None;
+        GatewayStatus {
+            mode: MemoryMode::Local,
+            state: "failed".to_string(),
+            endpoint,
+            knowledge_endpoint,
+        }
+    }
 }
 
 fn apply_llm_env(command: &mut Command, config: &LocalRuntimeConfig) {
@@ -292,7 +535,7 @@ fn node_relative_path() -> &'static str {
 mod tests {
     use std::path::Path;
 
-    use super::{BundledLayout, MemoryMode};
+    use super::{BundledLayout, MemoryConnectionConfig, MemoryMode};
 
     #[test]
     fn remote_mode_never_spawns_a_child() {
@@ -304,5 +547,36 @@ mod tests {
         assert!(BundledLayout::from_resource_dir(Path::new("C:/missing"))
             .core_entry()
             .is_err());
+    }
+
+    #[test]
+    fn remote_config_is_normalized_and_builds_minimal_sidecar_env() {
+        let config = MemoryConnectionConfig {
+            mode: MemoryMode::Remote,
+            endpoint: " https://memory.example.com/ ".to_string(),
+            service_id: " personal-memory ".to_string(),
+            team_id: " personal:alice ".to_string(),
+            agent_id: " coding ".to_string(),
+            user_id: " alice ".to_string(),
+            task_id: Some(" project-1 ".to_string()),
+            ..MemoryConnectionConfig::default()
+        }
+        .normalized()
+        .unwrap();
+
+        assert_eq!(config.endpoint, "https://memory.example.com");
+        let env = config.sidecar_env(&config.endpoint, "secret");
+        assert_eq!(env.len(), 7);
+        assert_eq!(env.get("TDAI_MEMORY_TEAM_ID").map(String::as_str), Some("personal:alice"));
+        assert!(!env.contains_key("TDAI_LLM_API_KEY"));
+    }
+
+    #[test]
+    fn local_absolute_task_id_is_rejected() {
+        let config = MemoryConnectionConfig {
+            task_id: Some("C:\\workspace\\project".to_string()),
+            ..MemoryConnectionConfig::default()
+        };
+        assert!(config.normalized().is_err());
     }
 }

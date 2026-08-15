@@ -33,7 +33,7 @@ async-trait = "0.1"
 base64 = "0.22"
 portable-pty = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 # 仅启用 deflate（最常见的 skill zip 压缩），关闭 bzip2/zstd 以免引入 C 依赖、构建更稳。
 zip = { version = "2", default-features = false, features = ["deflate"] }
@@ -45,6 +45,13 @@ windows = { version = "0.58", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
@@ -52,4 +59,3 @@ tokio = { version = "1", features = ["full", "test-util"] }
 # Declare src-tauri as its own workspace root so tauri-build / cargo_toml does not
 # walk up into parent directories (avoids PermissionDenied on restricted/OneDrive paths).
 [workspace]
-

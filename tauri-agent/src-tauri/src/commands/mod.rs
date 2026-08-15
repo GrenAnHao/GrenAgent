@@ -12,6 +12,7 @@ pub mod shell;
 pub mod skills;
 pub mod subagent;
 pub mod terminal;
+pub mod tencentdb;
 pub mod ui_history;
 pub mod usage;
 pub mod workspaces;

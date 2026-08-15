@@ -103,7 +103,7 @@ git commit -m "feat(memory): package local TencentDB gateway"
 - 创建：\`extensions/tencentdb-memory/context.test.ts\`、\`capture.test.ts\`
 - 修改：\`tauri-agent/src-tauri/src/commands/mod.rs\`、\`tauri-agent/src-tauri/src/state/store.rs\`、\`extensions/index.ts\`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 \`\`\`ts
 it('injects L3 into the system prompt and L1 as one bounded custom message', async () => {
@@ -117,13 +117,13 @@ it('captures only messages after the cursor', () => {
 });
 \`\`\`
 
-- [ ] **步骤 2：运行失败测试**
+- [x] **步骤 2：运行失败测试**
 
 运行：\`bunx vitest run ../extensions/tencentdb-memory/context.test.ts ../extensions/tencentdb-memory/capture.test.ts\`
 
 预期：FAIL，helper 尚未定义。
 
-- [ ] **步骤 3：实现连接和 hook**
+- [x] **步骤 3：实现连接和 hook**
 
 Rust command 只返回脱敏 DTO：
 
@@ -139,7 +139,7 @@ export type TencentdbStatus = {
 
 凭据仅由 Tauri 后端安全存储。SDK client 每个调用携带稳定 \`teamId\`、\`agentId\`、\`userId\`，写入以 \`ctx.sessionManager.getSessionId()\` 作为非空 \`sessionId\`。在 \`before_agent_start\` 并行调用 \`searchAtomic\`、\`readCore\`、\`listScenarios\`；在 \`agent_end\` 以游标加内容指纹后台调用 \`addConversation\`，不得上传完整历史。注册 \`tdai_memory_search\` 与 \`tdai_conversation_search\`。
 
-- [ ] **步骤 4：验证**
+- [x] **步骤 4：验证**
 
 运行：\`bunx vitest run ../extensions/tencentdb-memory/context.test.ts ../extensions/tencentdb-memory/capture.test.ts\`
 
@@ -149,7 +149,7 @@ export type TencentdbStatus = {
 
 预期：PASS，extension 已被注册。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 \`\`\`powershell
 git add tauri-agent/src-tauri/src/commands/tencentdb.rs tauri-agent/src/lib/tencentdb.ts extensions/tencentdb-memory extensions/index.ts
