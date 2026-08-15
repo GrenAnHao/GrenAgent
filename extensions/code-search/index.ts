@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
       }
       try {
         const n = await reindex(ctx, cfg, ctx.signal ?? undefined);
-        ctx.ui.notify(`已索引/更新 ${n} 个文件。`, "success");
+        ctx.ui.notify(`已索引/更新 ${n} 个文件。`, "info");
       } catch (e) {
         ctx.ui.notify(`索引失败：${e instanceof Error ? e.message : String(e)}`, "error");
       }

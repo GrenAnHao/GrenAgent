@@ -189,7 +189,7 @@ export default function (pi: ExtensionAPI) {
         const abs = isAbsolute(p) ? p : resolve(ctx.cwd, p);
         const config = await resolveEmbeddingConfig(ctx.modelRegistry);
         const chunks = await kb.addDocument(p, readFileSync(abs, "utf8"), config);
-        ctx.ui.notify(`Indexed ${p} into ${chunks} chunk(s).`, "success");
+        ctx.ui.notify(`Indexed ${p} into ${chunks} chunk(s).`, "info");
         return;
       }
 

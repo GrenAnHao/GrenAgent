@@ -352,7 +352,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const ops = await smartSave({ ...ctx, signal: ctx.signal ?? undefined }, text, "project");
-        ctx.ui.notify(`Saved (project): ${ops.map((o) => o.op).join(",")}`, "success");
+        ctx.ui.notify(`Saved (project): ${ops.map((o) => o.op).join(",")}`, "info");
         return;
       }
 
@@ -379,7 +379,7 @@ export default function (pi: ExtensionAPI) {
           (await global.update(id, fields, config, "manual edit", null, ctx.signal ?? undefined));
         ctx.ui.notify(
           r ? `Updated memory ${id} (v${r.version}).` : `No memory with id ${id}.`,
-          r ? "success" : "warning",
+          r ? "info" : "warning",
         );
         return;
       }
@@ -398,7 +398,7 @@ export default function (pi: ExtensionAPI) {
         const config = await resolveEmbeddingConfig(ctx.modelRegistry);
         await global.save(m.text, m.category ?? null, config);
         project.forget(id);
-        ctx.ui.notify(`Promoted ${id} to global memory.`, "success");
+        ctx.ui.notify(`Promoted ${id} to global memory.`, "info");
         return;
       }
 
@@ -427,13 +427,15 @@ export default function (pi: ExtensionAPI) {
         }
         // 用 remove（记 DELETE 历史）而非 forget（硬删不记录）：让面板删除可在历史里回滚恢复。
         const ok = project.remove(id, "forget") || global.remove(id, "forget");
-        ctx.ui.notify(ok ? `Forgot memory ${id}.` : `No memory with id ${id}.`, ok ? "success" : "warning");
+        ctx.ui.notify(ok ? `Forgot memory ${id}.` : `No memory with id ${id}.`, ok ? "info" : "warning");
         return;
       }
 
       if (sub === "history") {
         const id = parts[1];
-        const rows = id ? project.history(id).concat(global.history(id)) : project.history(20).concat(global.history(20));
+        const rows = id
+          ? project.history(id).concat(global.history(id))
+          : project.history(undefined, 20).concat(global.history(undefined, 20));
         const lines = rows
           .sort((a, b) => b.createdAt - a.createdAt)
           .slice(0, 30)
@@ -472,7 +474,7 @@ export default function (pi: ExtensionAPI) {
           r
             ? `Rolled back to history #${hid} (memory ${r.id}).`
             : `Nothing to roll back for #${hid} (already undone, or memory was cleared).`,
-          r ? "success" : "warning",
+          r ? "info" : "warning",
         );
         return;
       }

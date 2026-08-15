@@ -1,6 +1,6 @@
 // web-search: open-webSearch 能力内置版 — 多引擎联网搜索（web_search / web_search_multi）+ 站点/文章抓取工具。
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isSafeUrl } from "../web-fetch/html.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
@@ -281,7 +281,7 @@ export default function (pi: ExtensionAPI) {
       maxResults: Type.Optional(Type.Number({ description: "Max results (default 5, max 10)" })),
       fetchTop: Type.Optional(Type.Number({ description: "Also fetch the body of the top N results as markdown (default 0, max 3)" })),
     }),
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
       const choice = resolveProvider(getAllConfig());
       if (!choice.ok) {
         return {
@@ -293,7 +293,7 @@ export default function (pi: ExtensionAPI) {
       const query = params.query.trim();
       const maxResults = Math.max(1, Math.min(params.maxResults ?? 5, 10));
       let parsed: ParsedSearch;
-      let usedEngine = choice.provider;
+      let usedEngine: string = choice.provider;
       try {
         if (choice.provider === "brave") {
           parsed = parseBrave(await braveSearch(choice.apiKey, query, maxResults, signal ?? undefined));
@@ -385,7 +385,7 @@ export default function (pi: ExtensionAPI) {
       description,
       promptSnippet: description,
       parameters: Type.Object({ url: Type.String({ description: "Article URL" }) }),
-      async execute(_toolCallId, params, signal) {
+      async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
         const url = params.url.trim();
         if (!isSafeUrl(url).ok || !validate(url)) {
           return {
@@ -440,7 +440,7 @@ export default function (pi: ExtensionAPI) {
     description: "Fetch README content from a GitHub repository URL",
     promptSnippet: "Fetch GitHub repo README.",
     parameters: Type.Object({ url: Type.String({ description: "GitHub repository URL" }) }),
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
       const url = params.url.trim();
       if (!extractGithubRepo(url)) {
         return {
@@ -471,7 +471,7 @@ export default function (pi: ExtensionAPI) {
       url: Type.String({ description: "Public HTTP(S) URL" }),
       maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 200000)" })),
     }),
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
       const url = params.url.trim();
       const safe = isSafeUrl(url);
       if (!safe.ok) {

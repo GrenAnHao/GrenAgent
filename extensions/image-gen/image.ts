@@ -90,7 +90,7 @@ export async function editImage(
     form.append("size", config.size);
     form.append("n", "1");
     for (const ref of references) {
-      form.append("image[]", new Blob([ref.data], { type: ref.type }), ref.name);
+      form.append("image[]", new Blob([Uint8Array.from(ref.data).buffer], { type: ref.type }), ref.name);
     }
     res = await fetch(url, {
       method: "POST",

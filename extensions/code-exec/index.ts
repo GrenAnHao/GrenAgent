@@ -16,6 +16,10 @@ import { formatResult } from "./protocol.js";
 const RUNNER_PATH = join(dirname(fileURLToPath(import.meta.url)), "runner.py");
 const JS_RUNNER_PATH = join(dirname(fileURLToPath(import.meta.url)), "runner.mjs");
 
+function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }], details: undefined };
+}
+
 export default function (pi: ExtensionAPI) {
   console.error("[code-exec] extension loaded");
 
@@ -51,14 +55,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const info = resolvePython();
       if (!info) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "未找到 Python（已尝试 py -3 / python3 / python）。请安装 Python，或用 PI_PYTHON 指定解释器路径。",
-            },
-          ],
-        };
+        return textResult("未找到 Python（已尝试 py -3 / python3 / python）。请安装 Python，或用 PI_PYTHON 指定解释器路径。");
       }
       const kernel = kernelFor(ctx.cwd, info);
       try {
@@ -68,7 +65,7 @@ export default function (pi: ExtensionAPI) {
         });
         return { content: [{ type: "text", text: formatResult(result) }], details: { ok: result.ok } };
       } catch (err) {
-        return { content: [{ type: "text", text: `执行失败：${(err as Error).message}` }] };
+        return textResult(`执行失败：${(err as Error).message}`);
       }
     },
   });
@@ -80,12 +77,12 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const kernel = kernels.get(ctx.cwd);
-      if (!kernel) return { content: [{ type: "text", text: "内核尚未启动，无需重置。" }] };
+      if (!kernel) return textResult("内核尚未启动，无需重置。");
       try {
         await kernel.reset();
-        return { content: [{ type: "text", text: "Python 内核已重置（变量与导入已清空）。" }] };
+        return textResult("Python 内核已重置（变量与导入已清空）。");
       } catch (err) {
-        return { content: [{ type: "text", text: `重置失败：${(err as Error).message}` }] };
+        return textResult(`重置失败：${(err as Error).message}`);
       }
     },
   });
@@ -120,7 +117,7 @@ export default function (pi: ExtensionAPI) {
         });
         return { content: [{ type: "text", text: formatResult(result) }], details: { ok: result.ok } };
       } catch (err) {
-        return { content: [{ type: "text", text: `执行失败：${(err as Error).message}` }] };
+        return textResult(`执行失败：${(err as Error).message}`);
       }
     },
   });
@@ -132,12 +129,12 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const kernel = jsKernels.get(ctx.cwd);
-      if (!kernel) return { content: [{ type: "text", text: "JS 内核尚未启动，无需重置。" }] };
+      if (!kernel) return textResult("JS 内核尚未启动，无需重置。");
       try {
         await kernel.reset();
-        return { content: [{ type: "text", text: "JS 内核已重置（变量已清空）。" }] };
+        return textResult("JS 内核已重置（变量已清空）。");
       } catch (err) {
-        return { content: [{ type: "text", text: `重置失败：${(err as Error).message}` }] };
+        return textResult(`重置失败：${(err as Error).message}`);
       }
     },
   });

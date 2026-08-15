@@ -32,6 +32,7 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         return {
           content: [{ type: "text", text: `ast_grep 不可用：${(err as Error).message}（可能缺 @ast-grep/napi prebuilt）` }],
+          details: undefined,
         };
       }
     },
@@ -74,6 +75,7 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         return {
           content: [{ type: "text", text: `ast_edit 不可用：${(err as Error).message}（可能缺 @ast-grep/napi prebuilt）` }],
+          details: undefined,
         };
       }
     },

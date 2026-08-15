@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- Node.js >= 22.5（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.5.0`）
+- Node.js >= 22.19（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.19.0`）
 - Rust 工具链：构建桌面端（Tauri 2）时需要，参见 Tauri 官方环境要求
 - Bun：`tauri-agent/` 使用 Bun 管理依赖；`tauri.conf.json` 的 `beforeDevCommand` / `beforeBuildCommand` 为 `bun run dev` / `bun run build`，因此 `bun run tauri dev` 会在 Tauri 构建链里自动调用 Bun
 

@@ -56,28 +56,21 @@ export async function runOneshot(): Promise<void> {
   }
   const { req } = parsed;
   try {
-    const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
-    const { completeSimple, streamSimple } = await import("@earendil-works/pi-ai/compat");
-    const registry = ModelRegistry.create(AuthStorage.create());
-    const model = registry.find(req.provider, req.modelId);
+    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+    const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const model = modelRuntime.getModel(req.provider, req.modelId);
     if (!model) {
       emit({ ok: false, error: `model not found: ${req.provider}/${req.modelId}` });
-      return;
-    }
-    const auth = await registry.getApiKeyAndHeaders(model);
-    if (!auth.ok) {
-      emit({ ok: false, error: `auth failed: ${auth.error}` });
       return;
     }
     const context = {
       systemPrompt: req.system,
       messages: [{ role: "user", content: req.user, timestamp: Date.now() }],
-    } as Parameters<typeof completeSimple>[1];
-    const options = { apiKey: auth.apiKey, headers: auth.headers } as never;
+    } as Parameters<typeof modelRuntime.completeSimple>[1];
 
     if (req.stream) {
       // 精简 JSONL：仅吐 delta + 末尾 done/error(usage)，避免每事件夹带整个 partial 消息。
-      for await (const ev of streamSimple(model, context, options)) {
+      for await (const ev of modelRuntime.streamSimple(model, context)) {
         if (ev.type === "text_delta" && ev.delta) {
           emit({ type: "delta", text: ev.delta });
         } else if (ev.type === "done") {
@@ -88,7 +81,7 @@ export async function runOneshot(): Promise<void> {
       }
       return;
     }
-    const msg = await completeSimple(model, context, options);
+    const msg = await modelRuntime.completeSimple(model, context);
     emit(formatNonStream(msg as AssistantLike));
   } catch (e) {
     emit({ ok: false, error: e instanceof Error ? e.message : String(e) });

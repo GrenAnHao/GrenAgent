@@ -85,14 +85,31 @@ describe("fable-behavior extension", () => {
   });
 
   it("registers fable_behavior_ref by default", () => {
-    const tools: string[] = [];
+    const tools: Array<{ name: string; execute?: (_id: string, params: { topic: string }) => Promise<unknown> }> = [];
     const pi = {
       on: () => {},
-      registerTool: (t: { name: string }) => tools.push(t.name),
+      registerTool: (t: { name: string; execute?: (_id: string, params: { topic: string }) => Promise<unknown> }) => tools.push(t),
       registerCommand: () => {},
     } as never;
     fableBehavior(pi);
-    expect(tools).toContain("fable_behavior_ref");
+    expect(tools.map((tool) => tool.name)).toContain("fable_behavior_ref");
+  });
+
+  it("returns details for an unknown reference topic without marking it as an error", async () => {
+    let refTool: { execute?: (_id: string, params: { topic: string }) => Promise<unknown> } | undefined;
+    const pi = {
+      on: () => {},
+      registerTool: (tool: { name: string; execute?: (_id: string, params: { topic: string }) => Promise<unknown> }) => {
+        if (tool.name === "fable_behavior_ref") refTool = tool;
+      },
+      registerCommand: () => {},
+    } as never;
+    fableBehavior(pi);
+
+    await expect(refTool?.execute?.("id", { topic: "unknown" })).resolves.toEqual({
+      content: [{ type: "text", text: "Unknown topic: unknown" }],
+      details: undefined,
+    });
   });
 
   it("FABLE_BEHAVIOR_TIER3_TOOL=0 skips ref tool", () => {

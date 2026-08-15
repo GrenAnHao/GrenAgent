@@ -144,7 +144,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       applyMode("agent", ctx, { silent: true });
-      ctx.ui.notify("已自动切换到 Agent 模式，开始实施。", "success");
+      ctx.ui.notify("已自动切换到 Agent 模式，开始实施。", "info");
       const deliverMessage = args.trim() || "设计已确认，现在开始实施。请按已讨论的方案动手。";
       pi.sendMessage(
         { customType: "brainstorm-deliver", content: deliverMessage, display: true },
@@ -238,6 +238,7 @@ export default function (pi: ExtensionAPI) {
       if (!data) {
         return {
           content: [{ type: "text", text: "ask_user：未提供有效问题（每个问题至少要有 question 文本）。" }],
+          details: undefined,
         };
       }
 
@@ -248,9 +249,9 @@ export default function (pi: ExtensionAPI) {
         const payload = JSON.stringify({ __askUser: 1, data });
         const answer = await ctx.ui.input(payload, undefined, { signal });
         if (typeof answer === "string" && answer.trim()) {
-          return { content: [{ type: "text", text: answer }] };
+          return { content: [{ type: "text", text: answer }], details: undefined };
         }
-        return { content: [{ type: "text", text: "用户取消了 ask_user 选择（未作答）。" }] };
+        return { content: [{ type: "text", text: "用户取消了 ask_user 选择（未作答）。" }], details: undefined };
       }
 
       // 非交互模式（print / 无对话框 UI）：退回到对话流卡片（非阻塞），并提示模型停下等待。
@@ -267,6 +268,7 @@ export default function (pi: ExtensionAPI) {
               "请停止当前回合，等待用户在卡片上选择并回复后再继续——不要替用户作答。",
           },
         ],
+        details: undefined,
       };
     },
   });

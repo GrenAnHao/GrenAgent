@@ -42,11 +42,11 @@ export default function (pi: ExtensionAPI) {
       try {
         content = readFileSync(abs, "utf8");
       } catch (err) {
-        return { content: [{ type: "text", text: `读取失败：${(err as Error).message}` }] };
+        return { content: [{ type: "text", text: `读取失败：${(err as Error).message}` }], details: undefined };
       }
       snapshots.set(abs, { content, tag: computeTag(abs, content) });
       const text = renderRead(rel, abs, content, { offset: params.offset, limit: params.limit });
-      return { content: [{ type: "text", text }] };
+      return { content: [{ type: "text", text }], details: undefined };
     },
   });
 
@@ -60,7 +60,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const parsed = parsePatch(params.patch ?? "");
       if (parsed.error) {
-        return { content: [{ type: "text", text: `补丁解析失败：${parsed.error}` }] };
+        return { content: [{ type: "text", text: `补丁解析失败：${parsed.error}` }], details: undefined };
       }
       const applied: string[] = [];
       const rejected: string[] = [];

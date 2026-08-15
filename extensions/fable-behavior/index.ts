@@ -38,10 +38,10 @@ export default function (pi: ExtensionAPI) {
         if (!text) {
           return {
             content: [{ type: "text", text: `Unknown topic: ${params.topic}` }],
-            isError: true,
+            details: undefined,
           };
         }
-        return { content: [{ type: "text", text }] };
+        return { content: [{ type: "text", text }], details: undefined };
       },
     });
   }

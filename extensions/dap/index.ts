@@ -44,6 +44,10 @@ function formatScopes(body: unknown): string {
   return scopes.map((s) => `${s.name} (ref=${s.variablesReference})`).join("\n");
 }
 
+function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }], details: undefined };
+}
+
 export default function (pi: ExtensionAPI) {
   console.error("[dap] extension loaded");
 
@@ -71,9 +75,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const spec = resolveAdapter();
       if (!spec) {
-        return {
-          content: [{ type: "text", text: "未找到 Python 调试适配器。请先 `pip install debugpy`（一期仅支持 Python）。" }],
-        };
+        return textResult("未找到 Python 调试适配器。请先 `pip install debugpy`（一期仅支持 Python）。");
       }
       const existing = sessions.get(ctx.cwd);
       if (existing) existing.dispose();
@@ -83,9 +85,9 @@ export default function (pi: ExtensionAPI) {
       try {
         const r = await client.launch(program, params.args ?? [], params.stopOnEntry ?? false);
         const out = client.drainOutput();
-        return { content: [{ type: "text", text: `${formatStop(r)}${out ? `\n--- 输出 ---\n${out}` : ""}` }] };
+        return textResult(`${formatStop(r)}${out ? `\n--- 输出 ---\n${out}` : ""}`);
       } catch (err) {
-        return { content: [{ type: "text", text: `启动失败：${(err as Error).message}` }] };
+        return textResult(`启动失败：${(err as Error).message}`);
       }
     },
   });
@@ -100,13 +102,13 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+      if (!client) return textResult("无调试会话，请先 dap_launch。");
       const path = isAbsolute(params.path ?? "") ? params.path : resolve(ctx.cwd, params.path ?? "");
       try {
         await client.setBreakpoints(path, params.lines ?? []);
-        return { content: [{ type: "text", text: `已设置 ${(params.lines ?? []).length} 个断点：${params.path}` }] };
+        return textResult(`已设置 ${(params.lines ?? []).length} 个断点：${params.path}`);
       } catch (err) {
-        return { content: [{ type: "text", text: `设置断点失败：${(err as Error).message}` }] };
+        return textResult(`设置断点失败：${(err as Error).message}`);
       }
     },
   });
@@ -119,13 +121,13 @@ export default function (pi: ExtensionAPI) {
       parameters: Type.Object({}),
       async execute(_id, _params, _signal, _onUpdate, ctx) {
         const client = sessionFor(ctx.cwd);
-        if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+        if (!client) return textResult("无调试会话，请先 dap_launch。");
         try {
           const r = await run(client);
           const out = client.drainOutput();
-          return { content: [{ type: "text", text: `${formatStop(r)}${out ? `\n--- 输出 ---\n${out}` : ""}` }] };
+          return textResult(`${formatStop(r)}${out ? `\n--- 输出 ---\n${out}` : ""}`);
         } catch (err) {
-          return { content: [{ type: "text", text: `操作失败：${(err as Error).message}` }] };
+          return textResult(`操作失败：${(err as Error).message}`);
         }
       },
     });
@@ -142,11 +144,11 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+      if (!client) return textResult("无调试会话，请先 dap_launch。");
       try {
-        return { content: [{ type: "text", text: formatStack(await client.stackTrace()) }] };
+        return textResult(formatStack(await client.stackTrace()));
       } catch (err) {
-        return { content: [{ type: "text", text: `获取调用栈失败：${(err as Error).message}` }] };
+        return textResult(`获取调用栈失败：${(err as Error).message}`);
       }
     },
   });
@@ -158,11 +160,11 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ frameId: Type.Number({ description: "栈帧 id（来自 dap_stack_trace）" }) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+      if (!client) return textResult("无调试会话，请先 dap_launch。");
       try {
-        return { content: [{ type: "text", text: formatScopes(await client.scopes(params.frameId ?? 0)) }] };
+        return textResult(formatScopes(await client.scopes(params.frameId ?? 0)));
       } catch (err) {
-        return { content: [{ type: "text", text: `获取作用域失败：${(err as Error).message}` }] };
+        return textResult(`获取作用域失败：${(err as Error).message}`);
       }
     },
   });
@@ -176,11 +178,11 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+      if (!client) return textResult("无调试会话，请先 dap_launch。");
       try {
-        return { content: [{ type: "text", text: formatVariables(await client.variables(params.variablesReference ?? 0)) }] };
+        return textResult(formatVariables(await client.variables(params.variablesReference ?? 0)));
       } catch (err) {
-        return { content: [{ type: "text", text: `获取变量失败：${(err as Error).message}` }] };
+        return textResult(`获取变量失败：${(err as Error).message}`);
       }
     },
   });
@@ -195,15 +197,15 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }] };
+      if (!client) return textResult("无调试会话，请先 dap_launch。");
       try {
         const body = (await client.evaluate(params.expression ?? "", params.frameId)) as {
           result?: string;
           type?: string;
         };
-        return { content: [{ type: "text", text: `${body?.result ?? "(无返回)"}${body?.type ? ` [${body.type}]` : ""}` }] };
+        return textResult(`${body?.result ?? "(无返回)"}${body?.type ? ` [${body.type}]` : ""}`);
       } catch (err) {
-        return { content: [{ type: "text", text: `求值失败：${(err as Error).message}` }] };
+        return textResult(`求值失败：${(err as Error).message}`);
       }
     },
   });
@@ -215,10 +217,10 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
-      if (!client) return { content: [{ type: "text", text: "无调试会话。" }] };
+      if (!client) return textResult("无调试会话。");
       await client.terminate();
       sessions.delete(ctx.cwd);
-      return { content: [{ type: "text", text: "调试会话已结束。" }] };
+      return textResult("调试会话已结束。");
     },
   });
 

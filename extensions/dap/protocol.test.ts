@@ -1,6 +1,7 @@
 import type { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { encodeFrame } from "../_shared/jsonrpc-stdio.js";
+import dap from "./index.js";
 import { DapConnection } from "./protocol.js";
 
 function mockStdin() {
@@ -60,5 +61,42 @@ describe("DapConnection", () => {
     const p = conn.request("continue");
     conn.rejectAll(new Error("exited"));
     await expect(p).rejects.toThrow("exited");
+  });
+});
+
+describe("dap extension", () => {
+  it("returns a text-only result for stack trace without a debug session", async () => {
+    const tools: Array<{
+      name: string;
+      execute: (
+        ...args: [
+          toolCallId: string,
+          params: Record<string, never>,
+          signal: AbortSignal | undefined,
+          onUpdate: undefined,
+          ctx: { cwd: string },
+        ]
+      ) => Promise<unknown>;
+    }> = [];
+    const pi = {
+      registerTool: (tool: (typeof tools)[number]) => {
+        tools.push(tool);
+      },
+      on: () => {},
+    };
+    dap(pi as unknown as Parameters<typeof dap>[0]);
+
+    const result = await tools.find((tool) => tool.name === "dap_stack_trace")!.execute(
+      "call",
+      {},
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+
+    expect(result).toEqual({
+      content: [{ type: "text", text: "无调试会话，请先 dap_launch。" }],
+      details: undefined,
+    });
   });
 });

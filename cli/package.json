@@ -10,7 +10,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "node --import tsx src/main.ts --mode rpc",
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.43.0",
-    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@earendil-works/pi-coding-agent": "^0.84.2",
     "typebox": "*"
   },
   "devDependencies": {

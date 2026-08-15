@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import type { spawnPiAgent as SpawnPiAgent } from "../multi-agent/runner.js";
 
 const { spawnPiAgent } = vi.hoisted(() => ({
-  spawnPiAgent: vi.fn(async () => ({ ok: true, output: "consolidated 3 facts", exitCode: 0, transcript: "" })),
+  spawnPiAgent: vi.fn<typeof SpawnPiAgent>(async () => ({ ok: true, output: "consolidated 3 facts", exitCode: 0, transcript: "" })),
 }));
 
 vi.mock("../multi-agent/runner.js", () => ({ spawnPiAgent }));
@@ -32,8 +33,7 @@ describe("startEvolveJob", () => {
     );
     expect(id).toMatch(/^sa-/);
     expect(spawnPiAgent).toHaveBeenCalledTimes(1);
-    const env = spawnPiAgent.mock.calls[0][2].env as Record<string, string>;
-    expect(env.SELF_EVOLVE_CHILD).toBe("1");
+    expect(spawnPiAgent.mock.calls[0]?.[2]?.env?.SELF_EVOLVE_CHILD).toBe("1");
     await waitEvolveJob(id, dir);
     expect(done).toHaveBeenCalledWith(expect.objectContaining({ ok: true, id }));
     expect(reg.get(id)?.status).toBe("done");

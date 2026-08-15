@@ -29,7 +29,7 @@ export interface McpSnapshot {
 /** 管理器需要的最小 MCP 客户端能力（真实 SDK Client 结构兼容）。 */
 export interface McpClient {
   listTools(): Promise<{ tools: McpToolDef[] }>;
-  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{ content: unknown }>;
+  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{ content?: unknown }>;
   close(): Promise<void>;
 }
 
@@ -74,7 +74,10 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
   }
   return {
     listTools: () => client.listTools(),
-    callTool: (args) => client.callTool(args),
+    callTool: async (args) => {
+      const result = await client.callTool(args);
+      return { content: "content" in result ? result.content : undefined };
+    },
     close: () => client.close(),
   };
 }

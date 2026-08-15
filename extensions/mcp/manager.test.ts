@@ -8,7 +8,7 @@ function fakeClient(
 ): McpClient {
   return {
     listTools: async () => ({ tools }),
-    callTool: async () => callResult as { content: unknown },
+    callTool: async () => callResult as { content?: unknown },
     close: async () => {},
   };
 }
@@ -72,6 +72,14 @@ describe("createManager", () => {
     await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
     expect(await mgr.callTool("a", "alpha", {})).toEqual({ text: "hi" });
     await expect(mgr.callTool("nope", "x", {})).rejects.toThrow(/not connected/);
+  });
+
+  it("returns the fallback text when a tool result omits content", async () => {
+    const connect = async () => fakeClient([{ name: "alpha" }], {});
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    expect(await mgr.callTool("a", "alpha", {})).toEqual({ text: "(no output)" });
   });
 
   it("subscribe delivers snapshots and unsub stops them", async () => {

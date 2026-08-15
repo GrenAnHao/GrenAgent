@@ -40,9 +40,9 @@ export default function (pi: ExtensionAPI) {
       try {
         const args = buildGhArgs(params.action, params);
         const raw = await runGh(args, ctx.cwd, signal ?? undefined);
-        return { content: [{ type: "text", text: formatResult(params.action, raw) }] };
+        return { content: [{ type: "text", text: formatResult(params.action, raw) }], details: undefined };
       } catch (err) {
-        return { content: [{ type: "text", text: `github 失败：${(err as Error).message}` }] };
+        return { content: [{ type: "text", text: `github 失败：${(err as Error).message}` }], details: undefined };
       }
     },
   });

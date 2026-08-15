@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
       async execute(_id, params, _signal, _onUpdate, ctx) {
         const abs = absOf(params.path ?? "", ctx.cwd);
         const { client, error } = clientFor(abs, ctx.cwd);
-        if (error || !client) return { content: [{ type: "text", text: error ?? "无可用语言服务器" }] };
+        if (error || !client) return { content: [{ type: "text", text: error ?? "无可用语言服务器" }], details: undefined };
         try {
           const text = await run(
             client,
@@ -127,9 +127,9 @@ export default function (pi: ExtensionAPI) {
             (params as { column?: number }).column ?? 1,
             ctx.cwd,
           );
-          return { content: [{ type: "text", text }] };
+          return { content: [{ type: "text", text }], details: undefined };
         } catch (err) {
-          return { content: [{ type: "text", text: `LSP 调用失败：${(err as Error).message}` }] };
+          return { content: [{ type: "text", text: `LSP 调用失败：${(err as Error).message}` }], details: undefined };
         }
       },
     });

@@ -36,8 +36,9 @@ export function collectModels(registry: RegistryLike): ModelRow[] {
 
 export async function runModelProbe(): Promise<void> {
   try {
-    const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
-    const registry = ModelRegistry.create(AuthStorage.create()) as unknown as RegistryLike;
+    const { ModelRuntime, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
+    const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const registry = new ModelRegistry(modelRuntime) as unknown as RegistryLike;
     process.stdout.write(`${JSON.stringify({ ok: true, models: collectModels(registry) })}\n`);
   } catch (e) {
     process.stdout.write(
