@@ -23,6 +23,10 @@ const autoInjectTopK = () => Number(getConfig("KB_AUTO_TOPK") ?? "3") || 3;
 const AUTO_INJECT_MAX_CHARS = 6000;
 
 export default function (pi: ExtensionAPI) {
+  // Keep the legacy backend on disk for rollback, but stop using it after a
+  // verified TencentDB migration.
+  if (getConfig("TDAI_LEGACY_CUTOVER") === "1") return;
+
   let store: KnowledgeStore | undefined;
   let storePath = "";
 

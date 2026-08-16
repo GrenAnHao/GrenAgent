@@ -36,6 +36,10 @@ const memoryModel = () => getConfig("MEMORY_MODEL");
 type ScopedHit = MemoryHit & { scope: "project" | "global" };
 
 export default function (pi: ExtensionAPI) {
+  // Keep the legacy backend on disk for rollback, but stop using it after a
+  // verified TencentDB migration.
+  if (getConfig("TDAI_LEGACY_CUTOVER") === "1") return;
+
   let projectStore: MemoryStore | undefined;
   let globalStore: MemoryStore | undefined;
   let projectPath = "";

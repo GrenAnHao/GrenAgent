@@ -45,10 +45,10 @@ taskId:    可选；使用 Git remote URL 或项目 UUID，不能使用本机绝
 
 | 现有能力 | 第一阶段处理 | 替代能力 |
 | --- | --- | --- |
-| `long-term-memory` | 移除 | `tencentdb-memory` Pi extension，通过 SDK 操作 L0--L3 |
-| `knowledge-rag` | 移除 | TencentDB Wiki 与 CodeGraph |
-| `codebase-memory-mcp` | 移除 | TencentDB MemoryKnowledge MCP |
-| 本地记忆工具 | 移除或替换 | TencentDB L1/L0 查询工具 |
+| `long-term-memory` | 保留实现，验证后按 workspace 停用 | `tencentdb-memory` Pi extension，通过 SDK 操作 L0--L3 |
+| `knowledge-rag` | 保留实现，验证后按 workspace 停用 | TencentDB Wiki 与 CodeGraph |
+| `codebase-memory-mcp` | 保留资源，验证后按 workspace 停止注入 | TencentDB MemoryKnowledge MCP |
+| 本地记忆工具 | 保留以便回滚，cutover 后不再注册 | TencentDB L1/L0 查询工具 |
 | 本地 Pi Skills | 受控缓存 | TencentDB Skill 同步出的 Pi `SKILL.md` 与资源 |
 
 新的 `tencentdb-memory` extension 使用 Pi 生命周期：
@@ -90,7 +90,7 @@ Wiki 和 CodeGraph 经现有 MCP 扩展连接 TencentDB MemoryKnowledge stdio MC
 
 | 现有数据 | 目标 | 迁移方式 |
 | --- | --- | --- |
-| 项目/全局 `long-term-memory` SQLite | Chat Memory L1 | 导入为带来源标记的记忆，先给出预览和数量统计 |
+| 项目/全局 `long-term-memory` SQLite | Chat Memory L1 | 公共 `atomic/update` 不能创建旧 L1，标记为需人工处理，不伪造导入成功 |
 | Pi 会话 JSONL | Chat Memory L0 | 按用户选择批量导入，由 TencentDB 后台提炼 L1--L3 |
 | 本地 `SKILL.md` 与资源 | TencentDB Skill | 导入为个人 Skill，保留版本和资源清单 |
 | `knowledge-rag` 文档来源 | Wiki | 重新导入原始文档并重建 |
@@ -102,15 +102,24 @@ Wiki 和 CodeGraph 经现有 MCP 扩展连接 TencentDB MemoryKnowledge stdio MC
 1. 扫描：只读发现来源、数量、体积和缺失的原始文件。
 2. 预览：选择资产和目标空间，明确冲突与不能自动迁移的项。
 3. 执行：按资产类型记录迁移批次、源 ID、目标 ID、结果与失败原因，支持重试。
-4. 验证与停用：核对数量、抽样检索、Gateway 健康和 Pi 实际召回；全部通过后才禁用旧扩展。
+4. 验证与停用：核对远端数量、真实内容抽样、Gateway/Knowledge 健康、知识构建状态、L3 非空读取和当前 workspace 的 Pi RPC；全部通过后才写入 workspace cutover marker 并停用旧链路。
 
 知识和代码索引均是可再生缓存，必须从原始文档或仓库重建。原始来源缺失时向导必须显示为需要人工处理，不能静默跳过。
+
+`manual` 项只能通过显式人工处置解除阻塞：选择“已在外部完成迁移”或“明确豁免并保留旧数据”，填写必填备注，并记录服务端时间。处置请求必须同时绑定 workspace、迁移 run ID 和 source ID；相同请求可幂等重试，已写入的处置记录不能被另一种结论覆盖。人工处置不会删除或改写旧来源。
+
+知识验证逐一检查每个已迁移目标。Wiki 必须达到 `ready`、`page_count > 0`，且页面列表与加工后页面内容均非空；CodeGraph 必须达到 `ready`、`stats.files > 0`，且文件查询返回内容。Pi 验证使用临时会话发送带唯一 nonce 的普通 Prompt，真实经过 `before_agent_start` 召回，再从 `get_messages` 校验隐藏的 nonce 标记；`before_provider_request` 在任何外部模型请求前中止该回合，`agent_end` 不捕获探针内容。验证结束后恢复原会话并尽力删除临时会话文件。
+
+真实 Prompt 仍受 Pi 的模型前置检查约束：当前 sidecar 未运行、正在生成、未配置可用模型或其凭据时，探针必须明确失败并保持旧链路启用，不允许降级成只检查扩展命令或普通 Gateway health。
+
+cutover 只改变运行时选择：旧扩展、命令、UI、资源和数据继续保留，旧数据保持只读以支持回滚；`session-memory` 始终启用。
 
 ## 错误处理与安全
 
 - 远程 Gateway 必须置于 HTTPS、私有网络或认证代理之后。
 - 客户端不得持有可任意访问全部资产的共享管理员凭据。
 - 所有迁移操作可追踪、可重试；源数据在用户明确删除前保留。
+- 迁移状态文件仅在确实不存在时显示为“尚未扫描”；损坏 JSON、权限错误和其他 I/O 错误必须显式显示，不能被吞掉。
 - 连接、同步、MCP 和资产加载的失败状态均应在原生界面中可见。
 
 ## 验收标准

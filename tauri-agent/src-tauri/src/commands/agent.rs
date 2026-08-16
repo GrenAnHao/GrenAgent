@@ -106,7 +106,15 @@ pub async fn open_workspace(
     let app2 = app.clone();
     let ws = workspace.clone();
     let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
-    env.extend(crate::commands::tencentdb::prepare_memory_env(&app, &store, &memory_runtime).await);
+    env.extend(
+        crate::commands::tencentdb::prepare_memory_env_for_workspace(
+            &app,
+            &store,
+            &memory_runtime,
+            Some(&cwd),
+        )
+        .await,
+    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     // Code Intelligence 自动 init 开关（在 env 被 move 进 spawn 闭包前读取）。
@@ -230,7 +238,15 @@ pub async fn warm_workspace(
     let app2 = app.clone();
     let ws = workspace.clone();
     let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
-    env.extend(crate::commands::tencentdb::prepare_memory_env(&app, &store, &memory_runtime).await);
+    env.extend(
+        crate::commands::tencentdb::prepare_memory_env_for_workspace(
+            &app,
+            &store,
+            &memory_runtime,
+            Some(&cwd),
+        )
+        .await,
+    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     let client = mgr

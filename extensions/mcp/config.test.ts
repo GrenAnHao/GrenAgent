@@ -102,6 +102,16 @@ describe("injectDefaultServers · code-intel", () => {
     ).toBeUndefined();
   });
 
+  it("skips codebase-memory after the workspace legacy cutover", () => {
+    expect(
+      injectDefaultServers(
+        [],
+        { ...base, CODE_INTEL: "codebase-memory", TDAI_LEGACY_CUTOVER: "1" },
+        "linux",
+      ).find((s) => s.name === "codebase-memory"),
+    ).toBeUndefined();
+  });
+
   it("falls back to codebase-memory for a removed/unknown engine (e.g. legacy codegraph/gitnexus)", () => {
     const cg = injectDefaultServers([], { ...base, CODE_INTEL: "codegraph" }, "linux").find(
       (s) => s.name === "codebase-memory",

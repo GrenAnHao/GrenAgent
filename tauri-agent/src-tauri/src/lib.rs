@@ -170,6 +170,13 @@ pub fn run() {
             commands::tencentdb::tencentdb_test_connection,
             commands::tencentdb::tencentdb_start_local,
             commands::tencentdb::tencentdb_stop_local,
+            commands::migration::tencentdb_migration_status,
+            commands::migration::tencentdb_migration_scan,
+            commands::migration::tencentdb_migration_preview,
+            commands::migration::tencentdb_migration_execute,
+            commands::migration::tencentdb_migration_resolve_manual,
+            commands::migration::tencentdb_migration_verify,
+            commands::migration::tencentdb_migration_archive,
             commands::files::write_temp_html,
         ])
         .run(tauri::generate_context!())

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{Manager, State};
 
 use crate::state::AppStateStore;
@@ -152,6 +153,112 @@ fn managed_skill_root(app: &tauri::AppHandle, agent_id: &str) -> Result<PathBuf>
         .join(component))
 }
 
+fn legacy_cutover_env(active: bool) -> HashMap<String, String> {
+    if !active {
+        return HashMap::new();
+    }
+    HashMap::from([
+        ("TDAI_LEGACY_CUTOVER".to_string(), "1".to_string()),
+        ("MEMORY_AUTO_INJECT".to_string(), "0".to_string()),
+        ("MEMORY_AUTO_CAPTURE".to_string(), "0".to_string()),
+        ("MEMORY_EXTRACT".to_string(), "0".to_string()),
+        ("KB_AUTO_INJECT".to_string(), "0".to_string()),
+        ("CODE_INTEL".to_string(), "off".to_string()),
+    ])
+}
+
+fn normalize_workspace_marker_path(path: &Path) -> String {
+    let normalized = fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
+}
+
+pub(crate) fn workspace_cutover_marker_path(
+    app_data_dir: &Path,
+    workspace: &Path,
+) -> PathBuf {
+    let normalized = normalize_workspace_marker_path(workspace);
+    let key = crate::commands::migration::workspace_run_key(&normalized);
+    app_data_dir
+        .join("tencentdb-memory")
+        .join("cutovers")
+        .join(format!("{key}.json"))
+}
+
+fn read_cutover_marker(
+    path: &Path,
+    workspace: Option<&Path>,
+    require_workspace: bool,
+) -> Option<bool> {
+    let data = match fs::read_to_string(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some(true),
+    };
+    let marker = match serde_json::from_str::<Value>(&data) {
+        Ok(marker) => marker,
+        Err(_) => return Some(true),
+    };
+    if marker.get("verified").and_then(Value::as_bool) != Some(true) {
+        return Some(false);
+    }
+    if !require_workspace {
+        let Some(marker_workspace) = marker.get("workspace").and_then(Value::as_str) else {
+            return Some(true);
+        };
+        let Some(workspace) = workspace else {
+            return Some(true);
+        };
+        return Some(
+            normalize_workspace_marker_path(Path::new(marker_workspace))
+                == normalize_workspace_marker_path(workspace),
+        );
+    }
+    let Some(marker_workspace) = marker.get("workspace").and_then(Value::as_str) else {
+        return Some(true);
+    };
+    let Some(workspace) = workspace else {
+        return Some(true);
+    };
+    Some(
+        normalize_workspace_marker_path(Path::new(marker_workspace))
+            == normalize_workspace_marker_path(workspace),
+    )
+}
+
+fn legacy_cutover_active_for_workspace(
+    app_data_dir: &Path,
+    workspace: Option<&Path>,
+) -> bool {
+    if let Some(workspace) = workspace {
+        let scoped = workspace_cutover_marker_path(app_data_dir, workspace);
+        if let Some(active) = read_cutover_marker(&scoped, Some(workspace), true) {
+            return active;
+        }
+    }
+    let legacy = app_data_dir.join("tencentdb-memory").join("cutover.json");
+    read_cutover_marker(&legacy, workspace, false).unwrap_or(false)
+}
+
+fn cutover_env_for_app(
+    app: &tauri::AppHandle,
+    workspace: Option<&Path>,
+) -> HashMap<String, String> {
+    let active = app.path().app_data_dir().ok().is_some_and(|dir| {
+        legacy_cutover_active_for_workspace(&dir, workspace)
+    });
+    legacy_cutover_env(active)
+}
+
 async fn probe_gateway(
     endpoint: &str,
     api_key: &str,
@@ -190,12 +297,19 @@ async fn probe_gateway(
     Ok(())
 }
 
-/// 为单个 Pi sidecar 准备最小 TencentDB 环境。失败时不阻塞 Agent 启动。
-pub async fn prepare_memory_env(
+/// Prepare sidecar environment with a workspace-scoped cutover marker.
+/// `None` preserves the legacy global-marker behavior for callers without a
+/// workspace identity.
+pub async fn prepare_memory_env_for_workspace(
     app: &tauri::AppHandle,
     store: &AppStateStore,
     runtime: &MemoryRuntime,
+    workspace: Option<&Path>,
 ) -> HashMap<String, String> {
+    // Read the cutover marker before touching config, credentials, or the
+    // supervised runtime. If any of those steps fails, returning these
+    // switches still prevents the legacy extensions from waking up.
+    let cutover_env = cutover_env_for_app(app, workspace);
     let prepared = async {
         let config = store.tencentdb_config().await.normalized()?;
         let api_key = ensure_gateway_api_key(&config.mode)?;
@@ -216,6 +330,7 @@ pub async fn prepare_memory_env(
                 .into_owned(),
         );
         env.insert("TDAI_SKILLS_SYNC".to_string(), "1".to_string());
+        env.extend(cutover_env.clone());
         env.shrink_to_fit();
         Ok::<_, anyhow::Error>(env)
     }
@@ -225,7 +340,7 @@ pub async fn prepare_memory_env(
         Ok(env) => env,
         Err(error) => {
             eprintln!("[tencentdb-memory] sidecar integration unavailable: {error}");
-            HashMap::new()
+            cutover_env
         }
     }
 }
@@ -344,8 +459,89 @@ pub async fn tencentdb_stop_local(
 
 #[cfg(test)]
 mod tests {
-    use super::TencentdbStatus;
+    use std::fs;
+    use std::path::Path;
+
+    use super::{
+        legacy_cutover_active_for_workspace, legacy_cutover_env,
+        workspace_cutover_marker_path, TencentdbStatus,
+    };
     use crate::tencentdb::MemoryMode;
+
+    #[test]
+    fn cutover_fallback_env_keeps_legacy_switches_disabled() {
+        let env = legacy_cutover_env(true);
+        assert_eq!(env.get("TDAI_LEGACY_CUTOVER").map(String::as_str), Some("1"));
+        assert_eq!(env.get("MEMORY_AUTO_INJECT").map(String::as_str), Some("0"));
+        assert_eq!(env.get("MEMORY_AUTO_CAPTURE").map(String::as_str), Some("0"));
+        assert_eq!(env.get("MEMORY_EXTRACT").map(String::as_str), Some("0"));
+        assert_eq!(env.get("KB_AUTO_INJECT").map(String::as_str), Some("0"));
+        assert_eq!(env.get("CODE_INTEL").map(String::as_str), Some("off"));
+        assert!(legacy_cutover_env(false).is_empty());
+    }
+
+    #[test]
+    fn workspace_cutover_marker_only_applies_to_matching_workspace() {
+        let root = std::env::temp_dir().join(format!("tdai-cutover-{}", uuid::Uuid::new_v4()));
+        let marker_dir = root.join("tencentdb-memory");
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(
+            marker_dir.join("cutover.json"),
+            serde_json::json!({ "verified": true, "workspace": "C:/workspace/project-a" })
+                .to_string(),
+        )
+        .unwrap();
+
+        assert!(legacy_cutover_active_for_workspace(
+            &root,
+            Some(Path::new("C:/workspace/project-a"))
+        ));
+        assert!(!legacy_cutover_active_for_workspace(
+            &root,
+            Some(Path::new("C:/workspace/project-b"))
+        ));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn malformed_existing_cutover_marker_fails_closed() {
+        let root = std::env::temp_dir().join(format!("tdai-cutover-{}", uuid::Uuid::new_v4()));
+        let marker_dir = root.join("tencentdb-memory");
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(marker_dir.join("cutover.json"), b"not-json").unwrap();
+        assert!(legacy_cutover_active_for_workspace(
+            &root,
+            Some(Path::new("C:/workspace/project-a"))
+        ));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn workspace_markers_are_independent_and_do_not_overwrite_each_other() {
+        let root = std::env::temp_dir().join(format!("tdai-cutover-{}", uuid::Uuid::new_v4()));
+        let alpha = Path::new("C:/workspace/project-a");
+        let beta = Path::new("C:/workspace/project-b");
+        let alpha_marker = workspace_cutover_marker_path(&root, alpha);
+        let beta_marker = workspace_cutover_marker_path(&root, beta);
+        assert_ne!(alpha_marker, beta_marker);
+        fs::create_dir_all(alpha_marker.parent().unwrap()).unwrap();
+        fs::write(
+            &alpha_marker,
+            serde_json::json!({ "verified": true, "workspace": alpha.to_string_lossy() })
+                .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            &beta_marker,
+            serde_json::json!({ "verified": true, "workspace": beta.to_string_lossy() })
+                .to_string(),
+        )
+        .unwrap();
+
+        assert!(legacy_cutover_active_for_workspace(&root, Some(alpha)));
+        assert!(legacy_cutover_active_for_workspace(&root, Some(beta)));
+        fs::remove_dir_all(root).ok();
+    }
 
     #[test]
     fn status_dto_never_serializes_credentials() {

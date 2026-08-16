@@ -11,6 +11,21 @@ interface CaptureState {
 }
 
 const CAPTURE_STATE_TYPE = "tencentdb-memory-capture";
+export const MEMORY_RECALL_PROBE_MESSAGE_TYPE = "tencentdb-memory-probe";
+const MEMORY_RECALL_PROBE_PREFIX = "[tencentdb-memory-probe:";
+
+/** Prompt used only by the migration verifier to exercise the real Pi hook. */
+export function memoryRecallProbePrompt(nonce: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(nonce)) {
+    throw new Error("invalid TencentDB recall probe nonce");
+  }
+  return `${MEMORY_RECALL_PROBE_PREFIX}${nonce}]`;
+}
+
+function parseMemoryRecallProbeNonce(prompt: string): string | undefined {
+  const match = /^\[tencentdb-memory-probe:([A-Za-z0-9_-]{1,128})\]$/.exec(prompt.trim());
+  return match?.[1];
+}
 
 function restoreCaptureState(entries: unknown[]): CaptureState | undefined {
   const entry = entries
@@ -39,10 +54,12 @@ export default function tencentdbMemory(pi: ExtensionAPI) {
   const turnCursors = new Map<string, number>();
   const captureStates = new Map<string, CaptureState>();
   const captureQueues = new Map<string, Promise<void>>();
+  const recallProbeSessions = new Set<string>();
 
   pi.on("before_agent_start", async (event, ctx) => {
     const query = event.prompt.trim();
     if (!query) return undefined;
+    const probeNonce = parseMemoryRecallProbeNonce(query);
 
     const sessionId = ctx.sessionManager.getSessionId();
     const entries = ctx.sessionManager.getEntries();
@@ -52,20 +69,42 @@ export default function tencentdbMemory(pi: ExtensionAPI) {
 
     try {
       const injection = await buildRecallInjection(createMemoryClient(), query);
+      if (probeNonce) {
+        recallProbeSessions.add(sessionId);
+        return {
+          systemPrompt: injection.systemPrompt ? `${event.systemPrompt}\n\n${injection.systemPrompt}` : undefined,
+          message: {
+            customType: MEMORY_RECALL_PROBE_MESSAGE_TYPE,
+            content: probeNonce,
+            details: { nonce: probeNonce },
+            display: false,
+          },
+        };
+      }
       if (!injection.systemPrompt && !injection.message) return undefined;
       return {
         systemPrompt: injection.systemPrompt ? `${event.systemPrompt}\n\n${injection.systemPrompt}` : undefined,
         message: injection.message,
       };
     } catch (error) {
+      if (probeNonce) recallProbeSessions.delete(sessionId);
       console.error("[tencentdb-memory] recall failed:", error);
       return undefined;
+    }
+  });
+
+  // The verifier sends a normal prompt so before_agent_start really runs, then
+  // aborts before any provider request can leave the machine.
+  pi.on("before_provider_request", (_event, ctx) => {
+    if (recallProbeSessions.has(ctx.sessionManager.getSessionId())) {
+      ctx.abort();
     }
   });
 
   pi.on("agent_end", (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     if (!sessionId) return;
+    if (recallProbeSessions.delete(sessionId)) return;
     const messages = [...event.messages];
     const previous = captureQueues.get(sessionId) ?? Promise.resolve();
     const next = previous
@@ -76,7 +115,10 @@ export default function tencentdbMemory(pi: ExtensionAPI) {
         const batch = selectUncaptured(messages, cursor);
         if (batch.length === 0) return;
         const fingerprint = captureFingerprint(batch);
-        if (state?.fingerprint === fingerprint) return;
+        // A repeated event for the same transcript is idempotent. Keep the
+        // cursor in the comparison so identical content in a later turn is
+        // still captured instead of being mistaken for a retry.
+        if (state?.cursor === messages.length && state.fingerprint === fingerprint) return;
 
         const client = createMemoryClient().withIsolation({ sessionId });
         await client.addConversation({

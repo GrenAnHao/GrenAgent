@@ -506,7 +506,9 @@ fn kill_child(child: &mut Child, name: &str) -> Result<()> {
 }
 
 async fn wait_for_health(endpoint: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut last_error: Option<anyhow::Error> = None;
 

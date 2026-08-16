@@ -83,7 +83,7 @@ export function injectDefaultServers(
   // 旧值/未知引擎（如已移除的 codegraph/gitnexus）回落 codebase-memory，避免迁移用户代码智能静默失效。
   const requested = env.CODE_INTEL ?? "codebase-memory";
   const engineName = requested === "off" ? "off" : getEngine(requested) ? requested : "codebase-memory";
-  const engine = engineName === "off" ? undefined : getEngine(engineName);
+  const engine = engineName === "off" || env.TDAI_LEGACY_CUTOVER === "1" ? undefined : getEngine(engineName);
   if (engine) {
     const sameName = out.some((s) => s.name === engine.serverName);
     const signatureHit = Object.values(userServerTools).some((tools) =>

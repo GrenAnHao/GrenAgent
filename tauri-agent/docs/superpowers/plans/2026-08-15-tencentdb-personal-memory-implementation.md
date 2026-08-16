@@ -173,7 +173,7 @@ it('writes versioned SKILL.md only under the managed root', async () => {
   expect(await readFile(join(root, 'review', 'SKILL.md'), 'utf8')).toContain('# Review');
 });
 
-it('adds TencentDB knowledge MCP without codebase-memory', () => {
+it('skips codebase-memory when cutover sets CODE_INTEL off', () => {
   const servers = injectDefaultServers([], { TDAI_KNOWLEDGE_MCP: '1', CODE_INTEL: 'off' }, 'win32');
   expect(servers.some((s) => s.name === 'tencentdb-knowledge')).toBe(true);
 });
@@ -187,7 +187,7 @@ it('adds TencentDB knowledge MCP without codebase-memory', () => {
 
 - [x] **步骤 3：实现资产层和界面**
 
-Skill 写入临时目录后验证每条资源路径，再原子替换 \`~/.pi/agent/tencentdb-skills/<agent-id>/\`；绝不覆盖用户 Skill，成功后增加 \`PI_RELOAD_REV\`。MCP 使用打包的 MemoryKnowledge stdio server，删除 codebase-memory 默认注入。
+Skill 写入临时目录后验证每条资源路径，再原子替换 \`~/.pi/agent/tencentdb-skills/<agent-id>/\`；绝不覆盖用户 Skill，成功后增加 \`PI_RELOAD_REV\`。MCP 使用打包的 MemoryKnowledge stdio server；保留 codebase-memory 资源与默认能力，仅在 workspace cutover 设置 \`CODE_INTEL=off\` 时停止注入。
 
 原生设置使用 segmented control 选择本机或远程、连接测试与本机服务控制。资产中心复用 \`ManagerLayout\` 展示 Chat Memory、Skill、Wiki、CodeGraph；装备页面只管理个人 Agent。替换旧 MemoryPanel 和 KnowledgePanel 的 \`/memory\`、\`/kb\` 调用，所有 loading、empty、failure、sync 状态固定布局。
 
@@ -195,7 +195,7 @@ Skill 写入临时目录后验证每条资源路径，再原子替换 \`~/.pi/ag
 
 运行：\`bunx vitest run ../extensions/tencentdb-skills/sync.test.ts ../extensions/mcp/config.test.ts src/features/tencentdb\`
 
-预期：PASS，路径逃逸被拒绝，旧 codebase-memory 不再注入。
+预期：PASS，路径逃逸被拒绝，cutover workspace 不再注入旧 codebase-memory。
 
 运行：\`bun run build\`
 
@@ -214,10 +214,10 @@ git commit -m "feat(memory): add TencentDB assets and native personal center"
 - 创建：\`tauri-agent/src-tauri/src/commands/migration/tencentdb.rs\`
 - 创建：\`tauri-agent/src-tauri/src/commands/migration/tencentdb_test.rs\`
 - 创建：\`tauri-agent/src/features/tencentdb/MigrationWizard.tsx\`、\`MigrationWizard.test.tsx\`
-- 删除：\`extensions/long-term-memory/\`、\`extensions/knowledge-rag/\`
-- 修改：\`extensions/index.ts\`、\`tauri-agent/src-tauri/src/commands/{memory,knowledge,code_intel}.rs\`、\`tauri-agent/src-tauri/tauri.conf.json\`
+- 修改：\`extensions/long-term-memory/index.ts\`、\`extensions/knowledge-rag/index.ts\`、\`extensions/mcp/config.ts\`
+- 修改：\`tauri-agent/src-tauri/src/commands/{agent,tencentdb}.rs\`、\`tauri-agent/src/lib/tencentdb.ts\`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 \`\`\`rust
 #[test]
@@ -232,21 +232,27 @@ fn legacy_extensions_remain_enabled_before_verification() {
 }
 \`\`\`
 
-- [ ] **步骤 2：运行失败测试**
+- [x] **步骤 2：运行失败测试**
 
 运行：\`cargo test -p tauri-agent migration::tencentdb -- --nocapture\`
 
 预期：FAIL，scan 和 cutover state machine 不存在。
 
-- [ ] **步骤 3：实现状态机与清理**
+- [x] **步骤 3：实现状态机与可回滚停用**
 
-实现 \`scan -> preview -> execute -> verify -> archived\`，每批记录 source ID、target ID、计数、错误与可重试标志。导入旧 SQLite L1 与 Pi JSONL L0；将本地 \`SKILL.md\` 导入 TencentDB；从原始文档重建 Wiki、从 Git remote 重建 CodeGraph。缺失来源产生 \`manual\` 项。只有计数、抽样查询、Gateway health 与 Pi 召回均通过后，才删除旧 extensions、旧 command/UI、codebase-memory resource 和 build script。保留 \`session-memory\`。
+实现 \`scan -> preview -> execute -> verify -> archived\`，每批记录 source ID、target ID、计数、错误与可重试标志。导入 Pi JSONL L0 和本地 \`SKILL.md\`，从原始文档重建 Wiki、从 Git remote 重建 CodeGraph。TencentDB 公共 \`atomic/update\` 只能更新已有 L1，不能创建旧 SQLite 中的 L1，因此该来源必须显示为 \`manual\`，不得伪装为导入成功；缺失原始来源同样产生 \`manual\` 项。
 
-- [ ] **步骤 4：验证**
+人工项通过 \`external_completed\` 或 \`explicit_waived\` 显式处置，要求非空备注并写入服务端时间。处置命令绑定 workspace、run ID 与 source ID；相同请求幂等，冲突覆盖被拒绝。向导选择以 \`workspace + runId\` 保存到本机，优先于服务端上次执行时的 \`selectedIds\`。
+
+只有远端计数、每个迁移目标的真实内容抽样、Gateway/Knowledge health、每个 Wiki/CodeGraph 的构建与内容状态、L3 非空读取和当前 workspace 的真实 Pi hook 探针全部通过后，才允许归档。Pi 探针在临时 session 中发送唯一 nonce Prompt，验证 \`before_agent_start\` 产生的隐藏消息，并在 \`before_provider_request\` 中止外部模型请求；无可用模型/凭据、sidecar 忙碌、超时或 nonce 不匹配都保持失败。归档不删除旧 extensions、旧 command/UI、资源或数据，而是写入 workspace 独立的 cutover marker，并通过环境变量停用 \`long-term-memory\`、\`knowledge-rag\` 和 \`codebase-memory\`；旧数据保持只读可回滚，\`session-memory\` 永久保留。
+
+Gateway、Knowledge 和本机运行时 health 请求均设置有限超时。迁移状态文件只有 \`NotFound\` 返回空状态；损坏 JSON、权限或其他 I/O 错误直接返回前端。
+
+- [x] **步骤 4：验证**
 
 运行：\`cargo test -p tauri-agent migration::tencentdb -- --nocapture\`
 
-预期：PASS，未验证时旧链路不删除。
+预期：PASS，未验证时旧链路继续启用；归档后仅运行时停用，不物理删除。
 
 运行：\`bunx vitest run src/features/tencentdb/MigrationWizard.test.tsx ../extensions/tencentdb-memory ../extensions/tencentdb-skills\`
 
@@ -256,11 +262,11 @@ fn legacy_extensions_remain_enabled_before_verification() {
 
 预期：PASS。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 \`\`\`powershell
-git add -A tauri-agent/src-tauri/src/commands/migration tauri-agent/src/features/tencentdb extensions tauri-agent/src-tauri
-git commit -m "feat(memory): migrate to TencentDB and retire local backends"
+git add tauri-agent/src-tauri/src/commands/migration tauri-agent/src-tauri/src/commands/agent.rs tauri-agent/src-tauri/src/commands/tencentdb.rs tauri-agent/src-tauri/src/commands/mod.rs tauri-agent/src-tauri/src/lib.rs tauri-agent/src/features/tencentdb tauri-agent/src/lib/tencentdb.ts extensions/long-term-memory/index.ts extensions/knowledge-rag/index.ts extensions/mcp/config.ts
+git commit -m "feat(memory): migrate to TencentDB with reversible cutover"
 \`\`\`
 
 ## 规格覆盖自检
