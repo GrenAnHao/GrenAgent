@@ -10,6 +10,7 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { CapabilityModelField } from './CapabilityModelField';
 import { migratePhase2 } from './phase2Migration';
 import { pi } from '../../lib/pi';
+import { TencentdbCenter } from '../tencentdb/TencentdbCenter';
 
 const useStyles = createStyles(({ css, token }) => ({
   root: css`
@@ -137,7 +138,7 @@ export function SettingsPanel() {
     })().catch(() => {});
   }, []);
 
-  const showSaveBar = activeId !== 'providers' && activeId !== 'appearance';
+  const showSaveBar = activeId !== 'providers' && activeId !== 'appearance' && activeId !== 'tencentdb';
 
   return (
     <Flexbox className={styles.root} data-testid="settings-panel">
@@ -165,7 +166,9 @@ export function SettingsPanel() {
           })}
         </nav>
         <div className={styles.content}>
-          {activeId === 'providers' ? (
+          {activeId === 'tencentdb' ? (
+            <TencentdbCenter />
+          ) : activeId === 'providers' ? (
             <div className={styles.providersHost}>
               <div className={styles.pageTitle}>{cat.title}</div>
               <ProvidersSettings />

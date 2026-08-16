@@ -85,6 +85,7 @@ function defaultReadServers(): McpServerConfig[] {
     getAllConfig(),
     process.platform,
     readToolsCache(),
+    process.arch,
   );
   return expandServerVars(servers, process.cwd());
 }

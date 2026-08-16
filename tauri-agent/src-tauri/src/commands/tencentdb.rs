@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -30,6 +30,7 @@ pub struct SaveTencentdbConnection {
 pub struct TencentdbStatus {
     pub mode: MemoryMode,
     pub endpoint: String,
+    pub knowledge_endpoint: Option<String>,
     pub state: String,
     pub credential_configured: bool,
     pub last_success_at: Option<String>,
@@ -102,6 +103,7 @@ async fn current_status(
         return Ok(TencentdbStatus {
             mode: MemoryMode::Local,
             endpoint: local.endpoint,
+            knowledge_endpoint: local.knowledge_endpoint,
             state: local.state,
             credential_configured,
             last_success_at: config.last_success_at,
@@ -111,6 +113,7 @@ async fn current_status(
     Ok(TencentdbStatus {
         mode: MemoryMode::Remote,
         endpoint: config.endpoint,
+        knowledge_endpoint: config.knowledge_endpoint,
         state: if config.last_success_at.is_some() {
             "ready".to_string()
         } else {
@@ -119,6 +122,34 @@ async fn current_status(
         credential_configured,
         last_success_at: config.last_success_at,
     })
+}
+
+fn insert_knowledge_env(env: &mut HashMap<String, String>, endpoint: Option<&str>) {
+    if let Some(endpoint) = endpoint.filter(|value| !value.trim().is_empty()) {
+        env.insert("TDAI_KNOWLEDGE_ENDPOINT".to_string(), endpoint.to_string());
+        env.insert("TDAI_KNOWLEDGE_MCP".to_string(), "1".to_string());
+    }
+}
+
+fn managed_skill_root(app: &tauri::AppHandle, agent_id: &str) -> Result<PathBuf> {
+    let component: String = agent_id
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() || matches!(value, '-' | '_') {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let component = if component.is_empty() { "agent" } else { &component };
+    Ok(app
+        .path()
+        .app_data_dir()
+        .context("failed to resolve application data directory")?
+        .join("tencentdb-memory")
+        .join("skills")
+        .join(component))
 }
 
 async fn probe_gateway(
@@ -171,13 +202,20 @@ pub async fn prepare_memory_env(
         let mut env = if config.mode == MemoryMode::Local {
             let status = start_local_runtime(app, runtime, &config, &api_key).await?;
             let mut env = config.sidecar_env(&status.endpoint, &api_key);
-            if let Some(endpoint) = status.knowledge_endpoint {
-                env.insert("TDAI_KNOWLEDGE_ENDPOINT".to_string(), endpoint);
-            }
+            insert_knowledge_env(&mut env, status.knowledge_endpoint.as_deref());
             env
         } else {
-            config.sidecar_env(&config.endpoint, &api_key)
+            let mut env = config.sidecar_env(&config.endpoint, &api_key);
+            insert_knowledge_env(&mut env, config.knowledge_endpoint.as_deref());
+            env
         };
+        env.insert(
+            "TDAI_SKILLS_ROOT".to_string(),
+            managed_skill_root(app, &config.agent_id)?
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert("TDAI_SKILLS_SYNC".to_string(), "1".to_string());
         env.shrink_to_fit();
         Ok::<_, anyhow::Error>(env)
     }
@@ -190,6 +228,17 @@ pub async fn prepare_memory_env(
             HashMap::new()
         }
     }
+}
+
+#[tauri::command]
+pub async fn tencentdb_get_config(
+    store: State<'_, AppStateStore>,
+) -> Result<MemoryConnectionConfig, String> {
+    store
+        .tencentdb_config()
+        .await
+        .normalized()
+        .map_err(public_error)
 }
 
 #[tauri::command]
@@ -303,6 +352,7 @@ mod tests {
         let value = serde_json::to_value(TencentdbStatus {
             mode: MemoryMode::Remote,
             endpoint: "https://memory.example.com".to_string(),
+            knowledge_endpoint: Some("https://knowledge.example.com".to_string()),
             state: "ready".to_string(),
             credential_configured: true,
             last_success_at: None,

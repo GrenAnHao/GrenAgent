@@ -41,6 +41,11 @@ pub struct MemoryConnectionConfig {
     pub mode: MemoryMode,
     #[serde(default)]
     pub endpoint: String,
+    /// Optional Knowledge Service base URL. Remote deployments may expose it
+    /// separately from the MemoryCore Gateway; local mode always overrides it
+    /// with the supervised loopback service.
+    #[serde(default)]
+    pub knowledge_endpoint: Option<String>,
     #[serde(default = "default_service_id")]
     pub service_id: String,
     #[serde(default = "default_team_id")]
@@ -64,6 +69,7 @@ impl Default for MemoryConnectionConfig {
         Self {
             mode: MemoryMode::Local,
             endpoint: String::new(),
+            knowledge_endpoint: None,
             service_id: default_service_id(),
             team_id: default_team_id(),
             agent_id: default_agent_id(),
@@ -83,6 +89,9 @@ impl MemoryConnectionConfig {
         self.agent_id = required_value("agentId", self.agent_id)?;
         self.user_id = required_value("userId", self.user_id)?;
         self.task_id = optional_value(self.task_id);
+        self.knowledge_endpoint = self
+            .knowledge_endpoint
+            .and_then(|value| optional_value(Some(value)));
         self.llm_base_url = optional_value(self.llm_base_url);
         self.llm_model = optional_value(self.llm_model);
 
@@ -100,6 +109,14 @@ impl MemoryConnectionConfig {
                 .context("TencentDB remote endpoint must be a valid URL")?;
             if !matches!(url.scheme(), "http" | "https") {
                 bail!("TencentDB remote endpoint must use HTTP or HTTPS");
+            }
+        }
+        if let Some(endpoint) = self.knowledge_endpoint.as_mut() {
+            *endpoint = endpoint.trim().trim_end_matches('/').to_string();
+            let url = reqwest::Url::parse(endpoint)
+                .context("TencentDB knowledge endpoint must be a valid URL")?;
+            if !matches!(url.scheme(), "http" | "https") {
+                bail!("TencentDB knowledge endpoint must use HTTP or HTTPS");
             }
         }
         Ok(self)
@@ -554,6 +571,7 @@ mod tests {
         let config = MemoryConnectionConfig {
             mode: MemoryMode::Remote,
             endpoint: " https://memory.example.com/ ".to_string(),
+            knowledge_endpoint: Some(" https://knowledge.example.com/v3/ ".to_string()),
             service_id: " personal-memory ".to_string(),
             team_id: " personal:alice ".to_string(),
             agent_id: " coding ".to_string(),
@@ -565,6 +583,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.endpoint, "https://memory.example.com");
+        assert_eq!(config.knowledge_endpoint.as_deref(), Some("https://knowledge.example.com/v3"));
         let env = config.sidecar_env(&config.endpoint, "secret");
         assert_eq!(env.len(), 7);
         assert_eq!(env.get("TDAI_MEMORY_TEAM_ID").map(String::as_str), Some("personal:alice"));
@@ -575,6 +594,17 @@ mod tests {
     fn local_absolute_task_id_is_rejected() {
         let config = MemoryConnectionConfig {
             task_id: Some("C:\\workspace\\project".to_string()),
+            ..MemoryConnectionConfig::default()
+        };
+        assert!(config.normalized().is_err());
+    }
+
+    #[test]
+    fn invalid_knowledge_endpoint_is_rejected() {
+        let config = MemoryConnectionConfig {
+            mode: MemoryMode::Remote,
+            endpoint: "https://memory.example.com".to_string(),
+            knowledge_endpoint: Some("file:///tmp/knowledge".to_string()),
             ..MemoryConnectionConfig::default()
         };
         assert!(config.normalized().is_err());

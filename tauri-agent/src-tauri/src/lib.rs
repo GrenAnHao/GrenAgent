@@ -165,6 +165,7 @@ pub fn run() {
             commands::code_intel::code_intel_file_graph,
             commands::code_intel::code_intel_rich_graph,
             commands::tencentdb::tencentdb_get_status,
+            commands::tencentdb::tencentdb_get_config,
             commands::tencentdb::tencentdb_save_connection,
             commands::tencentdb::tencentdb_test_connection,
             commands::tencentdb::tencentdb_start_local,

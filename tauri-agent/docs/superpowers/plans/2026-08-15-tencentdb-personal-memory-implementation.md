@@ -165,7 +165,7 @@ git commit -m "feat(memory): add TencentDB connection and Pi memory extension"
 - 创建：\`tauri-agent/src/features/tencentdb/*.test.tsx\`
 - 修改：\`tauri-agent/src/features/settings/settingsSchema.ts\`、\`SettingsPanel.tsx\`、\`src/lib/pi.ts\`、\`src/features/memory/MemoryPanel.tsx\`、\`src/features/knowledge/KnowledgePanel.tsx\`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 \`\`\`ts
 it('writes versioned SKILL.md only under the managed root', async () => {
@@ -179,19 +179,19 @@ it('adds TencentDB knowledge MCP without codebase-memory', () => {
 });
 \`\`\`
 
-- [ ] **步骤 2：运行失败测试**
+- [x] **步骤 2：运行失败测试**
 
 运行：\`bunx vitest run ../extensions/tencentdb-skills/sync.test.ts ../extensions/mcp/config.test.ts\`
 
 预期：FAIL，sync module 与 TencentDB MCP config 不存在。
 
-- [ ] **步骤 3：实现资产层和界面**
+- [x] **步骤 3：实现资产层和界面**
 
 Skill 写入临时目录后验证每条资源路径，再原子替换 \`~/.pi/agent/tencentdb-skills/<agent-id>/\`；绝不覆盖用户 Skill，成功后增加 \`PI_RELOAD_REV\`。MCP 使用打包的 MemoryKnowledge stdio server，删除 codebase-memory 默认注入。
 
 原生设置使用 segmented control 选择本机或远程、连接测试与本机服务控制。资产中心复用 \`ManagerLayout\` 展示 Chat Memory、Skill、Wiki、CodeGraph；装备页面只管理个人 Agent。替换旧 MemoryPanel 和 KnowledgePanel 的 \`/memory\`、\`/kb\` 调用，所有 loading、empty、failure、sync 状态固定布局。
 
-- [ ] **步骤 4：验证**
+- [x] **步骤 4：验证**
 
 运行：\`bunx vitest run ../extensions/tencentdb-skills/sync.test.ts ../extensions/mcp/config.test.ts src/features/tencentdb\`
 
@@ -201,7 +201,7 @@ Skill 写入临时目录后验证每条资源路径，再原子替换 \`~/.pi/ag
 
 预期：PASS。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 \`\`\`powershell
 git add extensions/tencentdb-skills extensions/mcp tauri-agent/src/features/tencentdb tauri-agent/src/features/settings tauri-agent/src/features/memory tauri-agent/src/features/knowledge tauri-agent/src/lib/pi.ts

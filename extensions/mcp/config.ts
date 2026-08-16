@@ -1,5 +1,6 @@
 // Pure helpers for the mcp extension: parse the MCP_SERVERS JSON config and
 // sanitize names for tool registration. No I/O so the logic stays testable.
+import { join } from "node:path";
 import { getEngine, matchesEngineSignature } from "../code-intel/engines.js";
 
 export interface McpServerConfig {
@@ -74,6 +75,7 @@ export function injectDefaultServers(
   env: Record<string, string | undefined>,
   platform: string,
   userServerTools: Record<string, string[]> = {},
+  architecture = process.arch,
 ): McpServerConfig[] {
   let out = servers;
 
@@ -112,7 +114,40 @@ export function injectDefaultServers(
     ];
   }
 
+  // 3) TencentDB MemoryKnowledge（打包的 stdio MCP）。仅在 Tauri sidecar 注入
+  // TDAI_KNOWLEDGE_MCP=1 且能解析打包目录时启用；用户自配同名服务优先。
+  if ((env.TDAI_KNOWLEDGE_MCP ?? "0") === "1" && !out.some((s) => s.name === "tencentdb-knowledge")) {
+    const pkgDir = env.PI_PACKAGE_DIR ?? "";
+    const knowledgeEndpoint = env.TDAI_KNOWLEDGE_ENDPOINT ?? "";
+    if (pkgDir && knowledgeEndpoint) {
+      const platformDir = knowledgePlatformDir(platform, architecture);
+      const root = join(pkgDir, "tencentdb-memory", platformDir);
+      const node = platform === "win32" ? join(root, "node", "node.exe") : join(root, "node", "bin", "node");
+      const entry = join(root, "knowledge", "bin", "mcp.mjs");
+      out = [
+        ...out,
+        {
+          name: "tencentdb-knowledge",
+          transport: "stdio",
+          command: node,
+          args: [entry],
+          env: {
+            KNOWLEDGE_API_URL: knowledgeEndpoint.replace(/\/v3\/?$/, ""),
+            ...(env.TDAI_MEMORY_API_KEY ? { KNOWLEDGE_API_TOKEN: env.TDAI_MEMORY_API_KEY } : {}),
+          },
+        },
+      ];
+    }
+  }
+
   return out;
+}
+
+function knowledgePlatformDir(platform: string, architecture: string): string {
+  const arch = architecture === "arm64" || architecture === "aarch64" ? "aarch64" : "x86_64";
+  if (platform === "win32") return `windows-${arch}`;
+  if (platform === "darwin") return `darwin-${arch}`;
+  return `linux-${arch}`;
 }
 
 export function sanitize(s: string): string {

@@ -22,6 +22,12 @@ import {
   runRpcMode,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { readMemoryConnectionConfig } from "../../extensions/tencentdb-memory/client.js";
+import {
+  createSkillClient,
+  fetchRemoteSkills,
+  syncSkills,
+} from "../../extensions/tencentdb-skills/sync.js";
 import { allExtensions, namedExtensions, safety } from "../../extensions/index.js";
 import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
 import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-profile.js";
@@ -79,10 +85,12 @@ function disabledSkills(): Set<string> {
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
+  const managedSkillRoot = await syncConfiguredSkills();
 
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
+    ...(managedSkillRoot ? { additionalSkillPaths: [managedSkillRoot] } : {}),
     authStorage,
     modelRegistry,
     resourceLoaderOptions: {
@@ -111,6 +119,33 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, 
     diagnostics: services.diagnostics,
   };
 };
+
+/** Pull remote Skills before the first session load; keep a prior cache on failure. */
+async function syncConfiguredSkills(): Promise<string | undefined> {
+  const root = getConfig("TDAI_SKILLS_ROOT")?.trim();
+  if (!root || getConfig("TDAI_SKILLS_SYNC") !== "1") return undefined;
+  try {
+    const config = readMemoryConnectionConfig();
+    const client = createSkillClient(config);
+    const timeoutMs = Number.parseInt(getConfig("TDAI_SKILLS_SYNC_TIMEOUT_MS") ?? "12000", 10);
+    const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 12000;
+    const skills = await Promise.race([
+      fetchRemoteSkills(client, {
+        teamId: config.teamId,
+        agentId: config.agentId,
+        userId: config.userId,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`skill sync timed out after ${budget}ms`)), budget).unref?.();
+      }),
+    ]);
+    const result = await syncSkills(root, skills);
+    console.error(`[tencentdb-skills] synced ${result.synced.length} skills revision=${result.revision}`);
+  } catch (error) {
+    console.error(`[tencentdb-skills] sync failed; using cached skills: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return root;
+}
 
 async function run(): Promise<void> {
   const argv = process.argv.slice(2);

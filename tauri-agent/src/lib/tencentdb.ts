@@ -6,6 +6,7 @@ export type TencentdbConnectionState = 'stopped' | 'starting' | 'ready' | 'faile
 export interface TencentdbConnectionConfig {
   mode: TencentdbMode;
   endpoint: string;
+  knowledgeEndpoint?: string;
   serviceId: string;
   teamId: string;
   agentId: string;
@@ -19,6 +20,7 @@ export interface TencentdbConnectionConfig {
 export interface TencentdbStatus {
   mode: TencentdbMode;
   endpoint: string;
+  knowledgeEndpoint?: string;
   state: TencentdbConnectionState;
   credentialConfigured: boolean;
   lastSuccessAt?: string;
@@ -33,6 +35,7 @@ export interface SaveTencentdbConnection {
 }
 
 export const tencentdbApi = {
+  config: () => invoke<TencentdbConnectionConfig>('tencentdb_get_config'),
   status: () => invoke<TencentdbStatus>('tencentdb_get_status'),
   save: (input: SaveTencentdbConnection) =>
     invoke<TencentdbStatus>('tencentdb_save_connection', { input }),
