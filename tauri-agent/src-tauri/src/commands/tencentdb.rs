@@ -733,10 +733,8 @@ pub async fn ensure_panel_runtime_started(
     panel: &PanelRuntime,
 ) -> Result<(PanelConnection, String)> {
     ensure_panel_restart_not_required(runtime)?;
-    let config = store.tencentdb_config().await.normalized()?;
-    if config.mode == MemoryMode::Local {
-        ensure_runtime_started(app, store, runtime).await?;
-    }
+    let status = ensure_runtime_started(app, store, runtime).await?;
+    ensure_panel_dependencies_ready(&status.state)?;
     let connection = panel_connection(store, runtime).await?;
     let endpoint = panel
         .ensure_started(&bundled_layout(app)?, &connection)
@@ -747,6 +745,13 @@ pub async fn ensure_panel_runtime_started(
 fn ensure_panel_restart_not_required(runtime: &MemoryRuntime) -> Result<()> {
     if runtime.requires_restart() {
         bail!("TencentDB Panel requires an application restart before it can be opened");
+    }
+    Ok(())
+}
+
+fn ensure_panel_dependencies_ready(state: &str) -> Result<()> {
+    if state != "ready" {
+        bail!("TencentDB Panel dependencies are not ready: {state}");
     }
     Ok(())
 }
@@ -2606,7 +2611,8 @@ mod tests {
     use super::{
         bump_skill_reload_revision, clear_workspace_asset_reference, connection_settings_changed,
         core_redirect_policy, core_route_scope, ensure_knowledge_asset_deleted,
-        ensure_local_metadata_identity, ensure_panel_restart_not_required, legacy_cutover_env,
+        ensure_local_metadata_identity, ensure_panel_dependencies_ready,
+        ensure_panel_restart_not_required, legacy_cutover_env,
         load_selected_wiki_files,
         local_user_api_key, managed_skill_root_at, managed_skill_scope,
         normalize_code_graph_files_format, normalize_core_request_body, normalize_knowledge_count,
@@ -2636,6 +2642,15 @@ mod tests {
         let error = ensure_panel_restart_not_required(&runtime).unwrap_err();
 
         assert!(error.to_string().contains("restart"));
+    }
+
+    #[test]
+    fn panel_start_is_rejected_when_dependencies_are_not_ready() {
+        assert!(ensure_panel_dependencies_ready("ready").is_ok());
+
+        let error = ensure_panel_dependencies_ready("failed").unwrap_err();
+
+        assert!(error.to_string().contains("failed"));
     }
 
     #[tokio::test]
