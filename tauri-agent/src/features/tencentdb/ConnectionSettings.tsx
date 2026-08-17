@@ -1,7 +1,9 @@
 import { Alert, Button, Input, Segmented } from 'antd';
 import { Flexbox } from '@lobehub/ui';
 import { createStyles } from 'antd-style';
+import { ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   DEFAULT_TENCENTDB_CONFIG,
   tencentdbApi,
@@ -33,6 +35,7 @@ export function ConnectionSettings() {
   const [llmApiKey, setLlmApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [openingPanel, setOpeningPanel] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -99,6 +102,20 @@ export function ConnectionSettings() {
       setMessage(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setTesting(false);
+    }
+  };
+
+  const openPanel = async () => {
+    if (openingPanel) return;
+    setOpeningPanel(true);
+    setMessage(null);
+    try {
+      const result = await tencentdbApi.openPanel();
+      await openUrl(result.url);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setOpeningPanel(false);
     }
   };
 
@@ -177,6 +194,14 @@ export function ConnectionSettings() {
       <div className={styles.actions}>
         <Button type="primary" loading={saving} onClick={() => void save()}>保存配置</Button>
         <Button loading={testing} onClick={() => void test()}>测试连接</Button>
+        <Button
+          disabled={openingPanel}
+          icon={<ExternalLink size={14} />}
+          loading={openingPanel}
+          onClick={() => void openPanel()}
+        >
+          打开原生后台
+        </Button>
         <span className={styles.meta}>状态：{stateLabel}{status?.lastSuccessAt ? ` · 最近成功 ${new Date(status.lastSuccessAt).toLocaleString()}` : ''}</span>
       </div>
     </Flexbox>

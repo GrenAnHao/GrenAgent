@@ -40,6 +40,15 @@ describe('TencentDB Core API', () => {
 
     expect(invoke).toHaveBeenCalledWith('tencentdb_reload_skills');
   });
+
+  it('opens the native panel through the managed Tauri command', async () => {
+    invoke.mockResolvedValue({ url: 'http://127.0.0.1:8123/__grenagent/bootstrap#tdai-bootstrap=token' });
+
+    await expect(tencentdbApi.openPanel()).resolves.toEqual({
+      url: 'http://127.0.0.1:8123/__grenagent/bootstrap#tdai-bootstrap=token',
+    });
+    expect(invoke).toHaveBeenCalledWith('tencentdb_open_panel');
+  });
 });
 
 describe('TencentDB Knowledge API', () => {

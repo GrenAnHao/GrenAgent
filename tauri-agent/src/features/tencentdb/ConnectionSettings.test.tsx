@@ -1,15 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { config, defaultConfig, save, test } = vi.hoisted(() => ({
+const { config, defaultConfig, save, test, openPanel } = vi.hoisted(() => ({
   config: { mode: 'remote', endpoint: 'https://m', knowledgeEndpoint: 'https://k/v3', serviceId: 'personal-memory', teamId: 'personal-alice', agentId: 'pi-personal', userId: 'alice' },
   defaultConfig: { mode: 'local', endpoint: '', serviceId: 'personal-memory', teamId: 'personal-local', agentId: 'pi-personal', userId: 'local' },
   save: vi.fn(() => Promise.resolve({ mode: 'remote', endpoint: 'https://m', state: 'ready', credentialConfigured: true })),
   test: vi.fn(() => Promise.resolve({ mode: 'remote', endpoint: 'https://m', state: 'ready', credentialConfigured: true })),
+  openPanel: vi.fn(() => Promise.resolve({ url: 'http://127.0.0.1:43123/__grenagent/bootstrap#tdai-bootstrap=one-time' })),
 }));
+const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(() => Promise.resolve()) }));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 vi.mock('./tencentdbApi', () => ({
   DEFAULT_TENCENTDB_CONFIG: defaultConfig,
-  tencentdbApi: { save, test },
+  tencentdbApi: { save, test, openPanel },
   useTencentdbConnection: () => ({
     config,
     status: { mode: 'remote', endpoint: 'https://m', state: 'ready', credentialConfigured: true },
@@ -61,5 +64,29 @@ describe('ConnectionSettings', () => {
     expect(screen.getByTestId('tencentdb-agent-id')).toBeDisabled();
     expect(screen.getByTestId('tencentdb-user-id')).toHaveValue('local');
     expect(screen.getByTestId('tencentdb-user-id')).toBeDisabled();
+  });
+
+  it('opens the native panel and prevents duplicate requests while opening', async () => {
+    let resolveOpen!: (value: { url: string }) => void;
+    openPanel.mockImplementationOnce(() => new Promise((resolve) => { resolveOpen = resolve; }));
+    render(<ConnectionSettings />);
+
+    const button = screen.getByRole('button', { name: '打开原生后台' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(openPanel).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    resolveOpen({ url: 'http://127.0.0.1:43123/__grenagent/bootstrap#tdai-bootstrap=one-time' });
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(openUrl).toHaveBeenCalledWith('http://127.0.0.1:43123/__grenagent/bootstrap#tdai-bootstrap=one-time');
+  });
+
+  it('shows an error when opening the native panel fails', async () => {
+    openPanel.mockRejectedValueOnce(new Error('panel unavailable'));
+    render(<ConnectionSettings />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开原生后台' }));
+    await waitFor(() => expect(screen.getByText('panel unavailable')).toBeTruthy());
   });
 });

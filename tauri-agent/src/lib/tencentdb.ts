@@ -63,6 +63,10 @@ export interface TencentdbStatus {
   restartRequired?: boolean;
 }
 
+export interface TencentdbPanelOpen {
+  url: string;
+}
+
 export interface WorkspaceKnowledgeAssets {
   codeGraphId?: string;
   wikiId?: string;
@@ -233,6 +237,7 @@ export const tencentdbApi = {
   save: (input: SaveTencentdbConnection) =>
     invoke<TencentdbStatus>('tencentdb_save_connection', { input }),
   test: () => invoke<TencentdbStatus>('tencentdb_test_connection'),
+  openPanel: () => invoke<TencentdbPanelOpen>('tencentdb_open_panel'),
   reloadSkills: () => invoke<void>('tencentdb_reload_skills'),
   coreRequest,
   listKnowledgeAssets: (workspace?: string) =>
