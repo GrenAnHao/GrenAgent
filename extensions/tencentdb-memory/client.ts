@@ -9,6 +9,7 @@ export interface MemoryConnectionConfig {
   teamId: string;
   agentId: string;
   userId: string;
+  userKey: string;
   taskId?: string;
 }
 
@@ -26,6 +27,7 @@ export function readMemoryConnectionConfig(): MemoryConnectionConfig {
     teamId: required("TDAI_MEMORY_TEAM_ID"),
     agentId: required("TDAI_MEMORY_AGENT_ID"),
     userId: required("TDAI_MEMORY_USER_ID"),
+    userKey: required("TDAI_MEMORY_USER_KEY"),
     taskId: getConfig("TDAI_MEMORY_TASK_ID")?.trim() || undefined,
   };
 }

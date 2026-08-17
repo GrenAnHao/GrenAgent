@@ -6,7 +6,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { getConfig } from "../_shared/runtime-config.js";
+import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { resolveMcpServers } from "./capability.js";
 
 export interface AgentResult {
@@ -49,6 +49,11 @@ export function resolvePiCommand(): { cmd: string; baseArgs: string[] } {
   const piBin = getConfig("PI_BIN");
   if (piBin) return { cmd: piBin, baseArgs: [] };
   return { cmd: process.execPath, baseArgs: [] };
+}
+
+export function buildSubagentSkillArgs(root: string | undefined): string[] {
+  const managedRoot = root?.trim();
+  return ["--no-skills", ...(managedRoot ? ["--skill", managedRoot] : [])];
 }
 
 export function extractFinalText(jsonlOutput: string): string {
@@ -143,14 +148,14 @@ export function buildSubagentRuntimeConfig(
   denyTools.add("spawn_agent");
   // 探索子代理也禁止再发起探索（与 spawn_agent 同款防递归）。
   denyTools.add("explore_context");
-  const env: Record<string, string> = {
+  const env = withoutSensitiveProcessConfig({
     ...extraEnv,
     ...SUBAGENT_MEMORY_OFF,
     SAFETY_DENY_TOOLS: Array.from(denyTools).join(","),
     MCP_SERVERS: resolveMcpServers(mcp, parentMcp),
-  };
+  });
   if (!src) return { path: undefined, env, cleanup: () => {} };
-  const merged = { ...base, ...env };
+  const merged = { ...withoutSensitiveProcessConfig(base), ...env };
   const path = join(tmpdir(), `pi-subagent-rc-${randomBytes(4).toString("hex")}.json`);
   try {
     // 0o600：派生配置全量继承父 runtime-config（含 MCP_SERVERS 等可能带 token 的字段），
@@ -194,7 +199,15 @@ export async function spawnPiAgent(
   // it keeps them lightweight and deterministic regardless of the user's global
   // defaultProjectTrust — an "always" setting would otherwise make every
   // sub-agent re-load project-local MCP, re-creating the cold-start stampede.
-  const args = [...baseArgs, "--mode", "json", "-p", "--no-session", "--no-approve"];
+  const args = [
+    ...baseArgs,
+    ...buildSubagentSkillArgs(getConfig("TDAI_SKILLS_ROOT")),
+    "--mode",
+    "json",
+    "-p",
+    "--no-session",
+    "--no-approve",
+  ];
   const model = opts.model ?? resolveSubagentModel();
   if (model) args.push("--model", model);
   if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));

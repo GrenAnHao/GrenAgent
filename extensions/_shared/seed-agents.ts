@@ -1,5 +1,5 @@
 // Shared, self-healing seeder for managed agent templates (fable defaults +
-// self-evolve personas). The old behavior ("write only if the file is absent")
+// bundled agent personas). The old behavior ("write only if the file is absent")
 // meant a template change never reached an already-seeded machine — the stale
 // copy lingered forever. This seeder instead tracks a content hash per file in a
 // JSON manifest so it can UPGRADE the templates it previously wrote while never

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -41,10 +41,31 @@ impl PiTransport for SidecarTransport {
     }
 }
 
-/// Bun 编译的 pi 需在 exe 旁放 theme/assets；Tauri 只复制 sidecar 本体到 target/debug，
-/// 因此通过 PI_PACKAGE_DIR 指向 `src-tauri/binaries/`（build:sidecar 产物目录）。
-pub(crate) fn pi_package_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
+fn resolve_pi_package_dir(
+    resource_dir: &Path,
+    manifest_dir: &Path,
+    allow_dev_fallback: bool,
+) -> PathBuf {
+    let bundled = resource_dir.join("binaries");
+    if bundled.is_dir() || !allow_dev_fallback {
+        bundled
+    } else {
+        manifest_dir.join("binaries")
+    }
+}
+
+/// Resolve assets from the installed Tauri resource directory. Development
+/// builds may fall back to `src-tauri/binaries` before Tauri has copied them.
+pub(crate) fn pi_package_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| anyhow!("failed to resolve Tauri resource directory: {error}"))?;
+    Ok(resolve_pi_package_dir(
+        &resource_dir,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        cfg!(debug_assertions),
+    ))
 }
 
 /// 起一个 pi RPC sidecar，绑定到 `cwd`，返回已接好 stdout 读取循环的 PiClient。
@@ -56,16 +77,13 @@ pub fn spawn_pi_client(
     env: std::collections::HashMap<String, String>,
     runtime_config: &str,
 ) -> Result<Arc<PiClient>> {
-    let package_dir = pi_package_dir();
+    let package_dir = pi_package_dir(app)?;
     let (mut rx, child) = app
         .shell()
         .sidecar("pi")
         .map_err(|e| anyhow!("sidecar lookup failed: {e}"))?
         .args(["--mode", "rpc"])
         .env("PI_PACKAGE_DIR", &package_dir)
-        // 与画布侧共用同一索引目录：agent 的 codebase-memory MCP server 经 process.env
-        // 继承 CBM_CACHE_DIR，确保 explore 子代理查到的 project 与画布 index 的是同一份。
-        .env("CBM_CACHE_DIR", crate::commands::code_intel::cbm_cache_dir(app))
         .env("PI_RUNTIME_CONFIG", runtime_config)
         .envs(env)
         .current_dir(cwd)
@@ -77,7 +95,9 @@ pub fn spawn_pi_client(
     if let Some(guard) = app.try_state::<Arc<ProcessGuard>>() {
         let pid = child.pid();
         if let Err(e) = guard.assign(pid) {
-            forward_log(&format!("[pi] failed to assign sidecar (pid {pid}) to job: {e}"));
+            forward_log(&format!(
+                "[pi] failed to assign sidecar (pid {pid}) to job: {e}"
+            ));
         }
     }
 
@@ -146,4 +166,41 @@ pub fn spawn_pi_client(
     });
 
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::resolve_pi_package_dir;
+
+    #[test]
+    fn pi_package_dir_prefers_installed_resources() {
+        let root =
+            std::env::temp_dir().join(format!("grenagent-resources-{}", uuid::Uuid::new_v4()));
+        let resource_dir = root.join("resources");
+        let manifest_dir = root.join("source");
+        std::fs::create_dir_all(resource_dir.join("binaries")).unwrap();
+
+        assert_eq!(
+            resolve_pi_package_dir(&resource_dir, &manifest_dir, true),
+            resource_dir.join("binaries")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn pi_package_dir_only_falls_back_to_source_in_development() {
+        let resource_dir = Path::new("C:/installed/resources");
+        let manifest_dir = Path::new("C:/workspace/src-tauri");
+
+        assert_eq!(
+            resolve_pi_package_dir(resource_dir, manifest_dir, true),
+            manifest_dir.join("binaries")
+        );
+        assert_eq!(
+            resolve_pi_package_dir(resource_dir, manifest_dir, false),
+            resource_dir.join("binaries")
+        );
+    }
 }

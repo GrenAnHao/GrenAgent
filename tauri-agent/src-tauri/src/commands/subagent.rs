@@ -3,10 +3,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
-use crate::commands::knowledge::open_readonly;
 use crate::commands::sessions::resolve_workspace_dir;
+
+fn open_readonly(path: &Path) -> Result<Option<Connection>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

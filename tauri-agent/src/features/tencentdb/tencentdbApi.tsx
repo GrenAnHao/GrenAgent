@@ -1,19 +1,53 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tencentdbApi } from '../../lib/tencentdb';
-import type { TencentdbConnectionConfig, TencentdbStatus } from '../../lib/tencentdb';
-import type { TencentdbMigrationRun, TencentdbMigrationState, TencentdbManualResolutionKind } from '../../lib/tencentdb';
+import type {
+  TencentdbConnectionConfig,
+  TencentdbAsset,
+  TencentdbCodeGraph,
+  TencentdbCodeGraphFilesFormat,
+  TencentdbCodeGraphFilesOptions,
+  TencentdbCodeGraphNodeOptions,
+  TencentdbCodeGraphQueryResponse,
+  TencentdbCodeGraphSearchResponse,
+  TencentdbFixedAsset,
+  TencentdbKnowledgeAssets,
+  TencentdbSkillDetail,
+  TencentdbSkillSummary,
+  TencentdbStatus,
+  TencentdbWiki,
+  TencentdbWikiPage,
+  TencentdbWikiPageContent,
+  TencentdbWikiSearchResponse,
+  WorkspaceKnowledgeAssets,
+} from '../../lib/tencentdb';
 
 export { tencentdbApi };
-export type { TencentdbConnectionConfig, TencentdbStatus };
-export type { TencentdbMigrationRun };
-export type { TencentdbMigrationState };
-export type { TencentdbManualResolutionKind };
+export type {
+  TencentdbConnectionConfig,
+  TencentdbAsset,
+  TencentdbCodeGraph,
+  TencentdbCodeGraphFilesFormat,
+  TencentdbCodeGraphFilesOptions,
+  TencentdbCodeGraphNodeOptions,
+  TencentdbCodeGraphQueryResponse,
+  TencentdbCodeGraphSearchResponse,
+  TencentdbFixedAsset,
+  TencentdbKnowledgeAssets,
+  TencentdbSkillDetail,
+  TencentdbSkillSummary,
+  TencentdbStatus,
+  TencentdbWiki,
+  TencentdbWikiPage,
+  TencentdbWikiPageContent,
+  TencentdbWikiSearchResponse,
+  WorkspaceKnowledgeAssets,
+};
 
 export const DEFAULT_TENCENTDB_CONFIG: TencentdbConnectionConfig = {
   mode: 'local',
   endpoint: '',
   serviceId: 'personal-memory',
-  teamId: 'personal:local',
+  teamId: 'personal-local',
   agentId: 'pi-personal',
   userId: 'local',
 };

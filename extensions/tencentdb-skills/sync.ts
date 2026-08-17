@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
-import { SkillClient, type SkillClientConfig } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
+import { MetadataClient, SkillClient, type SkillClientConfig } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
 
 export interface SkillResource {
   path: string;
@@ -21,18 +21,28 @@ export interface SkillSyncResult {
   removed: string[];
 }
 
-export function createSkillClient(config: SkillClientConfig): SkillClient {
+export interface ManagedSkillClient {
+  skills: Pick<SkillClient, "get" | "readFile">;
+  metadata: Pick<MetadataClient, "listAgentFixedAssetsWithDetail">;
+}
+
+export function createSkillClient(config: SkillClientConfig): ManagedSkillClient {
   // Skill 同步发生在 sidecar 冷启动路径；给它独立的短请求预算，避免
   // 远程 Gateway 无响应时把整次会话卡在资源加载之前。
   const timeout = Number.parseInt(process.env.TDAI_SKILLS_REQUEST_TIMEOUT_MS ?? "4000", 10);
-  return new SkillClient({
+  const clientConfig = {
     ...config,
     timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 4000,
-  });
+  };
+  return {
+    skills: new SkillClient(clientConfig),
+    metadata: new MetadataClient(clientConfig),
+  };
 }
 
 interface SkillManifest {
   revision: string;
+  scope: string;
   skills: Array<{ id: string; version: number }>;
 }
 
@@ -77,16 +87,29 @@ async function readManifest(root: string): Promise<SkillManifest | undefined> {
   }
 }
 
+export async function hasMatchingSkillScope(root: string, scope: string): Promise<boolean> {
+  const manifest = await readManifest(resolve(root));
+  return manifest?.scope === scope;
+}
+
 /**
  * 将远程 Skill 原子同步到专用缓存根目录。
  * 该根目录不与用户 ~/.pi/agent/skills 重叠，因此不会覆盖用户 Skill。
  */
-export async function syncSkills(root: string, skills: RemoteSkill[]): Promise<SkillSyncResult> {
+export async function syncSkills(root: string, scope: string, skills: RemoteSkill[]): Promise<SkillSyncResult> {
+  const normalizedScope = scope.trim();
+  if (!normalizedScope) throw new Error("TencentDB skill cache scope is required");
   const managedRoot = resolve(root);
   await mkdir(managedRoot, { recursive: true });
-  const staging = join(managedRoot, `.staging-${randomUUID()}`);
   const previous = await readManifest(managedRoot);
-  const previousIds = new Set(previous?.skills.map((skill) => skill.id) ?? []);
+  if (previous?.scope !== normalizedScope) {
+    await rm(managedRoot, { recursive: true, force: true });
+    await mkdir(managedRoot, { recursive: true });
+  }
+  const staging = join(managedRoot, `.staging-${randomUUID()}`);
+  const previousIds = new Set(
+    previous?.scope === normalizedScope ? previous.skills.map((skill) => skill.id) : [],
+  );
   const manifestSkills: SkillManifest["skills"] = [];
 
   try {
@@ -128,11 +151,11 @@ export async function syncSkills(root: string, skills: RemoteSkill[]): Promise<S
       }
     }
 
-    const manifestPayload = JSON.stringify({ skills: manifestSkills }, null, 2);
+    const manifestPayload = JSON.stringify({ scope: normalizedScope, skills: manifestSkills }, null, 2);
     const revision = createHash("sha256").update(manifestPayload).digest("hex");
     await atomicWrite(
       join(managedRoot, ".manifest.json"),
-      JSON.stringify({ revision, skills: manifestSkills }, null, 2),
+      JSON.stringify({ revision, scope: normalizedScope, skills: manifestSkills }, null, 2),
     );
     return { revision, synced: manifestSkills.map((skill) => skill.id), removed };
   } finally {
@@ -142,28 +165,32 @@ export async function syncSkills(root: string, skills: RemoteSkill[]): Promise<S
 
 /** 从 MemoryCore Skill API 拉取当前 Agent 的 active Skill 与资源文件。 */
 export async function fetchRemoteSkills(
-  client: SkillClient,
+  client: ManagedSkillClient,
   identity: { teamId: string; agentId: string; userId: string },
 ): Promise<RemoteSkill[]> {
   const pageSize = 100;
-  const summaries = [] as Awaited<ReturnType<SkillClient["list"]>>["items"];
+  const skillIds: string[] = [];
+  const seenSkillIds = new Set<string>();
   let offset = 0;
   while (true) {
-    const page = await client.list({
-      team_id: identity.teamId,
+    const page = await client.metadata.listAgentFixedAssetsWithDetail({
       agent_id: identity.agentId,
-      user_id: identity.userId,
-      filters: { status: ["active"], owner_agent_id: identity.agentId },
-      pagination: { limit: pageSize, offset },
+      limit: pageSize,
+      offset,
     });
-    summaries.push(...page.items);
+    for (const item of page.items) {
+      if (item.asset_type === "skill" && !seenSkillIds.has(item.asset_id)) {
+        seenSkillIds.add(item.asset_id);
+        skillIds.push(item.asset_id);
+      }
+    }
     offset += page.items.length;
     if (page.items.length === 0 || page.items.length < pageSize || offset >= page.total) break;
   }
   const result: RemoteSkill[] = [];
-  for (const summary of summaries) {
-    const detail = await client.get({
-      skill_id: summary.skill_id,
+  for (const skillId of skillIds) {
+    const detail = await client.skills.get({
+      skill_id: skillId,
       team_id: identity.teamId,
       agent_id: identity.agentId,
       user_id: identity.userId,
@@ -172,8 +199,8 @@ export async function fetchRemoteSkills(
     });
     const resources: SkillResource[] = [];
     for (const entry of detail.manifest ?? []) {
-      const file = await client.readFile({
-        skill_id: summary.skill_id,
+      const file = await client.skills.readFile({
+        skill_id: skillId,
         version: detail.version,
         path: entry.path,
         team_id: identity.teamId,
@@ -183,7 +210,7 @@ export async function fetchRemoteSkills(
       resources.push({ path: file.path, content: file.content });
     }
     result.push({
-      id: summary.skill_id,
+      id: skillId,
       version: detail.version,
       markdown: detail.content ?? "",
       resources,

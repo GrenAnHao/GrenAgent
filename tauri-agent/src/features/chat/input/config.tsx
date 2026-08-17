@@ -5,7 +5,6 @@ import ModelThinkingAction from './actions/ModelThinkingAction';
 import CompactAction from './actions/CompactAction';
 import NewSessionAction from './actions/NewSessionAction';
 import UploadAction from './actions/UploadAction';
-import KbAddAction from './actions/KbAddAction';
 import WebSearchAction from './actions/WebSearchAction';
 import GenerateImageAction from './actions/GenerateImageAction';
 import SpeakAction from './actions/SpeakAction';
@@ -21,7 +20,6 @@ export const actionMap = {
   compact: CompactAction,
   newSession: NewSessionAction,
   fileUpload: UploadAction,
-  kbAdd: KbAddAction,
   webSearch: WebSearchAction,
   generateImage: GenerateImageAction,
   speak: SpeakAction,
@@ -40,7 +38,6 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   compact: '压缩上下文',
   newSession: '新会话',
   fileUpload: '添加图片',
-  kbAdd: '加入知识库',
   webSearch: '联网搜索',
   generateImage: '生成图片',
   speak: '朗读文本',
@@ -51,7 +48,6 @@ export const DEFAULT_LEFT_ACTIONS: ActionKey[] = [
   'approval',
   'model',
   'fileUpload',
-  'kbAdd',
   'webSearch',
   'generateImage',
   'speak',
@@ -68,7 +64,6 @@ export const COLLAPSE_PRIORITY: ActionKey[] = [
   'speak',
   'generateImage',
   'webSearch',
-  'kbAdd',
   'compact',
   'newSession',
   'fileUpload',
@@ -83,7 +78,6 @@ export const ACTION_WIDTH = {
   approval: 96,
   model: 210,
   fileUpload: 28,
-  kbAdd: 28,
   webSearch: 28,
   generateImage: 28,
   speak: 28,

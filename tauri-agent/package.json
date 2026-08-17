@@ -11,7 +11,6 @@
     "tauri": "tauri",
     "test": "vitest --run",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "build:codebasememory": "node scripts/build-codebasememory.mjs",
     "build:tencentdb-memory": "node scripts/build-tencentdb-memory.mjs"
   },
   "dependencies": {
@@ -26,10 +25,8 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "@xyflow/react": "^12.11.2",
     "antd": "^6.6.0",
     "antd-style": "^4.1.0",
-    "d3-force": "^3.0.0",
     "lexical": "0.42.0",
     "lucide-react": "^1.31.0",
     "mermaid": "^11.16.1",
@@ -46,7 +43,6 @@
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^6.10.0",
     "@testing-library/react": "^16.3.2",
-    "@types/d3-force": "^3.0.10",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",

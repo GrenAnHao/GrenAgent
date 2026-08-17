@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { profileToEnv, resolveProfile } from "./capability.js";
-import { buildSubagentRuntimeConfig, extractFinalText, isAgentEndLine, resolvePiCommand, resolveSubagentModel } from "./runner.js";
+import {
+  buildSubagentRuntimeConfig,
+  buildSubagentSkillArgs,
+  extractFinalText,
+  isAgentEndLine,
+  resolvePiCommand,
+  resolveSubagentModel,
+} from "./runner.js";
 
 const origPiBin = process.env.PI_BIN;
 const origSubagentModel = process.env.SUBAGENT_MODEL;
@@ -22,6 +32,20 @@ describe("resolvePiCommand", () => {
   it("falls back to the current executable (sidecar self), not bare 'pi'", () => {
     delete process.env.PI_BIN;
     expect(resolvePiCommand().cmd).toBe(process.execPath);
+  });
+});
+
+describe("buildSubagentSkillArgs", () => {
+  it("disables discovered skills and loads only the TencentDB managed root", () => {
+    expect(buildSubagentSkillArgs("C:/managed/skills")).toEqual([
+      "--no-skills",
+      "--skill",
+      "C:/managed/skills",
+    ]);
+  });
+
+  it("keeps all skills disabled when no managed root is configured", () => {
+    expect(buildSubagentSkillArgs(undefined)).toEqual(["--no-skills"]);
   });
 });
 
@@ -69,6 +93,43 @@ describe("buildSubagentRuntimeConfig", () => {
     const deny = rc.env.SAFETY_DENY_TOOLS.split(",");
     expect(deny).toContain("bash");
     expect(deny).toContain("explore_context");
+    rc.cleanup();
+  });
+
+  it("does not copy TencentDB credentials into a derived sub-agent config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-subagent-secret-test-"));
+    const source = join(dir, "runtime-settings.json");
+    writeFileSync(source, JSON.stringify({
+      SOME_KEY: "visible",
+      TDAI_MEMORY_API_KEY: "gateway-secret",
+      TDAI_MEMORY_USER_KEY: "user-secret",
+    }));
+    process.env.PI_RUNTIME_CONFIG = source;
+
+    const rc = buildSubagentRuntimeConfig(false, {});
+    try {
+      expect(rc.path).toBeDefined();
+      const derived = JSON.parse(readFileSync(rc.path!, "utf8")) as Record<string, string>;
+      expect(derived.SOME_KEY).toBe("visible");
+      expect(derived).not.toHaveProperty("TDAI_MEMORY_API_KEY");
+      expect(derived).not.toHaveProperty("TDAI_MEMORY_USER_KEY");
+    } finally {
+      rc.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not pass TencentDB credentials supplied as child overrides", () => {
+    delete process.env.PI_RUNTIME_CONFIG;
+    const rc = buildSubagentRuntimeConfig(false, {
+      SOME_KEY: "visible",
+      TDAI_MEMORY_API_KEY: "gateway-secret",
+      TDAI_MEMORY_USER_KEY: "user-secret",
+    });
+
+    expect(rc.env.SOME_KEY).toBe("visible");
+    expect(rc.env).not.toHaveProperty("TDAI_MEMORY_API_KEY");
+    expect(rc.env).not.toHaveProperty("TDAI_MEMORY_USER_KEY");
     rc.cleanup();
   });
 });

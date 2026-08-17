@@ -22,8 +22,7 @@ import { MainColumnHeader } from './features/layout/MainColumnHeader';
 import { RightPanelShell, SidebarShell, TerminalShell } from './features/layout/PanelShells';
 import { ModuleRail } from './features/layout/ModuleRail';
 import { ModuleContainer } from './features/workspace/ModuleContainer';
-import { KnowledgePanel } from './features/knowledge/KnowledgePanel';
-import { useModuleStore, type WorkspaceView } from './stores/moduleStore';
+import { useModuleStore } from './stores/moduleStore';
 import { FullscreenLoading } from './components/FullscreenLoading';
 import { onPiEvent, pi, type OpenWorkspaceResult } from './lib/pi';
 import { readUiHistoryForSession, sessionKeyFromPath } from './lib/uiHistory';
@@ -147,35 +146,14 @@ async function acquireDraftScratch(): Promise<string> {
   return cwd;
 }
 
-/** 项目级工具面板（绑定当前工作区）：在主列内渲染，侧栏常驻、项目上下文不丢。 */
-function WorkspacePanel({ view }: { view: Exclude<WorkspaceView, 'chat'> }) {
-  switch (view) {
-    case 'knowledge':
-      return <KnowledgePanel />;
-    default:
-      return null;
-  }
-}
-
 const MainChatColumn = memo(function MainChatColumn() {
-  const view = useModuleStore((s) => s.activeWorkspaceView);
-  const isChat = view === 'chat';
   return (
     <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
       <MainColumnHeader />
       <Flexbox flex={1} style={{ minHeight: 0, position: 'relative' }}>
-        {/* ChatView 常驻保活：切到项目工具视图时仅 display:none 隐藏，避免重挂整棵对话树。 */}
-        <Flexbox
-          flex={1}
-          style={{ display: isChat ? 'flex' : 'none', minHeight: 0, height: '100%', position: 'relative' }}
-        >
+        <Flexbox flex={1} style={{ minHeight: 0, height: '100%', position: 'relative' }}>
           <ChatView />
         </Flexbox>
-        {isChat ? null : (
-          <Flexbox flex={1} style={{ minHeight: 0, height: '100%' }}>
-            <WorkspacePanel view={view} />
-          </Flexbox>
-        )}
       </Flexbox>
     </Flexbox>
   );

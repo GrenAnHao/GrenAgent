@@ -1,5 +1,5 @@
 // Flatten a heterogeneous AgentMessage[] into a plain "role: text" transcript.
-// Shared by the goal judge, session-memory, long-term-memory and auto-title
+// Shared by the goal judge, session-memory, TencentDB capture and auto-title
 // extensions so the (sometimes nested) message-shape handling lives in one place.
 
 /** Extract concatenated text from a message content (string | text-part array). */

@@ -63,43 +63,6 @@ export interface OpenWorkspaceResult {
   sessionFile: string | null;
 }
 
-export interface KbStats {
-  chunks: number;
-  sources: number;
-  model: string | null;
-}
-export interface KbSource {
-  source: string;
-  chunks: number;
-}
-export interface KbChunk {
-  id: string;
-  text: string;
-}
-export interface MemStats {
-  project: number;
-  global: number;
-}
-export interface MemItem {
-  id: string;
-  text: string;
-  category: string | null;
-  createdAt: number;
-  scope: 'project' | 'global';
-}
-export interface MemHistoryItem {
-  historyId: number;
-  memoryId: string;
-  op: 'ADD' | 'UPDATE' | 'DELETE' | 'ROLLBACK';
-  oldText: string | null;
-  newText: string | null;
-  oldCategory: string | null;
-  newCategory: string | null;
-  reason: string | null;
-  version: number;
-  createdAt: number;
-  scope: string;
-}
 export interface ImageItem {
   name: string;
   bytes: number;
@@ -244,14 +207,6 @@ export const pi = {
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
-  kbStats: (workspace: string) => invoke<KbStats>('kb_stats', { workspace }),
-  kbSources: (workspace: string) => invoke<KbSource[]>('kb_sources', { workspace }),
-  kbChunks: (workspace: string, source: string) =>
-    invoke<KbChunk[]>('kb_chunks', { workspace, source }),
-  memStats: (workspace: string) => invoke<MemStats>('mem_stats', { workspace }),
-  memList: (workspace: string) => invoke<MemItem[]>('mem_list', { workspace }),
-  memHistory: (workspace: string, memoryId?: string) =>
-    invoke<MemHistoryItem[]>('mem_history', { workspace, memoryId: memoryId ?? null }),
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
   createImage: (workspace: string, name: string) =>
     invoke<string>('create_image', { workspace, name }),

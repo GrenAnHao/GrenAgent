@@ -1,16 +1,11 @@
 pub mod agent;
-pub mod code_intel;
 pub mod create;
 pub mod files;
 pub mod git;
-pub mod knowledge;
 pub mod mcp_policy;
-pub mod memory;
-pub mod migration;
 pub mod providers;
 pub mod sessions;
 pub mod shell;
-pub mod skills;
 pub mod subagent;
 pub mod tencentdb;
 pub mod terminal;

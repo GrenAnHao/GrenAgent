@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { ChatInputProvider, type ChatInputContextValue } from '../ChatInputContext';
-import KbAddAction from './KbAddAction';
+import { actionMap, DEFAULT_LEFT_ACTIONS } from '../config';
 import GenerateImageAction from './GenerateImageAction';
 import SpeakAction from './SpeakAction';
 
@@ -35,11 +35,9 @@ function renderWithCtx(ui: ReactNode) {
 }
 
 describe('input extension actions', () => {
-  it('KbAddAction prefills a kb_add instruction', () => {
-    const setValue = renderWithCtx(<KbAddAction />);
-    fireEvent.click(screen.getByRole('button'));
-    expect(setValue).toHaveBeenCalledTimes(1);
-    expect(setValue.mock.calls[0][0]).toContain('知识库');
+  it('does not register the retired knowledge action', () => {
+    expect('kbAdd' in actionMap).toBe(false);
+    expect(DEFAULT_LEFT_ACTIONS).not.toContain('kbAdd');
   });
 
   it('GenerateImageAction prefills an image instruction', () => {

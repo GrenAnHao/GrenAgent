@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::tencentdb::knowledge::WorkspaceKnowledgeAssets;
 use crate::tencentdb::MemoryConnectionConfig;
 
 /// 仅存应用级元数据，会话本身由 pi 管理。
@@ -25,6 +26,9 @@ pub struct AppState {
     /// TencentDB 连接的非敏感部分；API Key 仅存系统凭据库。
     #[serde(default)]
     pub tencentdb_memory: MemoryConnectionConfig,
+    /// workspace -> TencentDB Wiki/CodeGraph IDs. 仅保存非敏感资产映射。
+    #[serde(default)]
+    pub tencentdb_knowledge_assets: HashMap<String, WorkspaceKnowledgeAssets>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,10 +104,20 @@ impl AppState {
         self.settings
             .iter()
             // TencentDB 连接和密钥由专用状态/凭据边界管理，不能经普通设置文件进入 runtime config。
-            .filter(|(k, _)| !k.starts_with("TDAI_MEMORY_") && k.as_str() != "TDAI_KNOWLEDGE_ENDPOINT")
+            .filter(|(k, _)| {
+                !k.starts_with("TDAI_MEMORY_") && k.as_str() != "TDAI_KNOWLEDGE_ENDPOINT"
+            })
             .filter(|(_, v)| !v.trim().is_empty())
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
+    }
+
+    pub fn knowledge_assets(&self, workspace: &str) -> Option<&WorkspaceKnowledgeAssets> {
+        self.tencentdb_knowledge_assets.get(workspace)
+    }
+
+    pub fn set_knowledge_assets(&mut self, workspace: String, assets: WorkspaceKnowledgeAssets) {
+        self.tencentdb_knowledge_assets.insert(workspace, assets);
     }
 }
 
@@ -181,7 +195,10 @@ mod tests {
             "anthropic/claude-haiku".to_string(),
         );
         m.insert("TDAI_MEMORY_API_KEY".to_string(), "secret".to_string());
-        m.insert("TDAI_KNOWLEDGE_ENDPOINT".to_string(), "http://local".to_string());
+        m.insert(
+            "TDAI_KNOWLEDGE_ENDPOINT".to_string(),
+            "http://local".to_string(),
+        );
         st.replace_settings(m);
         st.save(&path).unwrap();
 

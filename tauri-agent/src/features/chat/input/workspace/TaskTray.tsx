@@ -87,7 +87,7 @@ function elapsed(from: number, to: number): string {
 // running 行超过这么久没有心跳（updatedAt 不再前进）就视为「停滞」：时间按最后一次心跳封顶、
 // 不再随当前时刻累加，避免后端僵尸 running 行让托盘显示离谱的累计时长。
 const STALE_MS = 120_000;
-// 自动后台任务（self-evolve 的 Auto Dream / Auto Distill）到终态后，在托盘里保留这么久即淡出，
+// 自动后台任务到终态后，在托盘里保留这么久即淡出，
 // 不长期常驻——它们的结果另有 NoticePill 通知。
 const FADE_MS = 60_000;
 

@@ -181,11 +181,8 @@ function Gallery() {
       </Section>
 
       <Section title="注入提示 NoticePill">
-        <Item label="long-term-memory（可展开）">
-          <NoticePill customType="long-term-memory" content={'## 已注入长期记忆\n- 项目用 bun 跑脚本\n- 默认分支 main\n- 不使用 emoji'} />
-        </Item>
-        <Item label="knowledge-rag">
-          <NoticePill customType="knowledge-rag" content={'## 已注入知识库上下文\n- conv 基元设计文档\n- 工具卡渲染约定'} />
+        <Item label="上下文注入（可展开）">
+          <NoticePill customType="context" content={'## 已注入上下文\n- 项目约定\n- 当前任务状态'} />
         </Item>
       </Section>
 
@@ -256,21 +253,6 @@ function Gallery() {
       </Section>
 
       <Section title="扩展卡 ExtensionCards">
-        <Item label="kb_search">
-          {renderExtensionCard({ toolName: 'kb_search', args: { query: 'conv 基元' }, result: withDetails({ hits: [{ source: 'docs/conv.md', score: 0.82 }, { source: 'docs/plan.md', score: 0.61 }] }, '## 命中片段\n- ConvRow 是 L2 纯行，统一状态点 + 工具图标。'), status: 'done' })}
-        </Item>
-        <Item label="kb_add">
-          {renderExtensionCard({ toolName: 'kb_add', args: { source: 'docs/plan.md' }, result: withDetails({ source: 'docs/plan.md', chunks: 12, embedded: true }), status: 'done' })}
-        </Item>
-        <Item label="memory_save · done">
-          {renderExtensionCard({ toolName: 'memory_save', args: { text: '统一卡片基元' }, result: withDetails({ scope: 'project', category: '风格' }), status: 'done' })}
-        </Item>
-        <Item label="memory_save · error">
-          {renderExtensionCard({ toolName: 'memory_save', args: { text: '统一卡片基元' }, result: toolResult('embedding 未配置：缺少 API key'), status: 'error' })}
-        </Item>
-        <Item label="memory_recall">
-          {renderExtensionCard({ toolName: 'memory_recall', args: { query: '风格约定' }, result: toolResult('召回到 2 条相关记忆：\n- 项目禁用 emoji\n- 图标统一取 lobehub + lucide'), status: 'done' })}
-        </Item>
         <Item label="spawn_agent">
           {renderExtensionCard({ toolName: 'spawn_agent', args: {}, result: withDetails({ count: 3, failed: 0 }, '3 个子代理已派发'), status: 'done' })}
         </Item>

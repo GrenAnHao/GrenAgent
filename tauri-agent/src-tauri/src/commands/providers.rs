@@ -170,7 +170,7 @@ struct ProbeModelsOut {
 #[tauri::command]
 pub async fn list_models_global(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
     use tauri_plugin_shell::ShellExt;
-    let package_dir = crate::pi::sidecar::pi_package_dir();
+    let package_dir = crate::pi::sidecar::pi_package_dir(&app).map_err(|e| e.to_string())?;
     let output = app
         .shell()
         .sidecar("pi")
@@ -358,7 +358,7 @@ async fn run_oneshot_lines<F: FnMut(&str)>(
 ) -> Result<(), String> {
     use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
-    let package_dir = crate::pi::sidecar::pi_package_dir();
+    let package_dir = crate::pi::sidecar::pi_package_dir(app).map_err(|e| e.to_string())?;
     let (mut rx, _child) = app
         .shell()
         .sidecar("pi")

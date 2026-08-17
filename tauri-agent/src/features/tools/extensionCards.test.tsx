@@ -40,39 +40,10 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     expect(renderExtensionCard({ toolName: 'bash', args: {}, result: {}, status: 'done' })).toBeNull();
   });
 
-  it('kb_search shows hit sources and scores', () => {
-    renderCard('kb_search', { content: [{ type: 'text', text: 'body' }], details: { mode: 'semantic', hits: [{ source: 'spec.md', score: 0.91 }] } });
-    expect(screen.getByTestId('card-kb_search')).toBeTruthy();
-    expect(screen.getByText(/spec\.md/)).toBeTruthy();
-  });
-
-  it('kb_add shows indexed source and chunk count', () => {
-    renderCard('kb_add', { content: [], details: { source: 'notes.md', chunks: 7, embedded: true } });
-    const card = screen.getByTestId('card-kb_add');
-    expect(card.textContent).toContain('notes.md');
-    expect(card.textContent).toContain('7');
-  });
-
-  it('memory_save shows scope', () => {
-    renderCard('memory_save', { content: [], details: { id: 'm1', scope: 'global', category: 'preference' } });
-    expect(screen.getByTestId('card-memory_save').textContent).toContain('全局');
-  });
-
-  it('memory_save 失败态显示「保存失败」而非谎报已保存', () => {
-    renderCard(
-      'memory_save',
-      { content: [{ type: 'text', text: 'Memory service unavailable due to network issues' }] },
-      {},
-      'error',
-    );
-    const card = screen.getByTestId('card-memory_save');
-    expect(card.textContent).toContain('失败');
-    expect(card.textContent).not.toContain('已保存');
-  });
-
-  it('memory_recall renders recall card', () => {
-    renderCard('memory_recall', { content: [{ type: 'text', text: 'mem body' }], details: { hits: [{ id: 'm1', scope: 'project', score: 0.8 }] } });
-    expect(screen.getByTestId('card-memory_recall')).toBeTruthy();
+  it('does not render cards for removed legacy memory or knowledge tools', () => {
+    for (const toolName of ['kb_search', 'kb_add', 'memory_save', 'memory_recall']) {
+      expect(renderExtensionCard({ toolName, args: {}, result: {}, status: 'done' })).toBeNull();
+    }
   });
 
   it('generate_image shows filename in tooltip and reveals file on click', () => {

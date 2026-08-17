@@ -50,7 +50,7 @@ export default function (pi: ExtensionAPI) {
   console.error("[agent-mode] extension loaded");
 
   let currentMode: AgentMode = DEFAULT_MODE;
-  // 进入受限模式（ask/plan）前的完整工具集，退出时还原（避免丢失 todo/kb/memory 等扩展工具）。
+  // 进入受限模式（ask/plan）前的完整工具集，退出时还原（避免丢失动态扩展工具）。
   let savedTools: string[] | undefined;
   // plan 的步骤跟踪：规划阶段产出 todoItems；用户点卡片「开始执行」（/plan-build）后 executionMode=true（此时已切回 agent 拿全工具）。
   let todoItems: TodoItem[] = [];

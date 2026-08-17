@@ -67,77 +67,15 @@ describe("injectDefaultServers", () => {
   });
 });
 
-describe("injectDefaultServers · code-intel", () => {
-  const base = { PI_PACKAGE_DIR: "/pkg" } as Record<string, string | undefined>;
-
-  it("injects codebase-memory by default (pointing at the single binary)", () => {
-    const cg = injectDefaultServers([], { ...base, CODE_INTEL: "codebase-memory" }, "linux").find(
-      (s) => s.name === "codebase-memory",
-    );
-    expect(cg?.command).toBe("/pkg/codebase-memory/codebase-memory-mcp");
-    expect(cg?.args).toEqual([]);
-    expect(cg?.cwd).toBe("${workspaceFolder}");
+describe("injectDefaultServers · TencentDB cutover", () => {
+  it("never injects the legacy codebase-memory server", () => {
+    const out = injectDefaultServers([], { PI_PACKAGE_DIR: "/pkg", CODE_INTEL: "codebase-memory" }, "linux");
+    expect(out.some((s) => s.name === "codebase-memory")).toBe(false);
   });
 
-  it("points at the .exe on win32 (single binary, no node launcher)", () => {
-    const cg = injectDefaultServers([], { ...base, CODE_INTEL: "codebase-memory" }, "win32").find(
-      (s) => s.name === "codebase-memory",
-    );
-    expect(cg?.command).toBe("/pkg/codebase-memory/codebase-memory-mcp.exe");
-    expect(cg?.args).toEqual([]);
-    expect(cg?.cwd).toBe("${workspaceFolder}");
-  });
-
-  it("injects codebase-memory even when CODE_INTEL is unset (default engine)", () => {
-    expect(injectDefaultServers([], { ...base }, "linux").find((s) => s.name === "codebase-memory")).toBeTruthy();
-  });
-
-  it("does not inject without PI_PACKAGE_DIR (keeps existing tests green)", () => {
-    expect(injectDefaultServers([], { CODE_INTEL: "codebase-memory" }, "linux")).toEqual([]);
-  });
-
-  it("skips injection when CODE_INTEL=off", () => {
-    expect(
-      injectDefaultServers([], { ...base, CODE_INTEL: "off" }, "linux").find((s) => s.name === "codebase-memory"),
-    ).toBeUndefined();
-  });
-
-  it("skips codebase-memory after the workspace legacy cutover", () => {
-    expect(
-      injectDefaultServers(
-        [],
-        { ...base, CODE_INTEL: "codebase-memory", TDAI_LEGACY_CUTOVER: "1" },
-        "linux",
-      ).find((s) => s.name === "codebase-memory"),
-    ).toBeUndefined();
-  });
-
-  it("falls back to codebase-memory for a removed/unknown engine (e.g. legacy codegraph/gitnexus)", () => {
-    const cg = injectDefaultServers([], { ...base, CODE_INTEL: "codegraph" }, "linux").find(
-      (s) => s.name === "codebase-memory",
-    );
-    expect(cg?.command).toBe("/pkg/codebase-memory/codebase-memory-mcp");
-  });
-
-  it("yields when the user already configured a same-named server", () => {
-    const user = parseMcpServers('{"mcpServers":{"codebase-memory":{"command":"my-cbm","args":["x"]}}}');
-    const out = injectDefaultServers(user, { ...base, CODE_INTEL: "codebase-memory" }, "linux");
-    expect(out.filter((s) => s.name === "codebase-memory")).toHaveLength(1);
-    expect(out.find((s) => s.name === "codebase-memory")?.command).toBe("my-cbm");
-  });
-
-  it("yields when a differently-named user server exposes the signature tools", () => {
-    const user = parseMcpServers('{"mcpServers":{"my-cbm":{"command":"x"}}}');
-    const out = injectDefaultServers(user, { ...base, CODE_INTEL: "codebase-memory" }, "linux", {
-      "my-cbm": ["search_graph", "trace_path"],
-    });
-    expect(out.find((s) => s.name === "codebase-memory")).toBeUndefined();
-  });
-
-  it("still injects open-websearch alongside codebase-memory", () => {
-    const out = injectDefaultServers([], { ...base, OPEN_WEBSEARCH: "1" }, "linux");
-    expect(out.find((s) => s.name === "codebase-memory")).toBeTruthy();
-    expect(out.find((s) => s.name === "open-websearch")).toBeTruthy();
+  it("drops a stale user-configured codebase-memory server", () => {
+    const user = parseMcpServers('{"mcpServers":{"codebase-memory":{"command":"my-cbm"}}}');
+    expect(injectDefaultServers(user, {}, "linux")).toEqual([]);
   });
 
   it("injects TencentDB knowledge MCP from the bundled runtime", () => {
@@ -147,10 +85,15 @@ describe("injectDefaultServers · code-intel", () => {
         PI_PACKAGE_DIR: "C:/app/binaries",
         TDAI_KNOWLEDGE_MCP: "1",
         TDAI_KNOWLEDGE_ENDPOINT: "http://127.0.0.1:8421/v3",
-        TDAI_MEMORY_API_KEY: "secret",
+        TDAI_MEMORY_SERVICE_ID: "personal-memory",
+        TDAI_CODE_GRAPH_ID: "cg-current",
+        TDAI_WIKI_ID: "wiki-current",
         CODE_INTEL: "off",
       },
       "win32",
+      {},
+      "x64",
+      { knowledgeApiToken: "secret", knowledgeUserKey: "user-secret" },
     );
     const server = out.find((s) => s.name === "tencentdb-knowledge");
     expect(server?.command?.replaceAll("\\", "/")).toBe(
@@ -162,8 +105,28 @@ describe("injectDefaultServers · code-intel", () => {
     expect(server).toMatchObject({
       name: "tencentdb-knowledge",
       transport: "stdio",
-      env: { KNOWLEDGE_API_URL: "http://127.0.0.1:8421", KNOWLEDGE_API_TOKEN: "secret" },
+      env: {
+        KNOWLEDGE_API_URL: "http://127.0.0.1:8421",
+        KNOWLEDGE_API_TOKEN: "secret",
+        KNOWLEDGE_USER_KEY: "user-secret",
+        KNOWLEDGE_SERVICE_ID: "personal-memory",
+        TDAI_CODE_GRAPH_ID: "cg-current",
+        TDAI_WIKI_ID: "wiki-current",
+      },
     });
+  });
+
+  it("does not read the Knowledge token from the general process environment", () => {
+    const [server] = injectDefaultServers([], {
+      PI_PACKAGE_DIR: "/pkg",
+      TDAI_KNOWLEDGE_MCP: "1",
+      TDAI_KNOWLEDGE_ENDPOINT: "http://127.0.0.1:8421/v3",
+      TDAI_MEMORY_API_KEY: "must-not-forward",
+      TDAI_MEMORY_USER_KEY: "must-not-forward-user",
+    }, "linux");
+
+    expect(server.env).not.toHaveProperty("KNOWLEDGE_API_TOKEN");
+    expect(server.env).not.toHaveProperty("KNOWLEDGE_USER_KEY");
   });
 
   it("does not inject TencentDB knowledge when the user configured the same name", () => {

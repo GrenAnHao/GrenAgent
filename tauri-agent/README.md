@@ -5,23 +5,26 @@ GrenAgent 桌面应用：React 19 + TypeScript + Vite 前端，Tauri 2 与 Rust 
 ## 开发
 
 ```bash
-npm install
-npm run dev          # 前端开发服务器
-npm run tauri dev    # 桌面端（Tauri + Rust）
+bun install
+bun run build:tencentdb-memory   # 首次运行或上游版本更新后执行
+bun run dev                      # 前端开发服务器
+bun run tauri dev                # 桌面端（Tauri + Rust，自动托管 TencentDB）
 ```
+
+本机模式无需单独启动服务或配置 TencentDB User Key，并使用固定单用户身份。远程模式支持填写服务端已有的 Team、Agent 和 User 身份，同时需要 Gateway API Key 与 User Key；密钥只写入系统凭据库，Agent 工具子进程不会继承它们。
 
 ## 构建
 
 ```bash
-npm run build                    # 校验已打包运行时后执行 tsc && vite build
-npm run build:sidecar            # 构建 Agent sidecar 二进制
-npm run build:codebasememory     # 构建 codebase-memory 二进制
-npm run build:tencentdb-memory   # 构建当前平台的 TencentDB MemoryCore/Knowledge 运行时
+bun run build                    # 校验已打包运行时后执行 tsc && vite build
+bun run build:sidecar            # 构建 Agent sidecar 二进制
+bun run build:tencentdb-memory   # 构建当前平台的 TencentDB MemoryCore/Knowledge 运行时
 ```
 
 ## 验证
 
 ```bash
-npx tsc --noEmit
-npm run test
+bunx tsc --noEmit
+bun run test
+node --test scripts/tencentdb-runtime-patches.node-test.mjs
 ```

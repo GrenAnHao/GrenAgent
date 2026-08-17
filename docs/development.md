@@ -4,15 +4,17 @@
 
 ## 环境要求
 
-- Node.js >= 22.5（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.5.0`）
+- Node.js >= 22.5（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.5.0`；TencentDB 打包运行时固定携带 Node 22.19.0）
 - Rust 工具链：构建桌面端（Tauri 2）时需要，参见 Tauri 官方环境要求
 - Bun：`tauri-agent/` 使用 Bun 管理依赖；`tauri.conf.json` 的 `beforeDevCommand` / `beforeBuildCommand` 为 `bun run dev` / `bun run build`，因此 `bun run tauri dev` 会在 Tauri 构建链里自动调用 Bun
+- `curl` 与 `tar`：构建 TencentDB 运行时时用于下载和解包上游源码、Node.js 运行时
 
 ## 安装
 
 ```bash
 cd tauri-agent
 bun install
+bun run build:tencentdb-memory
 ```
 
 `cli/` 与 `extensions/` 各自维护依赖，按需在对应目录执行 `npm install`。
@@ -24,10 +26,10 @@ bun install
 | 命令 | 说明 |
 | --- | --- |
 | `bun run dev` | 启动 Vite 前端开发服务器 |
-| `bun run tauri dev` | 启动桌面端（Tauri + Rust，内部触发 `bun run build`） |
-| `bun run build` | 前端构建（`tsc && vite build`） |
+| `bun run tauri dev` | 启动桌面端（Tauri + Rust，内部启动 Vite；Tauri setup 自动托管已构建的 TencentDB 运行时） |
+| `bun run build` | 校验 TencentDB 运行时后执行 `tsc && vite build` |
 | `bun run build:sidecar` | 构建 Agent sidecar 二进制（`binaries/pi`） |
-| `bun run build:codebasememory` | 构建 codebase-memory 二进制 |
+| `bun run build:tencentdb-memory` | 校验固定 SHA-256 后下载并构建随应用打包的 TencentDB MemoryCore、MemoryKnowledge 与 Node.js 运行时 |
 | `bun run test` | 运行前端测试（`vitest --run`） |
 | `bunx tsc --noEmit` | 前端类型检查 |
 
@@ -100,7 +102,7 @@ export default function (pi: ExtensionAPI) {
 ## 构建产物
 
 - `binaries/pi`：sidecar 单文件二进制，由 `npm run build:sidecar` 生成。
-- `binaries/codebase-memory/`：codebase-memory 单文件二进制，由 `npm run build:codebasememory` 生成，并在 `tauri.conf.json` 的 `resources` 中打包。
+- `binaries/tencentdb-memory/<platform>/`：由 `bun run build:tencentdb-memory` 生成的托管运行时，包含 MemoryCore、MemoryKnowledge、Node.js 和固定版本清单，并在 `tauri.conf.json` 的 `resources` 中打包。
 
 ## 本地向量服务（embedding，独立模块）
 
@@ -125,4 +127,4 @@ export default function (pi: ExtensionAPI) {
 ## 提交与分支
 
 - commit message 遵循约定式提交（Conventional Commits），用中文描述，例如 `fix(sessions): 修复项目在资源管理器中打开无效`。
-- 不要提交 `node_modules`、`.codebase-memory`、构建产物等（已在 gitignore 中）。
+- 不要提交 `node_modules`、TencentDB 运行时构建产物等（已在 gitignore 中）。

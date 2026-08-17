@@ -427,7 +427,7 @@ export default function (pi: ExtensionAPI) {
           timeoutMs: limits.timeoutMs,
           signal: controller.signal,
           // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
-          // SubAgentLogBody 轮询 registry 即可像主对话一样实时回放后台子代理（与 dream/distill 一致）。
+          // SubAgentLogBody 轮询 registry，即可像主对话一样实时回放后台子代理。
           onUpdate: (u) => registry.progress(id, u.transcript),
         })
           .then((r) =>

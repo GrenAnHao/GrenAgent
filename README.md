@@ -1,6 +1,6 @@
 # GrenAgent
 
-本地优先的桌面 AI 编码 Agent。基于 Pi 运行时（`@earendil-works/pi-coding-agent`），把对话、工具调用、代码智能、知识库与记忆整合进一个 Tauri 桌面应用，全程在本地运行。
+本地优先的桌面 AI 编码 Agent。基于 Pi 运行时（`@earendil-works/pi-coding-agent`），把对话、工具调用、代码智能、知识库与记忆整合进一个 Tauri 桌面应用；默认使用本机托管运行时，也可连接远程 Gateway。
 
 <p align="center">
   <img src="images/hero-code-graph.jpg" alt="代码图谱 · 227 个文件 · 674 条依赖" width="100%">
@@ -24,8 +24,8 @@
   <tr>
     <td width="50%" valign="top">
       <img src="images/code-index.png" alt="代码智能" width="100%"><br>
-      <strong>代码智能</strong><br>
-      内置 CodeGraph，离线、零配置，基于 tree-sitter 与 SQLite。
+      <strong>TencentDB CodeGraph</strong><br>
+      由 MemoryKnowledge 统一提供符号检索、调用关系与影响分析，本机工作区自动登记并构建。
     </td>
     <td width="50%" valign="top">
       <img src="images/git-graph.png" alt="Git 集成" width="100%"><br>
@@ -47,9 +47,9 @@
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="images/skills.png" alt="Skills 工作流" width="100%"><br>
-      <strong>Skills 工作流</strong><br>
-      从 <code>~/.agents/skills</code> 加载技能，<code>/skill:name</code> 调用，面板内启用/禁用。
+      <img src="images/skills.png" alt="TencentDB Skills" width="100%"><br>
+      <strong>TencentDB Skills</strong><br>
+      从当前 Agent 装备的 TencentDB Skill 资产加载，版本或资源更新后自动热重载。
     </td>
     <td width="50%" valign="top"></td>
   </tr>
@@ -57,8 +57,8 @@
 
 此外还支持：
 
-- **知识库 RAG** — 文件分块后做向量或关键词检索，面板内用原生文件选择器添加文档。
-- **长期记忆** — 跨会话的记忆抽取与检索。
+- **TencentDB Knowledge** — Wiki 文档检索与 CodeGraph 代码知识统一由 MemoryKnowledge 提供。
+- **TencentDB 长期记忆** — 支持本机托管，也可连接远程 Gateway 跨设备共享。
 - **用量统计** — 按天、模型、项目聚合 Token 与费用。
 - **终端 Dock** — 终端 tab 容器，子代理会话独立成 tab。
 - **IM 接入** — 微信（ilink 官方 bot）扫码登录，手机遥控 Agent；「连接」面板展示登录状态与会话只读镜像。
@@ -70,7 +70,7 @@ GrenAgent 由以下部分组成：
 | 模块 | 包名 | 职责 |
 | --- | --- | --- |
 | `cli/` | `grenagent-agent-sidecar` | Agent sidecar。把 Pi 运行时与内置扩展编译成单个二进制（`binaries/pi`），由 Tauri 后端以 `--mode rpc` 拉起。 |
-| `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总（当前 36 个），随 sidecar 一并编译，无需全局安装。 |
+| `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总，随 sidecar 一并编译，无需全局安装。 |
 | `tauri-agent/` | `grenagent-app` | 桌面应用。React 19 + TypeScript + Vite 前端，Tauri 2 / Rust 后端。 |
 | `embedding/` | `embedding` | 独立本地向量服务（实验）。CPU 跑 `Xenova/all-MiniLM-L6-v2`，`POST /embed` 返回 384 维向量；尚未集成进主应用。 |
 
@@ -96,25 +96,26 @@ bun run dev
 
 ```bash
 cd tauri-agent
+bun run build:tencentdb-memory   # 首次运行或上游版本更新后执行
 bun run tauri dev
 ```
 
 ## 内置扩展
 
-Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入 **36 个**内置扩展（`safety` 最先加载以尽早拦截）。扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令；纯策略类扩展只挂 hook，无显式工具。
+Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`safety` 最先加载以尽早拦截）。扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令；纯策略类扩展只挂 hook，无显式工具。
 
 按职责大致分为：
 
 | 类别 | 扩展 | 说明 |
 | --- | --- | --- |
 | 安全与策略 | `safety`、`approval`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、死循环检测、声明式规则、MCP 工具权限 |
-| 会话管理 | `auto-title`、`checkpoint`、`compaction-policy`、`session-memory`、`session-search`、`goal`、`todo` | 自动标题、工作区快照、上下文压缩、会话状态、历史搜索、目标驱动、待办 |
+| 会话管理 | `auto-title`、`checkpoint`、`compaction-policy`、`session-memory`、`goal`、`todo` | 自动标题、工作区快照、上下文压缩、会话状态、目标驱动、待办 |
 | 模式与交互 | `agent-mode`、`diagram-hint` | Agent / Ask / Debug / Plan 模式；Mermaid / KaTeX 渲染提示 |
-| 知识与记忆 | `knowledge-rag`、`long-term-memory` | 知识库 RAG（`kb_search` / `kb_add`）；跨会话记忆（`memory_*`） |
+| 知识与记忆 | `tencentdb-memory`、`session-memory` | TencentDB 长期记忆与跨会话检索；当前会话压缩后的短期工作状态 |
 | 联网与信息 | `web-fetch`、`web-search` | 单页抓取（`fetch_url`）；多引擎搜索与站点抓取（`web_search` 等） |
 | MCP | `mcp` | 连接外部 MCP server，工具名 `mcp__<server>__<tool>` |
 | 媒体生成 | `image-gen`、`tts` | 文生图（`generate_image`）；语音合成（`speak`） |
-| 代码智能 | `code-intel`、`code-search`、`ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`code-review`、`diagnostics` | CodeGraph 探索、代码搜索、AST 编辑、LSP、行号编辑、批量读写、Python/JS 执行、调试日志、DAP、审查、诊断 |
+| 代码智能 | `ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`code-review`、`diagnostics` | TencentDB CodeGraph（经 MemoryKnowledge MCP）、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |
 | 多代理 | `multi-agent` | 子代理委派（`spawn_agent`） |
 | 外部集成 | `github` | GitHub CLI 封装（`github`） |
 | IM 接入 | `im-gateway`、`im-platforms` | HTTP webhook 网关；微信 ilink bot（`/im`） |

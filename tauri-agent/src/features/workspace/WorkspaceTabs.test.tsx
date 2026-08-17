@@ -14,26 +14,26 @@ afterEach(() => {
 describe('WorkspaceTabs', () => {
   it('renders all workspace view tabs', () => {
     render(<WorkspaceTabs />);
-    for (const id of ['chat', 'knowledge']) {
+    for (const id of ['chat']) {
       expect(screen.getByTestId(`workspace-tab-${id}`)).toBeTruthy();
     }
   });
 
-  it('does not render memory as a workspace tab (memory is global)', () => {
+  it('does not render retired knowledge or memory workspace tabs', () => {
     render(<WorkspaceTabs />);
+    expect(screen.queryByTestId('workspace-tab-knowledge')).toBeNull();
     expect(screen.queryByTestId('workspace-tab-memory')).toBeNull();
   });
 
-  it('switches the active workspace view on click', () => {
+  it('keeps chat as the active workspace view', () => {
     render(<WorkspaceTabs />);
-    fireEvent.click(screen.getByTestId('workspace-tab-knowledge'));
-    expect(useModuleStore.getState().activeWorkspaceView).toBe('knowledge');
+    fireEvent.click(screen.getByTestId('workspace-tab-chat'));
+    expect(useModuleStore.getState().activeWorkspaceView).toBe('chat');
   });
 
   it('marks the active view with aria-pressed', () => {
-    useModuleStore.setState({ activeWorkspaceView: 'knowledge' });
+    useModuleStore.setState({ activeWorkspaceView: 'chat' });
     render(<WorkspaceTabs />);
-    expect(screen.getByTestId('workspace-tab-knowledge').getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByTestId('workspace-tab-chat').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('workspace-tab-chat').getAttribute('aria-pressed')).toBe('true');
   });
 });

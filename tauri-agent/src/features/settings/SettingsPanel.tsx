@@ -127,7 +127,7 @@ export function SettingsPanel() {
   const cat: SettingCategory = SETTINGS_SCHEMA.find((c) => c.id === activeId) ?? SETTINGS_SCHEMA[0];
   const sections = cat.sections ?? [{ title: '', fields: cat.fields ?? [] }];
 
-  // 一次性迁移：旧 IMAGE/TTS/KB_EMBED/MEMORY_EMBED 的 key/baseURL → provider+model（幂等）。
+  // 一次性迁移：旧 IMAGE/TTS 的 key/baseURL → provider+model（幂等）。
   useEffect(() => {
     void (async () => {
       const [settings, cfg] = await Promise.all([pi.getSettings(), pi.getProviderConfig()]);

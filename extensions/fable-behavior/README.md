@@ -73,7 +73,7 @@ cp -r ~/.pi/agent/agents ~/.pi/agent/agents.bak
 FABLE_BEHAVIOR_SEED_AGENTS=force pi ...
 ```
 
-The same self-healing seeder backs self-evolve's `dream` / `distill` personas (`.self-evolve-seed-version`, `SELF_EVOLVE_SEED`). Shared logic: `extensions/_shared/seed-agents.ts`.
+The shared self-healing seeder lives in `extensions/_shared/seed-agents.ts`.
 
 ## Layering vs other extensions
 

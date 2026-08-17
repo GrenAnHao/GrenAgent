@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { useModuleStore, type ModuleId } from '../../stores/moduleStore';
-import { MemoryPanel } from '../memory/MemoryPanel';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
@@ -9,8 +8,6 @@ import { UsagePanel } from '../usage/UsagePanel';
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
   switch (module) {
-    case 'memory':
-      return <MemoryPanel />;
     case 'settings':
       return <SettingsPanel />;
     case 'connections':

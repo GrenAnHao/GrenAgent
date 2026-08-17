@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::state::AppState;
+use crate::tencentdb::knowledge::WorkspaceKnowledgeAssets;
 use crate::tencentdb::MemoryConnectionConfig;
 
 /// 线程安全的 AppState 持有者 + 持久化路径。作为 Tauri managed state。
@@ -70,6 +71,19 @@ impl AppStateStore {
 
     pub async fn replace_tencentdb_config(&self, config: MemoryConnectionConfig) {
         self.update(|st| st.tencentdb_memory = config).await;
+    }
+
+    pub async fn knowledge_assets_for(&self, workspace: &str) -> Option<WorkspaceKnowledgeAssets> {
+        self.inner.lock().await.knowledge_assets(workspace).cloned()
+    }
+
+    pub async fn replace_knowledge_assets(
+        &self,
+        workspace: String,
+        assets: WorkspaceKnowledgeAssets,
+    ) {
+        self.update(|st| st.set_knowledge_assets(workspace, assets))
+            .await;
     }
 
     /// 运行时配置文件路径（注入 sidecar 供扩展 fs.watch 热更新）。

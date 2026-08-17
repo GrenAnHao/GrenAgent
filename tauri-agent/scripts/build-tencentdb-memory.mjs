@@ -1,8 +1,20 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import {
+  localSourceFetcherSource,
+  patchCoreManagedIdentityBootstrap,
+  patchCoreStdinShutdown,
+  patchKnowledgeApiAuth,
+  patchKnowledgeMcpHttpClient,
+  patchKnowledgeMcpServer,
+  patchKnowledgeSourceRegistry,
+  patchKnowledgeStdinShutdown,
+  patchKnowledgeWikiWindowsContainment,
+} from "./tencentdb-runtime-patches.mjs";
 
 const upstream = {
   owner: "TencentCloud",
@@ -10,6 +22,7 @@ const upstream = {
   commit: "97f94654280b2932c35ba4806a491999ed244cc9",
 };
 const nodeVersion = "22.19.0";
+const upstreamSourceSha256 = "8c8785d384cf10e6feb92b93f4ffe03e5890dd6fbaf37f512fef0e3bb87be9f0";
 const appRoot = resolve(import.meta.dirname, "..");
 const outputRoot = join(appRoot, "src-tauri", "binaries", "tencentdb-memory", platformDir());
 
@@ -25,18 +38,22 @@ try {
   await download(
     `https://codeload.github.com/${upstream.owner}/${upstream.repo}/tar.gz/${upstream.commit}`,
     archive,
+    upstreamSourceSha256,
   );
   await mkdir(sourceRoot, { recursive: true });
   execFileSync("tar", ["-xzf", archive, "-C", sourceRoot, "--strip-components=1"], { stdio: "inherit" });
 
-  const nodeRoot = await downloadNodeRuntime(workspace);
+  const nodeRuntime = nodeAsset();
+  const nodeRoot = await downloadNodeRuntime(workspace, nodeRuntime);
   const node = nodeExecutable(nodeRoot);
   const npm = npmCli(nodeRoot);
   const core = join(sourceRoot, "MemoryCore");
   const knowledge = join(sourceRoot, "MemoryKnowledge");
   await disableCoreOpenclawPostinstall(core);
+  await patchCoreRuntime(core);
   await pinKnowledgeLoopback(knowledge);
   await fixKnowledgeMainGuards(knowledge);
+  await patchKnowledgeRuntime(knowledge);
   installAndBuild(core, false, node, npm);
   installAndBuild(knowledge, true, node, npm);
   await alignKnowledgeLaunchers(knowledge);
@@ -48,7 +65,16 @@ try {
   await cp(nodeRoot, join(outputRoot, "node"), { recursive: true });
   await writeFile(
     join(outputRoot, "manifest.json"),
-    `${JSON.stringify({ upstream, nodeVersion }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        upstream,
+        upstreamSourceSha256,
+        nodeVersion,
+        nodeAsset: { filename: nodeRuntime.filename, sha256: nodeRuntime.sha256 },
+      },
+      null,
+      2,
+    )}\n`,
   );
   await verifyLayout(outputRoot);
 } finally {
@@ -60,11 +86,14 @@ function installAndBuild(dir, needsBuild, node, npm) {
     ...process.env,
     PATH: `${dirname(node)}${delimiter}${process.env.PATH ?? ""}`,
   };
-  const installArgs = needsBuild ? [npm, "install"] : [npm, "install", "--omit=dev"];
+  // npm 10 crashes while resolving Vitest's optional peer graph in this pinned upstream tree.
+  const installArgs = needsBuild
+    ? [npm, "install", "--legacy-peer-deps"]
+    : [npm, "install", "--omit=dev", "--legacy-peer-deps"];
   execFileSync(node, installArgs, { cwd: dir, env, stdio: "inherit" });
   if (needsBuild) {
     execFileSync(node, [npm, "run", "build"], { cwd: dir, env, stdio: "inherit" });
-    execFileSync(node, [npm, "prune", "--omit=dev"], { cwd: dir, env, stdio: "inherit" });
+    execFileSync(node, [npm, "prune", "--omit=dev", "--legacy-peer-deps"], { cwd: dir, env, stdio: "inherit" });
   }
 }
 
@@ -73,6 +102,22 @@ async function disableCoreOpenclawPostinstall(coreDir) {
   const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
   delete packageJson.scripts?.postinstall;
   await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+}
+
+async function patchCoreRuntime(coreDir) {
+  const serverPath = join(coreDir, "src", "gateway", "server.ts");
+  await writeFile(serverPath, patchCoreStdinShutdown(await readFile(serverPath, "utf8")));
+  const schemaPath = join(coreDir, "src", "metadata", "router", "v3-meta-schemas.ts");
+  const typesPath = join(coreDir, "src", "metadata", "types.ts");
+  const servicePath = join(coreDir, "src", "metadata", "service", "metadata-service.ts");
+  const identity = patchCoreManagedIdentityBootstrap({
+    schema: await readFile(schemaPath, "utf8"),
+    types: await readFile(typesPath, "utf8"),
+    service: await readFile(servicePath, "utf8"),
+  });
+  await writeFile(schemaPath, identity.schema);
+  await writeFile(typesPath, identity.types);
+  await writeFile(servicePath, identity.service);
 }
 
 async function pinKnowledgeLoopback(knowledgeDir) {
@@ -117,6 +162,45 @@ async function fixKnowledgeMainGuards(knowledgeDir) {
   );
 }
 
+async function patchKnowledgeRuntime(knowledgeDir) {
+  const serverPath = join(knowledgeDir, "src", "server.ts");
+  let server = await readFile(serverPath, "utf8");
+  server = patchKnowledgeApiAuth(server);
+  server = patchKnowledgeStdinShutdown(server);
+  await writeFile(
+    serverPath,
+    server,
+  );
+
+  const mcpClientPath = join(knowledgeDir, "src", "mcp", "http-client.ts");
+  await writeFile(
+    mcpClientPath,
+    patchKnowledgeMcpHttpClient(await readFile(mcpClientPath, "utf8")),
+  );
+
+  const mcpServerPath = join(knowledgeDir, "src", "mcp", "server.ts");
+  await writeFile(
+    mcpServerPath,
+    patchKnowledgeMcpServer(await readFile(mcpServerPath, "utf8")),
+  );
+
+  const registryPath = join(knowledgeDir, "src", "source-fetcher", "registry.ts");
+  await writeFile(
+    registryPath,
+    patchKnowledgeSourceRegistry(await readFile(registryPath, "utf8")),
+  );
+  await writeFile(
+    join(knowledgeDir, "src", "source-fetcher", "local-fetcher.ts"),
+    localSourceFetcherSource,
+  );
+
+  const wikiServicePath = join(knowledgeDir, "src", "store", "wiki-service.ts");
+  await writeFile(
+    wikiServicePath,
+    patchKnowledgeWikiWindowsContainment(await readFile(wikiServicePath, "utf8")),
+  );
+}
+
 async function alignKnowledgeLaunchers(knowledgeDir) {
   const launchers = [
     ["server.mjs", "../dist/server.js", "../dist/server.mjs"],
@@ -138,10 +222,9 @@ function runtimeFile(source) {
   return !relative.includes("/.git/") && !relative.includes("/__tests__/") && !relative.endsWith(".test.ts");
 }
 
-async function downloadNodeRuntime(workspace) {
-  const asset = nodeAsset();
+async function downloadNodeRuntime(workspace, asset = nodeAsset()) {
   const archive = join(workspace, asset.filename);
-  await download(`https://nodejs.org/dist/v${nodeVersion}/${asset.filename}`, archive);
+  await download(`https://nodejs.org/dist/v${nodeVersion}/${asset.filename}`, archive, asset.sha256);
   const extracted = join(workspace, "node");
   await mkdir(extracted, { recursive: true });
   execFileSync("tar", asset.tarArgs(archive, extracted), { stdio: "inherit" });
@@ -163,12 +246,33 @@ function npmCli(nodeRoot) {
 function nodeAsset() {
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   if (process.platform === "win32") {
-    return { filename: `node-v${nodeVersion}-win-${arch}.zip`, tarArgs: (archive, dir) => ["-xf", archive, "-C", dir] };
+    return {
+      filename: `node-v${nodeVersion}-win-${arch}.zip`,
+      sha256:
+        arch === "arm64"
+          ? "e4a7336010d58ff35b53d9dd5869095c56089c70913cf22508cf8183593e56b2"
+          : "ea3fad0e67a991d8477d8c01344b56e69c676ccb733f065b22436994b1253f86",
+      tarArgs: (archive, dir) => ["-xf", archive, "-C", dir],
+    };
   }
   if (process.platform === "darwin") {
-    return { filename: `node-v${nodeVersion}-darwin-${arch}.tar.gz`, tarArgs: (archive, dir) => ["-xzf", archive, "-C", dir] };
+    return {
+      filename: `node-v${nodeVersion}-darwin-${arch}.tar.gz`,
+      sha256:
+        arch === "arm64"
+          ? "c59006db713c770d6ec63ae16cb3edc11f49ee093b5c415d667bb4f436c6526d"
+          : "3cfed4795cd97277559763c5f56e711852d2cc2420bda1cea30c8aa9ac77ce0c",
+      tarArgs: (archive, dir) => ["-xzf", archive, "-C", dir],
+    };
   }
-  return { filename: `node-v${nodeVersion}-linux-${arch}.tar.xz`, tarArgs: (archive, dir) => ["-xJf", archive, "-C", dir] };
+  return {
+    filename: `node-v${nodeVersion}-linux-${arch}.tar.xz`,
+    sha256:
+      arch === "arm64"
+        ? "0b2d9f564b6594222a62c82e1df2efe119dd4a4aff29644f4dd325bf360b6bcc"
+        : "c0649af18e6a24f6fe5535a3e86b341dd49a8e71117c8b68bde973ef834f16f2",
+    tarArgs: (archive, dir) => ["-xJf", archive, "-C", dir],
+  };
 }
 
 function platformDir() {
@@ -197,35 +301,123 @@ async function verifyLayout(root) {
       throw new Error(`TencentDB runtime is incomplete: ${basename(path)} is missing from ${root}`);
     }
   }
+  const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+  const expectedNode = nodeAsset();
+  if (
+    manifest.upstream?.owner !== upstream.owner
+    || manifest.upstream?.repo !== upstream.repo
+    || manifest.upstream?.commit !== upstream.commit
+    || manifest.upstreamSourceSha256 !== upstreamSourceSha256
+    || manifest.nodeVersion !== nodeVersion
+    || manifest.nodeAsset?.filename !== expectedNode.filename
+    || manifest.nodeAsset?.sha256 !== expectedNode.sha256
+  ) {
+    throw new Error("TencentDB runtime manifest digest or version pin is invalid");
+  }
+  const mcpBundle = await readFile(join(root, "knowledge", "dist", "mcp", "server.mjs"), "utf8");
+  for (const marker of [
+    "x-tdai-service-id",
+    "x-tdai-user-key",
+    "defaultCodeGraphId",
+    "KNOWLEDGE_SERVICE_ID",
+    "KNOWLEDGE_USER_KEY",
+  ]) {
+    if (!mcpBundle.includes(marker)) {
+      throw new Error(`TencentDB runtime MCP patch is missing marker: ${marker}`);
+    }
+  }
+  const localFetcher = await readFile(
+    join(root, "knowledge", "src", "source-fetcher", "local-fetcher.ts"),
+    "utf8",
+  );
+  for (const marker of ["TDAI_LOCAL_SOURCE_ALLOWLIST", "isSymbolicLink()", "local source must be absolute"]) {
+    if (!localFetcher.includes(marker)) {
+      throw new Error(`TencentDB runtime local workspace fetcher is missing marker: ${marker}`);
+    }
+  }
+  const wikiService = await readFile(join(root, "knowledge", "src", "store", "wiki-service.ts"), "utf8");
+  for (const marker of ["import { join, resolve, normalize, sep }", "base.endsWith(sep)"]) {
+    if (!wikiService.includes(marker)) {
+      throw new Error(`TencentDB runtime Wiki Windows path patch is missing marker: ${marker}`);
+    }
+  }
+  const knowledgeBundle = await readFile(join(root, "knowledge", "dist", "server.mjs"), "utf8");
+  const stdinShutdownMarkers = [
+    "managed runtime stdin closed",
+    'process.stdin.once("end"',
+    'process.stdin.once("close"',
+  ];
+  for (const marker of [
+    "TDAI_LOCAL_SOURCE_ALLOWLIST",
+    "isSymbolicLink()",
+    "base.endsWith(sep)",
+    "knowledgeApiAuth",
+    "KNOWLEDGE_API_TOKEN is required",
+    "timingSafeEqual",
+    ...stdinShutdownMarkers,
+  ]) {
+    if (!knowledgeBundle.includes(marker)) {
+      throw new Error(`TencentDB runtime Knowledge bundle is missing marker: ${marker}`);
+    }
+  }
+  const coreEntry = await readFile(join(root, "core", "src", "gateway", "server.ts"), "utf8");
+  for (const marker of stdinShutdownMarkers) {
+    if (!coreEntry.includes(marker)) {
+      throw new Error(`TencentDB runtime Core entry is missing stdin shutdown marker: ${marker}`);
+    }
+  }
+  const coreMetadataService = await readFile(
+    join(root, "core", "src", "metadata", "service", "metadata-service.ts"),
+    "utf8",
+  );
+  for (const marker of ["user_id: input.user_id", "team_id: input.team_id", "agent_id: input.agent_id"]) {
+    if (!coreMetadataService.includes(marker)) {
+      throw new Error(`TencentDB runtime managed identity patch is missing marker: ${marker}`);
+    }
+  }
   console.log(`TencentDB runtime verified: ${root}`);
 }
 
-async function download(url, destination) {
+async function download(url, destination, expectedSha256) {
+  if (!/^[a-f0-9]{64}$/i.test(expectedSha256)) {
+    throw new Error(`invalid expected SHA-256 digest for ${url}`);
+  }
+  let downloaded = false;
   try {
     execFileSync("curl", ["--fail", "--location", "--retry", "3", "--connect-timeout", "15", "--max-time", "300", "--output", destination, url], {
       stdio: "inherit",
     });
-    return;
+    downloaded = true;
   } catch {
     console.warn(`curl download failed, falling back to Node fetch: ${url}`);
   }
 
   let lastError;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      console.log(`Downloading ${url} (attempt ${attempt}/3)`);
-      const response = await fetch(url, {
-        headers: { "User-Agent": "GrenAgent build" },
-        signal: AbortSignal.timeout(120_000),
-      });
-      if (!response.ok || !response.body) throw new Error(`download failed (${response.status}): ${url}`);
-      const chunks = [];
-      for await (const chunk of response.body) chunks.push(chunk);
-      await writeFile(destination, Buffer.concat(chunks));
-      return;
-    } catch (error) {
-      lastError = error;
+  if (!downloaded) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        console.log(`Downloading ${url} (attempt ${attempt}/3)`);
+        const response = await fetch(url, {
+          headers: { "User-Agent": "GrenAgent build" },
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!response.ok || !response.body) throw new Error(`download failed (${response.status}): ${url}`);
+        const chunks = [];
+        for await (const chunk of response.body) chunks.push(chunk);
+        await writeFile(destination, Buffer.concat(chunks));
+        downloaded = true;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
-  throw lastError;
+  if (!downloaded) throw lastError;
+
+  const actualSha256 = createHash("sha256").update(await readFile(destination)).digest("hex");
+  if (actualSha256 !== expectedSha256.toLowerCase()) {
+    throw new Error(
+      `SHA-256 mismatch for ${url}: expected ${expectedSha256}, received ${actualSha256}`,
+    );
+  }
 }

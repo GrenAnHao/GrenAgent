@@ -45,7 +45,7 @@ describe('toolUtils', () => {
 
 describe('toolMeta extension icons', () => {
   it('returns distinct icons for extension tools', () => {
-    for (const name of ['kb_search', 'kb_add', 'memory_save', 'memory_recall', 'generate_image', 'spawn_agent', 'fetch_url', 'speak']) {
+    for (const name of ['generate_image', 'spawn_agent', 'fetch_url', 'speak']) {
       expect(toolMeta(name).icon).toBeTruthy();
     }
   });
