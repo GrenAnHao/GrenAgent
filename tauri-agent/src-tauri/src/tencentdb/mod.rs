@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 use crate::pi::ProcessGuard;
 
 pub mod knowledge;
+pub mod panel;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -353,6 +354,18 @@ impl BundledLayout {
         self.required("core/tdai-gateway.standalone.yaml")
     }
 
+    pub(crate) fn panel_entry(&self) -> Result<PathBuf> {
+        self.required("panel/dist/index.js")
+    }
+
+    pub(crate) fn panel_root(&self) -> Result<PathBuf> {
+        self.panel_entry()?
+            .parent()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .context("TencentDB Panel entry has no root directory")
+    }
+
     fn required(&self, relative: &str) -> Result<PathBuf> {
         let path = self.root.join(relative);
         if path.is_file() {
@@ -398,7 +411,7 @@ mod runtime_process_group {
     };
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
-    pub(super) struct RuntimeProcessGroup {
+    pub(crate) struct RuntimeProcessGroup {
         job: HANDLE,
         #[cfg(test)]
         assign_attempts: AtomicUsize,
@@ -408,7 +421,7 @@ mod runtime_process_group {
     unsafe impl Sync for RuntimeProcessGroup {}
 
     impl RuntimeProcessGroup {
-        pub(super) fn new() -> Result<Self> {
+        pub(crate) fn new() -> Result<Self> {
             unsafe {
                 let job = CreateJobObjectW(None, PCWSTR::null())
                     .map_err(|error| anyhow!("CreateJobObjectW failed: {error}"))?;
@@ -431,7 +444,7 @@ mod runtime_process_group {
             }
         }
 
-        pub(super) fn assign(&self, child: &Child) -> Result<()> {
+        pub(crate) fn assign(&self, child: &Child) -> Result<()> {
             #[cfg(test)]
             self.assign_attempts.fetch_add(1, Ordering::Relaxed);
             let pid = child.id();
@@ -444,7 +457,7 @@ mod runtime_process_group {
             }
         }
 
-        pub(super) fn terminate_tree(&self) -> Result<()> {
+        pub(crate) fn terminate_tree(&self) -> Result<()> {
             unsafe {
                 TerminateJobObject(self.job, 1)
                     .map_err(|error| anyhow!("TerminateJobObject failed: {error}"))
@@ -508,14 +521,14 @@ mod runtime_process_group {
 
     use anyhow::Result;
 
-    pub(super) struct RuntimeProcessGroup;
+    pub(crate) struct RuntimeProcessGroup;
 
     impl RuntimeProcessGroup {
-        pub(super) fn new() -> Result<Self> {
+        pub(crate) fn new() -> Result<Self> {
             Ok(Self)
         }
 
-        pub(super) fn assign(&self, _child: &Child) -> Result<()> {
+        pub(crate) fn assign(&self, _child: &Child) -> Result<()> {
             Ok(())
         }
     }
@@ -974,7 +987,7 @@ fn non_empty(value: &Option<String>) -> Option<&str> {
     value.as_deref().filter(|value| !value.trim().is_empty())
 }
 
-fn available_loopback_port() -> Result<u16> {
+pub(crate) fn available_loopback_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
 }
@@ -999,11 +1012,11 @@ fn release_processes_if_stopped<T>(processes: &mut Option<T>, stopped: bool) {
     }
 }
 
-fn spawn_managed_child(command: &mut Command) -> std::io::Result<Child> {
+pub(crate) fn spawn_managed_child(command: &mut Command) -> std::io::Result<Child> {
     command.stdin(Stdio::piped()).spawn()
 }
 
-fn request_graceful_stop(child: &mut Child) {
+pub(crate) fn request_graceful_stop(child: &mut Child) {
     drop(child.stdin.take());
 }
 
@@ -1014,7 +1027,7 @@ async fn stop_managed_child(child: &mut Child, name: &str) -> Result<()> {
     wait_for_graceful_exit(child, name, deadline).await
 }
 
-fn child_is_running(child: Option<&mut Child>, name: &str) -> Result<bool> {
+pub(crate) fn child_is_running(child: Option<&mut Child>, name: &str) -> Result<bool> {
     let Some(child) = child else {
         return Ok(false);
     };
@@ -1181,8 +1194,7 @@ async fn wait_for_graceful_exit(
     }
 }
 
-#[cfg(any(test, not(windows)))]
-fn kill_child(child: &mut Child, name: &str) -> Result<()> {
+pub(crate) fn kill_child(child: &mut Child, name: &str) -> Result<()> {
     match child.try_wait() {
         Ok(Some(_)) => Ok(()),
         Ok(None) => {
@@ -1212,7 +1224,7 @@ fn kill_child(child: &mut Child, name: &str) -> Result<()> {
     }
 }
 
-async fn wait_for_health(endpoint: &str, shutting_down: &AtomicBool) -> Result<()> {
+pub(crate) async fn wait_for_health(endpoint: &str, shutting_down: &AtomicBool) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()?;
