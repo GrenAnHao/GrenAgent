@@ -14,6 +14,9 @@ import {
   patchKnowledgeSourceRegistry,
   patchKnowledgeStdinShutdown,
   patchKnowledgeWikiWindowsContainment,
+  patchPanelBootstrapRoutes,
+  patchPanelInstanceRegistry,
+  patchPanelStdinShutdown,
 } from "./tencentdb-runtime-patches.mjs";
 
 const upstream = {
@@ -49,19 +52,29 @@ try {
   const npm = npmCli(nodeRoot);
   const core = join(sourceRoot, "MemoryCore");
   const knowledge = join(sourceRoot, "MemoryKnowledge");
+  const panel = join(sourceRoot, "MemoryPanel");
   await disableCoreOpenclawPostinstall(core);
   await patchCoreRuntime(core);
   await pinKnowledgeLoopback(knowledge);
   await fixKnowledgeMainGuards(knowledge);
   await patchKnowledgeRuntime(knowledge);
+  await patchPanelRuntime(panel);
   installAndBuild(core, false, node, npm);
   installAndBuild(knowledge, true, node, npm);
+  installAndBuild(panel, true, node, npm);
+  installAndBuild(join(panel, "web"), true, node, npm, false);
   await alignKnowledgeLaunchers(knowledge);
 
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
   await cp(core, join(outputRoot, "core"), { recursive: true, filter: runtimeFile });
   await cp(knowledge, join(outputRoot, "knowledge"), { recursive: true, filter: runtimeFile });
+  await mkdir(join(outputRoot, "panel"), { recursive: true });
+  await cp(join(panel, "dist"), join(outputRoot, "panel", "dist"), { recursive: true });
+  await cp(join(panel, "node_modules"), join(outputRoot, "panel", "node_modules"), { recursive: true });
+  await cp(join(panel, "package.json"), join(outputRoot, "panel", "package.json"));
+  await cp(join(panel, "web", "dist"), join(outputRoot, "panel", "web", "dist"), { recursive: true });
+  await cp(join(panel, "web", "public"), join(outputRoot, "panel", "web", "public"), { recursive: true });
   await cp(nodeRoot, join(outputRoot, "node"), { recursive: true });
   await writeFile(
     join(outputRoot, "manifest.json"),
@@ -71,6 +84,11 @@ try {
         upstreamSourceSha256,
         nodeVersion,
         nodeAsset: { filename: nodeRuntime.filename, sha256: nodeRuntime.sha256 },
+        panel: {
+          backendEntry: "panel/dist/index.js",
+          webEntry: "panel/web/dist/index.html",
+          bootstrapProtocol: "v1",
+        },
       },
       null,
       2,
@@ -81,19 +99,20 @@ try {
   rmSync(workspace, { recursive: true, force: true });
 }
 
-function installAndBuild(dir, needsBuild, node, npm) {
+function installAndBuild(dir, needsBuild, node, npm, legacyPeerDeps = true) {
   const env = {
     ...process.env,
     PATH: `${dirname(node)}${delimiter}${process.env.PATH ?? ""}`,
   };
   // npm 10 crashes while resolving Vitest's optional peer graph in this pinned upstream tree.
+  const peerArgs = legacyPeerDeps ? ["--legacy-peer-deps"] : [];
   const installArgs = needsBuild
-    ? [npm, "install", "--legacy-peer-deps"]
-    : [npm, "install", "--omit=dev", "--legacy-peer-deps"];
+    ? [npm, "install", ...peerArgs]
+    : [npm, "install", "--omit=dev", ...peerArgs];
   execFileSync(node, installArgs, { cwd: dir, env, stdio: "inherit" });
   if (needsBuild) {
     execFileSync(node, [npm, "run", "build"], { cwd: dir, env, stdio: "inherit" });
-    execFileSync(node, [npm, "prune", "--omit=dev", "--legacy-peer-deps"], { cwd: dir, env, stdio: "inherit" });
+    execFileSync(node, [npm, "prune", "--omit=dev", ...peerArgs], { cwd: dir, env, stdio: "inherit" });
   }
 }
 
@@ -201,6 +220,15 @@ async function patchKnowledgeRuntime(knowledgeDir) {
   );
 }
 
+async function patchPanelRuntime(panelDir) {
+  const indexPath = join(panelDir, "src", "panel", "index.ts");
+  await writeFile(indexPath, patchPanelStdinShutdown(await readFile(indexPath, "utf8")));
+  const registryPath = join(panelDir, "src", "panel", "config", "instance-registry.ts");
+  await writeFile(registryPath, patchPanelInstanceRegistry(await readFile(registryPath, "utf8")));
+  const appPath = join(panelDir, "src", "panel", "http", "app.ts");
+  await writeFile(appPath, patchPanelBootstrapRoutes(await readFile(appPath, "utf8")));
+}
+
 async function alignKnowledgeLaunchers(knowledgeDir) {
   const launchers = [
     ["server.mjs", "../dist/server.js", "../dist/server.mjs"],
@@ -291,6 +319,8 @@ async function verifyLayout(root) {
     "knowledge/dist/server.mjs",
     "knowledge/bin/mcp.mjs",
     "knowledge/dist/mcp/server.mjs",
+    "panel/dist/index.js",
+    "panel/web/dist/index.html",
     "manifest.json",
   ];
   for (const relative of required) {
@@ -300,6 +330,11 @@ async function verifyLayout(root) {
     } catch {
       throw new Error(`TencentDB runtime is incomplete: ${basename(path)} is missing from ${root}`);
     }
+  }
+  try {
+    if (!(await stat(join(root, "panel", "web", "public"))).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new Error(`TencentDB runtime is incomplete: panel/web/public is missing from ${root}`);
   }
   const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
   const expectedNode = nodeAsset();
@@ -366,6 +401,18 @@ async function verifyLayout(root) {
       throw new Error(`TencentDB runtime Core entry is missing stdin shutdown marker: ${marker}`);
     }
   }
+  const panelEntry = await readFile(join(root, "panel", "dist", "panel", "index.js"), "utf8");
+  const panelRegistry = await readFile(join(root, "panel", "dist", "panel", "config", "instance-registry.js"), "utf8");
+  const panelApp = await readFile(join(root, "panel", "dist", "panel", "http", "app.js"), "utf8");
+  for (const marker of ["managed runtime stdin closed", 'process.stdin.once("close"']) {
+    if (!panelEntry.includes(marker)) throw new Error(`TencentDB runtime Panel bundle is missing marker: ${marker}`);
+  }
+  for (const marker of ["TDAI_PANEL_INSTANCES_JSON"]) {
+    if (!panelRegistry.includes(marker)) throw new Error(`TencentDB runtime Panel registry is missing marker: ${marker}`);
+  }
+  for (const marker of ["__grenagent/bootstrap", "tdai-panel.session", "auth/verify"]) {
+    if (!panelApp.includes(marker)) throw new Error(`TencentDB runtime Panel bootstrap is missing marker: ${marker}`);
+  }
   const coreMetadataService = await readFile(
     join(root, "core", "src", "metadata", "service", "metadata-service.ts"),
     "utf8",
@@ -375,6 +422,12 @@ async function verifyLayout(root) {
       throw new Error(`TencentDB runtime managed identity patch is missing marker: ${marker}`);
     }
   }
+  const panelManifest = manifest.panel;
+  if (
+    panelManifest?.backendEntry !== "panel/dist/index.js"
+    || panelManifest?.webEntry !== "panel/web/dist/index.html"
+    || panelManifest?.bootstrapProtocol !== "v1"
+  ) throw new Error("TencentDB runtime Panel manifest is invalid");
   console.log(`TencentDB runtime verified: ${root}`);
 }
 

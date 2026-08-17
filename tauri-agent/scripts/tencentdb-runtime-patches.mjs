@@ -20,6 +20,121 @@ function stdinShutdownBridge(shutdownCall) {
   ].join("\n");
 }
 
+export function patchPanelStdinShutdown(source) {
+  if (source.includes("managed runtime stdin closed")) return source;
+  const handlers = [...source.matchAll(/process\.on\((['"])SIG(?:INT|TERM)\1,\s*shutdown\);/g)];
+  if (handlers.length < 2) {
+    throw new Error("unexpected TencentDB upstream layout while patching MemoryPanel stdin shutdown");
+  }
+  const last = handlers[handlers.length - 1];
+  const end = (last.index ?? 0) + last[0].length;
+  const bridge = [
+    "",
+    "  let stdinShutdownRequested = false;",
+    "  const shutdownOnStdinClose = () => {",
+    "    if (stdinShutdownRequested) return;",
+    "    stdinShutdownRequested = true;",
+    '    console.info("managed runtime stdin closed");',
+    "    process.exit(0);",
+    "  };",
+    '  process.stdin.once("end", shutdownOnStdinClose);',
+    '  process.stdin.once("close", shutdownOnStdinClose);',
+    "  process.stdin.resume();",
+  ].join("\n");
+  return source.slice(0, end) + bridge + source.slice(end);
+}
+
+export function patchPanelInstanceRegistry(source) {
+  if (source.includes("TDAI_PANEL_INSTANCES_JSON")) return source;
+  const needle = /static load\(configPath[^)]*\)[^{]*\{/;
+  const match = needle.exec(source);
+  if (!match) {
+    throw new Error("unexpected TencentDB upstream layout while patching MemoryPanel instance registry");
+  }
+  const envLoad = [
+    match[0],
+    "    const envConfig = process.env.TDAI_PANEL_INSTANCES_JSON?.trim();",
+    "    if (envConfig) {",
+    "      let raw: unknown;",
+    "      try { raw = JSON.parse(envConfig) as unknown; } catch {",
+    '        throw new InstanceRegistryError(500, "invalid TDAI_PANEL_INSTANCES_JSON");',
+    "      }",
+    "      const parsed = fileSchema.safeParse(Array.isArray(raw) ? { instances: raw } : raw);",
+    "      if (!parsed.success) throw new InstanceRegistryError(500, \"TDAI_PANEL_INSTANCES_JSON validation failed\");",
+    "      const entries = parsed.data.instances.map((row) => ({",
+    "        instance_id: row.id, name: row.name, gateway_endpoint: row.gateway_endpoint,",
+    "        proxy_endpoint: row.proxy_endpoint, api_key: row.api_key,",
+    "      }));",
+    "      return new InstanceRegistry(entries);",
+    "    }",
+  ].join("\n");
+  return source.replace(match[0], envLoad);
+}
+
+export function panelBootstrapHtml() {
+  return `<!doctype html><meta charset="utf-8"><title>GrenAgent</title><script>
+(async()=>{try{const prefix='#tdai-bootstrap=';const token=location.hash.startsWith(prefix)?decodeURIComponent(location.hash.slice(prefix.length)):'';if(!token)throw new Error('missing token');const response=await fetch('/__grenagent/bootstrap/consume',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})});if(!response.ok)throw new Error('bootstrap failed');const payload=await response.json();localStorage['tdai-panel.session']=JSON.stringify(payload.session);}finally{location.replace('/');}})();
+</script>`;
+}
+
+export function patchPanelBootstrapRoutes(source) {
+  if (source.includes("__grenagent/bootstrap")) return source;
+  const needle = "const app = new Hono();";
+  if (!source.includes(needle)) {
+    throw new Error("unexpected TencentDB upstream layout while patching MemoryPanel bootstrap routes");
+  }
+  const wrapper = JSON.stringify(panelBootstrapHtml());
+  const routes = `${needle}
+
+  const panelBootstrapTokens = new Map<string, { instanceId: string; userKey: string; expiresAt: number }>();
+  const panelSharedSecret = process.env.TDAI_PANEL_BOOTSTRAP_SECRET?.trim() ?? "";
+  const panelRequestIsLoopback = (c: any): boolean => {
+    const address = c.env?.incoming?.socket?.remoteAddress;
+    return !address || address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+  };
+  const panelBootstrapSecret = (c: any): boolean => {
+    const provided = c.req.header("x-tdai-panel-shared-secret") ?? c.req.header("x-tdai-panel-secret") ?? "";
+    return Boolean(panelSharedSecret) && provided === panelSharedSecret;
+  };
+  app.post("/__grenagent/bootstrap/register", async (c) => {
+    if (!panelRequestIsLoopback(c) || !panelBootstrapSecret(c)) return c.json({ error: "unauthorized" }, 401);
+    let body: any;
+    try { body = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+    const token = typeof body?.token === "string" ? body.token.trim() : "";
+    const instanceId = typeof body?.instance_id === "string" ? body.instance_id.trim() : "";
+    const userKey = typeof body?.user_key === "string" ? body.user_key.trim() : "";
+    const rawExpiry = body?.expires_at;
+    const expiresAt = typeof rawExpiry === "number" ? rawExpiry : Date.parse(String(rawExpiry ?? ""));
+    if (!token || !instanceId || !userKey || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || expiresAt - Date.now() > 60_000) {
+      return c.json({ error: "invalid_request" }, 400);
+    }
+    panelBootstrapTokens.set(token, { instanceId, userKey, expiresAt });
+    return c.json({ ok: true });
+  });
+  app.post("/__grenagent/bootstrap/consume", async (c) => {
+    let body: any;
+    try { body = await c.req.json(); } catch { return c.json({ error: "unauthorized" }, 401); }
+    const token = typeof body?.token === "string" ? body.token.trim() : "";
+    const record = panelBootstrapTokens.get(token);
+    panelBootstrapTokens.delete(token);
+    if (!record || record.expiresAt <= Date.now()) return c.json({ error: "unauthorized" }, 401);
+    let entry;
+    try { entry = deps.instanceRegistry.resolve(record.instanceId); } catch { return c.json({ error: "unauthorized" }, 401); }
+    const verified = await deps.metaKernel.invoke("auth/verify", { user_key: record.userKey }, {
+      instanceId: entry.instance_id, gatewayEndpoint: entry.gateway_endpoint, gatewayApiKey: entry.api_key,
+      reqId: c.get("reqId"),
+    });
+    if (verified.code !== 0) return c.json({ error: "unauthorized" }, 401);
+    const data: any = verified.data ?? {};
+    if (data.valid !== true || !data.user || typeof data.user !== "object") {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return c.json({ session: { instanceId: entry.instance_id, instanceName: entry.name, userKey: record.userKey, user: data.user } });
+  });
+  app.get("/__grenagent/bootstrap", (c) => c.html(${wrapper}));`;
+  return source.replace(needle, routes);
+}
+
 export function patchCoreStdinShutdown(source) {
   const needle = [
     '  process.on("SIGINT", shutdown);',

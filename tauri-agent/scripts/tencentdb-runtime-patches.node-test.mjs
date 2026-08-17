@@ -8,6 +8,10 @@ import test from "node:test";
 
 import {
   localSourceFetcherSource,
+  panelBootstrapHtml,
+  patchPanelBootstrapRoutes,
+  patchPanelInstanceRegistry,
+  patchPanelStdinShutdown,
   patchCoreStdinShutdown,
   patchKnowledgeMcpHttpClient,
   patchKnowledgeMcpServer,
@@ -15,6 +19,28 @@ import {
   patchKnowledgeStdinShutdown,
 } from "./tencentdb-runtime-patches.mjs";
 import * as runtimePatches from "./tencentdb-runtime-patches.mjs";
+
+test('patches MemoryPanel for managed stdin shutdown and env registry', () => {
+  const source = `process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);`;
+  const patched = patchPanelStdinShutdown(source);
+  assert.match(patched, /managed runtime stdin closed/);
+  assert.match(patched, /process\.stdin\.once\("close"/);
+  const registry = patchPanelInstanceRegistry(`static load(configPath) { return readFileSync(configPath, 'utf8'); }`);
+  assert.match(registry, /TDAI_PANEL_INSTANCES_JSON/);
+});
+
+test('patches MemoryPanel bootstrap protocol without exposing credentials in URL', () => {
+  const app = patchPanelBootstrapRoutes(`const app = new Hono(); return app;`);
+  assert.match(app, /__grenagent\/bootstrap/);
+  assert.match(app, /TDAI_PANEL_BOOTSTRAP_SECRET/);
+  assert.match(app, /data\.valid !== true/);
+  assert.match(app, /user: data\.user/);
+  const html = panelBootstrapHtml();
+  assert.match(html, /location\.hash/);
+  assert.match(html, /tdai-panel\.session/);
+  assert.match(html, /finally\{location\.replace\('\/'\);\}/);
+  assert.doesNotMatch(html, /user[_-]?key|api[_-]?key/i);
+});
 
 test("MCP patch adds tenant header and locks calls to current asset defaults", () => {
   const client = patchKnowledgeMcpHttpClient(`
@@ -268,6 +294,7 @@ test("build script applies and verifies every runtime security patch", () => {
   assert.match(buildScript, /process\.stdin\.once\(\\?"end/);
   assert.match(buildScript, /process\.stdin\.once\(\\?"close/);
   assert.match(buildScript, /--legacy-peer-deps/);
+  assert.match(buildScript, /installAndBuild\(join\(panel, "web"\), true, node, npm, false\)/);
 });
 
 const generatedPlatform = process.platform === "win32"
