@@ -13,6 +13,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::state::AppStateStore;
 use crate::tencentdb::knowledge::{KnowledgeClient, WorkspaceKnowledgeAssets};
+use crate::tencentdb::panel::{panel_url, PanelConnection, PanelRuntime};
 use crate::tencentdb::{
     local_source_allowlist_path, BundledLayout, GatewayStatus, LocalRuntimeConfig,
     MemoryConnectionConfig, MemoryCredentialStore, MemoryMode, MemoryRuntime,
@@ -44,6 +45,12 @@ pub struct TencentdbStatus {
     pub user_credential_configured: bool,
     pub last_success_at: Option<String>,
     pub restart_required: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TencentdbPanelOpen {
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -683,6 +690,57 @@ pub async fn ensure_runtime_started(
     })
     .await?;
     current_status(store, runtime).await
+}
+
+async fn panel_connection(
+    store: &AppStateStore,
+    runtime: &MemoryRuntime,
+) -> Result<PanelConnection> {
+    let config = store.tencentdb_config().await.normalized()?;
+    let gateway_api_key = ensure_gateway_api_key(&config.mode)?;
+    let user_key = resolve_user_api_key(&config, &gateway_api_key)?;
+    let (gateway_endpoint, knowledge_endpoint) = if config.mode == MemoryMode::Local {
+        let status = runtime.local_status().await;
+        (
+            status.endpoint,
+            status.knowledge_endpoint.unwrap_or_default(),
+        )
+    } else {
+        (
+            config.endpoint.clone(),
+            config.knowledge_endpoint.clone().unwrap_or_default(),
+        )
+    };
+    if gateway_endpoint.trim().is_empty() {
+        bail!("TencentDB Gateway endpoint is unavailable");
+    }
+    Ok(PanelConnection {
+        mode: config.mode,
+        service_id: config.service_id,
+        user_id: config.user_id,
+        gateway_endpoint,
+        knowledge_endpoint,
+        gateway_api_key,
+        user_key,
+    })
+}
+
+/// Ensure the native Panel is running after its local dependencies, when applicable.
+pub async fn ensure_panel_runtime_started(
+    app: &tauri::AppHandle,
+    store: &AppStateStore,
+    runtime: &MemoryRuntime,
+    panel: &PanelRuntime,
+) -> Result<(PanelConnection, String)> {
+    let config = store.tencentdb_config().await.normalized()?;
+    if config.mode == MemoryMode::Local {
+        ensure_runtime_started(app, store, runtime).await?;
+    }
+    let connection = panel_connection(store, runtime).await?;
+    let endpoint = panel
+        .ensure_started(&bundled_layout(app)?, &connection)
+        .await?;
+    Ok((connection, endpoint))
 }
 
 async fn current_status(store: &AppStateStore, runtime: &MemoryRuntime) -> Result<TencentdbStatus> {
@@ -1591,6 +1649,25 @@ pub async fn tencentdb_get_config(
 }
 
 #[tauri::command]
+pub async fn tencentdb_open_panel(
+    app: tauri::AppHandle,
+    store: State<'_, AppStateStore>,
+    runtime: State<'_, Arc<MemoryRuntime>>,
+    panel: State<'_, Arc<PanelRuntime>>,
+) -> Result<TencentdbPanelOpen, String> {
+    let (connection, endpoint) = ensure_panel_runtime_started(&app, &store, &runtime, &panel)
+        .await
+        .map_err(public_error)?;
+    let token = panel
+        .register_bootstrap(&connection)
+        .await
+        .map_err(public_error)?;
+    Ok(TencentdbPanelOpen {
+        url: panel_url(&endpoint, &token).map_err(public_error)?,
+    })
+}
+
+#[tauri::command]
 pub async fn tencentdb_get_status(
     store: State<'_, AppStateStore>,
     runtime: State<'_, Arc<MemoryRuntime>>,
@@ -2359,6 +2436,7 @@ pub async fn tencentdb_save_connection(
     input: SaveTencentdbConnection,
     store: State<'_, AppStateStore>,
     runtime: State<'_, Arc<MemoryRuntime>>,
+    panel: State<'_, Arc<PanelRuntime>>,
     mgr: State<'_, Arc<crate::pi::PiManager>>,
 ) -> Result<TencentdbStatus, String> {
     let previous = store.tencentdb_config().await;
@@ -2449,6 +2527,9 @@ pub async fn tencentdb_save_connection(
         || input.clear_llm_api_key;
     let changed = connection_settings_changed(previous, config.clone(), credential_changed);
     let restart_required = changed && !mgr.all().await.is_empty();
+    if changed {
+        panel.stop().await.map_err(public_error)?;
+    }
     if changed && !restart_required {
         runtime.stop().await.map_err(public_error)?;
         runtime.clear_restart_required();
@@ -2463,9 +2544,10 @@ pub async fn tencentdb_save_connection(
         status.restart_required = true;
         return Ok(status);
     }
-    ensure_runtime_started(&app, &store, &runtime)
+    ensure_panel_runtime_started(&app, &store, &runtime, &panel)
         .await
-        .map_err(public_error)
+        .map_err(public_error)?;
+    current_status(&store, &runtime).await.map_err(public_error)
 }
 
 #[tauri::command]

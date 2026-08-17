@@ -231,6 +231,10 @@ impl PanelRuntime {
 
     pub async fn shutdown(&self) -> Result<()> {
         self.shutting_down.store(true, Ordering::Release);
+        self.stop().await
+    }
+
+    pub async fn stop(&self) -> Result<()> {
         let _operation = self.lifecycle_operations.lock().await;
         let mut slot = self.process.lock().await;
         if let Some(process) = slot.as_mut() {
