@@ -78,6 +78,8 @@ struct PanelProcess {
     process_group: RuntimeProcessGroup,
 }
 
+const PANEL_BOOTSTRAP_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+
 pub struct PanelRuntime {
     lifecycle_operations: Mutex<()>,
     process: Mutex<Option<PanelProcess>>,
@@ -164,10 +166,10 @@ impl PanelRuntime {
             .env("TDAI_PANEL_BOOTSTRAP_SECRET", &shared_secret)
             .env("KNOWLEDGE_LLM_BINDING_SYNC", "false");
         crate::pi::guard::prepare_command(&mut command)?;
-        let mut child =
-            spawn_managed_child(&mut command).context("failed to start TencentDB MemoryPanel")?;
         let process_group =
             RuntimeProcessGroup::new().context("failed to create TencentDB Panel process group")?;
+        let mut child =
+            spawn_managed_child(&mut command).context("failed to start TencentDB MemoryPanel")?;
         if let Err(error) = process_group.assign(&child) {
             request_graceful_stop(&mut child);
             let _ = kill_child(&mut child, "MemoryPanel");
@@ -197,24 +199,32 @@ impl PanelRuntime {
 
     pub async fn register_bootstrap(&self, connection: &PanelConnection) -> Result<String> {
         let token = uuid::Uuid::new_v4().simple().to_string();
-        let slot = self.process.lock().await;
-        let process = slot
-            .as_ref()
-            .context("TencentDB Panel runtime is not started")?;
-        if process.fingerprint != connection.fingerprint() {
-            bail!("TencentDB Panel connection changed; restart is required");
-        }
+        let connection_fingerprint = connection.fingerprint();
+        let (endpoint, shared_secret) = {
+            let mut slot = self.process.lock().await;
+            let process = slot
+                .as_mut()
+                .context("TencentDB Panel runtime is not started")?;
+            if !child_is_running(Some(&mut process.child), "MemoryPanel")? {
+                bail!("TencentDB Panel runtime is not running");
+            }
+            if process.fingerprint != connection_fingerprint {
+                bail!("TencentDB Panel connection changed; restart is required");
+            }
+            (process.endpoint.clone(), process.shared_secret.clone())
+        };
         let expires_at = SystemTime::now()
             .checked_add(Duration::from_secs(30))
             .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
             .map(|value| value.as_millis() as u64)
             .context("failed to create TencentDB Panel bootstrap expiry")?;
-        reqwest::Client::new()
-            .post(format!(
-                "{}/__grenagent/bootstrap/register",
-                process.endpoint
-            ))
-            .header("x-tdai-panel-shared-secret", &process.shared_secret)
+        let client = reqwest::Client::builder()
+            .timeout(PANEL_BOOTSTRAP_REQUEST_TIMEOUT)
+            .build()
+            .context("failed to create TencentDB Panel bootstrap client")?;
+        client
+            .post(format!("{endpoint}/__grenagent/bootstrap/register"))
+            .header("x-tdai-panel-shared-secret", shared_secret)
             .json(&json!({
                 "token": token,
                 "instance_id": connection.service_id,
@@ -257,11 +267,19 @@ async fn stop_panel_process(process: &mut PanelProcess) -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    process
+        .child
+        .wait()
+        .context("failed to reap TencentDB MemoryPanel")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::atomic::AtomicBool;
+
     use super::*;
 
     fn connection() -> PanelConnection {
@@ -307,5 +325,66 @@ mod tests {
             assert_ne!(base.fingerprint(), changed.fingerprint());
         }
         assert_eq!(base.fingerprint(), base.clone().fingerprint());
+    }
+
+    #[tokio::test]
+    async fn bootstrap_registration_does_not_block_runtime_stop() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let request_received = Arc::new(AtomicBool::new(false));
+        let server_received = request_received.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 1024];
+            let _ = stream.read(&mut buffer);
+            server_received.store(true, Ordering::Release);
+            std::thread::sleep(Duration::from_secs(4));
+        });
+
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "more > nul"]);
+            command
+        };
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "cat >/dev/null"]);
+            command
+        };
+        let child = spawn_managed_child(&mut command).unwrap();
+        let runtime = Arc::new(PanelRuntime::new());
+        let panel_connection = connection();
+        *runtime.process.lock().await = Some(PanelProcess {
+            child,
+            endpoint,
+            fingerprint: panel_connection.fingerprint(),
+            shared_secret: "test-secret".into(),
+            process_group: RuntimeProcessGroup::new().unwrap(),
+        });
+
+        let registration_runtime = runtime.clone();
+        let registration = tokio::spawn(async move {
+            registration_runtime
+                .register_bootstrap(&panel_connection)
+                .await
+        });
+        while !request_received.load(Ordering::Acquire) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let stopped = tokio::time::timeout(Duration::from_millis(250), runtime.stop()).await;
+        let registration_result = registration.await.unwrap();
+        server.join().unwrap();
+        if stopped.is_err() {
+            runtime.stop().await.unwrap();
+        }
+
+        assert!(
+            registration_result.is_err(),
+            "bootstrap request did not time out"
+        );
+        assert!(stopped.is_ok(), "bootstrap request held the process lock");
     }
 }

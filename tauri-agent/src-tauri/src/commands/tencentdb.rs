@@ -732,6 +732,7 @@ pub async fn ensure_panel_runtime_started(
     runtime: &MemoryRuntime,
     panel: &PanelRuntime,
 ) -> Result<(PanelConnection, String)> {
+    ensure_panel_restart_not_required(runtime)?;
     let config = store.tencentdb_config().await.normalized()?;
     if config.mode == MemoryMode::Local {
         ensure_runtime_started(app, store, runtime).await?;
@@ -741,6 +742,13 @@ pub async fn ensure_panel_runtime_started(
         .ensure_started(&bundled_layout(app)?, &connection)
         .await?;
     Ok((connection, endpoint))
+}
+
+fn ensure_panel_restart_not_required(runtime: &MemoryRuntime) -> Result<()> {
+    if runtime.requires_restart() {
+        bail!("TencentDB Panel requires an application restart before it can be opened");
+    }
+    Ok(())
 }
 
 async fn current_status(store: &AppStateStore, runtime: &MemoryRuntime) -> Result<TencentdbStatus> {
@@ -2598,7 +2606,8 @@ mod tests {
     use super::{
         bump_skill_reload_revision, clear_workspace_asset_reference, connection_settings_changed,
         core_redirect_policy, core_route_scope, ensure_knowledge_asset_deleted,
-        ensure_local_metadata_identity, legacy_cutover_env, load_selected_wiki_files,
+        ensure_local_metadata_identity, ensure_panel_restart_not_required, legacy_cutover_env,
+        load_selected_wiki_files,
         local_user_api_key, managed_skill_root_at, managed_skill_scope,
         normalize_code_graph_files_format, normalize_core_request_body, normalize_knowledge_count,
         normalize_knowledge_search, normalize_knowledge_text, normalize_optional_knowledge_count,
@@ -2614,9 +2623,20 @@ mod tests {
         TencentdbStatus, TencentdbSyncAsset,
     };
     use crate::tencentdb::knowledge::WorkspaceKnowledgeAssets;
-    use crate::tencentdb::{MemoryConnectionConfig, MemoryMode};
+    use crate::tencentdb::{MemoryConnectionConfig, MemoryMode, MemoryRuntime};
     use reqwest::StatusCode;
     use serde_json::json;
+
+    #[test]
+    fn panel_start_is_rejected_while_runtime_restart_is_required() {
+        let runtime = MemoryRuntime::new();
+        assert!(ensure_panel_restart_not_required(&runtime).is_ok());
+
+        runtime.mark_restart_required();
+        let error = ensure_panel_restart_not_required(&runtime).unwrap_err();
+
+        assert!(error.to_string().contains("restart"));
+    }
 
     #[tokio::test]
     async fn local_identity_init_tolerates_a_concurrent_winner() {
