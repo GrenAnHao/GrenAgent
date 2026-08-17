@@ -1,7 +1,9 @@
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fs, io};
 
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -10,8 +12,8 @@ use tokio::sync::Mutex;
 
 use crate::pi::ProcessGuard;
 use crate::tencentdb::{
-    available_loopback_port, child_is_running, kill_child, request_graceful_stop,
-    spawn_managed_child, wait_for_health, BundledLayout, MemoryMode, RuntimeProcessGroup,
+    child_is_running, kill_child, request_graceful_stop, spawn_managed_child,
+    wait_for_panel_health, BundledLayout, MemoryMode, RuntimeProcessGroup,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +81,9 @@ struct PanelProcess {
 }
 
 const PANEL_BOOTSTRAP_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const PANEL_BOOTSTRAP_TTL: Duration = Duration::from_secs(60);
+const PANEL_START_ATTEMPTS: usize = 3;
+const PANEL_STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct PanelRuntime {
     lifecycle_operations: Mutex<()>,
@@ -143,9 +148,6 @@ impl PanelRuntime {
         let entry = layout.panel_entry()?;
         let panel_root = layout.panel_root()?;
         let ui_dist = panel_root.join("web").join("dist");
-        let port = available_loopback_port()?;
-        let endpoint = format!("http://127.0.0.1:{port}");
-        let shared_secret = uuid::Uuid::new_v4().simple().to_string();
         let registry = serde_json::to_string(&json!([{
             "id": connection.service_id,
             "name": connection.service_id,
@@ -153,48 +155,93 @@ impl PanelRuntime {
             "proxy_endpoint": connection.gateway_endpoint,
             "api_key": connection.gateway_api_key,
         }]))?;
-        let mut command = Command::new(node);
-        command
-            .arg(entry)
-            .current_dir(panel_root)
-            .env("HOST", "127.0.0.1")
-            .env("PORT", port.to_string())
-            .env("UI_DIST_DIR", ui_dist)
-            .env("KNOWLEDGE_SERVICE_URL", &connection.knowledge_endpoint)
-            .env("KNOWLEDGE_AUTH_TOKEN", &connection.gateway_api_key)
-            .env("TDAI_PANEL_INSTANCES_JSON", registry)
-            .env("TDAI_PANEL_BOOTSTRAP_SECRET", &shared_secret)
-            .env("KNOWLEDGE_LLM_BINDING_SYNC", "false");
-        crate::pi::guard::prepare_command(&mut command)?;
-        let process_group =
-            RuntimeProcessGroup::new().context("failed to create TencentDB Panel process group")?;
-        let mut child =
-            spawn_managed_child(&mut command).context("failed to start TencentDB MemoryPanel")?;
-        if let Err(error) = process_group.assign(&child) {
-            request_graceful_stop(&mut child);
-            let _ = kill_child(&mut child, "MemoryPanel");
-            return Err(error).context("failed to supervise TencentDB MemoryPanel process tree");
-        }
-        if let Some(guard) = &self.process_guard {
-            if let Err(error) = guard.assign(child.id()) {
+        let mut last_health_error = None;
+        for attempt in 0..PANEL_START_ATTEMPTS {
+            let port_file = panel_port_file()?;
+            let shared_secret = uuid::Uuid::new_v4().simple().to_string();
+            let mut command = Command::new(&node);
+            command
+                .arg(&entry)
+                .current_dir(&panel_root)
+                .env("HOST", "127.0.0.1")
+                .env("PORT", "0")
+                .env("TDAI_PANEL_PORT_FILE", &port_file)
+                .env("UI_DIST_DIR", &ui_dist)
+                .env("KNOWLEDGE_SERVICE_URL", &connection.knowledge_endpoint)
+                .env("KNOWLEDGE_AUTH_TOKEN", &connection.gateway_api_key)
+                .env("TDAI_PANEL_INSTANCES_JSON", &registry)
+                .env("TDAI_PANEL_BOOTSTRAP_SECRET", &shared_secret)
+                .env("KNOWLEDGE_LLM_BINDING_SYNC", "false");
+            if let Err(error) = crate::pi::guard::prepare_command(&mut command) {
+                cleanup_panel_port_file(&port_file);
+                return Err(error);
+            }
+            let process_group = match RuntimeProcessGroup::new() {
+                Ok(group) => group,
+                Err(error) => {
+                    cleanup_panel_port_file(&port_file);
+                    return Err(error).context("failed to create TencentDB Panel process group");
+                }
+            };
+            let mut child = match spawn_managed_child(&mut command) {
+                Ok(child) => child,
+                Err(error) => {
+                    cleanup_panel_port_file(&port_file);
+                    return Err(error).context("failed to start TencentDB MemoryPanel");
+                }
+            };
+            if let Err(error) = process_group.assign(&child) {
                 request_graceful_stop(&mut child);
                 let _ = kill_child(&mut child, "MemoryPanel");
-                return Err(error).context("failed to assign TencentDB Panel to ProcessGuard");
+                cleanup_panel_port_file(&port_file);
+                return Err(error)
+                    .context("failed to supervise TencentDB MemoryPanel process tree");
+            }
+            if let Some(guard) = &self.process_guard {
+                if let Err(error) = guard.assign(child.id()) {
+                    request_graceful_stop(&mut child);
+                    let _ = kill_child(&mut child, "MemoryPanel");
+                    cleanup_panel_port_file(&port_file);
+                    return Err(error).context("failed to assign TencentDB Panel to ProcessGuard");
+                }
+            }
+            let startup_result =
+                match wait_for_panel_port(&port_file, &mut child, &self.shutting_down).await {
+                    Ok(port) => {
+                        let endpoint = format!("http://127.0.0.1:{port}");
+                        wait_for_panel_health(&endpoint, &shared_secret, &self.shutting_down)
+                            .await
+                            .map(|()| endpoint)
+                    }
+                    Err(error) => Err(error),
+                };
+            cleanup_panel_port_file(&port_file);
+            match startup_result {
+                Ok(endpoint) => {
+                    *slot = Some(PanelProcess {
+                        child,
+                        endpoint: endpoint.clone(),
+                        fingerprint: connection.fingerprint(),
+                        shared_secret,
+                        process_group,
+                    });
+                    return Ok(endpoint);
+                }
+                Err(error) => {
+                    request_graceful_stop(&mut child);
+                    #[cfg(windows)]
+                    let _ = process_group.terminate_tree();
+                    let _ = kill_child(&mut child, "MemoryPanel");
+                    last_health_error = Some(error);
+                    if attempt + 1 == PANEL_START_ATTEMPTS {
+                        break;
+                    }
+                }
             }
         }
-        if let Err(error) = wait_for_health(&endpoint, &self.shutting_down).await {
-            request_graceful_stop(&mut child);
-            let _ = kill_child(&mut child, "MemoryPanel");
-            return Err(error).context("TencentDB MemoryPanel did not become healthy");
-        }
-        *slot = Some(PanelProcess {
-            child,
-            endpoint: endpoint.clone(),
-            fingerprint: connection.fingerprint(),
-            shared_secret,
-            process_group,
-        });
-        Ok(endpoint)
+        Err(last_health_error
+            .unwrap_or_else(|| anyhow::anyhow!("TencentDB Panel failed to start"))
+            .context("TencentDB MemoryPanel did not become healthy after retries"))
     }
 
     pub async fn register_bootstrap(&self, connection: &PanelConnection) -> Result<String> {
@@ -214,12 +261,13 @@ impl PanelRuntime {
             (process.endpoint.clone(), process.shared_secret.clone())
         };
         let expires_at = SystemTime::now()
-            .checked_add(Duration::from_secs(30))
+            .checked_add(PANEL_BOOTSTRAP_TTL)
             .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
             .map(|value| value.as_millis() as u64)
             .context("failed to create TencentDB Panel bootstrap expiry")?;
         let client = reqwest::Client::builder()
             .timeout(PANEL_BOOTSTRAP_REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("failed to create TencentDB Panel bootstrap client")?;
         client
@@ -252,6 +300,80 @@ impl PanelRuntime {
         }
         *slot = None;
         Ok(())
+    }
+}
+
+fn panel_port_file() -> Result<PathBuf> {
+    let directory =
+        std::env::temp_dir().join(format!("grenagent-panel-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir(&directory).with_context(|| {
+        format!(
+            "failed to create TencentDB Panel startup directory: {}",
+            directory.display()
+        )
+    })?;
+    Ok(directory.join("port"))
+}
+
+fn cleanup_panel_port_file(path: &Path) {
+    let _ = fs::remove_file(path);
+    if let Some(parent) = path.parent() {
+        let _ = fs::remove_dir(parent);
+    }
+}
+
+fn parse_panel_port(value: &str) -> Result<u16> {
+    if value.is_empty() || value.trim() != value {
+        bail!("Panel reported an invalid port");
+    }
+    let port = value
+        .parse::<u16>()
+        .context("Panel reported an invalid port")?;
+    if port == 0 {
+        bail!("Panel reported port 0");
+    }
+    Ok(port)
+}
+
+async fn wait_for_panel_port(
+    path: &Path,
+    child: &mut Child,
+    shutting_down: &AtomicBool,
+) -> Result<u16> {
+    let deadline = tokio::time::Instant::now() + PANEL_STARTUP_TIMEOUT;
+    let mut last_error: Option<anyhow::Error> = None;
+    while tokio::time::Instant::now() < deadline {
+        if shutting_down.load(Ordering::Acquire) {
+            bail!("TencentDB runtime is shutting down");
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                bail!("TencentDB MemoryPanel exited before reporting its port: {status}")
+            }
+            Ok(None) => {}
+            Err(error) => return Err(error).context("failed to inspect TencentDB MemoryPanel"),
+        }
+        match fs::read_to_string(path) {
+            Ok(raw) => match parse_panel_port(&raw) {
+                Ok(port) => return Ok(port),
+                Err(error) => last_error = Some(error),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => last_error = Some(error.into()),
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+            _ = wait_until_panel_shutdown(shutting_down) => {
+                bail!("TencentDB runtime is shutting down");
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Panel did not report a listening port")))
+}
+
+async fn wait_until_panel_shutdown(shutting_down: &AtomicBool) {
+    while !shutting_down.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -325,6 +447,17 @@ mod tests {
             assert_ne!(base.fingerprint(), changed.fingerprint());
         }
         assert_eq!(base.fingerprint(), base.clone().fingerprint());
+    }
+
+    #[test]
+    fn managed_panel_port_file_accepts_only_valid_tcp_ports() {
+        assert_eq!(parse_panel_port("43123").unwrap(), 43123);
+        for value in ["", "0", "65536", "12x", " 43123 "] {
+            assert!(
+                parse_panel_port(value).is_err(),
+                "accepted invalid port {value:?}"
+            );
+        }
     }
 
     #[tokio::test]

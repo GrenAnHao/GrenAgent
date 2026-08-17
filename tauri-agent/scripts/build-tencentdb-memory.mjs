@@ -16,6 +16,8 @@ import {
   patchKnowledgeWikiWindowsContainment,
   patchPanelBootstrapRoutes,
   patchPanelInstanceRegistry,
+  patchPanelMetaLogRedaction,
+  patchPanelPortFile,
   patchPanelStdinShutdown,
 } from "./tencentdb-runtime-patches.mjs";
 
@@ -222,11 +224,18 @@ async function patchKnowledgeRuntime(knowledgeDir) {
 
 async function patchPanelRuntime(panelDir) {
   const indexPath = join(panelDir, "src", "panel", "index.ts");
-  await writeFile(indexPath, patchPanelStdinShutdown(await readFile(indexPath, "utf8")));
+  let index = patchPanelStdinShutdown(await readFile(indexPath, "utf8"));
+  index = patchPanelPortFile(index);
+  await writeFile(indexPath, index);
   const registryPath = join(panelDir, "src", "panel", "config", "instance-registry.ts");
   await writeFile(registryPath, patchPanelInstanceRegistry(await readFile(registryPath, "utf8")));
   const appPath = join(panelDir, "src", "panel", "http", "app.ts");
   await writeFile(appPath, patchPanelBootstrapRoutes(await readFile(appPath, "utf8")));
+  const transportPath = join(panelDir, "src", "panel", "kernel", "transport-fetch.ts");
+  await writeFile(
+    transportPath,
+    patchPanelMetaLogRedaction(await readFile(transportPath, "utf8")),
+  );
 }
 
 async function alignKnowledgeLaunchers(knowledgeDir) {
@@ -404,14 +413,21 @@ async function verifyLayout(root) {
   const panelEntry = await readFile(join(root, "panel", "dist", "panel", "index.js"), "utf8");
   const panelRegistry = await readFile(join(root, "panel", "dist", "panel", "config", "instance-registry.js"), "utf8");
   const panelApp = await readFile(join(root, "panel", "dist", "panel", "http", "app.js"), "utf8");
-  for (const marker of ["managed runtime stdin closed", 'process.stdin.once("close"']) {
+  const panelTransport = await readFile(
+    join(root, "panel", "dist", "panel", "kernel", "transport-fetch.js"),
+    "utf8",
+  );
+  for (const marker of ["managed runtime stdin closed", 'process.stdin.once("close"', "TDAI_PANEL_PORT_FILE"]) {
     if (!panelEntry.includes(marker)) throw new Error(`TencentDB runtime Panel bundle is missing marker: ${marker}`);
   }
   for (const marker of ["TDAI_PANEL_INSTANCES_JSON"]) {
     if (!panelRegistry.includes(marker)) throw new Error(`TencentDB runtime Panel registry is missing marker: ${marker}`);
   }
-  for (const marker of ["__grenagent/bootstrap", "tdai-panel.session", "auth/verify"]) {
+  for (const marker of ["__grenagent/bootstrap", "__grenagent/health", "x-tdai-panel-shared-secret", "tdai-panel.session", "auth/verify"]) {
     if (!panelApp.includes(marker)) throw new Error(`TencentDB runtime Panel bootstrap is missing marker: ${marker}`);
+  }
+  for (const marker of ["TDAI_PANEL_LOG_REDACTION_V1", 'return "[redacted]"']) {
+    if (!panelTransport.includes(marker)) throw new Error(`TencentDB runtime Panel log redaction is missing marker: ${marker}`);
   }
   const coreMetadataService = await readFile(
     join(root, "core", "src", "metadata", "service", "metadata-service.ts"),

@@ -1259,6 +1259,51 @@ pub(crate) async fn wait_for_health(endpoint: &str, shutting_down: &AtomicBool) 
     Err(last_error.unwrap_or_else(|| anyhow!("health check timed out")))
 }
 
+pub(crate) async fn wait_for_panel_health(
+    endpoint: &str,
+    shared_secret: &str,
+    shutting_down: &AtomicBool,
+) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last_error: Option<anyhow::Error> = None;
+
+    while tokio::time::Instant::now() < deadline {
+        if shutting_down.load(Ordering::Acquire) {
+            bail!("TencentDB runtime is shutting down");
+        }
+        let response = tokio::select! {
+            response = client
+                .get(format!("{endpoint}/__grenagent/health"))
+                .header("x-tdai-panel-shared-secret", shared_secret)
+                .send() => response,
+            _ = wait_until_shutdown(shutting_down) => {
+                bail!("TencentDB runtime is shutting down");
+            }
+        };
+        match response {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) if response.status().is_client_error() => {
+                return Err(anyhow!("Panel health check returned {}", response.status()));
+            }
+            Ok(response) => {
+                last_error = Some(anyhow!("Panel health check returned {}", response.status()))
+            }
+            Err(error) => last_error = Some(error.into()),
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+            _ = wait_until_shutdown(shutting_down) => {
+                bail!("TencentDB runtime is shutting down");
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("Panel health check timed out")))
+}
+
 async fn wait_until_shutdown(shutting_down: &AtomicBool) {
     while !shutting_down.load(Ordering::Acquire) {
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   localSourceFetcherSource,
   panelBootstrapHtml,
+  patchPanelPortFile,
   patchPanelBootstrapRoutes,
   patchPanelInstanceRegistry,
   patchPanelStdinShutdown,
@@ -38,8 +39,41 @@ test('patches MemoryPanel bootstrap protocol without exposing credentials in URL
   const html = panelBootstrapHtml();
   assert.match(html, /location\.hash/);
   assert.match(html, /tdai-panel\.session/);
-  assert.match(html, /finally\{location\.replace\('\/'\);\}/);
+  assert.match(html, /finally\{if\(!bootstrapSucceeded\)localStorage\.removeItem\(['"]tdai-panel\.session['"]\);location\.replace\('\/'\);\}/);
   assert.doesNotMatch(html, /user[_-]?key|api[_-]?key/i);
+});
+
+test("MemoryPanel internal health route requires the shared secret", () => {
+  const patched = runtimePatches.patchPanelBootstrapRoutes("const app = new Hono();");
+  assert.match(patched, /__grenagent\/health/);
+  assert.match(patched, /x-tdai-panel-shared-secret/);
+  assert.match(patched, /service: \"tencentdb-panel\"/);
+});
+
+test('bootstrap failure clears stale panel session before redirect', () => {
+  const html = panelBootstrapHtml();
+  assert.match(html, /localStorage\.removeItem\(['"]tdai-panel\.session['"]\)/);
+});
+
+test('MemoryPanel writes the OS-selected listening port for managed startup', () => {
+  const source = `import { serve } from '@hono/node-server';\nserve({ fetch: app.fetch, hostname: config.server.host, port: config.server.port }, (info) => {\n    deps.logger.info('panel listening', { url: info.port });\n  });`;
+  const patched = patchPanelPortFile(source);
+  assert.match(patched, /TDAI_PANEL_PORT_FILE/);
+  assert.match(patched, /info\.port/);
+});
+
+test("MemoryPanel remote metadata logs fully redact credential fields", () => {
+  assert.equal(typeof runtimePatches.patchPanelMetaLogRedaction, "function");
+  const patched = runtimePatches.patchPanelMetaLogRedaction(`
+function maskSecret(value: string): string {
+  if (!value) return '';
+  if (value.length <= 8) return \`\${value}…\`;
+  return \`\${value.slice(0, 8)}…\`;
+}
+`);
+  assert.match(patched, /TDAI_PANEL_LOG_REDACTION_V1/);
+  assert.match(patched, /return \"\[redacted\]\"/);
+  assert.doesNotMatch(patched, /value\.slice\(0, 8\)/);
 });
 
 test("MCP patch adds tenant header and locks calls to current asset defaults", () => {
@@ -275,6 +309,7 @@ test("build script applies and verifies every runtime security patch", () => {
   const buildScript = readFileSync(join(import.meta.dirname, "build-tencentdb-memory.mjs"), "utf8");
   assert.match(buildScript, /patchCoreStdinShutdown/);
   assert.match(buildScript, /patchKnowledgeApiAuth/);
+  assert.match(buildScript, /patchPanelMetaLogRedaction/);
   assert.match(buildScript, /upstreamSourceSha256/);
   assert.match(buildScript, /createHash\("sha256"\)/);
   assert.match(buildScript, /SHA-256 mismatch/);
@@ -290,6 +325,10 @@ test("build script applies and verifies every runtime security patch", () => {
   assert.match(buildScript, /const knowledgeBundle = await readFile/);
   assert.match(buildScript, /TencentDB runtime Knowledge bundle is missing marker/);
   assert.match(buildScript, /managed runtime stdin closed/);
+  assert.match(buildScript, /patchPanelPortFile/);
+  assert.match(buildScript, /TDAI_PANEL_PORT_FILE/);
+  assert.match(buildScript, /TDAI_PANEL_LOG_REDACTION_V1/);
+  assert.match(buildScript, /__grenagent\/health/);
   assert.match(buildScript, /knowledgeApiAuth/);
   assert.match(buildScript, /process\.stdin\.once\(\\?"end/);
   assert.match(buildScript, /process\.stdin\.once\(\\?"close/);

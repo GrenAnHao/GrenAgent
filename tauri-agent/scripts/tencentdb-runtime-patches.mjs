@@ -44,6 +44,20 @@ export function patchPanelStdinShutdown(source) {
   return source.slice(0, end) + bridge + source.slice(end);
 }
 
+export function patchPanelMetaLogRedaction(source) {
+  if (source.includes("TDAI_PANEL_LOG_REDACTION_V1")) return source;
+  const needle = `function maskSecret(value: string): string {
+  if (!value) return '';
+  if (value.length <= 8) return \`${"${value}"}…\`;
+  return \`${"${value.slice(0, 8)}"}…\`;
+}`;
+  const replacement = `// TDAI_PANEL_LOG_REDACTION_V1: credentials never appear in Panel logs.
+function maskSecret(_value: string): string {
+  return "[redacted]";
+}`;
+  return replaceOnce(source, needle, replacement, "MemoryPanel metadata log redaction");
+}
+
 export function patchPanelInstanceRegistry(source) {
   if (source.includes("TDAI_PANEL_INSTANCES_JSON")) return source;
   const needle = /static load\(configPath[^)]*\)[^{]*\{/;
@@ -73,8 +87,23 @@ export function patchPanelInstanceRegistry(source) {
 
 export function panelBootstrapHtml() {
   return `<!doctype html><meta charset="utf-8"><title>GrenAgent</title><script>
-(async()=>{try{const prefix='#tdai-bootstrap=';const token=location.hash.startsWith(prefix)?decodeURIComponent(location.hash.slice(prefix.length)):'';if(!token)throw new Error('missing token');const response=await fetch('/__grenagent/bootstrap/consume',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})});if(!response.ok)throw new Error('bootstrap failed');const payload=await response.json();localStorage['tdai-panel.session']=JSON.stringify(payload.session);}finally{location.replace('/');}})();
+(async()=>{let bootstrapSucceeded=false;try{const prefix='#tdai-bootstrap=';const token=location.hash.startsWith(prefix)?decodeURIComponent(location.hash.slice(prefix.length)):'';if(!token)throw new Error('missing token');const response=await fetch('/__grenagent/bootstrap/consume',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})});if(!response.ok)throw new Error('bootstrap failed');const payload=await response.json();localStorage['tdai-panel.session']=JSON.stringify(payload.session);bootstrapSucceeded=true;}finally{if(!bootstrapSucceeded)localStorage.removeItem('tdai-panel.session');location.replace('/');}})();
 </script>`;
+}
+
+export function patchPanelPortFile(source) {
+  if (source.includes("TDAI_PANEL_PORT_FILE")) return source;
+  const importNeedle = "import { serve } from '@hono/node-server';";
+  const patchedImport = `${importNeedle}\nimport { writeFileSync } from 'node:fs';`;
+  const withImport = replaceOnce(source, importNeedle, patchedImport, "MemoryPanel managed port file import");
+  const callbackNeedle = "    deps.logger.info('panel listening', {";
+  const callbackBody = [
+    "    // TDAI_PANEL_PORT_FILE: report the atomically assigned listener port to the parent.",
+    "    const managedPortFile = process.env.TDAI_PANEL_PORT_FILE?.trim();",
+    "    if (managedPortFile) writeFileSync(managedPortFile, String(info.port), { encoding: 'utf8', mode: 0o600 });",
+    callbackNeedle,
+  ].join("\n");
+  return replaceOnce(withImport, callbackNeedle, callbackBody, "MemoryPanel managed port file callback");
 }
 
 export function patchPanelBootstrapRoutes(source) {
@@ -96,6 +125,10 @@ export function patchPanelBootstrapRoutes(source) {
     const provided = c.req.header("x-tdai-panel-shared-secret") ?? c.req.header("x-tdai-panel-secret") ?? "";
     return Boolean(panelSharedSecret) && provided === panelSharedSecret;
   };
+  app.get("/__grenagent/health", (c) => {
+    if (!panelRequestIsLoopback(c) || !panelBootstrapSecret(c)) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ status: "ok", service: "tencentdb-panel" });
+  });
   app.post("/__grenagent/bootstrap/register", async (c) => {
     if (!panelRequestIsLoopback(c) || !panelBootstrapSecret(c)) return c.json({ error: "unauthorized" }, 401);
     let body: any;
