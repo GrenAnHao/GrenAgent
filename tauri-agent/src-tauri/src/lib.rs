@@ -11,6 +11,7 @@ use tauri::Manager;
 use commands::shell::ShellManager;
 use pi::{PiManager, ProcessGuard};
 use state::AppStateStore;
+use tencentdb::panel::PanelRuntime;
 use tencentdb::MemoryRuntime;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -47,11 +48,17 @@ pub fn run() {
                 }
             };
 
-            let memory_runtime = Arc::new(match process_guard {
+            let memory_runtime = Arc::new(match process_guard.clone() {
                 Some(guard) => MemoryRuntime::with_process_guard(guard),
                 None => MemoryRuntime::new(),
             });
             app_handle.manage(memory_runtime.clone());
+
+            let panel_runtime = Arc::new(match process_guard {
+                Some(guard) => PanelRuntime::with_process_guard(guard),
+                None => PanelRuntime::new(),
+            });
+            app_handle.manage(panel_runtime.clone());
 
             // TencentDB 是应用级运行时，不应等到用户打开第一个工作区才启动。
             // 工作区路径仍保留幂等 ensure，覆盖首次启动与运行时配置刚保存的竞态。
@@ -60,18 +67,19 @@ pub fn run() {
                 .try_state::<AppStateStore>()
                 .map(|store| store.inner().clone());
             let startup_runtime = memory_runtime.clone();
+            let startup_panel = panel_runtime.clone();
             if let Some(store) = startup_store {
                 tauri::async_runtime::spawn(async move {
-                    match commands::tencentdb::ensure_runtime_started(
+                    match commands::tencentdb::ensure_panel_runtime_started(
                         &startup_app,
                         &store,
                         &startup_runtime,
+                        &startup_panel,
                     )
                     .await
                     {
-                        Ok(status) => eprintln!(
-                            "[tencentdb-memory] application runtime ready: {:?} {}",
-                            status.mode, status.endpoint
+                        Ok((_connection, endpoint)) => eprintln!(
+                            "[tencentdb-memory] application runtime ready; panel={endpoint}"
                         ),
                         Err(error) => eprintln!(
                             "[tencentdb-memory] application runtime failed to start: {error}"
@@ -171,6 +179,7 @@ pub fn run() {
             commands::shell::shell_stop,
             commands::tencentdb::tencentdb_get_status,
             commands::tencentdb::tencentdb_get_config,
+            commands::tencentdb::tencentdb_open_panel,
             commands::tencentdb::tencentdb_save_connection,
             commands::tencentdb::tencentdb_test_connection,
             commands::tencentdb::tencentdb_reload_skills,
@@ -213,15 +222,21 @@ fn shutdown_children(app_handle: &tauri::AppHandle) {
     let memory_runtime = app_handle
         .try_state::<Arc<MemoryRuntime>>()
         .map(|state| state.inner().clone());
-    if manager.is_none() && memory_runtime.is_none() {
+    let panel_runtime = app_handle
+        .try_state::<Arc<PanelRuntime>>()
+        .map(|state| state.inner().clone());
+    if manager.is_none() && memory_runtime.is_none() && panel_runtime.is_none() {
         return;
     }
     tauri::async_runtime::block_on(async move {
-        if let Some(manager) = manager {
-            manager.close_all().await;
+        if let Some(panel_runtime) = panel_runtime {
+            let _ = panel_runtime.shutdown().await;
         }
         if let Some(memory_runtime) = memory_runtime {
             let _ = memory_runtime.shutdown().await;
+        }
+        if let Some(manager) = manager {
+            manager.close_all().await;
         }
     });
 }
