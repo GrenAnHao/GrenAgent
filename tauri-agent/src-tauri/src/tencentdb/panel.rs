@@ -190,20 +190,11 @@ impl PanelRuntime {
                     return Err(error).context("failed to start TencentDB MemoryPanel");
                 }
             };
-            if let Err(error) = process_group.assign(&child) {
+            if let Err(error) = self.supervise_child(&process_group, &child) {
                 request_graceful_stop(&mut child);
                 let _ = kill_child(&mut child, "MemoryPanel");
                 cleanup_panel_port_file(&port_file);
-                return Err(error)
-                    .context("failed to supervise TencentDB MemoryPanel process tree");
-            }
-            if let Some(guard) = &self.process_guard {
-                if let Err(error) = guard.assign(child.id()) {
-                    request_graceful_stop(&mut child);
-                    let _ = kill_child(&mut child, "MemoryPanel");
-                    cleanup_panel_port_file(&port_file);
-                    return Err(error).context("failed to assign TencentDB Panel to ProcessGuard");
-                }
+                return Err(error);
             }
             let startup_result =
                 match wait_for_panel_port(&port_file, &mut child, &self.shutting_down).await {
@@ -242,6 +233,21 @@ impl PanelRuntime {
         Err(last_health_error
             .unwrap_or_else(|| anyhow::anyhow!("TencentDB Panel failed to start"))
             .context("TencentDB MemoryPanel did not become healthy after retries"))
+    }
+
+    fn supervise_child(&self, process_group: &RuntimeProcessGroup, child: &Child) -> Result<()> {
+        if let Some(guard) = &self.process_guard {
+            guard
+                .assign(child.id())
+                .context("failed to assign TencentDB Panel to ProcessGuard")?;
+        } else {
+            #[cfg(windows)]
+            bail!("TencentDB Panel runtime requires ProcessGuard on Windows");
+        }
+        process_group
+            .assign(child)
+            .context("failed to supervise TencentDB MemoryPanel process tree")?;
+        Ok(())
     }
 
     pub async fn register_bootstrap(&self, connection: &PanelConnection) -> Result<String> {
@@ -519,5 +525,36 @@ mod tests {
             "bootstrap request did not time out"
         );
         assert!(stopped.is_ok(), "bootstrap request held the process lock");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn panel_supervision_joins_shared_guard_before_its_private_job() {
+        let guard = Arc::new(ProcessGuard::new().unwrap());
+        let runtime = PanelRuntime::with_process_guard(guard.clone());
+        let shared_sibling_group = RuntimeProcessGroup::new().unwrap();
+        let panel_group = RuntimeProcessGroup::new().unwrap();
+
+        let mut sibling_command = Command::new("cmd");
+        sibling_command.args(["/C", "more > nul"]);
+        let mut sibling = spawn_managed_child(&mut sibling_command).unwrap();
+        guard.assign(sibling.id()).unwrap();
+        shared_sibling_group.assign(&sibling).unwrap();
+
+        let mut panel_command = Command::new("cmd");
+        panel_command.args(["/C", "more > nul"]);
+        let mut panel = spawn_managed_child(&mut panel_command).unwrap();
+        let result = runtime.supervise_child(&panel_group, &panel);
+
+        let _ = panel_group.terminate_tree();
+        let _ = shared_sibling_group.terminate_tree();
+        let _ = panel.wait();
+        let _ = sibling.wait();
+        drop(runtime);
+        if let Ok(guard) = Arc::try_unwrap(guard) {
+            let _ = guard.close_for_test();
+        }
+
+        result.unwrap();
     }
 }
