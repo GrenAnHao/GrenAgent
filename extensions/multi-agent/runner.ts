@@ -53,7 +53,7 @@ export function resolvePiCommand(): { cmd: string; baseArgs: string[] } {
 
 export function buildSubagentSkillArgs(root: string | undefined): string[] {
   const managedRoot = root?.trim();
-  return ["--no-skills", ...(managedRoot ? ["--skill", managedRoot] : [])];
+  return managedRoot ? ["--skill", managedRoot] : [];
 }
 
 export function extractFinalText(jsonlOutput: string): string {

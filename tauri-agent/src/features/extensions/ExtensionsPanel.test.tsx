@@ -26,12 +26,12 @@ afterEach(() => {
 });
 
 describe('ExtensionsPanel', () => {
-  it('exposes only MCP and does not expose retired code intelligence or local Skills tabs', async () => {
+  it('exposes MCP and the native local Skills tab, without retired code intelligence', async () => {
     getSettings.mockResolvedValueOnce({});
     render(<ExtensionsPanel />);
     await waitFor(() => expect(screen.getByTestId('ext-tab-mcp')).toBeTruthy());
     expect(screen.queryByTestId('ext-tab-code-intel')).toBeNull();
-    expect(screen.queryByTestId('ext-tab-skills')).toBeNull();
+    expect(screen.getByTestId('ext-tab-skills')).toBeTruthy();
   });
 
   it('lists MCP servers from MCP_SERVERS (standard mcpServers format)', async () => {

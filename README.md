@@ -47,9 +47,9 @@
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="images/skills.png" alt="TencentDB Skills" width="100%"><br>
-      <strong>TencentDB Skills</strong><br>
-      从当前 Agent 装备的 TencentDB Skill 资产加载，版本或资源更新后自动热重载。
+      <img src="images/skills.png" alt="本机与 TencentDB Skills" width="100%"><br>
+      <strong>本机与 TencentDB Skills</strong><br>
+      本机 Skill 保持原生目录管理；当前 Agent 装备的 TencentDB Skill 作为隔离补充，版本或资源更新后自动热重载。
     </td>
     <td width="50%" valign="top"></td>
   </tr>

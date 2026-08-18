@@ -1,12 +1,13 @@
 import { Button, Flexbox } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Boxes, Plus, ScrollText } from 'lucide-react';
+import { Boxes, Plus, ScrollText, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
 import { McpServerCard } from './McpServerCard';
+import { NativeSkillsPanel } from './NativeSkillsPanel';
 import {
   listEntries,
   mergeImport,
@@ -39,6 +40,12 @@ const styles = createStaticStyles(({ css }) => ({
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
     background: ${cssVar.colorBgContainer};
   `,
+  tabBar: css`
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    gap: 2px;
+  `,
   tab: css`
     display: inline-flex;
     align-items: center;
@@ -46,9 +53,16 @@ const styles = createStaticStyles(({ css }) => ({
     height: 100%;
     padding-inline: 10px;
     margin-block-end: -1px;
-    border-block-end: 2px solid ${cssVar.colorPrimary};
-    color: ${cssVar.colorText};
+    border: 0;
+    border-block-end: 2px solid transparent;
+    background: transparent;
+    color: ${cssVar.colorTextTertiary};
     font-size: 13px;
+    cursor: pointer;
+  `,
+  tabActive: css`
+    border-block-end-color: ${cssVar.colorPrimary};
+    color: ${cssVar.colorText};
     font-weight: 600;
   `,
   errorBar: css`
@@ -87,7 +101,7 @@ const styles = createStaticStyles(({ css }) => ({
     width: 34px;
     height: 34px;
     flex: 0 0 auto;
-    border-radius: 10px;
+    border-radius: 8px;
     background: ${cssVar.colorFillTertiary};
     color: ${cssVar.colorText};
   `,
@@ -140,8 +154,9 @@ export function ExtensionsPanel() {
     disabled: values.MCP_SERVERS_DISABLED ?? '',
   };
   const entries = listEntries(cols).sort((a, b) => Number(b.enabled) - Number(a.enabled));
-  const existingNames = entries.map((e) => e.name);
+  const existingNames = entries.map((entry) => entry.name);
 
+  const [tab, setTab] = useState<'mcp' | 'skills'>('mcp');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<McpEntry | undefined>(undefined);
   const touchedRef = useRef(false);
@@ -151,11 +166,15 @@ export function ExtensionsPanel() {
   const [toolsCache, setToolsCache] = useState<Record<string, CacheEntry>>({});
   const [probing, setProbing] = useState<Set<string>>(new Set());
 
+  const markChanged = () => {
+    touchedRef.current = true;
+  };
+
   useEffect(() => {
     let cancelled = false;
     void readMcpPolicy()
-      .then((t) => {
-        if (!cancelled) setPolicyRaw(parsePolicyDoc(t));
+      .then((text) => {
+        if (!cancelled) setPolicyRaw(parsePolicyDoc(text));
       })
       .catch(() => {});
     return () => {
@@ -173,27 +192,26 @@ export function ExtensionsPanel() {
     try {
       setToolsCache(parseToolsCache(await readMcpToolsCache()));
     } catch {
-      // ignore: empty cache renders as 未探测
+      // An empty cache renders as not probed.
     }
   };
 
   const probeOne = async (serverName: string, serverConfig: McpConfig) => {
-    setProbing((s) => new Set(s).add(serverName));
+    setProbing((current) => new Set(current).add(serverName));
     try {
       await probeMcpServer(toProbeConfigJson(serverName, serverConfig));
     } catch {
-      // probe failure is recorded in cache by the subcommand; ignore here
+      // The probe command records failures in its cache.
     } finally {
       await reloadCache();
-      setProbing((s) => {
-        const next = new Set(s);
+      setProbing((current) => {
+        const next = new Set(current);
         next.delete(serverName);
         return next;
       });
     }
   };
 
-  // 打开面板：读缓存，并对「已启用但还没缓存过」的 server 自动探测一次（顺序执行，避免一次 spawn 一堆 npx）。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -205,13 +223,13 @@ export function ExtensionsPanel() {
       }
       if (cancelled) return;
       setToolsCache(cache);
-      const toProbe = listEntries({
+      const pending = listEntries({
         enabled: values.MCP_SERVERS ?? '',
         disabled: values.MCP_SERVERS_DISABLED ?? '',
-      }).filter((e) => e.enabled && !cache[e.name]);
-      for (const e of toProbe) {
+      }).filter((entry) => entry.enabled && !cache[entry.name]);
+      for (const entry of pending) {
         if (cancelled) return;
-        await probeOne(e.name, e.config);
+        await probeOne(entry.name, entry.config);
       }
     })();
     return () => {
@@ -226,7 +244,7 @@ export function ExtensionsPanel() {
     if (loading || !touchedRef.current) return;
     const timer = window.setTimeout(() => void persistRef.current(), 600);
     return () => window.clearTimeout(timer);
-  }, [values.MCP_SERVERS, values.MCP_SERVERS_DISABLED, loading]);
+  }, [values.MCP_SERVERS, values.MCP_SERVERS_DISABLED, values.SKILLS_DISABLED, values.PI_RELOAD_REV, loading]);
 
   const writeCols = (next: Collections) => {
     setValue('MCP_SERVERS', next.enabled);
@@ -245,16 +263,25 @@ export function ExtensionsPanel() {
   return (
     <Flexbox className={styles.panel} data-testid="extensions-panel">
       <div className={styles.header}>
-        <span className={styles.tab} data-testid="ext-tab-mcp">
-          <Boxes size={15} />
-          插件
-        </span>
+        <div className={styles.tabBar}>
+          <button type="button" className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`} data-testid="ext-tab-mcp" onClick={() => setTab('mcp')}>
+            <Boxes size={15} />
+            插件
+          </button>
+          <button type="button" className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`} data-testid="ext-tab-skills" onClick={() => setTab('skills')}>
+            <Sparkles size={15} />
+            技能
+          </button>
+        </div>
       </div>
 
       {error && <div className={styles.errorBar}>{error}</div>}
 
       <div className={styles.body}>
         <div className={styles.inner}>
+          {tab === 'skills' ? (
+            <NativeSkillsPanel values={values} setValue={setValue} onChanged={markChanged} />
+          ) : <>
           <div className={styles.heroBar}>
             <div className={styles.hero}>
               <span className={styles.heroIcon}>
@@ -298,25 +325,25 @@ export function ExtensionsPanel() {
               <span>未配置 MCP server，点右上「添加 MCP」</span>
             </div>
           ) : (
-            entries.map((e) => (
+            entries.map((entry) => (
               <McpServerCard
-                key={e.name}
-                name={e.name}
-                config={e.config}
-                enabled={e.enabled}
-                cachedTools={getCachedTools(toolsCache, e.name)}
-                probing={probing.has(e.name)}
-                probeError={getCacheEntry(toolsCache, e.name)?.ok === false ? getCacheEntry(toolsCache, e.name)?.error : undefined}
+                key={entry.name}
+                name={entry.name}
+                config={entry.config}
+                enabled={entry.enabled}
+                cachedTools={getCachedTools(toolsCache, entry.name)}
+                probing={probing.has(entry.name)}
+                probeError={getCacheEntry(toolsCache, entry.name)?.ok === false ? getCacheEntry(toolsCache, entry.name)?.error : undefined}
                 policyRaw={policyRaw}
-                onToggle={(v) => handleToggleMcp(e.name, v)}
+                onToggle={(enabled) => handleToggleMcp(entry.name, enabled)}
                 onEdit={() => {
-                  setEditing(e);
+                  setEditing(entry);
                   setModalOpen(true);
                 }}
-                onDelete={() => handleDeleteMcp(e.name)}
-                onProbe={() => void probeOne(e.name, e.config)}
+                onDelete={() => handleDeleteMcp(entry.name)}
+                onProbe={() => void probeOne(entry.name, entry.config)}
                 onPermChange={onPermChange}
-                onOpenRules={(full) => setRulesTarget(full)}
+                onOpenRules={(fullName) => setRulesTarget(fullName)}
               />
             ))
           )}
@@ -334,13 +361,14 @@ export function ExtensionsPanel() {
               open={!!rulesTarget}
               fullName={rulesTarget}
               policyRaw={policyRaw}
-              onSave={(full, perm, rules) =>
-                writePolicy(setToolRules(setToolPerm(policyRaw, full, perm), full, rules))
+              onSave={(fullName, perm, rules) =>
+                writePolicy(setToolRules(setToolPerm(policyRaw, fullName, perm), fullName, rules))
               }
               onClose={() => setRulesTarget(undefined)}
             />
           ) : null}
           <AuditModal open={auditOpen} onClose={() => setAuditOpen(false)} />
+          </>}
         </div>
       </div>
     </Flexbox>

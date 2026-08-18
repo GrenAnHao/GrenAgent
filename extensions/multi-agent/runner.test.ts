@@ -36,16 +36,15 @@ describe("resolvePiCommand", () => {
 });
 
 describe("buildSubagentSkillArgs", () => {
-  it("disables discovered skills and loads only the TencentDB managed root", () => {
+  it("adds TencentDB skills without disabling native discovery", () => {
     expect(buildSubagentSkillArgs("C:/managed/skills")).toEqual([
-      "--no-skills",
       "--skill",
       "C:/managed/skills",
     ]);
   });
 
-  it("keeps all skills disabled when no managed root is configured", () => {
-    expect(buildSubagentSkillArgs(undefined)).toEqual(["--no-skills"]);
+  it("does not add skill flags when no managed root is configured", () => {
+    expect(buildSubagentSkillArgs(undefined)).toEqual([]);
   });
 });
 

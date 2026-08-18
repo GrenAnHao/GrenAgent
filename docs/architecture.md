@@ -35,7 +35,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 采用混合运行时（hybrid runtime）：
 
-- `--mode rpc`：由 Tauri 后端拉起。关闭 Pi 默认 Skill 扫描，仅加载当前 Agent 的 TencentDB 托管 Skill 根目录。
+- `--mode rpc`：由 Tauri 后端拉起。保留 Pi 原生 Skill 扫描，并追加当前 Agent 的 TencentDB 托管 Skill 根目录；同名时本机原生 Skill 优先。
 - 其他模式（子代理等一次性任务，走 `--mode json -p`）：复用官方 `main()`，由其处理 print 模式。
 
 进程退出时，父进程（Tauri）会关闭 stdio / RPC 管道，在途写入随后以 `EPIPE` 失败。sidecar 在模块加载阶段就注册 `EPIPE` 处理：一旦命中即干净退出，避免对死管道反复写入导致 stderr 刷屏。

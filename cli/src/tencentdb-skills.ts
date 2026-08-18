@@ -8,29 +8,21 @@ import {
 import { getConfig } from "../../extensions/_shared/runtime-config.js";
 
 export interface ManagedSkillLoaderOptions {
-  noSkills: true;
+  /** Keep Pi's native ~/.agents, ~/.pi and project skill discovery enabled. */
+  noSkills: false;
   additionalSkillPaths: string[];
 }
 
 export function managedSkillLoaderOptions(root: string | undefined): ManagedSkillLoaderOptions {
   return {
-    noSkills: true,
+    noSkills: false,
     additionalSkillPaths: root ? [root] : [],
   };
 }
 
 export function withManagedSkillArgs(argv: string[], root: string | undefined): string[] {
-  const sanitized: string[] = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--skill") {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--skill=") || arg === "--no-skills" || arg === "-ns") continue;
-    sanitized.push(arg);
-  }
-  return ["--no-skills", ...(root ? ["--skill", root] : []), ...sanitized];
+  const managedRoot = root?.trim();
+  return managedRoot ? [...argv, "--skill", managedRoot] : [...argv];
 }
 
 export async function reloadManagedSkills(
