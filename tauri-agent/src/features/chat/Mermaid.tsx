@@ -426,7 +426,7 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
         <MermaidRenderBoundary fallback={fallback}>
           <LobeMermaid
             fullFeatured
-            copyable
+            copyable={false}
             defaultExpand
             actionsRender={actionsRender}
             theme={theme.isDarkMode ? 'zinc-dark' : 'zinc-light'}

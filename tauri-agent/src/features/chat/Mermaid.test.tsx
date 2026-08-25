@@ -16,8 +16,10 @@ vi.mock('@lobehub/ui', async () => {
   const actual = await vi.importActual<typeof import('@lobehub/ui')>('@lobehub/ui');
   return {
     ...actual,
-    Mermaid: ({ children }: { children: string }) => (
-      <div data-testid="lobehub-mermaid">{children}</div>
+    Mermaid: ({ children, copyable }: { children: string; copyable?: boolean }) => (
+      <div data-testid="lobehub-mermaid" data-copyable={String(copyable)}>
+        {children}
+      </div>
     ),
   };
 });
@@ -38,6 +40,7 @@ describe('Mermaid adapter', () => {
 
     await waitFor(() => expect(screen.getByTestId('lobehub-mermaid')).toBeInTheDocument());
     expect(screen.getByTestId('lobehub-mermaid')).toHaveTextContent('"x{1}"');
+    expect(screen.getByTestId('lobehub-mermaid')).toHaveAttribute('data-copyable', 'false');
   });
 
   it('keeps the project error card when Mermaid parsing fails', async () => {
