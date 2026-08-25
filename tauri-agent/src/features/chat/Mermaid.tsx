@@ -2,6 +2,7 @@ import { ActionIcon, Icon, Mermaid as LobeMermaid } from '@lobehub/ui';
 import type { MenuProps } from 'antd';
 import { Dropdown } from 'antd';
 import { createStaticStyles, cssVar, cx, useTheme } from 'antd-style';
+import { renderMermaidSVG, THEMES } from 'beautiful-mermaid';
 import { Braces, Check, Copy, FileCode, FileImage, Loader2, Sparkles, TriangleAlert } from 'lucide-react';
 import { Component, memo, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 
@@ -158,11 +159,20 @@ async function prepareMermaid(code: string): Promise<{ code: string; autofixed: 
 }
 
 async function renderExportSvg(code: string, dark: boolean): Promise<string> {
-  const mermaid = await loadMermaid();
-  mermaid.initialize({ securityLevel: 'loose', startOnLoad: false, theme: dark ? 'dark' : 'neutral' });
-  renderSequence += 1;
-  const result = await mermaid.render(`mermaid-export-${renderSequence.toString(36)}`, code);
-  return result.svg;
+  try {
+    // Keep exports on the same engine as the LobeHub component. Otherwise the
+    // visible diagram uses beautiful-mermaid while copied output uses Mermaid.js,
+    // producing different layouts and node sizes.
+    return renderMermaidSVG(code, THEMES[dark ? 'zinc-dark' : 'zinc-light']);
+  } catch {
+    // LobeHub falls back to Mermaid.js for diagram types beautiful-mermaid does
+    // not support. Mirror that fallback so those diagrams remain exportable.
+    const mermaid = await loadMermaid();
+    mermaid.initialize({ securityLevel: 'loose', startOnLoad: false, theme: dark ? 'dark' : 'neutral' });
+    renderSequence += 1;
+    const result = await mermaid.render(`mermaid-export-${renderSequence.toString(36)}`, code);
+    return result.svg;
+  }
 }
 
 function svgWithPixelSize(svg: string, scale: number): { svg: string; width: number; height: number } | null {
