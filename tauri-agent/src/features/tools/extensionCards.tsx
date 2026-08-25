@@ -2,8 +2,6 @@ import { ActionIcon, Flexbox, Icon, Image, ScrollArea, Skeleton } from '@lobehub
 import { createStaticStyles, cssVar, keyframes } from 'antd-style';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
-  BookPlus,
-  Brain,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -469,80 +467,6 @@ const ImageThumb: FC<{ workspace: string; path: string; w: number; h: number }> 
         onError={bumpRetry}
       />
     </div>
-  );
-};
-
-const KbSearchCard: FC<ExtensionCardProps> = ({ result }) => {
-  const details = getDetails(result);
-  const hits = Array.isArray(details?.hits)
-    ? (details!.hits as Array<{ source?: unknown; score?: unknown }>)
-    : [];
-  const text = extractText(result);
-  return (
-    <Flexbox gap={6} data-testid="card-kb_search">
-      {hits.length > 0 && (
-        <Flexbox gap={2}>
-          {hits.map((h, i) => (
-            <Flexbox horizontal align="center" gap={6} key={i}>
-              <Icon icon={Search} size={13} />
-              <span style={{ fontSize: 12 }}>{asString(h.source)}</span>
-              {h.score != null && <span style={labelStyle}>score {asString(h.score)}</span>}
-            </Flexbox>
-          ))}
-        </Flexbox>
-      )}
-      {text ? <LazyMarkdown>{text}</LazyMarkdown> : null}
-    </Flexbox>
-  );
-};
-
-const KbAddCard: FC<ExtensionCardProps> = ({ result }) => {
-  const d = getDetails(result);
-  return (
-    <Flexbox horizontal align="center" gap={6} data-testid="card-kb_add">
-      <Icon icon={BookPlus} size={14} />
-      <span style={{ fontSize: 12 }}>
-        已索引 {asString(d?.source)} 为 {asString(d?.chunks ?? 0)} 块（{d?.embedded ? 'embedded' : 'keyword'}）
-      </span>
-    </Flexbox>
-  );
-};
-
-const MemoryCard: FC<ExtensionCardProps> = ({ toolName, result, status }) => {
-  const d = getDetails(result);
-  const text = extractText(result);
-  if (toolName === 'memory_save') {
-    const category = asString(d?.category);
-    // 失败（embedding 未配 / 网络等）时不能谎报「已保存」：按错误态显示并附错误首行。
-    // 之前固定渲染「已保存」，即使工具红叉也照样写——与实际不符。
-    if (status === 'error') {
-      const brief = text.split('\n')[0];
-      return (
-        <Flexbox horizontal align="center" gap={6} data-testid="card-memory_save">
-          <Icon icon={Brain} size={14} />
-          <span style={{ fontSize: 12, color: cssVar.colorError }}>
-            记忆保存失败{brief ? `：${brief}` : ''}
-          </span>
-        </Flexbox>
-      );
-    }
-    return (
-      <Flexbox horizontal align="center" gap={6} data-testid="card-memory_save">
-        <Icon icon={Brain} size={14} />
-        <span style={{ fontSize: 12 }}>
-          已保存到{d?.scope === 'global' ? '全局' : '项目'}记忆{category ? `（${category}）` : ''}
-        </span>
-      </Flexbox>
-    );
-  }
-  return (
-    <Flexbox gap={6} data-testid="card-memory_recall">
-      <Flexbox horizontal align="center" gap={6}>
-        <Icon icon={Brain} size={14} />
-        <span style={{ fontSize: 12 }}>召回记忆</span>
-      </Flexbox>
-      {text ? <LazyMarkdown>{text}</LazyMarkdown> : null}
-    </Flexbox>
   );
 };
 
@@ -1354,10 +1278,6 @@ const FetchArticleCard: FC<ExtensionCardProps & { testId: string }> = ({ args, r
 };
 
 const EXTENSION_CARD_RENDERERS: Record<string, FC<ExtensionCardProps>> = {
-  kb_search: KbSearchCard,
-  kb_add: KbAddCard,
-  memory_save: MemoryCard,
-  memory_recall: MemoryCard,
   generate_image: GenerateImageCard,
   spawn_agent: SpawnAgentCard,
   fetch_url: FetchUrlCard,

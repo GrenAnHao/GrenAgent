@@ -6,7 +6,6 @@ import autoTitle from "./auto-title/index.js";
 import compactionPolicy from "./compaction-policy/index.js";
 import loopGuard from "./loop-guard/index.js";
 import rulebook from "./rulebook/index.js";
-import codeSearch from "./code-search/index.js";
 import astTools from "./ast-tools/index.js";
 import github from "./github/index.js";
 import batchTools from "./batch-tools/index.js";
@@ -16,14 +15,11 @@ import imGateway from "./im-gateway/index.js";
 import imPlatforms from "./im-platforms/index.js";
 import goal from "./goal/index.js";
 import imageGen from "./image-gen/index.js";
-import knowledgeRag from "./knowledge-rag/index.js";
-import longTermMemory from "./long-term-memory/index.js";
-import selfEvolve from "./self-evolve/index.js";
+import tencentdbMemory from "./tencentdb-memory/index.js";
 import sessionMemory from "./session-memory/index.js";
 import mcp from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
 import multiAgent from "./multi-agent/index.js";
-import codeIntel from "./code-intel/index.js";
 import lsp from "./lsp/index.js";
 import agentMode from "./agent-mode/index.js";
 import debugTools from "./debug-tools/index.js";
@@ -38,7 +34,6 @@ import todo from "./todo/index.js";
 import tts from "./tts/index.js";
 import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
-import sessionSearch from "./session-search/index.js";
 import webSearch from "./web-search/index.js";
 
 export {
@@ -54,20 +49,15 @@ export {
   diagramHint,
   fableBehavior,
   goal,
-  knowledgeRag,
-  longTermMemory,
-  selfEvolve,
+  tencentdbMemory,
   sessionMemory,
   webFetch,
   webSearch,
-  sessionSearch,
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
   multiAgent,
-  codeIntel,
   lsp,
-  codeSearch,
   astTools,
   github,
   batchTools,
@@ -94,20 +84,15 @@ export const allExtensions = [
   diagramHint,
   fableBehavior,
   goal,
-  knowledgeRag,
-  longTermMemory,
-  selfEvolve,
+  tencentdbMemory,
   sessionMemory,
   webFetch,
   webSearch,
-  sessionSearch,
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
   multiAgent,
-  codeIntel,
   lsp,
-  codeSearch,
   astTools,
   github,
   batchTools,
@@ -136,21 +121,16 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "diagram-hint", factory: diagramHint },
   { name: "fable-behavior", factory: fableBehavior },
   { name: "goal", factory: goal },
-  { name: "knowledge-rag", factory: knowledgeRag },
-  { name: "long-term-memory", factory: longTermMemory },
-  { name: "self-evolve", factory: selfEvolve },
+  { name: "tencentdb-memory", factory: tencentdbMemory },
   { name: "session-memory", factory: sessionMemory },
   { name: "web-fetch", factory: webFetch },
   { name: "web-search", factory: webSearch },
-  { name: "session-search", factory: sessionSearch },
   { name: "mcp", factory: mcp },
   { name: "mcp-policy", factory: mcpPolicy },
   { name: "image-gen", factory: imageGen },
   { name: "diagnostics", factory: diagnostics },
   { name: "multi-agent", factory: multiAgent },
-  { name: "code-intel", factory: codeIntel },
   { name: "lsp", factory: lsp },
-  { name: "code-search", factory: codeSearch },
   { name: "ast-tools", factory: astTools },
   { name: "github", factory: github },
   { name: "batch-tools", factory: batchTools },

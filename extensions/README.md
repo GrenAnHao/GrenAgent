@@ -6,8 +6,7 @@
 
 | 目录 | 工具 / 命令 | 需要 key? | 说明 |
 |---|---|---|---|
-| [`knowledge-rag`](./knowledge-rag) | `kb_search` `kb_add` `/kb` | 可选(语义) | 本地知识库 RAG + 提问自动注入 |
-| [`long-term-memory`](./long-term-memory) | `memory_save` `memory_recall` `/memory` | 可选(语义) | 两级长期记忆 + 自动召回 + 「记住:」自动捕获 |
+| [`tencentdb-memory`](./tencentdb-memory) | `tdai_memory_search` `tdai_conversation_search` | TencentDB 配置 | TencentDB 长期记忆、会话捕获与自动召回 |
 | [`web-fetch`](./web-fetch) | `fetch_url` `fetch_html` `fetch_markdown` `fetch_txt` `fetch_json` | 否 | 网页抓取(SSRF 防护) |
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
 | [`code-review`](./code-review) | `git_diff` `review_note` `/review` | 否 | 结构化代码审查 + 报告 |
@@ -16,14 +15,13 @@
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
 | [`im-gateway`](./im-gateway) | `/imgateway` + webhook | 否 | HTTP 网关,接入 IM 平台 |
 
-合计 **10 个工具 + 4 个命令**(8 个 extension)。
+合计 **当前 sidecar 中的全部扩展**，长期记忆与知识检索统一由 `tencentdb-memory` 提供。
 
 ## 一键加载全部
 
 ```bash
 # 方式 1:逐个 -e(开发调试)
-pi -e ./extensions/knowledge-rag/index.ts \
-   -e ./extensions/long-term-memory/index.ts \
+pi -e ./extensions/tencentdb-memory/index.ts \
    -e ./extensions/web-fetch/index.ts \
    -e ./extensions/image-gen/index.ts \
    -e ./extensions/code-review/index.ts \
@@ -38,14 +36,13 @@ cp -r extensions/* ~/.pi/agent/extensions/
 
 ## 统一配置
 
-配一个 `OPENAI_API_KEY` 即可同时启用语义检索 / 记忆 / 图像 / embedding(各 extension 也有独立的 `*_EMBED_*`、`IMAGE_*` 覆盖)。需要 key 的只有:`image-gen`(必需)、`knowledge-rag` / `long-term-memory`(可选,无 key 走关键词)、`multi-agent`(子 agent 实跑需 provider key)。
+桌面端由 Tauri 托管 TencentDB 本地运行时，或在设置中连接远程 Gateway；sidecar 会自动获得对应的 endpoint、身份坐标和 Knowledge MCP。其他需要外部服务的扩展仍按各自 README 配置。
 
 ## 技术共性
 
 - TypeScript extension,`typebox` schema,`registerTool` / `registerCommand` / 生命周期钩子。
-- `node:sqlite` 本地持久化(knowledge / memory / review),embedding 存 Float32 BLOB,**零或极少第三方依赖**。
-- knowledge-rag / long-term-memory 用 `before_agent_start` 做「提问自动检索/召回注入」。
-- 关键词检索支持中英文(CJK 分词)。
+- `tencentdb-memory` 通过 TencentDB SDK 访问长期记忆与会话检索，并在 `before_agent_start` 注入相关上下文。
+- `session-memory` 只管理会话短期工作状态，不承担长期知识存储。
 
 ## 测试
 
@@ -54,4 +51,4 @@ cp -r extensions/* ~/.pi/agent/extensions/
 ## 注意
 
 - 包名:按官方新名 `@earendil-works/*` + `typebox`(实测该 Pi 版本 bundle 的是 `typebox`,不是 `@sinclair/typebox`)。
-- `node:sqlite` 是实验特性,首次加载打印一行 `ExperimentalWarning`,正常无害(需 Node ≥ 22.5)。
+- TencentDB 本地服务使用应用数据目录保存自身运行时数据；sidecar 不再创建旧的知识库或长期记忆 SQLite 文件。

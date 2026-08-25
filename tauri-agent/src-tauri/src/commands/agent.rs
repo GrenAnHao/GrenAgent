@@ -14,6 +14,7 @@ use crate::pi::sink::{EventSink, TauriSink};
 use crate::pi::types::{PiOutbound, RpcResponse};
 use crate::pi::{PiClient, PiManager};
 use crate::state::AppStateStore;
+use crate::tencentdb::MemoryRuntime;
 
 async fn client_for(mgr: &PiManager, workspace: &str) -> Result<Arc<PiClient>, String> {
     mgr.get(workspace)
@@ -40,7 +41,7 @@ fn perf_log(label: &str, elapsed_ms: u128) {
     eprintln!("[PERF-startup] {label}: {elapsed_ms}ms");
 }
 
-fn is_conversation_workspace(cwd: &Path) -> bool {
+pub(crate) fn is_conversation_workspace(cwd: &Path) -> bool {
     let works = match dirs::home_dir().map(|h| h.join(".pi").join("agent").join("works")) {
         Some(works) => works,
         None => return false,
@@ -66,7 +67,7 @@ fn apply_conversation_tool_policy(
     if is_conversation_workspace(cwd) {
         env.remove("MCP_SERVERS");
         env.insert("MCP_DISABLED".into(), "1".into());
-        // 真对话模式（SP-3）：项目无关对话加载精简扩展集——裁掉 lsp/dap/code-intel/diagnostics 等重代码
+        // 真对话模式（SP-3）：项目无关对话加载精简扩展集——裁掉 lsp/dap/code-search/diagnostics 等重代码
         // 智能扩展，缩短冷启动、降低开销；安全闸（safety）仍保留。项目工作区不设此项，保持全量扩展。
         env.insert("EXTENSIONS_PROFILE".into(), "chat".into());
     }
@@ -97,24 +98,25 @@ pub async fn open_workspace(
     app: tauri::AppHandle,
     mgr: State<'_, Arc<PiManager>>,
     store: State<'_, AppStateStore>,
+    memory_runtime: State<'_, Arc<MemoryRuntime>>,
 ) -> Result<OpenWorkspaceResult, String> {
     let t0 = Instant::now();
     let cwd = resolve_workspace_dir(&workspace)?;
     let cwd_for_spawn = cwd.to_string_lossy().to_string();
     let app2 = app.clone();
     let ws = workspace.clone();
-    let env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
+    let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
+    env.extend(
+        crate::commands::tencentdb::prepare_memory_env_for_workspace(
+            &app,
+            &store,
+            &memory_runtime,
+            Some(&cwd),
+        )
+        .await,
+    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
-    // Code Intelligence 自动 init 开关（在 env 被 move 进 spawn 闭包前读取）。
-    let auto_init_code_intel = env
-        .get("CODE_INTEL")
-        .map(|v| v.as_str() != "off")
-        .unwrap_or(true)
-        && env
-            .get("CODE_INTEL_AUTO_INIT")
-            .map(|v| v.as_str() != "0")
-            .unwrap_or(true);
     mgr.get_or_open(&workspace, move || {
         let sink: Arc<dyn EventSink> = Arc::new(TauriSink { app: app2.clone() });
         spawn_pi_client(
@@ -166,32 +168,6 @@ pub async fn open_workspace(
         t0.elapsed().as_millis(),
     );
 
-    // Code Intelligence：首次打开未索引项目时后台自动 init（非阻塞，失败仅日志）。
-    // codebase-memory 的索引落在 CBM_CACHE_DIR/<slug>.db（不在工作区内），故用
-    // code_intel_is_initialized 判定是否已索引（在 spawn 内做，连 stat 都不挡 open）。
-    // 对话工作区（~/.pi/agent/works/<uuid>）是临时目录，不建代码索引——与
-    // apply_conversation_tool_policy 给对话关闭 MCP 的策略保持一致。
-    if auto_init_code_intel && !is_conversation_workspace(&cwd) {
-        let app_for_init = app.clone();
-        let ws_for_init = workspace.clone();
-        tauri::async_runtime::spawn(async move {
-            let indexed = crate::commands::code_intel::code_intel_is_initialized(
-                app_for_init.clone(),
-                ws_for_init.clone(),
-            )
-            .await
-            .unwrap_or(false);
-            if indexed {
-                return;
-            }
-            if let Err(e) =
-                crate::commands::code_intel::code_intel_init(app_for_init, ws_for_init).await
-            {
-                eprintln!("[code-intel] auto-init failed: {e}");
-            }
-        });
-    }
-
     Ok(OpenWorkspaceResult {
         restored_session,
         session_file,
@@ -216,6 +192,7 @@ pub async fn warm_workspace(
     app: tauri::AppHandle,
     mgr: State<'_, Arc<PiManager>>,
     store: State<'_, AppStateStore>,
+    memory_runtime: State<'_, Arc<MemoryRuntime>>,
 ) -> Result<(), String> {
     if mgr.get(&workspace).await.is_some() {
         return Ok(());
@@ -225,7 +202,16 @@ pub async fn warm_workspace(
     let cwd_for_spawn = cwd.to_string_lossy().to_string();
     let app2 = app.clone();
     let ws = workspace.clone();
-    let env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
+    let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
+    env.extend(
+        crate::commands::tencentdb::prepare_memory_env_for_workspace(
+            &app,
+            &store,
+            &memory_runtime,
+            Some(&cwd),
+        )
+        .await,
+    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     let client = mgr

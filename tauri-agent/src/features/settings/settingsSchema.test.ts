@@ -23,9 +23,14 @@ describe('SETTINGS_SCHEMA', () => {
     }
   });
 
-  it('memory category is split into sections', () => {
-    const mem = SETTINGS_SCHEMA.find((c) => c.id === 'memory');
-    expect(mem?.sections?.length).toBeGreaterThanOrEqual(2);
+  it('keeps TencentDB as the only legacy-memory settings entry', () => {
+    expect(SETTINGS_SCHEMA.find((c) => c.id === 'tencentdb')).toBeTruthy();
+    expect(SETTINGS_SCHEMA.find((c) => c.id === 'knowledge')).toBeUndefined();
+    expect(SETTINGS_SCHEMA.find((c) => c.id === 'memory')).toBeUndefined();
+
+    const allFields = SETTINGS_SCHEMA.flatMap((c) => c.sections?.flatMap((s) => s.fields) ?? c.fields ?? []);
+    expect(allFields.some((f) => f.key.startsWith('KB_'))).toBe(false);
+    expect(allFields.some((f) => f.key.startsWith('MEMORY_'))).toBe(false);
   });
 
   it('titleModel effect is instant; unmarked fields default to hot', () => {
@@ -33,7 +38,7 @@ describe('SETTINGS_SCHEMA', () => {
     const titleModel = allFields.find((f) => f.key === 'titleModel');
     expect(titleModel?.effect).toBe('instant');
     expect(fieldEffect(titleModel!)).toBe('instant');
-    const hotField = allFields.find((f) => f.key === 'KB_AUTO_INJECT');
+    const hotField = allFields.find((f) => f.key === 'IMAGE_SIZE');
     expect(fieldEffect(hotField!)).toBe('hot');
   });
 });

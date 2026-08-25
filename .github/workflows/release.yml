@@ -25,8 +25,7 @@ jobs:
             args: '--target x86_64-apple-darwin'
             rust_targets: x86_64-apple-darwin
             sidecar_target: x86_64-apple-darwin
-          # 24.04: glibc >= 2.38 for bundled codebase-memory-mcp. AppImage/linuxdeploy is
-          # flaky on GHA (FUSE/strip/size); ship .deb from CI instead.
+          # AppImage/linuxdeploy is flaky on GHA (FUSE/strip/size); ship .deb from CI instead.
           - platform: ubuntu-24.04
             args: '--bundles deb'
             rust_targets: ''
@@ -87,9 +86,9 @@ jobs:
           PI_SIDECAR_TARGET: ${{ matrix.sidecar_target }}
         run: bun run build:sidecar
 
-      - name: Build codebase-memory binary
+      - name: Build TencentDB Agent Memory runtime
         working-directory: tauri-agent
-        run: bun run build:codebasememory
+        run: bun run build:tencentdb-memory
 
       - name: Read release notes
         if: startsWith(github.ref, 'refs/tags/')

@@ -68,7 +68,7 @@ function makeFixture(): ChatMessage[] {
       result: {},
       status: 'done',
     } as ChatMessage,
-    { kind: 'notice', id: 'n1', customType: 'knowledge-rag', content: '已注入 3 条' } as ChatMessage,
+    { kind: 'notice', id: 'n1', customType: 'extension-context', content: '已注入 3 条' } as ChatMessage,
   ];
 }
 

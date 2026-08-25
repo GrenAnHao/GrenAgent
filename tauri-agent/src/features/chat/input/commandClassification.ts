@@ -6,7 +6,6 @@ import { parseCommandToken } from './editor/commandPaste';
  */
 export const EXECUTIVE_COMMANDS = new Set<string>([
   'compact', 'newsession', 'new',
-  'dream', 'distill',
   'share', 'unshare', 'export', 'undo', 'redo',
   'model', 'models', 'theme', 'themes',
   'agent', 'agents', 'editor', 'mcp',

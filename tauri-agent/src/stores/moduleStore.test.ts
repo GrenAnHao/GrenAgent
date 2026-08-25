@@ -16,8 +16,8 @@ describe('moduleStore', () => {
     expect(useModuleStore.getState().activeModule).toBe('settings');
   });
 
-  it('setActiveWorkspaceView switches the active workspace view', () => {
-    useModuleStore.getState().setActiveWorkspaceView('knowledge');
-    expect(useModuleStore.getState().activeWorkspaceView).toBe('knowledge');
+  it('keeps the only workspace view on chat', () => {
+    useModuleStore.getState().setActiveWorkspaceView('chat');
+    expect(useModuleStore.getState().activeWorkspaceView).toBe('chat');
   });
 });

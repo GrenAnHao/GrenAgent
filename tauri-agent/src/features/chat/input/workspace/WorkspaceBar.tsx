@@ -8,8 +8,6 @@ import { useSessionStore } from '../../../../store/session';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
 import { BranchPicker } from './BranchPicker';
-import { CodeGraphButton } from './CodeGraphPanel';
-import { IndexButton } from './IndexPanel';
 import { TaskTray } from './TaskTray';
 import { wsStyles as s } from './styles';
 
@@ -20,7 +18,7 @@ function workspaceName(ws: string): string {
 }
 
 /**
- * 工作区 / Git 功能栏：当前工作区 + 分支(改动数；气泡内含「查看改动」diff 与「Git 图谱」) + 代码图谱 + 索引 + 后台任务。
+ * 工作区 / Git 功能栏：当前工作区 + 分支(改动数；气泡内含「查看改动」diff 与「Git 图谱」) + 后台任务。
  * 渲染于输入框上方（MessageEditor 的 zone，与 GoalPill 同层）。
  * 首次挂载 / agent_end / tool_execution_end 时刷新 git 概况。
  */
@@ -56,8 +54,6 @@ export function WorkspaceBar() {
         <span className={s.chipName}>{workspaceName(workspace)}</span>
       </span>
       {isRepo ? <BranchPicker /> : null}
-      <IndexButton />
-      <CodeGraphButton />
       <TaskTray />
     </div>
   );

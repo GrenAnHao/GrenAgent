@@ -1,7 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  BookPlus,
-  Brain,
   FilePen,
   FilePlus,
   FileText,
@@ -96,9 +94,6 @@ export function toolMeta(toolName: string): { icon: LucideIcon } {
   if (name === 'glob' || name === 'grep' || name === 'ripgrep') return { icon: Search };
   if (name === 'ls' || name === 'list_dir') return { icon: Folder };
   // —— extension tools ——
-  if (name === 'kb_search') return { icon: Search };
-  if (name === 'kb_add') return { icon: BookPlus };
-  if (name === 'memory_save' || name === 'memory_recall') return { icon: Brain };
   if (name === 'generate_image') return { icon: Image };
   if (name === 'spawn_agent') return { icon: Network };
   if (name === 'fetch_url') return { icon: Globe };

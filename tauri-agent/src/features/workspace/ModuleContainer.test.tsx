@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModuleContainer } from './ModuleContainer';
 import { useModuleStore } from '../../stores/moduleStore';
 
-vi.mock('../memory/MemoryPanel', () => ({ MemoryPanel: () => <div>MEM_PANEL</div> }));
 vi.mock('../settings/SettingsPanel', () => ({ SettingsPanel: () => <div>SET_PANEL</div> }));
 vi.mock('../connections/ConnectionsPanel', () => ({ ConnectionsPanel: () => <div>CONN_PANEL</div> }));
 vi.mock('../extensions/ExtensionsPanel', () => ({ ExtensionsPanel: () => <div>EXT_PANEL</div> }));
@@ -24,7 +23,6 @@ describe('ModuleContainer', () => {
   });
 
   const cases: [string, string][] = [
-    ['memory', 'MEM_PANEL'],
     ['settings', 'SET_PANEL'],
     ['connections', 'CONN_PANEL'],
     ['extensions', 'EXT_PANEL'],

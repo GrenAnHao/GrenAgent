@@ -4,14 +4,12 @@ import {
   Cpu,
   FileDown,
   FileSearch,
-  FlaskConical,
   FoldVertical,
   History,
   Link2Off,
   LogOut,
   MessageSquarePlus,
   MessageSquareText,
-  Moon,
   Palette,
   PenLine,
   Plug,
@@ -80,8 +78,6 @@ export const COMMAND_ICON: Record<string, LucideIcon> = {
   // 内置工作流类命令
   review: FileSearch,
   goal: Target,
-  dream: Moon,
-  distill: FlaskConical,
   'deep-research': Telescope,
 };
 

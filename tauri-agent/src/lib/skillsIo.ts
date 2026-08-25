@@ -8,7 +8,6 @@ export interface SkillInfo {
   path: string;
   scope: string;
 }
-
 export function listSkills(): Promise<SkillInfo[]> {
   return invoke<SkillInfo[]>('list_skills');
 }

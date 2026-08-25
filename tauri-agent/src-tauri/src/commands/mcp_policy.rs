@@ -53,7 +53,7 @@ pub async fn probe_mcp_server(
     config_json: String,
 ) -> Result<String, String> {
     use tauri_plugin_shell::ShellExt;
-    let package_dir = crate::pi::sidecar::pi_package_dir();
+    let package_dir = crate::pi::sidecar::pi_package_dir(&app).map_err(|e| e.to_string())?;
     let output = app
         .shell()
         .sidecar("pi")

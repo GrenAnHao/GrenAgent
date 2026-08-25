@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { allExtensions, approval, diagramHint, fableBehavior, multiAgent, safety } from "./index.js";
+import {
+  allExtensions,
+  approval,
+  diagramHint,
+  fableBehavior,
+  multiAgent,
+  namedExtensions,
+  safety,
+  tencentdbMemory,
+} from "./index.js";
 
 // allExtensions 是 cli/src/main.ts 编译进 sidecar 二进制的整包扩展（既喂给 RPC 运行时，也喂给
 // 子代理的 `--mode json -p` 路径 main(argv, { extensionFactories: allExtensions })）。因为是编译进去
@@ -25,5 +34,15 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
   it("every entry is an extension factory function", () => {
     expect(allExtensions.length).toBeGreaterThan(0);
     for (const ext of allExtensions) expect(typeof ext).toBe("function");
+  });
+
+  it("uses TencentDB as the only long-term memory, knowledge, and conversation backend", () => {
+    expect(allExtensions).toContain(tencentdbMemory);
+    const names = namedExtensions.map((entry) => entry.name);
+    expect(names).not.toContain("long-term-memory");
+    expect(names).not.toContain("knowledge-rag");
+    expect(names).not.toContain("code-intel");
+    expect(names).not.toContain("session-search");
+    expect(names).not.toContain("self-evolve");
   });
 });

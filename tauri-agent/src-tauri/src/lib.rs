@@ -2,6 +2,7 @@ mod commands;
 mod pi;
 mod security;
 mod state;
+pub mod tencentdb;
 
 use std::sync::Arc;
 
@@ -10,6 +11,8 @@ use tauri::Manager;
 use commands::shell::ShellManager;
 use pi::{PiManager, ProcessGuard};
 use state::AppStateStore;
+use tencentdb::panel::PanelRuntime;
+use tencentdb::MemoryRuntime;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,20 +36,62 @@ pub fn run() {
 
             // OS 级孤儿兜底：主进程一旦消失（含崩溃），job 内的 pi sidecar 全被回收。
             // 创建失败不致命——降级为仅依赖 cli 侧 stdin-EOF 自杀。
-            match ProcessGuard::new() {
+            let process_guard = match ProcessGuard::new() {
                 Ok(guard) => {
-                    app_handle.manage(Arc::new(guard));
+                    let guard = Arc::new(guard);
+                    app_handle.manage(guard.clone());
+                    Some(guard)
                 }
-                Err(e) => eprintln!("[pi] ProcessGuard init failed, orphan reaping degraded: {e}"),
+                Err(e) => {
+                    eprintln!("[pi] ProcessGuard init failed, orphan reaping degraded: {e}");
+                    None
+                }
+            };
+
+            let memory_runtime = Arc::new(match process_guard.clone() {
+                Some(guard) => MemoryRuntime::with_process_guard(guard),
+                None => MemoryRuntime::new(),
+            });
+            app_handle.manage(memory_runtime.clone());
+
+            let panel_runtime = Arc::new(match process_guard {
+                Some(guard) => PanelRuntime::with_process_guard(guard),
+                None => PanelRuntime::new(),
+            });
+            app_handle.manage(panel_runtime.clone());
+
+            // TencentDB 是应用级运行时，不应等到用户打开第一个工作区才启动。
+            // 工作区路径仍保留幂等 ensure，覆盖首次启动与运行时配置刚保存的竞态。
+            let startup_app = app_handle.clone();
+            let startup_store = app_handle
+                .try_state::<AppStateStore>()
+                .map(|store| store.inner().clone());
+            let startup_runtime = memory_runtime.clone();
+            let startup_panel = panel_runtime.clone();
+            if let Some(store) = startup_store {
+                tauri::async_runtime::spawn(async move {
+                    match commands::tencentdb::ensure_panel_runtime_started(
+                        &startup_app,
+                        &store,
+                        &startup_runtime,
+                        &startup_panel,
+                    )
+                    .await
+                    {
+                        Ok((_connection, endpoint)) => eprintln!(
+                            "[tencentdb-memory] application runtime ready; panel={endpoint}"
+                        ),
+                        Err(error) => eprintln!(
+                            "[tencentdb-memory] application runtime failed to start: {error}"
+                        ),
+                    }
+                });
             }
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if let Some(mgr) = window.app_handle().try_state::<Arc<PiManager>>() {
-                    let mgr = mgr.inner().clone();
-                    tauri::async_runtime::block_on(async move { mgr.close_all().await });
-                }
+                shutdown_children(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,12 +162,6 @@ pub fn run() {
             commands::git::git_checkout,
             commands::git::git_create_branch,
             commands::git::get_git_log_graph,
-            commands::knowledge::kb_stats,
-            commands::knowledge::kb_sources,
-            commands::knowledge::kb_chunks,
-            commands::memory::mem_stats,
-            commands::memory::mem_list,
-            commands::memory::mem_history,
             commands::create::create_list,
             commands::create::create_image,
             commands::get_settings,
@@ -145,15 +184,66 @@ pub fn run() {
             commands::shell::shell_write,
             commands::shell::shell_resize,
             commands::shell::shell_stop,
-            commands::code_intel::code_intel_status,
-            commands::code_intel::code_intel_init,
-            commands::code_intel::code_intel_sync,
-            commands::code_intel::code_intel_reindex,
-            commands::code_intel::code_intel_is_initialized,
-            commands::code_intel::code_intel_file_graph,
-            commands::code_intel::code_intel_rich_graph,
+            commands::tencentdb::tencentdb_get_status,
+            commands::tencentdb::tencentdb_get_config,
+            commands::tencentdb::tencentdb_open_panel,
+            commands::tencentdb::tencentdb_save_connection,
+            commands::tencentdb::tencentdb_test_connection,
+            commands::tencentdb::tencentdb_reload_skills,
+            commands::tencentdb::tencentdb_core_request,
+            commands::tencentdb::tencentdb_list_knowledge_assets,
+            commands::tencentdb::tencentdb_get_wiki,
+            commands::tencentdb::tencentdb_get_code_graph,
+            commands::tencentdb::tencentdb_search_wiki,
+            commands::tencentdb::tencentdb_list_wiki_pages,
+            commands::tencentdb::tencentdb_read_wiki_pages,
+            commands::tencentdb::tencentdb_search_code_graph,
+            commands::tencentdb::tencentdb_explore_code_graph,
+            commands::tencentdb::tencentdb_get_code_graph_callers,
+            commands::tencentdb::tencentdb_get_code_graph_callees,
+            commands::tencentdb::tencentdb_analyze_code_graph_impact,
+            commands::tencentdb::tencentdb_get_code_graph_node,
+            commands::tencentdb::tencentdb_get_code_graph_status,
+            commands::tencentdb::tencentdb_list_code_graph_files,
+            commands::tencentdb::tencentdb_delete_wiki,
+            commands::tencentdb::tencentdb_delete_code_graph,
+            commands::tencentdb::tencentdb_provision_workspace_assets,
+            commands::tencentdb::tencentdb_sync_code_graph,
+            commands::tencentdb::tencentdb_sync_wiki,
+            commands::tencentdb::tencentdb_import_wiki_files,
             commands::files::write_temp_html,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                shutdown_children(app_handle);
+            }
+        });
+}
+
+fn shutdown_children(app_handle: &tauri::AppHandle) {
+    let manager = app_handle
+        .try_state::<Arc<PiManager>>()
+        .map(|state| state.inner().clone());
+    let memory_runtime = app_handle
+        .try_state::<Arc<MemoryRuntime>>()
+        .map(|state| state.inner().clone());
+    let panel_runtime = app_handle
+        .try_state::<Arc<PanelRuntime>>()
+        .map(|state| state.inner().clone());
+    if manager.is_none() && memory_runtime.is_none() && panel_runtime.is_none() {
+        return;
+    }
+    tauri::async_runtime::block_on(async move {
+        if let Some(panel_runtime) = panel_runtime {
+            let _ = panel_runtime.shutdown().await;
+        }
+        if let Some(memory_runtime) = memory_runtime {
+            let _ = memory_runtime.shutdown().await;
+        }
+        if let Some(manager) = manager {
+            manager.close_all().await;
+        }
+    });
 }

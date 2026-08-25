@@ -21,16 +21,22 @@ describe('migratePhase2', () => {
     expect(JSON.parse(r.authJson).deepseek.key).toBe('k');
   });
 
-  it('creates a legacy provider for a custom endpoint', () => {
+  it('ignores retired knowledge and memory capability settings', () => {
     const r = migratePhase2(
-      { KB_EMBED_API_KEY: 'k', KB_EMBED_BASE_URL: 'https://my/v1', KB_EMBED_MODEL: 'e5' },
+      {
+        KB_EMBED_API_KEY: 'kb-key',
+        KB_EMBED_BASE_URL: 'https://kb.example/v1',
+        KB_EMBED_MODEL: 'kb-model',
+        MEMORY_EMBED_API_KEY: 'memory-key',
+        MEMORY_EMBED_MODEL: 'memory-model',
+      },
       '{}',
       '{}',
     );
-    expect(r.nextSettings.KB_EMBED_PROVIDER).toBe('legacy-kb_embed');
-    const prov = JSON.parse(r.modelsJson).providers['legacy-kb_embed'];
-    expect(prov).toMatchObject({ baseUrl: 'https://my/v1', apiKey: 'k' });
-    expect(prov.models[0].id).toBe('e5');
+    expect(r.changed).toBe(false);
+    expect(r.nextSettings.KB_EMBED_PROVIDER).toBeUndefined();
+    expect(r.nextSettings.MEMORY_EMBED_PROVIDER).toBeUndefined();
+    expect(JSON.parse(r.modelsJson).providers).toEqual({});
   });
 
   it('is idempotent: no old key or already migrated → no change', () => {

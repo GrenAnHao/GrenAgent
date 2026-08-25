@@ -14,14 +14,14 @@ afterEach(() => {
 describe('ModuleRail', () => {
   it('renders only global module buttons', () => {
     render(<ModuleRail />);
-    for (const id of ['chat', 'memory', 'connections', 'extensions', 'usage', 'settings']) {
+    for (const id of ['chat', 'connections', 'extensions', 'usage', 'settings']) {
       expect(screen.getByTestId(`module-${id}`)).toBeTruthy();
     }
   });
 
-  it('does not render project-scoped modules (moved to workspace tabs)', () => {
+  it('does not render retired memory or project-scoped modules', () => {
     render(<ModuleRail />);
-    for (const id of ['knowledge']) {
+    for (const id of ['memory', 'knowledge']) {
       expect(screen.queryByTestId(`module-${id}`)).toBeNull();
     }
   });

@@ -1,4 +1,4 @@
-// In-process LLM access shared by the goal / long-term-memory / session-memory
+// In-process LLM access shared by the goal and session-memory
 // extensions. Uses the current agent model (ctx.model) via pi-ai's
 // completeSimple — no sub-process, no extra API key.
 //

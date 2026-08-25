@@ -8,7 +8,6 @@ interface AddSkillModalProps {
   onSubmit: (name: string, description: string, body: string) => Promise<void>;
   onClose: () => void;
 }
-
 const NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
 const styles = createStaticStyles(({ css }) => ({

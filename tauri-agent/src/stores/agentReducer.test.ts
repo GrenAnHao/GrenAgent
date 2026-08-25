@@ -366,27 +366,27 @@ describe('applyEvent', () => {
 
 describe('custom injection messages -> notice', () => {
   it('applyEvent turns a display custom message into a single notice (deduped)', () => {
-    const msg = { role: 'custom', customType: 'knowledge-rag', content: '# KB\n\nsnippet', display: true } as const;
+    const msg = { role: 'custom', customType: 'extension-context', content: '# Context\n\nsnippet', display: true } as const;
     let state = initialAgentState();
     state = applyEvent(state, { type: 'message_start', message: msg } as never);
     state = applyEvent(state, { type: 'message_end', message: msg } as never);
     const notices = state.messages.filter((m) => m.kind === 'notice');
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ kind: 'notice', customType: 'knowledge-rag', content: '# KB\n\nsnippet' });
+    expect(notices[0]).toMatchObject({ kind: 'notice', customType: 'extension-context', content: '# Context\n\nsnippet' });
   });
 
   it('ignores custom messages without display:true', () => {
-    const msg = { role: 'custom', customType: 'long-term-memory', content: 'x', display: false } as const;
+    const msg = { role: 'custom', customType: 'extension-context', content: 'x', display: false } as const;
     const state = applyEvent(initialAgentState(), { type: 'message_start', message: msg } as never);
     expect(state.messages.filter((m) => m.kind === 'notice')).toHaveLength(0);
   });
 
   it('messagesFromAgent restores notices from history', () => {
     const out = messagesFromAgent([
-      { role: 'custom', customType: 'long-term-memory', content: '# Mem', display: true } as never,
+      { role: 'custom', customType: 'extension-context', content: '# Context', display: true } as never,
       { role: 'user', content: 'hi' } as never,
     ]);
-    expect(out[0]).toMatchObject({ kind: 'notice', customType: 'long-term-memory', content: '# Mem' });
+    expect(out[0]).toMatchObject({ kind: 'notice', customType: 'extension-context', content: '# Context' });
     expect(out[1]).toMatchObject({ kind: 'user', text: 'hi' });
   });
 });

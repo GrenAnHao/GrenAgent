@@ -4,17 +4,6 @@ import { memo, useMemo, useState } from 'react';
 import { MutedLine } from './conv/MutedLine';
 import { LazyMarkdown } from './LazyMarkdown';
 
-const TITLES: Record<string, string> = {
-  'knowledge-rag': '已注入知识库上下文',
-  'long-term-memory': '已注入长期记忆',
-  'self-evolve-dream-start': 'Dream 已启动',
-  'self-evolve-distill-start': 'Distill 已启动',
-  'self-evolve-dream-done': 'Auto Dream 已完成',
-  'self-evolve-distill-done': 'Auto Distill 已完成',
-  'self-evolve-dream-error': 'Auto Dream 失败',
-  'self-evolve-distill-error': 'Auto Distill 失败',
-};
-
 const styles = createStaticStyles(({ css }) => ({
   // 注入内容收进限高滚动区；正文整体压紧、标题降级，不再是生硬的大 h1。
   body: css`
@@ -57,9 +46,9 @@ interface NoticePillProps {
   content: string;
 }
 
-function NoticePillInner({ customType, content }: NoticePillProps) {
+function NoticePillInner({ content }: NoticePillProps) {
   const [expanded, setExpanded] = useState(false);
-  const title = TITLES[customType] ?? '已注入上下文';
+  const title = '已注入上下文';
 
   // 剥离扩展注入的首个标题行（与折叠头标题重复），并数出条目数放到折叠头。
   const { body, count } = useMemo(() => {

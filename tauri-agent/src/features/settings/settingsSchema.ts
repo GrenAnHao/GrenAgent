@@ -1,4 +1,4 @@
-import { AudioLines, BookOpen, Bot, Brain, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bot, CloudCog, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability';
@@ -78,6 +78,13 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     ],
   },
   {
+    id: 'tencentdb',
+    title: 'TencentDB 记忆',
+    group: '核心',
+    icon: CloudCog,
+    fields: [],
+  },
+  {
     // 供应商管理：由 SettingsPanel 特判渲染 ProvidersSettings（读写 ~/.pi/agent/models.json + auth.json）。
     id: 'providers',
     title: '供应商',
@@ -92,83 +99,6 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     group: '核心',
     icon: Palette,
     fields: [],
-  },
-  {
-    id: 'knowledge',
-    title: '知识库',
-    group: '能力',
-    icon: BookOpen,
-    fields: [
-      { key: 'KB_AUTO_INJECT', label: '自动注入', type: 'boolean', description: '检索到的知识自动注入上下文' },
-      { key: 'KB_AUTO_TOPK', label: '自动注入条数', type: 'number', placeholder: '3', description: '每次注入的知识块上限' },
-      {
-        key: 'KB_EMBED_PROVIDER',
-        modelKey: 'KB_EMBED_MODEL',
-        capability: 'embedding',
-        type: 'capability',
-        label: 'Embedding 模型',
-        description: '供应商 + 模型；密钥取自供应商库',
-      },
-    ],
-  },
-  {
-    id: 'memory',
-    title: '记忆',
-    group: '能力',
-    icon: Brain,
-    sections: [
-      {
-        title: '记忆召回',
-        fields: [
-          {
-            key: 'MEMORY_AUTO_INJECT',
-            label: '自动注入记忆',
-            type: 'boolean',
-            description: '每次提问自动召回相关记忆并注入上下文',
-          },
-          { key: 'MEMORY_AUTO_TOPK', label: '自动召回条数', type: 'number', placeholder: '5', description: '每次注入的记忆条数上限' },
-          {
-            key: 'MEMORY_AUTO_CAPTURE',
-            label: '捕获“记住”指令',
-            type: 'boolean',
-            description: '用户说“记住：…”时自动保存',
-          },
-          {
-            key: 'MEMORY_EMBED_PROVIDER',
-            modelKey: 'MEMORY_EMBED_MODEL',
-            capability: 'embedding',
-            type: 'capability',
-            label: '记忆 Embedding 模型',
-            description: '供应商 + 模型；留空则降级关键词召回',
-          },
-        ],
-      },
-      {
-        title: '记忆维护',
-        fields: [
-          {
-            key: 'MEMORY_SMART',
-            label: '智能合并',
-            type: 'boolean',
-            description: '由 LLM 决策新增/更新/删除，自动消解重复与矛盾',
-          },
-          {
-            key: 'MEMORY_MODEL',
-            label: '记忆模型',
-            type: 'model',
-            placeholder: '如 openai/gpt-4o-mini',
-            description: '智能合并/提取所用模型；留空＝继承当前对话模型',
-          },
-          {
-            key: 'MEMORY_EXTRACT',
-            label: '对话提取记忆',
-            type: 'boolean',
-            description: '每轮对话后抽取要点入库（会多一次 LLM 调用，默认关）',
-          },
-          { key: 'MEMORY_SMART_NOTICE', label: '合并时提示', type: 'boolean', description: '记忆被更新或删除时在对话里提示' },
-        ],
-      },
-    ],
   },
   {
     id: 'image',

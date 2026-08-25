@@ -10,8 +10,6 @@ interface CapKeys {
 const CAPS: CapKeys[] = [
   { keyPrefix: 'IMAGE', provider: 'IMAGE_PROVIDER', model: 'IMAGE_MODEL' },
   { keyPrefix: 'TTS', provider: 'TTS_PROVIDER', model: 'TTS_MODEL' },
-  { keyPrefix: 'KB_EMBED', provider: 'KB_EMBED_PROVIDER', model: 'KB_EMBED_MODEL' },
-  { keyPrefix: 'MEMORY_EMBED', provider: 'MEMORY_EMBED_PROVIDER', model: 'MEMORY_EMBED_MODEL' },
 ];
 
 export interface Phase2MigrationResult {

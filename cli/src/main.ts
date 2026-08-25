@@ -2,8 +2,8 @@
 // GrenAgent — agent sidecar.
 //
 // Hybrid runtime so we get the best of both:
-//   - `--mode rpc` (Tauri backend): build the runtime ourselves so we can pass
-//     `skillsOverride` and filter out skills disabled via SKILLS_DISABLED.
+//   - `--mode rpc` (Tauri backend): build the runtime ourselves so only the
+//     TencentDB-managed Skill cache is visible to Pi.
 //   - everything else (sub-agents/memory-extract `--mode json -p`, etc.): reuse
 //     the official `main(argv, { extensionFactories })` which handles print mode.
 //
@@ -21,8 +21,20 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { allExtensions, namedExtensions, safety } from "../../extensions/index.js";
-import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
+import {
+  captureSensitiveProcessConfig,
+  getConfig,
+  watchConfig,
+} from "../../extensions/_shared/runtime-config.js";
 import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-profile.js";
+import {
+  managedSkillLoaderOptions,
+  reloadManagedSkills,
+  syncConfiguredSkills,
+  withManagedSkillArgs,
+} from "./tencentdb-skills.js";
+
+captureSensitiveProcessConfig();
 
 // Distinctive startup marker on stderr. The Tauri backend (pi/sidecar.rs) probes
 // for it after spawn: if absent, the spawned `pi` is likely a plain upstream
@@ -55,46 +67,19 @@ function isRpcMode(argv: string[]): boolean {
   return i >= 0 && argv[i + 1] === "rpc";
 }
 
-// pi exposes skills as the `skill:<name>` command but the skill resource itself
-// is keyed by the bare name. Normalize both the disabled list and each skill name
-// to the bare form so the GUI's toggle matches regardless of which form it stored.
-function bareSkillName(name: string): string {
-  return name.startsWith("skill:") ? name.slice(6) : name;
-}
-
-// Skills the user disabled in the GUI (comma-separated names via SKILLS_DISABLED).
-// Read at call time from the runtime config (falls back to env) so a session
-// reload picks up live toggles without restarting the sidecar.
-function disabledSkills(): Set<string> {
-  return new Set(
-    (getConfig("SKILLS_DISABLED") ?? "")
-      .split(",")
-      .map((s) => bareSkillName(s.trim()))
-      .filter(Boolean),
-  );
-}
-
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
+  const managedSkillRoot = await syncConfiguredSkills();
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
     resourceLoaderOptions: {
+      ...managedSkillLoaderOptions(managedSkillRoot),
       // 按 EXTENSIONS_PROFILE 过滤：真对话模式（chat）裁掉重代码智能扩展以加速冷启动；默认 project 全载。
       // safety 永不剔除（见 filterExtensionsByProfile）。
       extensionFactories: filterExtensionsByProfile(
         namedExtensions,
         (getConfig("EXTENSIONS_PROFILE") as ExtensionProfile) ?? "project",
       ).map((x) => x.factory),
-      // Provided unconditionally so every resourceLoader.reload() re-reads the live
-      // disabled list — GUI skill toggles take effect on reload, no sidecar restart.
-      skillsOverride: (base) => {
-        const disabled = disabledSkills();
-        if (disabled.size === 0) return base;
-        return {
-          skills: base.skills.filter((s) => !disabled.has(bareSkillName(s.name))),
-          diagnostics: base.diagnostics,
-        };
-      },
     },
   });
 
@@ -157,17 +142,17 @@ async function run(): Promise<void> {
 
     // Resource hot-reload: the GUI bumps PI_RELOAD_REV in runtime-settings.json on
     // changes that need extensions/skills re-evaluated (skill toggle/create/delete/
-    // import, explore_context toggle). On change, reload the session's resources +
+    // import). On change, reload the session's resources +
     // system prompt in place via AgentSession.reload() — no sidecar restart,
     // conversation preserved. Deferred to idle so an in-flight turn isn't interrupted.
-    // (MCP servers and the code-intel engine hot-reload via the mcp manager's own
-    // watch, so they don't need a session reload.)
+    // MCP servers hot-reload via the MCP manager's own watch, so they don't
+    // need a session reload.
     let lastReloadRev = getConfig("PI_RELOAD_REV") ?? "";
     let reloadTimer: ReturnType<typeof setTimeout> | undefined;
     const reloadResources = (): void => {
       const session = runtime.session;
       const doReload = (): Promise<void> =>
-        runtime.session.reload().catch((e) => {
+        reloadManagedSkills(syncConfiguredSkills, () => runtime.session.reload()).catch((e) => {
           console.error("[reload] session reload failed:", e);
         });
       if (!session.isStreaming) {
@@ -196,7 +181,8 @@ async function run(): Promise<void> {
   }
 
   // Everything else (sub-agent print/json, interactive, --help, ...) → official CLI.
-  await main(argv, { extensionFactories: allExtensions });
+  const managedSkillRoot = await syncConfiguredSkills();
+  await main(withManagedSkillArgs(argv, managedSkillRoot), { extensionFactories: allExtensions });
 }
 
 run().catch((error) => {

@@ -1,7 +1,7 @@
 {
   "name": "grenagent-agent-sidecar",
   "version": "0.1.0",
-  "description": "GrenAgent's pi-based agent sidecar (RPC mode) with 8 built-in extensions, spawned by the Tauri backend.",
+  "description": "GrenAgent's pi-based agent sidecar (RPC mode) with bundled extensions and TencentDB memory.",
   "type": "module",
   "bin": {
     "grenagent-sidecar": "dist/main.js"

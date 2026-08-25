@@ -4,8 +4,6 @@
 export const CHAT_EXCLUDED = new Set<string>([
   "lsp",
   "dap",
-  "code-intel",
-  "code-search",
   "ast-tools",
   "hashline",
   "code-exec",

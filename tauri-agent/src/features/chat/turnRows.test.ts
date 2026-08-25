@@ -45,11 +45,11 @@ describe('buildTurnRows', () => {
     expect(rows.every((r) => r.kind === 'segment')).toBe(true);
   });
 
-  it('never groups search/action tools (grep/glob/code_search stand alone)', () => {
+  it('never groups search/action tools (grep/glob/github stand alone)', () => {
     const rows = buildTurnRows([
       tool('g1', 'grep'),
       tool('g2', 'glob'),
-      tool('c1', 'code_search'),
+      tool('c1', 'github'),
       tool('b1', 'bash'),
       tool('e1', 'edit'),
     ]);

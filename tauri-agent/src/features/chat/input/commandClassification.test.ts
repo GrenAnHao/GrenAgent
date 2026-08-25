@@ -4,7 +4,6 @@ import { isExecutiveCommand, isExecutiveCommandMessage } from './commandClassifi
 
 describe('isExecutiveCommand', () => {
   it('命中已知动作命令（忽略大小写）', () => {
-    expect(isExecutiveCommand('dream')).toBe(true);
     expect(isExecutiveCommand('newSession')).toBe(true);
     expect(isExecutiveCommand('COMPACT')).toBe(true);
   });
@@ -14,13 +13,15 @@ describe('isExecutiveCommand', () => {
     expect(isExecutiveCommand('skill:new')).toBe(false);
     expect(isExecutiveCommand('deep-research')).toBe(false);
     expect(isExecutiveCommand('review')).toBe(false);
+    expect(isExecutiveCommand('dream')).toBe(false);
+    expect(isExecutiveCommand('distill')).toBe(false);
   });
 });
 
 describe('isExecutiveCommandMessage', () => {
   it('仅当整条消息==单个执行性命令时为真', () => {
-    expect(isExecutiveCommandMessage('/dream')).toBe(true);
-    expect(isExecutiveCommandMessage('/dream foo')).toBe(true);
+    expect(isExecutiveCommandMessage('/dream')).toBe(false);
+    expect(isExecutiveCommandMessage('/distill')).toBe(false);
     expect(isExecutiveCommandMessage('/skill:tdd')).toBe(false);
     expect(isExecutiveCommandMessage('hello /dream')).toBe(false);
     expect(isExecutiveCommandMessage('please run dream')).toBe(false);

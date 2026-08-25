@@ -16,7 +16,6 @@ fn global_skill_dirs() -> Vec<PathBuf> {
         None => Vec::new(),
     }
 }
-
 /// 新增技能的目标目录：用户全局 `~/.agents/skills`（与现有技能同处）。
 fn add_target_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "无法解析用户主目录".to_string())?;
