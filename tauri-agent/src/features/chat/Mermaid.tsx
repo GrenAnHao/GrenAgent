@@ -439,6 +439,7 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
             copyable={false}
             defaultExpand
             actionsRender={actionsRender}
+            shadow
             // lobe-theme keeps the SVG background transparent so LobeHub's
             // enlarged preview does not carry the diagram canvas with it.
             theme="lobe-theme"
