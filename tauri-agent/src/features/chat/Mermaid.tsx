@@ -28,6 +28,18 @@ const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
     margin: 8px 0;
   `,
+  diagramFrame: css`
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 8px;
+    background: ${cssVar.colorBgContainer};
+    box-shadow:
+      0 1px 0 -1px ${cssVar.colorBorder},
+      0 1px 2px -0.5px ${cssVar.colorBorder},
+      0 2px 2px -1px ${cssVar.colorBorderSecondary},
+      0 3px 6px -4px ${cssVar.colorBorderSecondary};
+  `,
   loading: css`
     display: flex;
     align-items: center;
@@ -432,24 +444,25 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
   );
   return (
     <div className={styles.root}>
-      <div className={styles.actionHost}>
-        <MermaidRenderBoundary fallback={fallback}>
-          <LobeMermaid
-            fullFeatured
-            copyable={false}
-            defaultExpand
-            actionsRender={actionsRender}
-            shadow
-            // lobe-theme keeps the SVG background transparent so LobeHub's
-            // enlarged preview does not carry the diagram canvas with it.
-            theme="lobe-theme"
-            styles={{ content: { background: cssVar.colorBgContainer } }}
-            variant="filled"
-          >
-            {prepared}
-          </LobeMermaid>
-        </MermaidRenderBoundary>
-        {fixed ? <span className={styles.fixedBadge}>{persistedFix?.ai ? '已由 AI 修复' : '已自动修正语法'}</span> : null}
+      <div className={styles.diagramFrame}>
+        <div className={styles.actionHost}>
+          <MermaidRenderBoundary fallback={fallback}>
+            <LobeMermaid
+              fullFeatured
+              copyable={false}
+              defaultExpand
+              actionsRender={actionsRender}
+              // lobe-theme keeps the SVG background transparent so LobeHub's
+              // enlarged preview does not carry the diagram canvas with it.
+              theme="lobe-theme"
+              styles={{ content: { background: cssVar.colorBgContainer } }}
+              variant="filled"
+            >
+              {prepared}
+            </LobeMermaid>
+          </MermaidRenderBoundary>
+          {fixed ? <span className={styles.fixedBadge}>{persistedFix?.ai ? '已由 AI 修复' : '已自动修正语法'}</span> : null}
+        </div>
       </div>
     </div>
   );

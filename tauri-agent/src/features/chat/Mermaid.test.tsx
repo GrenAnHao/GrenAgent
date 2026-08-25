@@ -16,17 +16,15 @@ vi.mock('@lobehub/ui', async () => {
   const actual = await vi.importActual<typeof import('@lobehub/ui')>('@lobehub/ui');
   return {
     ...actual,
-    Mermaid: ({ children, copyable, shadow, theme, styles }: {
+    Mermaid: ({ children, copyable, theme, styles }: {
       children: string;
       copyable?: boolean;
-      shadow?: boolean;
       theme?: string;
       styles?: { content?: { background?: string } };
     }) => (
       <div
         data-testid="lobehub-mermaid"
         data-copyable={String(copyable)}
-        data-shadow={String(shadow)}
         data-theme={theme}
         data-content-background={styles?.content?.background}
       >
@@ -53,7 +51,6 @@ describe('Mermaid adapter', () => {
     await waitFor(() => expect(screen.getByTestId('lobehub-mermaid')).toBeInTheDocument());
     expect(screen.getByTestId('lobehub-mermaid')).toHaveTextContent('"x{1}"');
     expect(screen.getByTestId('lobehub-mermaid')).toHaveAttribute('data-copyable', 'false');
-    expect(screen.getByTestId('lobehub-mermaid')).toHaveAttribute('data-shadow', 'true');
     expect(screen.getByTestId('lobehub-mermaid')).toHaveAttribute('data-theme', 'lobe-theme');
     expect(screen.getByTestId('lobehub-mermaid')).toHaveAttribute('data-content-background', 'var(--ant-color-bg-container)');
   });
