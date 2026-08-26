@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeProjectContextPastedText } from './projectContextCitation';
 
 vi.mock('../../../../lib/pi', () => ({ onPiEvent: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock('../../../../store/session', () => ({
@@ -26,11 +27,26 @@ describe('WorkspaceBar', () => {
     expect(screen.getByTestId('task-tray')).toBeTruthy();
   });
 
-  it('accepts a project context reference callback without coupling it to send', () => {
+  it('accepts a typed project context reference callback', () => {
     const onReferencePastedText = vi.fn();
+    const citation = makeProjectContextPastedText({
+      text: 'CodeGraph: WorkspaceBar callers',
+      source: 'project:///repo/codegraph',
+      label: 'CodeGraph',
+    });
 
     render(<WorkspaceBar onReferencePastedText={onReferencePastedText} />);
 
-    expect(onReferencePastedText).not.toHaveBeenCalled();
+    onReferencePastedText(citation);
+
+    expect(onReferencePastedText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'CodeGraph: WorkspaceBar callers',
+        source: 'project:///repo/codegraph',
+        lines: 1,
+        chars: 31,
+        referenceOnly: false,
+      }),
+    );
   });
 });

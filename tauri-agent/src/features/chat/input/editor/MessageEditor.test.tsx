@@ -36,7 +36,7 @@ vi.mock('../workspace/WorkspaceBar', () => ({
           lines: 1,
           chars: 24,
           source: 'project:///repo/codegraph',
-          referenceOnly: true,
+          referenceOnly: false,
         })
       }
     >
@@ -70,7 +70,7 @@ afterEach(() => {
 });
 
 describe('MessageEditor project context citations', () => {
-  it('adds a reference-only pasted text without sending the message', () => {
+  it('adds project context content without sending the message', () => {
     render(<MessageEditor leftActions={[]} rightActions={[]} />);
 
     fireEvent.click(screen.getByRole('button', { name: '引用当前内容' }));
@@ -79,7 +79,7 @@ describe('MessageEditor project context citations', () => {
       expect.objectContaining({
         text: expect.stringContaining('CodeGraph'),
         source: expect.stringContaining('project://'),
-        referenceOnly: true,
+        referenceOnly: false,
       }),
     );
     expect(send).not.toHaveBeenCalled();
