@@ -113,6 +113,39 @@ describe('项目上下文卡片', () => {
     expect(listKnowledgeAssets).not.toHaveBeenCalled();
   });
 
+  it('从卡片打开右侧项目抽屉，切换标签并在关闭或工作区切换后清空内容', async () => {
+    const view = render(<WorkspaceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开项目上下文' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveAttribute('aria-label', 'repo 项目上下文');
+    expect(within(dialog).getByRole('tablist')).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(dialog).getByRole('tab', { name: 'Wiki' })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: 'CodeGraph' })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: '记忆' })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: 'Git' })).toBeTruthy();
+    expect(within(dialog).getByRole('tabpanel')).toHaveTextContent('概览 内容');
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Wiki' }));
+    expect(within(dialog).getByRole('tab', { name: 'Wiki' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(dialog).getByRole('tabpanel')).toHaveTextContent('Wiki 内容');
+    expect(within(dialog).getByRole('tabpanel')).not.toHaveTextContent('概览 内容');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭项目上下文' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: '打开项目上下文' }));
+    const reopenedDialog = await screen.findByRole('dialog');
+    expect(within(reopenedDialog).getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(reopenedDialog).getByRole('tabpanel')).toHaveTextContent('概览 内容');
+    workspace.current = '/repo-b';
+    view.rerender(<WorkspaceBar />);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
   it('显示当前绑定知识的同步和不可用状态', async () => {
     listKnowledgeAssets.mockResolvedValue(currentAssets({
       wikiStatus: 'processing',

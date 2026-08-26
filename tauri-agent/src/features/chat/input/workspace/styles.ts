@@ -78,6 +78,87 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     flex: none;
     color: ${cssVar.colorTextTertiary};
   `,
+  projectContextDrawer: css`
+    .ant-drawer-header {
+      padding: 14px 16px;
+      border-bottom-color: ${cssVar.colorBorderSecondary};
+    }
+  `,
+  projectContextDrawerTitle: css`
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: ${cssVar.colorText};
+  `,
+  projectContextDrawerPath: css`
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 400;
+    color: ${cssVar.colorTextTertiary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  projectContextDrawerClose: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+
+    color: ${cssVar.colorTextSecondary};
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      color: ${cssVar.colorText};
+      background: ${cssVar.colorFillTertiary};
+    }
+  `,
+  projectContextTabList: css`
+    display: flex;
+    gap: 2px;
+
+    padding: 8px 12px 0;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    overflow-x: auto;
+  `,
+  projectContextTab: css`
+    flex: none;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+
+    font-size: 12.5px;
+    color: ${cssVar.colorTextSecondary};
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      color: ${cssVar.colorText};
+    }
+
+    &:focus-visible {
+      outline: 2px solid ${cssVar.colorPrimaryBorder};
+      outline-offset: -2px;
+    }
+  `,
+  projectContextTabActive: css`
+    border-bottom-color: ${cssVar.colorPrimary};
+    color: ${cssVar.colorPrimary};
+    font-weight: 600;
+  `,
+  projectContextTabPanel: css`
+    padding: 16px;
+    font-size: 13px;
+    color: ${cssVar.colorTextSecondary};
+  `,
   chip: css`
     display: inline-flex;
     gap: 6px;

@@ -15,6 +15,7 @@ import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
 import { BranchPicker } from './BranchPicker';
 import { ProjectContextCard } from './ProjectContextCard';
+import { ProjectContextDrawer } from './ProjectContextDrawer';
 import { TaskTray } from './TaskTray';
 import { wsStyles as s } from './styles';
 import type { PastedText } from '../editor/types';
@@ -75,7 +76,7 @@ function projectKnowledgeSummary(knowledge: TencentdbKnowledgeAssets): string {
  * 渲染于输入框上方（MessageEditor 的 zone，与 GoalPill 同层）。
  * 首次挂载 / agent_end / tool_execution_end 时刷新 git 概况。
  */
-export function WorkspaceBar(_props: WorkspaceBarProps) {
+export function WorkspaceBar({ onReferencePastedText }: WorkspaceBarProps) {
   const { workspace } = useAgentStoreContext();
   const worksDir = useSessionStore((state) => state.worksDir);
   const { status } = useTencentdbConnection();
@@ -150,6 +151,13 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
       </span>
       {isRepo ? <BranchPicker /> : null}
       <TaskTray />
+      <ProjectContextDrawer
+        name={workspaceName(workspace)}
+        open={projectContextOpen}
+        workspace={workspace}
+        onClose={() => setProjectContextOpen(false)}
+        onReferencePastedText={onReferencePastedText}
+      />
     </div>
   );
 }
