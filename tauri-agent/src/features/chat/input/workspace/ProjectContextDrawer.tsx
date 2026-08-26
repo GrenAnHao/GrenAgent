@@ -4,8 +4,10 @@ import { X } from 'lucide-react';
 import { ProjectContextTabs, type ProjectContextTab } from './ProjectContextTabs';
 import { wsStyles as s } from './styles';
 import type { PastedText } from '../editor/types';
+import type { TencentdbKnowledgeAssets } from '../../../../features/tencentdb/tencentdbApi';
 
 interface ProjectContextDrawerProps {
+  knowledge: TencentdbKnowledgeAssets | null;
   name: string;
   onClose: () => void;
   onReferencePastedText?: (item: PastedText) => void;
@@ -15,6 +17,7 @@ interface ProjectContextDrawerProps {
 
 /** 项目上下文抽屉壳；各标签的数据加载与引用操作由后续标签功能负责。 */
 export function ProjectContextDrawer({
+  knowledge,
   name,
   onClose,
   onReferencePastedText: _onReferencePastedText,
@@ -61,7 +64,7 @@ export function ProjectContextDrawer({
       )}
       onClose={handleClose}
     >
-      <ProjectContextTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      <ProjectContextTabs activeTab={activeTab} knowledge={knowledge} onTabChange={setActiveTab} />
     </Drawer>
   );
 }

@@ -84,6 +84,7 @@ export function WorkspaceBar({ onReferencePastedText }: WorkspaceBarProps) {
   const connected = status?.state === 'ready';
   const git = useGitInfo(workspace);
   const [knowledgeSummary, setKnowledgeSummary] = useState<string | null>(null);
+  const [knowledge, setKnowledge] = useState<TencentdbKnowledgeAssets | null>(null);
   const [knowledgeError, setKnowledgeError] = useState(false);
   const [projectContextOpen, setProjectContextOpen] = useState(false);
   const knowledgeGeneration = useRef(0);
@@ -109,6 +110,7 @@ export function WorkspaceBar({ onReferencePastedText }: WorkspaceBarProps) {
   useEffect(() => {
     const generation = ++knowledgeGeneration.current;
     setProjectContextOpen(false);
+    setKnowledge(null);
     setKnowledgeSummary(null);
     setKnowledgeError(false);
     if (!workspace || isConversation || !connected) return;
@@ -118,7 +120,10 @@ export function WorkspaceBar({ onReferencePastedText }: WorkspaceBarProps) {
     );
     void tencentdbApi.listKnowledgeAssets(workspace)
       .then((knowledge) => {
-        if (isCurrent()) setKnowledgeSummary(projectKnowledgeSummary(knowledge));
+        if (isCurrent()) {
+          setKnowledge(knowledge);
+          setKnowledgeSummary(projectKnowledgeSummary(knowledge));
+        }
       })
       .catch(() => {
         if (isCurrent()) setKnowledgeError(true);
@@ -152,6 +157,7 @@ export function WorkspaceBar({ onReferencePastedText }: WorkspaceBarProps) {
       {isRepo ? <BranchPicker /> : null}
       <TaskTray />
       <ProjectContextDrawer
+        knowledge={knowledge}
         name={workspaceName(workspace)}
         open={projectContextOpen}
         workspace={workspace}

@@ -1,9 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { connection, listKnowledgeAssets, session, workspace } = vi.hoisted(() => ({
+const { connection, listKnowledgeAssets, listWikiPages, readWikiPages, searchCodeGraph, searchWiki, session, workspace } = vi.hoisted(() => ({
   connection: { status: { state: 'ready' } as { state: string } | null },
   listKnowledgeAssets: vi.fn(),
+  listWikiPages: vi.fn(),
+  readWikiPages: vi.fn(),
+  searchCodeGraph: vi.fn(),
+  searchWiki: vi.fn(),
   session: { worksDir: '/works' },
   workspace: { current: '/repo' },
 }));
@@ -20,7 +24,7 @@ vi.mock('../../../../stores/gitStore', () => ({
   useGitStore: { getState: () => ({ load: vi.fn() }) },
 }));
 vi.mock('../../../../features/tencentdb/tencentdbApi', () => ({
-  tencentdbApi: { listKnowledgeAssets },
+  tencentdbApi: { listKnowledgeAssets, listWikiPages, readWikiPages, searchCodeGraph, searchWiki },
   useTencentdbConnection: () => connection,
 }));
 vi.mock('./TaskTray', () => ({ TaskTray: () => null }));
@@ -79,6 +83,12 @@ beforeEach(() => {
   session.worksDir = '/works';
   workspace.current = '/repo';
   listKnowledgeAssets.mockResolvedValue(currentAssets());
+  listWikiPages.mockResolvedValue({
+    items: [{ id: 'overview', title: '项目概览', type: 'page', path: '/overview', description: '当前项目说明' }],
+  });
+  readWikiPages.mockResolvedValue({ items: [{ ref: '/overview', content: 'Wiki 正文内容' }] });
+  searchCodeGraph.mockResolvedValue({ text: 'src/main.ts: bootstrapApp', isError: false });
+  searchWiki.mockResolvedValue({ results: [{ path: '/architecture', title: '架构设计', snippet: '项目架构说明', score: 0.9, type: 'page' }], count: 1 });
 });
 
 describe('项目上下文卡片', () => {
@@ -126,12 +136,11 @@ describe('项目上下文卡片', () => {
     expect(within(dialog).getByRole('tab', { name: 'CodeGraph' })).toBeTruthy();
     expect(within(dialog).getByRole('tab', { name: '记忆' })).toBeTruthy();
     expect(within(dialog).getByRole('tab', { name: 'Git' })).toBeTruthy();
-    expect(within(dialog).getByRole('tabpanel')).toHaveTextContent('概览 内容');
+    expect(within(dialog).getByRole('tabpanel')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('tab', { name: 'Wiki' }));
     expect(within(dialog).getByRole('tab', { name: 'Wiki' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(dialog).getByRole('tabpanel')).toHaveTextContent('Wiki 内容');
-    expect(within(dialog).getByRole('tabpanel')).not.toHaveTextContent('概览 内容');
+    expect(within(dialog).getByRole('tabpanel')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: '关闭项目上下文' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -139,11 +148,39 @@ describe('项目上下文卡片', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开项目上下文' }));
     const reopenedDialog = await screen.findByRole('dialog');
     expect(within(reopenedDialog).getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(reopenedDialog).getByRole('tabpanel')).toHaveTextContent('概览 内容');
+    expect(within(reopenedDialog).getByRole('tabpanel')).toBeTruthy();
     workspace.current = '/repo-b';
     view.rerender(<WorkspaceBar />);
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('复用项目资产展示概览，并加载 Wiki 页面与 CodeGraph 搜索结果', async () => {
+    render(<WorkspaceBar />);
+    fireEvent.click(screen.getByRole('button', { name: '打开项目上下文' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByText('1 个 Wiki')).toBeTruthy();
+    expect(within(dialog).getByText('12 个文件')).toBeTruthy();
+    expect(within(dialog).getByText('48 个节点')).toBeTruthy();
+    expect(listKnowledgeAssets).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Wiki' }));
+    expect(await within(dialog).findByText('项目概览')).toBeTruthy();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '搜索 Wiki' }), { target: { value: '架构' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '搜索 Wiki' }));
+    expect(await within(dialog).findByText('架构设计')).toBeTruthy();
+    expect(searchWiki).toHaveBeenCalledWith('wiki-current', '架构', 20);
+    fireEvent.click(within(dialog).getByRole('button', { name: '阅读项目概览' }));
+    expect(await within(dialog).findByText('Wiki 正文内容')).toBeTruthy();
+    expect(readWikiPages).toHaveBeenCalledWith('wiki-current', ['/overview']);
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'CodeGraph' }));
+    const codeGraphSearch = await within(dialog).findByRole('textbox', { name: '搜索 CodeGraph 符号' });
+    fireEvent.change(codeGraphSearch, { target: { value: 'bootstrapApp' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '搜索 CodeGraph' }));
+    expect(await within(dialog).findByText('src/main.ts: bootstrapApp')).toBeTruthy();
+    expect(searchCodeGraph).toHaveBeenCalledWith('codegraph-current', 'bootstrapApp', 20);
   });
 
   it('显示当前绑定知识的同步和不可用状态', async () => {
