@@ -10,6 +10,75 @@ export const wsStyles = createStaticStyles(({ css }) => ({
 
     margin-bottom: 8px;
   `,
+  projectContextCard: css`
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+
+    max-width: min(360px, 100%);
+    min-height: 44px;
+    padding: 6px 9px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 8px;
+
+    color: ${cssVar.colorText};
+    text-align: left;
+
+    background: ${cssVar.colorBgElevated};
+
+    cursor: pointer;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease;
+
+    &:hover {
+      border-color: ${cssVar.colorPrimaryBorder};
+      background: ${cssVar.colorFillQuaternary};
+    }
+
+    &:focus-visible {
+      outline: 2px solid ${cssVar.colorPrimaryBorder};
+      outline-offset: 2px;
+    }
+  `,
+  projectContextIcon: css`
+    flex: none;
+    color: ${cssVar.colorPrimary};
+  `,
+  projectContextBody: css`
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 6px;
+    align-items: baseline;
+
+    min-width: 0;
+  `,
+  projectContextLabel: css`
+    font-size: 11px;
+    color: ${cssVar.colorTextTertiary};
+  `,
+  projectContextName: css`
+    overflow: hidden;
+    min-width: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  projectContextSummary: css`
+    grid-column: 1 / -1;
+
+    overflow: hidden;
+    margin-top: 1px;
+    font-size: 11px;
+    color: ${cssVar.colorTextSecondary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  projectContextChevron: css`
+    flex: none;
+    color: ${cssVar.colorTextTertiary};
+  `,
   chip: css`
     display: inline-flex;
     gap: 6px;
