@@ -139,7 +139,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     <div ref={zoneRef} className={styles.zone}>
       <SteerQueue />
       <GoalPill />
-      <WorkspaceBar />
+      <WorkspaceBar onReferencePastedText={addPastedText} />
       <PromptRequestCard />
       <div ref={surfaceRef} className={styles.surface}>
         {hasChips ? <InputChips /> : null}

@@ -25,4 +25,12 @@ describe('WorkspaceBar', () => {
     expect(screen.queryByTestId('code-graph-button')).toBeNull();
     expect(screen.getByTestId('task-tray')).toBeTruthy();
   });
+
+  it('accepts a project context reference callback without coupling it to send', () => {
+    const onReferencePastedText = vi.fn();
+
+    render(<WorkspaceBar onReferencePastedText={onReferencePastedText} />);
+
+    expect(onReferencePastedText).not.toHaveBeenCalled();
+  });
 });

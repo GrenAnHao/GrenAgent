@@ -10,6 +10,12 @@ import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
 import { BranchPicker } from './BranchPicker';
 import { TaskTray } from './TaskTray';
 import { wsStyles as s } from './styles';
+import type { PastedText } from '../editor/types';
+
+export interface WorkspaceBarProps {
+  /** 项目上下文抽屉将引用内容加入当前输入区，不触发发送。 */
+  onReferencePastedText?: (item: PastedText) => void;
+}
 
 /** 取路径末段作为工作区显示名。 */
 function workspaceName(ws: string): string {
@@ -22,7 +28,7 @@ function workspaceName(ws: string): string {
  * 渲染于输入框上方（MessageEditor 的 zone，与 GoalPill 同层）。
  * 首次挂载 / agent_end / tool_execution_end 时刷新 git 概况。
  */
-export function WorkspaceBar() {
+export function WorkspaceBar(_props: WorkspaceBarProps) {
   const { workspace } = useAgentStoreContext();
   const worksDir = useSessionStore((state) => state.worksDir);
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
