@@ -35,17 +35,39 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function currentAssets(name = '项目 Wiki', files = 12, nodes = 48) {
+function currentAssets({
+  name = '项目 Wiki',
+  files = 12,
+  nodes = 48,
+  wikiStatus = 'ready',
+  codeGraphStatus = 'ready',
+  codeGraphError,
+  workspaceError,
+}: {
+  name?: string;
+  files?: number;
+  nodes?: number;
+  wikiStatus?: 'draft' | 'pending' | 'processing' | 'ready' | 'failed';
+  codeGraphStatus?: 'pending' | 'processing' | 'ready' | 'failed';
+  codeGraphError?: string;
+  workspaceError?: string;
+} = {}) {
   return {
     codeGraphs: [
-      { code_graph_id: 'codegraph-current', repo_name: 'repo', status: 'ready', stats: { files, nodes } },
+      {
+        code_graph_id: 'codegraph-current',
+        repo_name: 'repo',
+        status: codeGraphStatus,
+        stats: { files, nodes },
+        sync_error: codeGraphError,
+      },
       { code_graph_id: 'codegraph-other', repo_name: 'other', status: 'ready', stats: { files: 99, nodes: 999 } },
     ],
     wikis: [
-      { wiki_id: 'wiki-current', name, status: 'ready' },
+      { wiki_id: 'wiki-current', name, status: wikiStatus },
       { wiki_id: 'wiki-other', name: '其他项目知识', status: 'ready' },
     ],
-    workspace: { codeGraphId: 'codegraph-current', wikiId: 'wiki-current' },
+    workspace: { codeGraphId: 'codegraph-current', wikiId: 'wiki-current', error: workspaceError },
   };
 }
 
@@ -65,7 +87,7 @@ describe('项目上下文卡片', () => {
 
     const card = screen.getByTestId('project-context-card');
     expect(within(card).getByText('repo')).toBeTruthy();
-    expect(await within(card).findByText('1 篇 Wiki · 12 文件 · 48 节点')).toBeTruthy();
+    expect(await within(card).findByText('1 篇 Wiki · 12 文件 · 48 节点 · Wiki：已就绪 · CodeGraph：已就绪 · 项目记忆不可用')).toBeTruthy();
     expect(listKnowledgeAssets).toHaveBeenCalledWith('/repo');
     expect(screen.queryByText('其他项目知识')).toBeNull();
   });
@@ -91,10 +113,30 @@ describe('项目上下文卡片', () => {
     expect(listKnowledgeAssets).not.toHaveBeenCalled();
   });
 
+  it('显示当前绑定知识的同步和不可用状态', async () => {
+    listKnowledgeAssets.mockResolvedValue(currentAssets({
+      wikiStatus: 'processing',
+      codeGraphStatus: 'failed',
+      codeGraphError: '代码图谱同步失败',
+    }));
+
+    render(<WorkspaceBar />);
+
+    expect(await screen.findByText('1 篇 Wiki · 12 文件 · 48 节点 · Wiki：同步中 · CodeGraph：不可用 · 项目知识不可用：代码图谱同步失败 · 项目记忆不可用')).toBeTruthy();
+  });
+
+  it('展示工作区知识错误', async () => {
+    listKnowledgeAssets.mockResolvedValue(currentAssets({ workspaceError: '工作区资产初始化失败' }));
+
+    render(<WorkspaceBar />);
+
+    expect(await screen.findByText('1 篇 Wiki · 12 文件 · 48 节点 · Wiki：已就绪 · CodeGraph：已就绪 · 项目知识不可用：工作区资产初始化失败 · 项目记忆不可用')).toBeTruthy();
+  });
+
   it('忽略工作区切换后返回的过期知识响应', async () => {
     const workspaceA = deferred<ReturnType<typeof currentAssets>>();
     listKnowledgeAssets.mockImplementation((scope?: string) => (
-      scope === '/repo-a' ? workspaceA.promise : Promise.resolve(currentAssets('项目 B Wiki', 7, 21))
+      scope === '/repo-a' ? workspaceA.promise : Promise.resolve(currentAssets({ name: '项目 B Wiki', files: 7, nodes: 21 }))
     ));
     workspace.current = '/repo-a';
     const view = render(<WorkspaceBar />);
@@ -102,12 +144,12 @@ describe('项目上下文卡片', () => {
 
     workspace.current = '/repo-b';
     view.rerender(<WorkspaceBar />);
-    expect(await screen.findByText('1 篇 Wiki · 7 文件 · 21 节点')).toBeTruthy();
+    expect(await screen.findByText('1 篇 Wiki · 7 文件 · 21 节点 · Wiki：已就绪 · CodeGraph：已就绪 · 项目记忆不可用')).toBeTruthy();
 
-    workspaceA.resolve(currentAssets('过期项目 Wiki'));
+    workspaceA.resolve(currentAssets({ name: '过期项目 Wiki' }));
     await workspaceA.promise;
 
     expect(screen.queryByText('过期项目 Wiki')).toBeNull();
-    expect(screen.getByText('1 篇 Wiki · 7 文件 · 21 节点')).toBeTruthy();
+    expect(screen.getByText('1 篇 Wiki · 7 文件 · 21 节点 · Wiki：已就绪 · CodeGraph：已就绪 · 项目记忆不可用')).toBeTruthy();
   });
 });

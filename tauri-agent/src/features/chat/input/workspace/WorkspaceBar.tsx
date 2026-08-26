@@ -9,6 +9,7 @@ import {
 } from '../../../../features/tencentdb/tencentdbApi';
 import { onPiEvent } from '../../../../lib/pi';
 import { isUnder } from '../../../../lib/pathUtils';
+import type { TencentdbKnowledgeStatus } from '../../../../lib/tencentdb';
 import { useSessionStore } from '../../../../store/session';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
@@ -29,6 +30,12 @@ function workspaceName(ws: string): string {
   return parts[parts.length - 1] || ws;
 }
 
+function knowledgeStatusLabel(status: TencentdbKnowledgeStatus): string {
+  if (status === 'ready') return '已就绪';
+  if (status === 'processing' || status === 'pending') return '同步中';
+  return '不可用';
+}
+
 function projectKnowledgeSummary(knowledge: TencentdbKnowledgeAssets): string {
   const workspaceAssets = knowledge.workspace;
   const wikis = workspaceAssets?.wikiId
@@ -37,14 +44,29 @@ function projectKnowledgeSummary(knowledge: TencentdbKnowledgeAssets): string {
   const codeGraphs = workspaceAssets?.codeGraphId
     ? knowledge.codeGraphs.filter((graph) => graph.code_graph_id === workspaceAssets.codeGraphId)
     : [];
-  if (wikis.length === 0 && codeGraphs.length === 0) return '暂无项目知识';
+  const summary: string[] = [];
+  if (wikis.length === 0 && codeGraphs.length === 0) {
+    summary.push('暂无项目知识');
+  }
 
   const files = codeGraphs.reduce((total, graph) => total + (graph.stats?.files ?? 0), 0);
   const nodes = codeGraphs.reduce((total, graph) => total + (graph.stats?.nodes ?? 0), 0);
-  const summary = [`${wikis.length} 篇 Wiki`];
-  if (files > 0) summary.push(`${files} 文件`);
-  if (nodes > 0) summary.push(`${nodes} 节点`);
-  if (files === 0 && nodes === 0 && codeGraphs.length > 0) summary.push(`${codeGraphs.length} 个代码图谱`);
+  if (wikis.length > 0 || codeGraphs.length > 0) {
+    summary.push(`${wikis.length} 篇 Wiki`);
+    if (files > 0) summary.push(`${files} 文件`);
+    if (nodes > 0) summary.push(`${nodes} 节点`);
+    if (files === 0 && nodes === 0 && codeGraphs.length > 0) summary.push(`${codeGraphs.length} 个代码图谱`);
+  }
+  if (wikis.length > 0) summary.push(`Wiki：${knowledgeStatusLabel(wikis[0].status)}`);
+  if (codeGraphs.length > 0) summary.push(`CodeGraph：${knowledgeStatusLabel(codeGraphs[0].status)}`);
+
+  const errors = [
+    workspaceAssets?.error,
+    ...wikis.map((wiki) => wiki.sync_error),
+    ...codeGraphs.map((graph) => graph.sync_error),
+  ].filter((error): error is string => Boolean(error));
+  if (errors.length > 0) summary.push(`项目知识不可用：${errors.join('；')}`);
+  summary.push('项目记忆不可用');
   return summary.join(' · ');
 }
 

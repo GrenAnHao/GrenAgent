@@ -68,12 +68,11 @@ export const wsStyles = createStaticStyles(({ css }) => ({
   projectContextSummary: css`
     grid-column: 1 / -1;
 
-    overflow: hidden;
     margin-top: 1px;
     font-size: 11px;
     color: ${cssVar.colorTextSecondary};
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
   `,
   projectContextChevron: css`
     flex: none;
