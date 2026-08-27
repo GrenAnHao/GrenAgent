@@ -132,13 +132,36 @@ export const cardStyles = createStaticStyles(({ css }) => ({
       background: ${cssVar.colorTextQuaternary};
     }
   `,
-  editRow: css`
+  editRows: css`
+    position: relative;
     display: grid;
-    grid-template-columns: 44px 20px minmax(max-content, 1fr);
+    grid-template-columns: 64px minmax(max-content, 1fr);
     min-width: max-content;
     font-family: ${cssVar.fontFamilyCode};
     font-size: 12px;
     line-height: 1.7;
+  `,
+  editBackgrounds: css`
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    pointer-events: none;
+
+    span {
+      flex: 0 0 1.7em;
+    }
+  `,
+  editGutter: css`
+    z-index: 1;
+  `,
+  editGutterRow: css`
+    display: grid;
+    grid-template-columns: 44px 20px;
+    height: 1.7em;
   `,
   editLineNumber: css`
     padding-inline-end: 8px;
@@ -152,14 +175,31 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     user-select: none;
   `,
   editCodeText: css`
+    z-index: 1;
     padding-inline-end: 12px;
     white-space: pre;
 
     pre {
+      overflow: visible !important;
       margin: 0 !important;
       padding: 0 !important;
       border: 0 !important;
       background: transparent !important;
+    }
+
+    code {
+      gap: 0 !important;
+    }
+
+    code,
+    .line {
+      line-height: 1.7 !important;
+    }
+
+    .line {
+      width: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
     }
   `,
   editAdded: css`

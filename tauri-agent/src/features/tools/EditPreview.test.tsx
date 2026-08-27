@@ -5,7 +5,7 @@ import { EditPreview } from './EditPreview';
 
 vi.mock('./LazyHighlighter', () => ({
   LazySyntaxHighlighter: ({ children, language }: { children: React.ReactNode; language: string }) => (
-    <div data-language={language}>{children}</div>
+    <div data-language={language} data-testid="syntax-highlighter">{children}</div>
   ),
 }));
 
@@ -24,10 +24,11 @@ describe('EditPreview', () => {
 
     expect(screen.getByText('GeminiProvider.ts')).toBeTruthy();
     expect(screen.queryByText(/D:\/OneDrive/)).toBeNull();
-    expect(screen.getByText('line 10')).toBeTruthy();
-    expect(screen.getByText('line 21')).toBeTruthy();
-    expect(screen.getByText('old value')).toBeTruthy();
-    expect(screen.getByText('new value')).toBeTruthy();
+    const highlightedCode = screen.getByTestId('syntax-highlighter').textContent;
+    expect(highlightedCode).toContain('line 10');
+    expect(highlightedCode).toContain('line 21');
+    expect(highlightedCode).toContain('old value');
+    expect(highlightedCode).toContain('new value');
     expect(screen.getByTestId('edit-preview-scroll')).toBeTruthy();
     expect(screen.getByTestId('edit-preview-language')).toHaveAttribute('data-language', 'typescript');
   });
@@ -54,8 +55,20 @@ describe('EditPreview', () => {
       />,
     );
 
-    expect(screen.getByText('throw new Error();')).toBeTruthy();
-    expect(screen.getByText('return request();')).toBeTruthy();
+    const highlightedCode = screen.getByTestId('syntax-highlighter').textContent;
+    expect(highlightedCode).toContain('throw new Error();');
+    expect(highlightedCode).toContain('return request();');
     expect(screen.getAllByText('130')).toHaveLength(2);
+  });
+
+  it('renders the preview with one syntax highlighter', () => {
+    wrap(
+      <EditPreview
+        path="src/GeminiProvider.ts"
+        diff={' 129  context\n-130  old value\n+130  new value\n 131  context'}
+      />,
+    );
+
+    expect(screen.getAllByTestId('syntax-highlighter')).toHaveLength(1);
   });
 });

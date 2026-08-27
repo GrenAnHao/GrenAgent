@@ -63,15 +63,31 @@ function contextualRows(rows: EditRow[], context = 5): EditRow[] {
 }
 
 function renderRows(rows: EditRow[], language: string): ReactNode {
-  return rows.map((row, index) => (
-    <div className={`${cardStyles.editRow} ${row.marker === '+' ? cardStyles.editAdded : row.marker === '-' ? cardStyles.editRemoved : ''}`} key={`${row.line}-${row.marker}-${index}`}>
-      <span className={cardStyles.editLineNumber}>{row.line}</span>
-      <span className={cardStyles.editMarker}>{row.marker === ' ' ? '·' : row.marker}</span>
+  return (
+    <div className={cardStyles.editRows}>
+      <div aria-hidden className={cardStyles.editBackgrounds}>
+        {rows.map((row, index) => (
+          <span
+            className={row.marker === '+' ? cardStyles.editAdded : row.marker === '-' ? cardStyles.editRemoved : undefined}
+            key={`${row.line}-${row.marker}-${index}`}
+          />
+        ))}
+      </div>
+      <div className={cardStyles.editGutter}>
+        {rows.map((row, index) => (
+          <div className={cardStyles.editGutterRow} key={`${row.line}-${row.marker}-${index}`}>
+            <span className={cardStyles.editLineNumber}>{row.line}</span>
+            <span className={cardStyles.editMarker}>{row.marker === ' ' ? '·' : row.marker}</span>
+          </div>
+        ))}
+      </div>
       <div className={cardStyles.editCodeText}>
-        <LazySyntaxHighlighter language={language} variant="borderless">{row.text || ' '}</LazySyntaxHighlighter>
+        <LazySyntaxHighlighter language={language} variant="borderless">
+          {rows.map((row) => row.text).join('\n')}
+        </LazySyntaxHighlighter>
       </div>
     </div>
-  ));
+  );
 }
 
 export function EditPreview({ path, diff, oldText, newText, resultText, isError }: EditPreviewProps) {

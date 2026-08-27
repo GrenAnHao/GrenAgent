@@ -70,7 +70,7 @@ describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
     fireEvent.click(screen.getByText('edit'));
     expect(screen.getAllByText('GeminiProvider.ts')).toHaveLength(2);
     expect(screen.queryByText(/D:\/workspace/)).toBeNull();
-    expect(screen.getByText('new')).toBeTruthy();
+    expect(screen.getByTestId('edit-preview-language').textContent).toContain('new');
   });
 
   it('shows a no-change edit error even when the result is not marked as an error', () => {
