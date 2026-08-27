@@ -64,6 +64,11 @@ MCP Manager 将独立文件与现有桌面设置 `MCP_SERVERS` 合并。该方�
 }
 ```
 
+为支持桌面面板启停独立文件中的 server，GrenAgent 允许同一文件带一个可选的
+`disabledMcpServers` 顶层集合。启停操作只在 `mcpServers` 与
+`disabledMcpServers` 之间移动条目；MCP Manager 仅连接 `mcpServers`。该扩展不改变
+标准 `mcpServers` 的内容，其他客户端读取此文件时会自然忽略未知的顶层字段。
+
 有效配置按以下优先级合并，后者覆盖前者：
 
 1. 内置 MCP server。
@@ -176,7 +181,7 @@ MCP Manager 扩展配置读取和监听逻辑：
 - 配置差异继续交给现有 `diffServers` 完成连接、重连和关闭。
 - 文件监听异常隔离，不影响现有 `MCP_SERVERS` 连接。
 
-桌面 MCP 面板合并显示三个用户配置来源：桌面设置、全局文件和项目文件。每个条目标注来源；编辑、启停和删除只修改对应来源，不把独立文件条目写回 `MCP_SERVERS`。
+桌面 MCP 面板合并显示三个用户配置来源：桌面设置、全局文件和项目文件。每个条目标注来源；编辑和删除只修改对应来源，启停独立文件条目时只在该文件的 `mcpServers` 与 `disabledMcpServers` 间移动，不把独立文件条目写回 `MCP_SERVERS`。
 
 ## 数据流与事务
 
