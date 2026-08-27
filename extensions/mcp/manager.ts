@@ -8,6 +8,7 @@ import { expandServerVars, injectDefaultServers, type McpServerConfig, parseMcpS
 import { diffServers } from "./diff.js";
 import type { ProbeResult } from "./probe.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
+import { readLayeredMcpServersSync, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
 export const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
 
@@ -84,7 +85,7 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
 
 function defaultReadServers(): McpServerConfig[] {
   const servers = injectDefaultServers(
-    parseMcpServers(getConfig("MCP_SERVERS") ?? ""),
+    readLayeredMcpServersSync(process.cwd(), getConfig("MCP_SERVERS") ?? ""),
     getAllConfig(),
     process.platform,
     readToolsCache(),
@@ -100,7 +101,11 @@ function defaultReadServers(): McpServerConfig[] {
 export function createManager(deps: ManagerDeps = {}): McpManager {
   const connect = deps.connect ?? realConnect;
   const readServers = deps.readServers ?? defaultReadServers;
-  const watch = deps.watch ?? watchConfig;
+  const watch = deps.watch ?? ((cb: () => void) => {
+    const offConfig = watchConfig(() => cb());
+    const offFiles = watchMcpConfigFiles(process.cwd(), cb);
+    return () => { offConfig(); offFiles(); };
+  });
   const writeCache = deps.writeCache ?? writeToolsCacheEntry;
 
   const clients = new Map<string, McpClient>();

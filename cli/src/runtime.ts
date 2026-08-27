@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { allExtensions, namedExtensions, safety } from "../../extensions/index.js";
 import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
+import { onResourceReloadRequested } from "../../extensions/_shared/resource-reload.js";
 import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-profile.js";
 import {
   managedSkillLoaderOptions,
@@ -144,6 +145,7 @@ export async function run(): Promise<void> {
         }
       });
     };
+    const unwatchResourceReload = onResourceReloadRequested(reloadResources);
     const unwatchReload = watchConfig((next) => {
       const rev = next.PI_RELOAD_REV ?? "";
       if (rev === lastReloadRev) return;
@@ -151,7 +153,7 @@ export async function run(): Promise<void> {
       if (reloadTimer) clearTimeout(reloadTimer);
       reloadTimer = setTimeout(reloadResources, 150);
     });
-    process.on("exit", () => unwatchReload());
+    process.on("exit", () => { unwatchReload(); unwatchResourceReload(); });
 
     await runRpcMode(runtime);
     return;

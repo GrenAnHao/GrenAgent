@@ -35,6 +35,7 @@ import tts from "./tts/index.js";
 import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
 import webSearch from "./web-search/index.js";
+import resourceManager from "./resource-manager/index.js";
 
 export {
   safety,
@@ -53,6 +54,7 @@ export {
   sessionMemory,
   webFetch,
   webSearch,
+  resourceManager,
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
@@ -88,6 +90,7 @@ export const allExtensions = [
   sessionMemory,
   webFetch,
   webSearch,
+  resourceManager,
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
@@ -125,6 +128,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "session-memory", factory: sessionMemory },
   { name: "web-fetch", factory: webFetch },
   { name: "web-search", factory: webSearch },
+  { name: "resource-manager", factory: resourceManager },
   { name: "mcp", factory: mcp },
   { name: "mcp-policy", factory: mcpPolicy },
   { name: "image-gen", factory: imageGen },

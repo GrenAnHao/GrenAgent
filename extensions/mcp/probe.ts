@@ -28,6 +28,7 @@ export async function probeServer(s: McpServerConfig, timeoutMs = PROBE_TIMEOUT_
       : new StdioClientTransport({
           command: s.command ?? "",
           args: s.args ?? [],
+          ...(s.cwd ? { cwd: s.cwd } : {}),
           env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
         });
   try {
