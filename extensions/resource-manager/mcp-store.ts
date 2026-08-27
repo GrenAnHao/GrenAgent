@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { readFileSync, watch } from "node:fs";
+import { mkdirSync, readFileSync, watch } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { McpServerConfig } from "../mcp/config.js";
 import { parseMcpServers } from "../mcp/config.js";
@@ -55,7 +55,7 @@ export function readLayeredMcpServersSync(cwd: string, desktopJson: string, home
 export function watchMcpConfigFiles(cwd: string, onChange: () => void, home = homedir()): () => void {
   const paths = mcpConfigPaths(cwd, home);
   const watchers = [dirname(paths.global), dirname(paths.project)].map((dir) => {
-    try { return watch(dir, () => onChange()); } catch { return undefined; }
+    try { mkdirSync(dir, { recursive: true }); return watch(dir, () => onChange()); } catch { return undefined; }
   }).filter(Boolean) as import("node:fs").FSWatcher[];
   return () => watchers.forEach((w) => w.close());
 }
