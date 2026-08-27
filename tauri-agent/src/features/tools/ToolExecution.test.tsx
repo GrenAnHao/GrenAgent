@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { ToolExecution } from './ToolExecution';
 
@@ -54,5 +54,47 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
     expect(screen.getByText('echo hi')).toBeTruthy();
     expect(document.body.textContent).toContain('hi there');
     expect(document.body.textContent).toContain('bash');
+  });
+});
+
+describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
+  it('supports the edits array schema and shows only the filename', () => {
+    wrap(
+      <ToolExecution
+        toolName="edit"
+        args={{ path: 'D:/workspace/GeminiProvider.ts', edits: [{ oldText: 'old', newText: 'new' }] }}
+        result={{ details: { diff: ' 1 old\n-2 old\n+2 new\n 3 next' }, content: [] }}
+        status="done"
+      />,
+    );
+    fireEvent.click(screen.getByText('edit'));
+    expect(screen.getAllByText('GeminiProvider.ts')).toHaveLength(2);
+    expect(screen.queryByText(/D:\/workspace/)).toBeNull();
+    expect(screen.getByText('new')).toBeTruthy();
+  });
+
+  it('shows a no-change edit error even when the result is not marked as an error', () => {
+    wrap(
+      <ToolExecution
+        toolName="edit"
+        args={{
+          path: 'D:/workspace/GeminiProvider.ts',
+          edits: [{ oldText: 'same', newText: 'same' }],
+        }}
+        result={{
+          content: [
+            {
+              type: 'text',
+              text: 'No changes made to D:/workspace/GeminiProvider.ts. The replacement produced identical content.',
+            },
+          ],
+        }}
+        status="done"
+      />,
+    );
+    fireEvent.click(screen.getByText('edit'));
+    expect(document.body.textContent).toContain('No changes made');
+    expect(document.body.textContent).toContain('replacement produced identical content');
+    expect(screen.queryByText('+ same')).toBeNull();
   });
 });

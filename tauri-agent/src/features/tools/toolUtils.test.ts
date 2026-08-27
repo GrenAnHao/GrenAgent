@@ -4,6 +4,7 @@ import {
   extractText,
   getDetails,
   getDiff,
+  getEditTexts,
   langByPath,
   skillNameFromRead,
   toolMeta,
@@ -11,6 +12,9 @@ import {
 import { Terminal, Wrench } from 'lucide-react';
 
 describe('toolUtils', () => {
+  it('getEditTexts reads the current edits array schema', () => {
+    expect(getEditTexts({ edits: [{ oldText: 'old', newText: 'new' }] })).toEqual({ oldText: 'old', newText: 'new' });
+  });
   it('extractText from content blocks', () => {
     expect(
       extractText({ content: [{ type: 'text', text: 'line1' }, { type: 'text', text: 'line2' }] }),

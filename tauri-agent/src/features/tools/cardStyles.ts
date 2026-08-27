@@ -75,6 +75,99 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
     word-break: break-all;
   `,
+  editCard: css`
+    overflow: hidden;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadius};
+    background: ${cssVar.colorFillQuaternary};
+  `,
+  editToolbar: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+    font-size: 12px;
+    color: ${cssVar.colorTextTertiary};
+
+    button {
+      padding: 2px 6px;
+      border: 1px solid ${cssVar.colorBorderSecondary};
+      border-radius: 4px;
+      background: transparent;
+      color: ${cssVar.colorTextSecondary};
+      cursor: pointer;
+    }
+  `,
+  editScroll: css`
+    overflow: auto;
+    max-height: min(50vh, 360px);
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+
+    &:hover,
+    &:focus-within {
+      scrollbar-color: ${cssVar.colorTextQuaternary} transparent;
+    }
+
+    &::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background: transparent;
+      background-clip: padding-box;
+    }
+
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus-within::-webkit-scrollbar-thumb {
+      background: ${cssVar.colorTextQuaternary};
+    }
+  `,
+  editRow: css`
+    display: grid;
+    grid-template-columns: 44px 20px minmax(max-content, 1fr);
+    min-width: max-content;
+    font-family: ${cssVar.fontFamilyCode};
+    font-size: 12px;
+    line-height: 1.7;
+  `,
+  editLineNumber: css`
+    padding-inline-end: 8px;
+    color: ${cssVar.colorTextQuaternary};
+    text-align: end;
+    user-select: none;
+  `,
+  editMarker: css`
+    color: ${cssVar.colorTextQuaternary};
+    text-align: center;
+    user-select: none;
+  `,
+  editCodeText: css`
+    padding-inline-end: 12px;
+    white-space: pre;
+
+    pre {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+    }
+  `,
+  editAdded: css`
+    background: color-mix(in srgb, ${cssVar.colorSuccess} 12%, transparent);
+  `,
+  editRemoved: css`
+    background: color-mix(in srgb, ${cssVar.colorError} 12%, transparent);
+  `,
   terminalOutput: css`
     overflow: auto;
     max-height: 240px;

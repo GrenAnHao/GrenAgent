@@ -152,6 +152,10 @@ export function langByPath(path: unknown): string {
   return map[ext] ?? 'plaintext';
 }
 
+export function fileNameFromPath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path;
+}
+
 export function stringifyJson(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -166,6 +170,28 @@ export function getArgString(args: unknown, key: string): string {
   if (!args || typeof args !== 'object') return '';
   const value = (args as Record<string, unknown>)[key];
   return typeof value === 'string' ? value : value != null ? formatArgValue(value) : '';
+}
+
+export function getEditTexts(args: unknown): { oldText: string; newText: string } {
+  if (!args || typeof args !== 'object') return { oldText: '', newText: '' };
+  const input = args as Record<string, unknown>;
+  const pairs = (Array.isArray(input.edits) ? input.edits : []).flatMap((edit) => {
+    if (!edit || typeof edit !== 'object') return [];
+    const pair = edit as Record<string, unknown>;
+    return typeof pair.oldText === 'string' && typeof pair.newText === 'string'
+      ? [{ oldText: pair.oldText, newText: pair.newText }]
+      : [];
+  });
+  if (pairs.length) {
+    return {
+      oldText: pairs.map((pair) => pair.oldText).join('\n...\n'),
+      newText: pairs.map((pair) => pair.newText).join('\n...\n'),
+    };
+  }
+  return {
+    oldText: typeof input.oldText === 'string' ? input.oldText : typeof input.old_string === 'string' ? input.old_string : '',
+    newText: typeof input.newText === 'string' ? input.newText : typeof input.new_string === 'string' ? input.new_string : '',
+  };
 }
 
 export function getDetails(result: unknown): Record<string, unknown> | undefined {

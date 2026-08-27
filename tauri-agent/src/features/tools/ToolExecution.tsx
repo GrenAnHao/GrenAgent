@@ -8,15 +8,18 @@ import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { InlineQuestionCard } from '../chat/InlineQuestionCard';
 import { AnsweredQuestionsCard } from './AnsweredQuestionsCard';
 import { LazyHighlighter } from './LazyHighlighter';
+import { EditPreview } from './EditPreview';
 import { GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
 import { renderExtensionCard } from './extensionCards';
 import {
   argSummary,
   extractText,
+  fileNameFromPath,
   getArgString,
   getDetails,
   getDiff,
+  getEditTexts,
   langByPath,
   skillNameFromRead,
   stringifyJson,
@@ -119,6 +122,14 @@ function toolTitle(
   }
 
   const { icon } = toolMeta(toolName);
+  if (lname === 'edit' || lname === 'search_replace' || lname === 'str_replace') {
+    const path = getArgString(args, 'path');
+    return {
+      icon,
+      name: toolName,
+      args: path ? <span data-tooltip={path} aria-label={path}>{fileNameFromPath(path)}</span> : undefined,
+    };
+  }
   return { icon, name: toolName, args: argSummary(args) || undefined };
 }
 
@@ -193,33 +204,16 @@ function ToolDetail({
 
   if (name === 'edit' || name === 'search_replace' || name === 'str_replace') {
     const path = getArgString(args, 'path');
-    if (diff) {
-      return (
-        <Flexbox gap={8}>
-          {path && <div className={styles.pathLabel}>{path}</div>}
-          <LazyHighlighter language="diff" copyable style={{ maxHeight: 320 }}>
-            {diff}
-          </LazyHighlighter>
-        </Flexbox>
-      );
-    }
-    const oldText = getArgString(args, 'oldText') || getArgString(args, 'old_string');
-    const newText = getArgString(args, 'newText') || getArgString(args, 'new_string');
+    const { oldText, newText } = getEditTexts(args);
     return (
-      <Flexbox gap={8}>
-        {path && <div className={styles.pathLabel}>{path}</div>}
-        {oldText && (
-          <LazyHighlighter language="diff" copyable style={{ maxHeight: 160 }}>
-            {`- ${oldText}`}
-          </LazyHighlighter>
-        )}
-        {newText && (
-          <LazyHighlighter language="diff" copyable style={{ maxHeight: 160 }}>
-            {`+ ${newText}`}
-          </LazyHighlighter>
-        )}
-        {!oldText && !newText && <TerminalOutput text={text || stringifyJson(result)} isError={isError} />}
-      </Flexbox>
+      <EditPreview
+        path={path}
+        diff={diff}
+        oldText={oldText}
+        newText={newText}
+        resultText={text || stringifyJson(result)}
+        isError={isError}
+      />
     );
   }
 
