@@ -2,6 +2,7 @@ import { Button, Input } from 'antd';
 import { cx } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
 import { tencentdbApi, type TencentdbKnowledgeAssets, type TencentdbWikiPage, type TencentdbWikiPageContent, type TencentdbWikiSearchResponse } from '../../../../features/tencentdb/tencentdbApi';
+import { pi, type GitLogEntry } from '../../../../lib/pi';
 import { wsStyles as s } from './styles';
 
 export const projectContextTabs = [
@@ -43,7 +44,8 @@ function ProjectOverviewTab({ knowledge }: { knowledge: TencentdbKnowledgeAssets
   );
 }
 
-function ProjectWikiTab({ active, assetId }: { active: boolean; assetId?: string }) {
+function ProjectWikiTab({ active, wiki }: { active: boolean; wiki?: TencentdbKnowledgeAssets['wikis'][number] }) {
+  const assetId = wiki?.wiki_id;
   const [pages, setPages] = useState<TencentdbWikiPage[]>([]);
   const [content, setContent] = useState<TencentdbWikiPageContent | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,9 @@ function ProjectWikiTab({ active, assetId }: { active: boolean; assetId?: string
   if (!assetId) return <div className={s.projectContextEmpty}>当前项目未关联 Wiki。</div>;
   return (
     <div className={s.projectContextStack}>
+      <div className={s.projectContextOverview}>
+        <div><strong>{wiki?.name}</strong><span>{wiki?.summary || '暂无 Wiki 摘要'} · {wiki?.status === 'ready' ? '已就绪' : wiki?.status}</span></div>
+      </div>
       <div className={s.projectContextSearch}>
         <Input aria-label="搜索 Wiki" value={query} onChange={(event) => setQuery(event.target.value)} onPressEnter={() => void searchPages()} />
         <Button aria-label="搜索 Wiki" disabled={!query.trim()} onClick={() => void searchPages()}>搜索</Button>
@@ -111,7 +116,7 @@ function ProjectWikiTab({ active, assetId }: { active: boolean; assetId?: string
   );
 }
 
-function ProjectCodeGraphTab({ active, assetId }: { active: boolean; assetId?: string }) {
+function ProjectCodeGraphTab({ active, assetId, files = 0, nodes = 0 }: { active: boolean; assetId?: string; files?: number; nodes?: number }) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +144,10 @@ function ProjectCodeGraphTab({ active, assetId }: { active: boolean; assetId?: s
   if (!assetId) return <div className={s.projectContextEmpty}>当前项目未关联 CodeGraph。</div>;
   return (
     <div className={s.projectContextStack}>
+      <div className={s.projectContextOverview}>
+        <div><strong>{files} 个文件</strong><span>CodeGraph 索引文件</span></div>
+        <div><strong>{nodes} 个节点</strong><span>CodeGraph 符号节点</span></div>
+      </div>
       <div className={s.projectContextSearch}>
         <Input aria-label="搜索 CodeGraph 符号" value={query} onChange={(event) => setQuery(event.target.value)} onPressEnter={() => void search()} />
         <Button aria-label="搜索 CodeGraph" type="primary" disabled={!query.trim()} onClick={() => void search()}>搜索</Button>
@@ -149,8 +158,71 @@ function ProjectCodeGraphTab({ active, assetId }: { active: boolean; assetId?: s
   );
 }
 
-/** 项目上下文的标签壳；各标签的真实数据内容由后续功能填充。 */
-export function ProjectContextTabs({ activeTab, knowledge, onTabChange }: ProjectContextTabsProps) {
+function ProjectMemoryTab({ active }: { active: boolean }) {
+  const [messages, setMessages] = useState<Array<{ id?: string; role?: string; content?: string; timestamp?: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void tencentdbApi.coreRequest<{ messages?: Array<{ id?: string; role?: string; content?: string; timestamp?: string }> }>('/v3/conversation/query', { limit: 20, offset: 0 })
+      .then((result) => { if (!cancelled) setMessages(result.messages ?? []); })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  return (
+    <div className={s.projectContextStack}>
+      <div className={s.projectContextNotice}>当前 TencentDB 连接可检索范围，未按项目路径过滤。</div>
+      {error ? <div role="alert">{error}</div> : null}
+      {loading ? <div className={s.projectContextEmpty}>正在读取记忆。</div> : null}
+      {!loading && !error && messages.length === 0 ? <div className={s.projectContextEmpty}>暂无可检索记忆。</div> : null}
+      {messages.map((message, index) => (
+        <div className={s.projectContextResult} key={message.id ?? index}>
+          <div><strong>{message.content || `消息 ${index + 1}`}</strong><span>{[message.role, message.timestamp].filter(Boolean).join(' · ')}</span></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProjectGitTab({ active, workspace }: { active: boolean; workspace?: string }) {
+  const [log, setLog] = useState<GitLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active || !workspace) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void pi.getGitLogGraph(workspace, 40)
+      .then((result) => { if (!cancelled) setLog(result); })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [active, workspace]);
+
+  return (
+    <div className={s.projectContextStack}>
+      {error ? <div role="alert">{error}</div> : null}
+      {loading ? <div className={s.projectContextEmpty}>正在读取 Git 提交。</div> : null}
+      {!loading && !error && log.length === 0 ? <div className={s.projectContextEmpty}>暂无 Git 提交记录。</div> : null}
+      {log.map((commit) => (
+        <div className={s.projectContextResult} key={commit.hash}>
+          <div><strong>{commit.subject}</strong><span>{[commit.shortHash, commit.author, commit.refs.join(', ')].filter(Boolean).join(' · ')}</span></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 项目上下文标签与数据视图，内容从 TencentDB 和 Pi 工作区接口读取。 */
+export function ProjectContextTabs({ activeTab, knowledge, onTabChange, workspace }: ProjectContextTabsProps & { workspace?: string }) {
   const active = projectContextTabs.find((tab) => tab.id === activeTab) ?? projectContextTabs[0];
   const { wiki, codeGraph } = useMemo(() => scopedAssets(knowledge), [knowledge]);
 
@@ -179,10 +251,10 @@ export function ProjectContextTabs({ activeTab, knowledge, onTabChange }: Projec
         role="tabpanel"
       >
         {activeTab === 'overview' ? <ProjectOverviewTab knowledge={knowledge} /> : null}
-        {activeTab === 'wiki' ? <ProjectWikiTab active assetId={wiki?.wiki_id} /> : null}
-        {activeTab === 'codegraph' ? <ProjectCodeGraphTab active assetId={codeGraph?.code_graph_id} /> : null}
-        {activeTab === 'memory' ? '记忆内容' : null}
-        {activeTab === 'git' ? 'Git 内容' : null}
+        {activeTab === 'wiki' ? <ProjectWikiTab active wiki={wiki} /> : null}
+        {activeTab === 'codegraph' ? <ProjectCodeGraphTab active assetId={codeGraph?.code_graph_id} files={codeGraph?.stats?.files} nodes={codeGraph?.stats?.nodes} /> : null}
+        {activeTab === 'memory' ? <ProjectMemoryTab active /> : null}
+        {activeTab === 'git' ? <ProjectGitTab active workspace={workspace} /> : null}
       </section>
     </>
   );

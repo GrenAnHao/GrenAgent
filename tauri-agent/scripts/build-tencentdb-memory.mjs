@@ -11,11 +11,13 @@ import {
   patchKnowledgeApiAuth,
   patchKnowledgeMcpHttpClient,
   patchKnowledgeMcpServer,
+  patchKnowledgeLlmBinding,
   patchKnowledgeSourceRegistry,
   patchKnowledgeStdinShutdown,
   patchKnowledgeWikiWindowsContainment,
   patchPanelBootstrapRoutes,
   patchPanelInstanceRegistry,
+  patchPanelKnowledgeBaseUrl,
   patchPanelMetaLogRedaction,
   patchPanelPortFile,
   patchPanelStdinShutdown,
@@ -193,6 +195,15 @@ async function patchKnowledgeRuntime(knowledgeDir) {
     server,
   );
 
+  const schemaPath = join(knowledgeDir, "src", "db", "schema.ts");
+  await writeFile(schemaPath, patchKnowledgeLlmBinding(await readFile(schemaPath, "utf8")));
+  const dbClientPath = join(knowledgeDir, "src", "db", "client.ts");
+  await writeFile(dbClientPath, patchKnowledgeLlmBinding(await readFile(dbClientPath, "utf8")));
+  const bindingStorePath = join(knowledgeDir, "src", "store", "llm-binding-store.ts");
+  await writeFile(bindingStorePath, patchKnowledgeLlmBinding(await readFile(bindingStorePath, "utf8")));
+  const bindingRoutePath = join(knowledgeDir, "src", "routes", "llm-binding.ts");
+  await writeFile(bindingRoutePath, patchKnowledgeLlmBinding(await readFile(bindingRoutePath, "utf8")));
+
   const mcpClientPath = join(knowledgeDir, "src", "mcp", "http-client.ts");
   await writeFile(
     mcpClientPath,
@@ -235,6 +246,11 @@ async function patchPanelRuntime(panelDir) {
   await writeFile(
     transportPath,
     patchPanelMetaLogRedaction(await readFile(transportPath, "utf8")),
+  );
+  const knowledgeClientPath = join(panelDir, "src", "panel", "kernel", "adapters", "http-knowledge-client.ts");
+  await writeFile(
+    knowledgeClientPath,
+    patchPanelKnowledgeBaseUrl(await readFile(knowledgeClientPath, "utf8")),
   );
 }
 
@@ -398,6 +414,8 @@ async function verifyLayout(root) {
     "knowledgeApiAuth",
     "KNOWLEDGE_API_TOKEN is required",
     "timingSafeEqual",
+    "binding.model || fallback.model",
+    "model: text(\"model\")",
     ...stdinShutdownMarkers,
   ]) {
     if (!knowledgeBundle.includes(marker)) {
@@ -417,6 +435,10 @@ async function verifyLayout(root) {
     join(root, "panel", "dist", "panel", "kernel", "transport-fetch.js"),
     "utf8",
   );
+  const panelKnowledgeClient = await readFile(
+    join(root, "panel", "dist", "panel", "kernel", "adapters", "http-knowledge-client.js"),
+    "utf8",
+  );
   for (const marker of ["managed runtime stdin closed", 'process.stdin.once("close"', "TDAI_PANEL_PORT_FILE"]) {
     if (!panelEntry.includes(marker)) throw new Error(`TencentDB runtime Panel bundle is missing marker: ${marker}`);
   }
@@ -428,6 +450,9 @@ async function verifyLayout(root) {
   }
   for (const marker of ["TDAI_PANEL_LOG_REDACTION_V1", 'return "[redacted]"']) {
     if (!panelTransport.includes(marker)) throw new Error(`TencentDB runtime Panel log redaction is missing marker: ${marker}`);
+  }
+  if (!panelKnowledgeClient.includes("this.cfg.baseUrl.replace(/\\/v3\\/?$/, '')")) {
+    throw new Error("TencentDB runtime Panel Knowledge client is missing endpoint normalization");
   }
   const coreMetadataService = await readFile(
     join(root, "core", "src", "metadata", "service", "metadata-service.ts"),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCodeSearchHits, parseGlobOutput, parseGrepOutput } from './searchResults';
+import { parseGlobOutput, parseGrepOutput } from './searchResults';
 
 describe('parseGrepOutput', () => {
   it('parses grouped matches with total', () => {
@@ -56,25 +56,5 @@ describe('parseGlobOutput', () => {
 
   it('returns empty for No files found', () => {
     expect(parseGlobOutput('No files found')).toEqual({ files: [], truncated: false });
-  });
-});
-
-describe('parseCodeSearchHits', () => {
-  it('prefers structured details.hits', () => {
-    const result = {
-      details: { hits: [{ file: '/p/a.ts', startLine: 1, endLine: 9, score: 0.91 }] },
-      content: [{ type: 'text', text: 'ignored' }],
-    };
-    expect(parseCodeSearchHits(result)).toEqual([{ file: '/p/a.ts', startLine: 1, endLine: 9, score: 0.91 }]);
-  });
-
-  it('falls back to parsing text output', () => {
-    const result = {
-      content: [{ type: 'text', text: '2 result(s):\n1. /p/a.ts:3-20 (score 0.842)\n2. /p/b.ts:1-5 (score 0.700)' }],
-    };
-    const hits = parseCodeSearchHits(result);
-    expect(hits).toHaveLength(2);
-    expect(hits[0]).toEqual({ file: '/p/a.ts', startLine: 3, endLine: 20, score: 0.842 });
-    expect(hits[1]).toEqual({ file: '/p/b.ts', startLine: 1, endLine: 5, score: 0.7 });
   });
 });

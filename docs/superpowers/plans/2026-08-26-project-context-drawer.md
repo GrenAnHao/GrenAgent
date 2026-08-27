@@ -1,5 +1,14 @@
 # 项目上下文浮动卡片与右侧抽屉实现计划
 
+> **2026-08-27 架构修订：** 用户否决输入框上方浮动卡片和独立 Drawer。任务 2、3 的原承载方式已废弃。严格迭代第 1 轮改为：入口移动到 `MainColumnHeader` 动作区最右侧；`dockStore` 新增唯一的 `project-context` 右坞标签；`ProjectContextPanel` 作为既有 `DockPanel` 的普通内容渲染；`WorkspaceBar` 恢复只展示工作区、Git 与任务。后续任务 4-6 的数据与引用目标不变，但所有“抽屉”均指该右坞内容。
+
+## 严格迭代状态
+
+- [x] 第 1 轮：入口右移、复用既有右坞、移除浮动卡片与独立 Drawer。
+- [ ] 第 2 轮：记忆、Git 与固定引用栏。
+- [ ] 第 3 轮：移除 TencentDB 独立 LLM 配置，调整为 Pi 模型统一。
+- [ ] 第 4 轮：将 Agent 装备改为知识注入规则并完成全量回归。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 \`superpowers:subagent-driven-development\`（推荐）或 \`superpowers:executing-plans\` 逐任务实现此计划。步骤使用复选框（\`- [ ]\`）语法来跟踪进度。
 
 **目标：** 在聊天输入框外的 WorkspaceBar 同层加入项目上下文浮动卡片，并实现带 \`概览 / Wiki / CodeGraph / 记忆 / Git\` 标签的右侧详情抽屉；TencentDB 不再维护独立 LLM 配置，AgentLoadout 明确为知识注入规则。

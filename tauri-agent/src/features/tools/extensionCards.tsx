@@ -482,9 +482,9 @@ const GenerateImageCard: FC<ExtensionCardProps> = ({ args, result, status }) => 
     .filter(Boolean)
     .join(' · ');
   const ratio = ratioOf(asString(d?.size));
-  // 生成中（工具仍在跑、还没产出 path）：给等比加载帧，而非孤零零一个图标。
-  const loading = status === 'running' || (paths.length === 0 && status !== 'error');
-  const errored = status === 'error' && paths.length === 0;
+  // 生成中：仅 status=running 时转菊花；done 但无 path 属静默失败，归 error 显示而非永久转菊花。
+  const loading = status === 'running';
+  const errored = (status === 'error' || (status !== 'running' && paths.length === 0));
   const multi = paths.length > 1;
   // 标题用提示词（加粗单行截断），文件名收进 hover tooltip。
   const title = prompt || (loading ? '图片生成中…' : '生成图片');

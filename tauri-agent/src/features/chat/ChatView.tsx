@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { Icon } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
@@ -17,6 +17,7 @@ import { markScratchUsed } from '../../lib/startupConversation';
 import { createStartupPerf } from '../../lib/startupPerf';
 import { useSessionStore } from '../../store/session';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useModuleStore } from '../../stores/moduleStore';
 import { commandLanes } from '../../lib/commandLanes';
 import { awaitStreamingEnd } from '../../lib/streamingGate';
 
@@ -103,6 +104,16 @@ export function ChatView() {
   const showEmptyLayout = isEmpty && workspaceReady;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
+
+  // 切换到非对话视图（选项卡）时，若正在生成中则自动中止，避免切回时停止按钮残留显示。
+  const activeWorkspaceView = useModuleStore((s) => s.activeWorkspaceView);
+  useEffect(() => {
+    if (activeWorkspaceView !== 'chat' && store.useStore.getState().isStreaming) {
+      userAbortedRef.current = true;
+      store.useStore.setState({ aborting: true });
+      void pi.abort(workspace);
+    }
+  }, [activeWorkspaceView, store, workspace]);
 
   const handleSend = async (
     message: string,

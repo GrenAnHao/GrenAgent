@@ -130,8 +130,7 @@ pub async fn shell_start(
                     };
                     if valid_up_to > 0 {
                         // valid_up_to 处一定是字符边界，可安全无损解码。
-                        let chunk =
-                            String::from_utf8_lossy(&carry[..valid_up_to]).into_owned();
+                        let chunk = String::from_utf8_lossy(&carry[..valid_up_to]).into_owned();
                         carry.drain(..valid_up_to);
                         let _ = tauri::async_runtime::block_on(emit_shell_output(
                             &win,

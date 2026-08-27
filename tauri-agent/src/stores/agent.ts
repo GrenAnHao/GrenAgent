@@ -185,7 +185,12 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     if (sessionPath != null) setCachedSession(sessionPath, processed, sig);
     clearQueue();
     // 从会话树重建上下文排除集（best-effort），切换 / 重载会话后恢复灰显。
-    setFullState({ ...initialAgentState(), messages: processed, excluded: excludedFromAgent(msgs) });
+    // 重启后残留的 status:'running' 工具消息（进程被杀、未收到 tool_execution_end）标为 error，
+    // 避免永久显示「运行中…」。
+    const sanitized = processed.map((m) =>
+      m.kind === 'tool' && m.status === 'running' ? { ...m, status: 'error' as const } : m,
+    );
+    setFullState({ ...initialAgentState(), messages: sanitized, excluded: excludedFromAgent(msgs) });
     // 首次（无 uiHistory / uiHistory 更短）用后端起底：写一份 UI 历史，之后运行中每轮结束再覆盖为完整。
     if (sessionPath != null && processed === backend) {
       const key = sessionKeyFromPath(sessionPath);

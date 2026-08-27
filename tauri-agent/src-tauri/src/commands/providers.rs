@@ -189,8 +189,8 @@ pub async fn list_models_global(app: tauri::AppHandle) -> Result<Vec<serde_json:
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line = stdout.lines().last().unwrap_or("").trim();
-    let parsed: ProbeModelsOut =
-        serde_json::from_str(line).map_err(|e| format!("probe-models 输出解析失败: {e}; 原文: {line}"))?;
+    let parsed: ProbeModelsOut = serde_json::from_str(line)
+        .map_err(|e| format!("probe-models 输出解析失败: {e}; 原文: {line}"))?;
     if !parsed.ok {
         return Err(parsed.error.unwrap_or_else(|| "probe-models failed".into()));
     }
@@ -467,8 +467,7 @@ Most render failures come from labels. Apply these rules:
     let user = format!(
         "The Mermaid diagram failed to render.\n\nError:\n{error}\n\nOriginal Mermaid source:\n```mermaid\n{code}\n```\n\nReturn the corrected Mermaid source."
     );
-    let req =
-        serde_json::json!({ "provider": provider_key, "modelId": model_id, "system": system, "user": user });
+    let req = serde_json::json!({ "provider": provider_key, "modelId": model_id, "system": system, "user": user });
     let mut out_line = String::new();
     run_oneshot_lines(&app, &req, |line| out_line = line.to_string()).await?;
     let parsed: OneshotNonStream = serde_json::from_str(&out_line)
@@ -508,9 +507,12 @@ pub async fn diagnose_provider_model(
 ) -> Result<DiagnoseResult, String> {
     use std::time::Instant;
 
-    let user = if prompt.trim().is_empty() { "Who are you?".to_string() } else { prompt };
-    let req =
-        serde_json::json!({ "provider": provider_id, "modelId": model_id, "user": user, "stream": stream });
+    let user = if prompt.trim().is_empty() {
+        "Who are you?".to_string()
+    } else {
+        prompt
+    };
+    let req = serde_json::json!({ "provider": provider_id, "modelId": model_id, "user": user, "stream": stream });
 
     let start = Instant::now();
     let mut content = String::new();
@@ -524,7 +526,9 @@ pub async fn diagnose_provider_model(
     // oneshot 流式输出精简 JSONL：{type:"delta",text} / {type:"done"|"error",usage}；
     // 非流式输出单行 {ok,content,usage}。两种都在此统一解析，delta 同步推 on_chunk 并测 TTFT。
     run_oneshot_lines(&app, &req, |line| {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            return;
+        };
         match v.get("type").and_then(|t| t.as_str()) {
             Some("delta") => {
                 if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
@@ -562,7 +566,10 @@ pub async fn diagnose_provider_model(
                     let _ = on_chunk.send(c.to_string());
                 }
                 if v.get("ok").and_then(|o| o.as_bool()) == Some(false) {
-                    err = v.get("error").and_then(|e| e.as_str()).map(|s| s.to_string());
+                    err = v
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .map(|s| s.to_string());
                 }
             }
             _ => {}
@@ -600,8 +607,13 @@ pub async fn diagnose_provider_model(
             tokens_per_sec: None,
         });
     }
-    let tokens_per_sec =
-        completion_tokens.and_then(|c| if total_ms == 0 { None } else { Some(c as f64 / (total_ms as f64 / 1000.0)) });
+    let tokens_per_sec = completion_tokens.and_then(|c| {
+        if total_ms == 0 {
+            None
+        } else {
+            Some(c as f64 / (total_ms as f64 / 1000.0))
+        }
+    });
     Ok(DiagnoseResult {
         ok: true,
         error: None,

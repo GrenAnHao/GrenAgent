@@ -17,7 +17,7 @@ export function TencentdbCenter() {
         options={[
           { label: '连接设置', value: 'connection' },
           { label: '资产中心', value: 'assets' },
-          { label: 'Agent 装备', value: 'agents' },
+          { label: '知识注入规则', value: 'agents' },
         ]}
       />
       {view === 'connection' ? <ConnectionSettings /> : view === 'assets' ? <AssetCenter /> : <AgentLoadout />}

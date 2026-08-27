@@ -182,17 +182,18 @@ export function AgentLoadout() {
     <Flexbox gap={12} data-testid="tencentdb-agent-loadout">
       <Flexbox horizontal justify="space-between" align="center">
         <div>
-          <h3>Agent 装备</h3>
+          <h3>知识注入规则</h3>
+          <p>Skill、Wiki、CodeGraph 可注入知识；direct / summary / tool / reference 决定注入方式，priority 决定顺序。本页不负责模型、供应商或密钥。</p>
           <p>当前连接配置的 Agent：<strong>{agentId || '未配置'}</strong></p>
         </div>
         <Flexbox horizontal gap={8}>
           <Button size="small" aria-label="重试" onClick={() => void reload()} loading={loading} disabled={!enabled}>重试</Button>
-          <Button size="small" type="primary" onClick={() => void save()} loading={saving} disabled={!readyForAgent}>保存装备</Button>
+          <Button size="small" type="primary" onClick={() => void save()} loading={saving} disabled={!readyForAgent}>保存注入规则</Button>
         </Flexbox>
       </Flexbox>
       {error ? <Alert role="alert" type="error" title={error} /> : null}
       {loading ? <Spin size="small" /> : null}
-      {!loading && visibleAssets.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可装备的 Skill、Wiki 或 CodeGraph 资产" /> : null}
+      {!loading && visibleAssets.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可配置的知识注入资产" /> : null}
       {visibleAssets.map((asset) => {
         const existing = bindingByAsset.get(asset.asset_id);
         const checked = selected.has(asset.asset_id);

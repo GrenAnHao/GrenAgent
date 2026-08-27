@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { messagesRef } = vi.hoisted(() => ({ messagesRef: { current: [] as unknown[] } }));
+const { listKnowledgeAssets, messagesRef } = vi.hoisted(() => ({
+  listKnowledgeAssets: vi.fn(),
+  messagesRef: { current: [] as unknown[] },
+}));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStore: () => ({
     useStore: (sel: (s: { messages: unknown[] }) => unknown) => sel({ messages: messagesRef.current }),
@@ -25,6 +28,16 @@ vi.mock('../panels/SubAgentConversation', () => ({
     </div>
   ),
 }));
+vi.mock('../tencentdb/tencentdbApi', () => ({
+  tencentdbApi: {
+    listKnowledgeAssets,
+    listWikiPages: vi.fn(),
+    readWikiPages: vi.fn(),
+    searchCodeGraph: vi.fn(),
+    searchWiki: vi.fn(),
+  },
+  useTencentdbConnection: () => ({ status: { state: 'ready' } }),
+}));
 
 import { DockPanel } from './DockPanel';
 import { useDockStore } from '../../stores/dockStore';
@@ -36,6 +49,7 @@ afterEach(() => {
   localStorage.clear();
   useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
   useLayoutStore.setState({ rightPanelOpen: false });
+  vi.clearAllMocks();
 });
 
 function renderRight() {
@@ -52,6 +66,17 @@ describe('DockPanel (right region)', { timeout: 30_000 }, () => {
   it('shows the empty hint when there is no content', () => {
     renderRight();
     expect(screen.getByText(/暂无内容/)).toBeTruthy();
+  });
+
+  it('renders project context as a normal right dock tab', async () => {
+    listKnowledgeAssets.mockResolvedValue({ codeGraphs: [], wikis: [], workspace: {} });
+    useDockStore.getState().openProjectContext('/repo');
+
+    renderRight();
+
+    expect(screen.getByTestId('dock-tab-project-context')).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'repo 项目上下文' })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('opens a sub-agent tab on demand and shows its conversation', () => {

@@ -13,6 +13,7 @@ import {
   patchPanelBootstrapRoutes,
   patchPanelInstanceRegistry,
   patchPanelStdinShutdown,
+  patchPanelKnowledgeBaseUrl,
   patchCoreStdinShutdown,
   patchKnowledgeMcpHttpClient,
   patchKnowledgeMcpServer,
@@ -28,6 +29,17 @@ test('patches MemoryPanel for managed stdin shutdown and env registry', () => {
   assert.match(patched, /process\.stdin\.once\("close"/);
   const registry = patchPanelInstanceRegistry(`static load(configPath) { return readFileSync(configPath, 'utf8'); }`);
   assert.match(registry, /TDAI_PANEL_INSTANCES_JSON/);
+});
+
+test('MemoryPanel normalizes a Knowledge endpoint that already contains /v3', () => {
+  const source = `
+  private async post<T>(path: string, body: unknown): Promise<T> {
+    const resp = await fetch(\`${'${this.cfg.baseUrl}'}${'${path}'}\`);
+    return (await resp.json()) as T;
+  }
+`;
+  const patched = patchPanelKnowledgeBaseUrl(source);
+  assert.ok(patched.includes("this.cfg.baseUrl.replace(/\\/v3\\/?$/, '')"));
 });
 
 test('patches MemoryPanel bootstrap protocol without exposing credentials in URL', () => {
@@ -200,6 +212,40 @@ export function createApp() {
   assert.match(patched, /wrapError\(401, "unauthorized"\)/);
 });
 
+test("Knowledge LLM binding patch persists model and protocol", () => {
+  assert.equal(typeof runtimePatches.patchKnowledgeLlmBinding, "function");
+  const patched = runtimePatches.patchKnowledgeLlmBinding(`
+export const llmBinding = sqliteTable("llm_binding", {
+  serviceId: text("service_id").primaryKey(),
+  mode: text("mode").notNull(),
+  apiKey: text("api_key"),
+  baseUrl: text("base_url"),
+});
+export interface LlmBindingRow {
+  service_id: string;
+  mode: LlmBindingMode;
+  api_key: string | null;
+  base_url: string | null;
+}
+export interface LlmBindingInput {
+  mode: LlmBindingMode;
+  api_key?: string | null;
+  base_url?: string | null;
+}
+const values = { serviceId, mode: input.mode, apiKey, baseUrl };
+const fallbackModel = fallback.model;
+return { ...fallback, model: fallbackModel, protocol: fallback.protocol };
+const model = fallback.model;
+const protocol = fallback.protocol;
+`);
+  assert.match(patched, /model: text\("model"\)/);
+  assert.match(patched, /protocol: text\("protocol"\)/);
+  assert.match(patched, /model\?: string/);
+  assert.match(patched, /protocol\?: "openai" \| "anthropic"/);
+  assert.match(patched, /model: binding\.model \|\| fallback\.model|const model = binding\?\.model/);
+  assert.match(patched, /protocol: binding\.protocol \|\| fallback\.protocol|const protocol = binding\?\.protocol/);
+});
+
 test("Core bootstrap patch preserves the configured user, team, and agent IDs", () => {
   assert.equal(typeof runtimePatches.patchCoreManagedIdentityBootstrap, "function");
   const patched = runtimePatches.patchCoreManagedIdentityBootstrap({
@@ -310,6 +356,7 @@ test("build script applies and verifies every runtime security patch", () => {
   assert.match(buildScript, /patchCoreStdinShutdown/);
   assert.match(buildScript, /patchKnowledgeApiAuth/);
   assert.match(buildScript, /patchPanelMetaLogRedaction/);
+  assert.match(buildScript, /patchPanelKnowledgeBaseUrl/);
   assert.match(buildScript, /upstreamSourceSha256/);
   assert.match(buildScript, /createHash\("sha256"\)/);
   assert.match(buildScript, /SHA-256 mismatch/);
@@ -328,6 +375,7 @@ test("build script applies and verifies every runtime security patch", () => {
   assert.match(buildScript, /patchPanelPortFile/);
   assert.match(buildScript, /TDAI_PANEL_PORT_FILE/);
   assert.match(buildScript, /TDAI_PANEL_LOG_REDACTION_V1/);
+  assert.match(buildScript, /endpoint normalization/);
   assert.match(buildScript, /__grenagent\/health/);
   assert.match(buildScript, /knowledgeApiAuth/);
   assert.match(buildScript, /process\.stdin\.once\(\\?"end/);

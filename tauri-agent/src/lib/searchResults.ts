@@ -1,5 +1,3 @@
-import { getDetails, extractText } from '../features/tools/toolUtils';
-
 export interface GrepMatch {
   line: number;
   text: string;
@@ -79,46 +77,4 @@ export function parseGlobOutput(text: string): GlobResult {
     files.push(line);
   }
   return { files, truncated };
-}
-
-export interface CodeSearchHit {
-  file: string;
-  startLine?: number;
-  endLine?: number;
-  score?: number;
-}
-
-/** 取 code_search 命中：优先结构化 details.hits，缺失时兜底解析文本 "1. file:start-end (score x)"。 */
-export function parseCodeSearchHits(result: unknown): CodeSearchHit[] {
-  const details = getDetails(result);
-  const raw = details?.hits;
-  if (Array.isArray(raw)) {
-    return raw.flatMap((h): CodeSearchHit[] => {
-      if (!h || typeof h !== 'object') return [];
-      const o = h as Record<string, unknown>;
-      const file = typeof o.file === 'string' ? o.file : '';
-      if (!file) return [];
-      return [
-        {
-          file,
-          startLine: typeof o.startLine === 'number' ? o.startLine : undefined,
-          endLine: typeof o.endLine === 'number' ? o.endLine : undefined,
-          score: typeof o.score === 'number' ? o.score : undefined,
-        },
-      ];
-    });
-  }
-  const hits: CodeSearchHit[] = [];
-  for (const line of extractText(result).split('\n')) {
-    const m = line.match(/^\s*\d+\.\s+(.+?):(\d+)-(\d+)(?:\s+\(score\s+([\d.]+)\))?/);
-    if (m) {
-      hits.push({
-        file: m[1],
-        startLine: Number(m[2]),
-        endLine: Number(m[3]),
-        score: m[4] ? Number(m[4]) : undefined,
-      });
-    }
-  }
-  return hits;
 }

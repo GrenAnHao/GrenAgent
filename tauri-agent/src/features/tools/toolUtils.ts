@@ -50,7 +50,7 @@ export function getDiff(result: unknown): string | undefined {
 
 /**
  * 「上下文收集」工具：只读地读取文件/列目录。时间线里连续的此类调用折叠成一条摘要
- *（对齐 MiMo 的 ContextToolGroup）。grep/glob/code_search 不在此列——它们作为「搜索动作」
+ *（对齐 MiMo 的 ContextToolGroup）。grep/glob 不在此列——它们作为「搜索动作」
  * 各自独立成 Cursor 风格的结果卡常驻可见；edit/write/bash 等动作工具同样逐个单独展示。
  */
 const CONTEXT_TOOLS = new Set(['read', 'read_file', 'ls', 'list_dir']);

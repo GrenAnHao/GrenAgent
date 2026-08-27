@@ -10,89 +10,22 @@ export const wsStyles = createStaticStyles(({ css }) => ({
 
     margin-bottom: 8px;
   `,
-  projectContextCard: css`
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-
-    max-width: min(360px, 100%);
-    min-height: 44px;
-    padding: 6px 9px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
-
-    color: ${cssVar.colorText};
-    text-align: left;
-
-    background: ${cssVar.colorBgElevated};
-
-    cursor: pointer;
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease;
-
-    &:hover {
-      border-color: ${cssVar.colorPrimaryBorder};
-      background: ${cssVar.colorFillQuaternary};
-    }
-
-    &:focus-visible {
-      outline: 2px solid ${cssVar.colorPrimaryBorder};
-      outline-offset: 2px;
-    }
+  projectContextPanel: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    background: ${cssVar.colorBgContainer};
   `,
-  projectContextIcon: css`
-    flex: none;
-    color: ${cssVar.colorPrimary};
-  `,
-  projectContextBody: css`
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 6px;
-    align-items: baseline;
-
-    min-width: 0;
-  `,
-  projectContextLabel: css`
-    font-size: 11px;
-    color: ${cssVar.colorTextTertiary};
-  `,
-  projectContextName: css`
-    overflow: hidden;
-    min-width: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `,
-  projectContextSummary: css`
-    grid-column: 1 / -1;
-
-    margin-top: 1px;
-    font-size: 11px;
-    color: ${cssVar.colorTextSecondary};
-    overflow-wrap: anywhere;
-    white-space: normal;
-  `,
-  projectContextChevron: css`
-    flex: none;
-    color: ${cssVar.colorTextTertiary};
-  `,
-  projectContextDrawer: css`
-    .ant-drawer-header {
-      padding: 14px 16px;
-      border-bottom-color: ${cssVar.colorBorderSecondary};
-    }
-  `,
-  projectContextDrawerTitle: css`
+  projectContextPanelHeader: css`
     display: grid;
     gap: 2px;
-    min-width: 0;
+    padding: 14px 16px;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
     font-size: 14px;
-    font-weight: 600;
     color: ${cssVar.colorText};
   `,
-  projectContextDrawerPath: css`
+  projectContextPanelPath: css`
     overflow: hidden;
     font-size: 11px;
     font-weight: 400;
@@ -100,25 +33,9 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
-  projectContextDrawerClose: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    border-radius: 6px;
-
-    color: ${cssVar.colorTextSecondary};
-    background: transparent;
-    cursor: pointer;
-
-    &:hover {
-      color: ${cssVar.colorText};
-      background: ${cssVar.colorFillTertiary};
-    }
+  projectContextPanelMessage: css`
+    padding: 16px;
+    color: ${cssVar.colorError};
   `,
   projectContextTabList: css`
     display: flex;
@@ -155,7 +72,10 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     font-weight: 600;
   `,
   projectContextTabPanel: css`
+    flex: 1;
+    min-height: 0;
     padding: 16px;
+    overflow: auto;
     font-size: 13px;
     color: ${cssVar.colorTextSecondary};
   `,
@@ -203,6 +123,13 @@ export const wsStyles = createStaticStyles(({ css }) => ({
   `,
   projectContextEmpty: css`
     color: ${cssVar.colorTextTertiary};
+  `,
+  projectContextNotice: css`
+    padding: 8px 10px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 6px;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 12px;
   `,
   chip: css`
     display: inline-flex;

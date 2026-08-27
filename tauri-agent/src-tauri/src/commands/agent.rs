@@ -67,7 +67,7 @@ fn apply_conversation_tool_policy(
     if is_conversation_workspace(cwd) {
         env.remove("MCP_SERVERS");
         env.insert("MCP_DISABLED".into(), "1".into());
-        // 真对话模式（SP-3）：项目无关对话加载精简扩展集——裁掉 lsp/dap/code-search/diagnostics 等重代码
+        // 真对话模式（SP-3）：项目无关对话加载精简扩展集，裁掉不适用于纯对话的重型工具。
         // 智能扩展，缩短冷启动、降低开销；安全闸（safety）仍保留。项目工作区不设此项，保持全量扩展。
         env.insert("EXTENSIONS_PROFILE".into(), "chat".into());
     }
@@ -439,10 +439,14 @@ pub async fn agent_restore_entry(
 /// 扫描会话 jsonl，返回内层 `message.timestamp == ts` 的 entry 的顶层 `id`（取最后匹配，规避同 ts 多分支）。
 /// 磁盘 entry 形如 `{type:"message", id, parentId, timestamp(ISO), message:{role, content, timestamp(ms)}}`，
 /// 删段 / 回退按内层毫秒 timestamp 关联（与 compaction-policy 扩展、前端口径一致）。
-fn find_entry_id_by_timestamp(session_file: &str, timestamp: i64) -> Result<Option<String>, String> {
+fn find_entry_id_by_timestamp(
+    session_file: &str,
+    timestamp: i64,
+) -> Result<Option<String>, String> {
     use std::io::BufRead;
     // 逐行流式读取，恒定内存（不把整个会话文件一次性读进内存）。仍需扫到末尾取最后匹配。
-    let file = std::fs::File::open(session_file).map_err(|e| format!("read session failed: {e}"))?;
+    let file =
+        std::fs::File::open(session_file).map_err(|e| format!("read session failed: {e}"))?;
     let reader = std::io::BufReader::new(file);
     let mut found: Option<String> = None;
     for line in reader.lines() {
@@ -698,7 +702,10 @@ mod tests {
             find_entry_id_by_timestamp(&path, 100).unwrap(),
             Some("b".to_string())
         );
-        assert_eq!(find_entry_id_by_timestamp(&path, 200).unwrap(), Some("c".to_string()));
+        assert_eq!(
+            find_entry_id_by_timestamp(&path, 200).unwrap(),
+            Some("c".to_string())
+        );
         assert_eq!(find_entry_id_by_timestamp(&path, 999).unwrap(), None);
     }
 }

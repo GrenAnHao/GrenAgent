@@ -107,14 +107,17 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
     return true;
   }, [cardKey, workspace]);
 
-  // 浏览器打开：写临时文件 → Tauri opener 打开（Blob URL 在 WebView 里不工作）
+  // 浏览器打开：写临时文件 → file:// URL → openUrl（openPath 走文件默认程序，
+  // 开发机上 .html 可能被编辑器覆盖；openUrl 走浏览器 URL handler，更可靠）
   const openInBrowser = useCallback(async () => {
     if (!html) return;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const { openPath } = await import('@tauri-apps/plugin-opener');
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
       const path = await invoke<string>('write_temp_html', { content: buildSrcDoc(html) });
-      await openPath(path);
+      // Windows 路径 C:\...\file.html → file:///C:/…/file.html
+      const fileUrl = 'file:///' + (path as string).replace(/\\/g, '/');
+      await openUrl(fileUrl);
     } catch (e) {
       console.error('[VisualCard] openInBrowser failed:', e);
     }

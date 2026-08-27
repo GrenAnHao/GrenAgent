@@ -29,9 +29,6 @@ pub struct SaveTencentdbConnection {
     pub user_api_key: Option<String>,
     #[serde(default)]
     pub clear_user_api_key: bool,
-    pub llm_api_key: Option<String>,
-    #[serde(default)]
-    pub clear_llm_api_key: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -61,10 +58,21 @@ pub struct TencentdbCoreRequest {
     pub body: serde_json::Map<String, serde_json::Value>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TencentdbLlmSyncInput {
+    pub provider: String,
+    pub model_id: String,
+    pub api: String,
+    pub base_url: String,
+    pub api_key: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CoreRouteScope {
     ConfigIdentity,
     ChatMemoryClear,
+    MetaAssetCreate,
     MetaAccessibleAssetList,
     AgentFixedAsset,
     AgentFixedAssetSet,
@@ -102,6 +110,7 @@ fn core_route_scope(route: &str) -> Result<CoreRouteScope> {
         | "/v3/skill/files/read"
         | "/v3/skill/listing" => Ok(CoreRouteScope::ConfigIdentity),
         "/v3/chat-memory/clear" => Ok(CoreRouteScope::ChatMemoryClear),
+        "/v3/meta/asset/create" => Ok(CoreRouteScope::MetaAssetCreate),
         "/v3/meta/asset/list-accessible" => Ok(CoreRouteScope::MetaAccessibleAssetList),
         "/v3/meta/agent-fixed-asset/set" => Ok(CoreRouteScope::AgentFixedAssetSet),
         "/v3/meta/agent-fixed-asset/list" | "/v3/meta/agent-fixed-asset/list-with-detail" => {
@@ -146,6 +155,13 @@ fn normalize_core_request_body(
             }
             body.clear();
             body.insert("memory_ids".to_string(), json!(normalized));
+        }
+        CoreRouteScope::MetaAssetCreate => {
+            body.insert("team_id".to_string(), json!(config.team_id));
+            body.insert("owner_user_id".to_string(), json!(config.user_id));
+            body.insert("source_type".to_string(), json!("knowledge"));
+            body.insert("visibility".to_string(), json!("team"));
+            body.insert("status".to_string(), json!("approved"));
         }
         CoreRouteScope::MetaAccessibleAssetList => {
             body.insert("team_id".to_string(), json!(config.team_id));
@@ -627,11 +643,9 @@ async fn start_local_runtime(
     gateway_api_key: &str,
 ) -> Result<GatewayStatus> {
     let data_dir = tencentdb_data_dir(app)?;
-    let runtime_config = LocalRuntimeConfig {
-        llm_api_key: MemoryCredentialStore::llm_api_key()?,
-        llm_base_url: config.llm_base_url.clone(),
-        llm_model: config.llm_model.clone(),
-    };
+    // LLM routing is synchronized from Pi's active model through the Knowledge
+    // binding endpoint; TencentDB runtime never reads a second model config.
+    let runtime_config = LocalRuntimeConfig::default();
     let status = runtime
         .start_local(
             bundled_layout(app)?,
@@ -1289,6 +1303,155 @@ async fn configured_knowledge_client(
     ))
 }
 
+/// Knowledge 和 Core 使用两张资产表：Knowledge 负责内容，Core 负责资产治理与 Agent 绑定。
+/// 项目资产创建/复用后必须在 Core 补齐元数据，否则 Hub 的 Agent 资产列表会显示为 0。
+async fn reconcile_knowledge_core_assets(
+    config: &MemoryConnectionConfig,
+    gateway_endpoint: &str,
+    api_key: &str,
+    user_key: &str,
+    code_graph: Option<(&str, &str, &str)>,
+    wiki: Option<(&str, &str, &str)>,
+) -> Result<()> {
+    let client = core_http_client()?;
+    let mut new_bindings = Vec::new();
+
+    for (asset_id, asset_type, name, source_ref) in [
+        code_graph.map(|(id, name, source)| (id, "code_graph", name, source)),
+        wiki.map(|(id, name, source)| (id, "llm_wiki", name, source)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let existing = send_core_request(
+            &client,
+            gateway_endpoint,
+            "/v3/meta/asset/get",
+            api_key,
+            &config.service_id,
+            Some(user_key),
+            json!({ "asset_id": asset_id }),
+        )
+        .await;
+
+        if existing.is_err() {
+            let create = send_core_request(
+                &client,
+                gateway_endpoint,
+                "/v3/meta/asset/create",
+                api_key,
+                &config.service_id,
+                Some(user_key),
+                json!({
+                    "asset_id": asset_id,
+                    "team_id": config.team_id,
+                    "asset_type": asset_type,
+                    "name": name,
+                    "owner_user_id": config.user_id,
+                    "source_type": "knowledge",
+                    "source_ref": source_ref,
+                    "content_ref": asset_id,
+                    "visibility": "team",
+                    "status": "approved",
+                }),
+            )
+            .await;
+            if let Err(create_error) = create {
+                // 并发启动可能已经由另一个工作区请求创建成功，回读确认即可。
+                send_core_request(
+                    &client,
+                    gateway_endpoint,
+                    "/v3/meta/asset/get",
+                    api_key,
+                    &config.service_id,
+                    Some(user_key),
+                    json!({ "asset_id": asset_id }),
+                )
+                .await
+                .with_context(|| format!("failed to register TencentDB {asset_type} asset {asset_id}: {create_error}"))?;
+            }
+        }
+        new_bindings.push(json!({
+            "asset_id": asset_id,
+            "asset_type": asset_type,
+            "injection_mode": "tool",
+            "priority": 50,
+            "created_by": config.user_id,
+        }));
+    }
+
+    if new_bindings.is_empty() {
+        return Ok(());
+    }
+
+    let mut current_items = Vec::new();
+    let mut offset = 0u64;
+    loop {
+        let page = send_core_request(
+            &client,
+            gateway_endpoint,
+            "/v3/meta/agent-fixed-asset/list-with-detail",
+            api_key,
+            &config.service_id,
+            Some(user_key),
+            json!({ "agent_id": config.agent_id, "limit": 100, "offset": offset }),
+        )
+        .await?;
+        let items = page
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let count = items.len() as u64;
+        current_items.extend(items);
+        offset += count;
+        let total = page
+            .get("total")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(offset);
+        if count == 0 || offset >= total {
+            break;
+        }
+    }
+    let mut bindings = current_items
+        .into_iter()
+        .filter_map(|item| {
+            Some(json!({
+                "asset_id": item.get("asset_id")?.as_str()?,
+                "asset_type": item.get("asset_type")?.as_str()?,
+                "injection_mode": item.get("injection_mode").and_then(serde_json::Value::as_str).unwrap_or("reference"),
+                "priority": item.get("priority").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                "created_by": config.user_id,
+            }))
+        })
+        .collect::<Vec<_>>();
+    let existing_ids = bindings
+        .iter()
+        .filter_map(|item| item.get("asset_id").and_then(serde_json::Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::HashSet<String>>();
+    for binding in new_bindings {
+        let Some(asset_id) = binding.get("asset_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !existing_ids.contains(asset_id) {
+            bindings.push(binding);
+        }
+    }
+
+    send_core_request(
+        &client,
+        gateway_endpoint,
+        "/v3/meta/agent-fixed-asset/set",
+        api_key,
+        &config.service_id,
+        Some(user_key),
+        json!({ "agent_id": config.agent_id, "bindings": bindings }),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn provision_workspace_assets(
     app: &tauri::AppHandle,
     store: &AppStateStore,
@@ -1296,6 +1459,13 @@ async fn provision_workspace_assets(
     workspace: &Path,
 ) -> Result<WorkspaceKnowledgeAssets> {
     let (config, client) = configured_knowledge_client(app, store, runtime).await?;
+    let gateway_api_key = ensure_gateway_api_key(&config.mode)?;
+    let gateway_user_key = resolve_user_api_key(&config, &gateway_api_key)?;
+    let gateway_endpoint = if config.mode == MemoryMode::Local {
+        runtime.local_status().await.endpoint
+    } else {
+        config.endpoint.clone()
+    };
     let workspace = if config.mode == MemoryMode::Local {
         register_local_source(app, workspace)?
     } else {
@@ -1367,6 +1537,28 @@ async fn provision_workspace_assets(
                 });
             }
         }
+    }
+
+    let code_graph_binding = assets.code_graph_id.as_deref().map(|id| {
+        (id, repo_name.as_str(), repo_url.as_str())
+    });
+    let wiki_binding = assets.wiki_id.as_deref().map(|id| {
+        (id, wiki_name.as_str(), wiki_name.as_str())
+    });
+    if let Err(error) = reconcile_knowledge_core_assets(
+        &config,
+        &gateway_endpoint,
+        &gateway_api_key,
+        &gateway_user_key,
+        code_graph_binding,
+        wiki_binding,
+    )
+    .await
+    {
+        assets.error = Some(match assets.error.take() {
+            Some(previous) => format!("{previous}; {error}"),
+            None => error.to_string(),
+        });
     }
 
     assets.updated_at = Some(chrono::Utc::now().to_rfc3339());
@@ -1693,6 +1885,37 @@ pub async fn tencentdb_reload_skills(store: State<'_, AppStateStore>) -> Result<
     bump_skill_reload_revision(&store).await;
     store.write_runtime_config().await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn tencentdb_sync_llm(
+    input: TencentdbLlmSyncInput,
+    app: tauri::AppHandle,
+    store: State<'_, AppStateStore>,
+    runtime: State<'_, Arc<MemoryRuntime>>,
+) -> Result<serde_json::Value, String> {
+    let protocol = match input.api.as_str() {
+        "anthropic-messages" => "anthropic",
+        "openai-completions" | "openai-responses" => "openai",
+        _ => return Err("TencentDB Knowledge 不支持当前 Pi 模型协议".into()),
+    };
+    let (config, client) = configured_knowledge_client(&app, &store, &runtime)
+        .await
+        .map_err(public_error)?;
+    if input.model_id.trim().is_empty() || input.base_url.trim().is_empty() || input.api_key.trim().is_empty() {
+        return Err("Pi 当前模型缺少可同步的 endpoint、model 或 API Key".into());
+    }
+    client
+        .set_llm_binding(
+            "byo",
+            input.base_url.trim(),
+            input.api_key.trim(),
+            input.model_id.trim(),
+            protocol,
+        )
+        .await
+        .map_err(public_error)
+        .map(|data| json!({ "provider": input.provider, "modelId": input.model_id, "protocol": protocol, "binding": data, "serviceId": config.service_id }))
 }
 
 #[tauri::command]
@@ -2523,11 +2746,6 @@ pub async fn tencentdb_save_connection(
     } else if let Some(value) = input.user_api_key.as_deref() {
         MemoryCredentialStore::set_user_api_key(value).map_err(public_error)?;
     }
-    if input.clear_llm_api_key {
-        MemoryCredentialStore::clear_llm_api_key().map_err(public_error)?;
-    } else if let Some(value) = input.llm_api_key.as_deref() {
-        MemoryCredentialStore::set_llm_api_key(value).map_err(public_error)?;
-    }
     if config.mode == MemoryMode::Local {
         ensure_gateway_api_key(&config.mode).map_err(public_error)?;
     }
@@ -2535,9 +2753,7 @@ pub async fn tencentdb_save_connection(
     let credential_changed = input.gateway_api_key.is_some()
         || input.clear_gateway_api_key
         || input.user_api_key.is_some()
-        || input.clear_user_api_key
-        || input.llm_api_key.is_some()
-        || input.clear_llm_api_key;
+        || input.clear_user_api_key;
     let changed = connection_settings_changed(previous, config.clone(), credential_changed);
     let restart_required = changed && !mgr.all().await.is_empty();
     if changed {
@@ -3207,6 +3423,7 @@ mod tests {
             "/v3/core/write",
             "/v3/core/count",
             "/v3/chat-memory/clear",
+            "/v3/meta/asset/create",
             "/v3/skill/create",
             "/v3/skill/update",
             "/v3/skill/patch",
@@ -3283,6 +3500,37 @@ mod tests {
         };
         let body = normalize_core_request_body("/v3/core/read", body, &without_task).unwrap();
         assert!(!body.contains_key("task_id"));
+    }
+
+    #[test]
+    fn core_asset_create_body_is_bound_to_configured_identity() {
+        let config = MemoryConnectionConfig {
+            team_id: "configured-team".to_string(),
+            user_id: "configured-user".to_string(),
+            ..MemoryConnectionConfig::default()
+        };
+        let body = normalize_core_request_body(
+            "/v3/meta/asset/create",
+            json!({
+                "asset_id": "cg-1",
+                "asset_type": "code_graph",
+                "team_id": "attacker-team",
+                "owner_user_id": "attacker-user",
+                "source_type": "manual",
+                "visibility": "private",
+                "status": "draft"
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            &config,
+        )
+        .unwrap();
+        assert_eq!(body.get("team_id"), Some(&json!("configured-team")));
+        assert_eq!(body.get("owner_user_id"), Some(&json!("configured-user")));
+        assert_eq!(body.get("source_type"), Some(&json!("knowledge")));
+        assert_eq!(body.get("visibility"), Some(&json!("team")));
+        assert_eq!(body.get("status"), Some(&json!("approved")));
     }
 
     #[test]

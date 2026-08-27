@@ -160,6 +160,28 @@ impl KnowledgeClient {
         Ok(())
     }
 
+    pub async fn set_llm_binding(
+        &self,
+        mode: &str,
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        protocol: &str,
+    ) -> Result<Value> {
+        self.post(
+            "/internal/llm-binding/set",
+            json!({
+                "mode": mode,
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+                "protocol": protocol,
+                "enabled": true,
+            }),
+        )
+        .await
+    }
+
     pub async fn create_code_graph(&self, body: Value) -> Result<Value> {
         self.post("/code-graph/create", body).await
     }

@@ -55,7 +55,9 @@ describe('ConnectionSettings', () => {
     fireEvent.click(screen.getByText('本机 local'));
     expect(screen.queryByTestId('tencentdb-endpoint')).toBeNull();
     expect(screen.queryByTestId('tencentdb-knowledge-endpoint')).toBeNull();
-    expect(screen.getByTestId('tencentdb-llm-model')).toBeTruthy();
+    expect(screen.queryByTestId('tencentdb-llm-model')).toBeNull();
+    expect(screen.queryByText('LLM Base URL')).toBeNull();
+    expect(screen.queryByText('LLM API Key')).toBeNull();
     expect(screen.getByText(/固定单用户身份/)).toBeTruthy();
     expect(screen.getByTestId('tencentdb-service-id')).not.toBeDisabled();
     expect(screen.getByTestId('tencentdb-team-id')).toHaveValue('personal-local');

@@ -190,6 +190,7 @@ pub fn run() {
             commands::tencentdb::tencentdb_save_connection,
             commands::tencentdb::tencentdb_test_connection,
             commands::tencentdb::tencentdb_reload_skills,
+            commands::tencentdb::tencentdb_sync_llm,
             commands::tencentdb::tencentdb_core_request,
             commands::tencentdb::tencentdb_list_knowledge_assets,
             commands::tencentdb::tencentdb_get_wiki,

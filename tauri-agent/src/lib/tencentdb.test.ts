@@ -120,4 +120,12 @@ describe('TencentDB Knowledge API', () => {
       ['tencentdb_delete_code_graph', { input: { assetId: 'cg-1', workspace: '/workspace/app' } }],
     ]);
   });
+
+  it('normalizes Wiki page list envelopes returned by the knowledge service', async () => {
+    invoke.mockResolvedValue({ pages: [{ id: 'p1', title: '概览', type: 'page', path: '/overview' }] });
+
+    await expect(tencentdbApi.listWikiPages('wiki-1')).resolves.toEqual({
+      items: [{ id: 'p1', title: '概览', type: 'page', path: '/overview' }],
+    });
+  });
 });

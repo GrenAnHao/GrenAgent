@@ -66,7 +66,9 @@ describe('AgentLoadout', () => {
 
     expect(screen.getByRole('checkbox', { name: /Docs/ })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: /Review/ }));
-    fireEvent.click(screen.getByRole('button', { name: '保存装备' }));
+    expect(screen.getByText('知识注入规则')).toBeTruthy();
+    expect(screen.getByText(/不负责模型、供应商或密钥/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '保存注入规则' }));
 
     await waitFor(() => expect(coreRequest).toHaveBeenCalledWith('/v3/meta/agent-fixed-asset/set', {
       bindings: expect.arrayContaining([
@@ -87,7 +89,7 @@ describe('AgentLoadout', () => {
     coreRequest.mockResolvedValue({ items: [] });
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(coreRequest).toHaveBeenCalledTimes(4));
-    expect(await screen.findByText('暂无可装备的 Skill、Wiki 或 CodeGraph 资产')).toBeTruthy();
+    expect(await screen.findByText('暂无可配置的知识注入资产')).toBeTruthy();
   });
 
   it('persists edited mode and priority for a newly selected asset', async () => {
@@ -96,7 +98,7 @@ describe('AgentLoadout', () => {
     fireEvent.mouseDown(screen.getByLabelText('Review 注入模式'));
     fireEvent.click((await screen.findAllByText('reference')).at(-1)!);
     fireEvent.change(screen.getByLabelText('Review 优先级'), { target: { value: '5' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存装备' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存注入规则' }));
 
     await waitFor(() => expect(coreRequest).toHaveBeenCalledWith(
       '/v3/meta/agent-fixed-asset/set',
@@ -138,8 +140,8 @@ describe('AgentLoadout', () => {
       '/v3/meta/agent-fixed-asset/list-with-detail',
       { limit: 100, offset: 100 },
     ));
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存装备' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '保存装备' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存注入规则' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '保存注入规则' }));
 
     await waitFor(() => expect(coreRequest).toHaveBeenCalledWith(
       '/v3/meta/agent-fixed-asset/set',
@@ -270,7 +272,7 @@ describe('AgentLoadout', () => {
 
     const view = render(<AgentLoadout />);
     expect(await screen.findByText('Skill agent-a')).toBeTruthy();
-    fireEvent.click(screen.getByText('保存装备').closest('button')!);
+    fireEvent.click(screen.getByText('保存注入规则').closest('button')!);
     await waitFor(() => expect(coreRequest).toHaveBeenCalledWith(
       '/v3/meta/agent-fixed-asset/set',
       expect.any(Object),
@@ -279,7 +281,7 @@ describe('AgentLoadout', () => {
     connection.config = { agentId: 'agent-b' };
     view.rerender(<AgentLoadout />);
     expect(await screen.findByText('Skill agent-b')).toBeTruthy();
-    const newAgentSave = screen.getByText('保存装备').closest('button')!;
+    const newAgentSave = screen.getByText('保存注入规则').closest('button')!;
     const newAgentWasBlocked = newAgentSave.classList.contains('ant-btn-loading');
 
     await act(async () => {
@@ -338,7 +340,7 @@ describe('AgentLoadout', () => {
     expect(screen.queryByRole('checkbox', { name: 'Skill stale' })).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Skill agent-b' })).toBeChecked();
 
-    fireEvent.click(screen.getByRole('button', { name: '保存装备' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存注入规则' }));
     await waitFor(() => expect(coreRequest).toHaveBeenCalledWith('/v3/meta/agent-fixed-asset/set', {
       bindings: [{ asset_id: 'skill-agent-b', asset_type: 'skill', injection_mode: 'reference', priority: 2 }],
     }));
@@ -381,7 +383,7 @@ describe('AgentLoadout', () => {
 
     expect(screen.queryByRole('checkbox', { name: /Docs/ })).toBeNull();
     expect(screen.queryByRole('checkbox', { name: 'Stale' })).toBeNull();
-    expect(screen.getByRole('button', { name: '保存装备' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存注入规则' })).toBeDisabled();
   });
 
 });

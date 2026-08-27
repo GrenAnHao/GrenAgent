@@ -3,6 +3,7 @@ import { Select } from '@lobehub/ui/base-ui';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
 import { pi } from '../../../../lib/pi';
+import { syncPiModelToTencentdb } from '../../../../lib/tencentdbLlmSync';
 import { loadProviderList } from '../../../settings/providerListCache';
 import {
   useAvailableModelsState,
@@ -13,7 +14,7 @@ import { modelKey, parseModelKey, type ModelInfo } from '../modelUtils';
 import { resolveLevelForModel, type RpcModel } from '../thinkingLevels';
 
 interface RpcSessionState {
-  model?: { id?: string; name?: string; provider?: string };
+  model?: { id?: string; name?: string; provider?: string; api?: string; baseUrl?: string };
 }
 
 // 记住每个 workspace 上次选中的模型 key：切换对话时同步回显（见组件内 render 期对齐），消除「先显示
@@ -66,6 +67,12 @@ export default function ModelAction() {
           const key = modelKey(model.provider, model.id);
           lastModelByWorkspace.set(workspace, key);
           setValue(key);
+          if (model.api && model.baseUrl) {
+            void pi
+              .getProviderConfig()
+              .then((config) => syncPiModelToTencentdb(model as ModelInfo, config))
+              .catch(() => {});
+          }
         }
       }
     })();
@@ -80,6 +87,13 @@ export default function ModelAction() {
     lastModelByWorkspace.set(workspace, key);
     void (async () => {
       await pi.setModel(workspace, provider, id);
+      const selected = models.find((item) => item.provider === provider && item.id === id);
+      if (selected) {
+        void pi
+          .getProviderConfig()
+          .then((config) => syncPiModelToTencentdb(selected, config))
+          .catch(() => {});
+      }
       // 切模型后按「该模型记忆 / 模型默认」设推理档位，避免沿用上一个模型的设定。
       try {
         const state = (await pi.getState(workspace)) as { thinkingLevel?: string; model?: RpcModel | null };
