@@ -128,11 +128,16 @@ export async function run(): Promise<void> {
 
     let lastReloadRev = getConfig("PI_RELOAD_REV") ?? "";
     let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    let reloadPending = false;
     const reloadResources = (): void => {
+      if (reloadPending) return;
+      reloadPending = true;
       const session = runtime.session;
       const doReload = (): Promise<void> =>
         reloadManagedSkills(syncConfiguredSkills, () => runtime.session.reload()).catch((e) => {
           console.error("[reload] session reload failed:", e);
+        }).finally(() => {
+          reloadPending = false;
         });
       if (!session.isStreaming) {
         void doReload();

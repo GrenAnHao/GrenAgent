@@ -66,9 +66,9 @@ export async function findMcpConflict(name: string, cwd: string, desktopJson: st
   if (Object.prototype.hasOwnProperty.call((await readMcpDocument(paths.global)).mcpServers, name)) return "global";
   return undefined;
 }
-export async function writeMcpServer(input: AddMcpServerInput, cwd: string, home = homedir()): Promise<string> {
+export async function writeMcpServer(input: AddMcpServerInput, cwd: string, home = homedir(), desktopJson = ""): Promise<string> {
   const paths = mcpConfigPaths(cwd, home); const path = paths[input.scope]; const doc = await readMcpDocument(path);
-  const conflict = await findMcpConflict(input.name, cwd, "", home);
+  const conflict = await findMcpConflict(input.name, cwd, desktopJson, home);
   if (conflict && !input.replace) throw new Error("MCP \"" + input.name + "\" 已存在，请显式设置 replace=true");
   const config: McpFileServer = input.transport === "sse" ? { url: input.url } : { command: input.command, args: input.args ?? [], env: input.env, cwd: input.cwd };
   doc.mcpServers[input.name] = config; delete doc.disabledMcpServers[input.name];

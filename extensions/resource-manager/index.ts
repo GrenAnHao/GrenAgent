@@ -42,7 +42,7 @@ export default function resourceManager(pi: ExtensionAPI) {
       try {
         const probe = await probeServer({ name: input.name, transport: input.transport, command: input.command, args: input.args, env: input.env, cwd: input.cwd, url: input.url });
         if (!probe.ok) return result("MCP 探测失败: " + redactSecrets(probe.error ?? "unknown error", secrets), { status: "error", resource: "mcp", error: redactSecrets(probe.error ?? "unknown error", secrets) });
-        const path = await writeMcpServer(input, ctx.cwd, getConfig("HOME") ?? undefined);
+        const path = await writeMcpServer(input, ctx.cwd, undefined, getConfig("MCP_SERVERS") ?? "");
         return result("已添加 MCP " + input.name, { status: "saved", resource: "mcp", name: input.name, scope: input.scope, path, connection: "connected", tools: probe.toolNames });
       } catch (e) {
         const message = redactSecrets(e instanceof Error ? e.message : String(e), secrets);
