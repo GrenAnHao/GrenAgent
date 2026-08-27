@@ -21,6 +21,7 @@ export type TencentdbCoreRoute =
   | '/v3/core/write'
   | '/v3/core/count'
   | '/v3/chat-memory/clear'
+  | '/v3/meta/asset/create'
   | '/v3/skill/create'
   | '/v3/skill/update'
   | '/v3/skill/patch'
@@ -47,8 +48,6 @@ export interface TencentdbConnectionConfig {
   agentId: string;
   userId: string;
   taskId?: string;
-  llmBaseUrl?: string;
-  llmModel?: string;
   lastSuccessAt?: string;
 }
 
@@ -65,6 +64,14 @@ export interface TencentdbStatus {
 
 export interface TencentdbPanelOpen {
   url: string;
+}
+
+export interface TencentdbLlmSyncInput {
+  provider: string;
+  modelId: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
 }
 
 export interface WorkspaceKnowledgeAssets {
@@ -222,8 +229,6 @@ export interface SaveTencentdbConnection {
   clearGatewayApiKey?: boolean;
   userApiKey?: string;
   clearUserApiKey?: boolean;
-  llmApiKey?: string;
-  clearLlmApiKey?: boolean;
 }
 
 export const coreRequest = <T>(
@@ -237,6 +242,8 @@ export const tencentdbApi = {
   save: (input: SaveTencentdbConnection) =>
     invoke<TencentdbStatus>('tencentdb_save_connection', { input }),
   test: () => invoke<TencentdbStatus>('tencentdb_test_connection'),
+  syncLlm: (input: TencentdbLlmSyncInput) =>
+    invoke<unknown>('tencentdb_sync_llm', { input }),
   openPanel: () => invoke<TencentdbPanelOpen>('tencentdb_open_panel'),
   reloadSkills: () => invoke<void>('tencentdb_reload_skills'),
   coreRequest,
@@ -248,8 +255,14 @@ export const tencentdbApi = {
     invoke<TencentdbWikiSearchResponse>('tencentdb_search_wiki', {
       input: { assetId, query, limit },
     }),
-  listWikiPages: (assetId: string) =>
-    invoke<{ items: TencentdbWikiPage[] }>('tencentdb_list_wiki_pages', { input: { assetId } }),
+  listWikiPages: async (assetId: string): Promise<{ items: TencentdbWikiPage[] }> => {
+    const response = await invoke<unknown>('tencentdb_list_wiki_pages', { input: { assetId } });
+    if (Array.isArray(response)) return { items: response as TencentdbWikiPage[] };
+    const value = response && typeof response === 'object' ? response as Record<string, unknown> : {};
+    const data = value.data && typeof value.data === 'object' ? value.data as Record<string, unknown> : value;
+    const items = data.items ?? data.pages;
+    return { items: Array.isArray(items) ? items as TencentdbWikiPage[] : [] };
+  },
   readWikiPages: (assetId: string, refs: string[]) =>
     invoke<{ items: TencentdbWikiPageContent[] }>('tencentdb_read_wiki_pages', {
       input: { assetId, refs },

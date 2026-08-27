@@ -27,3 +27,8 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   border-color: rgba(0, 0, 0, 0.85);
   filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.5));
 }
+
+/* Mermaid 的放大预览使用 Ant Design Image Portal；加深遮罩，避免底层消息与图表重叠。 */
+.ant-image-preview-root .ant-image-preview-mask {
+  background: rgba(0, 0, 0, 0.82) !important;
+}

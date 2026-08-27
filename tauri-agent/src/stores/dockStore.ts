@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { useLayoutStore } from './layoutStore';
 
 export type DockRegion = 'right' | 'bottom';
-export type DockTabKind = 'terminal' | 'page' | 'subagent' | 'subagentLog';
+export type DockTabKind = 'terminal' | 'page' | 'subagent' | 'subagentLog' | 'projectContext';
 // 后续阶段：| 'file' | 'diff' | 'sidechat'
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
@@ -42,7 +42,11 @@ export interface SubAgentLogPayload {
   transcript?: string;
 }
 
-export type DockTabPayload = TerminalPayload | PagePayload | SubAgentPayload | SubAgentLogPayload;
+export interface ProjectContextPayload {
+  workspace: string;
+}
+
+export type DockTabPayload = TerminalPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload;
 
 export interface DockTab {
   id: string;
@@ -66,6 +70,7 @@ interface DockState {
   reorderTabs: (region: DockRegion, fromIndex: number, toIndex: number) => void;
   moveTabRegion: (id: string, targetRegion: DockRegion, insertIndex?: number) => void;
   openPage: (page: PageView) => void;
+  openProjectContext: (workspace: string) => void;
   openSubAgent: (input: SubAgentOpenInput) => void;
   openSubAgentLog: (input: SubAgentLogPayload) => void;
   resetWorkspaceTabs: () => void;
@@ -204,6 +209,33 @@ export const useDockStore = create<DockState>()(
                   closable: true,
                   order: nextOrder(s.tabs, 'right'),
                   payload: { ...page },
+                },
+              ];
+          return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
+        });
+        useLayoutStore.getState().setRightPanelOpen(true);
+      },
+
+      openProjectContext: (workspace) => {
+        const id = 'project-context';
+        set((s) => {
+          const exists = s.tabs.some((tab) => tab.id === id);
+          const tabs = exists
+            ? s.tabs.map((tab) => (
+                tab.id === id
+                  ? { ...tab, title: '项目上下文', payload: { workspace } }
+                  : tab
+              ))
+            : [
+                ...s.tabs,
+                {
+                  id,
+                  kind: 'projectContext' as const,
+                  region: 'right' as const,
+                  title: '项目上下文',
+                  closable: true,
+                  order: nextOrder(s.tabs, 'right'),
+                  payload: { workspace },
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };

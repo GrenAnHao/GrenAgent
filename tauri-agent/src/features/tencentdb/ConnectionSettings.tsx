@@ -32,7 +32,6 @@ export function ConnectionSettings() {
   const [draft, setDraft] = useState<TencentdbConnectionConfig>(DEFAULT_TENCENTDB_CONFIG);
   const [gatewayApiKey, setGatewayApiKey] = useState('');
   const [userApiKey, setUserApiKey] = useState('');
-  const [llmApiKey, setLlmApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [openingPanel, setOpeningPanel] = useState(false);
@@ -73,12 +72,10 @@ export function ConnectionSettings() {
         config: draft,
         gatewayApiKey: gatewayApiKey.trim() || undefined,
         userApiKey: userApiKey.trim() || undefined,
-        llmApiKey: llmApiKey.trim() || undefined,
       });
       setStatus(next);
       setGatewayApiKey('');
       setUserApiKey('');
-      setLlmApiKey('');
       setMessage(
         next.restartRequired
           ? '连接配置已保存；当前工作区仍使用旧连接，请重启应用后生效。密钥仅写入系统凭据库。'
@@ -170,27 +167,19 @@ export function ConnectionSettings() {
             <div className={styles.field}><div className={styles.label}>User ID</div><Input data-testid="tencentdb-user-id" disabled={draft.mode === 'local'} value={draft.userId} onChange={(e) => update('userId', e.target.value)} /></div>
           </div>
           <div className={styles.field}><div className={styles.label}>可选 Task ID</div><Input value={draft.taskId ?? ''} onChange={(e) => update('taskId', e.target.value)} placeholder="Git remote 或项目 UUID" /></div>
-          {draft.mode === 'local' ? (
-            <div className={styles.row}>
-              <div className={styles.field}><div className={styles.label}>LLM Base URL</div><Input value={draft.llmBaseUrl ?? ''} onChange={(e) => update('llmBaseUrl', e.target.value)} placeholder="https://api.openai.com/v1" /></div>
-              <div className={styles.field}><div className={styles.label}>LLM Model</div><Input data-testid="tencentdb-llm-model" value={draft.llmModel ?? ''} onChange={(e) => update('llmModel', e.target.value)} placeholder="gpt-4.1-mini" /></div>
-            </div>
-          ) : null}
         </Flexbox>
       </div>
-      <div className={styles.card}>
-        <div className={styles.title}>凭据（留空表示保留已有值）</div>
-        <Flexbox gap={12}>
-          {draft.mode === 'remote' ? (
+      {draft.mode === 'remote' ? (
+        <div className={styles.card}>
+          <div className={styles.title}>凭据（留空表示保留已有值）</div>
+          <Flexbox gap={12}>
             <div className={styles.row}>
               <div className={styles.field}><div className={styles.label}>Gateway API Key</div><Input.Password data-testid="tencentdb-gateway-key" value={gatewayApiKey} onChange={(e) => setGatewayApiKey(e.target.value)} placeholder={status?.credentialConfigured ? '已配置，输入新值可替换' : '输入远程 Gateway 密钥'} /></div>
               <div className={styles.field}><div className={styles.label}>User Key</div><Input.Password required data-testid="tencentdb-user-key" value={userApiKey} onChange={(e) => setUserApiKey(e.target.value)} placeholder={status?.userCredentialConfigured ? '已配置，输入新值可替换' : '输入 x-tdai-user-key'} /></div>
             </div>
-          ) : (
-            <div className={styles.field}><div className={styles.label}>LLM API Key</div><Input.Password value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} placeholder="MemoryKnowledge 使用的模型密钥" /></div>
-          )}
-        </Flexbox>
-      </div>
+          </Flexbox>
+        </div>
+      ) : null}
       <div className={styles.actions}>
         <Button type="primary" loading={saving} onClick={() => void save()}>保存配置</Button>
         <Button loading={testing} onClick={() => void test()}>测试连接</Button>

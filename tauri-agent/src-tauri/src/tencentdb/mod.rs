@@ -65,10 +65,6 @@ pub struct MemoryConnectionConfig {
     #[serde(default)]
     pub task_id: Option<String>,
     #[serde(default)]
-    pub llm_base_url: Option<String>,
-    #[serde(default)]
-    pub llm_model: Option<String>,
-    #[serde(default)]
     pub last_success_at: Option<String>,
 }
 
@@ -83,8 +79,6 @@ impl Default for MemoryConnectionConfig {
             agent_id: default_agent_id(),
             user_id: default_user_id(),
             task_id: None,
-            llm_base_url: None,
-            llm_model: None,
             last_success_at: None,
         }
     }
@@ -128,8 +122,6 @@ impl MemoryConnectionConfig {
         self.knowledge_endpoint = self
             .knowledge_endpoint
             .and_then(|value| optional_value(Some(value)));
-        self.llm_base_url = optional_value(self.llm_base_url);
-        self.llm_model = optional_value(self.llm_model);
 
         if self.task_id.as_deref().is_some_and(looks_like_local_path) {
             bail!("TencentDB taskId must not be a local absolute path");
@@ -187,7 +179,6 @@ impl MemoryCredentialStore {
     const LOCAL_GATEWAY_ACCOUNT: &'static str = "local-gateway-api-key";
     const REMOTE_GATEWAY_ACCOUNT: &'static str = "remote-gateway-api-key";
     const USER_ACCOUNT: &'static str = "user-api-key";
-    const LLM_ACCOUNT: &'static str = "llm-api-key";
 
     pub fn gateway_api_key(mode: &MemoryMode) -> Result<Option<String>> {
         Self::read(Self::gateway_account(mode))
@@ -211,18 +202,6 @@ impl MemoryCredentialStore {
 
     pub fn clear_user_api_key() -> Result<()> {
         Self::clear(Self::USER_ACCOUNT)
-    }
-
-    pub fn llm_api_key() -> Result<Option<String>> {
-        Self::read(Self::LLM_ACCOUNT)
-    }
-
-    pub fn set_llm_api_key(value: &str) -> Result<()> {
-        Self::write(Self::LLM_ACCOUNT, value)
-    }
-
-    pub fn clear_llm_api_key() -> Result<()> {
-        Self::clear(Self::LLM_ACCOUNT)
     }
 
     fn gateway_account(mode: &MemoryMode) -> &'static str {
@@ -381,9 +360,6 @@ impl BundledLayout {
 
 #[derive(Clone, Debug, Default)]
 pub struct LocalRuntimeConfig {
-    pub llm_api_key: Option<String>,
-    pub llm_base_url: Option<String>,
-    pub llm_model: Option<String>,
 }
 
 #[cfg(windows)]
@@ -643,7 +619,7 @@ impl MemoryRuntime {
         layout: BundledLayout,
         data_dir: &Path,
         gateway_api_key: &str,
-        config: &LocalRuntimeConfig,
+        _config: &LocalRuntimeConfig,
     ) -> Result<GatewayStatus> {
         #[cfg(windows)]
         if self.process_guard.is_none() {
@@ -716,7 +692,6 @@ impl MemoryRuntime {
             .env("TDAI_GATEWAY_API_KEY", gateway_api_key)
             .env("TDAI_DATA_DIR", &core_data_dir);
         apply_core_runtime_env(&mut core);
-        apply_llm_env(&mut core, config);
         crate::pi::guard::prepare_command(&mut core)?;
         let core =
             spawn_managed_child(&mut core).context("failed to start TencentDB MemoryCore")?;
@@ -765,7 +740,6 @@ impl MemoryRuntime {
             .env("TDAI_LOCAL_SOURCE_ALLOWLIST", &local_source_allowlist)
             .env("LLM_MODE", "custom");
         apply_knowledge_runtime_env(&mut knowledge, gateway_api_key);
-        apply_llm_env(&mut knowledge, config);
         if let Err(error) = crate::pi::guard::prepare_command(&mut knowledge) {
             let cleanup = cleanup_failed_start(&mut processes, starting).await;
             return Err(with_cleanup_error(error.into(), cleanup))
@@ -938,21 +912,6 @@ fn lifecycle_name(state: u8) -> &'static str {
     }
 }
 
-fn apply_llm_env(command: &mut Command, config: &LocalRuntimeConfig) {
-    if let Some(value) = non_empty(&config.llm_api_key) {
-        command.env("TDAI_LLM_API_KEY", value);
-        command.env("LLM_API_KEY", value);
-    }
-    if let Some(value) = non_empty(&config.llm_base_url) {
-        command.env("TDAI_LLM_BASE_URL", value);
-        command.env("LLM_BASE_URL", value);
-    }
-    if let Some(value) = non_empty(&config.llm_model) {
-        command.env("TDAI_LLM_MODEL", value);
-        command.env("LLM_MODEL", value);
-    }
-}
-
 fn apply_core_runtime_env(command: &mut Command) {
     command.env("TDAI_SKILL_ENABLED", "true");
 }
@@ -981,10 +940,6 @@ fn core_working_dir(entry: &Path) -> Result<&Path> {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .context("TencentDB MemoryCore entry has no root directory")
-}
-
-fn non_empty(value: &Option<String>) -> Option<&str> {
-    value.as_deref().filter(|value| !value.trim().is_empty())
 }
 
 pub(crate) fn available_loopback_port() -> Result<u16> {

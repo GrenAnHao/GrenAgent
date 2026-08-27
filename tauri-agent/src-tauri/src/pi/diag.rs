@@ -36,7 +36,10 @@ mod tests {
     #[test]
     fn appends_crlf_to_a_bare_line() {
         // 行尾符被插件剥掉的常见情形：补一个 \r\n。
-        assert_eq!(normalize_crlf("[agent-mode] extension loaded"), "[agent-mode] extension loaded\r\n");
+        assert_eq!(
+            normalize_crlf("[agent-mode] extension loaded"),
+            "[agent-mode] extension loaded\r\n"
+        );
     }
 
     #[test]

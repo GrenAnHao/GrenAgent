@@ -379,5 +379,7 @@ pub async fn write_temp_html(content: String) -> Result<String, String> {
     let filename = format!("gren-visual-{}.html", ms);
     let path = std::env::temp_dir().join(&filename);
     std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
-    path.to_str().ok_or_else(|| "invalid path".to_string()).map(|s| s.to_owned())
+    path.to_str()
+        .ok_or_else(|| "invalid path".to_string())
+        .map(|s| s.to_owned())
 }

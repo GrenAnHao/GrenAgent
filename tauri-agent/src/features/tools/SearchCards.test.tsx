@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
-import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
+import { GlobCard, GrepCard } from './SearchCards';
 
 afterEach(cleanup);
 
@@ -36,25 +36,5 @@ describe('GlobCard', { timeout: 30_000 }, () => {
     expect(screen.getByTestId('card-glob')).toBeTruthy();
     expect(container.textContent).toContain('a.ts');
     expect(container.textContent).toContain('b.tsx');
-  });
-});
-
-describe('CodeSearchCard', { timeout: 30_000 }, () => {
-  it('展示命中代码块 file:行范围 + 分数', () => {
-    const result = {
-      content: [{ type: 'text', text: '1 result(s):' }],
-      details: { hits: [{ file: '/proj/a.ts', startLine: 3, endLine: 20, score: 0.91 }] },
-    };
-    const { container } = wrap(<CodeSearchCard result={result} />);
-    expect(screen.getByTestId('card-code_search')).toBeTruthy();
-    expect(container.textContent).toContain('a.ts:3-20');
-    expect(container.textContent).toContain('0.91');
-  });
-
-  it('未配置时显示提示文本', () => {
-    const { container } = wrap(
-      <CodeSearchCard result={textResult('Code search disabled: configure an embedding provider.')} />,
-    );
-    expect(container.textContent).toContain('Code search disabled');
   });
 });

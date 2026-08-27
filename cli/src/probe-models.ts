@@ -7,6 +7,8 @@ export interface ModelRow {
   provider: string;
   id: string;
   name: string;
+  api?: string;
+  baseUrl?: string;
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
@@ -26,6 +28,8 @@ export function collectModels(registry: RegistryLike): ModelRow[] {
     provider: m.provider,
     id: m.id,
     name: m.name ?? m.id,
+    ...(m.api ? { api: m.api } : {}),
+    ...(m.baseUrl ? { baseUrl: m.baseUrl } : {}),
     contextWindow: m.contextWindow ?? 0,
     maxTokens: m.maxTokens ?? 0,
     reasoning: m.reasoning ?? false,

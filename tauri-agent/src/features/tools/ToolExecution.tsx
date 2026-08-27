@@ -8,7 +8,7 @@ import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { InlineQuestionCard } from '../chat/InlineQuestionCard';
 import { AnsweredQuestionsCard } from './AnsweredQuestionsCard';
 import { LazyHighlighter } from './LazyHighlighter';
-import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
+import { GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
 import { renderExtensionCard } from './extensionCards';
 import {
@@ -22,7 +22,7 @@ import {
   stringifyJson,
   toolMeta,
 } from './toolUtils';
-import { parseCodeSearchHits, parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
+import { parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
 
 interface ToolExecutionProps {
   toolName: string;
@@ -113,19 +113,6 @@ function toolTitle(
       ),
     };
   }
-  if (lname === 'code_search') {
-    const n = status === 'running' ? undefined : parseCodeSearchHits(result).length;
-    return {
-      icon: Search,
-      name: (
-        <>
-          代码检索 {queryFrag(getArgString(args, 'query'), lname)}
-          {n != null ? <span className={c.searchCount}> · {n} 处</span> : null}
-        </>
-      ),
-    };
-  }
-
   // bash 类：命令进 args（去掉终端卡的 $ 提示符与命令重复）。
   if (lname === 'bash' || lname === 'shell' || lname === 'run_terminal_cmd') {
     return { icon: toolMeta(toolName).icon, name: toolName, args: getArgString(args, 'command') || undefined };
@@ -244,11 +231,6 @@ function ToolDetail({
     if (status === 'running' && !text) return <CodeSurface>搜索中…</CodeSurface>;
     return <GlobCard result={result} />;
   }
-  if (name === 'code_search') {
-    if (status === 'running' && !text) return <CodeSurface>搜索中…</CodeSurface>;
-    return <CodeSearchCard result={result} />;
-  }
-
   if (name === 'ls' || name === 'list_dir') {
     return <TerminalOutput text={text || stringifyJson(result)} isError={isError} />;
   }

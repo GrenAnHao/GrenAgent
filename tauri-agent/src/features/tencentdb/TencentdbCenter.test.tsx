@@ -14,5 +14,7 @@ describe('TencentdbCenter', () => {
     render(<TencentdbCenter />);
     expect(screen.getByTestId('connection-settings')).toBeTruthy();
     expect(screen.queryByText('迁移向导')).toBeNull();
+    expect(screen.getByText('知识注入规则')).toBeTruthy();
+    expect(screen.queryByText('Agent 装备')).toBeNull();
   });
 });

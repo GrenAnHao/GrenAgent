@@ -2,7 +2,7 @@ import { createStaticStyles, cssVar } from 'antd-style';
 import FileIcon from '../../components/FileIcon';
 import { memo } from 'react';
 import { extractText } from './toolUtils';
-import { parseCodeSearchHits, parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
+import { parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
@@ -163,36 +163,6 @@ export const GlobCard = memo(function GlobCard({ result }: { result: unknown }) 
         );
       })}
       {truncated && <div className={styles.more}>结果较多，已截断显示</div>}
-    </div>
-  );
-});
-
-/** code_search 语义检索卡：命中代码块 file:行范围 + 相关度分数。 */
-export const CodeSearchCard = memo(function CodeSearchCard({ result }: { result: unknown }) {
-  const hits = parseCodeSearchHits(result);
-  if (hits.length === 0) {
-    return <div className={styles.empty}>{extractText(result).trim() || '未找到结果'}</div>;
-  }
-  return (
-    <div className={styles.wrap} data-testid="card-code_search">
-      {hits.map((h, i) => {
-        const { dir, name } = splitPath(h.file);
-        const range =
-          h.startLine != null
-            ? `:${h.startLine}${h.endLine != null && h.endLine !== h.startLine ? `-${h.endLine}` : ''}`
-            : '';
-        return (
-          <div className={styles.row} key={i} title={h.file}>
-            <FileIcon fileName={name} size={13} variant="raw" />
-            <span className={styles.fileName}>
-              {name}
-              {range}
-            </span>
-            {dir && <span className={styles.dir}>{dir}</span>}
-            {h.score != null && <span className={styles.count}>{h.score.toFixed(2)}</span>}
-          </div>
-        );
-      })}
     </div>
   );
 });

@@ -58,6 +58,16 @@ function maskSecret(_value: string): string {
   return replaceOnce(source, needle, replacement, "MemoryPanel metadata log redaction");
 }
 
+export function patchPanelKnowledgeBaseUrl(source) {
+  if (source.includes("this.cfg.baseUrl.replace(/\\/v3\\/?$/, '')")) return source;
+  const needle = "const resp = await fetch(`${this.cfg.baseUrl}${path}`";
+  const replacement = [
+    "const baseUrl = this.cfg.baseUrl.replace(/\\/v3\\/?$/, '');",
+    "      const resp = await fetch(`${baseUrl}${path}`",
+  ].join("\n");
+  return replaceOnce(source, needle, replacement, "MemoryPanel Knowledge endpoint normalization");
+}
+
 export function patchPanelInstanceRegistry(source) {
   if (source.includes("TDAI_PANEL_INSTANCES_JSON")) return source;
   const needle = /static load\(configPath[^)]*\)[^{]*\{/;
@@ -325,6 +335,77 @@ export function patchKnowledgeApiAuth(source) {
     '  const api = new Hono();\n  api.use("*", knowledgeApiAuth());',
     "MemoryKnowledge protected routes",
   );
+}
+
+/** Persist the Pi-selected model/protocol in the per-service Knowledge binding. */
+export function patchKnowledgeLlmBinding(source) {
+  let patched = source;
+  if (patched.includes('apiKey: text("api_key"),') && !patched.includes('model: text("model")')) {
+    patched = patched.replace(
+      'apiKey: text("api_key"),',
+      'apiKey: text("api_key"),\n  model: text("model"),\n  protocol: text("protocol"),',
+    );
+  }
+  if (patched.includes("model          TEXT,") && !patched.includes("protocol       TEXT")) {
+    patched = patched.replace("model          TEXT,", "model          TEXT,\n      protocol       TEXT,");
+  }
+  if (patched.includes('addColumnIfMissing(raw, "knowledge_code_graph", "service_url", "TEXT");') && !patched.includes('"llm_binding", "protocol"')) {
+    patched = patched.replace(
+      'addColumnIfMissing(raw, "knowledge_code_graph", "service_url", "TEXT");',
+      'addColumnIfMissing(raw, "knowledge_code_graph", "service_url", "TEXT");\n  addColumnIfMissing(raw, "llm_binding", "protocol", "TEXT");',
+    );
+  }
+  if (patched.includes('        baseUrl: input.base_url ?? null,') && !patched.includes('        model: input.model ?? null,')) {
+    patched = patched.replace('        baseUrl: input.base_url ?? null,', '        baseUrl: input.base_url ?? null,\n        model: input.model ?? null,\n        protocol: input.protocol ?? null,');
+  }
+  if (patched.includes('            baseUrl: values.baseUrl,') && !patched.includes('            model: values.model,')) {
+    patched = patched.replace('            baseUrl: values.baseUrl,', '            baseUrl: values.baseUrl,\n            model: values.model,\n            protocol: values.protocol,');
+  }
+  if (patched.includes('    baseUrl: r.baseUrl ?? null,') && !patched.includes('    model: r.model ?? null,')) {
+    patched = patched.replace('    baseUrl: r.baseUrl ?? null,', '    baseUrl: r.baseUrl ?? null,\n    model: r.model ?? null,\n    protocol: r.protocol === "anthropic" ? "anthropic" : r.protocol === "openai" ? "openai" : null,');
+  }
+  if (patched.includes('  base_url: string | null;') && !patched.includes('  model: string | null;')) {
+    patched = patched.replace(
+      '  base_url: string | null;',
+      '  base_url: string | null;\n  model: string | null;\n  protocol: "openai" | "anthropic" | null;',
+    );
+  }
+  if (patched.includes('  base_url?: string | null;') && !patched.includes('  model?: string | null;')) {
+    patched = patched.replace(
+      '  base_url?: string | null;',
+      '  base_url?: string | null;\n  model?: string | null;\n  protocol?: "openai" | "anthropic" | null;',
+    );
+  }
+  if (patched.includes('baseUrl: input.base_url ?? null,') && !patched.includes('model: input.model ?? null,')) {
+    patched = patched.replace(
+      'baseUrl: input.base_url ?? null,',
+      'baseUrl: input.base_url ?? null,\n        model: input.model ?? null,\n        protocol: input.protocol ?? null,',
+    );
+  }
+  patched = patched.replace(/model: fallback\.model,/g, 'model: binding.model || fallback.model,');
+  patched = patched.replace(/protocol: fallback\.protocol,/g, 'protocol: binding.protocol || fallback.protocol,');
+  patched = patched.replace('const model = fallback.model;', 'const model = binding?.model || fallback.model;');
+  patched = patched.replace('const protocol = fallback.protocol;', 'const protocol = binding?.protocol || fallback.protocol;');
+  // Route/store source: parse and forward the new optional fields.
+  if (patched.includes('const baseUrl = asOptString(body.base_url);') && !patched.includes('const model = asOptString(body.model);')) {
+    patched = patched.replace(
+      'const baseUrl = asOptString(body.base_url);',
+      'const baseUrl = asOptString(body.base_url);\n    const model = asOptString(body.model);\n    const protocol = body.protocol === "anthropic" ? "anthropic" : body.protocol === "openai" ? "openai" : undefined;',
+    );
+  }
+  if (patched.includes('base_url: baseUrl ?? null,') && !patched.includes('      model,')) {
+    patched = patched.replace('base_url: baseUrl ?? null,', 'base_url: baseUrl ?? null,\n      model,\n      protocol,');
+  }
+  if (patched.includes('baseUrl: r.baseUrl ?? null,') && !patched.includes('model: r.model ?? null,')) {
+    patched = patched.replace('baseUrl: r.baseUrl ?? null,', 'baseUrl: r.baseUrl ?? null,\n    model: r.model ?? null,\n    protocol: r.protocol === "anthropic" ? "anthropic" : r.protocol === "openai" ? "openai" : null,');
+  }
+  if (patched.includes('base_url: r.base_url,') && !patched.includes('model: r.model,')) {
+    patched = patched.replace(
+      'base_url: r.base_url,',
+      'base_url: r.base_url,\n      model: r.model,\n      protocol: r.protocol,',
+    );
+  }
+  return patched;
 }
 
 export function patchKnowledgeMcpHttpClient(source) {

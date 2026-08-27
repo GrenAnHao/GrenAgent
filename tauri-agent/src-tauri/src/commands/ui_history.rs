@@ -99,7 +99,10 @@ mod tests {
     fn write_then_read_roundtrip() {
         let dir = tmp_dir();
         write_history_at(&dir, "sess-1", "{\"a\":1}\n{\"b\":2}\n").unwrap();
-        assert_eq!(read_history_at(&dir, "sess-1").unwrap(), "{\"a\":1}\n{\"b\":2}\n");
+        assert_eq!(
+            read_history_at(&dir, "sess-1").unwrap(),
+            "{\"a\":1}\n{\"b\":2}\n"
+        );
         fs::remove_dir_all(dir).ok();
     }
 
@@ -150,7 +153,10 @@ mod tests {
         }
         h.join().unwrap();
         let got = read_history_at(&dir, "s").unwrap();
-        assert!(got == "AAAA" || got == "BBBB", "unexpected content: {got:?}");
+        assert!(
+            got == "AAAA" || got == "BBBB",
+            "unexpected content: {got:?}"
+        );
         fs::remove_dir_all(dir).ok();
     }
 

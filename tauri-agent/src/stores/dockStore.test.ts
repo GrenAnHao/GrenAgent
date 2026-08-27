@@ -27,6 +27,24 @@ describe('dockStore', () => {
     expect((tabs[0].payload as { content: string }).content).toBe('second');
   });
 
+  it('openProjectContext reuses one right tab and updates it to the current workspace', () => {
+    const store = useDockStore.getState();
+
+    store.openProjectContext('/repo-a');
+    store.openProjectContext('/repo-b');
+
+    const tabs = useDockStore.getState().tabs.filter((tab) => tab.id === 'project-context');
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({
+      kind: 'projectContext',
+      region: 'right',
+      title: '项目上下文',
+      payload: { workspace: '/repo-b' },
+    });
+    expect(useDockStore.getState().activeByRegion.right).toBe('project-context');
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
   it('closeTab activates the left neighbor of the closed active tab', () => {
     const s = useDockStore.getState();
     s.openPage({ url: 'https://1', content: '' });

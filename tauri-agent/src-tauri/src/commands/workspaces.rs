@@ -296,7 +296,8 @@ mod tests {
 
     #[test]
     fn prune_missing_works_root_is_noop() {
-        let missing = std::env::temp_dir().join(format!("pi-prune-missing-{}", uuid::Uuid::new_v4()));
+        let missing =
+            std::env::temp_dir().join(format!("pi-prune-missing-{}", uuid::Uuid::new_v4()));
         assert_eq!(prune_orphans_in(&missing, &[], &[]), 0);
     }
 }

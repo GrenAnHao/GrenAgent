@@ -10,6 +10,127 @@ export const wsStyles = createStaticStyles(({ css }) => ({
 
     margin-bottom: 8px;
   `,
+  projectContextPanel: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    background: ${cssVar.colorBgContainer};
+  `,
+  projectContextPanelHeader: css`
+    display: grid;
+    gap: 2px;
+    padding: 14px 16px;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    font-size: 14px;
+    color: ${cssVar.colorText};
+  `,
+  projectContextPanelPath: css`
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 400;
+    color: ${cssVar.colorTextTertiary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  projectContextPanelMessage: css`
+    padding: 16px;
+    color: ${cssVar.colorError};
+  `,
+  projectContextTabList: css`
+    display: flex;
+    gap: 2px;
+
+    padding: 8px 12px 0;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    overflow-x: auto;
+  `,
+  projectContextTab: css`
+    flex: none;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+
+    font-size: 12.5px;
+    color: ${cssVar.colorTextSecondary};
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      color: ${cssVar.colorText};
+    }
+
+    &:focus-visible {
+      outline: 2px solid ${cssVar.colorPrimaryBorder};
+      outline-offset: -2px;
+    }
+  `,
+  projectContextTabActive: css`
+    border-bottom-color: ${cssVar.colorPrimary};
+    color: ${cssVar.colorPrimary};
+    font-weight: 600;
+  `,
+  projectContextTabPanel: css`
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    overflow: auto;
+    font-size: 13px;
+    color: ${cssVar.colorTextSecondary};
+  `,
+  projectContextStack: css`
+    display: grid;
+    gap: 10px;
+  `,
+  projectContextOverview: css`
+    display: grid;
+    gap: 8px;
+
+    > div {
+      display: grid;
+      gap: 2px;
+      padding: 10px;
+      border: 1px solid ${cssVar.colorBorderSecondary};
+      border-radius: 6px;
+    }
+
+    span { color: ${cssVar.colorTextTertiary}; font-size: 12px; }
+  `,
+  projectContextResult: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+
+    > div { display: grid; gap: 3px; min-width: 0; }
+    span { color: ${cssVar.colorTextTertiary}; font-size: 12px; }
+  `,
+  projectContextSearch: css`
+    display: flex;
+    gap: 8px;
+  `,
+  projectContextCode: css`
+    margin: 0;
+    padding: 10px;
+    border-radius: 6px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: ${cssVar.colorText};
+    background: ${cssVar.colorFillQuaternary};
+  `,
+  projectContextEmpty: css`
+    color: ${cssVar.colorTextTertiary};
+  `,
+  projectContextNotice: css`
+    padding: 8px 10px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 6px;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 12px;
+  `,
   chip: css`
     display: inline-flex;
     gap: 6px;

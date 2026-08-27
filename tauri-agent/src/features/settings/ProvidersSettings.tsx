@@ -589,6 +589,13 @@ export function ProvidersSettings() {
                         variant="filled"
                         onChange={(e) => patchActive({ baseUrl: e.target.value })}
                       />
+                      {active.baseUrl &&
+                        (active.api === 'openai-completions' || active.api === 'openai-responses') &&
+                        !/\/v\d+[a-z]*\/?$/i.test(active.baseUrl) && (
+                          <div style={{ fontSize: 12, color: cssVar.colorWarning, marginTop: 4 }}>
+                            OpenAI 兼容接口通常需要以 /v1 结尾，例如 {active.baseUrl.replace(/\/+$/, '')}/v1
+                          </div>
+                        )}
                     </div>
                   )}
                 </div>
