@@ -31,6 +31,11 @@ export interface TencentDbSecretStore {
   clear(key: TencentDbSecretKey): Promise<void>;
 }
 
+export interface TencentDbConfigStore {
+  read(): Promise<Partial<TencentDbConnectionConfig> | null>;
+  write(config: TencentDbConnectionConfig): Promise<void>;
+}
+
 export type TencentDbSecretKey = 'localGatewayApiKey' | 'remoteGatewayApiKey' | 'userApiKey';
 
 export interface TencentDbStatus {
@@ -46,6 +51,7 @@ export interface TencentDbStatus {
 
 export interface TencentDbServiceOptions {
   secrets?: TencentDbSecretStore;
+  configStore?: TencentDbConfigStore;
   layout?: TencentDbLayout;
   memoryRuntime?: TencentDbRuntime;
   panelRuntime?: TencentDbPanelRuntime;
@@ -72,6 +78,7 @@ const memorySecrets: TencentDbSecretStore = {
 export class TencentDbService {
   private config: TencentDbConnectionConfig = { ...DEFAULT_CONFIG };
   private readonly secrets: TencentDbSecretStore;
+  private readonly configStore?: TencentDbConfigStore;
   private readonly memoryRuntime?: TencentDbRuntime;
   private readonly panelRuntime?: TencentDbPanelRuntime;
   private readonly dataDir: string;
@@ -80,11 +87,17 @@ export class TencentDbService {
 
   constructor(options: TencentDbServiceOptions = {}) {
     this.secrets = options.secrets ?? memorySecrets;
+    this.configStore = options.configStore;
     this.layout = options.layout;
     this.memoryRuntime = options.memoryRuntime;
     this.panelRuntime = options.panelRuntime;
     this.dataDir = options.dataDir ?? join(process.cwd(), '.runtime', 'tencentdb-memory');
     this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  async load(): Promise<void> {
+    const stored = await this.configStore?.read();
+    if (stored) this.config = normalizeConfig({ ...DEFAULT_CONFIG, ...stored } as TencentDbConnectionConfig);
   }
 
   getConfig(): TencentDbConnectionConfig {
@@ -118,6 +131,7 @@ export class TencentDbService {
     if (input.clearUserApiKey) await this.secrets.clear('userApiKey');
     if (input.userApiKey?.trim()) await this.secrets.set('userApiKey', input.userApiKey.trim());
     this.config = config;
+    await this.configStore?.write(config);
     return this.status();
   }
 

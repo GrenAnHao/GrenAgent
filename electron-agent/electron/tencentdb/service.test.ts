@@ -33,4 +33,19 @@ describe('TencentDB service', () => {
       },
     })).rejects.toThrow('TencentDB remote Knowledge endpoint is required');
   });
+
+  it('loads and persists the connection config through the host store', async () => {
+    let saved: Record<string, unknown> | null = null;
+    const service = new TencentDbService({
+      configStore: {
+        read: async () => ({ mode: 'remote', endpoint: 'https://gateway.example', knowledgeEndpoint: 'https://knowledge.example/v3', serviceId: 'service-a', teamId: 'team-a', agentId: 'agent-a', userId: 'user-a' }),
+        write: async (config) => { saved = config; },
+      },
+      secrets: secrets({ remoteGatewayApiKey: 'gateway', userApiKey: 'user' }),
+    });
+    await service.load();
+    expect(service.getConfig().serviceId).toBe('service-a');
+    await service.saveConnection({ config: { ...service.getConfig(), userId: 'user-b' } });
+    expect(saved).toEqual(expect.objectContaining({ userId: 'user-b' }));
+  });
 });
