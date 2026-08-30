@@ -100,9 +100,26 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
 }
 
 .gren-browser-content {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
+}
+
+.gren-browser-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ant-color-text-secondary, #667085);
+  background: var(--ant-color-bg-container, #fff);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.gren-browser-error {
+  color: var(--ant-color-error, #d92d20);
 }
 
 .gren-browser-content webview {
