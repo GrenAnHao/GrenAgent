@@ -57,6 +57,7 @@ if (!process.env.VITEST) {
       memoryRuntime,
       panelRuntime,
       dataDir: join(app.getPath('userData'), 'tencentdb-memory'),
+      runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
       configStore: new JsonTencentDbConfigStore(join(app.getPath('userData'), 'tencentdb-config.json')),
       secrets: new SafeTencentDbSecretStore(join(app.getPath('userData'), 'tencentdb-credentials.json')),
     });

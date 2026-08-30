@@ -132,6 +132,7 @@ export class TencentDbService {
 
   async saveConnection(input: SaveTencentDbConnection): Promise<TencentDbStatus> {
     const config = normalizeConfig(input.config);
+    config.lastSuccessAt = undefined;
     validateConfig(config);
     const gatewayKeyName: TencentDbSecretKey = config.mode === 'local' ? 'localGatewayApiKey' : 'remoteGatewayApiKey';
     if (input.clearGatewayApiKey) await this.secrets.clear(gatewayKeyName);
