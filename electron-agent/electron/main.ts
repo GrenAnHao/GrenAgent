@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { browserWindowOptions } from "./mainConfig";
 import { SettingsService } from "./app/settingsService";
+import { WorkspaceService } from "./app/workspaceService";
 import { registerIpcHandlers } from "./ipc/register";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { TencentDbLayout } from "./tencentdb/layout";
@@ -42,6 +43,7 @@ if (!process.env.VITEST) {
     await tencentdb.load();
     registerIpcHandlers({
       settings: new SettingsService(app.getPath('userData')),
+      workspace: new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
       tencentdb,
     });
     app.on('before-quit', () => {

@@ -1,12 +1,14 @@
 import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { SettingsService } from '../app/settingsService';
+import type { WorkspaceService } from '../app/workspaceService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
 export interface IpcServices {
   settings?: SettingsService;
+  workspace?: WorkspaceService;
   tencentdb?: TencentDbService;
 }
 
@@ -45,6 +47,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   ipcMain.handle(IPC_CHANNELS.windowClose, (event) => event.sender.getOwnerBrowserWindow()?.close());
 
   if (services.settings) registerSettingsCommands(services.settings);
+  if (services.workspace) registerWorkspaceCommands(services.workspace);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
@@ -60,6 +63,20 @@ function registerSettingsCommands(service: SettingsService): void {
     }
     await service.replace(settings as Record<string, string>);
   });
+}
+
+function registerWorkspaceCommands(service: WorkspaceService): void {
+  registerCommand('get_works_dir', () => service.getWorksDir());
+  registerCommand('create_conversation', () => service.createConversation());
+  registerCommand('prune_orphan_conversations', (_event, args) => {
+    const keep = args.keep;
+    if (!Array.isArray(keep) || !keep.every((path) => typeof path === 'string')) {
+      throw new Error('Keep must be a string array');
+    }
+    return service.pruneOrphanConversations(keep);
+  });
+  registerCommand('list_all_sessions', () => service.listAllSessions());
+  registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
 }
 
 function registerTencentDbCommands(service: TencentDbService): void {
@@ -82,4 +99,10 @@ function readInput(args: Record<string, unknown>): any {
   const input = args.input;
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Command input must be an object');
   return input;
+}
+
+function readString(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
+  return value;
 }
