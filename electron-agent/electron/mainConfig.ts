@@ -8,7 +8,7 @@ export const browserWindowOptions: BrowserWindowConstructorOptions = {
   minHeight: 520,
   frame: false,
   webPreferences: {
-    preload: join(__dirname, "../preload/preload.mjs"),
+    preload: join(__dirname, "../preload/preload.js"),
     webviewTag: true,
     contextIsolation: true,
     nodeIntegration: false,
