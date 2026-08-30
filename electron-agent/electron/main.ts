@@ -3,8 +3,12 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { browserWindowOptions } from "./mainConfig";
 import { SettingsService } from "./app/settingsService";
+import { PiRuntimeService } from "./app/piRuntimeService";
 import { WorkspaceService } from "./app/workspaceService";
 import { registerIpcHandlers } from "./ipc/register";
+import { IPC_CHANNELS } from "./ipc/contracts";
+import { PiManager } from "./pi/manager";
+import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { TencentDbLayout } from "./tencentdb/layout";
 import { TencentDbRuntime } from "./tencentdb/runtime";
@@ -41,18 +45,43 @@ if (!process.env.VITEST) {
       secrets: new SafeTencentDbSecretStore(join(app.getPath('userData'), 'tencentdb-credentials.json')),
     });
     await tencentdb.load();
+    const settings = new SettingsService(app.getPath('userData'));
+    const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
+    const pi = new PiManager(
+      resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+      {
+        onEvent: (workspace, event) => broadcastPiEvent('pi://event', { workspace, event }),
+        onUiRequest: (workspace, request) => broadcastPiEvent('pi://ui-request', { workspace, request }),
+        onExit: (workspace, code) => broadcastPiEvent('pi://exit', { workspace, code }),
+        onLog: (message) => console.error(message),
+      },
+    );
     registerIpcHandlers({
-      settings: new SettingsService(app.getPath('userData')),
-      workspace: new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
+      settings,
+      pi: new PiRuntimeService({
+        manager: pi,
+        processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+        agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+        runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
+        resolveWorkspace: (path) => workspace.ensureWorkspace(path),
+      }),
+      workspace,
       tencentdb,
     });
     app.on('before-quit', () => {
+      void pi.closeAll();
       void panelRuntime.shutdown();
       void memoryRuntime.stop();
     });
     createWindow();
   });
   app.on("window-all-closed", () => app.quit());
+}
+
+function broadcastPiEvent(event: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(`${IPC_CHANNELS.eventPrefix}${event}`, payload);
+  }
 }
 
 class JsonTencentDbConfigStore implements TencentDbConfigStore {

@@ -62,4 +62,11 @@ describe('WorkspaceService', () => {
     await expect(service.pruneOrphanConversations([])).resolves.toBe(0);
     await expect(service.listSessions(conversation.cwd)).resolves.toEqual([]);
   });
+
+  it('recreates a missing conversation directory below works', async () => {
+    const { service } = await createService();
+    const workspace = join(await service.getWorksDir(), 'recreated');
+
+    await expect(service.ensureWorkspace(workspace)).resolves.toBe(workspace);
+  });
 });

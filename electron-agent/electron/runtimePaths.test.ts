@@ -28,4 +28,17 @@ describe('runtime paths', () => {
     });
     expect(packageDir.replaceAll('\\', '/')).toBe('C:/app/resources/pi');
   });
+
+  it('uses Bun installed under the user profile when it is absent from PATH', () => {
+    const process = resolvePiProcess({
+      appPath: 'C:/app/electron-agent',
+      resourcesPath: 'C:/app/resources',
+      isPackaged: false,
+      platform: 'win32',
+      env: { USERPROFILE: 'C:/Users/example' },
+      exists: (path) => path.replaceAll('\\', '/') === 'C:/Users/example/.bun/bin/bun.exe',
+    });
+
+    expect(process.command.replaceAll('\\', '/')).toBe('C:/Users/example/.bun/bin/bun.exe');
+  });
 });

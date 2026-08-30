@@ -34,6 +34,18 @@ export class WorkspaceService {
     return { cwd };
   }
 
+  async ensureWorkspace(workspace: string): Promise<string> {
+    try {
+      return displayPath(await realpath(workspace));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const worksDir = await this.getWorksDir();
+      if (!isDirectChild(worksDir, workspace)) throw error;
+      await mkdir(workspace, { recursive: true });
+      return displayPath(await realpath(workspace));
+    }
+  }
+
   async listAllSessions(): Promise<SessionInfo[]> {
     const files = await collectJsonlFiles(this.sessionsDir);
     const sessions = (await Promise.all(files.map((path) => readSession(path)))).filter((session): session is SessionInfo => session !== null);
