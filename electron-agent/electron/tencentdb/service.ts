@@ -208,6 +208,33 @@ export class TencentDbService {
     return envelope.data ?? {};
   }
 
+  async knowledgeRequest(route: string, body: Record<string, unknown> = {}): Promise<unknown> {
+    if (!/^\/?(?:v3\/)?[a-z0-9/_-]+$/i.test(route)) throw new Error(`TencentDB Knowledge route is not allowed: ${route}`);
+    const credentials = await this.resolveCredentials();
+    let endpoint = this.config.knowledgeEndpoint;
+    if (this.config.mode === 'local') {
+      if (!this.memoryRuntime) throw new Error('TencentDB runtime is unavailable');
+      this.lastLocalStatus = await this.memoryRuntime.startLocal({ dataDir: this.dataDir, gatewayApiKey: credentials.gatewayApiKey });
+      endpoint = this.lastLocalStatus.knowledgeEndpoint;
+    }
+    if (!endpoint?.trim()) throw new Error('TencentDB Knowledge endpoint is unavailable');
+    const base = endpoint.replace(/\/$/, '').replace(/\/v3$/i, '');
+    const response = await this.fetchImpl(`${base}/v3/${route.replace(/^\/?(?:v3\/)?/i, '')}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${credentials.gatewayApiKey}`,
+        'content-type': 'application/json',
+        'x-tdai-service-id': this.config.serviceId,
+        'x-tdai-user-key': credentials.userKey,
+      },
+      body: JSON.stringify(body),
+    });
+    const envelope = await response.json() as { code?: unknown; message?: unknown; data?: unknown };
+    if (envelope.code !== 0) throw new Error(`TencentDB Knowledge request failed (${response.status}): ${String(envelope.message ?? 'unknown error')}`);
+    if (envelope.data === undefined) throw new Error('TencentDB Knowledge returned no data');
+    return envelope.data;
+  }
+
   private readonly layout?: TencentDbLayout;
 }
 

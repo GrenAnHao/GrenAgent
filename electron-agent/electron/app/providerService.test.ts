@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderService } from './providerService';
 
 const directories: string[] = [];
@@ -41,5 +41,15 @@ describe('ProviderService', () => {
     });
 
     await expect(service.listModels()).resolves.toEqual([{ provider: 'openai', id: 'gpt-5' }]);
+  });
+
+  it('discovers OpenAI-compatible model ids from the provider endpoint', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 }));
+    const service = new ProviderService({ agentDir: 'C:/agent', fetch });
+
+    await expect(service.fetchModels('https://provider.example', 'secret', 'openai-completions')).resolves.toEqual(['model-a']);
+    expect(fetch).toHaveBeenCalledWith('https://provider.example/v1/models', expect.objectContaining({
+      headers: { authorization: 'Bearer secret' },
+    }));
   });
 });

@@ -11,10 +11,15 @@ export interface ProviderServiceOptions {
   agentDir: string;
   probeModels?: () => Promise<string>;
   refresh?: () => Promise<RefreshResult>;
+  fetch?: typeof fetch;
 }
 
 export class ProviderService {
-  constructor(private readonly options: ProviderServiceOptions) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(private readonly options: ProviderServiceOptions) {
+    this.fetchImpl = options.fetch ?? fetch;
+  }
 
   async getConfig(): Promise<{ modelsJson: string | null; authJson: string | null; agentDir: string }> {
     return {
@@ -47,6 +52,43 @@ export class ProviderService {
     }
     return output.models;
   }
+
+  async fetchModels(baseUrl: string, apiKey: string, api: string): Promise<string[]> {
+    const base = baseUrl.trim().replace(/\/$/, '');
+    const key = apiKey.trim();
+    if (!base) throw new Error('Base URL is required');
+    if (!key) throw new Error('API Key is required');
+    if (api === 'anthropic-messages') {
+      const data = await this.getJson(`${base.endsWith('/v1') ? base : `${base}/v1`}/models`, {
+        'x-api-key': key, 'anthropic-version': '2023-06-01',
+      });
+      return readModelIds(data);
+    }
+    if (api === 'google-generative-ai') {
+      const data = await this.getJson(`${base.endsWith('/v1beta') || base.endsWith('/v1') ? base : `${base}/v1beta`}/models?key=${encodeURIComponent(key)}`);
+      if (!data || typeof data !== 'object' || !Array.isArray((data as Record<string, unknown>).models)) throw new Error('Provider response does not contain models');
+      return (data as { models: Array<{ name?: unknown }> }).models.flatMap(({ name }) => typeof name === 'string' ? [name.replace(/^models\//, '')] : []);
+    }
+    const candidates = base.endsWith('/v1') ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`];
+    let lastError: unknown;
+    for (const url of candidates) {
+      try { return readModelIds(await this.getJson(url, { authorization: `Bearer ${key}` })); }
+      catch (error) { lastError = error; }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Provider model request failed');
+  }
+
+  private async getJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
+    const response = await this.fetchImpl(url, { headers });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300).trim()}`);
+    try { return JSON.parse(text); } catch { throw new Error(`Provider response is not valid JSON: ${text.slice(0, 300).trim()}`); }
+  }
+}
+
+function readModelIds(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as Record<string, unknown>).data)) throw new Error('Provider response does not contain data models');
+  return (value as { data: Array<{ id?: unknown }> }).data.flatMap(({ id }) => typeof id === 'string' ? [id] : []);
 }
 
 function validateJson(content: string, file: string): void {

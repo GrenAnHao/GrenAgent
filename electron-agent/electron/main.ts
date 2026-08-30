@@ -16,6 +16,8 @@ import { UiHistoryService } from "./app/uiHistoryService";
 import { WorkspaceApprovalService } from "./app/workspaceApprovalService";
 import { GitService } from "./app/gitService";
 import { TerminalService } from "./app/terminalService";
+import { CreateService } from "./app/createService";
+import { TempHtmlService } from "./app/tempHtmlService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -101,6 +103,8 @@ if (!process.env.VITEST) {
       workspaceApproval: new WorkspaceApprovalService(app.getPath('userData')),
       git: new GitService(),
       terminal: new TerminalService((event, payload) => broadcastPiEvent(event, payload)),
+      create: new CreateService(),
+      tempHtml: new TempHtmlService(app.getPath('temp')),
       tencentdb,
     });
     app.on('before-quit', () => {
