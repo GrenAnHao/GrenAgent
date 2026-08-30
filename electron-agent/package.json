@@ -20,6 +20,8 @@
     "@lexical/utils": "0.42.0",
     "@lobehub/charts": "^5.4.0",
     "@lobehub/editor": "^4.24.1",
+    "@lobehub/fluent-emoji": "^4.1.1",
+    "@lobehub/icons": "^5.16.0",
     "@lobehub/ui": "^5.32.7",
     "antd": "^6.6.1",
     "antd-style": "^4.1.0",
@@ -53,7 +55,7 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   }
 }

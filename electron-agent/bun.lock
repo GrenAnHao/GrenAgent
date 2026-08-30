@@ -12,6 +12,8 @@
         "@lexical/utils": "0.42.0",
         "@lobehub/charts": "^5.4.0",
         "@lobehub/editor": "^4.24.1",
+        "@lobehub/fluent-emoji": "^4.1.1",
+        "@lobehub/icons": "^5.16.0",
         "@lobehub/ui": "^5.32.7",
         "antd": "^6.6.1",
         "antd-style": "^4.1.0",
@@ -47,8 +49,8 @@
     },
   },
   "overrides": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
