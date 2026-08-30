@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, extname, join } from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -52,6 +52,15 @@ export interface TencentDbStatus {
   userCredentialConfigured: boolean;
   lastSuccessAt?: string;
   restartRequired?: boolean;
+}
+
+export interface WorkspaceKnowledgeAssets {
+  codeGraphId?: string;
+  wikiId?: string;
+  repoUrl?: string;
+  branch?: string;
+  error?: string;
+  updatedAt?: string;
 }
 
 export interface TencentDbServiceOptions {
@@ -296,7 +305,25 @@ export class TencentDbService {
       wikiId = extractId(created, 'wiki_id');
     } catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
     if (!codeGraphId && !wikiId) throw new Error(errors.join('; ') || 'TencentDB asset provisioning failed');
-    return { codeGraphId, wikiId, repoUrl: source.repoUrl, branch: source.branch, error: errors.length ? errors.join('; ') : undefined, updatedAt: new Date().toISOString() };
+    const assets = { codeGraphId, wikiId, repoUrl: source.repoUrl, branch: source.branch, error: errors.length ? errors.join('; ') : undefined, updatedAt: new Date().toISOString() };
+    await this.saveWorkspaceAssets(path, assets);
+    return assets;
+  }
+
+  async listKnowledgeAssets(workspace?: string): Promise<{ codeGraphs: unknown[]; wikis: unknown[]; workspace?: WorkspaceKnowledgeAssets }> {
+    const teamId = this.config.teamId;
+    const [graphs, wikis] = await Promise.all([
+      this.knowledgeRequest('/code-graph/list', { team_id: teamId, limit: 100, offset: 0 }),
+      this.knowledgeRequest('/wiki/list', { team_id: teamId, limit: 100, offset: 0 }),
+    ]);
+    const result: { codeGraphs: unknown[]; wikis: unknown[]; workspace?: WorkspaceKnowledgeAssets } = {
+      codeGraphs: readItems(graphs), wikis: readItems(wikis),
+    };
+    if (workspace) {
+      const path = await realpath(workspace);
+      result.workspace = await this.readWorkspaceAssets(path);
+    }
+    return result;
   }
 
   async reloadSkills(): Promise<string> {
@@ -340,6 +367,27 @@ export class TencentDbService {
     return { uploaded: files.length, sync };
   }
 
+  private async saveWorkspaceAssets(workspace: string, assets: WorkspaceKnowledgeAssets): Promise<void> {
+    const path = join(this.dataDir, 'workspace-assets.json');
+    let all: Record<string, WorkspaceKnowledgeAssets> = {};
+    try {
+      const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) all = parsed as Record<string, WorkspaceKnowledgeAssets>;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    all[normalizePath(workspace)] = assets;
+    await mkdir(this.dataDir, { recursive: true });
+    const temporary = `${path}.${randomBytes(8).toString('hex')}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporary, path);
+  }
+
+  private async readWorkspaceAssets(workspace: string): Promise<WorkspaceKnowledgeAssets | undefined> {
+    try {
+      const all = JSON.parse(await readFile(join(this.dataDir, 'workspace-assets.json'), 'utf8')) as Record<string, WorkspaceKnowledgeAssets>;
+      return all[normalizePath(workspace)];
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  }
+
   private readonly layout?: TencentDbLayout;
 }
 
@@ -360,6 +408,16 @@ function extractId(value: unknown, key: string): string | undefined {
   const object = value as Record<string, unknown>;
   const direct = object[key];
   return typeof direct === 'string' ? direct : typeof object.id === 'string' ? object.id : undefined;
+}
+
+function readItems(value: unknown): unknown[] {
+  if (!value || typeof value !== 'object') return [];
+  const items = (value as Record<string, unknown>).items;
+  return Array.isArray(items) ? items : [];
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 function normalizeConfig(config: TencentDbConnectionConfig): TencentDbConnectionConfig {

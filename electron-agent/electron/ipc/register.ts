@@ -309,12 +309,8 @@ function registerTencentDbCommands(service: TencentDbService): void {
     });
   });
   registerCommand('tencentdb_list_knowledge_assets', async (_event, args) => {
-    const teamId = service.getConfig().teamId;
-    const [graphs, wikis] = await Promise.all([
-      service.knowledgeRequest('/code-graph/list', { team_id: teamId, limit: 100, offset: 0 }),
-      service.knowledgeRequest('/wiki/list', { team_id: teamId, limit: 100, offset: 0 }),
-    ]);
-    return { codeGraphs: readItems(graphs), wikis: readItems(wikis) };
+    const workspace = args.workspace === undefined ? undefined : readString(args, 'workspace');
+    return service.listKnowledgeAssets(workspace);
   });
   registerKnowledgeCommand('tencentdb_get_wiki', service, '/wiki/get', (input) => ({ wiki_id: readObjectString(input, 'assetId') }));
   registerKnowledgeCommand('tencentdb_get_code_graph', service, '/code-graph/get', (input) => ({ code_graph_id: readObjectString(input, 'assetId') }));

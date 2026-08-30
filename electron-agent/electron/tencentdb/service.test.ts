@@ -90,6 +90,7 @@ describe('TencentDB service', () => {
     await service.saveConnection({ config: { mode: 'remote', endpoint: 'https://gateway.example', knowledgeEndpoint: 'https://knowledge.example', serviceId: 'service-a', teamId: 'team-a', agentId: 'agent-a', userId: 'user-a' } });
 
     await expect(service.provisionWorkspaceAssets(workspace)).resolves.toMatchObject({ codeGraphId: 'graph-1', wikiId: 'wiki-1' });
+    await expect(service.listKnowledgeAssets(workspace)).resolves.toMatchObject({ workspace: { codeGraphId: 'graph-1', wikiId: 'wiki-1' } });
   });
 
   it('imports validated Wiki files in one batch and triggers Wiki ingest', async () => {
