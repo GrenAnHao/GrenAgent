@@ -12,6 +12,7 @@ import { UsageService } from "./app/usageService";
 import { PiRuntimeService } from "./app/piRuntimeService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
+import { UiHistoryService } from "./app/uiHistoryService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -93,6 +94,7 @@ if (!process.env.VITEST) {
         refresh: () => new PiRuntimeService({ manager: pi, processCommand: piProcess, agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }) }).refreshModelRegistry(),
       }),
       workspace,
+      uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
       tencentdb,
     });
     app.on('before-quit', () => {

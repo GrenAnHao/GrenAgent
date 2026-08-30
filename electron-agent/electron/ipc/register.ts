@@ -10,6 +10,7 @@ import type { UsageService } from '../app/usageService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
+import type { UiHistoryService } from '../app/uiHistoryService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -25,6 +26,7 @@ export interface IpcServices {
   pi?: PiRuntimeService;
   provider?: ProviderService;
   workspace?: WorkspaceService;
+  uiHistory?: UiHistoryService;
   tencentdb?: TencentDbService;
 }
 
@@ -72,12 +74,13 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
+  if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
 function registerMcpPolicyCommands(service: McpPolicyService): void {
   registerCommand('read_mcp_policy', () => service.readPolicy());
-  registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readString(args, 'content')));
+  registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readText(args, 'content')));
   registerCommand('read_mcp_audit', () => service.readAudit());
   registerCommand('read_mcp_tools_cache', () => service.readToolsCache());
   registerCommand('probe_mcp_server', (_event, args) => service.probe(readString(args, 'configJson')));
@@ -116,7 +119,7 @@ function registerFileCommands(service: FileService): void {
   registerCommand('read_dropped_file', (_event, args) => service.readDropped(readString(args, 'path')));
   registerCommand('import_dropped_file', (_event, args) => service.importDropped(readString(args, 'workspace'), readString(args, 'path')));
   registerCommand('write_file', (_event, args) => service.write(
-    readString(args, 'workspace'), readString(args, 'path'), readString(args, 'content'),
+    readString(args, 'workspace'), readString(args, 'path'), readText(args, 'content'),
   ));
 }
 
@@ -171,6 +174,14 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
   registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
   registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
   registerCommand('remove_project', (_event, args) => service.removeProject(readString(args, 'workspace')));
+}
+
+function registerUiHistoryCommands(service: UiHistoryService): void {
+  registerCommand('ui_history_read', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'sessionKey')));
+  registerCommand('ui_history_write', (_event, args) => service.write(
+    readString(args, 'workspace'), readString(args, 'sessionKey'), readText(args, 'content'),
+  ));
+  registerCommand('ui_history_delete', (_event, args) => service.delete(readString(args, 'workspace'), readString(args, 'sessionKey')));
 }
 
 function registerPiCommands(service: PiRuntimeService): void {
