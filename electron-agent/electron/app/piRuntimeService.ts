@@ -41,6 +41,7 @@ interface PiManagerPort {
   get(workspace: string): PiClientPort | undefined;
   open(workspace: string, cwd: string, env?: Record<string, string>): PiClientPort;
   close(workspace: string): Promise<void>;
+  all?: () => Array<[string, PiClientPort]>;
 }
 
 export interface PiRuntimeOptions {
@@ -84,6 +85,20 @@ export class PiRuntimeService {
     const client = this.options.manager.get(workspace);
     if (!client) throw new Error(`Workspace is not open: ${workspace}`);
     await client.respondUi(response);
+  }
+
+  async refreshModelRegistry(): Promise<{ refreshed: string[]; failed: Array<{ workspace: string; error: string }> }> {
+    const result = { refreshed: [] as string[], failed: [] as Array<{ workspace: string; error: string }> };
+    for (const [workspace, client] of this.options.manager.all?.() ?? []) {
+      try {
+        const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
+        if (typeof state.sessionFile === 'string') await client.send({ type: 'switch_session', sessionPath: state.sessionFile });
+        result.refreshed.push(workspace);
+      } catch (error) {
+        result.failed.push({ workspace, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return result;
   }
 
   private async openClient(workspace: string): Promise<PiClientPort> {

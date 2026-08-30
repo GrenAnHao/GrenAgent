@@ -4,11 +4,14 @@ import { dirname, join } from "node:path";
 import { browserWindowOptions } from "./mainConfig";
 import { SettingsService } from "./app/settingsService";
 import { PiRuntimeService } from "./app/piRuntimeService";
+import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
 import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { TencentDbLayout } from "./tencentdb/layout";
 import { TencentDbRuntime } from "./tencentdb/runtime";
@@ -47,8 +50,9 @@ if (!process.env.VITEST) {
     await tencentdb.load();
     const settings = new SettingsService(app.getPath('userData'));
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
+    const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const pi = new PiManager(
-      resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+      piProcess,
       {
         onEvent: (workspace, event) => broadcastPiEvent('pi://event', { workspace, event }),
         onUiRequest: (workspace, request) => broadcastPiEvent('pi://ui-request', { workspace, request }),
@@ -64,6 +68,14 @@ if (!process.env.VITEST) {
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
         resolveWorkspace: (path) => workspace.ensureWorkspace(path),
+      }),
+      provider: new ProviderService({
+        agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
+        probeModels: async () => {
+          const { stdout } = await promisify(execFile)(piProcess.command, [piProcess.args[0], 'probe-models'], { windowsHide: true });
+          return stdout;
+        },
+        refresh: () => new PiRuntimeService({ manager: pi, processCommand: piProcess, agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }) }).refreshModelRegistry(),
       }),
       workspace,
       tencentdb,

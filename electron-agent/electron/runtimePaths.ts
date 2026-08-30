@@ -12,7 +12,8 @@ export interface RuntimePathsOptions {
 }
 
 export function resolvePiProcess(options: RuntimePathsOptions): PiProcessCommand {
-  const configured = options.env?.GREN_PI_COMMAND?.trim();
+  const env = options.env ?? process.env;
+  const configured = env.GREN_PI_COMMAND?.trim();
   if (configured) return { command: configured, args: ['--mode', 'rpc'] };
 
   const platform = options.platform ?? process.platform;
@@ -22,16 +23,16 @@ export function resolvePiProcess(options: RuntimePathsOptions): PiProcessCommand
   if (options.isPackaged || exists(bundled)) return { command: bundled, args: ['--mode', 'rpc'] };
 
   const cliEntry = resolve(options.appPath, '..', 'cli', 'src', 'main.ts');
-  return { command: resolveBunCommand(options, exists, platform), args: [cliEntry, '--mode', 'rpc'] };
+  return { command: resolveBunCommand(env, exists, platform), args: [cliEntry, '--mode', 'rpc'] };
 }
 
-function resolveBunCommand(options: RuntimePathsOptions, exists: (path: string) => boolean, platform: NodeJS.Platform): string {
-  const configured = options.env?.GREN_BUN_COMMAND?.trim();
+function resolveBunCommand(env: NodeJS.ProcessEnv, exists: (path: string) => boolean, platform: NodeJS.Platform): string {
+  const configured = env.GREN_BUN_COMMAND?.trim();
   if (configured) return configured;
   if (platform === 'win32') {
-    const home = options.env?.BUN_INSTALL?.trim() || options.env?.USERPROFILE?.trim();
+    const home = env.BUN_INSTALL?.trim() || env.USERPROFILE?.trim();
     if (home) {
-      const executable = options.env?.BUN_INSTALL?.trim()
+      const executable = env.BUN_INSTALL?.trim()
         ? join(home, 'bin', 'bun.exe')
         : join(home, '.bun', 'bin', 'bun.exe');
       if (exists(executable)) return executable;

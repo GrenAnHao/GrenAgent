@@ -2,6 +2,7 @@ import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { SettingsService } from '../app/settingsService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
+import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { TencentDbService } from '../tencentdb/service';
 
@@ -10,6 +11,7 @@ type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>)
 export interface IpcServices {
   settings?: SettingsService;
   pi?: PiRuntimeService;
+  provider?: ProviderService;
   workspace?: WorkspaceService;
   tencentdb?: TencentDbService;
 }
@@ -50,8 +52,16 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
 
   if (services.settings) registerSettingsCommands(services.settings);
   if (services.pi) registerPiCommands(services.pi);
+  if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
+}
+
+function registerProviderCommands(service: ProviderService): void {
+  registerCommand('get_provider_config', () => service.getConfig());
+  registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
+  registerCommand('refresh_model_registry', () => service.refresh());
+  registerCommand('list_models_global', () => service.listModels());
 }
 
 function registerSettingsCommands(service: SettingsService): void {

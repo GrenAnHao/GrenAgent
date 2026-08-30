@@ -55,6 +55,10 @@ export class PiManager {
     return this.clients.get(workspace);
   }
 
+  all(): Array<[string, PiClient]> {
+    return [...this.clients.entries()];
+  }
+
   open(workspace: string, cwd: string, env?: Record<string, string>): PiClient {
     const existing = this.clients.get(workspace);
     if (existing) return existing;
