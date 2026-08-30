@@ -5,6 +5,7 @@ import type { McpPolicyService } from '../app/mcpPolicyService';
 import type { McpConfigService } from '../app/mcpConfigService';
 import type { SubagentService } from '../app/subagentService';
 import type { FileService } from '../app/fileService';
+import type { SkillService } from '../app/skillService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
@@ -18,6 +19,7 @@ export interface IpcServices {
   mcpConfig?: McpConfigService;
   subagent?: SubagentService;
   files?: FileService;
+  skills?: SkillService;
   pi?: PiRuntimeService;
   provider?: ProviderService;
   workspace?: WorkspaceService;
@@ -63,6 +65,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
+  if (services.skills) registerSkillCommands(services.skills);
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
@@ -112,6 +115,21 @@ function registerFileCommands(service: FileService): void {
   registerCommand('write_file', (_event, args) => service.write(
     readString(args, 'workspace'), readString(args, 'path'), readString(args, 'content'),
   ));
+}
+
+function registerSkillCommands(service: SkillService): void {
+  registerCommand('list_skills', () => service.list());
+  registerCommand('create_skill', (_event, args) => service.create(readString(args, 'name'), readText(args, 'description'), readText(args, 'body')));
+  registerCommand('delete_skill', (_event, args) => service.remove(readString(args, 'path')));
+  registerCommand('import_skill_from_dir', (_event, args) => service.importDirectory(readString(args, 'src')));
+  registerCommand('import_skill_from_file', (_event, args) => service.importFile(readString(args, 'src')));
+  registerCommand('install_skill_from_zip', (_event, args) => service.installZip(readString(args, 'src')));
+  registerCommand('open_skills_dir', async () => {
+    const directory = await service.openDirectory();
+    const error = await shell.openPath(directory);
+    if (error) throw new Error(error);
+    return directory;
+  });
 }
 
 function registerProviderCommands(service: ProviderService): void {
@@ -195,6 +213,12 @@ function readInput(args: Record<string, unknown>): any {
 function readString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
+  return value;
+}
+
+function readText(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string') throw new Error(`${key} must be a string`);
   return value;
 }
 

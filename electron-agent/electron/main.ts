@@ -7,6 +7,7 @@ import { McpPolicyService } from "./app/mcpPolicyService";
 import { McpConfigService } from "./app/mcpConfigService";
 import { SubagentService } from "./app/subagentService";
 import { FileService } from "./app/fileService";
+import { SkillService } from "./app/skillService";
 import { PiRuntimeService } from "./app/piRuntimeService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
@@ -73,6 +74,7 @@ if (!process.env.VITEST) {
       mcpConfig: new McpConfigService(app.getPath('home'), settings),
       subagent: new SubagentService(),
       files: new FileService(),
+      skills: new SkillService(app.getPath('home')),
       pi: new PiRuntimeService({
         manager: pi,
         processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
