@@ -1,0 +1,35 @@
+{
+  "name": "electron-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc -p tsconfig.json && electron-vite build",
+    "test": "vitest run",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:tencentdb-memory": "node scripts/build-tencentdb-memory.mjs",
+    "package": "electron-builder --config electron-builder.yml"
+  },
+  "dependencies": {
+    "electron": "^38.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.30",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "jsdom": "^26.1.0",
+    "typescript": "7.0.2",
+    "vite": "7.1.7",
+    "vitest": "^3.2.4"
+  }
+}
