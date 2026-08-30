@@ -1,0 +1,73 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const { getSettings, setSettings, closeWorkspace, openWorkspace, getProviderConfig, setProviderConfig } = vi.hoisted(() => ({
+  getSettings: vi.fn(() => Promise.resolve({ OPENAI_API_KEY: 'sk-old', titleModel: 'haiku' })),
+  setSettings: vi.fn(() => Promise.resolve()),
+  closeWorkspace: vi.fn(() => Promise.resolve()),
+  openWorkspace: vi.fn(() => Promise.resolve({})),
+  getProviderConfig: vi.fn(() => Promise.resolve({ modelsJson: '{}', authJson: '{}', agentDir: '/a' })),
+  setProviderConfig: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
+}));
+vi.mock('../../stores/AgentStoreContext', () => ({
+  useAgentStoreContext: () => ({ workspace: '/ws' }),
+}));
+vi.mock('../../lib/pi', () => ({
+  pi: { getSettings, setSettings, closeWorkspace, openWorkspace, getProviderConfig, setProviderConfig },
+}));
+vi.mock('../tencentdb/TencentdbCenter', () => ({ TencentdbCenter: () => <div data-testid="tencentdb-center" /> }));
+
+import { SettingsPanel } from './SettingsPanel';
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+// 渲染整面板含大量 antd 控件，jsdom 下偏慢，单测放宽超时。
+const T = 30000;
+
+describe('SettingsPanel', () => {
+  it(
+    'renders grouped nav and prefills loaded values',
+    async () => {
+      render(<SettingsPanel />);
+      await waitFor(() => expect(screen.getByTestId('set-cat-general')).toBeTruthy());
+      expect(screen.getByTestId('set-cat-tencentdb')).toBeTruthy();
+      expect(screen.queryByTestId('set-cat-knowledge')).toBeNull();
+      expect(screen.queryByTestId('set-cat-memory')).toBeNull();
+      expect(screen.getByText('能力')).toBeTruthy();
+      const input = screen.getByTestId('set-field-titleModel') as HTMLInputElement;
+      expect(input.value).toBe('haiku');
+    },
+    T,
+  );
+
+  it(
+    'opens the TencentDB center instead of retired memory settings',
+    async () => {
+      render(<SettingsPanel />);
+      await waitFor(() => expect(screen.getByTestId('set-cat-tencentdb')).toBeTruthy());
+      fireEvent.click(screen.getByTestId('set-cat-tencentdb'));
+      expect(screen.getByTestId('tencentdb-center')).toBeTruthy();
+      expect(screen.queryByTestId('set-field-MEMORY_AUTO_INJECT')).toBeNull();
+    },
+    T,
+  );
+
+  it(
+    'edits a field and saves on button click without restart',
+    async () => {
+      render(<SettingsPanel />);
+      await waitFor(() => expect(screen.getByTestId('set-field-titleModel')).toBeTruthy());
+      fireEvent.change(screen.getByTestId('set-field-titleModel'), { target: { value: 'gpt-x' } });
+      fireEvent.click(screen.getByTestId('set-save'));
+      await waitFor(
+        () => expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ titleModel: 'gpt-x' })),
+        { timeout: 3000 },
+      );
+      expect(closeWorkspace).not.toHaveBeenCalled();
+    },
+    T,
+  );
+});

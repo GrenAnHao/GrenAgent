@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest';
+
+import { isExecutiveCommand, isExecutiveCommandMessage } from './commandClassification';
+
+describe('isExecutiveCommand', () => {
+  it('命中已知动作命令（忽略大小写）', () => {
+    expect(isExecutiveCommand('newSession')).toBe(true);
+    expect(isExecutiveCommand('COMPACT')).toBe(true);
+  });
+  it('提示词 / 技能 / 不确定命令保留气泡', () => {
+    expect(isExecutiveCommand('skill:tdd')).toBe(false);
+    // 与白名单同名的技能（如 skill:new）也必须保留气泡——技能必产生轮次。
+    expect(isExecutiveCommand('skill:new')).toBe(false);
+    expect(isExecutiveCommand('deep-research')).toBe(false);
+    expect(isExecutiveCommand('review')).toBe(false);
+    expect(isExecutiveCommand('dream')).toBe(false);
+    expect(isExecutiveCommand('distill')).toBe(false);
+  });
+});
+
+describe('isExecutiveCommandMessage', () => {
+  it('仅当整条消息==单个执行性命令时为真', () => {
+    expect(isExecutiveCommandMessage('/dream')).toBe(false);
+    expect(isExecutiveCommandMessage('/distill')).toBe(false);
+    expect(isExecutiveCommandMessage('/skill:tdd')).toBe(false);
+    expect(isExecutiveCommandMessage('hello /dream')).toBe(false);
+    expect(isExecutiveCommandMessage('please run dream')).toBe(false);
+  });
+});
