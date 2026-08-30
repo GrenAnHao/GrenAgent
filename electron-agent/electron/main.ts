@@ -94,7 +94,8 @@ if (!process.env.VITEST) {
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
         probeModels: async () => {
-          const { stdout } = await promisify(execFile)(piProcess.command, [piProcess.args[0], 'probe-models'], { windowsHide: true });
+          const probeArgs = piProcess.args[0]?.endsWith('.ts') ? [piProcess.args[0], 'probe-models'] : ['probe-models'];
+          const { stdout } = await promisify(execFile)(piProcess.command, probeArgs, { windowsHide: true });
           return stdout;
         },
         refresh: () => new PiRuntimeService({ manager: pi, processCommand: piProcess, agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }) }).refreshModelRegistry(),
