@@ -43,8 +43,29 @@ declare global {
 
 function bridge(): GrenRuntimeBridge {
   if (typeof window !== 'undefined' && window.gren) return window.gren;
-  throw new Error('Electron runtime bridge is unavailable');
+  return browserPreviewBridge;
 }
+
+const browserPreviewBridge: GrenRuntimeBridge = {
+  invoke: async () => {
+    throw new Error('Electron runtime bridge is unavailable');
+  },
+  subscribe: async () => () => {},
+  pickDirectory: async () => null,
+  openUrl: async () => {},
+  openPath: async () => {},
+  revealItemInDir: async () => {},
+  window: {
+    minimize: async () => {},
+    toggleMaximize: async () => {},
+    isMaximized: async () => false,
+    close: async () => {},
+    onResized: async () => () => {},
+  },
+  webview: {
+    onDragDropEvent: async () => () => {},
+  },
+};
 
 export function invoke<T>(command: string, args?: RuntimeArgs): Promise<T> {
   return bridge().invoke<T>(command, serializeRuntimeArg(args) as RuntimeArgs);

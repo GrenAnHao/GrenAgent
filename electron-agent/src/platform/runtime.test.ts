@@ -73,4 +73,8 @@ describe('Electron runtime bridge', () => {
     vi.stubGlobal('window', { gren: { webview: { onDragDropEvent } } });
     expect(getCurrentWebview().onDragDropEvent).toBe(onDragDropEvent);
   });
+
+  it('keeps browser previews alive when Electron preload is absent', async () => {
+    await expect(listen('pi://event', () => {})).resolves.toEqual(expect.any(Function));
+  });
 });
