@@ -168,6 +168,9 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
   });
   registerCommand('list_all_sessions', () => service.listAllSessions());
   registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
+  registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
+  registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
+  registerCommand('remove_project', (_event, args) => service.removeProject(readString(args, 'workspace')));
 }
 
 function registerPiCommands(service: PiRuntimeService): void {

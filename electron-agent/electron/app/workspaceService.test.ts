@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
@@ -68,5 +68,44 @@ describe('WorkspaceService', () => {
     const workspace = join(await service.getWorksDir(), 'recreated');
 
     await expect(service.ensureWorkspace(workspace)).resolves.toBe(workspace);
+  });
+
+  it('deletes a conversation directory and only sessions belonging to that conversation', async () => {
+    const { service, agentDir } = await createService();
+    const conversation = await service.createConversation();
+    const sessions = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'conversation.jsonl'), `{"type":"session","cwd":${JSON.stringify(conversation.cwd)}}\n`);
+    await writeFile(join(sessions, 'project.jsonl'), '{"type":"session","cwd":"C:/project"}\n');
+
+    await service.deleteConversation(conversation.cwd);
+    await expect(service.ensureWorkspace(conversation.cwd)).resolves.toBe(conversation.cwd);
+    await expect(readFile(join(sessions, 'project.jsonl'), 'utf8')).resolves.toContain('project');
+    await expect(readFile(join(sessions, 'conversation.jsonl'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('removes project sessions without deleting the project directory', async () => {
+    const { service, agentDir } = await createService();
+    const project = join(agentDir, 'project'); await mkdir(project);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'project.jsonl'), `{"type":"session","cwd":${JSON.stringify(project)}}\n`);
+
+    await service.removeProject(project);
+    await expect(readFile(join(sessions, 'project.jsonl'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(realpath(project)).resolves.toBe(project);
+  });
+
+  it('deletes only a session that belongs to the requested workspace', async () => {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const owned = join(sessions, 'owned.jsonl');
+    const foreign = join(sessions, 'foreign.jsonl');
+    await writeFile(owned, `{"type":"session","cwd":${JSON.stringify(workspace)}}\n`);
+    await writeFile(foreign, '{"type":"session","cwd":"C:/other"}\n');
+
+    await service.deleteSession(workspace, owned);
+    await expect(readFile(owned, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(service.deleteSession(workspace, foreign)).rejects.toThrow('session does not belong to workspace');
   });
 });
