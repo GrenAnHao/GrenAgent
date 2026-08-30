@@ -6,6 +6,7 @@ import type { McpConfigService } from '../app/mcpConfigService';
 import type { SubagentService } from '../app/subagentService';
 import type { FileService } from '../app/fileService';
 import type { SkillService } from '../app/skillService';
+import type { UsageService } from '../app/usageService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
@@ -20,6 +21,7 @@ export interface IpcServices {
   subagent?: SubagentService;
   files?: FileService;
   skills?: SkillService;
+  usage?: UsageService;
   pi?: PiRuntimeService;
   provider?: ProviderService;
   workspace?: WorkspaceService;
@@ -66,6 +68,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
+  if (services.usage) registerCommand('usage_report', () => services.usage!.report());
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
