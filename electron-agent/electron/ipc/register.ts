@@ -11,6 +11,8 @@ import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
+import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
+import type { GitService } from '../app/gitService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -27,6 +29,8 @@ export interface IpcServices {
   provider?: ProviderService;
   workspace?: WorkspaceService;
   uiHistory?: UiHistoryService;
+  workspaceApproval?: WorkspaceApprovalService;
+  git?: GitService;
   tencentdb?: TencentDbService;
 }
 
@@ -75,6 +79,8 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
   if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
+  if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);
+  if (services.git) registerGitCommands(services.git);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
@@ -182,6 +188,27 @@ function registerUiHistoryCommands(service: UiHistoryService): void {
     readString(args, 'workspace'), readString(args, 'sessionKey'), readText(args, 'content'),
   ));
   registerCommand('ui_history_delete', (_event, args) => service.delete(readString(args, 'workspace'), readString(args, 'sessionKey')));
+}
+
+function registerWorkspaceApprovalCommands(service: WorkspaceApprovalService): void {
+  registerCommand('request_workspace_approval', (_event, args) => service.approve(readString(args, 'path')));
+  registerCommand('is_workspace_approved', (_event, args) => service.isApproved(readString(args, 'path')));
+}
+
+function registerGitCommands(service: GitService): void {
+  registerCommand('get_git_status', (_event, args) => service.status(readString(args, 'workspacePath')));
+  registerCommand('get_git_diff', (_event, args) => service.diff(readString(args, 'workspacePath'), readString(args, 'filePath')));
+  registerCommand('get_git_branches', (_event, args) => service.branches(readString(args, 'workspacePath')));
+  registerCommand('git_checkout', (_event, args) => service.checkout(readString(args, 'workspacePath'), readString(args, 'branch')));
+  registerCommand('git_create_branch', (_event, args) => {
+    if (typeof args.checkout !== 'boolean') throw new Error('checkout must be a boolean');
+    return service.createBranch(readString(args, 'workspacePath'), readString(args, 'name'), args.checkout);
+  });
+  registerCommand('get_git_log_graph', (_event, args) => {
+    const limit = args.limit;
+    if (limit !== null && limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new Error('limit must be a positive integer or null');
+    return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined);
+  });
 }
 
 function registerPiCommands(service: PiRuntimeService): void {

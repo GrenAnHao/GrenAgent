@@ -40,6 +40,39 @@ describe('registerIpcHandlers', () => {
     expect(uiHistory.delete).toHaveBeenCalledWith('C:/project', 's');
   });
 
+  it('routes workspace approval commands', async () => {
+    const workspaceApproval = { approve: vi.fn().mockResolvedValue(undefined), isApproved: vi.fn().mockResolvedValue(true) };
+    registerIpcHandlers({ workspaceApproval });
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'request_workspace_approval', args: { path: 'C:/project' } })).resolves.toBeUndefined();
+    await expect(invoke({}, { command: 'is_workspace_approved', args: { path: 'C:/project' } })).resolves.toBe(true);
+    expect(workspaceApproval.approve).toHaveBeenCalledWith('C:/project');
+    expect(workspaceApproval.isApproved).toHaveBeenCalledWith('C:/project');
+  });
+
+  it('routes all Git commands with their contract argument names', async () => {
+    const git = {
+      status: vi.fn().mockResolvedValue([]), diff: vi.fn().mockResolvedValue(''), branches: vi.fn().mockResolvedValue({ current: '', branches: [] }),
+      checkout: vi.fn().mockResolvedValue(undefined), createBranch: vi.fn().mockResolvedValue(undefined), logGraph: vi.fn().mockResolvedValue([]),
+    };
+    registerIpcHandlers({ git });
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await invoke({}, { command: 'get_git_status', args: { workspacePath: 'C:/project' } });
+    await invoke({}, { command: 'get_git_diff', args: { workspacePath: 'C:/project', filePath: 'file.ts' } });
+    await invoke({}, { command: 'get_git_branches', args: { workspacePath: 'C:/project' } });
+    await invoke({}, { command: 'git_checkout', args: { workspacePath: 'C:/project', branch: 'main' } });
+    await invoke({}, { command: 'git_create_branch', args: { workspacePath: 'C:/project', name: 'feature/x', checkout: true } });
+    await invoke({}, { command: 'get_git_log_graph', args: { workspacePath: 'C:/project', limit: null } });
+    expect(git.status).toHaveBeenCalledWith('C:/project');
+    expect(git.diff).toHaveBeenCalledWith('C:/project', 'file.ts');
+    expect(git.branches).toHaveBeenCalledWith('C:/project');
+    expect(git.checkout).toHaveBeenCalledWith('C:/project', 'main');
+    expect(git.createBranch).toHaveBeenCalledWith('C:/project', 'feature/x', true);
+    expect(git.logGraph).toHaveBeenCalledWith('C:/project', null);
+  });
+
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {
     const window = {
       minimize: vi.fn(), maximize: vi.fn(), unmaximize: vi.fn(), isMaximized: vi.fn().mockReturnValue(false), close: vi.fn(),
