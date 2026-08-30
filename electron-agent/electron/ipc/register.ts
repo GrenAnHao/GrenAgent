@@ -48,6 +48,10 @@ export function registerCommand(command: string, handler: CommandHandler): void 
   commandHandlers.set(command, handler);
 }
 
+export function getRegisteredCommands(): string[] {
+  return [...commandHandlers.keys()].sort();
+}
+
 export function registerIpcHandlers(services: IpcServices = {}): void {
   ipcMain.handle(IPC_CHANNELS.invoke, async (event, request: InvokeRequest) => {
     if (!isInvokeRequest(request)) throw new Error('Invalid Electron invoke request');
