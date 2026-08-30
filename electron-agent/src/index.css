@@ -32,3 +32,84 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
 .ant-image-preview-root .ant-image-preview-mask {
   background: rgba(0, 0, 0, 0.82) !important;
 }
+
+.gren-browser {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.gren-browser-toolbar {
+  display: flex;
+  flex: 0 0 38px;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-block-end: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+  background: var(--ant-color-bg-elevated, #fff);
+}
+
+.gren-browser-toolbar button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ant-color-text-secondary, #667085);
+  background: transparent;
+  cursor: pointer;
+}
+
+.gren-browser-toolbar button:hover:not(:disabled) {
+  background: var(--ant-color-fill-tertiary, #f2f4f7);
+  color: var(--ant-color-text, #111827);
+}
+
+.gren-browser-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.gren-browser-address {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 6px;
+  color: var(--ant-color-text-tertiary, #98a2b3);
+  background: var(--ant-color-bg-layout, #f8fafc);
+}
+
+.gren-browser-address input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ant-color-text, #111827);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+}
+
+.gren-browser-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.gren-browser-content webview {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 0;
+}

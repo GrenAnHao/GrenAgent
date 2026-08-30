@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { DockTab, DockTabKind } from '../../stores/dockStore';
 import { PageBody } from './PageBody';
+import { BrowserBody } from './BrowserBody';
 import { ProjectContextBody } from './ProjectContextBody';
 import { SubAgentBody } from './SubAgentBody';
 import { SubAgentLogBody } from './SubAgentLogBody';
@@ -13,6 +14,7 @@ export interface DockBodyProps {
 
 const BODY_RENDERERS: Record<DockTabKind, ComponentType<DockBodyProps>> = {
   terminal: TerminalBody,
+  browser: BrowserBody,
   page: PageBody,
   subagent: SubAgentBody,
   subagentLog: SubAgentLogBody,

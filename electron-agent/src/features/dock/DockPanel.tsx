@@ -1,8 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { ActionIcon, Flexbox } from '@lobehub/ui';
-import { Dropdown } from 'antd';
 import { cx } from 'antd-style';
-import { PanelRightClose, Plus } from 'lucide-react';
+import { Globe, PanelRightClose, Plus } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import {
   defaultTerminalTitle,
@@ -29,6 +28,18 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
   const setActive = useDockStore((s) => s.setActive);
   const closeTab = useDockStore((s) => s.closeTab);
   const addTab = useDockStore((s) => s.addTab);
+
+  const addBrowser = useCallback(() => {
+    const id = `browser-${Date.now()}`;
+    addTab({
+      id,
+      kind: 'browser',
+      region: 'right',
+      title: '浏览器',
+      closable: true,
+      payload: { url: 'https://example.com', title: '浏览器' },
+    });
+  }, [addTab]);
 
   const subAgentStatus = useMemo(() => {
     const map: Record<string, 'running' | 'done' | 'error'> = {};
@@ -71,12 +82,7 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
       {region === 'bottom' ? (
         <ActionIcon icon={Plus} size="small" title="新建终端" onClick={addTerminal} />
       ) : (
-        <Dropdown
-          trigger={['click']}
-          menu={{ items: [{ key: 'hint', disabled: true, label: '从 fetch_url 卡片或 spawn_agent 打开' }] }}
-        >
-          <ActionIcon icon={Plus} size="small" title="新建" />
-        </Dropdown>
+        <ActionIcon icon={Globe} size="small" title="打开浏览器" onClick={addBrowser} />
       )}
       {onCollapse ? (
         <ActionIcon icon={PanelRightClose} size="small" title="Collapse panel" onClick={onCollapse} />

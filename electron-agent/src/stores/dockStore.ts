@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { useLayoutStore } from './layoutStore';
 
 export type DockRegion = 'right' | 'bottom';
-export type DockTabKind = 'terminal' | 'page' | 'subagent' | 'subagentLog' | 'projectContext';
+export type DockTabKind = 'terminal' | 'browser' | 'page' | 'subagent' | 'subagentLog' | 'projectContext';
 // 后续阶段：| 'file' | 'diff' | 'sidechat'
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
@@ -20,6 +20,11 @@ export interface PagePayload {
   title?: string;
   chars?: number;
   crawler?: string;
+}
+
+export interface BrowserPayload {
+  url: string;
+  title?: string;
 }
 
 /** 兼容现有调用方（extensionCards / PageContentViewer）的别名。 */
@@ -46,7 +51,7 @@ export interface ProjectContextPayload {
   workspace: string;
 }
 
-export type DockTabPayload = TerminalPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload;
+export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload;
 
 export interface DockTab {
   id: string;
@@ -64,6 +69,7 @@ interface DockState {
   activeByRegion: Record<DockRegion, string | null>;
 
   addTab: (input: Omit<DockTab, 'order'> & { order?: number }) => void;
+  updateTab: (id: string, patch: Partial<Pick<DockTab, 'title' | 'payload'>>) => void;
   closeTab: (id: string) => void;
   setActive: (region: DockRegion, id: string) => void;
   setTerminalStatus: (id: string, status: TerminalStatus, shellId?: string) => void;
@@ -130,6 +136,9 @@ export const useDockStore = create<DockState>()(
         if (input.region === 'right') useLayoutStore.getState().setRightPanelOpen(true);
         else useLayoutStore.getState().setTerminalOpen(true);
       },
+
+      updateTab: (id, patch) =>
+        set((s) => ({ tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab)) })),
 
       closeTab: (id) =>
         set((s) => {
