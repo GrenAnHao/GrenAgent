@@ -12,6 +12,20 @@ export interface ProviderServiceOptions {
   probeModels?: () => Promise<string>;
   refresh?: () => Promise<RefreshResult>;
   fetch?: typeof fetch;
+  activeModel?: (workspace: string) => Promise<{ provider: string; modelId: string }>;
+  oneshot?: (request: Record<string, unknown>, onLine?: (line: string) => void) => Promise<void>;
+}
+
+export interface DiagnoseResult {
+  ok: boolean;
+  error: string | null;
+  content: string;
+  ttftMs: number;
+  totalMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  tokensPerSec: number | null;
 }
 
 export class ProviderService {
@@ -78,12 +92,66 @@ export class ProviderService {
     throw lastError instanceof Error ? lastError : new Error('Provider model request failed');
   }
 
+  async fixMermaid(workspace: string, code: string, error: string): Promise<string> {
+    if (!this.options.activeModel || !this.options.oneshot) throw new Error('Pi oneshot runtime is unavailable');
+    const model = await this.options.activeModel(workspace);
+    let output = '';
+    await this.options.oneshot({
+      provider: model.provider, modelId: model.modelId,
+      system: 'Repair the Mermaid source. Reply only with corrected Mermaid code in one mermaid fenced block.',
+      user: `Mermaid error:\n${error}\n\nSource:\n\`\`\`mermaid\n${code}\n\`\`\``,
+    }, (line) => { output = line; });
+    const result = parseOneshot(output);
+    if (!result.ok) throw new Error(result.error || 'oneshot failed');
+    const fixed = extractMermaid(result.content ?? '');
+    if (!fixed) throw new Error('model returned no Mermaid code');
+    return fixed;
+  }
+
+  async diagnose(providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: (chunk: string) => void): Promise<DiagnoseResult> {
+    if (!this.options.oneshot) throw new Error('Pi oneshot runtime is unavailable');
+    const started = Date.now();
+    let content = ''; let error: string | null = null; let ttftMs = 0; let first = false;
+    let usage: Record<string, unknown> = {};
+    await this.options.oneshot({ provider: providerId, modelId, user: prompt.trim() || 'Who are you?', stream }, (line) => {
+      const result = parseOneshot(line);
+      if (result.type === 'delta' && typeof result.text === 'string') {
+        if (!first) { first = true; ttftMs = Date.now() - started; }
+        content += result.text; onChunk(result.text); return;
+      }
+      if (result.type === 'error') { error = result.error || 'oneshot failed'; return; }
+      if (result.type === 'done') { usage = result.usage ?? {}; return; }
+      if (result.ok === false) { error = result.error || 'oneshot failed'; return; }
+      if (result.ok === true) { content = result.content ?? ''; usage = result.usage ?? {}; }
+    });
+    const totalMs = Date.now() - started;
+    const completionTokens = numberValue(usage.completion_tokens);
+    return {
+      ok: error === null, error, content, ttftMs, totalMs,
+      promptTokens: numberValue(usage.prompt_tokens), completionTokens, totalTokens: numberValue(usage.total_tokens),
+      tokensPerSec: completionTokens !== null && totalMs > 0 ? completionTokens / (totalMs / 1000) : null,
+    };
+  }
+
   private async getJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
     const response = await this.fetchImpl(url, { headers });
     const text = await response.text();
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300).trim()}`);
     try { return JSON.parse(text); } catch { throw new Error(`Provider response is not valid JSON: ${text.slice(0, 300).trim()}`); }
   }
+}
+
+function parseOneshot(line: string): Record<string, any> {
+  try { return JSON.parse(line) as Record<string, any>; } catch { return { ok: false, error: `oneshot output is not valid JSON: ${line}` }; }
+}
+
+function extractMermaid(content: string): string {
+  const match = content.trim().match(/```(?:mermaid)?\s*\n?([\s\S]*?)```/i);
+  return (match?.[1] ?? content).trim();
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function readModelIds(value: unknown): string[] {

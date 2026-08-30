@@ -1,5 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TencentDbService, type TencentDbSecretStore } from './service';
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  for (const path of temporaryDirectories.splice(0)) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try { await rm(path, { recursive: true, force: true }); break; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EBUSY' || attempt === 9) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+  }
+});
 
 function secrets(values: Record<string, string> = {}): TencentDbSecretStore {
   const store = new Map(Object.entries(values));
@@ -64,5 +80,50 @@ describe('TencentDB service', () => {
     expect(fetch).toHaveBeenCalledWith('https://knowledge.example/v3/wiki/list', expect.objectContaining({
       headers: expect.objectContaining({ authorization: 'Bearer gateway', 'x-tdai-service-id': 'service-a', 'x-tdai-user-key': 'user' }),
     }));
+  });
+
+  it('provisions a CodeGraph and Wiki for a workspace from actual knowledge requests', async () => {
+    const workspace = await mkdtemp(`${tmpdir()}/electron-agent-assets-`);
+    temporaryDirectories.push(workspace);
+    const fetch = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify({ code: 0, data: url.includes('code-graph/create') ? { code_graph_id: 'graph-1' } : { wiki_id: 'wiki-1' } }), { status: 200 })));
+    const service = new TencentDbService({ fetch, secrets: secrets({ remoteGatewayApiKey: 'gateway', userApiKey: 'user' }) });
+    await service.saveConnection({ config: { mode: 'remote', endpoint: 'https://gateway.example', knowledgeEndpoint: 'https://knowledge.example', serviceId: 'service-a', teamId: 'team-a', agentId: 'agent-a', userId: 'user-a' } });
+
+    await expect(service.provisionWorkspaceAssets(workspace)).resolves.toMatchObject({ codeGraphId: 'graph-1', wikiId: 'wiki-1' });
+  });
+
+  it('imports validated Wiki files in one batch and triggers Wiki ingest', async () => {
+    const workspace = await mkdtemp(`${tmpdir()}/electron-agent-wiki-`);
+    temporaryDirectories.push(workspace);
+    const markdown = `${workspace}/guide.md`;
+    await writeFile(markdown, '# Guide');
+    const fetch = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify({ code: 0, data: url.includes('/wiki/raw/write') ? { accepted: 1 } : { state: 'processing' } }), { status: 200 })));
+    const service = new TencentDbService({ fetch, secrets: secrets({ remoteGatewayApiKey: 'gateway', userApiKey: 'user' }) });
+    await service.saveConnection({ config: { mode: 'remote', endpoint: 'https://gateway.example', knowledgeEndpoint: 'https://knowledge.example', serviceId: 'service-a', teamId: 'team-a', agentId: 'agent-a', userId: 'user-a' } });
+
+    await expect(service.importWikiFiles('wiki-1', [markdown])).resolves.toEqual({ uploaded: 1, sync: { state: 'processing' } });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('changes the persisted Pi reload revision when skills are reloaded', async () => {
+    const dataDir = await mkdtemp(`${tmpdir()}/electron-agent-reload-`);
+    temporaryDirectories.push(dataDir);
+    const service = new TencentDbService({ dataDir, secrets: secrets({ localGatewayApiKey: 'gateway' }) });
+    const first = await service.reloadSkills();
+    const second = await service.reloadSkills();
+    expect(first).not.toBe(second);
+  });
+
+  it('tests gateway credentials and knowledge health before marking the connection successful', async () => {
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/health')) return Promise.resolve(new Response('{}', { status: 200 }));
+      const body = url.includes('/auth/verify') ? { valid: true } : {};
+      return Promise.resolve(new Response(JSON.stringify({ code: 0, data: body }), { status: 200 }));
+    });
+    const service = new TencentDbService({ fetch, secrets: secrets({ remoteGatewayApiKey: 'gateway', userApiKey: 'user' }) });
+    await service.saveConnection({ config: { mode: 'remote', endpoint: 'https://gateway.example', knowledgeEndpoint: 'https://knowledge.example', serviceId: 'service-a', teamId: 'team-a', agentId: 'agent-a', userId: 'user-a' } });
+    await expect(service.testConnection()).resolves.toMatchObject({ state: 'ready', lastSuccessAt: expect.any(String) });
+    expect(fetch).toHaveBeenCalledWith('https://gateway.example/v3/meta/auth/verify', expect.anything());
+    expect(fetch).toHaveBeenCalledWith('https://knowledge.example/health');
   });
 });

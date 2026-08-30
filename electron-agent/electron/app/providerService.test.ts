@@ -52,4 +52,24 @@ describe('ProviderService', () => {
       headers: { authorization: 'Bearer secret' },
     }));
   });
+
+  it('uses the active workspace model for Mermaid repair and streams diagnostics', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const service = new ProviderService({
+      agentDir: 'C:/agent',
+      activeModel: async () => ({ provider: 'openai', modelId: 'gpt-5' }),
+      oneshot: async (request, onLine) => {
+        requests.push(request);
+        if ('system' in request) { onLine?.('{"ok":true,"content":"hello"}'); return; }
+        onLine?.('{"type":"delta","text":"hello"}');
+        onLine?.('{"type":"done","usage":{"total_tokens":3}}');
+      },
+    });
+    const chunks: string[] = [];
+
+    await expect(service.fixMermaid('C:/project', 'graph TD', 'parse error')).resolves.toBe('hello');
+    await expect(service.diagnose('openai', 'gpt-5', '', true, (chunk) => chunks.push(chunk))).resolves.toMatchObject({ ok: true, content: 'hello', totalTokens: 3 });
+    expect(requests[0]).toMatchObject({ provider: 'openai', modelId: 'gpt-5' });
+    expect(chunks).toEqual(['hello']);
+  });
 });

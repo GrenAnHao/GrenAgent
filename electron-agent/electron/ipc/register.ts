@@ -162,6 +162,15 @@ function registerProviderCommands(service: ProviderService): void {
   registerCommand('refresh_model_registry', () => service.refresh());
   registerCommand('list_models_global', () => service.listModels());
   registerCommand('fetch_provider_models', (_event, args) => service.fetchModels(readString(args, 'baseUrl'), readString(args, 'apiKey'), readString(args, 'api')));
+  registerCommand('fix_mermaid_diagram', (_event, args) => service.fixMermaid(readString(args, 'workspace'), readText(args, 'code'), readText(args, 'error')));
+  registerCommand('diagnose_provider_model', (event, args) => {
+    const channel = args.onChunk;
+    const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+      ? (chunk: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
+      : () => {};
+    if (typeof args.stream !== 'boolean') throw new Error('stream must be a boolean');
+    return service.diagnose(readString(args, 'providerId'), readString(args, 'modelId'), readText(args, 'prompt'), args.stream, emit);
+  });
 }
 
 function registerSettingsCommands(service: SettingsService): void {
@@ -275,8 +284,9 @@ function registerTencentDbCommands(service: TencentDbService): void {
   registerCommand('tencentdb_get_config', () => service.getConfig());
   registerCommand('tencentdb_get_status', () => service.status());
   registerCommand('tencentdb_save_connection', (_event, args) => service.saveConnection(readInput(args)));
-  registerCommand('tencentdb_test_connection', () => service.status());
+  registerCommand('tencentdb_test_connection', () => service.testConnection());
   registerCommand('tencentdb_open_panel', () => service.openPanel());
+  registerCommand('tencentdb_reload_skills', () => service.reloadSkills().then(() => undefined));
   registerCommand('tencentdb_core_request', (_event, args) => {
     const input = readInput(args) as { route?: unknown; body?: unknown };
     if (typeof input.route !== 'string') throw new Error('TencentDB Core request route is required');
@@ -319,6 +329,17 @@ function registerTencentDbCommands(service: TencentDbService): void {
   registerKnowledgeCommand('tencentdb_delete_code_graph', service, '/code-graph/delete', (input) => ({ code_graph_ids: [readObjectString(input, 'assetId')] }));
   registerKnowledgeCommand('tencentdb_sync_code_graph', service, '/code-graph/sync', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), user_id: service.getConfig().userId }));
   registerKnowledgeCommand('tencentdb_sync_wiki', service, '/wiki/ingest', (input) => ({ wiki_id: readObjectString(input, 'assetId'), user_id: service.getConfig().userId }));
+  registerCommand('tencentdb_provision_workspace_assets', (_event, args) => service.provisionWorkspaceAssets(readObjectString(readInput(args) as Record<string, unknown>, 'workspace')));
+  registerCommand('tencentdb_import_wiki_files', async (_event, args) => {
+    const input = readInput(args) as Record<string, unknown>;
+    const wikiId = readObjectString(input, 'wikiId');
+    const selected = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '文本知识', extensions: ['md', 'markdown', 'txt', 'rst', 'adoc', 'json', 'yaml', 'yml'] }],
+    });
+    if (selected.canceled || selected.filePaths.length === 0) return null;
+    return service.importWikiFiles(wikiId, selected.filePaths);
+  });
 }
 
 function registerKnowledgeCommand(command: string, service: TencentDbService, route: string, body: (input: Record<string, unknown>) => Record<string, unknown>): void {
