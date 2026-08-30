@@ -1,6 +1,10 @@
 import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { SettingsService } from '../app/settingsService';
+import type { McpPolicyService } from '../app/mcpPolicyService';
+import type { McpConfigService } from '../app/mcpConfigService';
+import type { SubagentService } from '../app/subagentService';
+import type { FileService } from '../app/fileService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
@@ -10,6 +14,10 @@ type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>)
 
 export interface IpcServices {
   settings?: SettingsService;
+  mcpPolicy?: McpPolicyService;
+  mcpConfig?: McpConfigService;
+  subagent?: SubagentService;
+  files?: FileService;
   pi?: PiRuntimeService;
   provider?: ProviderService;
   workspace?: WorkspaceService;
@@ -51,10 +59,59 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   ipcMain.handle(IPC_CHANNELS.windowClose, (event) => event.sender.getOwnerBrowserWindow()?.close());
 
   if (services.settings) registerSettingsCommands(services.settings);
+  if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
+  if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
+  if (services.subagent) registerSubagentCommands(services.subagent);
+  if (services.files) registerFileCommands(services.files);
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
   if (services.workspace) registerWorkspaceCommands(services.workspace);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
+}
+
+function registerMcpPolicyCommands(service: McpPolicyService): void {
+  registerCommand('read_mcp_policy', () => service.readPolicy());
+  registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readString(args, 'content')));
+  registerCommand('read_mcp_audit', () => service.readAudit());
+  registerCommand('read_mcp_tools_cache', () => service.readToolsCache());
+  registerCommand('probe_mcp_server', (_event, args) => service.probe(readString(args, 'configJson')));
+}
+
+function registerMcpConfigCommands(service: McpConfigService): void {
+  registerCommand('list_mcp_configs', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('upsert_mcp_config', (_event, args) => {
+    if (typeof args.config !== 'object' || !args.config || Array.isArray(args.config)) throw new Error('config must be an object');
+    if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
+    return service.upsert(readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'), args.config, args.enabled);
+  });
+  registerCommand('remove_mcp_config', (_event, args) => service.remove(
+    readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
+  ));
+}
+
+function registerSubagentCommands(service: SubagentService): void {
+  registerCommand('subagent_list', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
+    readString(args, 'workspace'), readString(args, 'agentId'),
+  ));
+  registerCommand('subagent_cancel', (_event, args) => service.cancel(
+    readString(args, 'workspace'), readString(args, 'agentId'),
+  ));
+}
+
+function registerFileCommands(service: FileService): void {
+  registerCommand('get_file_tree', (_event, args) => service.tree(readString(args, 'workspace'), args.includeGitStatus === true));
+  registerCommand('read_file', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('read_file_binary', (_event, args) => service.readBinary(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('register_dropped_files', (_event, args) => {
+    if (!Array.isArray(args.paths) || !args.paths.every((path) => typeof path === 'string')) throw new Error('paths must be a string array');
+    return service.registerDropped(args.paths);
+  });
+  registerCommand('read_dropped_file', (_event, args) => service.readDropped(readString(args, 'path')));
+  registerCommand('import_dropped_file', (_event, args) => service.importDropped(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('write_file', (_event, args) => service.write(
+    readString(args, 'workspace'), readString(args, 'path'), readString(args, 'content'),
+  ));
 }
 
 function registerProviderCommands(service: ProviderService): void {
