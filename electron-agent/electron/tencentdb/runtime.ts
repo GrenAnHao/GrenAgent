@@ -38,7 +38,7 @@ export class TencentDbRuntime {
   async startLocal(options: StartTencentDbOptions): Promise<TencentDbRuntimeStatus> {
     if (this.processes && this.state === 'ready') return this.processes.status;
     if (!options.gatewayApiKey.trim()) throw new Error('TencentDB local gateway API key must not be empty');
-    this.layout.assertReady();
+    this.layout.assertCoreReady();
     this.state = 'starting';
     const corePort = await freePort();
     const knowledgePort = await freePort();

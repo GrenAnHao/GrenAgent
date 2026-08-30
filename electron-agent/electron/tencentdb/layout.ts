@@ -53,6 +53,12 @@ export class TencentDbLayout {
       if (!existsSync(path)) throw new Error(`TencentDB bundled runtime entry is missing: ${path}`);
     }
   }
+
+  assertCoreReady(): void {
+    for (const path of [this.node(), this.coreEntry(), this.knowledgeEntry(), this.coreConfig()]) {
+      if (!existsSync(path)) throw new Error(`TencentDB bundled runtime entry is missing: ${path}`);
+    }
+  }
 }
 
 export { platformDir };
