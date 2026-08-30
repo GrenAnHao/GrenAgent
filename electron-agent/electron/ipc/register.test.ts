@@ -73,6 +73,15 @@ describe('registerIpcHandlers', () => {
     expect(git.logGraph).toHaveBeenCalledWith('C:/project', null);
   });
 
+  it('routes execute_command with string arguments and optional workspace', async () => {
+    const terminal = { execute: vi.fn().mockResolvedValue(undefined) };
+    registerIpcHandlers({ terminal });
+    await expect(handler(IPC_CHANNELS.invoke)({}, {
+      command: 'execute_command', args: { command: 'git', args: ['status'], workspace: 'C:/project' },
+    })).resolves.toBeUndefined();
+    expect(terminal.execute).toHaveBeenCalledWith('git', ['status'], 'C:/project');
+  });
+
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {
     const window = {
       minimize: vi.fn(), maximize: vi.fn(), unmaximize: vi.fn(), isMaximized: vi.fn().mockReturnValue(false), close: vi.fn(),

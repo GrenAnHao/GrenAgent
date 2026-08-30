@@ -13,6 +13,7 @@ import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
 import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
 import type { GitService } from '../app/gitService';
+import type { TerminalService } from '../app/terminalService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -31,6 +32,7 @@ export interface IpcServices {
   uiHistory?: UiHistoryService;
   workspaceApproval?: WorkspaceApprovalService;
   git?: GitService;
+  terminal?: TerminalService;
   tencentdb?: TencentDbService;
 }
 
@@ -81,6 +83,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
   if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);
   if (services.git) registerGitCommands(services.git);
+  if (services.terminal) registerTerminalCommands(services.terminal);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
@@ -208,6 +211,14 @@ function registerGitCommands(service: GitService): void {
     const limit = args.limit;
     if (limit !== null && limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new Error('limit must be a positive integer or null');
     return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined);
+  });
+}
+
+function registerTerminalCommands(service: TerminalService): void {
+  registerCommand('execute_command', (_event, args) => {
+    if (!Array.isArray(args.args) || !args.args.every((arg) => typeof arg === 'string')) throw new Error('args must be a string array');
+    if (args.workspace !== undefined && typeof args.workspace !== 'string') throw new Error('workspace must be a string');
+    return service.execute(readString(args, 'command'), args.args, args.workspace);
   });
 }
 
