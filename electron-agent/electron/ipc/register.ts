@@ -16,6 +16,7 @@ import type { GitService } from '../app/gitService';
 import type { TerminalService } from '../app/terminalService';
 import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
+import type { ShellService } from '../app/shellService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -37,6 +38,7 @@ export interface IpcServices {
   terminal?: TerminalService;
   create?: CreateService;
   tempHtml?: TempHtmlService;
+  shell?: ShellService;
   tencentdb?: TencentDbService;
 }
 
@@ -90,6 +92,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.terminal) registerTerminalCommands(services.terminal);
   if (services.create) registerCreateCommands(services.create);
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
+  if (services.shell) registerShellCommands(services.shell);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
@@ -232,6 +235,19 @@ function registerTerminalCommands(service: TerminalService): void {
 function registerCreateCommands(service: CreateService): void {
   registerCommand('create_list', (_event, args) => service.list(readString(args, 'workspace')));
   registerCommand('create_image', (_event, args) => service.read(readString(args, 'workspace'), readString(args, 'name')));
+}
+
+function registerShellCommands(service: ShellService): void {
+  registerCommand('shell_start', (_event, args) => {
+    if (args.workspace !== undefined && typeof args.workspace !== 'string') throw new Error('workspace must be a string');
+    return service.start(args.workspace);
+  });
+  registerCommand('shell_write', (_event, args) => service.write(readString(args, 'sessionId'), readText(args, 'data')));
+  registerCommand('shell_resize', (_event, args) => {
+    if (typeof args.rows !== 'number' || typeof args.cols !== 'number') throw new Error('rows and cols must be numbers');
+    return service.resize(readString(args, 'sessionId'), args.rows, args.cols);
+  });
+  registerCommand('shell_stop', (_event, args) => service.stop(readString(args, 'sessionId')));
 }
 
 function registerPiCommands(service: PiRuntimeService): void {

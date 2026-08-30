@@ -18,6 +18,7 @@ import { GitService } from "./app/gitService";
 import { TerminalService } from "./app/terminalService";
 import { CreateService } from "./app/createService";
 import { TempHtmlService } from "./app/tempHtmlService";
+import { ShellService } from "./app/shellService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -105,6 +106,7 @@ if (!process.env.VITEST) {
       terminal: new TerminalService((event, payload) => broadcastPiEvent(event, payload)),
       create: new CreateService(),
       tempHtml: new TempHtmlService(app.getPath('temp')),
+      shell: new ShellService((event, payload) => broadcastPiEvent(event, payload), (path) => workspace.ensureWorkspace(path)),
       tencentdb,
     });
     app.on('before-quit', () => {
