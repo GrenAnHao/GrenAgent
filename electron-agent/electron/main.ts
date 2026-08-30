@@ -2,6 +2,7 @@ import { app, BrowserWindow, safeStorage } from "electron";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { browserWindowOptions } from "./mainConfig";
+import { SettingsService } from "./app/settingsService";
 import { registerIpcHandlers } from "./ipc/register";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { TencentDbLayout } from "./tencentdb/layout";
@@ -39,7 +40,10 @@ if (!process.env.VITEST) {
       secrets: new SafeTencentDbSecretStore(join(app.getPath('userData'), 'tencentdb-credentials.json')),
     });
     await tencentdb.load();
-    registerIpcHandlers({ tencentdb });
+    registerIpcHandlers({
+      settings: new SettingsService(app.getPath('userData')),
+      tencentdb,
+    });
     app.on('before-quit', () => {
       void panelRuntime.shutdown();
       void memoryRuntime.stop();

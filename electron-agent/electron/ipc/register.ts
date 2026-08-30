@@ -1,10 +1,12 @@
 import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
+import type { SettingsService } from '../app/settingsService';
 import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
 export interface IpcServices {
+  settings?: SettingsService;
   tencentdb?: TencentDbService;
 }
 
@@ -42,7 +44,22 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event) => event.sender.getOwnerBrowserWindow()?.isMaximized() ?? false);
   ipcMain.handle(IPC_CHANNELS.windowClose, (event) => event.sender.getOwnerBrowserWindow()?.close());
 
+  if (services.settings) registerSettingsCommands(services.settings);
   if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
+}
+
+function registerSettingsCommands(service: SettingsService): void {
+  registerCommand('get_settings', () => service.getAll());
+  registerCommand('set_settings', async (_event, args) => {
+    const settings = args.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new Error('Settings must be an object');
+    }
+    if (!Object.values(settings).every((value) => typeof value === 'string')) {
+      throw new Error('Settings values must be strings');
+    }
+    await service.replace(settings as Record<string, string>);
+  });
 }
 
 function registerTencentDbCommands(service: TencentDbService): void {
