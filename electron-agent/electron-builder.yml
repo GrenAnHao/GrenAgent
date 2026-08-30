@@ -1,0 +1,23 @@
+appId: com.rxstudio.grenagent
+productName: GrenAgent
+directories:
+  output: release
+files:
+  - dist/**
+  - out/**
+  - package.json
+asar: true
+extraResources:
+  - from: resources/pi
+    to: pi
+  - from: resources/tencentdb-memory
+    to: tencentdb-memory
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+linux:
+  target:
+    - AppImage
