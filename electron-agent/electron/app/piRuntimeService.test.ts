@@ -27,4 +27,13 @@ describe('PiRuntimeService', () => {
 
     await expect(service.send('C:/work', 'agent_not_real', {})).rejects.toThrow('Unsupported Pi command');
   });
+
+  it('opens a workspace on the first agent command when warm_workspace has not run yet', async () => {
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+
+    await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ type: 'get_state' });
+    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent' });
+  });
 });

@@ -76,14 +76,12 @@ export class PiRuntimeService {
   async send(workspace: string, command: string, args: Record<string, unknown>): Promise<unknown> {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
-    const client = this.options.manager.get(workspace);
-    if (!client) throw new Error(`Workspace is not open: ${workspace}`);
+    const client = await this.openClient(workspace);
     return client.send({ type, ...args });
   }
 
   async respondUi(workspace: string, response: Record<string, unknown>): Promise<void> {
-    const client = this.options.manager.get(workspace);
-    if (!client) throw new Error(`Workspace is not open: ${workspace}`);
+    const client = await this.openClient(workspace);
     await client.respondUi(response);
   }
 
