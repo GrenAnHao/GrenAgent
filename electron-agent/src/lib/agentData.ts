@@ -12,6 +12,8 @@ export interface WikiSearchResult { page: string; title: string; snippet: string
 export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; files?: number; nodes?: number; edges?: number }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
 export interface AgentJobCreateInput { kind: string; workspace: string }
+export interface AgentAuditEvent { id: string; action: string; detail: Record<string, unknown>; createdAt: number }
+export interface AgentDiagnostics { jobs: { total: number; failed: number }; auditEvents: number }
 
 export const agentDataApi = {
   start: () => invoke<{ version: number }>('agentData_start'),
@@ -40,8 +42,8 @@ export const agentDataApi = {
     get: (module: string) => invoke<AgentConfig>('agentData_admin_config_get', { module }),
     update: (module: string, value: Record<string, unknown>, version: number) => invoke<AgentConfig>('agentData_admin_config_update', { module, value, version }),
   },
-  audit: () => invoke<unknown[]>('agentData_admin_audit_list'),
-  diagnostics: () => invoke<Record<string, unknown>>('agentData_admin_diagnostics'),
+  audit: () => invoke<AgentAuditEvent[]>('agentData_admin_audit_list'),
+  diagnostics: () => invoke<AgentDiagnostics>('agentData_admin_diagnostics'),
   export: () => invoke<Record<string, unknown>>('agentData_admin_export'),
   import: (data: Record<string, unknown>) => invoke<void>('agentData_admin_import', { data }),
 };

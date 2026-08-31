@@ -5,9 +5,11 @@ import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
 import { UsagePanel } from '../usage/UsagePanel';
 import { AgentDataCenter } from '../agentData/AgentDataCenter';
+import { useSessionStore } from '../../store';
 
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
+  const workspace = useSessionStore((state) => state.activeWorkspace);
   switch (module) {
     case 'settings':
       return <SettingsPanel />;
@@ -18,7 +20,7 @@ function ActivePanel({ module }: { module: ModuleId }) {
     case 'usage':
       return <UsagePanel />;
     case 'agentData':
-      return <AgentDataCenter />;
+      return <AgentDataCenter userId="local" workspace={workspace || undefined} />;
     default:
       return null;
   }

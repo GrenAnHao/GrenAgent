@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw } from 'lucide-react';
+import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import { agentDataApi, type AgentDataStatus, type AgentJob, type CodeGraphStatus, type MemoryOverview, type WikiOverview } from '../../lib/agentData';
 import { MemoryPanel } from './MemoryPanel';
 import { WikiPanel } from './WikiPanel';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
 import { JobsPanel } from './JobsPanel';
+import { AuditDiagnosticsPanel } from './AuditDiagnosticsPanel';
 import { styles } from './agentDataStyles';
 
-type Tab = 'overview' | 'jobs' | 'memory' | 'wiki' | 'code';
+type Tab = 'overview' | 'jobs' | 'memory' | 'wiki' | 'code' | 'audit';
 interface AgentDataCenterProps { userId?: string; workspace?: string }
 
 const tabs: Array<{ id: Tab; label: string; Icon: typeof BrainCircuit }> = [
@@ -16,6 +17,7 @@ const tabs: Array<{ id: Tab; label: string; Icon: typeof BrainCircuit }> = [
   { id: 'memory', label: 'Memory', Icon: Database },
   { id: 'wiki', label: 'Wiki', Icon: FileText },
   { id: 'code', label: 'Code Retrieval', Icon: Code2 },
+  { id: 'audit', label: '审计诊断', Icon: ShieldCheck },
 ];
 
 export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
@@ -86,6 +88,7 @@ export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
         {tab === 'memory' && !loading ? <MemoryPanel userId={userId} workspace={workspace} /> : null}
         {tab === 'wiki' && !loading ? <WikiPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
         {tab === 'code' && !loading ? <CodeRetrievalPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
+        {tab === 'audit' && !loading ? <AuditDiagnosticsPanel /> : null}
       </div>
     </div>
   </section>;
