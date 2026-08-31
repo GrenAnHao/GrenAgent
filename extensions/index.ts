@@ -37,6 +37,7 @@ import webSearch from "./web-search/index.js";
 import resourceManager from "./resource-manager/index.js";
 import memory from "./memory/index.js";
 import codeRetrieval from "./code-retrieval/index.js";
+import wikiRag from "./wiki-rag/index.js";
 
 export {
   safety,
@@ -72,6 +73,7 @@ export {
   afterToolFeedback,
   memory,
   codeRetrieval,
+  wikiRag,
 };
 
 // Order roughly by general usefulness; safety first so guardrails intercept earliest.
@@ -109,6 +111,7 @@ export const allExtensions = [
   afterToolFeedback,
   memory,
   codeRetrieval,
+  wikiRag,
 ];
 
 // 名→工厂映射（与 allExtensions 同序）：供 sidecar 按 EXTENSIONS_PROFILE 过滤加载（真对话模式裁重扩展）。
@@ -149,4 +152,5 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "after-tool-feedback", factory: afterToolFeedback },
   { name: "memory", factory: memory },
   { name: "code-retrieval", factory: codeRetrieval },
+  { name: "wiki-rag", factory: wikiRag },
 ];

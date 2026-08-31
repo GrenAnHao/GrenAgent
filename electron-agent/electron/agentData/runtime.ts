@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
 import { AgentDataStorage } from './storage';
 import { MemoryStore } from './memoryStore';
+import { WikiStore } from './wikiStore';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -21,6 +22,7 @@ export class AgentDataRuntime {
   private inFlight = 0;
   private readonly token = randomBytes(32).toString('hex');
   private memory?: MemoryStore;
+  private wiki?: WikiStore;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -29,6 +31,7 @@ export class AgentDataRuntime {
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
     this.memory = new MemoryStore(this.storage.db);
+    this.wiki = new WikiStore(this.storage.db);
     this.server = createServer((socket) => this.handleSocket(socket));
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
@@ -85,7 +88,7 @@ export class AgentDataRuntime {
       else if (value.method === 'system.status') response = { id: value.id, ok: true, result: { state: this.closed ? 'closed' : 'ready', version: PROTOCOL_VERSION } };
       else if (value.method === 'system.shutdown') { response = { id: value.id, ok: true, result: null }; shutdown = true; }
       else {
-        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method);
+        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.wikiMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
       }
@@ -96,6 +99,14 @@ export class AgentDataRuntime {
     if (!socket.destroyed) socket.write(`${JSON.stringify(response)}\n`, () => { if (shutdown) this.close(); });
     this.inFlight -= 1;
     if (this.closed && this.inFlight === 0) this.storage?.close();
+  }
+
+  private wikiMethod(name: string): AgentDataMethod | undefined {
+    if (!this.wiki) return undefined;
+    if (name === 'wiki.replace') return (params) => this.wiki!.replacePage({ workspace: readString(params.workspace) }, readString(params.page), readString(params.title), readString(params.content), typeof params.sourcePath === 'string' ? params.sourcePath : undefined);
+    if (name === 'wiki.search') return (params) => this.wiki!.search({ workspace: readString(params.workspace) }, readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'wiki.deleteWorkspace') return (params) => { this.wiki!.deleteWorkspace({ workspace: readString(params.workspace) }); return null; };
+    return undefined;
   }
 
   private memoryMethod(name: string): AgentDataMethod | undefined {

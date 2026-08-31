@@ -1,0 +1,3 @@
+export interface WikiChunk { title: string; content: string; startLine: number; endLine: number; hash: string }
+import { createHash } from 'node:crypto';
+export function chunkMarkdown(content: string, fallbackTitle = 'Untitled'): WikiChunk[] { const lines = content.split(/\r?\n/); const out: WikiChunk[] = []; let start = 0; let title = fallbackTitle; const flush = (end: number) => { const body = lines.slice(start, end).join('\n').trim(); if (body) out.push({ title, content: body, startLine: start + 1, endLine: end, hash: createHash('sha256').update(body).digest('hex') }); }; lines.forEach((line, i) => { const m = /^(#{1,6})\s+(.+)$/.exec(line); if (m) { flush(i); title = m[2].trim(); start = i; } }); flush(lines.length); return out; }
