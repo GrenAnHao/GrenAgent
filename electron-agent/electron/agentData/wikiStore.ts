@@ -12,10 +12,17 @@ export class WikiStore {
 
   replacePage(scope: WikiScope, page: string, title: string, content: string, sourcePath = page): WikiChunk[] {
     const chunks = chunkMarkdown(content, sourcePath, title).map((chunk) => ({ ...chunk, id: createHash('sha256').update(`${scope.workspace}:${page}:${chunk.hash}`).digest('hex').slice(0, 32), page }));
-    const tx = this.db.prepare('INSERT INTO wiki_pages(workspace,page,title,content,source_path,content_hash,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,page) DO UPDATE SET title=excluded.title,content=excluded.content,source_path=excluded.source_path,content_hash=excluded.content_hash,updated_at=excluded.updated_at');
-    tx.run(scope.workspace, page, title, content, sourcePath, hash(content), Date.now());
-    this.db.prepare('DELETE FROM wiki_fts WHERE workspace=? AND page=?').run(scope.workspace, page);
-    this.db.prepare('INSERT INTO wiki_fts(workspace,page,title,content) VALUES(?,?,?,?)').run(scope.workspace, page, title, content);
+    this.db.exec('BEGIN');
+    try {
+      const tx = this.db.prepare('INSERT INTO wiki_pages(workspace,page,title,content,source_path,content_hash,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,page) DO UPDATE SET title=excluded.title,content=excluded.content,source_path=excluded.source_path,content_hash=excluded.content_hash,updated_at=excluded.updated_at');
+      tx.run(scope.workspace, page, title, content, sourcePath, hash(content), Date.now());
+      this.db.prepare('DELETE FROM wiki_fts WHERE workspace=? AND page=?').run(scope.workspace, page);
+      this.db.prepare('INSERT INTO wiki_fts(workspace,page,title,content) VALUES(?,?,?,?)').run(scope.workspace, page, title, content);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
     return chunks;
   }
 
