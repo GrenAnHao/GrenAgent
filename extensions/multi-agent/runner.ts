@@ -201,7 +201,7 @@ export async function spawnPiAgent(
   // sub-agent re-load project-local MCP, re-creating the cold-start stampede.
   const args = [
     ...baseArgs,
-    ...buildSubagentSkillArgs(getConfig("TDAI_SKILLS_ROOT")),
+    ...buildSubagentSkillArgs(getConfig("SUBAGENT_SKILLS_ROOT")),
     "--mode",
     "json",
     "-p",

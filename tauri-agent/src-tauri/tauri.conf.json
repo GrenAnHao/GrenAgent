@@ -32,7 +32,7 @@
     "active": true,
     "targets": "all",
     "externalBin": ["binaries/pi"],
-    "resources": ["binaries/tencentdb-memory/**/*"],
+    "resources": [],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
