@@ -82,18 +82,12 @@ describe('registerIpcHandlers', () => {
     expect(terminal.execute).toHaveBeenCalledWith('git', ['status'], 'C:/project');
   });
 
-  it('routes TencentDB skill reload and Wiki file import through the native picker', async () => {
-    electron.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:/guide.md'] });
-    const tencentdb = {
-      reloadSkills: vi.fn().mockResolvedValue('revision'),
-      importWikiFiles: vi.fn().mockResolvedValue({ uploaded: 1, sync: {} }),
-    };
-    registerIpcHandlers({ tencentdb });
+  it('routes Agent Data management commands without exposing runtime details', async () => {
+    const agentData = { request: vi.fn(async (method: string) => ({ method })) };
+    registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);
-    await expect(invoke({}, { command: 'tencentdb_reload_skills', args: {} })).resolves.toBeUndefined();
-    await expect(invoke({}, { command: 'tencentdb_import_wiki_files', args: { input: { wikiId: 'wiki-1' } } })).resolves.toEqual({ uploaded: 1, sync: {} });
-    expect(tencentdb.reloadSkills).toHaveBeenCalledOnce();
-    expect(tencentdb.importWikiFiles).toHaveBeenCalledWith('wiki-1', ['C:/guide.md']);
+    await expect(invoke({}, { command: 'agentData_admin_jobs_list', args: {} })).resolves.toEqual({ method: 'admin.jobs.list' });
+    await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'memory', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
   });
 
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {

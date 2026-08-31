@@ -3,6 +3,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { AgentDataStorage } from './storage';
 import { MemoryStore } from './memoryStore';
 import { WikiStore } from './wikiStore';
+import { JobStore } from './jobStore';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -23,6 +24,7 @@ export class AgentDataRuntime {
   private readonly token = randomBytes(32).toString('hex');
   private memory?: MemoryStore;
   private wiki?: WikiStore;
+  private jobs?: JobStore;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -32,6 +34,7 @@ export class AgentDataRuntime {
     this.storage.migrate();
     this.memory = new MemoryStore(this.storage.db);
     this.wiki = new WikiStore(this.storage.db);
+    this.jobs = new JobStore(this.storage.db);
     this.server = createServer((socket) => this.handleSocket(socket));
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
@@ -88,7 +91,7 @@ export class AgentDataRuntime {
       else if (value.method === 'system.status') response = { id: value.id, ok: true, result: { state: this.closed ? 'closed' : 'ready', version: PROTOCOL_VERSION } };
       else if (value.method === 'system.shutdown') { response = { id: value.id, ok: true, result: null }; shutdown = true; }
       else {
-        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.wikiMethod(value.method);
+        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.wikiMethod(value.method) ?? this.adminMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
       }
@@ -121,6 +124,21 @@ export class AgentDataRuntime {
     return undefined;
   }
 
+  private adminMethod(name: string): AgentDataMethod | undefined {
+    if (!this.jobs) return undefined;
+    if (name === 'admin.jobs.list') return () => this.jobs!.list();
+    if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
+    if (name === 'admin.jobs.cancel') return (p) => this.jobs!.cancel(readString(p.id));
+    if (name === 'admin.jobs.create') return (p) => this.jobs!.create({ kind: readString(p.kind), workspace: readString(p.workspace) });
+    if (name === 'admin.config.get') return (p) => this.jobs!.config(readString(p.module));
+    if (name === 'admin.config.update') return (p) => this.jobs!.updateConfig(readString(p.module), readRecord(p.value), typeof p.version === 'number' ? p.version : -1);
+    if (name === 'admin.audit.list') return () => this.jobs!.audit();
+    if (name === 'admin.diagnostics') return () => this.jobs!.diagnostics();
+    if (name === 'admin.export') return () => this.jobs!.exportData();
+    if (name === 'admin.import') return (p) => { const data = readRecord(p.data); this.jobs!.importData({ configs: data.configs === undefined ? undefined : readRecord(data.configs) as never }); return null; };
+    return undefined;
+  }
+
   private requestId(line: string): string {
     try { const value = JSON.parse(line) as { id?: unknown }; return typeof value.id === 'string' ? value.id : randomUUID(); } catch { return randomUUID(); }
   }
@@ -129,3 +147,4 @@ export class AgentDataRuntime {
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
 function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
 function readScope(value: Record<string, unknown>): { userId: string; workspace: string; sessionId?: string } { return { userId: readString(value.userId), workspace: readString(value.workspace), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId) }; }
+function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }

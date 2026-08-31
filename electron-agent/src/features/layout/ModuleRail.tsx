@@ -1,5 +1,5 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { BarChart3, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
+import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 
 interface ModuleDef {
@@ -9,12 +9,13 @@ interface ModuleDef {
   footer?: boolean;
 }
 
-// 仅全局（应用级）模块常驻 rail；长期记忆与知识资产统一从设置中的 TencentDB 中心管理。
+// 全局 Agent Data 中心统一管理本地 CodeGraph、Wiki 与 Memory。
 const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
   { id: 'connections', label: '连接', Icon: Webhook },
   { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'usage', label: '用量', Icon: BarChart3 },
+  { id: 'agentData', label: 'Agent 数据', Icon: BrainCircuit },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },
 ];
 

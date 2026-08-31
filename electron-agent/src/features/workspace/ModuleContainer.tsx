@@ -4,6 +4,7 @@ import { SettingsPanel } from '../settings/SettingsPanel';
 import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
 import { UsagePanel } from '../usage/UsagePanel';
+import { AgentDataCenter } from '../agentData/AgentDataCenter';
 
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
@@ -16,6 +17,8 @@ function ActivePanel({ module }: { module: ModuleId }) {
       return <ExtensionsPanel />;
     case 'usage':
       return <UsagePanel />;
+    case 'agentData':
+      return <AgentDataCenter />;
     default:
       return null;
   }

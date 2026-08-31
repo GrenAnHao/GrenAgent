@@ -101,6 +101,15 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());
+    registerCommand('agentData_admin_jobs_list', () => services.agentData!.request('admin.jobs.list'));
+    registerCommand('agentData_admin_jobs_get', (_event, args) => services.agentData!.request('admin.jobs.get', { id: readString(args, 'id') }));
+    registerCommand('agentData_admin_jobs_cancel', (_event, args) => services.agentData!.request('admin.jobs.cancel', { id: readString(args, 'id') }));
+    registerCommand('agentData_admin_config_get', (_event, args) => services.agentData!.request('admin.config.get', { module: readString(args, 'module') }));
+    registerCommand('agentData_admin_config_update', (_event, args) => services.agentData!.request('admin.config.update', { module: readString(args, 'module'), value: readRecord(args, 'value'), version: args.version }));
+    registerCommand('agentData_admin_audit_list', () => services.agentData!.request('admin.audit.list'));
+    registerCommand('agentData_admin_diagnostics', () => services.agentData!.request('admin.diagnostics'));
+    registerCommand('agentData_admin_export', () => services.agentData!.request('admin.export'));
+    registerCommand('agentData_admin_import', (_event, args) => services.agentData!.request('admin.import', { data: readRecord(args, 'data') }));
   }
 }
 
