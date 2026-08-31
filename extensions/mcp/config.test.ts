@@ -67,7 +67,7 @@ describe("injectDefaultServers", () => {
   });
 });
 
-describe("injectDefaultServers · TencentDB cutover", () => {
+describe("injectDefaultServers · legacy filtering", () => {
   it("never injects the legacy codebase-memory server", () => {
     const out = injectDefaultServers([], { PI_PACKAGE_DIR: "/pkg", CODE_INTEL: "codebase-memory" }, "linux");
     expect(out.some((s) => s.name === "codebase-memory")).toBe(false);
@@ -78,85 +78,6 @@ describe("injectDefaultServers · TencentDB cutover", () => {
     expect(injectDefaultServers(user, {}, "linux")).toEqual([]);
   });
 
-  it("injects TencentDB knowledge MCP from the bundled runtime", () => {
-    const out = injectDefaultServers(
-      [],
-      {
-        PI_PACKAGE_DIR: "C:/app/binaries",
-        TDAI_KNOWLEDGE_MCP: "1",
-        TDAI_KNOWLEDGE_ENDPOINT: "http://127.0.0.1:8421/v3",
-        TDAI_MEMORY_SERVICE_ID: "personal-memory",
-        TDAI_CODE_GRAPH_ID: "cg-current",
-        TDAI_WIKI_ID: "wiki-current",
-        CODE_INTEL: "off",
-      },
-      "win32",
-      {},
-      "x64",
-      { knowledgeApiToken: "secret", knowledgeUserKey: "user-secret" },
-    );
-    const server = out.find((s) => s.name === "tencentdb-knowledge");
-    expect(server?.command?.replaceAll("\\", "/")).toBe(
-      "C:/app/binaries/tencentdb-memory/windows-x86_64/node/node.exe",
-    );
-    expect(server?.args?.[0]?.replaceAll("\\", "/")).toBe(
-      "C:/app/binaries/tencentdb-memory/windows-x86_64/knowledge/bin/mcp.mjs",
-    );
-    expect(server).toMatchObject({
-      name: "tencentdb-knowledge",
-      transport: "stdio",
-      env: {
-        KNOWLEDGE_API_URL: "http://127.0.0.1:8421",
-        KNOWLEDGE_API_TOKEN: "secret",
-        KNOWLEDGE_USER_KEY: "user-secret",
-        KNOWLEDGE_SERVICE_ID: "personal-memory",
-        TDAI_CODE_GRAPH_ID: "cg-current",
-        TDAI_WIKI_ID: "wiki-current",
-      },
-    });
-  });
-
-  it("does not read the Knowledge token from the general process environment", () => {
-    const [server] = injectDefaultServers([], {
-      PI_PACKAGE_DIR: "/pkg",
-      TDAI_KNOWLEDGE_MCP: "1",
-      TDAI_KNOWLEDGE_ENDPOINT: "http://127.0.0.1:8421/v3",
-      TDAI_MEMORY_API_KEY: "must-not-forward",
-      TDAI_MEMORY_USER_KEY: "must-not-forward-user",
-    }, "linux");
-
-    expect(server.env).not.toHaveProperty("KNOWLEDGE_API_TOKEN");
-    expect(server.env).not.toHaveProperty("KNOWLEDGE_USER_KEY");
-  });
-
-  it("does not inject TencentDB knowledge when the user configured the same name", () => {
-    const user = [{ name: "tencentdb-knowledge", transport: "stdio" as const, command: "custom" }];
-    const out = injectDefaultServers(user, {
-      TDAI_KNOWLEDGE_MCP: "1",
-      TDAI_KNOWLEDGE_ENDPOINT: "http://k/v3",
-      PI_PACKAGE_DIR: "/pkg",
-      CODE_INTEL: "off",
-    }, "linux");
-    expect(out).toEqual(user);
-  });
-
-  it("selects the bundled ARM64 runtime when the sidecar runs on ARM64", () => {
-    const out = injectDefaultServers(
-      [],
-      {
-        TDAI_KNOWLEDGE_MCP: "1",
-        TDAI_KNOWLEDGE_ENDPOINT: "https://k/v3",
-        PI_PACKAGE_DIR: "/pkg",
-        CODE_INTEL: "off",
-      },
-      "darwin",
-      {},
-      "arm64",
-    );
-    expect(out.find((s) => s.name === "tencentdb-knowledge")?.command?.replaceAll("\\", "/")).toBe(
-      "/pkg/tencentdb-memory/darwin-aarch64/node/bin/node",
-    );
-  });
 });
 
 describe("sanitize", () => {

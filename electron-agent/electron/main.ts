@@ -71,6 +71,10 @@ if (!process.env.VITEST) {
         processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
+        agentDataEndpoint: () => {
+          const endpoint = agentData.endpoint();
+          return endpoint ? JSON.stringify(endpoint) : undefined;
+        },
         resolveWorkspace: (path) => workspace.ensureWorkspace(path),
       }),
       provider: new ProviderService({

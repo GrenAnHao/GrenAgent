@@ -49,6 +49,7 @@ export interface PiRuntimeOptions {
   processCommand: PiProcessCommand;
   agentDir: string;
   runtimeConfigPath?: string;
+  agentDataEndpoint?: () => string | undefined;
   resolveWorkspace?: (workspace: string) => Promise<string>;
 }
 
@@ -105,6 +106,8 @@ export class PiRuntimeService {
     const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
     const env: Record<string, string> = { PI_PACKAGE_DIR: this.options.agentDir };
     if (this.options.runtimeConfigPath) env.PI_RUNTIME_CONFIG = this.options.runtimeConfigPath;
+    const endpoint = this.options.agentDataEndpoint?.();
+    if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
     return this.options.manager.open(workspace, cwd, env);
   }
 }

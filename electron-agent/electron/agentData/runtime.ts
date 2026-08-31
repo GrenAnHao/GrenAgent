@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
 import { AgentDataStorage } from './storage';
+import { MemoryStore } from './memoryStore';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -19,6 +20,7 @@ export class AgentDataRuntime {
   private readonly sockets = new Set<Socket>();
   private inFlight = 0;
   private readonly token = randomBytes(32).toString('hex');
+  private memory?: MemoryStore;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -26,6 +28,7 @@ export class AgentDataRuntime {
     if (this.endpoint) return this.endpoint;
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
+    this.memory = new MemoryStore(this.storage.db);
     this.server = createServer((socket) => this.handleSocket(socket));
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
@@ -82,7 +85,7 @@ export class AgentDataRuntime {
       else if (value.method === 'system.status') response = { id: value.id, ok: true, result: { state: this.closed ? 'closed' : 'ready', version: PROTOCOL_VERSION } };
       else if (value.method === 'system.shutdown') { response = { id: value.id, ok: true, result: null }; shutdown = true; }
       else {
-        const method = this.options.methods?.[value.method];
+        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
       }
@@ -95,7 +98,21 @@ export class AgentDataRuntime {
     if (this.closed && this.inFlight === 0) this.storage?.close();
   }
 
+  private memoryMethod(name: string): AgentDataMethod | undefined {
+    if (!this.memory) return undefined;
+    if (name === 'memory.upsert') return (params) => this.memory!.upsert(readScope(params), {
+      level: readLevel(params.level), content: readString(params.content), source: typeof params.source === 'string' ? params.source : undefined,
+    });
+    if (name === 'memory.search') return (params) => this.memory!.search(readScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
+    return undefined;
+  }
+
   private requestId(line: string): string {
     try { const value = JSON.parse(line) as { id?: unknown }; return typeof value.id === 'string' ? value.id : randomUUID(); } catch { return randomUUID(); }
   }
 }
+
+function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
+function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
+function readScope(value: Record<string, unknown>): { userId: string; workspace: string; sessionId?: string } { return { userId: readString(value.userId), workspace: readString(value.workspace), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId) }; }

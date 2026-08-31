@@ -35,6 +35,7 @@ import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
 import webSearch from "./web-search/index.js";
 import resourceManager from "./resource-manager/index.js";
+import memory from "./memory/index.js";
 
 export {
   safety,
@@ -68,6 +69,7 @@ export {
   imGateway,
   imPlatforms,
   afterToolFeedback,
+  memory,
 };
 
 // Order roughly by general usefulness; safety first so guardrails intercept earliest.
@@ -103,6 +105,7 @@ export const allExtensions = [
   imGateway,
   imPlatforms,
   afterToolFeedback,
+  memory,
 ];
 
 // 名→工厂映射（与 allExtensions 同序）：供 sidecar 按 EXTENSIONS_PROFILE 过滤加载（真对话模式裁重扩展）。
@@ -141,4 +144,5 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "im-gateway", factory: imGateway },
   { name: "im-platforms", factory: imPlatforms },
   { name: "after-tool-feedback", factory: afterToolFeedback },
+  { name: "memory", factory: memory },
 ];
