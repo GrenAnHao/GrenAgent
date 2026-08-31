@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest';
+import { AgentDataRuntime } from './runtime';
+import { AgentDataClient } from './client';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+describe('AgentDataRuntime', () => {
+  it('serves hello/status and rejects invalid or unknown requests', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const endpoint = await runtime.start();
+    const client = new AgentDataClient(endpoint);
+    await expect(client.request('system.hello')).resolves.toMatchObject({ version: 1 });
+    await expect(client.request('system.status')).resolves.toMatchObject({ state: 'ready' });
+    await expect(client.request('no.such.method')).rejects.toMatchObject({ code: 'METHOD_NOT_FOUND' });
+    await expect(new AgentDataClient({ ...endpoint, token: 'bad' }).request('system.status')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await client.close();
+    runtime.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('exits when stdin reaches EOF', async () => {
+    const runtime = new AgentDataRuntime({ dataPath: ':memory:', stdin: undefined });
+    await runtime.start();
+    runtime.handleStdinEnd();
+    expect(runtime.isClosed()).toBe(true);
+  });
+});

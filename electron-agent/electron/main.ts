@@ -18,6 +18,7 @@ import { TerminalService } from "./app/terminalService";
 import { CreateService } from "./app/createService";
 import { TempHtmlService } from "./app/tempHtmlService";
 import { ShellService } from "./app/shellService";
+import { AgentDataService } from "./app/agentDataService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -41,6 +42,8 @@ export function createWindow() {
 if (!process.env.VITEST) {
   app.whenReady().then(async () => {
     const settings = new SettingsService(app.getPath('userData'));
+    const agentData = new AgentDataService({ dataPath: join(app.getPath('userData'), 'agent-data.db') });
+    await agentData.start();
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const pi = new PiManager(
@@ -105,6 +108,7 @@ if (!process.env.VITEST) {
     });
     app.on('before-quit', () => {
       void pi.closeAll();
+      void agentData.stop();
     });
     createWindow();
   });
