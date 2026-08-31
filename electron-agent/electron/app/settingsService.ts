@@ -30,7 +30,7 @@ export class SettingsService {
 function runtimeSettings(settings: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(settings).filter(([key, value]) =>
-      !key.startsWith('TDAI_MEMORY_') && key !== 'TDAI_KNOWLEDGE_ENDPOINT' && value.trim().length > 0,
+      value.trim().length > 0,
     ),
   );
 }

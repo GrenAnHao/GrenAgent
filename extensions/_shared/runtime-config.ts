@@ -4,26 +4,16 @@
 import { readFileSync, watch } from "node:fs";
 
 let cache: Record<string, string> | null = null;
-const sensitiveConfig: Record<string, string> = {};
 let started = false;
 let watcher: import("node:fs").FSWatcher | undefined;
 const subscribers = new Set<(next: Record<string, string>) => void>();
 
-const SENSITIVE_PROCESS_KEYS = ["TDAI_MEMORY_API_KEY", "TDAI_MEMORY_USER_KEY"] as const;
-
 export function withoutSensitiveProcessConfig<T>(config: Record<string, T>): Record<string, T> {
-  const filtered = { ...config };
-  for (const key of SENSITIVE_PROCESS_KEYS) delete filtered[key];
-  return filtered;
+  return { ...config };
 }
 
 /** Keep credentials available to extensions without leaking them to tool subprocesses. */
 export function captureSensitiveProcessConfig(): void {
-  for (const key of SENSITIVE_PROCESS_KEYS) {
-    const value = process.env[key];
-    if (value !== undefined) sensitiveConfig[key] = value;
-    delete process.env[key];
-  }
 }
 
 function configPath(): string | undefined {
@@ -72,7 +62,7 @@ function ensureStarted(): void {
 
 export function getConfig(key: string): string | undefined {
   ensureStarted();
-  return sensitiveConfig[key] ?? cache?.[key] ?? process.env[key];
+  return cache?.[key] ?? process.env[key];
 }
 
 export function getAllConfig(): Record<string, string> {
@@ -94,7 +84,6 @@ export function __resetForTest(): void {
   watcher?.close();
   watcher = undefined;
   cache = null;
-  for (const key of Object.keys(sensitiveConfig)) delete sensitiveConfig[key];
   started = false;
   subscribers.clear();
 }

@@ -90,10 +90,6 @@ function defaultReadServers(): McpServerConfig[] {
     process.platform,
     readToolsCache(),
     process.arch,
-    {
-      knowledgeApiToken: getConfig("TDAI_MEMORY_API_KEY"),
-      knowledgeUserKey: getConfig("TDAI_MEMORY_USER_KEY"),
-    },
   );
   return expandServerVars(servers, process.cwd());
 }

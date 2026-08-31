@@ -3,7 +3,6 @@ import { Select } from '@lobehub/ui/base-ui';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
 import { pi } from '../../../../lib/pi';
-import { syncPiModelToTencentdb } from '../../../../lib/tencentdbLlmSync';
 import { loadProviderList } from '../../../settings/providerListCache';
 import {
   useAvailableModelsState,
@@ -67,12 +66,6 @@ export default function ModelAction() {
           const key = modelKey(model.provider, model.id);
           lastModelByWorkspace.set(workspace, key);
           setValue(key);
-          if (model.api && model.baseUrl) {
-            void pi
-              .getProviderConfig()
-              .then((config) => syncPiModelToTencentdb(model as ModelInfo, config))
-              .catch(() => {});
-          }
         }
       }
     })();
@@ -88,12 +81,6 @@ export default function ModelAction() {
     void (async () => {
       await pi.setModel(workspace, provider, id);
       const selected = models.find((item) => item.provider === provider && item.id === id);
-      if (selected) {
-        void pi
-          .getProviderConfig()
-          .then((config) => syncPiModelToTencentdb(selected, config))
-          .catch(() => {});
-      }
       // 切模型后按「该模型记忆 / 模型默认」设推理档位，避免沿用上一个模型的设定。
       try {
         const state = (await pi.getState(workspace)) as { thinkingLevel?: string; model?: RpcModel | null };

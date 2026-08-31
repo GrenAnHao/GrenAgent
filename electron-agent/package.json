@@ -9,7 +9,6 @@
     "build": "tsc -p tsconfig.json && electron-vite build",
     "test": "vitest run",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "build:tencentdb-memory": "node scripts/build-tencentdb-memory.mjs",
     "package": "electron-builder --config electron-builder.yml"
   },
   "dependencies": {

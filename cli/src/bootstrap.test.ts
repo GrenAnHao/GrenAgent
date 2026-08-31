@@ -4,15 +4,15 @@ import { test } from "node:test";
 import { __resetForTest, getConfig } from "../../extensions/_shared/runtime-config.js";
 import { bootstrapSidecar } from "./bootstrap.js";
 
-test("captures TencentDB credentials before loading the agent runtime", async () => {
+test("bootstrap loads the runtime without mutating process configuration", async () => {
   __resetForTest();
   process.env.TDAI_MEMORY_API_KEY = "gateway-secret";
   process.env.TDAI_MEMORY_USER_KEY = "user-secret";
   let ran = false;
 
   await bootstrapSidecar(async () => {
-    assert.equal(process.env.TDAI_MEMORY_API_KEY, undefined);
-    assert.equal(process.env.TDAI_MEMORY_USER_KEY, undefined);
+    assert.equal(process.env.TDAI_MEMORY_API_KEY, "gateway-secret");
+    assert.equal(process.env.TDAI_MEMORY_USER_KEY, "user-secret");
     assert.equal(getConfig("TDAI_MEMORY_API_KEY"), "gateway-secret");
     assert.equal(getConfig("TDAI_MEMORY_USER_KEY"), "user-secret");
     return {
@@ -24,6 +24,8 @@ test("captures TencentDB credentials before loading the agent runtime", async ()
 
   assert.equal(ran, true);
   __resetForTest();
+  delete process.env.TDAI_MEMORY_API_KEY;
+  delete process.env.TDAI_MEMORY_USER_KEY;
 });
 
 test("the executable entrypoint does not statically import Pi or extensions", async () => {

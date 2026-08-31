@@ -15,7 +15,6 @@ import imGateway from "./im-gateway/index.js";
 import imPlatforms from "./im-platforms/index.js";
 import goal from "./goal/index.js";
 import imageGen from "./image-gen/index.js";
-import tencentdbMemory from "./tencentdb-memory/index.js";
 import sessionMemory from "./session-memory/index.js";
 import mcp from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
@@ -50,7 +49,6 @@ export {
   diagramHint,
   fableBehavior,
   goal,
-  tencentdbMemory,
   sessionMemory,
   webFetch,
   webSearch,
@@ -86,7 +84,6 @@ export const allExtensions = [
   diagramHint,
   fableBehavior,
   goal,
-  tencentdbMemory,
   sessionMemory,
   webFetch,
   webSearch,
@@ -124,7 +121,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "diagram-hint", factory: diagramHint },
   { name: "fable-behavior", factory: fableBehavior },
   { name: "goal", factory: goal },
-  { name: "tencentdb-memory", factory: tencentdbMemory },
   { name: "session-memory", factory: sessionMemory },
   { name: "web-fetch", factory: webFetch },
   { name: "web-search", factory: webSearch },

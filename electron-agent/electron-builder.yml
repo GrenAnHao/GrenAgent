@@ -10,8 +10,6 @@ asar: true
 extraResources:
   - from: resources/pi
     to: pi
-  - from: resources/tencentdb-memory
-    to: tencentdb-memory
 win:
   target:
     - nsis

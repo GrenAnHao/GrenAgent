@@ -14,7 +14,6 @@ use crate::pi::sink::{EventSink, TauriSink};
 use crate::pi::types::{PiOutbound, RpcResponse};
 use crate::pi::{PiClient, PiManager};
 use crate::state::AppStateStore;
-use crate::tencentdb::MemoryRuntime;
 
 async fn client_for(mgr: &PiManager, workspace: &str) -> Result<Arc<PiClient>, String> {
     mgr.get(workspace)
@@ -98,7 +97,6 @@ pub async fn open_workspace(
     app: tauri::AppHandle,
     mgr: State<'_, Arc<PiManager>>,
     store: State<'_, AppStateStore>,
-    memory_runtime: State<'_, Arc<MemoryRuntime>>,
 ) -> Result<OpenWorkspaceResult, String> {
     let t0 = Instant::now();
     let cwd = resolve_workspace_dir(&workspace)?;
@@ -106,15 +104,6 @@ pub async fn open_workspace(
     let app2 = app.clone();
     let ws = workspace.clone();
     let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
-    env.extend(
-        crate::commands::tencentdb::prepare_memory_env_for_workspace(
-            &app,
-            &store,
-            &memory_runtime,
-            Some(&cwd),
-        )
-        .await,
-    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     mgr.get_or_open(&workspace, move || {
@@ -192,7 +181,6 @@ pub async fn warm_workspace(
     app: tauri::AppHandle,
     mgr: State<'_, Arc<PiManager>>,
     store: State<'_, AppStateStore>,
-    memory_runtime: State<'_, Arc<MemoryRuntime>>,
 ) -> Result<(), String> {
     if mgr.get(&workspace).await.is_some() {
         return Ok(());
@@ -203,15 +191,6 @@ pub async fn warm_workspace(
     let app2 = app.clone();
     let ws = workspace.clone();
     let mut env = apply_conversation_tool_policy(store.settings_env().await, &cwd);
-    env.extend(
-        crate::commands::tencentdb::prepare_memory_env_for_workspace(
-            &app,
-            &store,
-            &memory_runtime,
-            Some(&cwd),
-        )
-        .await,
-    );
     store.write_runtime_config().await;
     let runtime_config = store.runtime_path().to_string_lossy().to_string();
     let client = mgr

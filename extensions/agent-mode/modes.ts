@@ -17,7 +17,7 @@ export function isAgentMode(v: unknown): v is AgentMode {
 //   - 联网只读：fetch_url / fetch_llms / fetch_html / fetch_markdown / fetch_txt / fetch_json（web-fetch）、
 //     web_search / web_search_multi / fetch_web_content / fetch_github_readme（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
-//     tdai_memory_search / tdai_conversation_search（TencentDB）、git_diff（code-review）
+//     memory_search / conversation_search、git_diff（code-review）
 //   - 交互/只读视图（不改文件）：ask_user（agent-mode 提问卡）、hl_read（hashline 带 #TAG 的只读视图）
 // 写类(write/edit/review_note/todo/generate_image/speak)、命令行(bash)、
 // 子代理(spawn_agent/explore_context)、外部命令(diagnostics)、MCP(<server>__*) 一律不在白名单，
@@ -38,8 +38,8 @@ export const ASK_TOOLS: readonly string[] = [
   "fetch_web_content",
   "fetch_github_readme",
   "search",
-  "tdai_memory_search",
-  "tdai_conversation_search",
+  "memory_search",
+  "conversation_search",
   "git_diff",
   "lsp_definition",
   "lsp_references",

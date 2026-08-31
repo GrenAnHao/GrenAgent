@@ -17,7 +17,6 @@ import type { TerminalService } from '../app/terminalService';
 import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
-import type { TencentDbService } from '../tencentdb/service';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -39,7 +38,6 @@ export interface IpcServices {
   create?: CreateService;
   tempHtml?: TempHtmlService;
   shell?: ShellService;
-  tencentdb?: TencentDbService;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -97,7 +95,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.create) registerCreateCommands(services.create);
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
   if (services.shell) registerShellCommands(services.shell);
-  if (services.tencentdb) registerTencentDbCommands(services.tencentdb);
 }
 
 function registerMcpPolicyCommands(service: McpPolicyService): void {
@@ -282,106 +279,6 @@ function registerPiCommands(service: PiRuntimeService): void {
       return service.send(workspace, command, input);
     });
   }
-}
-
-function registerTencentDbCommands(service: TencentDbService): void {
-  registerCommand('tencentdb_get_config', () => service.getConfig());
-  registerCommand('tencentdb_get_status', () => service.status());
-  registerCommand('tencentdb_save_connection', (_event, args) => service.saveConnection(readInput(args)));
-  registerCommand('tencentdb_test_connection', () => service.testConnection());
-  registerCommand('tencentdb_open_panel', () => service.openPanel());
-  registerCommand('tencentdb_reload_skills', () => service.reloadSkills().then(() => undefined));
-  registerCommand('tencentdb_core_request', (_event, args) => {
-    const input = readInput(args) as { route?: unknown; body?: unknown };
-    if (typeof input.route !== 'string') throw new Error('TencentDB Core request route is required');
-    const body = input.body && typeof input.body === 'object' && !Array.isArray(input.body)
-      ? input.body as Record<string, unknown>
-      : {};
-    return service.coreRequest(input.route, body);
-  });
-  registerCommand('tencentdb_sync_llm', (_event, args) => {
-    const input = readInput(args) as Record<string, unknown>;
-    const api = readObjectString(input, 'api');
-    const protocol = api === 'anthropic-messages' ? 'anthropic' : api === 'openai-completions' || api === 'openai-responses' ? 'openai' : null;
-    if (!protocol) throw new Error('TencentDB Knowledge does not support this Pi model protocol');
-    return service.knowledgeRequest('/internal/llm-binding/set', {
-      mode: 'byo', base_url: readObjectString(input, 'baseUrl'), api_key: readObjectString(input, 'apiKey'), model: readObjectString(input, 'modelId'), protocol, enabled: true,
-    });
-  });
-  registerCommand('tencentdb_list_knowledge_assets', async (_event, args) => {
-    const workspace = args.workspace === undefined ? undefined : readString(args, 'workspace');
-    return service.listKnowledgeAssets(workspace);
-  });
-  registerKnowledgeCommand('tencentdb_get_wiki', service, '/wiki/get', (input) => ({ wiki_id: readObjectString(input, 'assetId') }));
-  registerKnowledgeCommand('tencentdb_get_code_graph', service, '/code-graph/get', (input) => ({ code_graph_id: readObjectString(input, 'assetId') }));
-  registerKnowledgeCommand('tencentdb_search_wiki', service, '/wiki/search', (input) => ({ wiki_id: readObjectString(input, 'assetId'), query: readObjectString(input, 'query'), limit: readCount(input, 'limit', 20, 100) }));
-  registerKnowledgeCommand('tencentdb_list_wiki_pages', service, '/wiki/page/ls', (input) => ({ wiki_id: readObjectString(input, 'assetId') }));
-  registerKnowledgeCommand('tencentdb_read_wiki_pages', service, '/wiki/page/read', (input) => ({ wiki_id: readObjectString(input, 'assetId'), refs: readStringArray(input, 'refs', 1, 20) }));
-  registerKnowledgeCommand('tencentdb_search_code_graph', service, '/code-graph/search', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), query: readObjectString(input, 'query'), limit: readCount(input, 'limit', 20, 100) }));
-  registerKnowledgeCommand('tencentdb_explore_code_graph', service, '/code-graph/explore', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), query: readObjectString(input, 'query'), maxFiles: readCount(input, 'maxFiles', 12, 200) }));
-  registerKnowledgeCommand('tencentdb_get_code_graph_callers', service, '/code-graph/callers', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), symbol: readObjectString(input, 'symbol'), limit: readCount(input, 'limit', 20, 200) }));
-  registerKnowledgeCommand('tencentdb_get_code_graph_callees', service, '/code-graph/callees', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), symbol: readObjectString(input, 'symbol'), limit: readCount(input, 'limit', 20, 200) }));
-  registerKnowledgeCommand('tencentdb_analyze_code_graph_impact', service, '/code-graph/impact', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), symbol: readObjectString(input, 'symbol'), depth: readCount(input, 'depth', 2, 10) }));
-  registerKnowledgeCommand('tencentdb_get_code_graph_node', service, '/code-graph/node', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), symbol: readObjectString(input, 'symbol'), includeCode: input.includeCode === true, ...optionalText(input, 'file'), ...optionalCount(input, 'line') }));
-  registerKnowledgeCommand('tencentdb_get_code_graph_status', service, '/code-graph/status', (input) => ({ code_graph_id: readObjectString(input, 'assetId') }));
-  registerKnowledgeCommand('tencentdb_list_code_graph_files', service, '/code-graph/files', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), format: typeof input.format === 'string' ? input.format : 'tree', includeMetadata: input.includeMetadata !== false, ...optionalText(input, 'path'), ...optionalText(input, 'pattern'), ...optionalCount(input, 'maxDepth') }));
-  registerKnowledgeCommand('tencentdb_delete_wiki', service, '/wiki/delete', (input) => ({ wiki_ids: [readObjectString(input, 'assetId')] }));
-  registerKnowledgeCommand('tencentdb_delete_code_graph', service, '/code-graph/delete', (input) => ({ code_graph_ids: [readObjectString(input, 'assetId')] }));
-  registerKnowledgeCommand('tencentdb_sync_code_graph', service, '/code-graph/sync', (input) => ({ code_graph_id: readObjectString(input, 'assetId'), user_id: service.getConfig().userId }));
-  registerKnowledgeCommand('tencentdb_sync_wiki', service, '/wiki/ingest', (input) => ({ wiki_id: readObjectString(input, 'assetId'), user_id: service.getConfig().userId }));
-  registerCommand('tencentdb_provision_workspace_assets', (_event, args) => service.provisionWorkspaceAssets(readObjectString(readInput(args) as Record<string, unknown>, 'workspace')));
-  registerCommand('tencentdb_import_wiki_files', async (_event, args) => {
-    const input = readInput(args) as Record<string, unknown>;
-    const wikiId = readObjectString(input, 'wikiId');
-    const selected = await dialog.showOpenDialog({
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '文本知识', extensions: ['md', 'markdown', 'txt', 'rst', 'adoc', 'json', 'yaml', 'yml'] }],
-    });
-    if (selected.canceled || selected.filePaths.length === 0) return null;
-    return service.importWikiFiles(wikiId, selected.filePaths);
-  });
-}
-
-function registerKnowledgeCommand(command: string, service: TencentDbService, route: string, body: (input: Record<string, unknown>) => Record<string, unknown>): void {
-  registerCommand(command, (_event, args) => service.knowledgeRequest(route, body(readInput(args) as Record<string, unknown>)));
-}
-
-function readItems(value: unknown): unknown[] {
-  return value && typeof value === 'object' && Array.isArray((value as Record<string, unknown>).items) ? (value as Record<string, unknown>).items as unknown[] : [];
-}
-
-function readObjectString(value: Record<string, unknown>, key: string): string {
-  const field = value[key];
-  if (typeof field !== 'string' || !field.trim()) throw new Error(`${key} must be a non-empty string`);
-  return field;
-}
-
-function readStringArray(value: Record<string, unknown>, key: string, min: number, max: number): string[] {
-  const items = value[key];
-  if (!Array.isArray(items) || items.length < min || items.length > max || !items.every((item) => typeof item === 'string' && item.trim())) throw new Error(`${key} must contain ${min} to ${max} non-empty strings`);
-  return items;
-}
-
-function readCount(value: Record<string, unknown>, key: string, fallback: number, max: number): number {
-  const count = value[key] ?? fallback;
-  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > max) throw new Error(`${key} must be an integer from 1 to ${max}`);
-  return count;
-}
-
-function optionalText(value: Record<string, unknown>, key: string): Record<string, string> {
-  if (value[key] === undefined || value[key] === null) return {};
-  return { [key]: readObjectString(value, key) };
-}
-
-function optionalCount(value: Record<string, unknown>, key: string): Record<string, number> {
-  if (value[key] === undefined || value[key] === null) return {};
-  return { [key]: readCount(value, key, 1, Number.MAX_SAFE_INTEGER) };
-}
-
-function readInput(args: Record<string, unknown>): any {
-  const input = args.input;
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Command input must be an object');
-  return input;
 }
 
 function readString(args: Record<string, unknown>, key: string): string {

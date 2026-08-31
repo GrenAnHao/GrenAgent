@@ -1,5 +1,3 @@
-// Loaded only after bootstrap removes TencentDB credentials from process.env.
-
 import {
   AuthStorage,
   type CreateAgentSessionRuntimeFactory,
@@ -16,12 +14,6 @@ import { allExtensions, namedExtensions, safety } from "../../extensions/index.j
 import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
 import { onResourceReloadRequested } from "../../extensions/_shared/resource-reload.js";
 import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-profile.js";
-import {
-  managedSkillLoaderOptions,
-  reloadManagedSkills,
-  syncConfiguredSkills,
-  withManagedSkillArgs,
-} from "./tencentdb-skills.js";
 
 function emitReadyBanner(): void {
   const safetyOn = allExtensions.includes(safety);
@@ -58,15 +50,12 @@ function disabledSkills(): Set<string> {
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
-  const managedSkillRoot = await syncConfiguredSkills();
-
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
     authStorage,
     modelRegistry,
     resourceLoaderOptions: {
-      ...managedSkillLoaderOptions(managedSkillRoot),
       // 按 EXTENSIONS_PROFILE 过滤：真对话模式（chat）裁掉重代码智能扩展以加速冷启动；默认 project 全载。
       // safety 永不剔除（见 filterExtensionsByProfile）。
       extensionFactories: filterExtensionsByProfile(
@@ -134,7 +123,7 @@ export async function run(): Promise<void> {
       reloadPending = true;
       const session = runtime.session;
       const doReload = (): Promise<void> =>
-        reloadManagedSkills(syncConfiguredSkills, () => runtime.session.reload()).catch((e) => {
+        runtime.session.reload().catch((e) => {
           console.error("[reload] session reload failed:", e);
         }).finally(() => {
           reloadPending = false;
@@ -164,6 +153,5 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const managedSkillRoot = await syncConfiguredSkills();
-  await main(withManagedSkillArgs(argv, managedSkillRoot), { extensionFactories: allExtensions });
+  await main(argv, { extensionFactories: allExtensions });
 }

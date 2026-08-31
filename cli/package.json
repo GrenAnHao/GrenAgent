@@ -1,7 +1,7 @@
 {
   "name": "grenagent-agent-sidecar",
   "version": "0.1.0",
-  "description": "GrenAgent's pi-based agent sidecar (RPC mode) with bundled extensions and TencentDB memory.",
+  "description": "GrenAgent's pi-based agent sidecar with bundled extensions.",
   "type": "module",
   "bin": {
     "grenagent-sidecar": "dist/main.js"
