@@ -11,7 +11,33 @@ export class MemoryStore {
       level INTEGER NOT NULL, content TEXT NOT NULL, source TEXT, fingerprint TEXT NOT NULL,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
       UNIQUE(user_id, workspace, session_id, level, fingerprint)
-    ); CREATE INDEX IF NOT EXISTS memories_scope ON memories(user_id, workspace, session_id, level);`);
+    ); CREATE INDEX IF NOT EXISTS memories_scope ON memories(user_id, workspace, session_id, level);
+    CREATE TABLE IF NOT EXISTS memory_captures (
+      capture_key TEXT PRIMARY KEY, user_id TEXT NOT NULL, workspace TEXT NOT NULL, session_id TEXT,
+      source TEXT NOT NULL, transcript TEXT NOT NULL, fingerprint TEXT NOT NULL, pending TEXT,
+      updated_at INTEGER NOT NULL, UNIQUE(user_id, workspace, session_id, source)
+    );`);
+  }
+
+  capture(scope: MemoryScope, source: string, transcript: string, fingerprint: string): { changed: boolean; delta: string; fingerprint: string } {
+    const captureKey = hash(`${scope.userId}\0${scope.workspace}\0${scope.sessionId ?? ''}\0${source}`);
+    const row = this.db.prepare('SELECT transcript, fingerprint, pending FROM memory_captures WHERE capture_key=?').get(captureKey) as { transcript?: string; fingerprint?: string; pending?: string | null } | undefined;
+    if (row?.fingerprint === fingerprint && row.pending == null) return { changed: false, delta: '', fingerprint };
+    const delta = row?.fingerprint === fingerprint && row.pending != null
+      ? row.pending
+      : row && transcript.startsWith(row.transcript) ? transcript.slice(row.transcript.length).replace(/^\n+/, '') : transcript;
+    if (delta) this.upsert(scope, { level: 0, content: delta, source });
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO memory_captures(capture_key,user_id,workspace,session_id,source,transcript,fingerprint,pending,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(capture_key) DO UPDATE SET transcript=excluded.transcript, fingerprint=excluded.fingerprint, pending=excluded.pending, updated_at=excluded.updated_at`).run(
+      captureKey, scope.userId, scope.workspace, scope.sessionId ?? null, source, transcript, fingerprint, delta || null, now,
+    );
+    return { changed: Boolean(delta), delta, fingerprint };
+  }
+
+  commitCapture(scope: MemoryScope, source: string, fingerprint: string): void {
+    const captureKey = hash(`${scope.userId}\0${scope.workspace}\0${scope.sessionId ?? ''}\0${source}`);
+    this.db.prepare('UPDATE memory_captures SET pending=NULL, updated_at=? WHERE capture_key=? AND fingerprint=?').run(Date.now(), captureKey, fingerprint);
   }
 
   upsert(scope: MemoryScope, input: Omit<MemoryRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): MemoryRecord {

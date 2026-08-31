@@ -6,6 +6,6 @@ describe('memory extension', () => {
     const tools: string[] = []; const events: string[] = [];
     memory({ registerTool: (tool: { name: string }) => tools.push(tool.name), on: (name: string) => events.push(name) } as never);
     expect(tools).toEqual(expect.arrayContaining(['memory_search', 'conversation_search']));
-    expect(events).toContain('before_agent_start');
+    expect(events).toEqual(expect.arrayContaining(['before_agent_start', 'agent_end']));
   });
 });

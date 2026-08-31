@@ -17,15 +17,24 @@ export function parseJsonLoose<T = unknown>(raw: string): T | undefined {
   const candidate = fence ? fence[1].trim() : text;
   const start = candidate.search(/[[{]/);
   if (start < 0) return undefined;
-  // Walk to the matching closing bracket to tolerate trailing prose.
-  const open = candidate[start];
-  const close = open === "{" ? "}" : "]";
-  let depth = 0;
+  // Walk to the matching closing bracket to tolerate trailing prose. Ignore
+  // brackets inside strings and support mixed object/array nesting.
+  const stack: string[] = [];
+  let quoted = false;
+  let escaped = false;
   for (let i = start; i < candidate.length; i++) {
-    if (candidate[i] === open) depth++;
-    else if (candidate[i] === close) {
-      depth--;
-      if (depth === 0) {
+    const char = candidate[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') { quoted = true; continue; }
+    if (char === "{" || char === "[") stack.push(char === "{" ? "}" : "]");
+    else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) return undefined;
+      if (stack.length === 0) {
         try {
           return JSON.parse(candidate.slice(start, i + 1)) as T;
         } catch {

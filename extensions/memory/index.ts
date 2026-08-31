@@ -1,17 +1,22 @@
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { MemoryClient } from './client.js';
+import { LayeredMemoryCapture } from './capture.js';
 import { buildMemoryContext } from './context.js';
 import { scopeFromContext } from './store.js';
 
 export default function memory(pi: ExtensionAPI) {
   const client = new MemoryClient();
+  const capture = new LayeredMemoryCapture(client);
   pi.on('before_agent_start', async (event, ctx) => {
     const query = event.prompt.trim(); if (!query) return undefined;
     try {
       const result = await client.request<Array<{ level: number; content: string }>>('memory.search', { ...scopeFromContext(ctx), query, limit: 8 });
       const content = buildMemoryContext(result); return content ? { message: { customType: 'memory', content, display: false } } : undefined;
     } catch { return undefined; }
+  });
+  pi.on('agent_end', async (event, ctx) => {
+    await capture.enqueue({ ...scopeFromContext(ctx), model: ctx.model, modelRegistry: ctx.modelRegistry, signal: ctx.signal }, event.messages as unknown[]).catch(() => {});
   });
   pi.registerTool({
     name: 'memory_search', label: 'Memory Search', description: 'Search local layered memory.',

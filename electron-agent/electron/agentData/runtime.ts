@@ -114,6 +114,8 @@ export class AgentDataRuntime {
     if (name === 'memory.upsert') return (params) => this.memory!.upsert(readScope(params), {
       level: readLevel(params.level), content: readString(params.content), source: typeof params.source === 'string' ? params.source : undefined,
     });
+    if (name === 'memory.capture') return (params) => this.memory!.capture(readScope(params), readString(params.source), readString(params.transcript), readString(params.fingerprint));
+    if (name === 'memory.captureCommit' || name === 'memory.commitCapture') return (params) => { this.memory!.commitCapture(readScope(params), readString(params.source), readString(params.fingerprint)); return null; };
     if (name === 'memory.search') return (params) => this.memory!.search(readScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
     if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
     return undefined;

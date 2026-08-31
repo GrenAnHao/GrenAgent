@@ -26,4 +26,18 @@ describe('AgentDataRuntime', () => {
     runtime.handleStdinEnd();
     expect(runtime.isClosed()).toBe(true);
   });
+
+  it('exposes durable memory capture and commit RPCs', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-capture-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const endpoint = await runtime.start();
+    const client = new AgentDataClient(endpoint);
+    const params = { userId: 'u', workspace: '/a', sessionId: 's', source: 'session:s', transcript: 'user: one', fingerprint: 'fp1' };
+    await expect(client.request('memory.capture', params)).resolves.toMatchObject({ changed: true, delta: 'user: one' });
+    await expect(client.request('memory.commitCapture', params)).resolves.toBeNull();
+    await expect(client.request('memory.capture', params)).resolves.toMatchObject({ changed: false, delta: '' });
+    await client.close();
+    runtime.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
