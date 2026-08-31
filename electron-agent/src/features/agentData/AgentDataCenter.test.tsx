@@ -7,10 +7,10 @@ import { AgentDataCenter } from './AgentDataCenter';
 vi.mock('../../lib/agentData', () => ({
   agentDataApi: {
     status: vi.fn(),
-    jobs: { list: vi.fn() },
-    memory: { overview: vi.fn() },
-    wiki: { overview: vi.fn() },
-    code: { status: vi.fn() },
+    jobs: { list: vi.fn(), create: vi.fn(), cancel: vi.fn() },
+    memory: { overview: vi.fn(), search: vi.fn(), delete: vi.fn() },
+    wiki: { overview: vi.fn(), search: vi.fn() },
+    code: { status: vi.fn(), search: vi.fn() },
   },
 }));
 import { agentDataApi } from '../../lib/agentData';

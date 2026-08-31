@@ -6,8 +6,11 @@ export interface AgentJob { id: string; kind: string; workspace: string; state: 
 export interface AgentConfig { version: number; value: Record<string, unknown> }
 export interface MemoryScope { userId: string; workspace: string; sessionId?: string }
 export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
+export interface MemoryRecord { id: string; level: 0 | 1 | 2 | 3; content: string; source?: string; createdAt: number; updatedAt: number }
 export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
+export interface WikiSearchResult { page: string; title: string; snippet: string; sourcePath: string; chunks: number }
 export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; files?: number; nodes?: number; edges?: number }
+export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
 export interface AgentJobCreateInput { kind: string; workspace: string }
 
 export const agentDataApi = {
@@ -22,12 +25,16 @@ export const agentDataApi = {
   },
   memory: {
     overview: (scope: MemoryScope) => invoke<MemoryOverview>('agentData_memory_overview', scope),
+    search: (scope: MemoryScope, query: string, limit = 50) => invoke<MemoryRecord[]>('agentData_memory_search', { ...scope, query, limit }),
+    delete: (scope: Omit<MemoryScope, 'sessionId'>, id: string) => invoke<void>('agentData_memory_delete', { ...scope, id }),
   },
   wiki: {
     overview: (workspace: string) => invoke<WikiOverview>('agentData_wiki_overview', { workspace }),
+    search: (workspace: string, query: string, limit = 50) => invoke<WikiSearchResult[]>('agentData_wiki_search', { workspace, query, limit }),
   },
   code: {
     status: (workspace: string) => invoke<CodeGraphStatus>('agentData_code_status', { workspace }),
+    search: (workspace: string, query: string, limit = 20) => invoke<{ workspace: string; available: boolean; results: CodeSearchResult[]; message?: string }>('agentData_code_search', { workspace, query, limit }),
   },
   config: {
     get: (module: string) => invoke<AgentConfig>('agentData_admin_config_get', { module }),

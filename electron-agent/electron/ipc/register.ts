@@ -125,6 +125,28 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       kind: readString(args, 'kind'),
       workspace: readString(args, 'workspace'),
     }));
+    registerCommand('agentData_memory_search', (_event, args) => services.agentData!.request('memory.search', {
+      userId: readString(args, 'userId'),
+      workspace: readString(args, 'workspace'),
+      ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
+      query: readString(args, 'query'),
+      limit: readPositiveInteger(args, 'limit', 50),
+    }));
+    registerCommand('agentData_memory_delete', (_event, args) => services.agentData!.request('memory.delete', {
+      userId: readString(args, 'userId'),
+      workspace: readString(args, 'workspace'),
+      id: readString(args, 'id'),
+    }));
+    registerCommand('agentData_wiki_search', (_event, args) => services.agentData!.request('wiki.search', {
+      workspace: readString(args, 'workspace'),
+      query: readString(args, 'query'),
+      limit: readPositiveInteger(args, 'limit', 50),
+    }));
+    registerCommand('agentData_code_search', (_event, args) => services.agentData!.request('codeRetrieval.search', {
+      workspace: readString(args, 'workspace'),
+      query: readString(args, 'query'),
+      limit: readPositiveInteger(args, 'limit', 20),
+    }));
   }
 }
 
@@ -321,6 +343,12 @@ function readString(args: Record<string, unknown>, key: string): string {
 function readText(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string') throw new Error(`${key} must be a string`);
+  return value;
+}
+
+function readPositiveInteger(args: Record<string, unknown>, key: string, fallback: number): number {
+  const value = args[key] ?? fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`);
   return value;
 }
 

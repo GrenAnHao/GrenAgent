@@ -27,9 +27,9 @@ export class WikiStore {
     return chunks;
   }
 
-  search(scope: WikiScope, query: string, limit = 20): Array<{ page: string; title: string; snippet: string }> {
-    const rows = this.db.prepare("SELECT page,title,snippet(wiki_fts,3,'', '', '...', 24) as snippet FROM wiki_fts WHERE workspace=? AND wiki_fts MATCH ? LIMIT ?").all(scope.workspace, query.trim(), Math.max(1, Math.min(limit, 100))) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({ page: String(row.page), title: String(row.title), snippet: String(row.snippet) }));
+  search(scope: WikiScope, query: string, limit = 20): Array<{ page: string; title: string; snippet: string; sourcePath: string; chunks: number }> {
+    const rows = this.db.prepare("SELECT f.page,f.title,snippet(wiki_fts,3,'', '', '...', 24) as snippet,p.source_path as sourcePath,p.content FROM wiki_fts f JOIN wiki_pages p ON p.workspace=f.workspace AND p.page=f.page WHERE f.workspace=? AND wiki_fts MATCH ? LIMIT ?").all(scope.workspace, query.trim(), Math.max(1, Math.min(limit, 100))) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ page: String(row.page), title: String(row.title), snippet: String(row.snippet), sourcePath: String(row.sourcePath), chunks: chunkMarkdown(String(row.content), String(row.sourcePath), String(row.title)).length }));
   }
 
   overview(scope: WikiScope): WikiOverview {

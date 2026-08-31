@@ -83,9 +83,9 @@ export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
         {loading && !status ? <div className={styles.state}>正在加载 Agent Data...</div> : null}
         {!loading && !error && tab === 'overview' ? <Overview status={status} jobs={jobs} memory={memory} wiki={wiki} code={code} workspace={workspace} /> : null}
         {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} workspace={workspace} onCreate={async (kind, targetWorkspace) => { await agentDataApi.jobs.create({ kind, workspace: targetWorkspace }); await refresh(); }} onRefresh={refresh} /> : null}
-        {tab === 'memory' && !loading ? <MemoryPanel /> : null}
-        {tab === 'wiki' && !loading ? <WikiPanel /> : null}
-        {tab === 'code' && !loading ? <CodeRetrievalPanel /> : null}
+        {tab === 'memory' && !loading ? <MemoryPanel userId={userId} workspace={workspace} /> : null}
+        {tab === 'wiki' && !loading ? <WikiPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
+        {tab === 'code' && !loading ? <CodeRetrievalPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
       </div>
     </div>
   </section>;

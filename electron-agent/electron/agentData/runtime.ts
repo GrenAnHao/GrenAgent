@@ -130,6 +130,7 @@ export class AgentDataRuntime {
     if (!this.jobs) return undefined;
     if (name === 'admin.jobs.list') return (params) => this.jobs!.list(params.state === undefined ? undefined : readJobState(params.state));
     if (name === 'codeRetrieval.admin.status') return () => ({ connected: false, indexed: false });
+    if (name === 'codeRetrieval.search') return (p) => ({ workspace: readString(p.workspace), available: false, results: [], message: 'CodeGraph index is not connected' });
     if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
     if (name === 'admin.jobs.cancel') return (p) => this.jobs!.cancel(readString(p.id));
     if (name === 'admin.jobs.create') return (p) => this.jobs!.create({ kind: readString(p.kind), workspace: readString(p.workspace) });
