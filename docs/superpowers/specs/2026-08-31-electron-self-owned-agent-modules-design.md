@@ -65,6 +65,8 @@ Data Runtime 是三个自研模块的存储所有者。Renderer 不直接访问 
 
 Electron IPC 暴露项目无关的 `codeRetrieval.*` API（索引状态、查询、同步、删除缓存）。现有 `tencentdbApi` 中的 CodeGraph 类型和调用点迁移到该接口，UI 不再拼接 `/v3/*` 路由。
 
+管理面板还需要使用同一模块的管理接口：`codeRetrieval.admin.listProjects`、`getProject`、`getStatus`、`sync`、`removeIndex`、`getRecentJobs`。查询接口和管理接口分开命名，面板可以执行同步/删除等写操作，但聊天工具只获得只读检索能力。
+
 ## 5. LLM Wiki RAG 模块
 
 模块建议命名为 `wiki-rag`。
@@ -83,6 +85,8 @@ Wiki 同步由 Pi 扩展发起，扩展使用当前 `ctx.model` 生成页面摘�
 ### 5.3 接口
 
 Data Runtime 提供 `wiki.sync`、`wiki.list`、`wiki.read`、`wiki.search`、`wiki.status`；扩展注册同名或语义一致的 Pi 工具。每条搜索结果必须带 workspace、source path 和行号引用，以便回到原文核查。
+
+管理面板接口预留 `wiki.admin.listWorkspaces`、`getDocument`、`getIndexStatus`、`sync`、`rebuildIndex`、`deleteDocument`、`getJobs` 和 `getDiagnostics`。面板可浏览页面正文、来源块、索引更新时间和失败原因；耗时同步统一返回 job id，由面板轮询或订阅状态事件，不阻塞 IPC 请求。
 
 ## 6. 记忆系统
 
@@ -108,6 +112,8 @@ SQLite 保存结构化字段、全文索引和引用元数据；Markdown 保存 
 
 注册 `memory_search`、`conversation_search` 和受控的 `memory_rebuild`。默认作用域为当前用户和工作区，可显式限定 session；不得要求 service/team/agent 元数据。所有自动捕获必须幂等，使用 session cursor 和 transcript fingerprint 防止重复写入。
 
+管理面板接口预留 `memory.admin.getOverview`、`listConversations`、`listAtoms`、`readScenario`、`readPersona`、`rebuildLayer`、`deleteEntry`、`getJobs` 和 `getDiagnostics`。面板可以按 user/workspace/session 筛选并查看 L0-L3 的引用链；删除和重建必须是显式操作，并通过审计记录保留操作者、时间、目标层和结果。
+
 ## 7. Data Runtime 与存储边界
 
 Data Runtime 由 Electron 启动、监控和关闭。它提供：
@@ -118,11 +124,25 @@ Data Runtime 由 Electron 启动、监控和关闭。它提供：
 - 文件路径边界检查、原子写入和备份入口；
 - 结构化健康状态和日志。
 
+### 7.1 管理面板 API
+
+管理面板是目标架构的一等客户端，但不直接访问 Runtime 数据库。Data Runtime 提供统一的 `admin.*` 管理面方法，Electron 主进程将其映射为类型化 IPC `agentDataAdmin.*`，Renderer 只依赖 IPC 类型。首批通用方法为：
+
+- `getSystemStatus`：Runtime、数据库迁移版本、磁盘占用和各模块健康状态；
+- `listJobs`、`getJob`、`cancelJob`：查看和控制同步、索引、抽取、重建任务；
+- `getModuleConfig`、`updateModuleConfig`：读取/修改非 Secret 的模块设置；
+- `listAuditEvents`、`getDiagnostics`：查看管理操作和可脱敏诊断；
+- `exportData`、`importData`：执行带 schema/version 的备份迁移。
+
+模块专属的 `*.admin.*` 方法负责资源浏览和动作语义，通用 `admin.*` 方法负责运行时级别的状态、任务、配置和审计。所有管理写操作都返回操作结果或 job id，并发控制使用资源版本号；面板关闭或重载不会丢失后台任务。
+
+面板不需要了解 JSON-RPC 细节、SQLite schema 或 CodeGraph MCP 协议。未来增加 Skill/Agent 管理时沿用同一 `agentDataAdmin.*` IPC 和 `*.admin.*` Runtime 命名空间，不改变 Renderer 的数据访问边界。
+
 建议数据目录为 Electron `userData/agent-data/`：`memory/`、`wiki/`、`code-retrieval/` 分开保存。运行时不得读取或写入 TencentDB 目录，也不得暴露 TencentDB 环境变量。
 
 ## 8. 迁移与淘汰顺序
 
-1. 建立 `agent-data` 包、RPC 契约、存储迁移器和测试夹具。
+1. 建立 `agent-data` 包、RPC 契约、管理面板 API、存储迁移器和测试夹具。
 2. 将现有 TencentDB memory 钩子迁移到自研 `memory`，先保持工具语义和注入行为。
 3. 接入 CodeGraph MCP adapter，切换 Electron UI 和工作区上下文调用。
 4. 移植 Wiki RAG 的扫描、分块、Markdown 和 FTS5 检索，接入当前模型生成页面。
@@ -149,6 +169,7 @@ Data Runtime 由 Electron 启动、监控和关闭。它提供：
 - CodeGraph MCP 请求映射、超时、无索引提示和路径校验。
 - Data Runtime RPC schema、鉴权、迁移、并发写入和进程重启。
 - Electron IPC 与 Pi 扩展钩子的集成测试。
+- 管理面板 IPC 的状态、任务、配置、审计、导入导出和并发版本测试。
 
 ### 10.2 功能验收
 
@@ -158,9 +179,9 @@ Data Runtime 由 Electron 启动、监控和关闭。它提供：
 - 新 prompt 能召回记忆并按预算注入；
 - 已初始化的 CodeGraph 项目可完成六类 MCP 查询；
 - Wiki 可同步、读取、全文检索并显示源文件引用；
+- 管理面板可查看三类模块健康状态、任务进度、配置和诊断，并能显式触发同步/重建/删除；
 - Skill/Agent 占位页面不阻塞聊天和设置加载。
 
 ## 11. 来源与许可记录
 
 移植 TencentDB Agent Memory 的记忆/Wiki 管线时，在对应目录附带 Tencent MIT License、来源仓库 URL、上游 commit/tag 和改动说明。CodeGraph adapter 及任何复制的协议/格式化代码同样附带 CodeGraph MIT License 和版权声明。未明确属于 MIT 代码的依赖只可参考行为，不直接复制实现，需单独核对许可证。
-
