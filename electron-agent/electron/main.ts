@@ -109,6 +109,7 @@ if (!process.env.VITEST) {
         undefined,
         (path) => workspace.ensureWorkspace(path),
       ),
+      agentData,
     });
     app.on('before-quit', () => {
       void pi.closeAll();

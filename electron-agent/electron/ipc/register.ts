@@ -17,6 +17,7 @@ import type { TerminalService } from '../app/terminalService';
 import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
+import type { AgentDataService } from '../app/agentDataService';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -38,6 +39,7 @@ export interface IpcServices {
   create?: CreateService;
   tempHtml?: TempHtmlService;
   shell?: ShellService;
+  agentData?: AgentDataService;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -95,6 +97,11 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.create) registerCreateCommands(services.create);
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
   if (services.shell) registerShellCommands(services.shell);
+  if (services.agentData) {
+    registerCommand('agentData_status', () => services.agentData!.status());
+    registerCommand('agentData_start', () => services.agentData!.start());
+    registerCommand('agentData_stop', () => services.agentData!.stop());
+  }
 }
 
 function registerMcpPolicyCommands(service: McpPolicyService): void {
