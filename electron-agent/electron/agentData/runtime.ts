@@ -108,6 +108,7 @@ export class AgentDataRuntime {
     if (!this.wiki) return undefined;
     if (name === 'wiki.replace') return (params) => this.wiki!.replacePage({ workspace: readString(params.workspace) }, readString(params.page), readString(params.title), readString(params.content), typeof params.sourcePath === 'string' ? params.sourcePath : undefined);
     if (name === 'wiki.search') return (params) => this.wiki!.search({ workspace: readString(params.workspace) }, readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'wiki.admin.overview') return (params) => this.wiki!.overview({ workspace: readString(params.workspace) });
     if (name === 'wiki.deleteWorkspace') return (params) => { this.wiki!.deleteWorkspace({ workspace: readString(params.workspace) }); return null; };
     return undefined;
   }
@@ -120,13 +121,15 @@ export class AgentDataRuntime {
     if (name === 'memory.capture') return (params) => this.memory!.capture(readScope(params), readString(params.source), readString(params.transcript), readString(params.fingerprint));
     if (name === 'memory.captureCommit' || name === 'memory.commitCapture') return (params) => { this.memory!.commitCapture(readScope(params), readString(params.source), readString(params.fingerprint)); return null; };
     if (name === 'memory.search') return (params) => this.memory!.search(readScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readScope(params));
     if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
     return undefined;
   }
 
   private adminMethod(name: string): AgentDataMethod | undefined {
     if (!this.jobs) return undefined;
-    if (name === 'admin.jobs.list') return () => this.jobs!.list();
+    if (name === 'admin.jobs.list') return (params) => this.jobs!.list(params.state === undefined ? undefined : readJobState(params.state));
+    if (name === 'codeRetrieval.admin.status') return () => ({ connected: false, indexed: false });
     if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
     if (name === 'admin.jobs.cancel') return (p) => this.jobs!.cancel(readString(p.id));
     if (name === 'admin.jobs.create') return (p) => this.jobs!.create({ kind: readString(p.kind), workspace: readString(p.workspace) });
@@ -149,5 +152,6 @@ export class AgentDataRuntime {
 
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
 function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
+function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
 function readScope(value: Record<string, unknown>): { userId: string; workspace: string; sessionId?: string } { return { userId: readString(value.userId), workspace: readString(value.workspace), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId) }; }
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }

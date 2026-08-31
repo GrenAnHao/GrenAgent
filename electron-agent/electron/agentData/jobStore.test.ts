@@ -9,6 +9,9 @@ describe('JobStore', () => {
     const job = store.create({ kind: 'wiki-sync', workspace: '/repo' });
     expect(store.get(job.id)).toMatchObject({ state: 'pending', kind: 'wiki-sync' });
     expect(store.list()).toHaveLength(1);
+    db.prepare("UPDATE agent_jobs SET state='running' WHERE id=?").run(job.id);
+    expect(store.list('running')).toHaveLength(1);
+    expect(store.list('completed')).toHaveLength(0);
     expect(() => store.updateConfig('memory', { enabled: true }, 1)).toThrow('VERSION_CONFLICT');
     expect(store.updateConfig('memory', { enabled: true }, 0)).toMatchObject({ version: 1, value: { enabled: true } });
     expect(store.audit()).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'config.update' })]));

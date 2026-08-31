@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export interface MemoryScope { userId: string; workspace: string; sessionId?: string }
 export interface MemoryRecord { id: string; level: 0 | 1 | 2 | 3; content: string; source?: string; createdAt: number; updatedAt: number }
+export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
 
 export class MemoryStore {
   constructor(private readonly db: DatabaseSync) {
@@ -62,6 +63,18 @@ export class MemoryStore {
       scope.userId, scope.workspace, scope.sessionId ?? null, scope.sessionId ?? null, `%${q}%`, Math.max(1, Math.min(limit, 100)),
     ) as Array<Record<string, unknown>>;
     return rows.map((row) => ({ id: String(row.id), level: Number(row.level) as MemoryRecord['level'], content: String(row.content), source: row.source == null ? undefined : String(row.source), createdAt: Number(row.createdAt), updatedAt: Number(row.updatedAt) }));
+  }
+
+  overview(scope: MemoryScope): MemoryOverview {
+    const rows = this.db.prepare(`SELECT level, count(*) as count FROM memories
+      WHERE user_id=? AND workspace=? AND (? IS NULL OR session_id=?) GROUP BY level`).all(
+      scope.userId, scope.workspace, scope.sessionId ?? null, scope.sessionId ?? null,
+    ) as Array<{ level: number; count: number }>;
+    const byLevel: MemoryOverview['byLevel'] = { L0: 0, L1: 0, L2: 0, L3: 0 };
+    for (const row of rows) {
+      if (row.level >= 0 && row.level <= 3) byLevel[`L${row.level}` as keyof typeof byLevel] = Number(row.count);
+    }
+    return { total: Object.values(byLevel).reduce((sum, count) => sum + count, 0), byLevel };
   }
 
   remove(scope: MemoryScope, id: string): void {

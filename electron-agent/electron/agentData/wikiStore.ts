@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export interface WikiScope { workspace: string }
 export interface WikiChunk { id: string; page: string; title: string; content: string; sourcePath: string; startLine: number; endLine: number; hash: string }
+export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
 
 export class WikiStore {
   constructor(private readonly db: DatabaseSync) {
@@ -29,6 +30,11 @@ export class WikiStore {
   search(scope: WikiScope, query: string, limit = 20): Array<{ page: string; title: string; snippet: string }> {
     const rows = this.db.prepare("SELECT page,title,snippet(wiki_fts,3,'', '', '...', 24) as snippet FROM wiki_fts WHERE workspace=? AND wiki_fts MATCH ? LIMIT ?").all(scope.workspace, query.trim(), Math.max(1, Math.min(limit, 100))) as Array<Record<string, unknown>>;
     return rows.map((row) => ({ page: String(row.page), title: String(row.title), snippet: String(row.snippet) }));
+  }
+
+  overview(scope: WikiScope): WikiOverview {
+    const row = this.db.prepare('SELECT count(*) as pages, max(updated_at) as latestUpdatedAt FROM wiki_pages WHERE workspace=?').get(scope.workspace) as { pages: number; latestUpdatedAt: number | null };
+    return { pages: Number(row.pages), latestUpdatedAt: row.latestUpdatedAt == null ? null : Number(row.latestUpdatedAt) };
   }
 
   deleteWorkspace(scope: WikiScope): void { this.db.prepare('DELETE FROM wiki_pages WHERE workspace=?').run(scope.workspace); this.db.prepare('DELETE FROM wiki_fts WHERE workspace=?').run(scope.workspace); }

@@ -49,4 +49,48 @@ describe('AgentDataRuntime', () => {
     await expect(client.request('admin.config.update', { module: 'memory', value: { enabled: false }, version: 0 })).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
+
+  it('exposes module overview and code retrieval status contracts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-overview-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+    const scope = { userId: 'u', workspace: '/workspace' };
+
+    await expect(client.request('memory.admin.overview', scope)).resolves.toMatchObject({
+      total: 0,
+      byLevel: { L0: 0, L1: 0, L2: 0, L3: 0 },
+    });
+    await client.request('memory.upsert', { ...scope, level: 1, content: 'a' });
+    await client.request('memory.upsert', { ...scope, level: 3, content: 'b' });
+    await expect(client.request('memory.admin.overview', scope)).resolves.toMatchObject({
+      total: 2,
+      byLevel: { L0: 0, L1: 1, L2: 0, L3: 1 },
+    });
+
+    await expect(client.request('wiki.admin.overview', { workspace: '/workspace' })).resolves.toMatchObject({
+      pages: 0,
+      latestUpdatedAt: null,
+    });
+    await client.request('wiki.replace', { workspace: '/workspace', page: 'guide', title: 'Guide', content: '# Guide\nbody' });
+    await expect(client.request('wiki.admin.overview', { workspace: '/workspace' })).resolves.toMatchObject({
+      pages: 1,
+      latestUpdatedAt: expect.any(Number),
+    });
+
+    await expect(client.request('codeRetrieval.admin.status')).resolves.toMatchObject({
+      connected: false,
+      indexed: false,
+    });
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('filters admin jobs by requested state', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobs-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+    await client.request('admin.jobs.create', { kind: 'wiki-sync', workspace: '/workspace' });
+    await expect(client.request('admin.jobs.list', { state: 'running' })).resolves.toEqual([]);
+    await expect(client.request('admin.jobs.list')).resolves.toHaveLength(1);
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
 });

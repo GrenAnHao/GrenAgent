@@ -13,7 +13,12 @@ export class JobStore {
   }
   create(input: { kind: string; workspace: string }): Job { const now = Date.now(); const id = randomUUID(); this.db.prepare('INSERT INTO agent_jobs VALUES(?,?,?,?,?,?,?,?)').run(id, input.kind, input.workspace, 'pending', 0, null, now, now); this.record('job.create', { id, ...input }); return this.get(id)!; }
   get(id: string): Job | undefined { const row = this.db.prepare('SELECT id,kind,workspace,state,progress,error,created_at as createdAt,updated_at as updatedAt FROM agent_jobs WHERE id=?').get(id) as Record<string, unknown> | undefined; return row ? this.mapJob(row) : undefined; }
-  list(): Job[] { return (this.db.prepare('SELECT id,kind,workspace,state,progress,error,created_at as createdAt,updated_at as updatedAt FROM agent_jobs ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>).map((row) => this.mapJob(row)); }
+  list(state?: JobState): Job[] {
+    const rows = state === undefined
+      ? this.db.prepare('SELECT id,kind,workspace,state,progress,error,created_at as createdAt,updated_at as updatedAt FROM agent_jobs ORDER BY updated_at DESC').all()
+      : this.db.prepare('SELECT id,kind,workspace,state,progress,error,created_at as createdAt,updated_at as updatedAt FROM agent_jobs WHERE state=? ORDER BY updated_at DESC').all(state);
+    return (rows as Array<Record<string, unknown>>).map((row) => this.mapJob(row));
+  }
   cancel(id: string): Job | undefined { const job = this.get(id); if (!job) return undefined; this.db.prepare("UPDATE agent_jobs SET state='cancelled',updated_at=? WHERE id=? AND state IN ('pending','running')").run(Date.now(), id); this.record('job.cancel', { id }); return this.get(id); }
   updateConfig(module: string, value: Record<string, unknown>, expectedVersion: number): ConfigValue { const current = this.config(module); if (current.version !== expectedVersion) throw new Error('VERSION_CONFLICT'); const next = current.version + 1; this.db.prepare('INSERT INTO agent_config(module,version,value) VALUES(?,?,?) ON CONFLICT(module) DO UPDATE SET version=excluded.version,value=excluded.value').run(module, next, JSON.stringify(value)); this.record('config.update', { module, version: next }); return { version: next, value }; }
   config(module: string): ConfigValue { const row = this.db.prepare('SELECT version,value FROM agent_config WHERE module=?').get(module) as { version?: number; value?: string } | undefined; return row ? { version: Number(row.version), value: JSON.parse(row.value!) as Record<string, unknown> } : { version: 0, value: {} }; }
