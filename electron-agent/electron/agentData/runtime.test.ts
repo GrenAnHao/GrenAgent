@@ -40,4 +40,13 @@ describe('AgentDataRuntime', () => {
     runtime.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('returns VERSION_CONFLICT for stale admin config writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-admin-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+    await expect(client.request('admin.config.update', { module: 'memory', value: { enabled: true }, version: 0 })).resolves.toMatchObject({ version: 1 });
+    await expect(client.request('admin.config.update', { module: 'memory', value: { enabled: false }, version: 0 })).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
 });

@@ -131,7 +131,10 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.cancel') return (p) => this.jobs!.cancel(readString(p.id));
     if (name === 'admin.jobs.create') return (p) => this.jobs!.create({ kind: readString(p.kind), workspace: readString(p.workspace) });
     if (name === 'admin.config.get') return (p) => this.jobs!.config(readString(p.module));
-    if (name === 'admin.config.update') return (p) => this.jobs!.updateConfig(readString(p.module), readRecord(p.value), typeof p.version === 'number' ? p.version : -1);
+    if (name === 'admin.config.update') return (p) => {
+      try { return this.jobs!.updateConfig(readString(p.module), readRecord(p.value), typeof p.version === 'number' ? p.version : -1); }
+      catch (error) { if (error instanceof Error && error.message === 'VERSION_CONFLICT') throw new RpcError('VERSION_CONFLICT', 'configuration version is stale'); throw error; }
+    };
     if (name === 'admin.audit.list') return () => this.jobs!.audit();
     if (name === 'admin.diagnostics') return () => this.jobs!.diagnostics();
     if (name === 'admin.export') return () => this.jobs!.exportData();
