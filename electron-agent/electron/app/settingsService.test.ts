@@ -27,7 +27,7 @@ describe('SettingsService', () => {
     });
   });
 
-  it('writes only usable non-TencentDB values to runtime settings', async () => {
+  it('writes only usable non-legacy values to runtime settings', async () => {
     const { service, directory } = await createService();
     await service.replace({
       OPENAI_API_KEY: 'sk-test',

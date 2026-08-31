@@ -30,7 +30,7 @@ export class SettingsService {
 function runtimeSettings(settings: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(settings).filter(([key, value]) =>
-      value.trim().length > 0,
+      value.trim().length > 0 && !/^TDAI_|^TENCENTDB_/i.test(key),
     ),
   );
 }
