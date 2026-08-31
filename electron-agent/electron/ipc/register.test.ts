@@ -90,6 +90,25 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'memory', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
   });
 
+  it('routes Agent Data module queries and job creation with explicit scope', async () => {
+    const agentData = { request: vi.fn(async (method: string, params: Record<string, unknown>) => ({ method, params })) };
+    registerIpcHandlers({ agentData } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', workspace: '/w' } })).resolves.toEqual({
+      method: 'memory.admin.overview', params: { userId: 'u', workspace: '/w' },
+    });
+    await expect(invoke({}, { command: 'agentData_wiki_overview', args: { workspace: '/w' } })).resolves.toEqual({
+      method: 'wiki.admin.overview', params: { workspace: '/w' },
+    });
+    await expect(invoke({}, { command: 'agentData_code_status', args: { workspace: '/w' } })).resolves.toEqual({
+      method: 'codeRetrieval.admin.status', params: { workspace: '/w' },
+    });
+    await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'wiki.sync', workspace: '/w' } })).resolves.toEqual({
+      method: 'admin.jobs.create', params: { kind: 'wiki.sync', workspace: '/w' },
+    });
+  });
+
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {
     const window = {
       minimize: vi.fn(), maximize: vi.fn(), unmaximize: vi.fn(), isMaximized: vi.fn().mockReturnValue(false), close: vi.fn(),
