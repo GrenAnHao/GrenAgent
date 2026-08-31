@@ -219,6 +219,83 @@ export const styles = createStaticStyles(({ css }) => ({
     td { color: ${cssVar.colorTextSecondary}; }
     td:first-child { color: ${cssVar.colorText}; font-weight: 500; }
   `,
+  toolbar: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-block-end: 14px;
+  `,
+  input: css`
+    min-width: 220px;
+    flex: 1;
+    height: 30px;
+    padding-inline: 9px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 6px;
+    background: ${cssVar.colorBgContainer};
+    color: ${cssVar.colorText};
+    font-size: 12px;
+    outline: none;
+    &:focus { border-color: ${cssVar.colorPrimary}; }
+  `,
+  select: css`
+    height: 30px;
+    padding-inline: 8px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 6px;
+    background: ${cssVar.colorBgContainer};
+    color: ${cssVar.colorTextSecondary};
+    font-size: 12px;
+    outline: none;
+  `,
+  progress: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 120px;
+  `,
+  progressTrack: css`
+    width: 72px;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: ${cssVar.colorFillTertiary};
+  `,
+  progressBar: css`
+    height: 100%;
+    border-radius: inherit;
+    background: ${cssVar.colorPrimary};
+  `,
+  statusTag: css`
+    display: inline-flex;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: ${cssVar.colorFillTertiary};
+    color: ${cssVar.colorTextSecondary};
+    font-size: 11px;
+  `,
+  statusRunning: css`
+    background: ${cssVar.colorSuccessBg};
+    color: ${cssVar.colorSuccess};
+  `,
+  statusFailed: css`
+    background: ${cssVar.colorErrorBg};
+    color: ${cssVar.colorError};
+  `,
+  statusCancelled: css`
+    color: ${cssVar.colorTextTertiary};
+  `,
+  actionButton: css`
+    padding: 3px 8px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 5px;
+    background: transparent;
+    color: ${cssVar.colorTextSecondary};
+    font-size: 11px;
+    cursor: pointer;
+    &:hover { border-color: ${cssVar.colorError}; color: ${cssVar.colorError}; }
+    &:disabled { cursor: wait; opacity: 0.55; }
+  `,
   state: css`
     padding: 36px 16px;
     border: 1px dashed ${cssVar.colorBorderSecondary};
