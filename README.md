@@ -24,7 +24,7 @@
   <tr>
     <td width="50%" valign="top">
       <img src="images/code-index.png" alt="代码智能" width="100%"><br>
-      <strong>TencentDB CodeGraph</strong><br>
+      <strong>本地 CodeGraph</strong><br>
       由 MemoryKnowledge 统一提供符号检索、调用关系与影响分析，本机工作区自动登记并构建。
     </td>
     <td width="50%" valign="top">
@@ -47,9 +47,9 @@
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="images/skills.png" alt="本机与 TencentDB Skills" width="100%"><br>
-      <strong>本机与 TencentDB Skills</strong><br>
-      本机 Skill 保持原生目录管理；当前 Agent 装备的 TencentDB Skill 作为隔离补充，版本或资源更新后自动热重载。
+      <img src="images/skills.png" alt="本机 Skills" width="100%"><br>
+      <strong>本机 Skills</strong><br>
+      Skill 保持原生目录管理；Agent Data 模块与 Skill 生命周期解耦。
     </td>
     <td width="50%" valign="top"></td>
   </tr>
@@ -57,8 +57,8 @@
 
 此外还支持：
 
-- **TencentDB Knowledge** — Wiki 文档检索与 CodeGraph 代码知识统一由 MemoryKnowledge 提供。
-- **TencentDB 长期记忆** — 支持本机托管，也可连接远程 Gateway 跨设备共享。
+- **本地 Wiki RAG** — Markdown 页面、来源引用和 FTS5 检索由本地 Runtime 管理。
+- **本地长期记忆** — L0-L3 分层记忆由当前 Pi 模型提炼并按工作区隔离。
 - **用量统计** — 按天、模型、项目聚合 Token 与费用。
 - **终端 Dock** — 终端 tab 容器，子代理会话独立成 tab。
 - **IM 接入** — 微信（ilink 官方 bot）扫码登录，手机遥控 Agent；「连接」面板展示登录状态与会话只读镜像。
@@ -96,7 +96,6 @@ bun run dev
 
 ```bash
 cd tauri-agent
-bun run build:tencentdb-memory   # 首次运行或上游版本更新后执行
 bun run tauri dev
 ```
 
@@ -111,11 +110,11 @@ Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`s
 | 安全与策略 | `safety`、`approval`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、死循环检测、声明式规则、MCP 工具权限 |
 | 会话管理 | `auto-title`、`checkpoint`、`compaction-policy`、`session-memory`、`goal`、`todo` | 自动标题、工作区快照、上下文压缩、会话状态、目标驱动、待办 |
 | 模式与交互 | `agent-mode`、`diagram-hint` | Agent / Ask / Debug / Plan 模式；Mermaid / KaTeX 渲染提示 |
-| 知识与记忆 | `tencentdb-memory`、`session-memory` | TencentDB 长期记忆与跨会话检索；当前会话压缩后的短期工作状态 |
+| 知识与记忆 | `memory`、`wiki-rag`、`session-memory` | 本地 L0-L3 记忆、Wiki 检索和当前会话压缩状态 |
 | 联网与信息 | `web-fetch`、`web-search` | 单页抓取（`fetch_url`）；多引擎搜索与站点抓取（`web_search` 等） |
 | MCP | `mcp` | 连接外部 MCP server，工具名 `mcp__<server>__<tool>` |
 | 媒体生成 | `image-gen`、`tts` | 文生图（`generate_image`）；语音合成（`speak`） |
-| 代码智能 | `ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`code-review`、`diagnostics` | TencentDB CodeGraph（经 MemoryKnowledge MCP）、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |
+| 代码智能 | `code-retrieval`、`ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`code-review`、`diagnostics` | CodeGraph MCP 代码检索、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |
 | 多代理 | `multi-agent` | 子代理委派（`spawn_agent`） |
 | 外部集成 | `github` | GitHub CLI 封装（`github`） |
 | IM 接入 | `im-gateway`、`im-platforms` | HTTP webhook 网关；微信 ilink bot（`/im`） |

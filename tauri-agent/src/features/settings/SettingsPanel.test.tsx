@@ -15,7 +15,6 @@ vi.mock('../../stores/AgentStoreContext', () => ({
 vi.mock('../../lib/pi', () => ({
   pi: { getSettings, setSettings, closeWorkspace, openWorkspace, getProviderConfig, setProviderConfig },
 }));
-vi.mock('../tencentdb/TencentdbCenter', () => ({ TencentdbCenter: () => <div data-testid="tencentdb-center" /> }));
 
 import { SettingsPanel } from './SettingsPanel';
 
@@ -33,24 +32,12 @@ describe('SettingsPanel', () => {
     async () => {
       render(<SettingsPanel />);
       await waitFor(() => expect(screen.getByTestId('set-cat-general')).toBeTruthy());
-      expect(screen.getByTestId('set-cat-tencentdb')).toBeTruthy();
+      expect(screen.queryByTestId('set-cat-tencentdb')).toBeNull();
       expect(screen.queryByTestId('set-cat-knowledge')).toBeNull();
       expect(screen.queryByTestId('set-cat-memory')).toBeNull();
       expect(screen.getByText('能力')).toBeTruthy();
       const input = screen.getByTestId('set-field-titleModel') as HTMLInputElement;
       expect(input.value).toBe('haiku');
-    },
-    T,
-  );
-
-  it(
-    'opens the TencentDB center instead of retired memory settings',
-    async () => {
-      render(<SettingsPanel />);
-      await waitFor(() => expect(screen.getByTestId('set-cat-tencentdb')).toBeTruthy());
-      fireEvent.click(screen.getByTestId('set-cat-tencentdb'));
-      expect(screen.getByTestId('tencentdb-center')).toBeTruthy();
-      expect(screen.queryByTestId('set-field-MEMORY_AUTO_INJECT')).toBeNull();
     },
     T,
   );

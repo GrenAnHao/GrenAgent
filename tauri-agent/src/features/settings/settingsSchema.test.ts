@@ -23,8 +23,8 @@ describe('SETTINGS_SCHEMA', () => {
     }
   });
 
-  it('keeps TencentDB as the only legacy-memory settings entry', () => {
-    expect(SETTINGS_SCHEMA.find((c) => c.id === 'tencentdb')).toBeTruthy();
+  it('keeps retired external memory settings out of the schema', () => {
+    expect(SETTINGS_SCHEMA.find((c) => c.id === 'tencentdb')).toBeUndefined();
     expect(SETTINGS_SCHEMA.find((c) => c.id === 'knowledge')).toBeUndefined();
     expect(SETTINGS_SCHEMA.find((c) => c.id === 'memory')).toBeUndefined();
 

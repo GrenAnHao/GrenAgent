@@ -4,7 +4,7 @@ React 快照中的桌面能力已统一收口到 `src/platform/runtime.ts`。业
 
 | 能力 | 平台接口 | 当前调用模块 |
 | --- | --- | --- |
-| 命令调用 | `invoke(command, args)` | 文件、Pi、TencentDB、终端、Workspace、MCP、技能 |
+| 命令调用 | `invoke(command, args)` | 文件、Pi、Agent Data、终端、Workspace、MCP、技能 |
 | 事件订阅 | `listen(event, handler)` | Pi、终端 |
 | 流式回调 | `Channel<T>` | Provider diagnostics |
 | 目录选择 | `openDirectory()` | 新建项目、技能导入 |

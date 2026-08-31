@@ -1,4 +1,4 @@
-import { AudioLines, Bot, CloudCog, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bot, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability';
@@ -76,13 +76,6 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
           '上下文将满需压缩时先弹确认，可拒绝本次压缩（默认开）。压缩会把靠前的对话压成摘要，关闭则自动压缩、不打扰。',
       },
     ],
-  },
-  {
-    id: 'tencentdb',
-    title: 'TencentDB 记忆',
-    group: '核心',
-    icon: CloudCog,
-    fields: [],
   },
   {
     // 供应商管理：由 SettingsPanel 特判渲染 ProvidersSettings（读写 ~/.pi/agent/models.json + auth.json）。

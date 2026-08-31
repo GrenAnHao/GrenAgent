@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { listKnowledgeAssets, messagesRef } = vi.hoisted(() => ({
-  listKnowledgeAssets: vi.fn(),
-  messagesRef: { current: [] as unknown[] },
-}));
+const { messagesRef } = vi.hoisted(() => ({ messagesRef: { current: [] as unknown[] } }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStore: () => ({
     useStore: (sel: (s: { messages: unknown[] }) => unknown) => sel({ messages: messagesRef.current }),
@@ -27,16 +24,6 @@ vi.mock('../panels/SubAgentConversation', () => ({
       <span>{status}</span>
     </div>
   ),
-}));
-vi.mock('../tencentdb/tencentdbApi', () => ({
-  tencentdbApi: {
-    listKnowledgeAssets,
-    listWikiPages: vi.fn(),
-    readWikiPages: vi.fn(),
-    searchCodeGraph: vi.fn(),
-    searchWiki: vi.fn(),
-  },
-  useTencentdbConnection: () => ({ status: { state: 'ready' } }),
 }));
 
 import { DockPanel } from './DockPanel';
@@ -69,7 +56,6 @@ describe('DockPanel (right region)', { timeout: 30_000 }, () => {
   });
 
   it('renders project context as a normal right dock tab', async () => {
-    listKnowledgeAssets.mockResolvedValue({ codeGraphs: [], wikis: [], workspace: {} });
     useDockStore.getState().openProjectContext('/repo');
 
     renderRight();

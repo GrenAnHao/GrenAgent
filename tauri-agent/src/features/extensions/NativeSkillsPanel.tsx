@@ -293,7 +293,7 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
         </Flexbox>
       </div>
       <div className={styles.desc}>
-        原生 Skill 保存在 <code className={styles.code}>~/.agents/skills</code> 与 <code className={styles.code}>~/.pi/agent/skills</code>；TencentDB Skill 使用独立缓存目录，不会覆盖本机文件。
+        原生 Skill 保存在 <code className={styles.code}>~/.agents/skills</code> 与 <code className={styles.code}>~/.pi/agent/skills</code>；Agent Data 模块不修改本机 Skill 目录。
       </div>
       {skills.length === 0 ? (
         <div className={styles.empty} data-testid="skills-empty"><Sparkles size={22} /><span>未发现本机技能，点右上「新增技能」或导入</span></div>

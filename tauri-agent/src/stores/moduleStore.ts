@@ -5,7 +5,7 @@ export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'settin
 
 /**
  * 工作区视图：项目级、绑定当前活跃工作区，渲染在主列内（对话区位置），侧栏常驻。
- * 'chat' 为默认且唯一视图；长期记忆与知识资产统一从 TencentDB 设置中心管理。
+ * 'chat' 为默认且唯一视图；长期记忆与知识资产由本地 Agent Data 管理。
  */
 export type WorkspaceView = 'chat';
 

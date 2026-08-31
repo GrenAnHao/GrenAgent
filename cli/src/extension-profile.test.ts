@@ -10,7 +10,7 @@ const all = [
   { name: "agent-mode" },
   { name: "lsp" },
   { name: "dap" },
-  { name: "tencentdb-memory" },
+  { name: "memory" },
 ];
 
 test("project profile keeps everything", () => {
@@ -22,7 +22,7 @@ test("chat profile drops heavy code extensions but keeps chat-relevant ones", ()
   assert.equal(has(chat, "safety"), true);
   assert.equal(has(chat, "approval"), true);
   assert.equal(has(chat, "agent-mode"), true);
-  assert.equal(has(chat, "tencentdb-memory"), true);
+  assert.equal(has(chat, "memory"), true);
   assert.equal(has(chat, "lsp"), false);
   assert.equal(has(chat, "dap"), false);
 });

@@ -6,7 +6,7 @@
 
 ## 原理
 
-- `../extensions/index.ts` 聚合全部内置 factory(`allExtensions`)，其中长期记忆唯一实现是 `tencentdb-memory`。
+- `../extensions/index.ts` 聚合全部内置 factory(`allExtensions`)，其中长期记忆由本地 `memory` 扩展实现。
 - `src/main.ts`:`createAgentSessionRuntime` + `createAgentSessionServices({ resourceLoaderOptions: { extensionFactories: allExtensions } })` → **`runRpcMode(runtime)`**。
 - `runRpcMode` 接管 stdout、从 stdin 读 JSONL 命令、把 agent 事件以 JSONL 输出。
 - `esbuild --bundle` 把 extension(含 store/embedding/typebox)打进 `dist/main.js`,pi 作为运行时外部依赖。
@@ -42,8 +42,8 @@ let mut child = std::process::Command::new("node")      // 或打包的二进制
 
 ## 关键约定
 
-- **TencentDB endpoint 由 Tauri 注入**：sidecar 从 `TDAI_MEMORY_ENDPOINT`、`TDAI_KNOWLEDGE_ENDPOINT` 和身份环境变量访问本机托管或远程 Gateway，不在工作区创建旧的知识库/记忆数据库。
-- **key**：`image-gen`/`tts` 按各自配置使用；TencentDB 凭据由 Tauri 安全存储后注入。
+- **Agent Data endpoint 由 Electron 注入**：sidecar 通过一次性 loopback token 访问本地 Runtime，Memory/Wiki 数据隔离存储。
+- **key**：`image-gen`/`tts` 按各自配置使用；记忆与 Wiki 复用当前 Pi 模型，不新增凭据。
 - **node:sqlite**:需 Node ≥ 22.5(或打包二进制时用对应 runtime)。
 
 ## 改名
@@ -56,5 +56,5 @@ let mut child = std::process::Command::new("node")      // 或打包的二进制
 
 ## 包含的内置 extension
 
-TencentDB memory · session memory · web-fetch · image-gen · code-review · multi-agent · tts · im-gateway · 其他内置工具扩展
+memory · wiki-rag · code-retrieval · session memory · web-fetch · image-gen · code-review · multi-agent · tts · im-gateway · 其他内置工具扩展
 (详见 `../extensions/index.ts` 与 `../extensions/<name>/README.md`)

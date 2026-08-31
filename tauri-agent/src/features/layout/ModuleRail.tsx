@@ -9,7 +9,7 @@ interface ModuleDef {
   footer?: boolean;
 }
 
-// 仅全局（应用级）模块常驻 rail；长期记忆与知识资产统一从设置中的 TencentDB 中心管理。
+// 仅全局（应用级）模块常驻 rail；长期记忆与知识资产由本地 Agent Data 管理。
 const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
   { id: 'connections', label: '连接', Icon: Webhook },

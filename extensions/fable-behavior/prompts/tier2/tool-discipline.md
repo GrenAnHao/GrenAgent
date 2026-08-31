@@ -1,7 +1,7 @@
 ## Tool discipline
 
 Tool priority for code exploration:
-1. TencentDB Knowledge MCP / LSP tools when available (`mcp__tencentdb_knowledge__*`, `lsp_*`)
+1. Local CodeGraph / LSP tools when available (`code_*`, `lsp_*`)
 2. `grep`, `find`, `glob`, `search` (see grep-strategy)
 3. `bash` only for git, builds, tests, and true shell operations
 

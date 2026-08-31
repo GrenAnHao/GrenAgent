@@ -6,7 +6,7 @@
 
 | 目录 | 工具 / 命令 | 需要 key? | 说明 |
 |---|---|---|---|
-| [`tencentdb-memory`](./tencentdb-memory) | `tdai_memory_search` `tdai_conversation_search` | TencentDB 配置 | TencentDB 长期记忆、会话捕获与自动召回 |
+| [`memory`](./memory) | `memory_search` `conversation_search` | Agent Data Runtime | 本地 L0-L3 长期记忆、会话捕获与自动召回 |
 | [`web-fetch`](./web-fetch) | `fetch_url` `fetch_html` `fetch_markdown` `fetch_txt` `fetch_json` | 否 | 网页抓取(SSRF 防护) |
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
 | [`code-review`](./code-review) | `git_diff` `review_note` `/review` | 否 | 结构化代码审查 + 报告 |
@@ -15,13 +15,13 @@
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
 | [`im-gateway`](./im-gateway) | `/imgateway` + webhook | 否 | HTTP 网关,接入 IM 平台 |
 
-合计 **当前 sidecar 中的全部扩展**，长期记忆与知识检索统一由 `tencentdb-memory` 提供。
+合计 **当前 sidecar 中的全部扩展**，长期记忆与知识检索由本地 `memory`、`wiki-rag` 与 `code-retrieval` 提供。
 
 ## 一键加载全部
 
 ```bash
 # 方式 1:逐个 -e(开发调试)
-pi -e ./extensions/tencentdb-memory/index.ts \
+pi -e ./extensions/memory/index.ts \
    -e ./extensions/web-fetch/index.ts \
    -e ./extensions/image-gen/index.ts \
    -e ./extensions/code-review/index.ts \
@@ -36,12 +36,12 @@ cp -r extensions/* ~/.pi/agent/extensions/
 
 ## 统一配置
 
-桌面端由 Tauri 托管 TencentDB 本地运行时，或在设置中连接远程 Gateway；sidecar 会自动获得对应的 endpoint、身份坐标和 Knowledge MCP。其他需要外部服务的扩展仍按各自 README 配置。
+桌面端由 Electron 托管本地 Agent Data Runtime；sidecar 通过受保护的 loopback endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
 
 ## 技术共性
 
 - TypeScript extension,`typebox` schema,`registerTool` / `registerCommand` / 生命周期钩子。
-- `tencentdb-memory` 通过 TencentDB SDK 访问长期记忆与会话检索，并在 `before_agent_start` 注入相关上下文。
+- `memory` 通过本地 Runtime 访问长期记忆与会话检索，并在 `before_agent_start` 注入相关上下文。
 - `session-memory` 只管理会话短期工作状态，不承担长期知识存储。
 
 ## 测试
@@ -51,4 +51,4 @@ cp -r extensions/* ~/.pi/agent/extensions/
 ## 注意
 
 - 包名:按官方新名 `@earendil-works/*` + `typebox`(实测该 Pi 版本 bundle 的是 `typebox`,不是 `@sinclair/typebox`)。
-- TencentDB 本地服务使用应用数据目录保存自身运行时数据；sidecar 不再创建旧的知识库或长期记忆 SQLite 文件。
+- Agent Data Runtime 使用应用数据目录保存 Memory/Wiki 数据；sidecar 不直接管理 SQLite 文件。
