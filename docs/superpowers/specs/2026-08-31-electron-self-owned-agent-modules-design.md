@@ -41,6 +41,19 @@ Electron 主进程
 
 Data Runtime 是三个自研模块的存储所有者。Renderer 不直接访问 SQLite 或 CodeGraph 文件；Pi 扩展不直接写 Data Runtime 的数据库。所有跨进程访问使用带版本号的 JSON-RPC 契约、loopback 随机 token、超时和结构化错误。
 
+## 3.1 历史 Tauri 实现参考
+
+早期 Tauri 版已经完成过 CodeGraph 索引、状态查询和前端图谱展示。迁移时以提交 `d90d4d1` 中的实现作为行为参考，不把 TencentDB API 作为新模块的依赖：
+
+- `tauri-agent/src-tauri/src/commands/code_intel.rs`：索引初始化、增量同步、全量重建、状态查询、文件图和 RichGraph 数据整形。
+- `tauri-agent/src/lib/codeGraphTypes.ts`：`GraphNode`、`GraphEdge`、`RichGraph` 和边类型约束。
+- `tauri-agent/src/lib/codeGraphIo.ts`、`codeGraphLayout.ts`、`codeGraphPath.ts`：图数据读取、布局、环路和路径计算。
+- `tauri-agent/src/features/chat/input/workspace/CodeGraphPanel.tsx`：图谱画布、工具栏、侧栏、加载/空态/错误态。
+- `tauri-agent/src/features/chat/input/workspace/IndexPanel.tsx`：索引状态、初始化和重建操作的状态显示。
+- `tauri-agent/src/features/extensions/ansi.ts`、`CodeIntelTab.tsx`、`codeIntelYield.ts`：状态文本解析、引擎设置和工具让位提示。
+
+Electron 迁移应优先复用这些数据结构、状态机和交互语义，再把调用端改为 `codeRetrieval.*` 与 `agentDataAdmin.*`。其中布局和画布属于前端通用能力，可以直接移植；索引进程控制和路径解析必须改为 Electron 主进程/TypeScript adapter。历史文件当前可能只存在于 Git 历史，实施阶段按该提交恢复所需片段并补齐测试。
+
 ## 4. 代码检索模块
 
 模块建议命名为 `code-retrieval`，不再使用 `tencentdb` 前缀。
@@ -142,13 +155,24 @@ Data Runtime 由 Electron 启动、监控和关闭。它提供：
 
 ## 8. 迁移与淘汰顺序
 
+### 8.1 前置清理（必须先完成）
+
+在任何自研模块接入前，先删除旧 TencentDB 的全部生产内容：
+
+- Electron/Tauri 的 Core、Knowledge、Panel runtime、布局解析、进程守护和启动/关闭逻辑；
+- `TencentDbService`、`tencentdbApi`、IPC/Rust command、旧设置页、旧管理面板和所有 `/v3/*` 路由调用；
+- `@tencentdb-agent-memory/*` 依赖、sidecar 构建脚本、打包资源、凭据/身份配置、`TDAI_*` 注入和旧数据目录；
+- `extensions/tencentdb-memory`、`cli` 中的 TencentDB Skill 同步入口及文档中的 TencentDB 运行说明。
+
+清理阶段只允许留下新的模块名下的空 provider/类型占位，以保持编译和 UI 导航可用；不得保留 TencentDB 兼容别名、隐藏 fallback 或继续启动旧进程。旧数据不自动迁移，先通过独立导出工具生成可选备份，用户确认后再决定是否导入。
+
+### 8.2 自研模块接入
+
 1. 建立 `agent-data` 包、RPC 契约、管理面板 API、存储迁移器和测试夹具。
-2. 将现有 TencentDB memory 钩子迁移到自研 `memory`，先保持工具语义和注入行为。
-3. 接入 CodeGraph MCP adapter，切换 Electron UI 和工作区上下文调用。
+2. 将现有记忆钩子迁移到自研 `memory`，先保持工具语义和注入行为。
+3. 接入 CodeGraph MCP adapter，按历史 Tauri 实现恢复索引状态显示和图谱画布，并切换 Electron UI/工作区上下文调用。
 4. 移植 Wiki RAG 的扫描、分块、Markdown 和 FTS5 检索，接入当前模型生成页面。
-5. 提供一次性旧数据导入/导出工具；导入失败不得覆盖新数据。
-6. 删除 TencentDB Core/Knowledge/Panel runtime、SDK、构建脚本、凭据存储、`/v3/*` 调用和旧设置页面。
-7. 增加 SkillProvider、AgentProvider 空实现和占位 UI，留待后续独立设计。
+5. 增加 SkillProvider、AgentProvider 空实现和占位 UI，留待后续独立设计。
 
 迁移期间允许保留只读兼容诊断，但生产启动路径不能再启动 TencentDB 进程或向其发送请求。
 
