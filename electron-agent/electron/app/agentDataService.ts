@@ -35,5 +35,6 @@ export class AgentDataService {
     return this.stopPromise;
   }
   endpoint(): AgentDataEndpoint | undefined { return this.runtime?.getEndpoint(); }
+  request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> { return this.requireClient().request<T>(method, params); }
   private requireClient(): AgentDataClient { if (!this.client) throw new Error('agent data runtime is not started'); return this.client; }
 }
