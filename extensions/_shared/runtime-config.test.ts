@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  captureSensitiveProcessConfig,
   getConfig,
   getAllConfig,
   __resetForTest,
@@ -45,16 +44,14 @@ describe("runtime-config", () => {
     process.env.PI_RUNTIME_CONFIG = fileWith({ SOME_KEY: "file" });
     expect(getAllConfig().SOME_KEY).toBe("file");
   });
-  it("keeps TencentDB credentials in-process without exposing them to child environments", () => {
+  it("rejects legacy provider credentials from process configuration", () => {
     process.env.TDAI_MEMORY_API_KEY = "gateway-secret";
     process.env.TDAI_MEMORY_USER_KEY = "user-secret";
 
-    captureSensitiveProcessConfig();
-
-    expect(getConfig("TDAI_MEMORY_API_KEY")).toBe("gateway-secret");
-    expect(getConfig("TDAI_MEMORY_USER_KEY")).toBe("user-secret");
-    expect(process.env.TDAI_MEMORY_API_KEY).toBeUndefined();
-    expect(process.env.TDAI_MEMORY_USER_KEY).toBeUndefined();
+    expect(getConfig("TDAI_MEMORY_API_KEY")).toBeUndefined();
+    expect(getConfig("TDAI_MEMORY_USER_KEY")).toBeUndefined();
+    expect(process.env.TDAI_MEMORY_API_KEY).toBe("gateway-secret");
+    expect(process.env.TDAI_MEMORY_USER_KEY).toBe("user-secret");
     expect(getAllConfig()).not.toHaveProperty("TDAI_MEMORY_API_KEY");
     expect(getAllConfig()).not.toHaveProperty("TDAI_MEMORY_USER_KEY");
   });

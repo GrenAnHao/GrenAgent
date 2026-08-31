@@ -102,8 +102,8 @@ describe("gateToolCall", () => {
       "web_search_multi",
       "search",
       "fetch_web_content",
-      "tdai_memory_search",
-      "tdai_conversation_search",
+      "memory_search",
+      "conversation_search",
       "git_diff",
     ]) {
       expect(gateToolCall("ask", t, {})).toBeUndefined();

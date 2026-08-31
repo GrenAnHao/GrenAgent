@@ -9,11 +9,7 @@ let watcher: import("node:fs").FSWatcher | undefined;
 const subscribers = new Set<(next: Record<string, string>) => void>();
 
 export function withoutSensitiveProcessConfig<T>(config: Record<string, T>): Record<string, T> {
-  return { ...config };
-}
-
-/** Keep credentials available to extensions without leaking them to tool subprocesses. */
-export function captureSensitiveProcessConfig(): void {
+  return Object.fromEntries(Object.entries(config).filter(([key]) => !/^TDAI_|^TENCENTDB_/i.test(key))) as Record<string, T>;
 }
 
 function configPath(): string | undefined {
@@ -62,6 +58,7 @@ function ensureStarted(): void {
 
 export function getConfig(key: string): string | undefined {
   ensureStarted();
+  if (/^TDAI_|^TENCENTDB_/i.test(key)) return undefined;
   return cache?.[key] ?? process.env[key];
 }
 
