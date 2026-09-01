@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,5 +68,19 @@ describe('useSettingsForm', () => {
       await result.current.persist();
     });
     expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ WECHAT_OC_ENABLE: '1' }));
+  });
+
+  it('保存自动标题开关值且不重启 sidecar', async () => {
+    const { result } = renderHook(() => useSettingsForm());
+    await waitFor(() => expect(result.current.values.OPENAI_API_KEY).toBe('sk-old'));
+    act(() => result.current.setValue('AUTO_TITLE', '0'));
+
+    await act(async () => {
+      await result.current.persist();
+    });
+
+    expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({ AUTO_TITLE: '0' }));
+    expect(closeWorkspace).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
   });
 });

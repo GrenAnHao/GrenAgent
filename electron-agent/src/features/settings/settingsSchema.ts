@@ -68,6 +68,13 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         effect: 'instant',
       },
       {
+        key: 'AUTO_TITLE',
+        label: '自动生成对话标题',
+        type: 'boolean',
+        default: '1',
+        description: '首轮对话结束后生成简短标题（默认开）',
+      },
+      {
         key: 'COMPACTION_PREVIEW',
         label: '压缩上下文前确认',
         type: 'boolean',
