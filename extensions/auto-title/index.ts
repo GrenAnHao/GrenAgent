@@ -16,6 +16,37 @@ const TITLE_PROMPT =
   "You generate a very short chat title (3 to 6 words) summarizing the user's request. " +
   "Use Title Case, no surrounding quotes, no trailing punctuation. Reply with ONLY the title.";
 
+type SummaryModel = { provider: string; id: string };
+
+function sameModel(left: SummaryModel, right: SummaryModel): boolean {
+  return left.provider === right.provider && left.id === right.id;
+}
+
+async function generateTitle(
+  ctx: ExtensionContext,
+  input: string,
+  primaryModel: SummaryModel,
+): Promise<string> {
+  const options = { systemPrompt: TITLE_PROMPT, maxChars: 80, signal: ctx.signal };
+  let primaryError: unknown;
+  try {
+    const title = await summarize(ctx, input, options);
+    if (title) return title;
+  } catch (err) {
+    primaryError = err;
+  }
+
+  const currentModel = ctx.model as SummaryModel | undefined;
+  if (!currentModel || sameModel(primaryModel, currentModel)) {
+    if (primaryError) throw primaryError;
+    return "";
+  }
+  return summarize(ctx, input, {
+    ...options,
+    modelSpec: `${currentModel.provider}/${currentModel.id}`,
+  });
+}
+
 /** 首条 user 消息的纯文本。messages 形如 {role,content} 或 {message:{role,content}}。 */
 function firstUserText(messages: unknown[]): string {
   for (const m of messages) {
@@ -49,7 +80,8 @@ export default function (pi: ExtensionAPI) {
       // 已命名（用户手动 / 此前已生成）则不覆盖。
       if (alreadyNamed(ctx)) return;
       // 无可用标题模型（titleModel 未配且 ctx.model 为空）则放弃。
-      if (!resolveSummaryModel(ctx)) return;
+      const primaryModel = resolveSummaryModel(ctx) as SummaryModel | undefined;
+      if (!primaryModel) return;
 
       const messages = Array.isArray((event as { messages?: unknown[] })?.messages)
         ? (event as { messages: unknown[] }).messages
@@ -60,12 +92,8 @@ export default function (pi: ExtensionAPI) {
       // 后台非阻塞：标题生成是一次额外模型调用，不该拖住首轮 agent_end / UI「运行中」。
       void (async () => {
         try {
-          const title = await summarize(ctx, firstUser, {
-            systemPrompt: TITLE_PROMPT,
-            maxChars: 80,
-            signal: ctx.signal,
-          });
-          if (title) await pi.setSessionName(title);
+          const title = await generateTitle(ctx, firstUser, primaryModel);
+          if (title && !alreadyNamed(ctx)) await pi.setSessionName(title);
         } catch (err) {
           console.error("[auto-title] error:", err instanceof Error ? (err.stack ?? err.message) : String(err));
         }
