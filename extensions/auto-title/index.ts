@@ -8,10 +8,9 @@
 //
 // 标题生成本身复用 `_shared/summarize`（进程内摘要原语，生成物标题等也用它）。
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getConfig } from "../_shared/runtime-config.js";
 import { resolveSummaryModel, summarize } from "../_shared/summarize.js";
 import { extractTextFromContent } from "../_shared/transcript.js";
-
-const ENABLED = (process.env.AUTO_TITLE ?? "1") !== "0";
 
 const TITLE_PROMPT =
   "You generate a very short chat title (3 to 6 words) summarizing the user's request. " +
@@ -42,10 +41,9 @@ function alreadyNamed(ctx: ExtensionContext): boolean {
 }
 
 export default function (pi: ExtensionAPI) {
-  if (!ENABLED) return;
-
   pi.on("agent_end", async (event, ctx) => {
     try {
+      if ((getConfig("AUTO_TITLE") ?? "1") === "0") return;
       // 子代理(--no-session, PI_IS_SUBAGENT)不需要标题，跳过以省一次模型调用。
       if (process.env.PI_IS_SUBAGENT === "1") return;
       // 已命名（用户手动 / 此前已生成）则不覆盖。
