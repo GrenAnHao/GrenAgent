@@ -5,6 +5,7 @@ import { ThreadStore } from './threadStore';
 import { MemoryStore } from './memoryStore';
 import { WikiStore } from './wikiStore';
 import { JobStore } from './jobStore';
+import { MemoryService } from '../app/memoryService';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -27,6 +28,7 @@ export class AgentDataRuntime {
   private wiki?: WikiStore;
   private jobs?: JobStore;
   private threads?: ThreadStore;
+  private memoryService?: MemoryService;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -35,6 +37,22 @@ export class AgentDataRuntime {
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
     this.memory = new MemoryStore(this.storage.db);
+    this.memoryService = new MemoryService({
+      store: this.memory,
+      queue: {
+        enqueue: async (input) => {
+          const now = Date.now();
+          this.storage!.db.prepare(`INSERT INTO service_tasks(id,kind,source_project_id,source_session_id,is_system,status,input,output,attempts,error,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(input.id, input.kind, input.sourceProjectId ?? null, input.sourceSessionId ?? null, input.system ? 1 : 0, 'queued', JSON.stringify(input.input), null, 0, null, now, now);
+          return { id: input.id, kind: input.kind, sourceProjectId: input.sourceProjectId, sourceSessionId: input.sourceSessionId, status: 'queued', input: input.input, attempts: 0, createdAt: now, updatedAt: now };
+        },
+        get: (id) => {
+          const row = this.storage!.db.prepare('SELECT * FROM service_tasks WHERE id=?').get(id) as Record<string, unknown> | undefined;
+          if (!row) return undefined;
+          return { id: String(row.id), kind: String(row.kind), sourceProjectId: row.source_project_id == null ? undefined : String(row.source_project_id), sourceSessionId: row.source_session_id == null ? undefined : String(row.source_session_id), status: String(row.status) as never, input: JSON.parse(String(row.input)), output: row.output == null ? undefined : JSON.parse(String(row.output)), attempts: Number(row.attempts), error: row.error == null ? undefined : String(row.error), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) };
+        },
+      },
+    });
     this.wiki = new WikiStore(this.storage.db);
     this.jobs = new JobStore(this.storage.db);
     this.threads = new ThreadStore(this.storage);
@@ -121,9 +139,10 @@ export class AgentDataRuntime {
     if (name === 'memory.upsert') return (params) => this.memory!.upsert(readScope(params), {
       level: readLevel(params.level), content: readString(params.content), source: typeof params.source === 'string' ? params.source : undefined,
     });
-    if (name === 'memory.capture') return (params) => this.memory!.capture(readScope(params), readString(params.source), readString(params.transcript), readString(params.fingerprint));
+    if (name === 'memory.capture') return (params) => this.memoryService!.capture({ ...readScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : readString(params.workspace), source: readString(params.source), transcript: readString(params.transcript), fingerprint: readString(params.fingerprint) });
     if (name === 'memory.captureCommit' || name === 'memory.commitCapture') return (params) => { this.memory!.commitCapture(readScope(params), readString(params.source), readString(params.fingerprint)); return null; };
-    if (name === 'memory.search') return (params) => this.memory!.search(readScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'memory.completeExtraction') return (params) => this.memoryService!.completeExtraction(readString(params.taskId), params.output);
+    if (name === 'memory.search') return (params) => this.memoryService!.search({ ...readScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : readString(params.workspace), query: readString(params.query), limit: typeof params.limit === 'number' ? params.limit : 20 });
     if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readScope(params));
     if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
     return undefined;
@@ -175,7 +194,7 @@ export class AgentDataRuntime {
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
 function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
 function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
-function readScope(value: Record<string, unknown>): { userId: string; workspace: string; sessionId?: string } { return { userId: readString(value.userId), workspace: readString(value.workspace), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId) }; }
+function readScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: readString(value.workspace), projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
 function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }
 function readItemType(value: unknown): import('../app/appServer/types').ItemType { if (value === 'user_message' || value === 'assistant_message' || value === 'reasoning' || value === 'tool_call' || value === 'tool_result' || value === 'permission_request' || value === 'error') return value; throw new RpcError('INVALID_PARAMS', 'invalid item type'); }

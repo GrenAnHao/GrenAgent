@@ -105,12 +105,14 @@ export class PiRuntimeService {
         await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'cancelled', completedAt: Date.now() });
         this.publish({ id: randomUUID(), type: 'turn.cancelled', timestamp: Date.now(), projectId: workspace, threadId: adapter.threadId, turnId: adapter.turnId, data: {} });
       }
+      if (adapter && (command === 'agent_prompt' || command === 'agent_abort')) this.activeTurns.delete(workspace);
       return result;
     } catch (error) {
       if (adapter && command === 'agent_prompt') {
         await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'failed', completedAt: Date.now(), error: error instanceof Error ? error.message : String(error) });
         this.publish({ id: randomUUID(), type: 'turn.failed', timestamp: Date.now(), projectId: workspace, threadId: adapter.threadId, turnId: adapter.turnId, data: { error: error instanceof Error ? error.message : String(error) } });
       }
+      if (adapter && command === 'agent_prompt') this.activeTurns.delete(workspace);
       throw error;
     }
   }
