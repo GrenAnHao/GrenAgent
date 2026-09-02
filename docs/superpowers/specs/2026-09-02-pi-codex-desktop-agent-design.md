@@ -9,7 +9,7 @@ GrenAgent 的目标是构建类 Codex 的 Electron 桌面 Agent。Electron 是�
 1. Codex 风格 Thread / Turn / Item 数据模型。
 2. 统一事件协议和事件回放。
 3. Electron 控制面与项目 Pi 执行面的边界。
-4. 全局记忆服务与系统级 Pi LLM Worker。
+4. 通用系统级 Pi Worker，以及作为首个调用方的全局记忆服务。
 5. 中心化 MCP 配置治理与每项目 Pi 的 MCP Client。
 6. 细粒度 Permission Profile。
 7. OS 级 Sandbox Manager。
@@ -28,8 +28,8 @@ Electron 主进程 = Control Plane
 Pi(project) = Project Agent Worker
   当前项目的模型回合、session、工具执行、项目 MCP 连接
 
-Pi(system) = System LLM Worker
-  Electron 按需启动的受限 LLM 执行器，不属于任何项目会话
+Pi(system) = System Agent Worker
+  Electron 按需启动的受限系统任务执行器，不属于任何项目会话
 ```
 
 Electron 永远是上层协调者。项目 Pi 不直接管理全局数据库、跨项目记忆、MCP 中心配置、桌面队列或 UI 状态。
@@ -95,15 +95,17 @@ Electron 不直接运行项目模型回合，也不代理每一次 MCP 工具调
 
 项目 Pi 不直接打开 Agent Data SQLite，也不读取其他项目的 session 文件。
 
-### Pi(system) 系统 LLM Worker
+### Pi(system) 通用系统 Agent Worker
 
-系统 Worker 由 Electron 按需启动、执行完任务后空闲退出：
+系统 Worker 是 Electron 共享的通用 LLM 执行能力，由 Electron 按需启动、执行完任务后空闲退出。记忆处理是首个调用方，不是 Worker 的专属用途：
 
 - 不绑定 workspace、Thread 或项目 session。
-- 不加载项目 MCP、web-search、Shell、DAP、LSP、写文件和子代理能力。
-- 只允许受控的 LLM completion 和结构化 JSON 输出。
-- 通过独立 RPC 接收 `memory_extract`、`memory_deduplicate`、`memory_summarize` 等任务。
-- 结果回传 Electron，由 Electron 校验、去重、分层和写入数据库。
+- 每个 ServiceTask 使用独立临时上下文，任务结束后不保留为项目聊天历史。
+- 默认只具有受控的 LLM completion 和结构化 JSON 输出能力，不自动加载项目 MCP、web-search、Shell、DAP、LSP、写文件和子代理能力。
+- 通过独立 RPC 接收已注册的系统任务，例如记忆抽取/去重/摘要、Thread 标题生成、内容分类和上下文摘要。
+- 每种任务由 Electron 的 ServiceTask Registry 绑定输入/输出 schema、超时、重试策略和能力白名单；任务 payload 不能自行申请额外能力。
+- 某类系统任务若需要工具，必须在任务定义中显式声明，并由 PermissionManager 和 SandboxManager 执行；不能继承任一项目 Pi 的工具或权限。
+- 结果回传 Electron，由对应的系统服务校验并决定是否持久化或发布事件。
 
 生命周期：
 
@@ -256,7 +258,7 @@ Electron 按 scope policy 检索统一数据库
 返回上下文片段，项目 Pi 注入当前回合
 ```
 
-系统 Worker 只处理 LLM 计算；Electron 负责数据真实性、权限、去重、审计和最终写入。记忆提炼不进入任何项目聊天历史。
+在记忆场景中，系统 Worker 只负责受控的 LLM 计算；Electron 负责数据真实性、权限、去重、审计和最终写入。记忆提炼不进入任何项目聊天历史。
 
 ## MCP 中心与项目 Client
 
@@ -366,17 +368,29 @@ PluginManager 在 Electron 侧管理发现、校验、配置、启停、状态�
 
 ## Turn 与 ServiceTask 队列
 
-用户对话和系统任务共用调度基础，但数据类型分开：
+用户对话和系统任务共用调度基础，但数据类型分开。ServiceTask 类型通过 Electron 注册表扩展，不在队列内硬编码为记忆专用：
 
 ```ts
-type ServiceTaskKind =
+type BuiltinServiceTaskKind =
   | "memory_extract"
   | "memory_deduplicate"
-  | "memory_summarize";
+  | "memory_summarize"
+  | "thread_title_generate"
+  | "content_classify"
+  | "context_summarize";
+
+interface ServiceTaskDefinition {
+  kind: string;
+  inputSchema: unknown;
+  outputSchema: unknown;
+  capabilities: Array<"llm_completion" | "llm_embedding" | "network" | "filesystem_read">;
+  timeoutMs: number;
+  maxAttempts: number;
+}
 
 interface ServiceTask {
   id: string;
-  kind: ServiceTaskKind;
+  kind: string;
   sourceProjectId?: string;
   sourceSessionId?: string;
   status: "queued" | "running" | "blocked" | "completed" | "failed" | "cancelled";
@@ -392,6 +406,7 @@ interface ServiceTask {
 规则：
 
 - 交互 Turn 和 ServiceTask 都由 Electron TaskQueue 调度。
+- TaskQueue 只接受 ServiceTask Registry 中已启用的 kind；入队和出队结果都按对应 schema 校验。
 - 同一 Thread 同时只允许一个 active Turn；同一 system Pi 同时只执行一个 ServiceTask；不同项目的项目 Pi 可以并行运行。
 - TaskQueue 对 system Pi 采用串行调度；项目 Pi 的并发由各 Thread/项目进程约束，是否限制跨项目并发由 Electron 的资源策略决定，不改变 Thread 语义。
 - 交互 Turn 绑定项目 Pi；ServiceTask 绑定 system Pi。
@@ -415,7 +430,10 @@ web-search
   普通项目工具插件；遵守 Permission Profile 和网络策略
 
 memory
-  Electron 数据服务 + system Pi Worker 的 LLM 任务，不进入项目 session
+  Electron 数据服务；需要 LLM 时调用通用 system Pi Worker，不进入项目 session
+
+system services
+  标题、摘要、分类、索引整理等非项目会话能力，通过 ServiceTask Registry 调用 system Pi Worker
 ```
 
 ## 本地 App Server 接口
@@ -471,8 +489,9 @@ Pi session 文件仍由 Pi 管理；Thread/Turn/Item 数据库是 Electron 的�
 - 为现有 `open_workspace`、`agent_prompt`、`agent_abort` 建立 adapter。
 - Electron UI 双读新旧状态，验证重启、切换项目和旧 session 兼容。
 
-### 阶段 3：记忆控制面与 system Pi Worker
+### 阶段 3：ServiceTask Registry、system Pi Worker 与记忆控制面
 
+- 建立通用 ServiceTask Definition/Registry、schema 校验和能力白名单。
 - 将 memory capture/search 统一收口到 Electron MemoryService。
 - 增加 ServiceTask 队列和 system Pi 按需启动/空闲退出。
 - 验证跨项目策略默认关闭、显式开启可审计、Worker 故障不影响项目对话。
@@ -524,7 +543,7 @@ Pi session 文件仍由 Pi 管理；Thread/Turn/Item 数据库是 Electron 的�
 - 一个 workspace 只允许一个项目 Pi。
 - 多项目记忆默认不可互读，显式策略开启后可检索并携带来源。
 - 记忆提炼不写入项目聊天 session。
-- system Pi 不加载项目工具和 MCP。
+- system Pi 不继承项目工具、MCP、上下文或权限；只有任务定义声明的能力可用。
 - MCP server 配置中心变更后，项目 Pi 可重新建立连接。
 
 ### 权限与沙箱
@@ -538,6 +557,7 @@ Pi session 文件仍由 Pi 管理；Thread/Turn/Item 数据库是 Electron 的�
 ### 任务和插件
 
 - ServiceTask 按需启动 system Pi，空闲后退出。
+- 非记忆 ServiceTask 可以复用同一 Worker，并按独立 schema 和能力白名单执行。
 - Worker 崩溃可重试，项目 Pi 不受影响。
 - 非交互 Turn 的权限阻塞、取消、恢复和失败状态正确。
 - 插件状态转移、版本校验和崩溃隔离可测试。
@@ -550,8 +570,8 @@ Pi session 文件仍由 Pi 管理；Thread/Turn/Item 数据库是 Electron 的�
 
 ## 最终验收标准
 
-1. Electron 是唯一控制面，项目 Pi 和 system Pi 的职责边界清晰且可测试。
-2. 项目对话、记忆任务、MCP 调用和后台任务都能映射到统一事件协议。
+1. Electron 是唯一控制面，项目 Pi 和通用 system Pi 的职责边界清晰且可测试。
+2. 项目对话、记忆任务、其他系统 LLM 任务、MCP 调用和后台任务都能映射到统一事件协议。
 3. 记忆数据库统一管理，支持项目隔离和受策略控制的跨项目读取。
 4. MCP 配置中心化，但每个项目 Pi 保持独立 Client 连接。
 5. 权限、沙箱、插件和任务队列有统一生命周期和故障恢复路径。
