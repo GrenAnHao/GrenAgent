@@ -67,6 +67,12 @@ export class PiManager {
     return client;
   }
 
+  openSystem(cwd: string, env?: Record<string, string>): PiClient {
+    return this.open('__system__', cwd, { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1', ...env });
+  }
+
+  closeSystem(): Promise<void> { return this.close('__system__'); }
+
   async close(workspace: string): Promise<void> {
     const client = this.clients.get(workspace);
     if (!client) return;
