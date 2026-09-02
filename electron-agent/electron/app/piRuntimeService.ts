@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { PiManager, PiProcessCommand } from '../pi/manager';
+import type { AppEvent, Thread, Turn } from './appServer/types';
 
 type PiCommand = keyof typeof commandTypes;
 
@@ -44,6 +46,14 @@ interface PiManagerPort {
   all?: () => Array<[string, PiClientPort]>;
 }
 
+interface ThreadStorePort {
+  createThread(input: { id: string; projectId: string; workspace: string; title?: string }): Promise<Thread> | Thread;
+  createTurn(input: { id: string; threadId: string; input: string; permissionProfile: string; mode?: Turn['mode'] }): Promise<Turn> | Turn;
+  updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn> | Turn;
+  appendAppEvent?(event: AppEvent): Promise<AppEvent> | AppEvent;
+}
+interface EventBusPort { publish(event: Omit<AppEvent, 'sequence'>): AppEvent; }
+
 export interface PiRuntimeOptions {
   manager: PiManagerPort;
   processCommand: PiProcessCommand;
@@ -51,9 +61,13 @@ export interface PiRuntimeOptions {
   runtimeConfigPath?: string;
   agentDataEndpoint?: () => string | undefined;
   resolveWorkspace?: (workspace: string) => Promise<string>;
+  threadStore?: ThreadStorePort;
+  emitAppEvent?: (event: Omit<AppEvent, 'sequence'>) => void;
+  eventBus?: EventBusPort;
 }
 
 export class PiRuntimeService {
+  private readonly activeTurns = new Map<string, { threadId: string; turnId: string }>();
   constructor(private readonly options: PiRuntimeOptions) {}
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null }> {
@@ -78,7 +92,27 @@ export class PiRuntimeService {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
     const client = await this.openClient(workspace);
-    return client.send({ type, ...args });
+    const adapter = this.options.threadStore && (command === 'agent_prompt' || command === 'agent_abort')
+      ? await this.prepareTurn(workspace, command, args)
+      : undefined;
+    try {
+      const result = await client.send({ type, ...args });
+      if (adapter && command === 'agent_prompt') {
+        await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'completed', completedAt: Date.now() });
+        this.publish({ id: randomUUID(), type: 'turn.completed', timestamp: Date.now(), projectId: workspace, threadId: adapter.threadId, turnId: adapter.turnId, data: {} });
+      }
+      if (adapter && command === 'agent_abort') {
+        await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'cancelled', completedAt: Date.now() });
+        this.publish({ id: randomUUID(), type: 'turn.cancelled', timestamp: Date.now(), projectId: workspace, threadId: adapter.threadId, turnId: adapter.turnId, data: {} });
+      }
+      return result;
+    } catch (error) {
+      if (adapter && command === 'agent_prompt') {
+        await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'failed', completedAt: Date.now(), error: error instanceof Error ? error.message : String(error) });
+        this.publish({ id: randomUUID(), type: 'turn.failed', timestamp: Date.now(), projectId: workspace, threadId: adapter.threadId, turnId: adapter.turnId, data: { error: error instanceof Error ? error.message : String(error) } });
+      }
+      throw error;
+    }
   }
 
   async respondUi(workspace: string, response: Record<string, unknown>): Promise<void> {
@@ -109,5 +143,23 @@ export class PiRuntimeService {
     const endpoint = this.options.agentDataEndpoint?.();
     if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
     return this.options.manager.open(workspace, cwd, env);
+  }
+
+  private async prepareTurn(workspace: string, command: string, args: Record<string, unknown>): Promise<{ threadId: string; turnId: string } | undefined> {
+    if (command === 'agent_abort') return this.activeTurns.get(workspace);
+    const threadId = randomUUID();
+    const turnId = randomUUID();
+    const thread = await this.options.threadStore!.createThread({ id: threadId, projectId: workspace, workspace });
+    await this.options.threadStore!.createTurn({ id: turnId, threadId, input: typeof args.prompt === 'string' ? args.prompt : '', permissionProfile: typeof args.permissionProfile === 'string' ? args.permissionProfile : 'default' });
+    this.activeTurns.set(workspace, { threadId, turnId });
+    this.publish({ id: randomUUID(), type: 'thread.created', timestamp: Date.now(), projectId: thread.projectId, threadId, data: thread });
+    this.publish({ id: randomUUID(), type: 'turn.queued', timestamp: Date.now(), projectId: workspace, threadId, turnId, data: {} });
+    return { threadId, turnId };
+  }
+
+  private publish(event: Omit<AppEvent, 'sequence'>): void {
+    const published = this.options.eventBus?.publish(event) ?? event;
+    this.options.emitAppEvent?.(published);
+    void this.options.threadStore?.appendAppEvent?.(published);
   }
 }

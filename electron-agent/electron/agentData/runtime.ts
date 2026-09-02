@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
 import { AgentDataStorage } from './storage';
+import { ThreadStore } from './threadStore';
 import { MemoryStore } from './memoryStore';
 import { WikiStore } from './wikiStore';
 import { JobStore } from './jobStore';
@@ -25,6 +26,7 @@ export class AgentDataRuntime {
   private memory?: MemoryStore;
   private wiki?: WikiStore;
   private jobs?: JobStore;
+  private threads?: ThreadStore;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -35,6 +37,7 @@ export class AgentDataRuntime {
     this.memory = new MemoryStore(this.storage.db);
     this.wiki = new WikiStore(this.storage.db);
     this.jobs = new JobStore(this.storage.db);
+    this.threads = new ThreadStore(this.storage);
     this.server = createServer((socket) => this.handleSocket(socket));
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
@@ -91,7 +94,7 @@ export class AgentDataRuntime {
       else if (value.method === 'system.status') response = { id: value.id, ok: true, result: { state: this.closed ? 'closed' : 'ready', version: PROTOCOL_VERSION } };
       else if (value.method === 'system.shutdown') { response = { id: value.id, ok: true, result: null }; shutdown = true; }
       else {
-        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.wikiMethod(value.method) ?? this.adminMethod(value.method);
+        const method = this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.wikiMethod(value.method) ?? this.adminMethod(value.method) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
       }
@@ -146,6 +149,24 @@ export class AgentDataRuntime {
     return undefined;
   }
 
+  private threadMethod(name: string): AgentDataMethod | undefined {
+    if (!this.threads) return undefined;
+    if (name === 'thread.create') return (p) => this.threads!.createThread({ id: readString(p.id), projectId: readString(p.projectId), workspace: readString(p.workspace), title: typeof p.title === 'string' ? p.title : undefined });
+    if (name === 'thread.list') return () => this.threads!.listThreads();
+    if (name === 'thread.read') return (p) => this.threads!.readThread(readString(p.id));
+    if (name === 'turn.create') return (p) => this.threads!.createTurn({ id: readString(p.id), threadId: readString(p.threadId), input: readString(p.input), permissionProfile: readString(p.permissionProfile), mode: p.mode === 'non-interactive' ? 'non-interactive' : 'interactive' });
+    if (name === 'turn.update') return (p) => this.threads!.updateTurn(readString(p.id), {
+      ...(isTurnStatus(p.status) ? { status: p.status } : {}),
+      ...(typeof p.startedAt === 'number' ? { startedAt: p.startedAt } : {}),
+      ...(typeof p.completedAt === 'number' ? { completedAt: p.completedAt } : {}),
+      ...(typeof p.error === 'string' ? { error: p.error } : {}),
+    });
+    if (name === 'item.upsert') return (p) => this.threads!.upsertItem({ id: readString(p.id), threadId: readString(p.threadId), turnId: readString(p.turnId), type: readItemType(p.type), status: readItemStatus(p.status), payload: p.payload });
+    if (name === 'item.list') return (p) => this.threads!.listItems(readString(p.threadId), p.turnId === undefined ? undefined : readString(p.turnId));
+    if (name === 'appEvent.append') return (p) => this.threads!.appendAppEvent(p as never);
+    return undefined;
+  }
+
   private requestId(line: string): string {
     try { const value = JSON.parse(line) as { id?: unknown }; return typeof value.id === 'string' ? value.id : randomUUID(); } catch { return randomUUID(); }
   }
@@ -156,3 +177,6 @@ function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value ===
 function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
 function readScope(value: Record<string, unknown>): { userId: string; workspace: string; sessionId?: string } { return { userId: readString(value.userId), workspace: readString(value.workspace), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId) }; }
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
+function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }
+function readItemType(value: unknown): import('../app/appServer/types').ItemType { if (value === 'user_message' || value === 'assistant_message' || value === 'reasoning' || value === 'tool_call' || value === 'tool_result' || value === 'permission_request' || value === 'error') return value; throw new RpcError('INVALID_PARAMS', 'invalid item type'); }
+function readItemStatus(value: unknown): import('../app/appServer/types').ItemStatus { if (value === 'started' || value === 'streaming' || value === 'completed' || value === 'failed') return value; throw new RpcError('INVALID_PARAMS', 'invalid item status'); }

@@ -98,6 +98,25 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
   if (services.shell) registerShellCommands(services.shell);
   if (services.agentData) {
+    registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
+      id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
+      ...(args.title === undefined ? {} : { title: readText(args, 'title') }),
+    }));
+    registerCommand('thread_list', () => services.agentData!.listThreads());
+    registerCommand('thread_read', (_event, args) => services.agentData!.readThread(readString(args, 'id')));
+    registerCommand('turn_create', (_event, args) => services.agentData!.createTurn({
+      id: readString(args, 'id'), threadId: readString(args, 'threadId'), input: readText(args, 'input'),
+      permissionProfile: readString(args, 'permissionProfile'), ...(args.mode === undefined ? {} : { mode: args.mode as 'interactive' | 'non-interactive' }),
+    }));
+    registerCommand('turn_update', (_event, args) => services.agentData!.updateTurn(readString(args, 'id'), {
+      ...(args.status === undefined ? {} : { status: args.status as never }),
+      ...(args.startedAt === undefined ? {} : { startedAt: args.startedAt as number }),
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt as number }),
+      ...(args.error === undefined ? {} : { error: readText(args, 'error') }),
+    }));
+    registerCommand('item_upsert', (_event, args) => services.agentData!.upsertItem(args as never));
+    registerCommand('item_list', (_event, args) => services.agentData!.listItems(readString(args, 'threadId'), args.turnId === undefined ? undefined : readString(args, 'turnId')));
+    registerCommand('app_event_append', (_event, args) => services.agentData!.appendAppEvent(args as never));
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());

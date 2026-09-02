@@ -109,6 +109,25 @@ describe('registerIpcHandlers', () => {
     });
   });
 
+  it('routes app server thread and turn commands through Agent Data', async () => {
+    const agentData = {
+      createThread: vi.fn().mockResolvedValue({ id: 't' }),
+      listThreads: vi.fn().mockResolvedValue([]),
+      readThread: vi.fn().mockResolvedValue(undefined),
+      createTurn: vi.fn().mockResolvedValue({ id: 'turn' }),
+      updateTurn: vi.fn().mockResolvedValue({ id: 'turn', status: 'failed' }),
+      upsertItem: vi.fn().mockResolvedValue({ id: 'item' }),
+      listItems: vi.fn().mockResolvedValue([]),
+      appendAppEvent: vi.fn().mockResolvedValue({ id: 'event' }),
+    };
+    registerIpcHandlers({ agentData } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await expect(invoke({}, { command: 'thread_create', args: { id: 't', projectId: 'p', workspace: '/w' } })).resolves.toEqual({ id: 't' });
+    await expect(invoke({}, { command: 'turn_update', args: { id: 'turn', status: 'failed', error: 'boom' } })).resolves.toEqual({ id: 'turn', status: 'failed' });
+    expect(agentData.createThread).toHaveBeenCalledWith({ id: 't', projectId: 'p', workspace: '/w' });
+    expect(agentData.updateTurn).toHaveBeenCalledWith('turn', { status: 'failed', error: 'boom' });
+  });
+
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {
     const window = {
       minimize: vi.fn(), maximize: vi.fn(), unmaximize: vi.fn(), isMaximized: vi.fn().mockReturnValue(false), close: vi.fn(),
