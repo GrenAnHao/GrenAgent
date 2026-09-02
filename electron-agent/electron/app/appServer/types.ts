@@ -62,6 +62,7 @@ export type AppEventType =
   | 'task.started'
   | 'task.completed'
   | 'task.failed'
+  | 'task.cancelled'
   | 'plugin.state_changed'
   | 'mcp.state_changed'
   | 'memory.updated';
