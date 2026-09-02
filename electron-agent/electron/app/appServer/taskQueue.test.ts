@@ -27,13 +27,14 @@ describe('TaskQueue', () => {
   });
 
   it('cancels queued tasks and recovers running tasks after restart', async () => {
-    const { storage, registry } = setup(); let release!: () => void;
+    const { storage, registry } = setup(); const bus = new EventBus(); let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queue = new TaskQueue({ storage, registry, execute: async () => { await gate; return null; } });
+    const queue = new TaskQueue({ storage, registry, eventBus: bus, execute: async () => { await gate; return null; } });
     const running = queue.enqueue({ id: 'running', kind: 'test', system: true, input: {} });
     const queued = queue.enqueue({ id: 'queued', kind: 'test', system: true, input: {} });
     await Promise.resolve();
     expect(queue.cancel('queued')).toMatchObject({ status: 'cancelled' });
+    expect(bus.replay(0)).toMatchObject({ kind: 'events', events: expect.arrayContaining([expect.objectContaining({ type: 'task.cancelled', data: expect.objectContaining({ id: 'queued', status: 'cancelled' }) })]) });
     expect(queue.recoverRunning()).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'running', status: 'queued' })]));
     release(); await running.catch(() => {}); await queued.catch(() => {});
   });
