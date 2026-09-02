@@ -54,10 +54,12 @@ export class TaskQueue {
 
   recoverRunning(): ServiceTask[] {
     const rows = this.options.storage.db.prepare("SELECT * FROM service_tasks WHERE status='running'").all() as Array<Record<string, unknown>>;
-    return rows.map((row) => {
+    const recovered = rows.map((row) => {
       const task = this.map(row); const updated = this.writeStatus(task, 'queued');
       this.publish('task.queued', updated, this.threadId(task.id)); return updated;
     });
+    if (recovered.length > 0) this.pump();
+    return recovered;
   }
 
   get(id: string): ServiceTask | undefined {

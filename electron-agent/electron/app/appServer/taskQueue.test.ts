@@ -37,4 +37,18 @@ describe('TaskQueue', () => {
     expect(queue.recoverRunning()).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'running', status: 'queued' })]));
     release(); await running.catch(() => {}); await queued.catch(() => {});
   });
+
+  it('automatically executes recovered tasks without another enqueue', async () => {
+    const { storage, registry } = setup();
+    const execute = vi.fn(async () => ({ recovered: true }));
+    const now = Date.now();
+    storage.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('crashed', 'test', 'running', '{}', 1, now, now);
+    const queue = new TaskQueue({ storage, registry, execute });
+
+    const recovered = queue.recoverRunning();
+
+    expect(recovered).toEqual([expect.objectContaining({ id: 'crashed', status: 'queued' })]);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(queue.get('crashed')).toMatchObject({ status: 'completed', output: { recovered: true } }));
+  });
 });
