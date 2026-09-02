@@ -23,10 +23,12 @@ const eventTypeMap: Record<string, AppEventType> = {
 export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventContext = {}): AppEventInput | undefined {
   const rawType = typeof raw.type === 'string' ? raw.type : undefined;
   if (!rawType) return undefined;
+  if (rawType === 'agent_end' && raw.willRetry === true) return undefined;
+  const message = isRecord(raw.message) ? raw.message : undefined;
+  if (isMessageLifecycleEvent(rawType) && message?.role !== 'assistant') return undefined;
   const type = rawType === 'agent_end' ? (agentEndFailed(raw) ? 'turn.failed' : 'turn.completed') : eventTypeMap[rawType];
   if (!type) return undefined;
 
-  const message = isRecord(raw.message) ? raw.message : undefined;
   const itemId =
     (typeof raw.toolCallId === 'string' && raw.toolCallId) ||
     (message && typeof message.id === 'string' && message.id) ||
@@ -45,9 +47,15 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
 }
 
 function agentEndFailed(raw: Record<string, unknown>): boolean {
-  if (raw.failed === true || raw.isError === true || raw.success === false) return true;
-  return (typeof raw.error === 'string' && raw.error.length > 0) ||
-    (typeof raw.errorMessage === 'string' && raw.errorMessage.length > 0);
+  const messages = Array.isArray(raw.messages) ? raw.messages : [];
+  const lastAssistant = [...messages].reverse().find((message) => isRecord(message) && message.role === 'assistant');
+  if (lastAssistant && ((lastAssistant.stopReason === 'error') || (lastAssistant.stopReason === 'aborted'))) return true;
+  if (lastAssistant && typeof lastAssistant.errorMessage === 'string' && lastAssistant.errorMessage.length > 0) return true;
+  return false;
+}
+
+function isMessageLifecycleEvent(type: string): boolean {
+  return type === 'message_start' || type === 'message_update' || type === 'message_end';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -78,10 +78,57 @@ describe('adaptPiEvent', () => {
     expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: raw });
   });
 
-  it('maps an agent_end with an error to turn.failed', () => {
-    const raw = { type: 'agent_end', messages: [], error: 'model failed' };
+  it('maps an agent_end with an assistant errorMessage to turn.failed', () => {
+    const raw = {
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'stop', errorMessage: 'model failed', content: [] }],
+    };
 
     expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.failed', data: raw });
+  });
+
+  it('uses the last assistant message stopReason and errorMessage for agent_end status', () => {
+    const raw = {
+      type: 'agent_end',
+      messages: [
+        { role: 'assistant', stopReason: 'stop', content: [] },
+        { role: 'toolResult', content: [] },
+        { role: 'assistant', stopReason: 'error', errorMessage: 'provider unavailable', content: [] },
+      ],
+    };
+
+    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.failed', data: raw });
+  });
+
+  it('treats an aborted assistant message as failed', () => {
+    expect(adaptPiEvent({
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'aborted', content: [] }],
+    })).toMatchObject({ type: 'turn.failed' });
+  });
+
+  it('does not emit a terminal event while agent_end will retry', () => {
+    expect(adaptPiEvent({ type: 'agent_end', messages: [], willRetry: true })).toBeUndefined();
+  });
+
+  it('uses only the last assistant message to determine final status', () => {
+    const raw = {
+      type: 'agent_end',
+      messages: [
+        { role: 'assistant', stopReason: 'error', errorMessage: 'first attempt failed', content: [] },
+        { role: 'assistant', stopReason: 'stop', content: [] },
+      ],
+    };
+
+    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: raw });
+  });
+
+  it('does not adapt non-assistant message lifecycle events', () => {
+    for (const role of ['user', 'toolResult']) {
+      for (const type of ['message_start', 'message_update', 'message_end']) {
+        expect(adaptPiEvent({ type, message: { id: `${role}-1`, role, content: [] } })).toBeUndefined();
+      }
+    }
   });
 
   it('maps queue updates to a task queued event while preserving the raw event', () => {
