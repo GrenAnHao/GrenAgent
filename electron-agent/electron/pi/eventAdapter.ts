@@ -20,13 +20,15 @@ const eventTypeMap: Record<string, AppEventType> = {
   queue_update: 'task.queued',
 };
 
+let fallbackEventId = 0;
+
 export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventContext = {}): AppEventInput | undefined {
   const rawType = typeof raw.type === 'string' ? raw.type : undefined;
   if (!rawType) return undefined;
   if (rawType === 'agent_end' && raw.willRetry === true) return undefined;
   const message = isRecord(raw.message) ? raw.message : undefined;
   if (isMessageLifecycleEvent(rawType) && message?.role !== 'assistant') return undefined;
-  const type = rawType === 'agent_end' ? (agentEndFailed(raw) ? 'turn.failed' : 'turn.completed') : eventTypeMap[rawType];
+  const type = rawType === 'agent_end' ? agentEndType(raw) : eventTypeMap[rawType];
   if (!type) return undefined;
 
   const itemId =
@@ -34,7 +36,7 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
     (message && typeof message.id === 'string' && message.id) ||
     undefined;
   const timestamp = typeof raw.timestamp === 'number' ? raw.timestamp : Date.now();
-  const id = typeof raw.id === 'string' ? raw.id : `${rawType}:${itemId ?? timestamp}`;
+  const id = typeof raw.id === 'string' ? raw.id : `${rawType}:${++fallbackEventId}`;
 
   return {
     id,
@@ -42,16 +44,62 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
     timestamp,
     ...context,
     ...(itemId ? { itemId } : {}),
-    data: raw,
+    data: projectData(rawType, raw, message),
   };
 }
 
-function agentEndFailed(raw: Record<string, unknown>): boolean {
+function agentEndType(raw: Record<string, unknown>): AppEventType {
   const messages = Array.isArray(raw.messages) ? raw.messages : [];
   const lastAssistant = [...messages].reverse().find((message) => isRecord(message) && message.role === 'assistant');
-  if (lastAssistant && ((lastAssistant.stopReason === 'error') || (lastAssistant.stopReason === 'aborted'))) return true;
-  if (lastAssistant && typeof lastAssistant.errorMessage === 'string' && lastAssistant.errorMessage.length > 0) return true;
-  return false;
+  if (lastAssistant?.stopReason === 'aborted') return 'turn.cancelled';
+  if (lastAssistant?.stopReason === 'error') return 'turn.failed';
+  if (lastAssistant && typeof lastAssistant.errorMessage === 'string' && lastAssistant.errorMessage.length > 0) {
+    return 'turn.failed';
+  }
+  return 'turn.completed';
+}
+
+function projectData(rawType: string, raw: Record<string, unknown>, message: Record<string, unknown> | undefined): unknown {
+  switch (rawType) {
+    case 'message_start':
+    case 'message_end':
+      return { message: projectMessage(message) };
+    case 'message_update':
+      return {
+        message: projectMessage(message),
+        assistantMessageEvent: projectAssistantMessageEvent(raw.assistantMessageEvent),
+      };
+    case 'tool_execution_start':
+      return pick(raw, ['toolCallId', 'toolName', 'args']);
+    case 'tool_execution_update':
+      return pick(raw, ['toolCallId', 'toolName', 'partialResult']);
+    case 'tool_execution_end':
+      return pick(raw, ['toolCallId', 'toolName', 'result', 'isError']);
+    case 'agent_end': {
+      const messages = Array.isArray(raw.messages) ? raw.messages : [];
+      const lastAssistant = [...messages].reverse().find((entry) => isRecord(entry) && entry.role === 'assistant');
+      return pick(lastAssistant, ['stopReason', 'errorMessage']);
+    }
+    case 'extension_error':
+      return pick(raw, ['error']);
+    case 'queue_update':
+      return pick(raw, ['steering', 'followUp']);
+    default:
+      return {};
+  }
+}
+
+function projectMessage(message: Record<string, unknown> | undefined): Record<string, unknown> {
+  return pick(message, ['id', 'role']);
+}
+
+function projectAssistantMessageEvent(value: unknown): Record<string, unknown> {
+  return pick(isRecord(value) ? value : undefined, ['type', 'delta']);
+}
+
+function pick(value: Record<string, unknown> | undefined, keys: string[]): Record<string, unknown> {
+  if (!value) return {};
+  return Object.fromEntries(keys.filter((key) => key in value).map((key) => [key, value[key]]));
 }
 
 function isMessageLifecycleEvent(type: string): boolean {

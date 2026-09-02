@@ -37,6 +37,9 @@ export class EventBus {
   }
 
   replay(afterSequence: number): ReplayResult {
+    if (!Number.isFinite(afterSequence) || afterSequence < 0) {
+      throw new Error('afterSequence must be a finite non-negative number');
+    }
     const earliestSequence = this.buffer[0]?.sequence;
     const latestSequence = this.buffer[this.buffer.length - 1]?.sequence ?? this.nextSequence - 1;
     if (earliestSequence !== undefined && afterSequence < earliestSequence - 1) {

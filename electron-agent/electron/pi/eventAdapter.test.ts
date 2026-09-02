@@ -17,7 +17,10 @@ describe('adaptPiEvent', () => {
       threadId: 'thread-1',
       turnId: 'turn-1',
       itemId: 'message-1',
-      data: raw,
+      data: {
+        message: { id: 'message-1', role: 'assistant' },
+        assistantMessageEvent: { type: 'text_delta', delta: 'hello' },
+      },
     });
     expect(raw).toEqual({
       type: 'message_update',
@@ -38,7 +41,7 @@ describe('adaptPiEvent', () => {
     expect(adaptPiEvent(raw)).toMatchObject({
       type: 'item.updated',
       itemId: 'call-1',
-      data: raw,
+      data: { toolCallId: 'call-1', toolName: 'bash', result: { content: [] }, isError: false },
     });
   });
 
@@ -48,7 +51,11 @@ describe('adaptPiEvent', () => {
       message: { id: 'assistant-1', role: 'assistant', content: [] },
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'item.created', itemId: 'assistant-1', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'item.created',
+      itemId: 'assistant-1',
+      data: { message: { id: 'assistant-1', role: 'assistant' } },
+    });
   });
 
   it('keeps thinking message updates as item.delta', () => {
@@ -58,7 +65,14 @@ describe('adaptPiEvent', () => {
       assistantMessageEvent: { type: 'thinking_delta', delta: 'reasoning' },
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'item.delta', itemId: 'assistant-1', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'item.delta',
+      itemId: 'assistant-1',
+      data: {
+        message: { id: 'assistant-1', role: 'assistant' },
+        assistantMessageEvent: { type: 'thinking_delta', delta: 'reasoning' },
+      },
+    });
   });
 
   it('maps tool execution progress to item.delta', () => {
@@ -69,13 +83,17 @@ describe('adaptPiEvent', () => {
       partialResult: { stdout: 'working' },
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'item.delta', itemId: 'call-1', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'item.delta',
+      itemId: 'call-1',
+      data: { toolCallId: 'call-1', toolName: 'bash', partialResult: { stdout: 'working' } },
+    });
   });
 
   it('maps a successful agent_end to turn.completed', () => {
     const raw = { type: 'agent_end', messages: [] };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: {} });
   });
 
   it('maps an agent_end with an assistant errorMessage to turn.failed', () => {
@@ -84,7 +102,10 @@ describe('adaptPiEvent', () => {
       messages: [{ role: 'assistant', stopReason: 'stop', errorMessage: 'model failed', content: [] }],
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.failed', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'turn.failed',
+      data: { stopReason: 'stop', errorMessage: 'model failed' },
+    });
   });
 
   it('uses the last assistant message stopReason and errorMessage for agent_end status', () => {
@@ -97,14 +118,17 @@ describe('adaptPiEvent', () => {
       ],
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.failed', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'turn.failed',
+      data: { stopReason: 'error', errorMessage: 'provider unavailable' },
+    });
   });
 
-  it('treats an aborted assistant message as failed', () => {
+  it('maps an aborted assistant message to a cancelled turn', () => {
     expect(adaptPiEvent({
       type: 'agent_end',
       messages: [{ role: 'assistant', stopReason: 'aborted', content: [] }],
-    })).toMatchObject({ type: 'turn.failed' });
+    })).toMatchObject({ type: 'turn.cancelled' });
   });
 
   it('does not emit a terminal event while agent_end will retry', () => {
@@ -120,7 +144,7 @@ describe('adaptPiEvent', () => {
       ],
     };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({ type: 'turn.completed', data: {} });
   });
 
   it('does not adapt non-assistant message lifecycle events', () => {
@@ -131,10 +155,38 @@ describe('adaptPiEvent', () => {
     }
   });
 
-  it('maps queue updates to a task queued event while preserving the raw event', () => {
+  it('maps queue updates to a task queued event with compact data', () => {
     const raw = { type: 'queue_update', steering: ['next'], followUp: [] };
 
-    expect(adaptPiEvent(raw)).toMatchObject({ type: 'task.queued', data: raw });
+    expect(adaptPiEvent(raw)).toMatchObject({
+      type: 'task.queued',
+      data: { steering: ['next'], followUp: [] },
+    });
+  });
+
+  it('assigns unique ids when Pi events do not provide an id', () => {
+    const first = adaptPiEvent({ type: 'agent_start' });
+    const second = adaptPiEvent({ type: 'agent_start' });
+
+    expect(first?.id).toBeTruthy();
+    expect(second?.id).toBeTruthy();
+    expect(first?.id).not.toBe(second?.id);
+  });
+
+  it('projects compact data without retaining the full transcript', () => {
+    const raw = {
+      type: 'agent_end',
+      messages: [
+        { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'a very long transcript' }] },
+      ],
+    };
+    const original = structuredClone(raw);
+
+    const mapped = adaptPiEvent(raw);
+
+    expect(mapped?.data).toEqual({ stopReason: 'stop' });
+    expect(mapped?.data).not.toHaveProperty('messages');
+    expect(raw).toEqual(original);
   });
 
   it('returns undefined for unknown events', () => {

@@ -12,6 +12,42 @@ function event(id: string): Omit<AppEvent, 'sequence'> {
 }
 
 describe('EventBus', () => {
+  it('rejects zero and fractional capacities', () => {
+    expect(() => new EventBus(0)).toThrow('EventBus capacity must be a positive integer');
+    expect(() => new EventBus(1.5)).toThrow('EventBus capacity must be a positive integer');
+  });
+
+  it('rejects invalid replay sequence values', () => {
+    const bus = new EventBus();
+
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+      expect(() => bus.replay(value)).toThrow('afterSequence must be a finite non-negative number');
+    }
+  });
+
+  it('supports unsubscribing a subscriber', () => {
+    const bus = new EventBus();
+    const received: AppEvent[] = [];
+    const unsubscribe = bus.subscribe((value) => received.push(value));
+
+    bus.publish(event('a'));
+    unsubscribe();
+    bus.publish(event('b'));
+
+    expect(received.map((value) => value.id)).toEqual(['a']);
+  });
+
+  it('retains exactly one event at capacity one', () => {
+    const bus = new EventBus(1);
+    bus.publish(event('a'));
+    bus.publish(event('b'));
+
+    expect(bus.replay(1)).toEqual({
+      kind: 'events',
+      events: [expect.objectContaining({ id: 'b', sequence: 2 })],
+    });
+  });
+
   it('assigns monotonically increasing sequences when publishing', () => {
     const bus = new EventBus();
 
