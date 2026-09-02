@@ -16,14 +16,14 @@ const eventTypeMap: Record<string, AppEventType> = {
   tool_execution_start: 'item.created',
   tool_execution_update: 'item.delta',
   tool_execution_end: 'item.updated',
-  agent_end: 'turn.completed',
   extension_error: 'turn.failed',
+  queue_update: 'task.queued',
 };
 
 export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventContext = {}): AppEventInput | undefined {
   const rawType = typeof raw.type === 'string' ? raw.type : undefined;
   if (!rawType) return undefined;
-  const type = eventTypeMap[rawType];
+  const type = rawType === 'agent_end' ? (agentEndFailed(raw) ? 'turn.failed' : 'turn.completed') : eventTypeMap[rawType];
   if (!type) return undefined;
 
   const message = isRecord(raw.message) ? raw.message : undefined;
@@ -42,6 +42,12 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
     ...(itemId ? { itemId } : {}),
     data: raw,
   };
+}
+
+function agentEndFailed(raw: Record<string, unknown>): boolean {
+  if (raw.failed === true || raw.isError === true || raw.success === false) return true;
+  return (typeof raw.error === 'string' && raw.error.length > 0) ||
+    (typeof raw.errorMessage === 'string' && raw.errorMessage.length > 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
