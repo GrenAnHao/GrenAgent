@@ -65,7 +65,8 @@ export type AppEventType =
   | 'task.cancelled'
   | 'plugin.state_changed'
   | 'mcp.state_changed'
-  | 'memory.updated';
+  | 'memory.updated'
+  | 'sandbox.degraded';
 
 export interface AppEvent {
   id: string;

@@ -27,6 +27,7 @@ import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
+import { SandboxManager } from "./app/sandbox/sandboxManager";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -46,6 +47,9 @@ if (!process.env.VITEST) {
     const agentData = new AgentDataService({ dataPath: join(app.getPath('userData'), 'agent-data.db') });
     await agentData.start();
     const permissions = new PermissionManager({ dataDir: app.getPath('userData') });
+    const sandbox = new SandboxManager({
+      publish: (event) => broadcastPiEvent('pi://event', event),
+    });
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
@@ -57,6 +61,7 @@ if (!process.env.VITEST) {
         onExit: (workspace, code) => broadcastPiEvent('pi://exit', { workspace, code }),
         onLog: (message) => console.error(message),
       },
+      sandbox,
     );
     registerIpcHandlers({
       settings,
@@ -67,7 +72,7 @@ if (!process.env.VITEST) {
         publish: (event) => broadcastPiEvent('pi://event', event),
       }),
       mcpConfig,
-      subagent: new SubagentService(),
+      subagent: new SubagentService(sandbox),
       files: new FileService(),
       skills: new SkillService(app.getPath('home')),
       usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
@@ -108,13 +113,14 @@ if (!process.env.VITEST) {
       uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
       workspaceApproval: new WorkspaceApprovalService(app.getPath('userData')),
       git: new GitService(),
-      terminal: new TerminalService((event, payload) => broadcastPiEvent(event, payload)),
+      terminal: new TerminalService((event, payload) => broadcastPiEvent(event, payload), sandbox),
       create: new CreateService(),
       tempHtml: new TempHtmlService(app.getPath('temp')),
       shell: new ShellService(
         (event, payload) => broadcastPiEvent(event, payload),
         undefined,
         (path) => workspace.ensureWorkspace(path),
+        sandbox,
       ),
       agentData,
       permissions,

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
+import type { SandboxManager } from './sandbox/sandboxManager';
 
 export interface SubagentItem {
   id: string;
@@ -18,6 +19,8 @@ export interface SubagentItem {
 }
 
 export class SubagentService {
+  constructor(private readonly sandbox?: SandboxManager) {}
+
   list(workspace: string): SubagentItem[] {
     const db = this.openRegistry(workspace);
     if (!db) return [];
@@ -61,6 +64,7 @@ export class SubagentService {
     const id = agentId.trim();
     if (!id) throw new Error('agentId is required');
     const directory = subagentsDir(workspace);
+    this.sandbox?.prepare({ profile: 'workspace', workspaceRoot: workspace, cwd: workspace, writePaths: [directory] });
     await mkdir(directory, { recursive: true });
     await appendFile(join(directory, 'cancel-requests.jsonl'), `${JSON.stringify({ agentId: id, at: Date.now() })}\n`);
   }

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { JsonlBuffer } from './jsonl';
 import { PiClient, type PiClientHandlers } from './client';
+import { SandboxManager } from '../app/sandbox/sandboxManager';
+import type { PermissionProfileName } from '../app/permissionManager';
 
 export interface PiProcessCommand {
   command: string;
@@ -10,6 +12,9 @@ export interface PiProcessCommand {
 export interface PiProcessOptions extends PiClientHandlers {
   cwd: string;
   env?: Record<string, string>;
+  sandbox?: SandboxManager;
+  profile?: PermissionProfileName;
+  workspaceRoot?: string;
 }
 
 class ChildTransport {
@@ -29,9 +34,15 @@ class ChildTransport {
 }
 
 export function spawnPiClient(workspace: string, processCommand: PiProcessCommand, options: PiProcessOptions): PiClient {
-  const child = spawn(processCommand.command, processCommand.args, {
+  const launch = options.sandbox?.prepare({
+    profile: options.profile ?? (workspace === '__system__' ? 'automation' : 'workspace'),
+    workspaceRoot: options.workspaceRoot ?? options.cwd,
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
+  }) ?? { profile: 'workspace' as const, cwd: options.cwd, env: { ...process.env, ...options.env }, network: 'none' as const, degraded: false };
+  const child = spawn(processCommand.command, processCommand.args, {
+    cwd: launch.cwd,
+    env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -49,7 +60,7 @@ export function spawnPiClient(workspace: string, processCommand: PiProcessComman
 export class PiManager {
   private readonly clients = new Map<string, PiClient>();
 
-  constructor(private readonly command: PiProcessCommand, private readonly handlers: PiClientHandlers = {}) {}
+  constructor(private readonly command: PiProcessCommand, private readonly handlers: PiClientHandlers = {}, private readonly sandbox?: SandboxManager) {}
 
   get(workspace: string): PiClient | undefined {
     return this.clients.get(workspace);
@@ -62,7 +73,7 @@ export class PiManager {
   open(workspace: string, cwd: string, env?: Record<string, string>): PiClient {
     const existing = this.clients.get(workspace);
     if (existing) return existing;
-    const client = spawnPiClient(workspace, this.command, { cwd, env, ...this.handlers });
+    const client = spawnPiClient(workspace, this.command, { cwd, env, sandbox: this.sandbox, profile: workspace === '__system__' ? 'automation' : 'workspace', ...this.handlers });
     this.clients.set(workspace, client);
     return client;
   }

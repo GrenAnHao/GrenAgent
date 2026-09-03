@@ -12,6 +12,7 @@ describe('SystemWorkerManager', () => {
     await manager.run({ id: 'a', kind: 'memory_extract', input: { text: 'a' } });
     await manager.run({ id: 'b', kind: 'memory_extract', input: { text: 'b' } });
     expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith('__system__', expect.anything(), expect.objectContaining({ profile: 'automation' }));
     vi.advanceTimersByTime(100); await Promise.resolve();
     expect(clients[0].close).toHaveBeenCalledOnce(); vi.useRealTimers();
   });

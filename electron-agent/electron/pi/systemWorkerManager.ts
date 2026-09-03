@@ -1,5 +1,6 @@
-import type { PiClient, PiClientHandlers } from './client';
-import { spawnPiClient, type PiProcessCommand } from './manager';
+import type { PiClient } from './client';
+import { spawnPiClient, type PiProcessCommand, type PiProcessOptions } from './manager';
+import type { SandboxManager } from '../app/sandbox/sandboxManager';
 
 export interface SystemWorkerTask { id: string; kind: string; input: unknown; maxAttempts?: number }
 export interface SystemWorkerState { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; output?: unknown; error?: string }
@@ -8,7 +9,8 @@ interface WorkerOptions {
   cwd?: string;
   idleTimeoutMs?: number;
   maxAttempts?: number;
-  createClient?: (workerKey: string, command: PiProcessCommand, options: { cwd: string; env: Record<string, string> } & PiClientHandlers) => PiClient;
+  sandbox?: SandboxManager;
+  createClient?: (workerKey: string, command: PiProcessCommand, options: PiProcessOptions) => PiClient;
 }
 
 export class SystemWorkerManager {
@@ -45,8 +47,16 @@ export class SystemWorkerManager {
   private ensureClient(): PiClient {
     if (this.client) { this.clearIdle(); return this.client; }
     const command = { command: this.options.processCommand.command, args: [...this.options.processCommand.args, '--system-worker'] };
-    const create = this.options.createClient ?? ((key: string, value: PiProcessCommand, options: { cwd: string; env: Record<string, string> } & PiClientHandlers) => spawnPiClient(key, value, options));
-    this.client = create('__system__', command, { cwd: this.options.cwd ?? process.cwd(), env: { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1' }, onExit: () => { if (this.current) this.closeClient(); } });
+    const create = this.options.createClient ?? ((key: string, value: PiProcessCommand, options: PiProcessOptions) => spawnPiClient(key, value, options));
+    const cwd = this.options.cwd ?? process.cwd();
+    this.client = create('__system__', command, {
+      cwd,
+      workspaceRoot: cwd,
+      profile: 'automation',
+      sandbox: this.options.sandbox,
+      env: { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1' },
+      onExit: () => { if (this.current) this.closeClient(); },
+    });
     return this.client;
   }
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { realpath } from 'node:fs/promises';
+import { SandboxManager } from './sandbox/sandboxManager';
 
 const allowedCommands = new Set(['node', 'npm', 'pnpm', 'yarn', 'bun', 'python', 'python3', 'pip', 'pip3', 'git', 'cargo', 'rustc', 'go', 'make', 'cmake', 'ls', 'dir', 'cat', 'echo', 'pwd']);
 
@@ -9,13 +10,14 @@ export type TerminalEvent =
   | { type: 'exit'; exit_code: number };
 
 export class TerminalService {
-  constructor(private readonly emit: (event: 'terminal-output', payload: TerminalEvent) => void) {}
+  constructor(private readonly emit: (event: 'terminal-output', payload: TerminalEvent) => void, private readonly sandbox?: SandboxManager) {}
 
-  async execute(command: string, args: string[], workspace?: string): Promise<void> {
+  async execute(command: string, args: string[], workspace?: string, profile = 'workspace'): Promise<void> {
     validateCommand(command);
     const cwd = workspace?.trim() ? await realpath(workspace) : undefined;
+    const launch = this.sandbox?.prepare({ profile, workspaceRoot: cwd, cwd, needsNetwork: commandNetworkRequirement(command, args) }) ?? { profile, cwd, env: process.env, network: 'none' as const, degraded: false };
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(command, args, { cwd: launch.cwd, env: launch.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout.on('data', (data: Buffer) => this.emit('terminal-output', { type: 'output', data: data.toString('utf8') }));
       child.stderr.on('data', (data: Buffer) => this.emit('terminal-output', { type: 'output', data: data.toString('utf8') }));
       child.once('error', (error) => reject(new Error(`spawn failed: ${error.message}`)));
@@ -25,6 +27,11 @@ export class TerminalService {
       });
     });
   }
+}
+
+function commandNetworkRequirement(command: string, args: string[]): boolean {
+  const value = `${command} ${args.join(' ')}`.toLowerCase();
+  return /(^|\s)(curl|wget|npm|pnpm|yarn|pip|pip3)($|\s)/.test(value);
 }
 
 function validateCommand(command: string): void {
