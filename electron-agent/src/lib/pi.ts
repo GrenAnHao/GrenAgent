@@ -8,6 +8,10 @@ export interface PiEventEnvelope {
   workspace: string;
   event: AgentEvent;
 }
+export interface AppEventEnvelope {
+  workspace: string;
+  event: AppEvent;
+}
 export interface PiUiRequestEnvelope {
   workspace: string;
   request: ExtensionUiRequest;
@@ -46,6 +50,26 @@ export type AssistantMessageEvent =
   | { type: 'thinking_delta'; delta: string }
   | { type: string; [k: string]: unknown };
 
+export type AppEventType =
+  | 'thread.created' | 'thread.updated'
+  | 'turn.queued' | 'turn.started' | 'turn.completed' | 'turn.failed' | 'turn.cancelled'
+  | 'item.created' | 'item.updated' | 'item.delta'
+  | 'permission.requested' | 'permission.resolved'
+  | 'task.queued' | 'task.started' | 'task.completed' | 'task.failed' | 'task.cancelled'
+  | 'plugin.state_changed' | 'mcp.state_changed' | 'memory.updated' | 'sandbox.degraded';
+
+export interface AppEvent {
+  id: string;
+  type: AppEventType;
+  sequence: number;
+  timestamp: number;
+  projectId?: string;
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  data: unknown;
+}
+
 export interface ExtensionUiRequest {
   id: string;
   method: 'select' | 'confirm' | 'input' | 'editor' | 'notify' | 'setStatus' | 'setWidget' | 'setTitle' | 'set_editor_text' | string;
@@ -54,6 +78,7 @@ export interface ExtensionUiRequest {
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  source?: 'extension' | 'permission';
   [k: string]: unknown;
 }
 
@@ -211,6 +236,10 @@ export const pi = {
     invoke<void>('remove_project', { workspace }),
   respondUi: (workspace: string, response: Record<string, unknown>) =>
     invoke<void>('extension_ui_respond', { workspace, response }),
+  resolvePermission: (id: string, resolution: 'allow' | 'deny') =>
+    invoke<unknown>('permission_resolve', { requestId: id, resolution }),
+  replayAppEvents: (afterSequence = 0, limit = 256) =>
+    invoke<AppEvent[]>('app_event_replay', { afterSequence, limit }),
   getSessionStats: (workspace: string) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
@@ -291,6 +320,9 @@ export interface SessionInfo {
 
 export function onPiEvent(handler: (e: PiEventEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiEventEnvelope>('pi://event', (e) => handler(e.payload));
+}
+export function onAppEvent(handler: (e: AppEventEnvelope) => void): Promise<UnlistenFn> {
+  return listen<AppEventEnvelope>('app://event', (e) => handler(e.payload));
 }
 export function onPiUiRequest(handler: (e: PiUiRequestEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiUiRequestEnvelope>('pi://ui-request', (e) => handler(e.payload));

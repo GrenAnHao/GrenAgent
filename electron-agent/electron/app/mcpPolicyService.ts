@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { PiProcessCommand } from '../pi/manager';
+import type { PermissionManager, PermissionAuthorization, PermissionProfileName } from './permissionManager';
 
 interface ProbeOptions {
   env: Record<string, string>;
@@ -14,6 +16,8 @@ export interface McpPolicyServiceOptions {
   piCommand?: PiProcessCommand;
   piPackageDir?: string;
   run?: ProbeRunner;
+  permissionManager?: Pick<PermissionManager, 'authorize'>;
+  publish?: (event: { id: string; type: 'mcp.state_changed'; timestamp: number; data: unknown }) => void;
 }
 
 export class McpPolicyService {
@@ -36,11 +40,20 @@ export class McpPolicyService {
   }
 
   async writePolicy(content: string): Promise<void> {
+    const authorization = await this.authorize({ kind: 'mcp.policy.change' }, 'interactive');
+    if (authorization.status !== 'allowed') throw new Error(`MCP policy change ${authorization.status}`);
     await mkdir(this.piDir, { recursive: true });
     const target = join(this.piDir, 'mcp-policy.json');
     const temporary = `${target}.tmp`;
     await writeFile(temporary, content);
     await rename(temporary, target);
+    this.publish({ action: 'policy.changed' });
+  }
+
+  async evaluateCall(workspace: string, toolName: string, args: Record<string, unknown>, profile: PermissionProfileName = 'interactive'): Promise<PermissionAuthorization> {
+    const result = await this.authorize({ kind: 'mcp.call', workspace, toolName, args }, profile);
+    this.publish({ action: 'tool.called', workspace, toolName, status: result.status });
+    return result;
   }
 
   async probe(configJson: string): Promise<string> {
@@ -67,6 +80,14 @@ export class McpPolicyService {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
       throw error;
     }
+  }
+
+  private authorize(operation: Record<string, unknown>, profile: PermissionProfileName): Promise<PermissionAuthorization> {
+    return this.options.permissionManager?.authorize(operation, profile) ?? Promise.resolve({ status: 'allowed', decision: 'allow' });
+  }
+
+  private publish(data: unknown): void {
+    this.options.publish?.({ id: randomUUID(), type: 'mcp.state_changed', timestamp: Date.now(), data });
   }
 }
 

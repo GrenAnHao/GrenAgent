@@ -8,7 +8,7 @@ const electron = vi.hoisted(() => ({
 
 vi.mock('electron', () => electron);
 
-import { registerIpcHandlers } from './register';
+import { getRegisteredCommands, registerIpcHandlers } from './register';
 import { IPC_CHANNELS } from './contracts';
 
 function handler(channel: string): (...args: any[]) => any {
@@ -49,6 +49,42 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'is_workspace_approved', args: { path: 'C:/project' } })).resolves.toBe(true);
     expect(workspaceApproval.approve).toHaveBeenCalledWith('C:/project');
     expect(workspaceApproval.isApproved).toHaveBeenCalledWith('C:/project');
+  });
+
+  it('registers permission and effective MCP configuration commands', () => {
+    registerIpcHandlers({
+      permissions: { authorize: vi.fn(), resolve: vi.fn() } as any,
+      mcpConfig: { effective: vi.fn(), list: vi.fn(), upsert: vi.fn(), remove: vi.fn() } as any,
+    });
+    const commands = getRegisteredCommands();
+    expect(commands).toContain('permission_evaluate');
+    expect(commands).toContain('permission_resolve');
+    expect(commands).toContain('effective_mcp_configs');
+  });
+
+  it('resolves permission requests with the requestId contract', async () => {
+    const permissions = { authorize: vi.fn(), resolve: vi.fn().mockResolvedValue({ id: 'p1', status: 'resolved' }) };
+    registerIpcHandlers({ permissions } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'permission_resolve', args: { requestId: 'p1', resolution: 'allow' } })).resolves.toMatchObject({ id: 'p1' });
+    expect(permissions.resolve).toHaveBeenCalledWith('p1', 'allow');
+  });
+
+  it('returns serialized plugin state and routes lifecycle commands', async () => {
+    const plugins = {
+      list: vi.fn(() => [{ id: 'goal', state: 'ready', updatedAt: 1 }]),
+      start: vi.fn(async () => ({ id: 'goal', state: 'ready', updatedAt: 2 })),
+      stop: vi.fn(async () => ({ id: 'goal', state: 'stopped', updatedAt: 3 })),
+      allowedPluginIds: vi.fn(() => ['goal']),
+    };
+    registerIpcHandlers({ plugins } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'plugin_list' })).resolves.toEqual([{ id: 'goal', state: 'ready', updatedAt: 1 }]);
+    await expect(invoke({}, { command: 'plugin_start', args: { id: 'goal' } })).resolves.toMatchObject({ state: 'ready' });
+    await expect(invoke({}, { command: 'plugin_stop', args: { id: 'goal' } })).resolves.toMatchObject({ state: 'stopped' });
+    await expect(invoke({}, { command: 'plugin_allowed_list' })).resolves.toEqual(['goal']);
   });
 
   it('routes all Git commands with their contract argument names', async () => {
@@ -107,6 +143,25 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'wiki.sync', workspace: '/w' } })).resolves.toEqual({
       method: 'admin.jobs.create', params: { kind: 'wiki.sync', workspace: '/w' },
     });
+  });
+
+  it('routes app server thread and turn commands through Agent Data', async () => {
+    const agentData = {
+      createThread: vi.fn().mockResolvedValue({ id: 't' }),
+      listThreads: vi.fn().mockResolvedValue([]),
+      readThread: vi.fn().mockResolvedValue(undefined),
+      createTurn: vi.fn().mockResolvedValue({ id: 'turn' }),
+      updateTurn: vi.fn().mockResolvedValue({ id: 'turn', status: 'failed' }),
+      upsertItem: vi.fn().mockResolvedValue({ id: 'item' }),
+      listItems: vi.fn().mockResolvedValue([]),
+      appendAppEvent: vi.fn().mockResolvedValue({ id: 'event' }),
+    };
+    registerIpcHandlers({ agentData } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await expect(invoke({}, { command: 'thread_create', args: { id: 't', projectId: 'p', workspace: '/w' } })).resolves.toEqual({ id: 't' });
+    await expect(invoke({}, { command: 'turn_update', args: { id: 'turn', status: 'failed', error: 'boom' } })).resolves.toEqual({ id: 'turn', status: 'failed' });
+    expect(agentData.createThread).toHaveBeenCalledWith({ id: 't', projectId: 'p', workspace: '/w' });
+    expect(agentData.updateTurn).toHaveBeenCalledWith('turn', { status: 'failed', error: 'boom' });
   });
 
   it('controls the owner BrowserWindow through the window IPC handlers', async () => {

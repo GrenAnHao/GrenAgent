@@ -17,6 +17,8 @@ export interface McpConfigEntry {
   scope: Scope;
 }
 
+export interface EffectiveMcpConfig { name: string; config: Config; }
+
 export class McpConfigService {
   constructor(private readonly home: string, private readonly settings: SettingsPort) {}
 
@@ -30,6 +32,16 @@ export class McpConfigService {
       mergeLayer(result, scope, document.mcpServers, document.disabledMcpServers);
     }
     return [...result.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async effective(workspace: string): Promise<EffectiveMcpConfig[]> {
+    const entries = await this.list(workspace);
+    return entries.filter((entry) => entry.enabled).map((entry) => ({ name: entry.name, config: redactSecrets(entry.config, `mcp/${entry.name}`) }));
+  }
+
+  /** Internal Pi launch path. Secrets never cross the renderer/API boundary, but the child Pi needs selected credentials to connect. */
+  async runtime(workspace: string): Promise<EffectiveMcpConfig[]> {
+    return (await this.list(workspace)).filter((entry) => entry.enabled).map(({ name, config }) => ({ name, config }));
   }
 
   async upsert(workspace: string, scope: string, name: string, config: unknown, enabled: boolean): Promise<void> {
@@ -165,4 +177,20 @@ function filterConfigs(value: unknown): Record<string, Config> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function redactSecrets(value: unknown, path: string): unknown {
+  if (Array.isArray(value)) return value.map((item, index) => redactSecrets(item, `${path}/${index}`));
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const itemPath = `${path}/${key}`;
+    if (isSecretKey(key)) out[key] = { credentialRef: itemPath };
+    else out[key] = redactSecrets(item, itemPath);
+  }
+  return out;
+}
+
+function isSecretKey(key: string): boolean {
+  return /(token|secret|password|api[_-]?key|authorization|credential)/i.test(key);
 }

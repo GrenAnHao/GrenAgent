@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { McpSnapshot } from "./manager";
 import { bind, project, summary } from "./index";
 
@@ -56,6 +56,21 @@ describe("project", () => {
     const pi = fakeProjectPi();
     project(pi as never, snap({ a: { status: "connecting", tools: [] }, b: { status: "failed", tools: [] } }), fakeMgr());
     expect(pi.registered).toEqual([]);
+  });
+
+  it("authorizes MCP calls through Electron before invoking a server", async () => {
+    const pi = fakeProjectPi();
+    const manager = { callTool: vi.fn(async () => ({ text: 'x' })) };
+    const control = { request: vi.fn(async () => ({ status: 'denied' })) };
+    const definitions: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
+    pi.registerTool = (tool: any) => definitions.push(tool);
+    project(pi as never, snap({ a: { status: 'connected', tools: ['x'] } }), manager as never, control as never);
+
+    const result = await definitions[0].execute('call', {}, undefined);
+
+    expect(control.request).toHaveBeenCalledWith('permission.authorize', expect.objectContaining({ operation: expect.objectContaining({ kind: 'mcp.call', server: 'a', toolName: 'x' }) }));
+    expect(manager.callTool).not.toHaveBeenCalled();
+    expect(result.details.error).toBe('denied');
   });
 });
 
@@ -119,5 +134,16 @@ describe("bind", () => {
     const before = pi.registered.length;
     mgr.emit(snap({ a: { status: "connected", tools: ["z"] } }));
     expect(pi.registered.length).toBe(before);
+  });
+
+  it("publishes MCP status through the Electron control plane", () => {
+    const pi = fakePiWithOn();
+    const mgr = fakeBindMgr(snap({ a: { status: 'connected', tools: ['x'] } }));
+    const control = { request: vi.fn(async () => null) };
+    bind(pi as never, mgr as never, control as never);
+
+    pi.fire('session_start', {}, { cwd: 'C:/work', hasUI: true, ui: { setStatus: vi.fn() } });
+
+    expect(control.request).toHaveBeenCalledWith('mcp.state.publish', { workspace: 'C:/work', servers: [{ name: 'a', status: 'connected', tools: 1, toolNames: ['mcp__a__x'] }] });
   });
 });

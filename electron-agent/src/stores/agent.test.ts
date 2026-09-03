@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 捕获事件订阅 handler + pi 命令 mock。用 vi.hoisted 确保在 vi.mock 工厂（被提升到文件顶部）执行前已初始化。
-const { eventHandlers, piMock } = vi.hoisted(() => ({
+const { eventHandlers, appEventHandlers, piMock } = vi.hoisted(() => ({
   eventHandlers: [] as Array<(e: { workspace: string; event: unknown }) => void>,
+  appEventHandlers: [] as Array<(e: { workspace: string; event: unknown }) => void>,
   piMock: {
     excludeEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     restoreEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
@@ -11,12 +12,17 @@ const { eventHandlers, piMock } = vi.hoisted(() => ({
       (_ws: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] }),
     ),
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
+    replayAppEvents: vi.fn((_afterSequence = 0, _limit = 256): Promise<unknown[]> => Promise.resolve([])),
   },
 }));
 vi.mock('../lib/pi', () => ({
   pi: piMock,
   onPiEvent: (h: (e: { workspace: string; event: unknown }) => void) => {
     eventHandlers.push(h);
+    return Promise.resolve(() => {});
+  },
+  onAppEvent: (h: (e: { workspace: string; event: unknown }) => void) => {
+    appEventHandlers.push(h);
     return Promise.resolve(() => {});
   },
   onPiExit: () => Promise.resolve(() => {}),
@@ -29,18 +35,31 @@ function emit(event: unknown) {
   for (const h of eventHandlers) h({ workspace: '.', event });
 }
 
+function emitApp(event: unknown) {
+  for (const h of appEventHandlers) h({ workspace: '.', event });
+}
+
 describe('createAgentStore', () => {
   let store: ReturnType<typeof createAgentStore>;
   let rafCallbacks: FrameRequestCallback[] = [];
 
   beforeEach(() => {
     eventHandlers.length = 0;
+    appEventHandlers.length = 0;
     rafCallbacks = [];
     piMock.excludeEntry.mockReset().mockResolvedValue(undefined);
     piMock.restoreEntry.mockReset().mockResolvedValue(undefined);
     piMock.rewindTo.mockReset().mockResolvedValue(undefined);
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
+    piMock.replayAppEvents.mockReset().mockResolvedValue([]);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      clear: () => storage.clear(),
+    });
     clearThinkingDurationsForTest();
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
       rafCallbacks.push(cb);
@@ -103,6 +122,34 @@ describe('createAgentStore', () => {
     const m = s.messages.at(-1);
     expect(m?.kind).toBe('assistant');
     expect(m?.kind === 'assistant' ? m.thinking : '').toBe('推理中');
+  });
+
+  it('prefers AppEvent projection and does not render its legacy Pi event twice', () => {
+    store = createAgentStore('.');
+    emitApp({ id: 'start', type: 'turn.started', sequence: 1, timestamp: 1, projectId: '.', threadId: 't', turnId: 'r', data: {} });
+    emitApp({ id: 'created', type: 'item.created', sequence: 2, timestamp: 2, projectId: '.', threadId: 't', turnId: 'r', itemId: 'assistant-1', data: { message: { id: 'assistant-1', role: 'assistant' } } });
+    emitApp({ id: 'delta', type: 'item.delta', sequence: 3, timestamp: 3, projectId: '.', threadId: 't', turnId: 'r', itemId: 'assistant-1', data: { assistantMessageEvent: { type: 'text_delta', delta: 'hello' } } });
+    emit({ type: 'message_update', message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'hello' }] }, assistantMessageEvent: { type: 'text_delta', delta: 'hello' } });
+    flushRAF();
+
+    const assistants = store.useStore.getState().messages.filter((message) => message.kind === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]).toMatchObject({ text: 'hello' });
+  });
+
+  it('replays only events after the persisted workspace cursor', async () => {
+    localStorage.setItem('pi-app-event-cursor:.', '3');
+    piMock.replayAppEvents.mockResolvedValueOnce([
+      { id: 'old', type: 'turn.started', sequence: 2, timestamp: 2, projectId: '.', data: {} },
+      { id: 'new', type: 'turn.started', sequence: 4, timestamp: 4, projectId: '.', data: {} },
+    ]);
+    store = createAgentStore('.');
+    await Promise.resolve();
+    flushRAF();
+
+    expect(piMock.replayAppEvents).toHaveBeenCalledWith(3, 1024);
+    expect(store.useStore.getState().isStreaming).toBe(true);
+    expect(localStorage.getItem('pi-app-event-cursor:.')).toBe('4');
   });
 
   it('推理时长在 message_end 后持久化，切换会话恢复时按 timestamp 回填', () => {

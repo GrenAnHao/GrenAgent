@@ -20,7 +20,7 @@ describe('PiRuntimeService', () => {
 
     await expect(service.openWorkspace('C:/work')).resolves.toEqual({ restoredSession: null, sessionFile: 'C:/sessions/a.jsonl' });
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ sessionFile: 'C:/sessions/a.jsonl', command: { type: 'get_state' } });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent' });
+    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace' });
     expect(client.send).toHaveBeenLastCalledWith({ type: 'get_state' });
   });
 
@@ -37,7 +37,69 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
 
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ type: 'get_state' });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent' });
+    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace' });
+  });
+
+  it('keeps a prompt queued until Pi lifecycle events persist its items and complete it', async () => {
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = { createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })), createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })), updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })), upsertItem: vi.fn(async (item) => item) };
+    const events: any[] = [];
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, emitAppEvent: (event) => events.push(event) });
+
+    await service.send('C:/work', 'agent_prompt', { prompt: 'hello' });
+
+    expect(thread.createThread).toHaveBeenCalledOnce();
+    expect(thread.createTurn).toHaveBeenCalledWith(expect.objectContaining({ input: 'hello' }));
+    expect(thread.updateTurn).not.toHaveBeenCalled();
+    expect(events.map((event) => event.type)).toEqual(['thread.created', 'turn.queued']);
+
+    await service.handlePiEvent('C:/work', { type: 'agent_start' });
+    await service.handlePiEvent('C:/work', { type: 'message_start', message: { role: 'assistant', content: [] } });
+    await service.handlePiEvent('C:/work', { type: 'message_update', message: { role: 'assistant', content: [] }, assistantMessageEvent: { type: 'text_delta', delta: 'hi' } });
+    await service.handlePiEvent('C:/work', { type: 'message_end', message: { role: 'assistant', content: [] } });
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'thread.created', 'turn.queued', 'turn.started', 'item.created', 'item.delta', 'item.updated', 'turn.completed',
+    ]);
+    expect(events.filter((event) => event.itemId).map((event) => event.itemId)).toEqual([
+      expect.any(String), expect.any(String), expect.any(String),
+    ]);
+    expect(new Set(events.filter((event) => event.itemId).map((event) => event.itemId)).size).toBe(1);
+    expect(thread.updateTurn).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
+    expect(thread.upsertItem).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not create a turn for extension slash commands', async () => {
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = { createThread: vi.fn(), createTurn: vi.fn(), updateTurn: vi.fn() };
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+
+    await service.send('C:/work', 'agent_prompt', { message: '/goal write tests' });
+
+    expect(client.send).toHaveBeenCalledWith({ type: 'prompt', message: '/goal write tests' });
+    expect(thread.createThread).not.toHaveBeenCalled();
+    expect(thread.createTurn).not.toHaveBeenCalled();
+  });
+
+  it('steers the active Turn and queues follow-up prompts without replacing it', async () => {
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'first' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'steer now', streamingBehavior: 'steer' })).resolves.toMatchObject({ type: 'prompt', message: 'steer now', streamingBehavior: 'steer' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'after this', streamingBehavior: 'followUp' })).resolves.toMatchObject({ status: 'queued', position: 1 });
+
+    expect(thread.createTurn).toHaveBeenCalledOnce();
+    expect(client.send).toHaveBeenCalledTimes(2);
   });
 
   it('routes extension-backed mode and approval changes through prompt commands', async () => {

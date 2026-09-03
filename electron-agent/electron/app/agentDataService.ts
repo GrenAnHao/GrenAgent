@@ -1,6 +1,8 @@
 import { AgentDataClient } from '../agentData/client';
 import { AgentDataRuntime, type AgentDataRuntimeOptions } from '../agentData/runtime';
 import type { AgentDataEndpoint } from '../agentData/protocol';
+import type { Item, Thread, Turn, AppEvent } from './appServer/types';
+import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
 
 export class AgentDataService {
   private runtime?: AgentDataRuntime;
@@ -36,5 +38,14 @@ export class AgentDataService {
   }
   endpoint(): AgentDataEndpoint | undefined { return this.runtime?.getEndpoint(); }
   request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> { return this.requireClient().request<T>(method, params); }
+  createThread(input: CreateThreadInput): Promise<Thread> { return this.request('thread.create', input); }
+  listThreads(): Promise<Thread[]> { return this.request('thread.list'); }
+  readThread(id: string): Promise<ThreadSnapshot | undefined> { return this.request('thread.read', { id }); }
+  createTurn(input: CreateTurnInput): Promise<Turn> { return this.request('turn.create', input); }
+  updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn> { return this.request('turn.update', { id, ...patch }); }
+  upsertItem(item: Omit<Item, 'createdAt'> & Partial<Pick<Item, 'createdAt' | 'updatedAt'>>): Promise<Item> { return this.request('item.upsert', item); }
+  listItems(threadId: string, turnId?: string): Promise<Item[]> { return this.request('item.list', { threadId, ...(turnId === undefined ? {} : { turnId }) }); }
+  appendAppEvent(event: AppEvent): Promise<AppEvent> { return this.request('appEvent.append', event); }
+  replayAppEvents(afterSequence = 0, limit = 256): Promise<AppEvent[]> { return this.request('appEvent.replay', { afterSequence, limit }); }
   private requireClient(): AgentDataClient { if (!this.client) throw new Error('agent data runtime is not started'); return this.client; }
 }

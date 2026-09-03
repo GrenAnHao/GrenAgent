@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
+import type { AgentEvent, AgentMessage, AppEvent, AssistantMessageEvent } from '../lib/pi';
 
 /** 用户消息里的图片（base64），用于在气泡中回显发送的图片。 */
 export interface UserImage {
@@ -51,10 +51,11 @@ export interface AgentState {
   /** 上下文压缩进行中：由 pi 的 compaction_start/compaction_end 事件驱动，UI 据此显示「正在压缩上下文…」。
    * 此前这两个事件被前端丢弃，压缩（手动 /compact 或自动）全程无任何状态反馈。 */
   compacting?: boolean;
+  pendingPermissions: Record<string, { id: string; operation: Record<string, unknown>; profile: string }>;
 }
 
 export function initialAgentState(): AgentState {
-  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [] };
+  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [], pendingPermissions: {} };
 }
 
 let counter = 0;
@@ -223,7 +224,8 @@ function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
   };
 }
 
-export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
+export function applyEvent(state: AgentState, event: AgentEvent | AppEvent): AgentState {
+  if (isAppEvent(event)) return applyAppEvent(state, event);
   switch (event.type) {
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
@@ -459,6 +461,97 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return state;
     }
   }
+}
+
+function applyAppEvent(state: AgentState, event: AppEvent): AgentState {
+  const data = isRecord(event.data) ? event.data : {};
+  if (event.type === 'turn.started') {
+    return { ...state, isStreaming: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false };
+  }
+  if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
+    const messages = state.messages.map((message) => message.kind === 'assistant' && message.streaming
+      ? { ...message, streaming: false }
+      : message);
+    const error = event.type === 'turn.failed'
+      ? readString(data.error) ?? readString(data.errorMessage) ?? state.lastError
+      : state.lastError;
+    return { ...state, messages, isStreaming: false, awaitingResponse: false, aborting: false, compacting: false, lastError: error };
+  }
+  if (event.type === 'permission.requested') {
+    const request = isRecord(data.request) ? data.request : undefined;
+    const id = request && readString(request.id);
+    if (!id) return state;
+    return {
+      ...state,
+      pendingPermissions: {
+        ...state.pendingPermissions,
+        [id]: {
+          id,
+          operation: isRecord(request.operation) ? request.operation : {},
+          profile: readString(request.profile) ?? 'interactive',
+        },
+      },
+    };
+  }
+  if (event.type === 'permission.resolved') {
+    const requestId = readString(data.requestId);
+    if (!requestId || !state.pendingPermissions[requestId]) return state;
+    const pendingPermissions = { ...state.pendingPermissions };
+    delete pendingPermissions[requestId];
+    return { ...state, pendingPermissions };
+  }
+  if (!event.itemId) return state;
+
+  const message = isRecord(data.message) ? data.message : undefined;
+  const isAssistant = message?.role === 'assistant' || state.messages.some((entry) => entry.kind === 'assistant' && entry.id === event.itemId);
+  if (isAssistant) return applyAssistantItem(state, event, data, message);
+
+  const toolCallId = readString(data.toolCallId) ?? event.itemId;
+  if (event.type === 'item.created') {
+    return applyEvent(state, { type: 'tool_execution_start', toolCallId, toolName: readString(data.toolName) ?? 'tool', args: data.args ?? {} });
+  }
+  if (event.type === 'item.delta') {
+    return applyEvent(state, { type: 'tool_execution_update', toolCallId, toolName: readString(data.toolName) ?? 'tool', partialResult: data.partialResult });
+  }
+  if (event.type === 'item.updated') {
+    return applyEvent(state, { type: 'tool_execution_end', toolCallId, toolName: readString(data.toolName) ?? 'tool', result: data.result, isError: data.isError === true });
+  }
+  return state;
+}
+
+function applyAssistantItem(state: AgentState, event: AppEvent, data: Record<string, unknown>, message?: Record<string, unknown>): AgentState {
+  const messages = [...state.messages];
+  let index = messages.findIndex((entry) => entry.kind === 'assistant' && entry.id === event.itemId);
+  if (index < 0) {
+    messages.push({ kind: 'assistant', id: event.itemId!, text: '', thinking: '', streaming: true });
+    index = messages.length - 1;
+  }
+  const current = messages[index] as Extract<ChatMessage, { kind: 'assistant' }>;
+  let text = current.text;
+  let thinking = current.thinking;
+  if (message) {
+    const projected = extractText(message as AgentMessage);
+    if (projected.text) text = projected.text;
+    if (projected.thinking) thinking = projected.thinking;
+  }
+  const delta = isRecord(data.assistantMessageEvent) ? data.assistantMessageEvent : undefined;
+  if (delta?.type === 'text_delta' && typeof delta.delta === 'string') text += delta.delta;
+  if (delta?.type === 'thinking_delta' && typeof delta.delta === 'string') thinking += delta.delta;
+  const final = event.type === 'item.updated';
+  messages[index] = { ...current, text, thinking, streaming: !final, ...thinkingTiming(current, thinking, text, final) };
+  return { ...state, messages };
+}
+
+function isAppEvent(event: AgentEvent | AppEvent): event is AppEvent {
+  return typeof (event as AppEvent).sequence === 'number' && typeof (event as AppEvent).timestamp === 'number';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
 }
 
 /**

@@ -18,6 +18,8 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
+import type { PermissionManager } from '../app/permissionManager';
+import type { PluginManager } from '../app/plugin/pluginManager';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -40,6 +42,8 @@ export interface IpcServices {
   tempHtml?: TempHtmlService;
   shell?: ShellService;
   agentData?: AgentDataService;
+  permissions?: PermissionManager;
+  plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -83,6 +87,8 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.settings) registerSettingsCommands(services.settings);
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
+  if (services.permissions) registerPermissionCommands(services.permissions);
+  if (services.plugins) registerPluginCommands(services.plugins);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
@@ -98,6 +104,29 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
   if (services.shell) registerShellCommands(services.shell);
   if (services.agentData) {
+    registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
+      id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
+      ...(args.title === undefined ? {} : { title: readText(args, 'title') }),
+    }));
+    registerCommand('thread_list', () => services.agentData!.listThreads());
+    registerCommand('thread_read', (_event, args) => services.agentData!.readThread(readString(args, 'id')));
+    registerCommand('turn_create', (_event, args) => services.agentData!.createTurn({
+      id: readString(args, 'id'), threadId: readString(args, 'threadId'), input: readText(args, 'input'),
+      permissionProfile: readString(args, 'permissionProfile'), ...(args.mode === undefined ? {} : { mode: args.mode as 'interactive' | 'non-interactive' }),
+    }));
+    registerCommand('turn_update', (_event, args) => services.agentData!.updateTurn(readString(args, 'id'), {
+      ...(args.status === undefined ? {} : { status: args.status as never }),
+      ...(args.startedAt === undefined ? {} : { startedAt: args.startedAt as number }),
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt as number }),
+      ...(args.error === undefined ? {} : { error: readText(args, 'error') }),
+    }));
+    registerCommand('item_upsert', (_event, args) => services.agentData!.upsertItem(args as never));
+    registerCommand('item_list', (_event, args) => services.agentData!.listItems(readString(args, 'threadId'), args.turnId === undefined ? undefined : readString(args, 'turnId')));
+    registerCommand('app_event_append', (_event, args) => services.agentData!.appendAppEvent(args as never));
+    registerCommand('app_event_replay', (_event, args) => services.agentData!.replayAppEvents(
+      typeof args.afterSequence === 'number' ? args.afterSequence : 0,
+      typeof args.limit === 'number' ? args.limit : 256,
+    ));
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());
@@ -150,6 +179,13 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   }
 }
 
+function registerPluginCommands(service: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>): void {
+  registerCommand('plugin_list', () => service.list());
+  registerCommand('plugin_start', (_event, args) => service.start(readString(args, 'id')));
+  registerCommand('plugin_stop', (_event, args) => service.stop(readString(args, 'id')));
+  registerCommand('plugin_allowed_list', () => service.allowedPluginIds());
+}
+
 function registerMcpPolicyCommands(service: McpPolicyService): void {
   registerCommand('read_mcp_policy', () => service.readPolicy());
   registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readText(args, 'content')));
@@ -160,6 +196,7 @@ function registerMcpPolicyCommands(service: McpPolicyService): void {
 
 function registerMcpConfigCommands(service: McpConfigService): void {
   registerCommand('list_mcp_configs', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('effective_mcp_configs', (_event, args) => service.effective(readString(args, 'workspace')));
   registerCommand('upsert_mcp_config', (_event, args) => {
     if (typeof args.config !== 'object' || !args.config || Array.isArray(args.config)) throw new Error('config must be an object');
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
@@ -167,6 +204,15 @@ function registerMcpConfigCommands(service: McpConfigService): void {
   });
   registerCommand('remove_mcp_config', (_event, args) => service.remove(
     readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
+  ));
+}
+
+function registerPermissionCommands(service: PermissionManager): void {
+  registerCommand('permission_evaluate', (_event, args) => service.authorize(
+    readRecord(args, 'operation'), readString(args, 'profile'),
+  ));
+  registerCommand('permission_resolve', (_event, args) => service.resolve(
+    readString(args, 'requestId'), args.resolution === 'allow' ? 'allow' : 'deny',
   ));
 }
 

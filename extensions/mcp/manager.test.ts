@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
-import { createManager, type McpClient, type McpSnapshot } from "./manager";
+import { createManager, managedServers, type McpClient, type McpSnapshot } from "./manager";
+
+describe('managedServers', () => {
+  it('uses the Electron effective MCP payload shape', () => {
+    expect(managedServers(JSON.stringify([
+      { name: 'project', config: { command: 'server', args: ['--stdio'] } },
+      { name: 'remote', config: { url: 'https://example.com/sse' } },
+    ]))).toEqual([
+      { name: 'project', transport: 'stdio', command: 'server', args: ['--stdio'], env: {} },
+      { name: 'remote', transport: 'sse', url: 'https://example.com/sse' },
+    ]);
+  });
+});
 
 function fakeClient(
   tools: Array<{ name: string; description?: string; inputSchema?: unknown }>,

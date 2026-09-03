@@ -6,6 +6,8 @@ import {
   fableBehavior,
   multiAgent,
   namedExtensions,
+  manifestExtensions,
+  selectAllowedExtensions,
   safety,
   memory,
 } from "./index.js";
@@ -39,5 +41,14 @@ describe("allExtensions bundle (compiled into the sidecar)", () => {
   it("registers the local memory extension", () => {
     expect(allExtensions).toContain(memory);
     expect(namedExtensions.map((entry) => entry.name)).toContain("memory");
+  });
+
+  it("adapts managed manifests without changing the static factory order", () => {
+    expect(manifestExtensions.map((entry) => entry.factory)).toEqual(allExtensions);
+    expect(manifestExtensions.map((entry) => entry.name)).toEqual(namedExtensions.map((entry) => entry.name));
+    expect(manifestExtensions.find((entry) => entry.name === "goal")?.manifest?.capabilities).toContain("agent");
+    expect(manifestExtensions.find((entry) => entry.name === "web-search")?.manifest?.permissions?.network).toBe("full");
+    expect(manifestExtensions.find((entry) => entry.name === "mcp")?.manifest?.capabilities).toContain("mcp");
+    expect(selectAllowedExtensions(["goal", "mcp"]).map((entry) => entry.name)).toEqual(["goal", "mcp"]);
   });
 });

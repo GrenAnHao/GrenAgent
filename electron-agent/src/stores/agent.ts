@@ -9,10 +9,12 @@ import {
   type ChatMessage,
   type UserImage,
 } from './agentReducer';
-import { pi, onPiEvent, onPiExit, type AgentEvent, type AgentMessage } from '../lib/pi';
+import { pi, onAppEvent, onPiEvent, onPiExit, type AgentEvent, type AgentMessage, type AppEvent } from '../lib/pi';
 import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurations';
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
 import { sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
+import { useUiPromptStore } from './uiPromptStore';
+import { useMcpStatusStore, type McpServerStatus } from './mcpStatusStore';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -24,6 +26,23 @@ export interface LoadMessagesOptions {
    * rewind 等需要后端权威结果的场景不传（走后端）。
    */
   uiHistory?: ChatMessage[];
+}
+
+const PROJECTED_PI_EVENTS = new Set([
+  'agent_start', 'agent_end', 'message_start', 'message_update', 'message_end',
+  'tool_execution_start', 'tool_execution_update', 'tool_execution_end',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isProjectedPiEvent(event: AgentEvent): boolean {
+  if (!PROJECTED_PI_EVENTS.has(event.type)) return false;
+  if (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end') {
+    return (event as { message?: { role?: unknown } }).message?.role === 'assistant';
+  }
+  return true;
 }
 
 export interface AgentStoreApi {
@@ -80,7 +99,11 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   // —— 事件按动画帧批量应用（对齐 lobehub 流式平滑的思路）——
   // 高频 thinking/text delta 一帧内合并为一次 setState，降低渲染压力；
   // 打字机视觉由 Markdown animated 承担，不丢任何事件、保持顺序。
-  let queue: AgentEvent[] = [];
+  let queue: Array<AgentEvent | AppEvent> = [];
+  let appEventsActive = false;
+  const seenAppEvents = new Set<string>();
+  const appEventCursorKey = `pi-app-event-cursor:${workspace}`;
+  let appEventCursor = readAppEventCursor(appEventCursorKey);
   let rafId: number | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let active = true;
@@ -150,9 +173,52 @@ export function createAgentStore(workspace: string): AgentStoreApi {
 
   onPiEvent((env) => {
     if (env.workspace !== workspace) return;
+    if (appEventsActive && isProjectedPiEvent(env.event)) return;
     queue.push(env.event);
     scheduleFlush();
   }).then((un) => unsubs.push(un));
+
+  onAppEvent((env) => {
+    if (env.workspace !== workspace) return;
+    if (!acceptAppEvent(env.event)) return;
+    appEventsActive = true;
+    const data = isRecord(env.event.data) ? env.event.data : {};
+    if (env.event.type === 'permission.requested') {
+      const request = isRecord(data.request) ? data.request : undefined;
+      const id = request && typeof request.id === 'string' ? request.id : undefined;
+      if (id) {
+        const operation = isRecord(request.operation) ? request.operation : {};
+        useUiPromptStore.getState().setRequest({
+          workspace,
+          request: {
+            id,
+            method: 'confirm',
+            source: 'permission',
+            title: '权限请求',
+            message: typeof operation.kind === 'string' ? operation.kind : '允许本次操作？',
+          },
+        });
+      }
+    } else if (env.event.type === 'permission.resolved') {
+      const id = typeof data.requestId === 'string' ? data.requestId : undefined;
+      useUiPromptStore.getState().clear(workspace, id);
+    } else if (env.event.type === 'mcp.state_changed' && Array.isArray(data.servers)) {
+      useMcpStatusStore.getState().setServers(data.servers as McpServerStatus[]);
+    }
+    queue.push(env.event);
+    scheduleFlush();
+  }).then((un) => unsubs.push(un));
+
+  if (typeof pi.replayAppEvents === 'function' && appEventCursor > 0) {
+    void pi.replayAppEvents(appEventCursor, 1024).then((events) => {
+      for (const event of events) {
+        if (!acceptAppEvent(event) || event.projectId !== workspace) continue;
+        appEventsActive = true;
+        queue.push(event);
+      }
+      if (events.some((event) => event.projectId === workspace)) scheduleFlush();
+    }).catch(() => {});
+  }
 
   onPiExit((env) => {
     if (env.workspace !== workspace) return;
@@ -163,6 +229,16 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     liveActivity = true;
     setFullState(addUserMessage(useStore.getState(), text, images, steering));
   };
+
+  function acceptAppEvent(event: AppEvent): boolean {
+    if (seenAppEvents.has(event.id)) return false;
+    seenAppEvents.add(event.id);
+    if (Number.isFinite(event.sequence) && event.sequence > appEventCursor) {
+      appEventCursor = event.sequence;
+      try { localStorage.setItem(appEventCursorKey, String(appEventCursor)); } catch { /* storage unavailable */ }
+    }
+    return true;
+  }
 
   const loadMessages = (msgs: AgentMessage[], options?: LoadMessagesOptions) => {
     if (liveActivity && !options?.force) return;
@@ -279,4 +355,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       unsubs.length = 0;
     },
   };
+}
+
+function readAppEventCursor(key: string): number {
+  try {
+    const value = Number(localStorage.getItem(key) ?? '0');
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
 }

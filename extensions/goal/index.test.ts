@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import factory from "./index.js";
 
 type Handler = (args: string, ctx: unknown) => Promise<void>;
 
-function setup() {
+function setup(control: { request: (...args: unknown[]) => Promise<unknown> } = { request: async () => { throw new Error('offline'); } }) {
   const calls = {
     sendMessage: [] as unknown[][],
     status: [] as unknown[][],
@@ -21,8 +21,9 @@ function setup() {
     on: (e: string) => events.push(e),
     appendEntry: (t: string, d: unknown) => calls.entries.push([t, d]),
     sendMessage: (m: unknown, o: unknown) => calls.sendMessage.push([m, o]),
-  } as never);
+  } as never, control as never);
   const ctx = {
+    cwd: 'C:/work',
     ui: {
       notify: (...a: unknown[]) => calls.notify.push(a),
       setStatus: (...a: unknown[]) => calls.status.push(a),
@@ -52,6 +53,16 @@ describe("goal extension factory", () => {
     const [key, text] = lastStatus(calls);
     expect(key).toBe("goal");
     expect(JSON.parse(text as string)).toMatchObject({ condition: "写完并通过测试", paused: false });
+  });
+
+  it("queues a desktop-managed Turn when the Electron control plane is available", async () => {
+    const control = { request: vi.fn(async () => ({ status: 'queued' })) };
+    const { handler, ctx, calls } = setup(control);
+
+    await handler("完成统一事件迁移", ctx);
+
+    expect(control.request).toHaveBeenCalledWith('turn.start', expect.objectContaining({ workspace: 'C:/work', input: '完成统一事件迁移' }));
+    expect(calls.sendMessage[0]?.[1]).toEqual({ triggerTurn: false });
   });
 
   it("pause then resume toggles the pushed paused flag", async () => {

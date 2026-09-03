@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { JsonlBuffer } from './jsonl';
 import { PiClient, type PiClientHandlers } from './client';
 import { processRegistry, type ProcessRegistry } from '../app/processRegistry';
+import { SandboxManager } from '../app/sandbox/sandboxManager';
+import type { PermissionProfileName } from '../app/permissionManager';
 
 export interface PiProcessCommand {
   command: string;
@@ -22,6 +24,9 @@ export interface PiProcessOptions extends PiClientHandlers {
   registry?: ProcessRegistry;
   spawnImpl?: PiSpawn;
   killTimeoutMs?: number;
+  sandbox?: SandboxManager;
+  profile?: PermissionProfileName;
+  workspaceRoot?: string;
 }
 
 class ChildTransport {
@@ -78,9 +83,15 @@ function waitForClose(child: ChildProcessWithoutNullStreams, timeoutMs: number):
 export function spawnPiClient(workspace: string, processCommand: PiProcessCommand, options: PiProcessOptions): PiClient {
   const spawnImpl = options.spawnImpl ?? (spawn as unknown as PiSpawn);
   const registry = options.registry ?? processRegistry;
-  const child = spawnImpl(processCommand.command, processCommand.args, {
+  const launch = options.sandbox?.prepare({
+    profile: options.profile ?? (workspace === '__system__' ? 'automation' : 'workspace'),
+    workspaceRoot: options.workspaceRoot ?? options.cwd,
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
+  }) ?? { profile: 'workspace' as const, cwd: options.cwd, env: { ...process.env, ...options.env }, network: 'none' as const, degraded: false };
+  const child = spawnImpl(processCommand.command, processCommand.args, {
+    cwd: launch.cwd,
+    env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     detached: process.platform !== 'win32',
@@ -103,7 +114,7 @@ export class PiManager {
   constructor(
     private readonly command: PiProcessCommand,
     private readonly handlers: PiClientHandlers = {},
-    private readonly options: Pick<PiProcessOptions, 'registry' | 'spawnImpl' | 'killTimeoutMs'> = {},
+    private readonly options: Pick<PiProcessOptions, 'registry' | 'spawnImpl' | 'killTimeoutMs'> & { sandbox?: SandboxManager } = {},
   ) {}
 
   get(workspace: string): PiClient | undefined {
@@ -122,6 +133,8 @@ export class PiManager {
       cwd,
       env,
       ...this.options,
+      sandbox: this.options.sandbox,
+      profile: workspace === '__system__' ? 'automation' : 'workspace',
       ...this.handlers,
       onExit: (ws, code) => {
         if (spawned && this.clients.get(ws) === spawned) this.clients.delete(ws);
@@ -132,6 +145,12 @@ export class PiManager {
     this.clients.set(workspace, client);
     return client;
   }
+
+  openSystem(cwd: string, env?: Record<string, string>): PiClient {
+    return this.open('__system__', cwd, { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1', ...env });
+  }
+
+  closeSystem(): Promise<void> { return this.close('__system__'); }
 
   async close(workspace: string): Promise<void> {
     const client = this.clients.get(workspace);

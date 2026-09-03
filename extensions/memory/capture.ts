@@ -37,8 +37,11 @@ export class LayeredMemoryCapture {
     if (!transcript) return;
     const fingerprint = hash(transcript);
     const source = `session:${ctx.sessionId ?? "unknown"}`;
-    const captured = await this.client.request<{ changed: boolean; delta: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint });
+    const captured = await this.client.request<{ changed: boolean; delta: string; taskId?: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint });
     if (!captured.changed || !captured.delta) return;
+    // Electron-owned MemoryService queues extraction in the system worker. The
+    // local fallback below remains for older sidecars that do not return taskId.
+    if (captured.taskId) return;
     const delta = captured.delta;
 
     const ask = this.askFactory(ctx);

@@ -3,7 +3,7 @@ import { Button, Icon } from '@lobehub/ui';
 import { MessageCircleQuestion, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { QuestionSelector } from '../../../components/QuestionSelector';
-import { extensionUiRespond } from '../../../lib/pi';
+import { extensionUiRespond, pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
 
@@ -96,11 +96,15 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const respond = useCallback(
     (payload: Record<string, unknown>) => {
       if (!item) return;
-      void extensionUiRespond(item.workspace, {
-        type: 'extension_ui_response',
-        id: item.request.id,
-        ...payload,
-      });
+      if (item.request.source === 'permission') {
+        void pi.resolvePermission(item.request.id, payload.confirmed === true ? 'allow' : 'deny');
+      } else {
+        void extensionUiRespond(item.workspace, {
+          type: 'extension_ui_response',
+          id: item.request.id,
+          ...payload,
+        });
+      }
       useUiPromptStore.getState().clear(item.workspace, item.request.id);
     },
     [item],

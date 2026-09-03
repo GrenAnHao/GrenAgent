@@ -48,4 +48,15 @@ describe('MemoryStore', () => {
     expect(reopened.capture(scope, 'session:s', 'user: one\nassistant: two', 'fp2').delta).toBe('assistant: two');
     db.close();
   });
+
+  it('stores project and global scope metadata and filters across projects', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new MemoryStore(db);
+    store.upsert({ userId: 'u', projectId: 'project-A', workspace: '/a', scope: 'global' }, { level: 1, content: 'global fact' });
+    store.upsert({ userId: 'u', projectId: 'project-A', workspace: '/a' }, { level: 1, content: 'a fact' });
+    store.upsert({ userId: 'u', projectId: 'project-B', workspace: '/b' }, { level: 1, content: 'b fact' });
+    expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a' }, 'fact').map((item) => item.content)).toEqual(['global fact', 'a fact']);
+    expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a', includeOtherProjects: true }, 'fact')).toHaveLength(3);
+    db.close();
+  });
 });
