@@ -46,5 +46,6 @@ export class AgentDataService {
   upsertItem(item: Omit<Item, 'createdAt'> & Partial<Pick<Item, 'createdAt' | 'updatedAt'>>): Promise<Item> { return this.request('item.upsert', item); }
   listItems(threadId: string, turnId?: string): Promise<Item[]> { return this.request('item.list', { threadId, ...(turnId === undefined ? {} : { turnId }) }); }
   appendAppEvent(event: AppEvent): Promise<AppEvent> { return this.request('appEvent.append', event); }
+  replayAppEvents(afterSequence = 0, limit = 256): Promise<AppEvent[]> { return this.request('appEvent.replay', { afterSequence, limit }); }
   private requireClient(): AgentDataClient { if (!this.client) throw new Error('agent data runtime is not started'); return this.client; }
 }

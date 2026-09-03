@@ -56,7 +56,7 @@ interface ThreadStorePort {
   upsertItem?(item: { id: string; threadId: string; turnId: string; type: 'assistant_message' | 'tool_call'; status: 'started' | 'streaming' | 'completed' | 'failed'; payload: unknown }): Promise<unknown> | unknown;
 }
 interface EventBusPort { publish(event: Omit<AppEvent, 'sequence'>): AppEvent; }
-interface McpConfigPort { effective(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; }
+interface McpConfigPort { effective(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; runtime?(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; }
 
 export interface PiRuntimeOptions {
   manager: PiManagerPort;
@@ -79,6 +79,7 @@ export class PiRuntimeService {
   private readonly itemPayloads = new Map<string, Record<string, unknown>>();
   private readonly workspaceThreads = new Map<string, string>();
   private readonly queuedTurns = new Map<string, Array<{ input: string; permissionProfile: string }>>();
+  private readonly permissionProfiles = new Map<string, string>();
   constructor(private readonly options: PiRuntimeOptions) {}
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null }> {
@@ -100,6 +101,7 @@ export class PiRuntimeService {
     this.assistantItems.delete(workspace);
     this.workspaceThreads.delete(workspace);
     this.queuedTurns.delete(workspace);
+    this.permissionProfiles.delete(workspace);
     return this.options.manager.close(workspace);
   }
 
@@ -176,6 +178,8 @@ export class PiRuntimeService {
     await client.respondUi(response);
   }
 
+  permissionProfile(workspace: string): string | undefined { return this.permissionProfiles.get(workspace); }
+
   async refreshModelRegistry(): Promise<{ refreshed: string[]; failed: Array<{ workspace: string; error: string }> }> {
     const result = { refreshed: [] as string[], failed: [] as Array<{ workspace: string; error: string }> };
     for (const [workspace, client] of this.options.manager.all?.() ?? []) {
@@ -199,7 +203,7 @@ export class PiRuntimeService {
     const endpoint = this.options.agentDataEndpoint?.();
     if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
     env.PI_PERMISSION_PROFILE = workspace === '__system__' ? 'automation' : 'workspace';
-    if (this.options.mcpConfig) env.PI_MCP_CONFIG = JSON.stringify(await this.options.mcpConfig.effective(workspace));
+    if (this.options.mcpConfig) env.PI_MCP_CONFIG = JSON.stringify(await (this.options.mcpConfig.runtime?.(workspace) ?? this.options.mcpConfig.effective(workspace)));
     if (this.options.allowedPluginIds) env.PI_ALLOWED_EXTENSIONS = JSON.stringify(this.options.allowedPluginIds());
     return this.options.manager.open(workspace, cwd, env);
   }
@@ -219,6 +223,7 @@ export class PiRuntimeService {
     const thread = createThread ? await this.options.threadStore!.createThread({ id: threadId, projectId: workspace, workspace }) : undefined;
     this.workspaceThreads.set(workspace, threadId);
     const input = typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
+    this.permissionProfiles.set(workspace, typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace');
     await this.options.threadStore!.createTurn({ id: turnId, threadId, input, permissionProfile: typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace' });
     this.activeTurns.set(workspace, { threadId, turnId });
     if (thread) this.publish({ id: randomUUID(), type: 'thread.created', timestamp: Date.now(), projectId: thread.projectId, threadId, data: thread });
@@ -268,6 +273,7 @@ export class PiRuntimeService {
   private publish(event: Omit<AppEvent, 'sequence'>): void {
     const published = this.options.eventBus?.publish(event) ?? event;
     this.options.emitAppEvent?.(published);
+    if (published.type === 'item.delta') return;
     const write = this.options.threadStore?.appendAppEvent?.(published);
     if (write instanceof Promise) void write.catch((error) => console.error('Failed to persist app event', error));
   }

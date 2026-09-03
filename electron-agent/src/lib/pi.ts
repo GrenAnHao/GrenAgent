@@ -229,6 +229,8 @@ export const pi = {
     invoke<void>('extension_ui_respond', { workspace, response }),
   resolvePermission: (id: string, resolution: 'allow' | 'deny') =>
     invoke<unknown>('permission_resolve', { requestId: id, resolution }),
+  replayAppEvents: (afterSequence = 0, limit = 256) =>
+    invoke<AppEvent[]>('app_event_replay', { afterSequence, limit }),
   getSessionStats: (workspace: string) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),

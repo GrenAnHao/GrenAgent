@@ -12,6 +12,7 @@ const { eventHandlers, appEventHandlers, piMock } = vi.hoisted(() => ({
       (_ws: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] }),
     ),
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
+    replayAppEvents: vi.fn((_afterSequence = 0, _limit = 256): Promise<unknown[]> => Promise.resolve([])),
   },
 }));
 vi.mock('../lib/pi', () => ({
@@ -51,6 +52,14 @@ describe('createAgentStore', () => {
     piMock.rewindTo.mockReset().mockResolvedValue(undefined);
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
+    piMock.replayAppEvents.mockReset().mockResolvedValue([]);
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      clear: () => storage.clear(),
+    });
     clearThinkingDurationsForTest();
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
       rafCallbacks.push(cb);
@@ -126,6 +135,21 @@ describe('createAgentStore', () => {
     const assistants = store.useStore.getState().messages.filter((message) => message.kind === 'assistant');
     expect(assistants).toHaveLength(1);
     expect(assistants[0]).toMatchObject({ text: 'hello' });
+  });
+
+  it('replays only events after the persisted workspace cursor', async () => {
+    localStorage.setItem('pi-app-event-cursor:.', '3');
+    piMock.replayAppEvents.mockResolvedValueOnce([
+      { id: 'old', type: 'turn.started', sequence: 2, timestamp: 2, projectId: '.', data: {} },
+      { id: 'new', type: 'turn.started', sequence: 4, timestamp: 4, projectId: '.', data: {} },
+    ]);
+    store = createAgentStore('.');
+    await Promise.resolve();
+    flushRAF();
+
+    expect(piMock.replayAppEvents).toHaveBeenCalledWith(3, 1024);
+    expect(store.useStore.getState().isStreaming).toBe(true);
+    expect(localStorage.getItem('pi-app-event-cursor:.')).toBe('4');
   });
 
   it('推理时长在 message_end 后持久化，切换会话恢复时按 timestamp 回填', () => {

@@ -62,6 +62,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, 
         manifestExtensions,
         (getConfig("EXTENSIONS_PROFILE") as ExtensionProfile) ?? "project",
       ), getConfig('PI_ALLOWED_EXTENSIONS')).map((x) => x.factory),
+      noContextFiles: getConfig('PI_DISABLE_PROJECT_CONTEXT') === '1',
       skillsOverride: (base) => {
         const disabled = disabledSkills();
         if (disabled.size === 0) return base;

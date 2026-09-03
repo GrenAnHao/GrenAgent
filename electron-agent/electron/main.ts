@@ -63,7 +63,10 @@ if (!process.env.VITEST) {
       void agentData?.appendAppEvent(event).catch((error) => console.error('Failed to persist app event', error));
       broadcastPiEvent('app://event', { workspace: event.projectId ?? '__global__', event });
     };
-    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), publish: publishAppEvent });
+    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), publish: publishAppEvent, resolveProfile: (operation, requested) => {
+      const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
+      return workspace ? (piRuntime?.permissionProfile(workspace) ?? requested) : requested;
+    } });
     const sandbox = new SandboxManager({ publish: publishAppEvent });
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));

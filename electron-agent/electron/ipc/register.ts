@@ -123,6 +123,10 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('item_upsert', (_event, args) => services.agentData!.upsertItem(args as never));
     registerCommand('item_list', (_event, args) => services.agentData!.listItems(readString(args, 'threadId'), args.turnId === undefined ? undefined : readString(args, 'turnId')));
     registerCommand('app_event_append', (_event, args) => services.agentData!.appendAppEvent(args as never));
+    registerCommand('app_event_replay', (_event, args) => services.agentData!.replayAppEvents(
+      typeof args.afterSequence === 'number' ? args.afterSequence : 0,
+      typeof args.limit === 'number' ? args.limit : 256,
+    ));
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());

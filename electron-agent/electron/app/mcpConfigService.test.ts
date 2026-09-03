@@ -111,4 +111,14 @@ describe('McpConfigService', () => {
     expect(JSON.stringify(effective)).not.toContain('global-secret');
     expect(JSON.stringify(effective)).not.toContain('Bearer secret');
   });
+
+  it('keeps raw credentials only for the internal Pi launch path', async () => {
+    const { home, workspace, settings } = await fixture();
+    await mkdir(join(workspace, '.pi'), { recursive: true });
+    await writeFile(join(workspace, '.pi', 'mcp.json'), JSON.stringify({ mcpServers: { secure: { command: 'server', env: { API_TOKEN: 'secret' } } } }));
+    const service = new McpConfigService(home, settings);
+
+    await expect(service.effective(workspace)).resolves.toEqual(expect.arrayContaining([{ name: 'secure', config: { command: 'server', env: { API_TOKEN: { credentialRef: 'mcp/secure/env/API_TOKEN' } } } }]));
+    await expect(service.runtime(workspace)).resolves.toEqual(expect.arrayContaining([{ name: 'secure', config: { command: 'server', env: { API_TOKEN: 'secret' } } }]));
+  });
 });

@@ -61,4 +61,20 @@ describe('PermissionManager', () => {
       expect.objectContaining({ type: 'resolved', requestId: result.request!.id, resolution: 'deny' }),
     ]);
   });
+
+  it('uses the runtime-selected profile for authorization and audit records', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'electron-agent-permissions-profile-'));
+    directories.push(dataDir);
+    const manager = new PermissionManager({
+      dataDir,
+      providers: [{ name: 'approval', evaluate: async () => 'ask' }],
+      resolveProfile: () => 'readonly',
+      now: () => 42,
+    });
+
+    const result = await manager.authorize({ kind: 'filesystem.read', workspace: 'C:/repo', path: 'C:/repo/a.ts' }, 'workspace');
+    expect(result.request).toMatchObject({ profile: 'readonly' });
+    const records = (await readFile(join(dataDir, 'permission-audit.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(records[0]).toMatchObject({ profile: 'readonly' });
+  });
 });

@@ -82,12 +82,21 @@ export class ThreadStore {
     return persisted;
   }
 
+  listAppEvents(afterSequence = 0, limit = 256): AppEvent[] {
+    if (!Number.isFinite(afterSequence) || afterSequence < 0) throw new Error('afterSequence must be a finite non-negative number');
+    const rows = this.db.prepare('SELECT * FROM app_events WHERE sequence > ? ORDER BY sequence ASC LIMIT ?').all(afterSequence, limit) as AppEventRow[];
+    return rows.map((row) => ({ id: row.id, type: row.type, sequence: row.sequence, timestamp: row.timestamp,
+      ...(row.project_id === null ? {} : { projectId: row.project_id }), ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
+      ...(row.turn_id === null ? {} : { turnId: row.turn_id }), ...(row.item_id === null ? {} : { itemId: row.item_id }), data: JSON.parse(row.data) }));
+  }
+
   private touchThread(id: string, timestamp: number): void { this.db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(timestamp, id); }
 }
 
 interface ThreadRow { id: string; project_id: string; workspace: string; title: string | null; status: Thread['status']; created_at: number; updated_at: number; }
 interface TurnRow { id: string; thread_id: string; status: Turn['status']; mode: Turn['mode']; input: string; permission_profile: string; created_at: number; started_at: number | null; completed_at: number | null; error: string | null; }
 interface ItemRow { id: string; thread_id: string; turn_id: string; type: Item['type']; status: Item['status']; payload: string; created_at: number; updated_at: number | null; }
+interface AppEventRow { id: string; type: AppEvent['type']; sequence: number; timestamp: number; project_id: string | null; thread_id: string | null; turn_id: string | null; item_id: string | null; data: string; }
 function toThread(row: ThreadRow): Thread { return { id: row.id, projectId: row.project_id, workspace: row.workspace, ...(row.title === null ? {} : { title: row.title }), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function toTurn(row: TurnRow): Turn { return { id: row.id, threadId: row.thread_id, status: row.status, mode: row.mode, input: row.input, permissionProfile: row.permission_profile, createdAt: row.created_at, ...(row.started_at === null ? {} : { startedAt: row.started_at }), ...(row.completed_at === null ? {} : { completedAt: row.completed_at }), ...(row.error === null ? {} : { error: row.error }) }; }
 function toItem(row: ItemRow): Item { return { id: row.id, threadId: row.thread_id, turnId: row.turn_id, type: row.type, status: row.status, payload: JSON.parse(row.payload), createdAt: row.created_at, ...(row.updated_at === null ? {} : { updatedAt: row.updated_at }) }; }

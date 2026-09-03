@@ -192,6 +192,10 @@ export class AgentDataRuntime {
     if (name === 'thread.create') return (p) => this.threads!.createThread({ id: readString(p.id), projectId: readString(p.projectId), workspace: readString(p.workspace), title: typeof p.title === 'string' ? p.title : undefined });
     if (name === 'thread.list') return () => this.threads!.listThreads();
     if (name === 'thread.read') return (p) => this.threads!.readThread(readString(p.id));
+    if (name === 'appEvent.replay') return (p) => this.threads!.listAppEvents(
+      typeof p.afterSequence === 'number' && Number.isFinite(p.afterSequence) && p.afterSequence >= 0 ? p.afterSequence : 0,
+      typeof p.limit === 'number' && Number.isInteger(p.limit) ? Math.max(1, Math.min(p.limit, 1024)) : 256,
+    );
     if (name === 'turn.create') return (p) => this.threads!.createTurn({ id: readString(p.id), threadId: readString(p.threadId), input: readString(p.input), permissionProfile: readString(p.permissionProfile), mode: p.mode === 'non-interactive' ? 'non-interactive' : 'interactive' });
     if (name === 'turn.update') return (p) => this.threads!.updateTurn(readString(p.id), {
       ...(isTurnStatus(p.status) ? { status: p.status } : {}),

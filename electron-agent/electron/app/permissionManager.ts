@@ -10,7 +10,7 @@ export interface PermissionOperation { kind: string; workspace?: string; path?: 
 export interface PermissionProvider { name: string; evaluate(operation: PermissionOperation, profile: PermissionProfileName): PermissionDecision | Promise<PermissionDecision>; }
 export interface PermissionRequest { id: string; operation: PermissionOperation; profile: PermissionProfileName; createdAt: number; status: 'blocked' | 'resolved'; resolution?: PermissionResolution; }
 export interface PermissionAuthorization { status: 'allowed' | 'denied' | 'blocked'; decision: PermissionDecision; request?: PermissionRequest; }
-export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; publish?: (event: Omit<AppEvent, 'sequence'>) => void; now?: () => number; }
+export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; publish?: (event: Omit<AppEvent, 'sequence'>) => void; resolveProfile?: (operation: PermissionOperation, requested: PermissionProfileName) => PermissionProfileName; now?: () => number; }
 
 export class PermissionManager {
   private readonly requests = new Map<string, PermissionRequest>();
@@ -26,12 +26,13 @@ export class PermissionManager {
   }
 
   async authorize(operation: PermissionOperation, profile: PermissionProfileName): Promise<PermissionAuthorization> {
-    const decision = await this.evaluate(operation, profile);
+    const effectiveProfile = this.options.resolveProfile?.(operation, profile) ?? profile;
+    const decision = await this.evaluate(operation, effectiveProfile);
     if (decision === 'allow') return { status: 'allowed', decision };
     if (decision === 'deny') return { status: 'denied', decision };
-    const request: PermissionRequest = { id: randomUUID(), operation, profile, createdAt: this.now(), status: 'blocked' };
+    const request: PermissionRequest = { id: randomUUID(), operation, profile: effectiveProfile, createdAt: this.now(), status: 'blocked' };
     this.requests.set(request.id, request);
-    await this.audit({ type: 'requested', requestId: request.id, operation, profile, createdAt: request.createdAt });
+    await this.audit({ type: 'requested', requestId: request.id, operation, profile: effectiveProfile, createdAt: request.createdAt });
     this.publish('permission.requested', { request });
     return { status: 'blocked', decision, request };
   }

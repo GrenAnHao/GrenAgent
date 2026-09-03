@@ -39,6 +39,11 @@ export class McpConfigService {
     return entries.filter((entry) => entry.enabled).map((entry) => ({ name: entry.name, config: redactSecrets(entry.config, `mcp/${entry.name}`) }));
   }
 
+  /** Internal Pi launch path. Secrets never cross the renderer/API boundary, but the child Pi needs selected credentials to connect. */
+  async runtime(workspace: string): Promise<EffectiveMcpConfig[]> {
+    return (await this.list(workspace)).filter((entry) => entry.enabled).map(({ name, config }) => ({ name, config }));
+  }
+
   async upsert(workspace: string, scope: string, name: string, config: unknown, enabled: boolean): Promise<void> {
     const validScope = validateScope(scope);
     const validConfig = validateConfig(config);

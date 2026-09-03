@@ -101,6 +101,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   // 打字机视觉由 Markdown animated 承担，不丢任何事件、保持顺序。
   let queue: Array<AgentEvent | AppEvent> = [];
   let appEventsActive = false;
+  const seenAppEvents = new Set<string>();
+  const appEventCursorKey = `pi-app-event-cursor:${workspace}`;
+  let appEventCursor = readAppEventCursor(appEventCursorKey);
   let rafId: number | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let active = true;
@@ -177,6 +180,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
 
   onAppEvent((env) => {
     if (env.workspace !== workspace) return;
+    if (!acceptAppEvent(env.event)) return;
     appEventsActive = true;
     const data = isRecord(env.event.data) ? env.event.data : {};
     if (env.event.type === 'permission.requested') {
@@ -205,6 +209,17 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     scheduleFlush();
   }).then((un) => unsubs.push(un));
 
+  if (typeof pi.replayAppEvents === 'function' && appEventCursor > 0) {
+    void pi.replayAppEvents(appEventCursor, 1024).then((events) => {
+      for (const event of events) {
+        if (!acceptAppEvent(event) || event.projectId !== workspace) continue;
+        appEventsActive = true;
+        queue.push(event);
+      }
+      if (events.some((event) => event.projectId === workspace)) scheduleFlush();
+    }).catch(() => {});
+  }
+
   onPiExit((env) => {
     if (env.workspace !== workspace) return;
     useStore.setState({ isStreaming: false });
@@ -214,6 +229,16 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     liveActivity = true;
     setFullState(addUserMessage(useStore.getState(), text, images, steering));
   };
+
+  function acceptAppEvent(event: AppEvent): boolean {
+    if (seenAppEvents.has(event.id)) return false;
+    seenAppEvents.add(event.id);
+    if (Number.isFinite(event.sequence) && event.sequence > appEventCursor) {
+      appEventCursor = event.sequence;
+      try { localStorage.setItem(appEventCursorKey, String(appEventCursor)); } catch { /* storage unavailable */ }
+    }
+    return true;
+  }
 
   const loadMessages = (msgs: AgentMessage[], options?: LoadMessagesOptions) => {
     if (liveActivity && !options?.force) return;
@@ -330,4 +355,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       unsubs.length = 0;
     },
   };
+}
+
+function readAppEventCursor(key: string): number {
+  try {
+    const value = Number(localStorage.getItem(key) ?? '0');
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
 }
