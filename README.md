@@ -1,6 +1,8 @@
 # GrenAgent
 
-本地优先的桌面 AI 编码 Agent。基于 Pi 运行时（`@earendil-works/pi-coding-agent`），把对话、工具调用、代码智能、知识库与记忆整合进一个 Tauri 桌面应用；默认使用本机托管运行时，也可连接远程 Gateway。
+本地优先的桌面 AI 编码 Agent。基于 Pi 运行时（`@earendil-works/pi-coding-agent`），把对话、工具调用、代码智能、知识库与记忆整合进一个 Electron 桌面应用；默认使用本机托管运行时，也可连接远程 Gateway。
+
+> **桌面端主线：Electron。** `electron-agent/` 是当前唯一维护的桌面实现；`tauri-agent/`（Tauri 2 + Rust）已过时并冻结，仅作历史参考，不再接受功能开发与缺陷修复，详见 [`tauri-agent/README.md`](./tauri-agent/README.md)。
 
 <p align="center">
   <img src="images/hero-code-graph.jpg" alt="代码图谱 · 227 个文件 · 674 条依赖" width="100%">
@@ -69,34 +71,43 @@ GrenAgent 由以下部分组成：
 
 | 模块 | 包名 | 职责 |
 | --- | --- | --- |
-| `cli/` | `grenagent-agent-sidecar` | Agent sidecar。把 Pi 运行时与内置扩展编译成单个二进制（`binaries/pi`），由 Tauri 后端以 `--mode rpc` 拉起。 |
+| `cli/` | `grenagent-agent-sidecar` | Agent sidecar。把 Pi 运行时与内置扩展编译成单个二进制（`resources/pi`），由 Electron 主进程以 `--mode rpc` 拉起。 |
 | `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总，随 sidecar 一并编译，无需全局安装。 |
-| `tauri-agent/` | `grenagent-app` | 桌面应用。React 19 + TypeScript + Vite 前端，Tauri 2 / Rust 后端。 |
+| `electron-agent/` | `electron-agent` | **当前桌面应用**。React 19 + TypeScript + Vite 渲染层，Electron 主进程（TypeScript 服务层）与自研 Agent Data Runtime。 |
+| `tauri-agent/` | `grenagent-app` | **已过时（冻结）**。历史桌面应用，Tauri 2 / Rust 后端。不再维护，仅作迁移参考。 |
 | `embedding/` | `embedding` | 独立本地向量服务（实验）。CPU 跑 `Xenova/all-MiniLM-L6-v2`，`POST /embed` 返回 384 维向量；尚未集成进主应用。 |
 
-请求走 Tauri command（前端 `invoke` 调用 Rust 后端），后端以 RPC 管道驱动 sidecar；Agent 的流式输出通过 Tauri 事件回传前端。详见 [架构文档](./docs/architecture.md)。
+渲染层只通过 `window.gren` 与主进程通信（单业务通道 `gren:invoke` + `gren:event:` 事件广播），主进程以 stdio JSONL RPC 驱动 sidecar；Agent 的流式输出由主进程转发回渲染层。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js >= 22.5
-- Rust 工具链（构建桌面端时需要，参见 Tauri 2 的环境要求）
-- Bun（`tauri-agent/` 包管理与 Tauri before-command，详见 [开发指南](./docs/development.md)）
-
-### 启动前端
-
-```bash
-cd tauri-agent
-bun install
-bun run dev
-```
+- Node.js >= 22.19（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.19.0`）
+- Bun（`electron-agent/` 的包管理与 sidecar 编译，详见 [开发指南](./docs/development.md)）
+- Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，日常开发不再需要
 
 ### 启动桌面端
 
 ```bash
-cd tauri-agent
-bun run tauri dev
+cd electron-agent
+bun install
+bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
+bun run dev
+```
+
+### 前端独立预览
+
+```bash
+cd electron-agent
+bun run dev            # electron-vite 同时拉起主进程与渲染层
+```
+
+### 打包
+
+```bash
+cd electron-agent
+bun run package        # electron-builder，产物在 release/
 ```
 
 ## 内置扩展
@@ -130,13 +141,16 @@ Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`s
 
 ```
 .
-├── cli/            # Agent sidecar（grenagent-agent-sidecar），汇总扩展编译为 binaries/pi
-├── extensions/     # 内置扩展集合，由 extensions/index.ts 的 allExtensions 编入 sidecar
-├── embedding/      # 独立本地向量服务（实验，未集成进主应用）
-├── tauri-agent/    # 桌面应用（grenagent-app）
-│   ├── src/        # React 前端：features / stores / lib / components / theme
-│   └── src-tauri/  # Tauri / Rust 后端：commands / state
-└── docs/           # 架构与开发文档，及 superpowers/ 下的设计规格与实现计划
+├── cli/             # Agent sidecar（grenagent-agent-sidecar），汇总扩展编译为 resources/pi
+├── extensions/      # 内置扩展集合，由 extensions/index.ts 的 allExtensions 编入 sidecar
+├── electron-agent/  # 桌面应用（electron-agent），当前主线
+│   ├── src/         # React 渲染层：features / stores / lib / platform / components / theme
+│   └── electron/    # Electron 主进程：app / agentData / pi / tencentdb，及 ipc 与 preload
+├── tauri-agent/     # 历史桌面应用（grenagent-app），已过时并冻结
+│   ├── src/         # React 前端快照（仅供迁移对照）
+│   └── src-tauri/   # Tauri / Rust 后端快照
+├── embedding/       # 独立本地向量服务（实验，未集成进主应用）
+└── docs/            # 架构与开发文档，及 superpowers/ 下的设计规格与实现计划
 ```
 
 ## 许可证

@@ -70,7 +70,7 @@ export class LayeredMemoryCapture {
 }
 
 function defaultAsk(ctx: CaptureContext): AskFn | undefined {
-  const model = resolveModel(ctx.model as never, ctx.modelRegistry as never, undefined);
+  const model = resolveModel(ctx.model, ctx.modelRegistry, undefined);
   return model ? (system, user) => askLlm(model, system, user, ctx.signal) : undefined;
 }
 

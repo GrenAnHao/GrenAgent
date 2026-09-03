@@ -2,7 +2,7 @@ import { mkdir, writeFile, rm, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceService } from './workspaceService';
 
 const directories: string[] = [];
@@ -82,6 +82,17 @@ describe('WorkspaceService', () => {
     await expect(service.ensureWorkspace(conversation.cwd)).resolves.toBe(conversation.cwd);
     await expect(readFile(join(sessions, 'project.jsonl'), 'utf8')).resolves.toContain('project');
     await expect(readFile(join(sessions, 'conversation.jsonl'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('closes an active workspace before deleting its directory', async () => {
+    const { service } = await createService();
+    const conversation = await service.createConversation();
+    const close = vi.fn(async () => {});
+    service.setWorkspaceCloser(close);
+
+    await service.deleteConversation(conversation.cwd);
+
+    expect(close).toHaveBeenCalledWith(conversation.cwd);
   });
 
   it('removes project sessions without deleting the project directory', async () => {

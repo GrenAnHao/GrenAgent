@@ -52,4 +52,9 @@ export class ShellService {
     this.sessions.delete(sessionId);
     session?.kill();
   }
+
+  async stopAll(): Promise<void> {
+    for (const session of this.sessions.values()) session.kill();
+    this.sessions.clear();
+  }
 }

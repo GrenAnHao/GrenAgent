@@ -3,7 +3,7 @@
 // 生成物标题（语音/图片）等共用这一个原语，避免各处重复一份模型解析 + 鉴权 + 清洗逻辑。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai/compat";
+import type { Model, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import { getConfig } from "./runtime-config.js";
 
 const DEFAULT_PROMPT =
@@ -78,7 +78,13 @@ export async function summarize(
       systemPrompt: opts.systemPrompt ?? DEFAULT_PROMPT,
       messages: [{ role: "user", content: text.slice(0, 4000), timestamp: Date.now() }],
     },
-    { apiKey: auth.apiKey, headers: auth.headers, reasoning: "off", signal: opts.signal } as never,
+    {
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      // 类型只声明到 ThinkingLevel（不含 "off"），运行时（EXTENDED_THINKING_LEVELS）接受。
+      reasoning: "off" as SimpleStreamOptions["reasoning"],
+      signal: opts.signal,
+    },
   );
   const out = (msg.content as unknown[])
     .filter(

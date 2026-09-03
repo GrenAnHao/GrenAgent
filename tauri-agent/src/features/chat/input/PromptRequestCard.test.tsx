@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { respond } = vi.hoisted(() => ({ respond: vi.fn(() => Promise.resolve()) }));
@@ -34,7 +34,7 @@ describe('PromptRequestCard', () => {
     expect(useUiPromptStore.getState().byWorkspace['/ws']).toBeUndefined();
   });
 
-  it('responds to confirm with { confirmed: true }', () => {
+  it('responds to confirm with { confirmed: true }', async () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
       request: { id: 'u2', method: 'confirm', title: '项目信任', message: '信任此工作区？' },
@@ -43,6 +43,19 @@ describe('PromptRequestCard', () => {
     expect(screen.getByText('信任此工作区？')).toBeTruthy();
     fireEvent.click(screen.getByTestId('prompt-request-confirm'));
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u2', confirmed: true });
+    await waitFor(() => expect(useUiPromptStore.getState().byWorkspace['/ws']).toBeUndefined());
+  });
+
+  it('keeps the confirm request visible and reports a response failure', async () => {
+    respond.mockRejectedValueOnce(new Error('sidecar unavailable'));
+    useUiPromptStore.getState().setRequest({
+      workspace: '/ws',
+      request: { id: 'u5', method: 'confirm', title: '确认添加 MCP', message: '继续？' },
+    });
+    render(<PromptRequestCard />);
+    fireEvent.click(screen.getByTestId('prompt-request-confirm'));
+    expect(await screen.findByText('提交失败：sidecar unavailable')).toBeTruthy();
+    expect(useUiPromptStore.getState().byWorkspace['/ws']).toBeDefined();
   });
 
   it('responds to input with { value } from the textarea', () => {

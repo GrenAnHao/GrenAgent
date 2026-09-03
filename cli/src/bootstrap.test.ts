@@ -13,8 +13,9 @@ test("bootstrap loads the runtime without mutating process configuration", async
   await bootstrapSidecar(async () => {
     assert.equal(process.env.TDAI_MEMORY_API_KEY, "gateway-secret");
     assert.equal(process.env.TDAI_MEMORY_USER_KEY, "user-secret");
-    assert.equal(getConfig("TDAI_MEMORY_API_KEY"), "gateway-secret");
-    assert.equal(getConfig("TDAI_MEMORY_USER_KEY"), "user-secret");
+    // 敏感键（TDAI_* / TENCENTDB_*）只留在 process.env，不进入运行时配置。
+    assert.equal(getConfig("TDAI_MEMORY_API_KEY"), undefined);
+    assert.equal(getConfig("TDAI_MEMORY_USER_KEY"), undefined);
     return {
       run: async () => {
         ran = true;

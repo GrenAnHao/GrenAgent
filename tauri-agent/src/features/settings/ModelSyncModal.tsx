@@ -3,6 +3,8 @@ import { Checkbox, Empty, Input, Spin } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
 import { pi } from '../../lib/pi';
+import { parseModels, type ModelInfo } from '../chat/input/modelUtils';
+import { PROVIDER_PRESETS } from './providerPresets';
 
 const styles = createStaticStyles(({ css }) => ({
   search: css`
@@ -77,6 +79,8 @@ interface ModelSyncModalProps {
   baseUrl: string;
   apiKey: string;
   api: string;
+  providerId?: string;
+  builtIn?: boolean;
   /** 已在当前供应商模型列表中的 id：标记「已添加」且不可重复勾选。 */
   existingIds: string[];
   onClose: () => void;
@@ -92,6 +96,8 @@ export function ModelSyncModal({
   baseUrl,
   apiKey,
   api,
+  providerId,
+  builtIn,
   existingIds,
   onClose,
   onConfirm,
@@ -113,8 +119,18 @@ export function ModelSyncModal({
     setSearch('');
     void (async () => {
       try {
-        const list = await pi.fetchProviderModels(baseUrl, apiKey, api);
-        if (alive) setIds(list);
+        const preset = providerId ? PROVIDER_PRESETS.find((item) => item.id === providerId) : undefined;
+        if (preset?.modelSource === 'manual') {
+          if (alive) setError('该供应商的模型目录由 Pi/网关动态管理，请手动添加模型 ID');
+          return;
+        }
+        if (builtIn || preset?.modelSource === 'registry') {
+          const list = parseModels(await pi.listModelsGlobal()).filter((model: ModelInfo) => model.provider === providerId);
+          if (alive) setIds(list.map((model) => model.id));
+        } else {
+          const list = await pi.fetchProviderModels(baseUrl, apiKey, api);
+          if (alive) setIds(list);
+        }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -124,7 +140,7 @@ export function ModelSyncModal({
     return () => {
       alive = false;
     };
-  }, [open, baseUrl, apiKey, api]);
+  }, [open, baseUrl, apiKey, api, providerId, builtIn]);
 
   const existing = useMemo(() => new Set(existingIds), [existingIds]);
   const filtered = useMemo(() => {

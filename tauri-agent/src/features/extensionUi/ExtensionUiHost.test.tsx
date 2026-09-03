@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 
 const { setStatus, goalSetGoal, setServers, msg, setRequest } = vi.hoisted(() => ({
   setStatus: vi.fn(),
@@ -8,11 +9,14 @@ const { setStatus, goalSetGoal, setServers, msg, setRequest } = vi.hoisted(() =>
   msg: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   setRequest: vi.fn(),
 }));
-let emit: (e: unknown) => void = () => {};
+const uiListeners = new Set<(e: unknown) => void>();
+let emit: (e: unknown) => void = (e) => {
+  for (const listener of uiListeners) listener(e);
+};
 vi.mock('../../lib/pi', () => ({
   onPiUiRequest: (h: (e: unknown) => void) => {
-    emit = h;
-    return Promise.resolve(() => {});
+    uiListeners.add(h);
+    return Promise.resolve(() => uiListeners.delete(h));
   },
 }));
 vi.mock('antd', async (importOriginal) => {
@@ -37,6 +41,7 @@ import { useImMessagesStore } from '../../stores/imMessagesStore';
 
 afterEach(() => {
   cleanup();
+  uiListeners.clear();
   setStatus.mockClear();
   goalSetGoal.mockClear();
   setServers.mockClear();
@@ -47,6 +52,18 @@ afterEach(() => {
 });
 
 describe('ExtensionUiHost', () => {
+  it('StrictMode 双挂载不会重复消费 notify', async () => {
+    render(
+      <StrictMode>
+        <ExtensionUiHost />
+      </StrictMode>,
+    );
+    // onPiUiRequest 的 unlisten 是异步返回，等待两个 effect 的注册/清理完成。
+    await Promise.resolve();
+    emit({ workspace: '/ws', request: { id: 'n0', method: 'notify', message: '只提示一次' } });
+    expect(msg.info).toHaveBeenCalledTimes(1);
+  });
+
   it('routes select to the uiPromptStore without a modal', () => {
     render(<ExtensionUiHost />);
     const request = { id: 'u1', method: 'select', title: '允许？', options: ['允许', '拒绝'] };

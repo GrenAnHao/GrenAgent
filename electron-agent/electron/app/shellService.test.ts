@@ -32,4 +32,18 @@ describe('ShellService', () => {
     expect(emit).toHaveBeenCalledWith('shell-output', { type: 'exit', exit_code: 0, session_id });
     expect(instance.kill).toHaveBeenCalledOnce();
   });
+
+  it('stopAll kills every open session and clears the session map', async () => {
+    const instances = [pty(), pty()];
+    let index = 0;
+    const spawn = vi.fn(() => instances[index++]);
+    const service = new ShellService(vi.fn(), spawn, async (path) => path);
+    const first = await service.start();
+    await service.start();
+
+    await service.stopAll();
+    expect(instances[0].kill).toHaveBeenCalledOnce();
+    expect(instances[1].kill).toHaveBeenCalledOnce();
+    await expect(service.write(first.session_id, 'x')).rejects.toThrow('shell session not found');
+  });
 });

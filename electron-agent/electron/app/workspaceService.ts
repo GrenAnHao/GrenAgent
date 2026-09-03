@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -15,11 +16,16 @@ export class WorkspaceService {
   private readonly worksDir: string;
   private readonly sessionsDir: string;
   private readonly drafts = new Set<string>();
+  private closeWorkspace?: (workspace: string) => Promise<void>;
 
   constructor(agentDir: string) {
     this.agentDir = agentDir;
     this.worksDir = join(agentDir, 'works');
     this.sessionsDir = join(agentDir, 'sessions');
+  }
+
+  setWorkspaceCloser(closeWorkspace: (workspace: string) => Promise<void>): void {
+    this.closeWorkspace = closeWorkspace;
   }
 
   async getWorksDir(): Promise<string> {
@@ -83,6 +89,7 @@ export class WorkspaceService {
     try {
       const target = displayPath(await realpath(workspace));
       if (!isDirectChild(worksDir, target)) throw new Error('not a conversation directory');
+      await this.closeWorkspace?.(target);
       await this.deleteSessionsForWorkspace(workspace);
       await rm(target, { recursive: true, force: true });
       this.drafts.delete(normalizePath(target));
@@ -131,20 +138,89 @@ async function collectJsonlFiles(directory: string): Promise<string[]> {
 
 async function readSession(path: string): Promise<SessionInfo | null> {
   const firstLine = (await readFile(path, 'utf8')).split(/\r?\n/, 1)[0];
-  let header: Record<string, unknown>;
+  let header: Record<string, unknown> | undefined;
   try {
     header = JSON.parse(firstLine) as Record<string, unknown>;
   } catch {
+    /* not JSON — fall through to path-based inference */
+  }
+
+  if (header?.type === 'session') {
+    return {
+      id: typeof header.id === 'string' ? header.id : '',
+      path,
+      cwd: typeof header.cwd === 'string' ? header.cwd : null,
+      timestamp: typeof header.timestamp === 'string' ? header.timestamp : null,
+      name: null,
+    };
+  }
+
+  // pi sidecar no longer writes a session header; infer metadata from path.
+  const cwd = inferCwdFromSessionPath(path);
+  if (!cwd) return null;
+  const timestamp = inferTimestampFromFilename(path);
+  const id = inferIdFromFilename(path);
+  return { id, path, cwd, timestamp, name: null };
+}
+
+/** Session files live at `<sessionsDir>/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.
+ *  The encoded cwd replaces `:` and every path separator with `-`, then wraps the
+ *  result in `--` (e.g. `C:\Users\foo` → `--C--Users-foo--`). Literal `-` in the
+ *  original path is also `-`, so decoding is ambiguous; resolve it greedily by
+ *  validating each guessed separator boundary against the filesystem. */
+function inferCwdFromSessionPath(sessionFilePath: string): string | null {
+  const parent = displayPath(join(sessionFilePath, '..')).replace(/\\/g, '/').replace(/\/+$/, '');
+  const encoded = parent.split('/').pop();
+  if (!encoded || !encoded.startsWith('--') || !encoded.endsWith('--')) return null;
+  return decodeEncodedCwd(encoded.slice(2, -2));
+}
+
+function decodeEncodedCwd(inner: string): string | null {
+  let root: string;
+  let rest: string;
+  if (/^[A-Za-z]-/.test(inner)) {
+    root = `${inner[0]}:\\`;
+    rest = inner.slice(2);
+    if (rest.startsWith('-')) rest = rest.slice(1);
+  } else if (inner.startsWith('-')) {
+    root = '/';
+    rest = inner.slice(1);
+  } else {
     return null;
   }
-  if (header.type !== 'session') return null;
-  return {
-    id: typeof header.id === 'string' ? header.id : '',
-    path,
-    cwd: typeof header.cwd === 'string' ? header.cwd : null,
-    timestamp: typeof header.timestamp === 'string' ? header.timestamp : null,
-    name: null,
+  const sep = root === '/' ? '/' : '\\';
+  const attach = (prefix: string, part: string) => (prefix.endsWith(sep) ? prefix + part : prefix + sep + part);
+  // Backtrack over each `-` (separator vs literal dash), validating against the
+  // filesystem. Trying the whole remainder as one segment first prefers literal
+  // dashes (`src-tauri` wins over `src/tauri` when both exist).
+  const solve = (prefix: string, s: string): string | null => {
+    if (!s) return null;
+    if (existsSync(attach(prefix, s))) return attach(prefix, s);
+    for (let i = 1; i < s.length; i++) {
+      if (s[i] !== '-') continue;
+      const candidate = attach(prefix, s.slice(0, i));
+      if (!existsSync(candidate)) continue;
+      const solved = solve(candidate, s.slice(i + 1));
+      if (solved) return solved;
+    }
+    return null;
   };
+  return solve(root, rest);
+}
+
+function inferTimestampFromFilename(sessionFilePath: string): string | null {
+  const base = sessionFilePath.replace(/\\/g, '/').split('/').pop() ?? '';
+  const match = base.match(/^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/);
+  if (!match) return null;
+  // Filename uses `-` where ISO timestamp uses `:`: `2026-08-28T16-27-36-994Z` → `2026-08-28T16:27:36.994Z`
+  const raw = match[1];
+  return raw.slice(0, 13) + ':' + raw.slice(14, 16) + ':' + raw.slice(17, 19) + '.' + raw.slice(20, 23) + 'Z';
+}
+
+function inferIdFromFilename(sessionFilePath: string): string {
+  const base = sessionFilePath.replace(/\\/g, '/').split('/').pop() ?? '';
+  const match = base.match(/_([^.]+)\.jsonl$/);
+  return match ? match[1] : '';
 }
 
 function isDirectChild(parent: string, candidate: string): boolean {

@@ -4,12 +4,16 @@ import { ChevronDown, ChevronRight, PencilLine, RefreshCw, SlidersHorizontal, Tr
 import { useState } from 'react';
 import { transportOf, type McpConfig } from './mcpConfig';
 import { getToolPerm, shortToolName, type Perm } from './mcpPolicy';
+import type { McpConfigScope } from '../../lib/pi';
 
 interface McpServerCardProps {
   name: string;
   config: McpConfig;
   enabled: boolean;
+  scope?: McpConfigScope;
   cachedTools?: string[];
+  runtimeStatus?: 'connecting' | 'connected' | 'failed';
+  runtimeToolNames?: string[];
   probing?: boolean;
   probeError?: string;
   policyRaw?: Record<string, unknown>;
@@ -27,14 +31,20 @@ const PERM_OPTIONS = [
   { label: '禁用', value: 'disabled' },
 ];
 
-function statusText(probing: boolean, probeError: string | undefined, count: number): string {
+function statusText(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: McpServerCardProps['runtimeStatus']): string {
+  if (runtimeStatus === 'connecting') return '连接中…';
+  if (runtimeStatus === 'failed') return '连接失败';
+  if (runtimeStatus === 'connected') return count > 0 ? `${count} 工具` : '已连接';
   if (probing) return '探测中…';
   if (probeError) return '连接失败';
   if (count > 0) return `${count} 工具`;
   return '未探测';
 }
 
-function statusColor(probing: boolean, probeError: string | undefined, count: number): string {
+function statusColor(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: McpServerCardProps['runtimeStatus']): string {
+  if (runtimeStatus === 'connecting') return cssVar.colorWarning;
+  if (runtimeStatus === 'failed') return cssVar.colorError;
+  if (runtimeStatus === 'connected') return cssVar.colorSuccess;
   if (probing) return cssVar.colorWarning;
   if (probeError) return cssVar.colorError;
   if (count > 0) return cssVar.colorSuccess;
@@ -146,11 +156,12 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export function McpServerCard({
-  name, config, enabled, cachedTools = [], probing = false, probeError, policyRaw = {},
+  name, config, enabled, scope, cachedTools = [], runtimeStatus, runtimeToolNames, probing = false, probeError, policyRaw = {},
   onToggle, onEdit, onDelete, onProbe, onPermChange, onOpenRules,
 }: McpServerCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const color = statusColor(probing, probeError, cachedTools.length);
+  const tools = runtimeToolNames ?? cachedTools;
+  const color = statusColor(probing, probeError, tools.length, runtimeStatus);
   return (
     <div className={styles.wrap} data-testid={`mcp-server-${name}`}>
       <div className={`${styles.card} ${enabled ? '' : styles.disabled}`}>
@@ -165,8 +176,9 @@ export function McpServerCard({
         <span className={styles.dot} style={{ background: color }} />
         <span className={styles.name}>{name}</span>
         <span className={styles.pill}>{transportOf(config)}</span>
+        {scope ? <span className={styles.pill}>{scope === 'global' ? '全局' : scope === 'project' ? '项目' : '应用'}</span> : null}
         <span className={styles.grow} />
-        <span className={styles.status} style={{ color }}>{statusText(probing, probeError, cachedTools.length)}</span>
+        <span className={styles.status} style={{ color }}>{statusText(probing, probeError, tools.length, runtimeStatus)}</span>
         <span className={styles.ops}>
           <button
             type="button"
@@ -189,10 +201,10 @@ export function McpServerCard({
       </div>
       {expanded ? (
         <div className={styles.tools}>
-          {cachedTools.length === 0 ? (
+          {tools.length === 0 ? (
             <div className={styles.hint}>{probeError ? `连接失败：${probeError}` : '点右侧「测试连接」获取工具列表'}</div>
           ) : (
-            cachedTools.map((full) => (
+            tools.map((full) => (
               <div key={full} className={styles.toolRow} data-testid={`mcp-tool-${full}`}>
                 <span className={styles.toolName} title={full}>{shortToolName(full)}</span>
                 <Segmented

@@ -242,6 +242,61 @@ describe('createAgentStore', () => {
     expect(store.useStore.getState().messages[0].kind).toBe('user');
   });
 
+  it('强制重载不会覆盖等待中的实时事件队列', () => {
+    store = createAgentStore('.');
+    store.loadMessages(
+      [
+        { role: 'user', content: 'previous' },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+      ] as never,
+      { force: true, sessionPath: '/s/live.jsonl' },
+    );
+    store.pushUserMessage('current');
+    store.useStore.setState({ awaitingResponse: true });
+
+    // 事件已从 sidecar 到达，但还没等到下一帧 flush；此时 App 的后台 getMessages
+    // 若强制重载，会在旧实现中 clearQueue 并把实时轮次整个抹掉。
+    emit({ type: 'agent_start' });
+    emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    emit({
+      type: 'tool_execution_start',
+      toolCallId: 'live-tool',
+      toolName: 'bash',
+      args: { command: 'echo live' },
+    });
+    store.loadMessages(
+      [
+        { role: 'user', content: 'previous' },
+        { role: 'assistant', content: [{ type: 'text', text: 'new snapshot' }] },
+      ] as never,
+      { force: true, sessionPath: '/s/live.jsonl' },
+    );
+    flushRAF();
+
+    const state = store.useStore.getState();
+    expect(state.isStreaming).toBe(true);
+    expect(state.messages.some((m) => m.kind === 'tool' && m.toolCallId === 'live-tool')).toBe(true);
+  });
+
+  it('强制切换到另一会话仍会加载目标快照', () => {
+    store = createAgentStore('.');
+    store.loadMessages(
+      [{ role: 'user', content: 'old session' }] as never,
+      { force: true, sessionPath: '/s/old.jsonl' },
+    );
+    store.useStore.setState({ isStreaming: true });
+
+    store.loadMessages(
+      [{ role: 'assistant', content: [{ type: 'text', text: 'other session' }] }] as never,
+      { force: true, sessionPath: '/s/other.jsonl' },
+    );
+
+    const state = store.useStore.getState();
+    expect(state.isStreaming).toBe(false);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].kind).toBe('assistant');
+  });
+
   it('reset 丢弃尚未应用的排队事件', () => {
     store = createAgentStore('.');
     emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } });

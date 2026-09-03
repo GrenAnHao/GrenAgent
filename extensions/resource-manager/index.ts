@@ -24,10 +24,17 @@ const skillParams = Type.Object({
   ]), description: Type.Optional(Type.String()), replace: Type.Optional(Type.Boolean()),
 });
 
+const resourceGuideline = [
+  "当用户要求添加、安装或配置 MCP server 时，必须调用 add_mcp_server；不要使用 write、edit 或 bash 手动修改 mcp.json。",
+  "当用户要求添加或安装 Skill 时，必须调用 add_skill；不要使用 write、edit 或 bash 手动创建 ~/.agents/skills 下的文件。",
+];
+
 export default function resourceManager(pi: ExtensionAPI) {
   pi.registerTool({
     name: "add_mcp_server", label: "Add MCP server",
-    description: "Add a local MCP server configuration after mandatory user confirmation.",
+    description: "Add an MCP server configuration through the managed resource store. Use this whenever the user asks to add, install, or configure an MCP server; never edit mcp.json manually.",
+    promptSnippet: "添加 MCP server（自动探测、确认后写入分层配置）",
+    promptGuidelines: resourceGuideline,
     parameters: mcpParams,
     async execute(_id, raw, _signal, _update, ctx) {
       const input = raw as AddMcpServerInput;
@@ -40,19 +47,28 @@ export default function resourceManager(pi: ExtensionAPI) {
       if (!ok) return result("用户取消添加 MCP", { status: "cancelled", resource: "mcp" });
       const secrets = Object.values(input.env ?? {});
       try {
+        ctx.ui.notify("正在探测 MCP server…");
         const probe = await probeServer({ name: input.name, transport: input.transport, command: input.command, args: input.args, env: input.env, cwd: input.cwd, url: input.url });
-        if (!probe.ok) return result("MCP 探测失败: " + redactSecrets(probe.error ?? "unknown error", secrets), { status: "error", resource: "mcp", error: redactSecrets(probe.error ?? "unknown error", secrets) });
+        if (!probe.ok) {
+          const error = redactSecrets(probe.error ?? "unknown error", secrets);
+          ctx.ui.notify("MCP 探测失败: " + error, "error");
+          return result("MCP 探测失败: " + error, { status: "error", resource: "mcp", error });
+        }
         const path = await writeMcpServer(input, ctx.cwd, undefined, getConfig("MCP_SERVERS") ?? "");
+        ctx.ui.notify("MCP " + input.name + " 已添加");
         return result("已添加 MCP " + input.name, { status: "saved", resource: "mcp", name: input.name, scope: input.scope, path, connection: "connected", tools: probe.toolNames });
       } catch (e) {
         const message = redactSecrets(e instanceof Error ? e.message : String(e), secrets);
+        ctx.ui.notify("添加 MCP 失败: " + message, "error");
         return result("添加 MCP 失败: " + message, { status: "error", resource: "mcp", error: message });
       }
     },
   });
   pi.registerTool({
     name: "add_skill", label: "Add Skill",
-    description: "Install a local Skill from content, a Markdown file, or a directory after mandatory user confirmation.",
+    description: "Install a Skill through the managed skill store. Use this whenever the user asks to add or install a Skill; never create ~/.agents/skills files manually.",
+    promptSnippet: "安装 Skill（确认后写入托管目录）",
+    promptGuidelines: resourceGuideline,
     parameters: skillParams,
     async execute(_id, raw, _signal, _update, ctx) {
       const input = raw as AddSkillInput;

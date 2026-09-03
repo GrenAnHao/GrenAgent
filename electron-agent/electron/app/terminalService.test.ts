@@ -16,4 +16,14 @@ describe('TerminalService', () => {
     await expect(service.execute('powershell', [])).rejects.toThrow('not allowed');
     await expect(service.execute('C:\\evil\\hack.exe', [])).rejects.toThrow('not allowed');
   });
+
+  it('registers spawned children with the process registry', async () => {
+    const registry = { register: vi.fn() };
+    const service = new TerminalService(vi.fn(), registry as never);
+    await service.execute(process.execPath, ['-e', 'console.log("registered")']);
+    expect(registry.register).toHaveBeenCalledWith(
+      expect.objectContaining({ pid: expect.any(Number) }),
+      expect.stringContaining('terminal:'),
+    );
+  });
 });

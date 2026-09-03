@@ -14,6 +14,7 @@ import { ModelSyncModal } from './ModelSyncModal';
 const API_OPTIONS: { value: ApiType; label: string }[] = [
   { value: 'openai-completions', label: 'OpenAI Completions 兼容' },
   { value: 'openai-responses', label: 'OpenAI Responses' },
+  { value: 'openai-codex-responses', label: 'OpenAI Codex Responses' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
   { value: 'google-generative-ai', label: 'Google Generative AI' },
 ];
@@ -725,17 +726,15 @@ export function ProvidersSettings() {
                       <Icon icon={Plus} size={14} />
                       添加模型
                     </button>
-                    {!active.builtIn && (
-                      <button
-                        type="button"
-                        data-testid="prov-sync-models"
-                        className={styles.addBtn}
-                        onClick={() => setSyncOpen(true)}
-                      >
-                        <Icon icon={RefreshCw} size={14} />
-                        同步模型
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      data-testid="prov-sync-models"
+                      className={styles.addBtn}
+                      onClick={() => setSyncOpen(true)}
+                    >
+                      <Icon icon={RefreshCw} size={14} />
+                      同步模型
+                    </button>
                   </div>
                 </div>
 
@@ -751,12 +750,14 @@ export function ProvidersSettings() {
           </div>
         </div>
       </div>
-      {active && !active.builtIn ? (
+      {active ? (
         <ModelSyncModal
           open={syncOpen}
           baseUrl={active.baseUrl ?? ''}
           apiKey={active.apiKey ?? ''}
           api={active.api ?? 'openai-completions'}
+          providerId={active.id}
+          builtIn={active.builtIn}
           existingIds={models.map((m) => m.id).filter(Boolean)}
           onClose={() => setSyncOpen(false)}
           onConfirm={addSyncedModels}

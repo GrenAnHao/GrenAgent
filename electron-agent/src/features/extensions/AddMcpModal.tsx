@@ -30,6 +30,7 @@ const EMPTY_FORM: McpFormValues = {
   command: '',
   args: '',
   env: [],
+  cwd: '',
   url: '',
   auth: 'none',
   token: '',
@@ -254,6 +255,16 @@ export function AddMcpModal({
                   keyPlaceholder="VAR_NAME"
                   addText="添加变量"
                   testId="mcp-env"
+                />
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label}>工作目录 cwd</label>
+                <input
+                  className={styles.input}
+                  data-testid="mcp-cwd"
+                  value={form.cwd ?? ''}
+                  onChange={(e) => set('cwd', e.target.value)}
+                  placeholder="D:/path/to/server"
                 />
               </div>
             </>

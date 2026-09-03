@@ -19,8 +19,8 @@ export default function (pi: ExtensionAPI) {
 
   const makeAsk = (ctx: ExtensionContext): AskFn | undefined => {
     const model = resolveModel(
-      ctx.model as never,
-      (ctx.modelRegistry ?? { find: () => undefined }) as never,
+      ctx.model,
+      ctx.modelRegistry ?? { find: () => undefined },
       stateModel(),
     );
     if (!model) return undefined;

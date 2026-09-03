@@ -2,7 +2,7 @@ import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mcpConfigPaths, readLayeredMcpServers, writeMcpServer } from "./mcp-store.js";
+import { mcpConfigPaths, readLayeredMcpServers, readLayeredMcpServersSync, writeMcpServer } from "./mcp-store.js";
 import { installSkill } from "./skill-store.js";
 
 describe("resource stores", () => {
@@ -14,6 +14,20 @@ describe("resource stores", () => {
     const servers = await readLayeredMcpServers(workspace, "", home);
     expect(servers.find((s) => s.name === "same")?.command).toBe("project");
     expect(JSON.parse(await readFile(mcpConfigPaths(workspace, home).global, "utf8")).mcpServers.same.command).toBe("global");
+  });
+
+  it("lets a higher-priority disabled entry mask the same server from lower layers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "resource-home-"));
+    const workspace = await mkdtemp(join(tmpdir(), "resource-ws-"));
+    await writeMcpServer({ name: "same", scope: "global", transport: "stdio", command: "global" }, workspace, home);
+    const projectPath = mcpConfigPaths(workspace, home).project;
+    await mkdir(join(workspace, ".pi"));
+    await writeFile(projectPath, JSON.stringify({ disabledMcpServers: { same: { command: "project" } } }));
+
+    const servers = await readLayeredMcpServers(workspace, "", home);
+
+    expect(servers.some((server) => server.name === "same")).toBe(false);
+    expect(readLayeredMcpServersSync(workspace, "", home).some((server) => server.name === "same")).toBe(false);
   });
 
   it("installs inline skills with generated frontmatter", async () => {

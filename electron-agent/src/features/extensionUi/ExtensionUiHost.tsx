@@ -86,7 +86,9 @@ export function ExtensionUiHost() {
           } catch {
             servers = [];
           }
-          useMcpStatusStore.getState().setServers(servers);
+          const statusStore = useMcpStatusStore.getState();
+          if (statusStore.setWorkspaceServers) statusStore.setWorkspaceServers(e.workspace, servers);
+          else statusStore.setServers(servers);
         } else if (r.statusKey === 'wechat') {
           try {
             const parsed = typeof r.statusText === 'string' ? (JSON.parse(r.statusText) as WechatStatus) : null;

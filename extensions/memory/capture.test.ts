@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { LayeredMemoryCapture, type CaptureClient } from "./capture.js";
 
 const scope = { userId: "local", workspace: "/repo", sessionId: "s1" };
+// 只用 model.id 与 modelRegistry.find，按真实参数类型收敛，不复制 pi 的完整结构。
 const ctx = {
   ...scope,
   model: { id: "current" },
   modelRegistry: { find: vi.fn() },
   signal: undefined,
-};
+} as unknown as Parameters<LayeredMemoryCapture["enqueue"]>[0];
 
 function client(): CaptureClient & { calls: Array<{ method: string; params: Record<string, unknown> }> } {
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];

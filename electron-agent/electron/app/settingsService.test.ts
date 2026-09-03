@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,6 +17,70 @@ async function createService(): Promise<{ service: SettingsService; directory: s
 }
 
 describe('SettingsService', () => {
+  it('reads MCP settings persisted by Tauri in app-state.json', async () => {
+    const { service, directory } = await createService();
+    await writeFile(join(directory, 'app-state.json'), JSON.stringify({
+      settings: {
+        MCP_SERVERS: JSON.stringify({ mcpServers: {
+          context7: { command: 'npx' },
+          deepwiki: { command: 'npx' },
+        } }),
+        MCP_SERVERS_DISABLED: '',
+      },
+    }));
+
+    await expect(service.getAll()).resolves.toMatchObject({
+      MCP_SERVERS: expect.stringContaining('context7'),
+      MCP_SERVERS_DISABLED: '',
+    });
+  });
+
+  it('updates the shared app-state settings without discarding Tauri state', async () => {
+    const { service, directory } = await createService();
+    await writeFile(join(directory, 'app-state.json'), JSON.stringify({
+      recent_workspaces: ['C:\\workspace'],
+      settings: { MCP_SERVERS: 'old' },
+    }));
+
+    await service.replace({ MCP_SERVERS: 'new' });
+
+    const state = JSON.parse(await readFile(join(directory, 'app-state.json'), 'utf8')) as {
+      recent_workspaces: string[];
+      settings: Record<string, string>;
+    };
+    expect(state.recent_workspaces).toEqual(['C:\\workspace']);
+    expect(state.settings.MCP_SERVERS).toBe('new');
+  });
+
+  it('falls back to the legacy data dir app-state when the current one is empty', async () => {
+    const { directory } = await createService();
+    const legacyDir = await mkdtemp(join(tmpdir(), 'electron-agent-settings-legacy-'));
+    directories.push(legacyDir);
+    await writeFile(join(legacyDir, 'app-state.json'), JSON.stringify({
+      settings: { MCP_SERVERS: JSON.stringify({ mcpServers: { context7: { command: 'npx' } } }) },
+    }));
+
+    await expect(new SettingsService(directory, [legacyDir]).getAll()).resolves.toMatchObject({
+      MCP_SERVERS: expect.stringContaining('context7'),
+    });
+  });
+
+  it('prefers current-dir settings over the legacy fallback', async () => {
+    const { directory } = await createService();
+    const legacyDir = await mkdtemp(join(tmpdir(), 'electron-agent-settings-legacy-'));
+    directories.push(legacyDir);
+    await writeFile(join(legacyDir, 'app-state.json'), JSON.stringify({
+      settings: { MCP_SERVERS: JSON.stringify({ mcpServers: { legacy: { command: 'npx' } } }) },
+    }));
+
+    const service = new SettingsService(directory, [legacyDir]);
+    await service.replace({ MCP_SERVERS: JSON.stringify({ mcpServers: { current: { command: 'npx' } } }) });
+
+    await expect(service.getAll()).resolves.toMatchObject({
+      MCP_SERVERS: expect.stringContaining('current'),
+    });
+  });
+
   it('returns persisted settings after a restart', async () => {
     const { service, directory } = await createService();
     await service.replace({ OPENAI_API_KEY: 'sk-test', EMPTY: '  ' });

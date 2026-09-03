@@ -2,6 +2,7 @@ pub mod agent;
 pub mod create;
 pub mod files;
 pub mod git;
+pub mod mcp_config;
 pub mod mcp_policy;
 pub mod providers;
 pub mod sessions;

@@ -14,7 +14,7 @@ export default function (pi: ExtensionAPI) {
 
   // getBranch() 返回 SessionEntry[]；reconstructFromEntries 只读取 type/message 子集。
   const reconstruct = (ctx: ExtensionContext) => {
-    state = reconstructFromEntries(ctx.sessionManager.getBranch() as never);
+    state = reconstructFromEntries(ctx.sessionManager.getBranch());
   };
   pi.on("session_start", async (_event, ctx) => reconstruct(ctx));
   pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));

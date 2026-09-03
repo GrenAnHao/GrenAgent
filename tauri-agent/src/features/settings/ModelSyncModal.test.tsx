@@ -2,10 +2,11 @@ import type { ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { fetchProviderModels } = vi.hoisted(() => ({
+const { fetchProviderModels, listModelsGlobal } = vi.hoisted(() => ({
   fetchProviderModels: vi.fn(),
+  listModelsGlobal: vi.fn(),
 }));
-vi.mock('../../lib/pi', () => ({ pi: { fetchProviderModels } }));
+vi.mock('../../lib/pi', () => ({ pi: { fetchProviderModels, listModelsGlobal } }));
 
 // 把 Modal 简化为：open 时渲染 children + 一个「确认」按钮（触发 onOk）。
 vi.mock('@lobehub/ui', () => ({
@@ -40,6 +41,28 @@ afterEach(() => {
 });
 
 describe('ModelSyncModal', () => {
+  it('uses the Pi registry for a built-in provider', async () => {
+    listModelsGlobal.mockResolvedValue([
+      { provider: 'openai-codex', id: 'gpt-5.5' },
+      { provider: 'openai', id: 'gpt-5.5' },
+    ]);
+    render(
+      <ModelSyncModal
+        open
+        baseUrl=""
+        apiKey=""
+        api="openai-codex-responses"
+        providerId="openai-codex"
+        builtIn
+        existingIds={[]}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText('gpt-5.5')).toBeTruthy();
+    expect(fetchProviderModels).not.toHaveBeenCalled();
+  });
+
   it('fetches models, marks existing, filters, selects and confirms', async () => {
     fetchProviderModels.mockResolvedValue(['gpt-4o', 'gpt-4o-mini', 'claude-3']);
     const onConfirm = vi.fn();

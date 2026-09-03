@@ -1,1 +1,1 @@
-export { askLlm, parseJsonLoose, resolveModel } from '../_shared/llm.js';
+export { askLlm, parseJsonLoose, resolveModel, type AskFn } from '../_shared/llm.js';

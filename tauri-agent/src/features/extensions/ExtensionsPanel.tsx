@@ -1,20 +1,17 @@
 import { Button, Flexbox } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Boxes, Plus, ScrollText, Sparkles } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
+import { pi, type McpConfigScope } from '../../lib/pi';
+import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useMcpStatusStore } from '../../stores/mcpStatusStore';
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
 import { McpServerCard } from './McpServerCard';
 import { NativeSkillsPanel } from './NativeSkillsPanel';
 import {
-  listEntries,
-  mergeImport,
-  removeServer,
-  setEnabled,
-  upsertServer,
-  type Collections,
   type McpConfig,
   type McpEntry,
 } from './mcpConfig';
@@ -148,23 +145,41 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export function ExtensionsPanel() {
+  const { workspace } = useAgentStoreContext();
   const { values, setValue, persist, loading, error } = useSettingsForm();
-  const cols: Collections = {
-    enabled: values.MCP_SERVERS ?? '',
-    disabled: values.MCP_SERVERS_DISABLED ?? '',
-  };
-  const entries = listEntries(cols).sort((a, b) => Number(b.enabled) - Number(a.enabled));
+  const [managedEntries, setManagedEntries] = useState<Array<McpEntry & { scope: McpConfigScope }>>([]);
+  const [mcpLoading, setMcpLoading] = useState(true);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const entries = [...managedEntries].sort((a, b) => Number(b.enabled) - Number(a.enabled));
+  const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? []);
   const existingNames = entries.map((entry) => entry.name);
 
   const [tab, setTab] = useState<'mcp' | 'skills'>('mcp');
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<McpEntry | undefined>(undefined);
+  const [editing, setEditing] = useState<(McpEntry & { scope: McpConfigScope }) | undefined>(undefined);
   const touchedRef = useRef(false);
   const [policyRaw, setPolicyRaw] = useState<Record<string, unknown>>({});
   const [auditOpen, setAuditOpen] = useState(false);
   const [rulesTarget, setRulesTarget] = useState<string | undefined>(undefined);
   const [toolsCache, setToolsCache] = useState<Record<string, CacheEntry>>({});
   const [probing, setProbing] = useState<Set<string>>(new Set());
+
+  const reloadMcpConfigs = useCallback(async () => {
+    setMcpLoading(true);
+    setMcpError(null);
+    try {
+      const next = await pi.listMcpConfigs(workspace);
+      setManagedEntries(next.map((entry) => ({ ...entry, config: entry.config as McpConfig })));
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMcpLoading(false);
+    }
+  }, [workspace]);
+
+  useEffect(() => {
+    void reloadMcpConfigs();
+  }, [reloadMcpConfigs]);
 
   const markChanged = () => {
     touchedRef.current = true;
@@ -213,6 +228,7 @@ export function ExtensionsPanel() {
   };
 
   useEffect(() => {
+    if (mcpLoading) return;
     let cancelled = false;
     void (async () => {
       let cache: Record<string, CacheEntry> = {};
@@ -223,10 +239,7 @@ export function ExtensionsPanel() {
       }
       if (cancelled) return;
       setToolsCache(cache);
-      const pending = listEntries({
-        enabled: values.MCP_SERVERS ?? '',
-        disabled: values.MCP_SERVERS_DISABLED ?? '',
-      }).filter((entry) => entry.enabled && !cache[entry.name]);
+      const pending = entries.filter((entry) => entry.enabled && !cache[entry.name]);
       for (const entry of pending) {
         if (cancelled) return;
         await probeOne(entry.name, entry.config);
@@ -236,7 +249,7 @@ export function ExtensionsPanel() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [mcpLoading]);
 
   const persistRef = useRef(persist);
   persistRef.current = persist;
@@ -244,20 +257,44 @@ export function ExtensionsPanel() {
     if (loading || !touchedRef.current) return;
     const timer = window.setTimeout(() => void persistRef.current(), 600);
     return () => window.clearTimeout(timer);
-  }, [values.MCP_SERVERS, values.MCP_SERVERS_DISABLED, values.SKILLS_DISABLED, values.PI_RELOAD_REV, loading]);
+  }, [values.SKILLS_DISABLED, values.PI_RELOAD_REV, loading]);
 
-  const writeCols = (next: Collections) => {
-    setValue('MCP_SERVERS', next.enabled);
-    setValue('MCP_SERVERS_DISABLED', next.disabled);
-    touchedRef.current = true;
+  const runMcpMutation = async (operation: () => Promise<void>) => {
+    setMcpError(null);
+    try {
+      await operation();
+      await reloadMcpConfigs();
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
-  const handleSubmitForm = (entry: { name: string; config: McpConfig }, targetEnabled: boolean) =>
-    writeCols(upsertServer(cols, entry, targetEnabled ? 'enabled' : 'disabled'));
-  const handleSubmitImport = (servers: Array<{ name: string; config: McpConfig }>) =>
-    writeCols(mergeImport(cols, servers).cols);
-  const handleToggleMcp = (name: string, enabled: boolean) => writeCols(setEnabled(cols, name, enabled));
-  const handleDeleteMcp = (name: string) => {
-    if (window.confirm(`确认删除 MCP "${name}"？`)) writeCols(removeServer(cols, name));
+  const handleSubmitForm = (entry: { name: string; config: McpConfig }, targetEnabled: boolean) => {
+    const original = editing;
+    const scope = original?.scope ?? 'settings';
+    void runMcpMutation(async () => {
+      await pi.upsertMcpConfig(workspace, scope, entry.name, entry.config, targetEnabled);
+      if (original && original.name !== entry.name) {
+        await pi.removeMcpConfig(workspace, scope, original.name);
+      }
+    });
+  };
+  const handleSubmitImport = (servers: Array<{ name: string; config: McpConfig }>) => {
+    const known = new Set(existingNames);
+    void runMcpMutation(async () => {
+      for (const server of servers) {
+        if (!known.has(server.name)) {
+          await pi.upsertMcpConfig(workspace, 'settings', server.name, server.config, true);
+        }
+      }
+    });
+  };
+  const handleToggleMcp = (entry: McpEntry & { scope: McpConfigScope }, enabled: boolean) => {
+    void runMcpMutation(() => pi.upsertMcpConfig(workspace, entry.scope, entry.name, entry.config, enabled));
+  };
+  const handleDeleteMcp = (entry: McpEntry & { scope: McpConfigScope }) => {
+    if (window.confirm(`确认删除 MCP "${entry.name}"？`)) {
+      void runMcpMutation(() => pi.removeMcpConfig(workspace, entry.scope, entry.name));
+    }
   };
 
   return (
@@ -275,7 +312,7 @@ export function ExtensionsPanel() {
         </div>
       </div>
 
-      {error && <div className={styles.errorBar}>{error}</div>}
+      {(error || mcpError) && <div className={styles.errorBar}>{error || mcpError}</div>}
 
       <div className={styles.body}>
         <div className={styles.inner}>
@@ -319,7 +356,7 @@ export function ExtensionsPanel() {
             连接外部 MCP server，其工具以 <code className={styles.code}>mcp__server__tool</code> 暴露给 agent。点「测试连接」获取工具并配置权限（即时生效）。
           </div>
 
-          {entries.length === 0 ? (
+          {!mcpLoading && entries.length === 0 ? (
             <div className={styles.empty} data-testid="mcp-empty">
               <Boxes size={22} />
               <span>未配置 MCP server，点右上「添加 MCP」</span>
@@ -331,16 +368,19 @@ export function ExtensionsPanel() {
                 name={entry.name}
                 config={entry.config}
                 enabled={entry.enabled}
+                scope={entry.scope}
                 cachedTools={getCachedTools(toolsCache, entry.name)}
+                runtimeStatus={runtimeServers.find((server) => server.name === entry.name)?.status}
+                runtimeToolNames={runtimeServers.find((server) => server.name === entry.name)?.toolNames}
                 probing={probing.has(entry.name)}
                 probeError={getCacheEntry(toolsCache, entry.name)?.ok === false ? getCacheEntry(toolsCache, entry.name)?.error : undefined}
                 policyRaw={policyRaw}
-                onToggle={(enabled) => handleToggleMcp(entry.name, enabled)}
+                onToggle={(enabled) => handleToggleMcp(entry, enabled)}
                 onEdit={() => {
                   setEditing(entry);
                   setModalOpen(true);
                 }}
-                onDelete={() => handleDeleteMcp(entry.name)}
+                onDelete={() => handleDeleteMcp(entry)}
                 onProbe={() => void probeOne(entry.name, entry.config)}
                 onPermChange={onPermChange}
                 onOpenRules={(fullName) => setRulesTarget(fullName)}

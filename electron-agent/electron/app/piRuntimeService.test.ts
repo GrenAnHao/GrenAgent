@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { PiRuntimeService } from './piRuntimeService';
 
@@ -35,5 +38,56 @@ describe('PiRuntimeService', () => {
 
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ type: 'get_state' });
     expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent' });
+  });
+
+  it('routes extension-backed mode and approval changes through prompt commands', async () => {
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+
+    await expect(service.send('C:/work', 'agent_set_mode', { mode: 'plan' })).resolves.toEqual({
+      type: 'prompt',
+      message: '/mode plan',
+    });
+    await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toEqual({
+      type: 'prompt',
+      message: '/approval full',
+    });
+    await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toEqual({
+      type: 'prompt',
+      message: '/ctx-exclude 101',
+    });
+    await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toEqual({
+      type: 'prompt',
+      message: '/ctx-restore 101',
+    });
+  });
+
+  it('rewinds by resolving the message timestamp to an entry id before forking', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-runtime-'));
+    const sessionFile = join(root, 'session.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'root' }),
+      JSON.stringify({ type: 'message', id: 'entry-1', message: { role: 'user', timestamp: 100 } }),
+      JSON.stringify({ type: 'message', id: 'entry-2', message: { role: 'user', timestamp: 200 } }),
+    ].join('\n'));
+    const client = {
+      send: vi.fn(async (command: Record<string, unknown>) => {
+        if (command.type === 'get_state') return { sessionFile };
+        return command;
+      }),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+
+    try {
+      await expect(service.send('C:/work', 'agent_rewind_to', { timestamp: 200 })).resolves.toEqual({
+        type: 'fork',
+        entryId: 'entry-2',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

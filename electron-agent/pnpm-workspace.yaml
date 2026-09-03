@@ -1,0 +1,6 @@
+allowBuilds:
+  '@homebridge/node-pty-prebuilt-multiarch': true
+  '@lobehub/editor': true
+  electron: true
+  electron-winstaller: true
+  esbuild: true

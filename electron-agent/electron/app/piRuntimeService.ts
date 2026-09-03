@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import type { PiManager, PiProcessCommand } from '../pi/manager';
 
 type PiCommand = keyof typeof commandTypes;
@@ -12,11 +14,11 @@ const commandTypes = {
   agent_get_available_models: 'get_available_models',
   agent_set_thinking_level: 'set_thinking_level',
   agent_cycle_thinking_level: 'cycle_thinking_level',
-  agent_set_mode: 'set_mode',
-  agent_set_approval: 'set_approval',
-  agent_exclude_entry: 'exclude_entry',
-  agent_restore_entry: 'restore_entry',
-  agent_rewind_to: 'rewind_to',
+  agent_set_mode: 'prompt',
+  agent_set_approval: 'prompt',
+  agent_exclude_entry: 'prompt',
+  agent_restore_entry: 'prompt',
+  agent_rewind_to: 'fork',
   agent_compact: 'compact',
   agent_set_auto_compaction: 'set_auto_compaction',
   agent_abort_retry: 'abort_retry',
@@ -51,6 +53,7 @@ export interface PiRuntimeOptions {
   runtimeConfigPath?: string;
   agentDataEndpoint?: () => string | undefined;
   resolveWorkspace?: (workspace: string) => Promise<string>;
+  resolveEnv?: (workspace: string) => Promise<Record<string, string>>;
 }
 
 export class PiRuntimeService {
@@ -78,6 +81,26 @@ export class PiRuntimeService {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
     const client = await this.openClient(workspace);
+    if (command === 'agent_set_mode') {
+      return client.send({ type: 'prompt', message: `/mode ${String(args.mode ?? '')}` });
+    }
+    if (command === 'agent_set_approval') {
+      return client.send({ type: 'prompt', message: `/approval ${String(args.level ?? '')}` });
+    }
+    if (command === 'agent_exclude_entry') {
+      return client.send({ type: 'prompt', message: `/ctx-exclude ${String(args.timestamp ?? '')}` });
+    }
+    if (command === 'agent_restore_entry') {
+      return client.send({ type: 'prompt', message: `/ctx-restore ${String(args.timestamp ?? '')}` });
+    }
+    if (command === 'agent_rewind_to') {
+      const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
+      const sessionFile = state.sessionFile;
+      if (typeof sessionFile !== 'string' || !sessionFile) throw new Error('no active session file');
+      const entryId = await findEntryIdByTimestamp(sessionFile, args.timestamp);
+      if (!entryId) throw new Error(`no message with timestamp ${String(args.timestamp)} in session`);
+      return client.send({ type: 'fork', entryId });
+    }
     return client.send({ type, ...args });
   }
 
@@ -104,10 +127,38 @@ export class PiRuntimeService {
     const existing = this.options.manager.get(workspace);
     if (existing) return existing;
     const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
-    const env: Record<string, string> = { PI_PACKAGE_DIR: this.options.agentDir };
+    const env: Record<string, string> = {
+      ...(await this.options.resolveEnv?.(workspace) ?? {}),
+      PI_PACKAGE_DIR: this.options.agentDir,
+    };
     if (this.options.runtimeConfigPath) env.PI_RUNTIME_CONFIG = this.options.runtimeConfigPath;
     const endpoint = this.options.agentDataEndpoint?.();
     if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
     return this.options.manager.open(workspace, cwd, env);
   }
+}
+
+async function findEntryIdByTimestamp(sessionFile: string, timestamp: unknown): Promise<string | undefined> {
+  const reader = createInterface({ input: createReadStream(sessionFile), crlfDelay: Infinity });
+  let found: string | undefined;
+  try {
+    for await (const line of reader) {
+      if (!line.trim()) continue;
+      let entry: unknown;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!entry || typeof entry !== 'object') continue;
+      const value = entry as Record<string, unknown>;
+      const message = value.message;
+      if (value.type !== 'message' || !message || typeof message !== 'object') continue;
+      if ((message as Record<string, unknown>).timestamp !== timestamp) continue;
+      if (typeof value.id === 'string') found = value.id;
+    }
+  } finally {
+    reader.close();
+  }
+  return found;
 }

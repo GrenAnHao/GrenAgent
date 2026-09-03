@@ -473,6 +473,10 @@ const Workspace = memo(function Workspace() {
           if (selectTokenRef.current !== token) return;
           // 命中缓存且内容未变时 loadMessages 内部会跳过重渲染（见 agent store），不会闪动。
           store.loadMessages(messages, { force: true, sessionPath: path, uiHistory });
+        } catch (error) {
+          if (selectTokenRef.current === token) {
+            store.useStore.setState({ lastError: `切换会话失败：${error instanceof Error ? error.message : String(error)}` });
+          }
         } finally {
           if (selectTokenRef.current === token) setWorkspaceReady(true);
         }

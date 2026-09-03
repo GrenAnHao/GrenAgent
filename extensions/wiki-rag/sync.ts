@@ -61,7 +61,7 @@ export async function scanWorkspaceMarkdown(cwd: string): Promise<string[]> {
 }
 
 function defaultAsk(ctx: WikiContext): AskFn | undefined {
-  const model = resolveModel(ctx.model as never, (ctx.modelRegistry ?? { find: () => undefined }) as never, undefined);
+  const model = resolveModel(ctx.model, ctx.modelRegistry ?? { find: () => undefined }, undefined);
   return model ? (system, user) => askLlm(model, system, user, ctx.signal) : undefined;
 }
 

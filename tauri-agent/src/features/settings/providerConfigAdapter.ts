@@ -90,6 +90,7 @@ export function defaultThinkingLevelMap(api: string | undefined, modelId?: strin
       return GOOGLE_THINKING_MAP;
     case 'openai-completions':
     case 'openai-responses':
+    case 'openai-codex-responses':
       return OPENAI_THINKING_MAP;
     default:
       return undefined;

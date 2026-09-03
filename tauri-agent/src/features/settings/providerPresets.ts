@@ -1,8 +1,11 @@
 export type ApiType =
   | 'openai-completions'
   | 'openai-responses'
+  | 'openai-codex-responses'
   | 'anthropic-messages'
   | 'google-generative-ai';
+
+export type ProviderModelSource = 'registry' | 'remote' | 'manual';
 
 export interface ProviderPreset {
   /** 与 Pi provider id 一致（如 'openai'） */
@@ -13,6 +16,8 @@ export interface ProviderPreset {
   api: ApiType;
   /** Base URL 提示，仅用于旧配置迁移匹配（内置 provider 不允许改 Base URL） */
   baseUrlHint?: string;
+  /** 模型同步来源；旧预设默认按 Pi Registry 处理。 */
+  modelSource?: ProviderModelSource;
 }
 
 /**
@@ -53,4 +58,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'xiaomi-token-plan-cn', name: 'Xiaomi MiMo Token Plan (China)', api: 'openai-completions' },
   { id: 'xiaomi-token-plan-ams', name: 'Xiaomi MiMo Token Plan (Amsterdam)', api: 'openai-completions' },
   { id: 'xiaomi-token-plan-sgp', name: 'Xiaomi MiMo Token Plan (Singapore)', api: 'openai-completions' },
+  { id: 'baseten', name: 'Baseten', api: 'openai-completions' },
+  { id: 'github-copilot', name: 'GitHub Copilot', api: 'anthropic-messages' },
+  { id: 'openai-codex', name: 'OpenAI Codex', api: 'openai-codex-responses' },
+  { id: 'qwen-token-plan', name: 'Qwen Token Plan', api: 'openai-completions' },
+  { id: 'qwen-token-plan-cn', name: 'Qwen Token Plan CN', api: 'openai-completions' },
+  { id: 'qwen-token-plan-individual', name: 'Qwen Token Plan Individual', api: 'openai-completions' },
+  { id: 'openrouter-images', name: 'OpenRouter Images', api: 'openai-completions', modelSource: 'manual' },
+  { id: 'radius', name: 'Radius', api: 'anthropic-messages', modelSource: 'manual' },
 ];

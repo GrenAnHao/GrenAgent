@@ -55,6 +55,12 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
     white-space: pre-wrap;
   `,
+  error: css`
+    margin-block-start: 8px;
+    color: ${cssVar.colorError};
+    font-size: 12px;
+    white-space: pre-wrap;
+  `,
   row: css`
     display: flex;
     gap: 8px;
@@ -86,22 +92,29 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const item = useUiPromptStore((s) => s.byWorkspace[workspace]);
   const [text, setText] = useState('');
   const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [respondError, setRespondError] = useState<string>();
 
   const requestId = item?.request.id;
   useEffect(() => {
     setText(item?.request.prefill ? String(item.request.prefill) : '');
     setSelected({});
+    setRespondError(undefined);
   }, [requestId, item?.request.prefill]);
 
   const respond = useCallback(
-    (payload: Record<string, unknown>) => {
+    async (payload: Record<string, unknown>) => {
       if (!item) return;
-      void extensionUiRespond(item.workspace, {
-        type: 'extension_ui_response',
-        id: item.request.id,
-        ...payload,
-      });
-      useUiPromptStore.getState().clear(item.workspace, item.request.id);
+      try {
+        await extensionUiRespond(item.workspace, {
+          type: 'extension_ui_response',
+          id: item.request.id,
+          ...payload,
+        });
+        useUiPromptStore.getState().clear(item.workspace, item.request.id);
+      } catch (error) {
+        // 保留请求卡，避免 sidecar 仍在等待响应时用户看不到任何反馈。
+        setRespondError(error instanceof Error ? error.message : String(error));
+      }
     },
     [item],
   );
@@ -161,6 +174,7 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
         </button>
       </div>
       {body ? <div className={styles.body}>{body}</div> : null}
+      {respondError ? <div className={styles.error}>{`提交失败：${respondError}`}</div> : null}
 
       {isConfirm ? (
         <div className={styles.row}>

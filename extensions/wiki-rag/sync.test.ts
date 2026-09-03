@@ -4,10 +4,13 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+// 只用 model.id 与 modelRegistry，按真实参数类型收敛，不复制 pi 的完整结构。
+type WikiUpdateContext = Parameters<WikiSync['update']>[0];
+
 function client() {
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const value: WikiSyncClient = {
-    async request<T>(method, params) {
+    async request<T>(method: string, params: Record<string, unknown>) {
       calls.push({ method, params });
       return null as T;
     },
@@ -35,7 +38,7 @@ describe('WikiSync', () => {
       expect(ctx.model).toEqual({ id: 'current' });
       return ask;
     });
-    await sync.update({ cwd: '/repo', model: { id: 'current' }, modelRegistry: {}, signal: undefined }, {
+    await sync.update({ cwd: '/repo', model: { id: 'current' }, modelRegistry: {}, signal: undefined } as unknown as WikiUpdateContext, {
       page: 'docs/overview.md', sourcePath: 'README.md', source: '# Source\n\nDetails',
     });
     expect(c.calls).toHaveLength(1);
@@ -47,7 +50,7 @@ describe('WikiSync', () => {
   it('keeps the existing page when generation fails', async () => {
     const c = client();
     const sync = new WikiSync(c.value, () => async () => { throw new Error('offline'); });
-    await expect(sync.update({ cwd: '/repo', model: { id: 'current' }, modelRegistry: {}, signal: undefined }, {
+    await expect(sync.update({ cwd: '/repo', model: { id: 'current' }, modelRegistry: {}, signal: undefined } as unknown as WikiUpdateContext, {
       page: 'docs/overview.md', sourcePath: 'README.md', source: 'new source',
     })).resolves.toBe(false);
     expect(c.calls).toHaveLength(0);

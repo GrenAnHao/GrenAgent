@@ -73,6 +73,15 @@ export interface ProviderConfigPayload {
   authJson: string | null;
   agentDir: string;
 }
+
+export type McpConfigScope = 'settings' | 'global' | 'project';
+
+export interface ManagedMcpConfig {
+  name: string;
+  config: object;
+  enabled: boolean;
+  scope: McpConfigScope;
+}
 export interface RefreshResult {
   refreshed: string[];
   failed: { workspace: string; error: string }[];
@@ -212,6 +221,17 @@ export const pi = {
   getSettings: () => invoke<Record<string, string>>('get_settings'),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
+  listMcpConfigs: (workspace: string) =>
+    invoke<ManagedMcpConfig[]>('list_mcp_configs', { workspace }),
+  upsertMcpConfig: (
+    workspace: string,
+    scope: McpConfigScope,
+    name: string,
+    config: object,
+    enabled: boolean,
+  ) => invoke<void>('upsert_mcp_config', { workspace, scope, name, config, enabled }),
+  removeMcpConfig: (workspace: string, scope: McpConfigScope, name: string) =>
+    invoke<void>('remove_mcp_config', { workspace, scope, name }),
   getProviderConfig: () => invoke<ProviderConfigPayload>('get_provider_config'),
   setProviderConfig: (modelsJson: string, authJson: string) =>
     invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),

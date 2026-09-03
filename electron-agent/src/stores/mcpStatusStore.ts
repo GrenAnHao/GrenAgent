@@ -9,12 +9,19 @@ export interface McpServerStatus {
 }
 
 interface McpStatusState {
-  /** 实时连接状态（由 sidecar mcp extension 经 setStatus 推送）。 */
+  /** 最新一份状态，保留给旧调用方；新 UI 应按 workspace 读取。 */
   servers: McpServerStatus[];
+  serversByWorkspace: Record<string, McpServerStatus[]>;
   setServers: (servers: McpServerStatus[]) => void;
+  setWorkspaceServers: (workspace: string, servers: McpServerStatus[]) => void;
 }
 
 export const useMcpStatusStore = create<McpStatusState>((set) => ({
   servers: [],
+  serversByWorkspace: {},
   setServers: (servers) => set({ servers }),
+  setWorkspaceServers: (workspace, servers) => set((state) => ({
+    servers,
+    serversByWorkspace: { ...state.serversByWorkspace, [workspace]: servers },
+  })),
 }));

@@ -250,6 +250,28 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       };
     }
 
+    case 'agent_settled': {
+      // agent_settled 是 RPC 流程的最终收尾事件，晚于 agent_end（扩展的 agent_end
+      // hooks 可能仍在执行）。即使中间的历史快照刷新覆盖过状态，也必须在此清掉
+      // 停止按钮对应的 streaming 标记，避免 UI 永久停在「待停止」。
+      let touched = false;
+      const messages = state.messages.map((m) => {
+        if (m.kind === 'assistant' && m.streaming) {
+          touched = true;
+          return { ...m, streaming: false };
+        }
+        return m;
+      });
+      return {
+        ...state,
+        isStreaming: false,
+        awaitingResponse: false,
+        aborting: false,
+        compacting: false,
+        messages: touched ? messages : state.messages,
+      };
+    }
+
     case 'message_start': {
       const ev = event as Extract<AgentEvent, { type: 'message_start' }>;
       if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message);

@@ -66,6 +66,7 @@ export function ExtensionUiHost() {
 
   useEffect(() => {
     let un: undefined | (() => void);
+    let disposed = false;
     void onPiUiRequest((e) => {
       const method = e.request.method;
       if (method === 'setStatus') {
@@ -86,7 +87,9 @@ export function ExtensionUiHost() {
           } catch {
             servers = [];
           }
-          useMcpStatusStore.getState().setServers(servers);
+          const statusStore = useMcpStatusStore.getState();
+          if (statusStore.setWorkspaceServers) statusStore.setWorkspaceServers(e.workspace, servers);
+          else statusStore.setServers(servers);
         } else if (r.statusKey === 'wechat') {
           try {
             const parsed = typeof r.statusText === 'string' ? (JSON.parse(r.statusText) as WechatStatus) : null;
@@ -144,9 +147,16 @@ export function ExtensionUiHost() {
         useUiPromptStore.getState().setRequest({ workspace: e.workspace, request: e.request });
       }
     }).then((fn) => {
-      un = fn;
+      // React StrictMode 会在监听 Promise resolve 前清理第一次 effect；此时必须
+      // 立即注销迟到的监听器，否则第二次 effect 会与旧监听并存，导致 notify 重复、
+      // 交互请求被重复消费。
+      if (disposed) fn();
+      else un = fn;
     });
-    return () => un?.();
+    return () => {
+      disposed = true;
+      un?.();
+    };
   }, [message]);
 
   return null;

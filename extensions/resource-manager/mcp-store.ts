@@ -38,6 +38,7 @@ export async function readLayeredMcpServers(cwd: string, desktopJson: string, ho
   for (const path of [paths.global, paths.project]) {
     const doc = await readMcpDocument(path);
     for (const [name, config] of Object.entries(doc.mcpServers)) { const s = toConfig(name, config); if (s) result.set(name, s); }
+    for (const name of Object.keys(doc.disabledMcpServers)) result.delete(name);
   }
   return [...result.values()];
 }
@@ -49,6 +50,7 @@ export function readLayeredMcpServersSync(cwd: string, desktopJson: string, home
     let doc: McpDocument;
     try { doc = JSON.parse(readFileSync(path, "utf8")) as McpDocument; } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; throw e; }
     for (const [name, config] of Object.entries(asMap(doc.mcpServers))) { const s = toConfig(name, config); if (s) result.set(name, s); }
+    for (const name of Object.keys(asMap(doc.disabledMcpServers))) result.delete(name);
   }
   return [...result.values()];
 }

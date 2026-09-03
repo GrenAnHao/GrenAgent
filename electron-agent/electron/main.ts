@@ -41,7 +41,11 @@ export function createWindow() {
 
 if (!process.env.VITEST) {
   app.whenReady().then(async () => {
-    const settings = new SettingsService(app.getPath('userData'));
+    // userData 随应用名变化（dev 用 package.json name，打包用 productName），
+    // 早期版本的数据留在旧目录；读不到时回退到 com.rxstudio.grenagent。
+    const settings = new SettingsService(app.getPath('userData'), [
+      join(app.getPath('appData'), 'com.rxstudio.grenagent'),
+    ].filter((dir) => dir !== app.getPath('userData')));
     const agentData = new AgentDataService({ dataPath: join(app.getPath('userData'), 'agent-data.db') });
     await agentData.start();
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));

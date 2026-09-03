@@ -10,7 +10,6 @@ export const CHAT_EXCLUDED = new Set<string>([
   "debug-tools",
   "diagnostics",
   "after-tool-feedback",
-  "resource-manager",
 ]);
 
 export type ExtensionProfile = "project" | "chat";

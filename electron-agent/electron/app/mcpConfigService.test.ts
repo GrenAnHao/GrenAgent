@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { McpConfigService } from './mcpConfigService';
+import { SettingsService } from './settingsService';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -23,6 +24,28 @@ async function fixture() {
 }
 
 describe('McpConfigService', () => {
+  it('includes MCP servers persisted in the shared Tauri app state', async () => {
+    const { home, workspace } = await fixture();
+    const dataDir = await mkdtemp(join(tmpdir(), 'electron-agent-shared-state-'));
+    directories.push(dataDir);
+    await writeFile(join(dataDir, 'app-state.json'), JSON.stringify({
+      settings: {
+        MCP_SERVERS: JSON.stringify({ mcpServers: {
+          context7: { command: 'npx' },
+          deepwiki: { command: 'npx' },
+        } }),
+        MCP_SERVERS_DISABLED: '',
+      },
+    }));
+
+    const service = new McpConfigService(home, new SettingsService(dataDir));
+
+    await expect(service.list(workspace)).resolves.toEqual([
+      { name: 'context7', config: { command: 'npx' }, enabled: true, scope: 'settings' },
+      { name: 'deepwiki', config: { command: 'npx' }, enabled: true, scope: 'settings' },
+    ]);
+  });
+
   it('lists settings, global, and project configs with project precedence', async () => {
     const { home, workspace, settings } = await fixture();
     await mkdir(join(home, '.pi', 'agent'), { recursive: true });

@@ -92,6 +92,20 @@ describe('applyEvent', () => {
     expect(s.isStreaming).toBe(false);
   });
 
+  it('agent_settled 作为最终收尾事件清除停止态', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_start',
+      message: { role: 'assistant', content: [] },
+    } as AgentEvent);
+    expect(s.isStreaming).toBe(true);
+    s = applyEvent(s, { type: 'agent_settled' } as AgentEvent);
+    expect(s.isStreaming).toBe(false);
+    expect(s.awaitingResponse).toBe(false);
+    expect(s.messages.every((m) => m.kind !== 'assistant' || !m.streaming)).toBe(true);
+  });
+
   it('agent_end clears only the streaming assistant and preserves identity of settled messages', () => {
     let s = initialAgentState();
     // 先落一条已完成（非 streaming）assistant

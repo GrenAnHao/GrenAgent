@@ -168,6 +168,16 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     if (liveActivity && !options?.force) return;
     const sessionPath =
       options && 'sessionPath' in options ? options.sessionPath ?? null : undefined;
+    // 后台 getMessages 可能与 prompt 并发返回。实时轮次尚未 flush 时，强制重载会
+    // clearQueue() 并重置 store，导致 sidecar 已发出的 tool_execution_start 永久丢失，
+    // UI 只剩「准备响应中」。同一会话在等待首响应或已进入流式后，实时事件是唯一权威来源，
+    // 快照延后到本轮结束再取；切换到另一会话仍允许强制加载。
+    const liveState = useStore.getState();
+    const sameSession =
+      sessionPath === undefined ||
+      (loadedSessionPath != null && sessionPath === loadedSessionPath) ||
+      (loadedSessionPath === undefined && liveActivity);
+    if (options?.force && sameSession && (liveState.isStreaming || liveState.awaitingResponse)) return;
     const backend = messagesFromAgent(msgs, getThinkingDuration);
     // UI 完整历史优先：pi auto-compaction 会让后端历史变短，前端持久化的完整历史（uiHistory）更长时用它，
     // 避免压缩后的短历史盖掉完整对话（rewind 等需要后端权威时调用方不传 uiHistory，自然走后端）。

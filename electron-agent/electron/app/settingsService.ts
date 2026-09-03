@@ -4,27 +4,75 @@ import { join } from 'node:path';
 export class SettingsService {
   private readonly settingsPath: string;
   private readonly runtimePath: string;
+  private readonly appStatePath: string;
 
-  constructor(private readonly dataDir: string) {
+  constructor(
+    private readonly dataDir: string,
+    private readonly legacyDataDirs: readonly string[] = [],
+  ) {
     this.settingsPath = join(dataDir, 'settings.json');
     this.runtimePath = join(dataDir, 'runtime-settings.json');
+    this.appStatePath = join(dataDir, 'app-state.json');
   }
 
   async getAll(): Promise<Record<string, string>> {
-    try {
-      const value = JSON.parse(await readFile(this.settingsPath, 'utf8')) as unknown;
-      return isSettings(value) ? value : {};
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-      throw error;
-    }
+    const appStateSettings = await readAppStateSettings(this.appStatePath);
+    const legacySettings = await readFirstSettings(this.legacyDataDirs);
+    const localSettings = await readSettingsFile(this.settingsPath);
+    return { ...legacySettings, ...appStateSettings, ...localSettings };
   }
 
   async replace(settings: Record<string, string>): Promise<void> {
     await mkdir(this.dataDir, { recursive: true });
+    await writeAppStateSettings(this.appStatePath, settings);
     await writeJsonAtomically(this.settingsPath, settings);
     await writeJsonAtomically(this.runtimePath, runtimeSettings(settings));
   }
+}
+
+async function readSettingsFile(path: string): Promise<Record<string, string>> {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    return isSettings(value) ? value : {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+// 旧数据目录（如重命名前的 com.rxstudio.grenagent）可能只有 app-state.json 或只有 settings.json，
+// 两种形态都尝试，取第一个非空结果。
+async function readFirstSettings(dataDirs: readonly string[]): Promise<Record<string, string>> {
+  for (const dataDir of dataDirs) {
+    const fromAppState = await readAppStateSettings(join(dataDir, 'app-state.json'));
+    if (Object.keys(fromAppState).length > 0) return fromAppState;
+    const settings = await readSettingsFile(join(dataDir, 'settings.json'));
+    if (Object.keys(settings).length > 0) return settings;
+  }
+  return {};
+}
+
+async function readAppStateSettings(path: string): Promise<Record<string, string>> {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const settings = (value as Record<string, unknown>).settings;
+    return isSettings(settings) ? settings : {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+async function writeAppStateSettings(path: string, settings: Record<string, string>): Promise<void> {
+  let state: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (value && typeof value === 'object' && !Array.isArray(value)) state = value as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  await writeJsonAtomically(path, { ...state, settings });
 }
 
 function runtimeSettings(settings: Record<string, string>): Record<string, string> {
@@ -42,7 +90,7 @@ function isSettings(value: unknown): value is Record<string, string> {
     && Object.values(value).every((item) => typeof item === 'string');
 }
 
-async function writeJsonAtomically(path: string, value: Record<string, string>): Promise<void> {
+async function writeJsonAtomically(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.tmp`;
   await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await rename(temporaryPath, path);

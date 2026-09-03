@@ -29,8 +29,8 @@ export default function (pi: ExtensionAPI) {
 
   const makeAsk = (ctx: ExtensionContext): AskFn | undefined => {
     const model = resolveModel(
-      ctx.model as never,
-      (ctx.modelRegistry ?? { find: () => undefined }) as never,
+      ctx.model,
+      ctx.modelRegistry ?? { find: () => undefined },
       goalModel(),
     );
     if (!model) return undefined;
@@ -88,7 +88,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    state = restoreFromEntries(ctx.sessionManager.getEntries() as never);
+    state = restoreFromEntries(ctx.sessionManager.getEntries());
     setStatus(ctx);
   });
 

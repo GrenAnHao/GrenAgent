@@ -1,12 +1,10 @@
 import {
-  AuthStorage,
   type CreateAgentSessionRuntimeFactory,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
   getAgentDir,
   main,
-  ModelRegistry,
   runRpcMode,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -48,13 +46,9 @@ function disabledSkills(): Set<string> {
 }
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
-    authStorage,
-    modelRegistry,
     resourceLoaderOptions: {
       // 按 EXTENSIONS_PROFILE 过滤：真对话模式（chat）裁掉重代码智能扩展以加速冷启动；默认 project 全载。
       // safety 永不剔除（见 filterExtensionsByProfile）。

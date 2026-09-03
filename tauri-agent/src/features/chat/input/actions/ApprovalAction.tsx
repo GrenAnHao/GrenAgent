@@ -1,5 +1,6 @@
 import { Icon } from '@lobehub/ui';
 import { Select } from '@lobehub/ui/base-ui';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { Hand, Shield, ShieldAlert, type LucideIcon } from 'lucide-react';
 import { pi } from '../../../../lib/pi';
 import {
@@ -17,6 +18,12 @@ const ICONS: Record<ApprovalPolicy, LucideIcon> = {
   auto: Shield,
   full: ShieldAlert,
 };
+
+const styles = createStaticStyles(({ css }) => ({
+  fullColor: css`
+    color: ${cssVar.colorWarning};
+  `,
+}));
 
 /**
  * 审批策略选择器：请求批准 / 替我审批 / 完全访问，与「模式」并列。
@@ -42,8 +49,10 @@ export default function ApprovalAction() {
       options={APPROVAL_POLICIES.map((p) => ({ label: APPROVAL_LABELS[p], value: p }))}
       optionRender={(option) => {
         const p = option.value as ApprovalPolicy;
+        const full = p === 'full';
         return (
           <span
+            className={full ? styles.fullColor : undefined}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
             title={APPROVAL_HINTS[p]}
           >
@@ -56,7 +65,12 @@ export default function ApprovalAction() {
         );
       }}
       placeholder="审批"
-      prefix={ICONS[level]}
+      prefix={<Icon icon={ICONS[level]} size={14} />}
+      classNames={{
+        itemIndicator: level === 'full' ? styles.fullColor : undefined,
+        prefix: level === 'full' ? styles.fullColor : undefined,
+        value: level === 'full' ? styles.fullColor : undefined,
+      }}
       style={{ width: 'auto', maxWidth: 120 }}
       onChange={onChange}
     />

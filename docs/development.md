@@ -2,37 +2,39 @@
 
 本文介绍本地开发环境搭建、常用命令、测试与代码风格约定。
 
+> **桌面端主线是 Electron。** 本文命令默认在 `electron-agent/` 下执行；`tauri-agent/`（Tauri 2 + Rust）已过时并冻结，相关段落标注为历史，仅在需要对照旧客户端时参考，详见 [`tauri-agent/README.md`](../tauri-agent/README.md)。
+
 ## 环境要求
 
 - Node.js >= 22.19（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.19.0`）
-- Rust 工具链：构建桌面端（Tauri 2）时需要，参见 Tauri 官方环境要求
-- Bun：`tauri-agent/` 使用 Bun 管理依赖；`tauri.conf.json` 的 `beforeDevCommand` / `beforeBuildCommand` 为 `bun run dev` / `bun run build`，因此 `bun run tauri dev` 会在 Tauri 构建链里自动调用 Bun
- - `curl` 与 `tar`：构建 TencentDB 运行时用于下载和解包上游源码、Node.js 运行时
-- `curl` 与 `tar`：构建 TencentDB 运行时时用于下载和解包上游源码、Node.js 运行时
+- Bun：`electron-agent/` 与 `tauri-agent/` 均用 Bun 管理依赖，sidecar 也由 Bun 编译
+- `curl` 与 `tar`：仅在构建历史 Tauri 版的 TencentDB 运行时时需要，用于下载和解包上游源码、Node.js 运行时
+- Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，参见 Tauri 官方环境要求
 
 ## 安装
 
 ```bash
-cd tauri-agent
+cd electron-agent
 bun install
-bun run build:tencentdb-memory
+bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
 ```
 
 `cli/` 与 `extensions/` 各自维护依赖，按需在对应目录执行 `npm install`。
 
 ## 常用命令
 
-以下命令在 `tauri-agent/` 目录执行：
+以下命令在 `electron-agent/` 目录执行：
 
 | 命令 | 说明 |
 | --- | --- |
-| `bun run dev` | 启动 Vite 前端开发服务器 |
-| `bun run tauri dev` | 启动桌面端（Tauri + Rust，内部启动 Vite；Tauri setup 自动托管已构建的 TencentDB 运行时） |
-| `bun run build` | 校验 TencentDB 运行时后执行 `tsc && vite build` |
-| `bun run build:sidecar` | 构建 Agent sidecar 二进制（`binaries/pi`） |
-| `bun run build:tencentdb-memory` | 校验固定 SHA-256 后下载并构建随应用打包的 TencentDB MemoryCore、MemoryKnowledge 与 Node.js 运行时 |
-| `bun run test` | 运行前端测试（`vitest --run`） |
-| `bunx tsc --noEmit` | 前端类型检查 |
+| `bun run dev` | 启动桌面端（electron-vite 同时拉起主进程与渲染层，支持热更新） |
+| `bun run build` | `tsc -p tsconfig.json` 类型检查后执行 `electron-vite build` |
+| `bun run build:sidecar` | 用 Bun 把 `cli` 编译为 sidecar 单文件（`resources/pi/pi(.exe)`） |
+| `bun run test` | 运行测试（`vitest run`） |
+| `bun run package` | electron-builder 打包，产物在 `release/` |
+| `bunx tsc --noEmit` | 类型检查 |
+
+历史命令（仅 `tauri-agent/`，已过时）：`bun run dev`（Vite 前端）、`bun run tauri dev`（Tauri + Rust 桌面端）、`bun run build:tencentdb-memory`（构建随包分发的 TencentDB 运行时）。
 
 sidecar（`cli/`）的相关命令：
 
@@ -47,7 +49,7 @@ sidecar（`cli/`）的相关命令：
 提交前建议至少跑通类型检查与相关测试：
 
 ```bash
-cd tauri-agent
+cd electron-agent
 bunx tsc --noEmit
 bunx vitest run <改动涉及的测试文件>
 ```
@@ -62,7 +64,8 @@ bunx vitest run src/features/sessions/SessionItem.test.tsx
 
 - 使用 Vitest，测试文件与源文件同目录，命名 `*.test.ts` 或 `*.test.tsx`。
 - 优先用 `vi.spyOn` 而非 `vi.mock`，尽量测试真实实现，不要把逻辑复制进测试。
-- 涉及 Tauri 接口时，mock `@tauri-apps/api`、`@tauri-apps/plugin-*` 等模块。
+- 涉及桌面能力时，mock `window.gren` 桥（契约见 `electron/ipc/contracts.ts`，渲染层入口为 `src/platform/runtime.ts`），不要 mock Electron 内部模块；无 bridge 时运行时会降级为 `browserPreviewBridge`。
+- （历史）Tauri 版需 mock `@tauri-apps/api`、`@tauri-apps/plugin-*` 等模块。
 
 ## 代码风格
 
@@ -102,6 +105,14 @@ export default function (pi: ExtensionAPI) {
 
 ## 构建产物
 
+当前（Electron）：
+
+- `resources/pi/pi(.exe)`：sidecar 单文件可执行，由 `bun run build:sidecar`（Bun 编译 `cli/`）生成，打包时作为 `extraResources` 分发到 `resources/pi`。
+- `out/`：`electron-vite build` 的主进程与 preload 产物（其中 `dist/` 为渲染层产物）。
+- `release/`：electron-builder 打包产物（nsis / dmg / AppImage）。
+
+历史（Tauri 版，已过时）：
+
 - `binaries/pi`：sidecar 单文件二进制，由 `npm run build:sidecar` 生成。
 - `binaries/tencentdb-memory/<platform>/`：由 `bun run build:tencentdb-memory` 生成的托管运行时，包含 MemoryCore、MemoryKnowledge、Node.js 和固定版本清单，并在 `tauri.conf.json` 的 `resources` 中打包。
 
@@ -128,4 +139,4 @@ export default function (pi: ExtensionAPI) {
 ## 提交与分支
 
 - commit message 遵循约定式提交（Conventional Commits），用中文描述，例如 `fix(sessions): 修复项目在资源管理器中打开无效`。
-- 不要提交 `node_modules`、TencentDB 运行时构建产物等（已在 gitignore 中）。
+- 不要提交 `node_modules`、`out/`、`dist/`、`release/`、`resources/pi` 等构建产物（已在 gitignore 中）。

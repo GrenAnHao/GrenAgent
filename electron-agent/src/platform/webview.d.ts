@@ -8,6 +8,7 @@ declare global {
           src?: string;
           partition?: string;
           allowpopups?: boolean;
+          webpreferences?: string;
         },
         HTMLElement
       >;

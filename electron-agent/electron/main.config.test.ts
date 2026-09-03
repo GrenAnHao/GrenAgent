@@ -7,6 +7,7 @@ describe('browserWindowOptions', () => {
     expect(browserWindowOptions.height).toBe(800)
     expect(browserWindowOptions.minWidth).toBe(720)
     expect(browserWindowOptions.minHeight).toBe(520)
+    expect(browserWindowOptions.backgroundColor).toBe('#0b0d12')
     expect(browserWindowOptions.webPreferences).toMatchObject({
       webviewTag: true,
       contextIsolation: true,

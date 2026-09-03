@@ -4,9 +4,9 @@
   "version": "0.2.0",
   "identifier": "com.rxstudio.grenagent",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run build:sidecar && bun run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build:sidecar && bun run build",
     "frontendDist": "../dist"
   },
   "app": {

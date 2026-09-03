@@ -5,6 +5,7 @@ export interface McpStdioConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  cwd?: string;
 }
 export interface McpRemoteConfig {
   url: string;
@@ -31,6 +32,7 @@ export interface McpFormValues {
   command?: string;
   args?: string;
   env?: Array<[string, string]>;
+  cwd?: string;
   url?: string;
   auth?: AuthKind;
   token?: string;
@@ -99,6 +101,8 @@ export function serializeForm(v: McpFormValues): { name: string; config: McpConf
     if (args) config.args = args.split(/\s+/);
     const env = kvToObj(v.env);
     if (Object.keys(env).length) config.env = env;
+    const cwd = (v.cwd ?? '').trim();
+    if (cwd) config.cwd = cwd;
     return { name, config };
   }
   const headers = kvToObj(v.headers);
@@ -120,6 +124,7 @@ export function configToForm(name: string, c: McpConfig): McpFormValues {
       command: s.command,
       args: (s.args ?? []).join(' '),
       env: objToKv(s.env),
+      cwd: s.cwd,
     };
   }
   const r = c as McpRemoteConfig;

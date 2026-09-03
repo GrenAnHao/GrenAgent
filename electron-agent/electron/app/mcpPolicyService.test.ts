@@ -64,4 +64,16 @@ describe('McpPolicyService', () => {
 
     await expect(service.probe('{}')).rejects.toThrow('bad MCP config');
   });
+
+  it('wraps probe timeouts without stderr into a readable error', async () => {
+    const service = new McpPolicyService('C:/home', {
+      piCommand: { command: 'pi', args: [] },
+      piPackageDir: 'C:/agent',
+      run: async () => {
+        throw Object.assign(new Error('kill ETIMEDOUT'), { code: 'ERR_CHILD_PROCESS_TIMEOUT' });
+      },
+    });
+
+    await expect(service.probe('{}')).rejects.toThrow('MCP probe failed: kill ETIMEDOUT');
+  });
 });

@@ -40,12 +40,14 @@ describe('mcpConfig', () => {
       command: 'npx',
       args: '-y  @modelcontextprotocol/server-github',
       env: [['GITHUB_TOKEN', 'ghp']],
+      cwd: '/workspace/server',
     });
     expect(name).toBe('gh');
     expect(config).toEqual({
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-github'],
       env: { GITHUB_TOKEN: 'ghp' },
+      cwd: '/workspace/server',
     });
   });
 

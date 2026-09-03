@@ -80,6 +80,7 @@ async function runProbe(command: string, args: string[], options: ProbeOptions):
   const result = await execFileAsync(command, args, {
     env: { ...process.env, ...options.env },
     windowsHide: true,
+    timeout: 30_000,
   });
   return { stdout: String(result.stdout), stderr: String(result.stderr) };
 }
