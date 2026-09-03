@@ -41,6 +41,13 @@ export class ServiceTaskRegistry {
     return result.data;
   }
 
+  validateOutput(kind: string, output: unknown): unknown {
+    const definition = this.require(kind);
+    const result = definition.outputSchema.safeParse(output);
+    if (!result.success) throw new Error('service task output does not match schema');
+    return result.data;
+  }
+
   assertCapabilities(kind: string, requested: ServiceTaskCapability[]): void {
     const definition = this.require(kind);
     if (requested.some((capability) => !definition.capabilities.includes(capability))) throw new Error('service task capability is not declared');

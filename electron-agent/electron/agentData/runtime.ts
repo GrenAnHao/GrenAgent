@@ -5,7 +5,10 @@ import { ThreadStore } from './threadStore';
 import { MemoryStore } from './memoryStore';
 import { WikiStore } from './wikiStore';
 import { JobStore } from './jobStore';
-import { MemoryService } from '../app/memoryService';
+import { MemoryService, type MemoryTaskQueue } from '../app/memoryService';
+import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
+import { TaskQueue } from '../app/appServer/taskQueue';
+import type { AppEvent, ServiceTask } from '../app/appServer/types';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -14,6 +17,8 @@ export interface AgentDataRuntimeOptions {
   dataPath: string;
   methods?: Record<string, AgentDataMethod>;
   stdin?: NodeJS.ReadableStream;
+  executeServiceTask?: (task: ServiceTask) => Promise<unknown>;
+  publishAppEvent?: (event: Omit<AppEvent, 'sequence'>) => AppEvent;
 }
 
 export class AgentDataRuntime {
@@ -37,9 +42,7 @@ export class AgentDataRuntime {
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
     this.memory = new MemoryStore(this.storage.db);
-    this.memoryService = new MemoryService({
-      store: this.memory,
-      queue: {
+    const fallbackQueue: MemoryTaskQueue = {
         enqueue: async (input) => {
           const now = Date.now();
           this.storage!.db.prepare(`INSERT INTO service_tasks(id,kind,source_project_id,source_session_id,is_system,status,input,output,attempts,error,created_at,updated_at)
@@ -51,8 +54,24 @@ export class AgentDataRuntime {
           if (!row) return undefined;
           return { id: String(row.id), kind: String(row.kind), sourceProjectId: row.source_project_id == null ? undefined : String(row.source_project_id), sourceSessionId: row.source_session_id == null ? undefined : String(row.source_session_id), status: String(row.status) as never, input: JSON.parse(String(row.input)), output: row.output == null ? undefined : JSON.parse(String(row.output)), attempts: Number(row.attempts), error: row.error == null ? undefined : String(row.error), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) };
         },
-      },
-    });
+      };
+    if (this.options.executeServiceTask) {
+      const registry = new ServiceTaskRegistry();
+      const queue = new TaskQueue({
+        storage: this.storage,
+        registry,
+        eventBus: this.options.publishAppEvent ? { publish: this.options.publishAppEvent } : undefined,
+        execute: async (task) => {
+          const output = await this.options.executeServiceTask!(task);
+          if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
+          return output;
+        },
+      });
+      this.memoryService = new MemoryService({ store: this.memory, queue, eventBus: this.options.publishAppEvent ? { publish: this.options.publishAppEvent } : undefined });
+      queue.recoverRunning();
+    } else {
+      this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue });
+    }
     this.wiki = new WikiStore(this.storage.db);
     this.jobs = new JobStore(this.storage.db);
     this.threads = new ThreadStore(this.storage);

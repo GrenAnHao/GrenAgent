@@ -41,6 +41,24 @@ describe('AgentDataRuntime', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('routes memory extraction through the configured system task executor', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-worker-'));
+    const runtime = new AgentDataRuntime({
+      dataPath: join(dir, 'data.db'),
+      executeServiceTask: async () => ({ l1: { theme: 'dark' } }),
+    });
+    const client = new AgentDataClient(await runtime.start());
+    const params = { userId: 'u', workspace: '/a', projectId: '/a', sessionId: 's', source: 'session:s', transcript: 'user: dark mode', fingerprint: 'fp1' };
+
+    const capture = await client.request<{ taskId: string }>('memory.capture', params);
+    await expect.poll(() => client.request<Array<{ content: string }>>('memory.search', { ...params, query: 'dark', limit: 10 })).toEqual([
+      expect.objectContaining({ content: '{"theme":"dark"}' }),
+    ]);
+    expect(capture.taskId).toBeTruthy();
+
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
   it('returns VERSION_CONFLICT for stale admin config writes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-admin-'));
     const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });

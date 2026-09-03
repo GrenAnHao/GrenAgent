@@ -52,4 +52,17 @@ describe('TaskQueue', () => {
     await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(queue.get('crashed')).toMatchObject({ status: 'completed', output: { recovered: true } }));
   });
+
+  it('resumes tasks that were already queued before restart', async () => {
+    const { storage, registry } = setup();
+    const execute = vi.fn(async () => ({ resumed: true }));
+    const now = Date.now();
+    storage.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('queued-before-restart', 'test', 'queued', '{}', 0, now, now);
+    const queue = new TaskQueue({ storage, registry, execute });
+
+    expect(queue.recoverRunning()).toEqual([]);
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(queue.get('queued-before-restart')).toMatchObject({ status: 'completed', output: { resumed: true } }));
+  });
 });

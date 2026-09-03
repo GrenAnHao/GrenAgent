@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { __resetForTest, getConfig } from "../../extensions/_shared/runtime-config.js";
 import { bootstrapSidecar } from "./bootstrap.js";
 
-test("bootstrap loads the runtime without mutating process configuration", async () => {
+test("bootstrap does not expose sensitive process configuration", async () => {
   __resetForTest();
   process.env.TDAI_MEMORY_API_KEY = "gateway-secret";
   process.env.TDAI_MEMORY_USER_KEY = "user-secret";
@@ -13,8 +13,8 @@ test("bootstrap loads the runtime without mutating process configuration", async
   await bootstrapSidecar(async () => {
     assert.equal(process.env.TDAI_MEMORY_API_KEY, "gateway-secret");
     assert.equal(process.env.TDAI_MEMORY_USER_KEY, "user-secret");
-    assert.equal(getConfig("TDAI_MEMORY_API_KEY"), "gateway-secret");
-    assert.equal(getConfig("TDAI_MEMORY_USER_KEY"), "user-secret");
+    assert.equal(getConfig("TDAI_MEMORY_API_KEY"), undefined);
+    assert.equal(getConfig("TDAI_MEMORY_USER_KEY"), undefined);
     return {
       run: async () => {
         ran = true;

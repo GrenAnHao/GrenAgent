@@ -10,10 +10,10 @@ import {
   runRpcMode,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { allExtensions, namedExtensions, safety } from "../../extensions/index.js";
+import { allExtensions, manifestExtensions, safety } from "../../extensions/index.js";
 import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
 import { onResourceReloadRequested } from "../../extensions/_shared/resource-reload.js";
-import { filterExtensionsByProfile, type ExtensionProfile } from "./extension-profile.js";
+import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
 
 function emitReadyBanner(): void {
   const safetyOn = allExtensions.includes(safety);
@@ -58,10 +58,10 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, 
     resourceLoaderOptions: {
       // 按 EXTENSIONS_PROFILE 过滤：真对话模式（chat）裁掉重代码智能扩展以加速冷启动；默认 project 全载。
       // safety 永不剔除（见 filterExtensionsByProfile）。
-      extensionFactories: filterExtensionsByProfile(
-        namedExtensions,
+      extensionFactories: getConfig('PI_SYSTEM_WORKER') === '1' ? [] : filterManagedExtensions(filterExtensionsByProfile(
+        manifestExtensions,
         (getConfig("EXTENSIONS_PROFILE") as ExtensionProfile) ?? "project",
-      ).map((x) => x.factory),
+      ), getConfig('PI_ALLOWED_EXTENSIONS')).map((x) => x.factory),
       skillsOverride: (base) => {
         const disabled = disabledSkills();
         if (disabled.size === 0) return base;

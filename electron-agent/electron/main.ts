@@ -28,6 +28,12 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
+import { EventBus } from "./app/appServer/eventBus";
+import type { AppEvent } from "./app/appServer/types";
+import { randomUUID } from "node:crypto";
+import { AgentDataStorage } from "./agentData/storage";
+import { PluginManager, type PluginDefinition } from "./app/plugin/pluginManager";
+import { SystemWorkerManager } from "./pi/systemWorkerManager";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -44,19 +50,67 @@ export function createWindow() {
 if (!process.env.VITEST) {
   app.whenReady().then(async () => {
     const settings = new SettingsService(app.getPath('userData'));
-    const agentData = new AgentDataService({ dataPath: join(app.getPath('userData'), 'agent-data.db') });
-    await agentData.start();
-    const permissions = new PermissionManager({ dataDir: app.getPath('userData') });
-    const sandbox = new SandboxManager({
-      publish: (event) => broadcastPiEvent('pi://event', event),
-    });
+    const dataPath = join(app.getPath('userData'), 'agent-data.db');
+    const sequenceStorage = new AgentDataStorage(dataPath);
+    sequenceStorage.migrate();
+    const latestSequence = Number((sequenceStorage.db.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM app_events').get() as { sequence: number }).sequence);
+    sequenceStorage.close();
+    const eventBus = new EventBus(1024, latestSequence + 1);
+    let piRuntime: PiRuntimeService | undefined;
+    let agentData: AgentDataService;
+    const publishAppEvent = (input: Omit<AppEvent, 'sequence'>) => {
+      const event = eventBus.publish(withEventProject(input));
+      void agentData?.appendAppEvent(event).catch((error) => console.error('Failed to persist app event', error));
+      broadcastPiEvent('app://event', { workspace: event.projectId ?? '__global__', event });
+    };
+    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), publish: publishAppEvent });
+    const sandbox = new SandboxManager({ publish: publishAppEvent });
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
+    const systemWorker = new SystemWorkerManager({
+      processCommand: piProcess,
+      cwd: app.getPath('userData'),
+      idleTimeoutMs: 60_000,
+      sandbox,
+      env: {
+        PI_PACKAGE_DIR: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+        PI_RUNTIME_CONFIG: join(app.getPath('userData'), 'runtime-settings.json'),
+      },
+    });
+    agentData = new AgentDataService({
+      dataPath,
+      executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
+      publishAppEvent,
+      methods: {
+        'turn.start': (params) => piRuntime?.enqueueTurn(
+          readRpcString(params, 'workspace'),
+          readRpcString(params, 'input'),
+          typeof params.permissionProfile === 'string' ? params.permissionProfile : 'workspace',
+        ),
+        'permission.authorize': (params) => permissions.authorize(
+          isRecord(params.operation) ? params.operation : {},
+          typeof params.profile === 'string' ? params.profile : 'workspace',
+        ),
+        'mcp.state.publish': (params) => {
+          publishAppEvent({ id: randomUUID(), type: 'mcp.state_changed', timestamp: Date.now(), projectId: readRpcString(params, 'workspace'), data: { servers: Array.isArray(params.servers) ? params.servers : [] } });
+          return null;
+        },
+      },
+    });
+    await agentData.start();
+    const pluginStorage = new AgentDataStorage(dataPath);
+    pluginStorage.migrate();
+    const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1', publish: publishAppEvent });
+    plugins.discover(builtinPluginDefinitions());
+    await plugins.startAll();
     const pi = new PiManager(
       piProcess,
       {
-        onEvent: (workspace, event) => broadcastPiEvent('pi://event', { workspace, event }),
+        onEvent: (workspace, event) => {
+          void piRuntime?.handlePiEvent(workspace, event);
+          broadcastPiEvent('pi://event', { workspace, event });
+        },
         onUiRequest: (workspace, request) => broadcastPiEvent('pi://ui-request', { workspace, request }),
         onExit: (workspace, code) => broadcastPiEvent('pi://exit', { workspace, code }),
         onLog: (message) => console.error(message),
@@ -69,14 +123,14 @@ if (!process.env.VITEST) {
         piCommand: piProcess,
         piPackageDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         permissionManager: permissions,
-        publish: (event) => broadcastPiEvent('pi://event', event),
+        publish: publishAppEvent,
       }),
       mcpConfig,
       subagent: new SubagentService(sandbox),
       files: new FileService(),
       skills: new SkillService(app.getPath('home')),
       usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
-      pi: new PiRuntimeService({
+      pi: piRuntime = new PiRuntimeService({
         manager: pi,
         processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
@@ -88,6 +142,10 @@ if (!process.env.VITEST) {
         resolveWorkspace: (path) => workspace.ensureWorkspace(path),
         permissionManager: permissions,
         mcpConfig,
+        allowedPluginIds: () => plugins.allowedPluginIds(),
+        threadStore: agentData,
+        eventBus,
+        emitAppEvent: (event) => broadcastPiEvent('app://event', { workspace: event.projectId ?? '__global__', event }),
       }),
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
@@ -124,10 +182,13 @@ if (!process.env.VITEST) {
       ),
       agentData,
       permissions,
+      plugins,
     });
     app.on('before-quit', () => {
       void pi.closeAll();
+      systemWorker?.close();
       void agentData.stop();
+      pluginStorage.close();
     });
     createWindow();
   });
@@ -164,4 +225,31 @@ function broadcastPiEvent(event: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(`${IPC_CHANNELS.eventPrefix}${event}`, payload);
   }
+}
+
+function withEventProject(event: Omit<AppEvent, 'sequence'>): Omit<AppEvent, 'sequence'> {
+  if (event.projectId) return event;
+  const data = isRecord(event.data) ? event.data : {};
+  const request = isRecord(data.request) ? data.request : undefined;
+  const operation = request && isRecord(request.operation) ? request.operation : undefined;
+  const workspace = typeof data.workspace === 'string' ? data.workspace : operation && typeof operation.workspace === 'string' ? operation.workspace : undefined;
+  return workspace ? { ...event, projectId: workspace } : event;
+}
+
+function readRpcString(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function builtinPluginDefinitions(): PluginDefinition[] {
+  return [
+    { id: 'goal', manifest: { id: 'goal', version: '0.1.0', apiVersion: '1', capabilities: ['agent', 'ui', 'event-subscriber'], permissions: { interaction: 'auto' } }, load: () => ({}) },
+    { id: 'web-search', manifest: { id: 'web-search', version: '0.1.0', apiVersion: '1', capabilities: ['tool'], permissions: { network: 'full' } }, load: () => ({}) },
+    { id: 'mcp', manifest: { id: 'mcp', version: '0.1.0', apiVersion: '1', capabilities: ['mcp', 'tool', 'event-subscriber'], permissions: { network: 'full', process: 'allowlist', secrets: 'selected' } }, load: () => ({}) },
+  ];
 }

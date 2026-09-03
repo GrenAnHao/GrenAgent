@@ -48,6 +48,7 @@ export class PermissionManager {
   private builtin(operation: PermissionOperation, profile: PermissionProfileName): PermissionDecision {
     if (profile === 'unrestricted') return 'allow';
     const kind = operation.kind.toLowerCase();
+    if (profile === 'readonly' && (kind.startsWith('network.') || kind === 'web.search' || kind === 'mcp.call')) return 'deny';
     if (profile === 'readonly' && (kind.startsWith('filesystem.write') || kind.startsWith('filesystem.edit') || kind.startsWith('process.'))) return 'deny';
     if (profile === 'workspace' && kind.startsWith('filesystem.')) {
       if (!operation.workspace || !operation.path || !isWithin(operation.workspace, operation.path)) return 'deny';

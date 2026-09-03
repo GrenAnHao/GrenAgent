@@ -16,5 +16,6 @@ describe('ServiceTaskRegistry', () => {
     expect(() => registry.validate('missing', {})).toThrow('service task kind is not registered');
     expect(() => registry.validate('test', { text: 1 })).toThrow('service task input does not match schema');
     expect(() => registry.assertCapabilities('test', ['network'])).toThrow('service task capability is not declared');
+    expect(() => registry.validateOutput('test', { ok: 'yes' })).toThrow('service task output does not match schema');
   });
 });

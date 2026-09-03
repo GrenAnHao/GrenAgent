@@ -35,6 +35,7 @@ import {
 } from "./provider.js";
 import { executeMultiEngineSearch, type SearchEngineExecutor } from "./searchService.js";
 import { getConfig, getAllConfig } from "../_shared/runtime-config.js";
+import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 
 const TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? "15000") || 15000;
 const FETCH_BODY_MAX = 4000;
@@ -277,7 +278,7 @@ function searchDetails(query: string, provider: string, parsed: ParsedSearch, en
   };
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, control: DesktopControlPort = desktopControl()) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
@@ -290,6 +291,8 @@ export default function (pi: ExtensionAPI) {
       fetchTop: Type.Optional(Type.Number({ description: "Also fetch the body of the top N results as markdown (default 0, max 3)" })),
     }),
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'web_search');
+      if (denied) return denied;
       const choice = resolveProvider(getAllConfig());
       if (!choice.ok) {
         return {
@@ -355,6 +358,8 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, signal) {
+      const denied = await requireNetwork(control, 'web_search_multi');
+      if (denied) return denied;
       const query = params.query.trim();
       const limit = Math.max(1, Math.min(params.limit ?? 10, 50));
       const engines = resolveSearchEngines(params.engines, ["bing", "baidu"]);
@@ -394,6 +399,8 @@ export default function (pi: ExtensionAPI) {
       promptSnippet: description,
       parameters: Type.Object({ url: Type.String({ description: "Article URL" }) }),
       async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
+        const denied = await requireNetwork(control, name, params.url);
+        if (denied) return denied;
         const url = params.url.trim();
         if (!isSafeUrl(url).ok || !validate(url)) {
           return {
@@ -449,6 +456,8 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: "Fetch GitHub repo README.",
     parameters: Type.Object({ url: Type.String({ description: "GitHub repository URL" }) }),
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'fetch_github_readme', params.url);
+      if (denied) return denied;
       const url = params.url.trim();
       if (!extractGithubRepo(url)) {
         return {
@@ -480,6 +489,8 @@ export default function (pi: ExtensionAPI) {
       maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 200000)" })),
     }),
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'fetch_web_content', params.url);
+      if (denied) return denied;
       const url = params.url.trim();
       const safe = isSafeUrl(url);
       if (!safe.ok) {
@@ -504,4 +515,22 @@ export default function (pi: ExtensionAPI) {
       }
     },
   });
+}
+
+async function requireNetwork(
+  control: DesktopControlPort,
+  toolName: string,
+  url?: string,
+): Promise<AgentToolResult<Record<string, unknown>> | undefined> {
+  const authorization = await authorizeDesktopOperation(control, {
+    kind: 'network.request',
+    workspace: process.cwd(),
+    toolName,
+    ...(url ? { url } : {}),
+  });
+  if (authorization.status === 'allowed') return undefined;
+  return {
+    content: [{ type: 'text', text: `网络访问已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停，等待批准' : '拒绝'}` }],
+    details: { error: `network_${authorization.status}` },
+  };
 }

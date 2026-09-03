@@ -10,7 +10,7 @@ export interface MemoryTaskQueue {
   enqueue(input: { id: string; kind: string; input: unknown; sourceProjectId?: string; sourceSessionId?: string; system?: boolean }): Promise<ServiceTask>;
   get?(id: string): ServiceTask | undefined;
 }
-interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; eventBus?: EventBus }
+interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; eventBus?: Pick<EventBus, 'publish'> }
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
 
 export class MemoryService {

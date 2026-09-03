@@ -9,12 +9,47 @@ import {
   type ChatMessage,
 } from './agentReducer';
 import type { AgentEvent } from '../lib/pi';
+import type { AppEvent } from '../lib/pi';
 
 function text(msg: ChatMessage): string {
   return msg.kind === 'assistant' || msg.kind === 'user' ? msg.text : '';
 }
 
 describe('applyEvent', () => {
+  it('rebuilds assistant, tool and permission state from AppEvent items', () => {
+    const appEvent = (type: AppEvent['type'], data: unknown, itemId?: string): AppEvent => ({
+      id: `${type}-${itemId ?? 'turn'}`,
+      type,
+      sequence: 1,
+      timestamp: 1,
+      projectId: '.',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId,
+      data,
+    });
+    let s = initialAgentState();
+    s = applyEvent(s, appEvent('turn.started', {}));
+    s = applyEvent(s, appEvent('item.created', { message: { id: 'assistant-1', role: 'assistant' } }, 'assistant-1'));
+    s = applyEvent(s, appEvent('item.delta', { assistantMessageEvent: { type: 'thinking_delta', delta: 'think' } }, 'assistant-1'));
+    s = applyEvent(s, appEvent('item.delta', { assistantMessageEvent: { type: 'text_delta', delta: 'hello' } }, 'assistant-1'));
+    s = applyEvent(s, appEvent('item.created', { toolCallId: 'tool-1', toolName: 'read', args: { path: 'a.ts' } }, 'tool-1'));
+    s = applyEvent(s, appEvent('item.updated', { toolCallId: 'tool-1', result: { ok: true }, isError: false }, 'tool-1'));
+    s = applyEvent(s, appEvent('permission.requested', { request: { id: 'permission-1', operation: { kind: 'process.exec', workspace: '.' }, profile: 'interactive', createdAt: 1, status: 'blocked' } }));
+
+    expect(s.isStreaming).toBe(true);
+    expect(s.messages).toEqual([
+      expect.objectContaining({ kind: 'assistant', id: 'assistant-1', text: 'hello', thinking: 'think', streaming: true }),
+      expect.objectContaining({ kind: 'tool', toolCallId: 'tool-1', status: 'done', result: { ok: true } }),
+    ]);
+    expect(s.pendingPermissions).toHaveProperty('permission-1');
+
+    s = applyEvent(s, appEvent('permission.resolved', { requestId: 'permission-1', resolution: 'allow' }));
+    s = applyEvent(s, appEvent('turn.completed', {}));
+    expect(s.pendingPermissions).not.toHaveProperty('permission-1');
+    expect(s.isStreaming).toBe(false);
+  });
+
   it('starts streaming assistant message on message_start', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'agent_start' } as AgentEvent);

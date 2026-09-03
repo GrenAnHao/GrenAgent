@@ -12,6 +12,10 @@ function event(id: string): Omit<AppEvent, 'sequence'> {
 }
 
 describe('EventBus', () => {
+  it('continues sequence numbers restored from durable storage', () => {
+    const bus = new EventBus(4, 42);
+    expect(bus.publish(event('restored')).sequence).toBe(42);
+  });
   it('rejects zero and fractional capacities', () => {
     expect(() => new EventBus(0)).toThrow('EventBus capacity must be a positive integer');
     expect(() => new EventBus(1.5)).toThrow('EventBus capacity must be a positive integer');

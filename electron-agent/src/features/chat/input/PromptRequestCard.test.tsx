@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { respond } = vi.hoisted(() => ({ respond: vi.fn(() => Promise.resolve()) }));
-vi.mock('../../../lib/pi', () => ({ extensionUiRespond: respond }));
+vi.mock('../../../lib/pi', () => ({ extensionUiRespond: respond, pi: { resolvePermission: vi.fn() } }));
 vi.mock('../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));

@@ -9,12 +9,14 @@ export type ReplayResult =
 export type EventSubscriber = (event: AppEvent) => void;
 
 export class EventBus {
-  private nextSequence = 1;
+  private nextSequence: number;
   private readonly buffer: AppEvent[] = [];
   private readonly subscribers = new Set<EventSubscriber>();
 
-  constructor(private readonly capacity = 256) {
+  constructor(private readonly capacity = 256, startSequence = 1) {
     if (!Number.isInteger(capacity) || capacity < 1) throw new Error('EventBus capacity must be a positive integer');
+    if (!Number.isInteger(startSequence) || startSequence < 1) throw new Error('EventBus startSequence must be a positive integer');
+    this.nextSequence = startSequence;
   }
 
   publish(input: EventBusEventInput): AppEvent {

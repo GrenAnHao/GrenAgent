@@ -8,6 +8,7 @@ import { getConfig } from "../_shared/runtime-config.js";
 import { type AskFn, askLlm, resolveModel } from "./llm.js";
 import { judge } from "./judge.js";
 import { type GoalState, restoreFromEntries } from "./state.js";
+import { desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 
 const enabled = () => (getConfig("GOAL_ENABLED") ?? "1") !== "0";
 const maxReact = () => Number(getConfig("GOAL_MAX_REACT") ?? "12") || 12;
@@ -21,7 +22,7 @@ export const pluginManifest = {
   permissions: { interaction: "auto" },
 } as const;
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, control: DesktopControlPort = desktopControl()) {
   let state: GoalState | undefined;
 
   const persist = () => pi.appendEntry("goal", state ?? null);
@@ -91,7 +92,7 @@ export default function (pi: ExtensionAPI) {
       persist();
       setStatus(ctx);
       ctx.ui.notify(`已设定目标并开始执行：${text}`, "info");
-      pi.sendMessage({ customType: "goal-start", content: text, display: true }, { triggerTurn: true });
+      await queueGoalTurn(pi, control, ctx, { customType: "goal-start", content: text, display: true });
     },
   });
 
@@ -125,13 +126,28 @@ export default function (pi: ExtensionAPI) {
     state.react += 1;
     persist();
     setStatus(ctx);
-    pi.sendMessage(
-      {
+    await queueGoalTurn(pi, control, ctx, {
         customType: "goal-reentry",
         content: `目标尚未达成：${verdict.reason}\n请继续完成目标：${state.condition}`,
         display: true,
-      },
-      { triggerTurn: true },
-    );
+    });
   });
+}
+
+async function queueGoalTurn(
+  pi: Pick<ExtensionAPI, 'sendMessage'>,
+  control: DesktopControlPort,
+  ctx: ExtensionContext,
+  message: { customType: string; content: string; display: true },
+): Promise<void> {
+  try {
+    await control.request('turn.start', {
+      workspace: ctx.cwd,
+      input: message.content,
+      permissionProfile: getConfig('PI_PERMISSION_PROFILE') ?? 'workspace',
+    });
+    pi.sendMessage(message, { triggerTurn: false });
+  } catch {
+    pi.sendMessage(message, { triggerTurn: true });
+  }
 }

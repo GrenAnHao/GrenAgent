@@ -62,6 +62,15 @@ describe('registerIpcHandlers', () => {
     expect(commands).toContain('effective_mcp_configs');
   });
 
+  it('resolves permission requests with the requestId contract', async () => {
+    const permissions = { authorize: vi.fn(), resolve: vi.fn().mockResolvedValue({ id: 'p1', status: 'resolved' }) };
+    registerIpcHandlers({ permissions } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'permission_resolve', args: { requestId: 'p1', resolution: 'allow' } })).resolves.toMatchObject({ id: 'p1' });
+    expect(permissions.resolve).toHaveBeenCalledWith('p1', 'allow');
+  });
+
   it('returns serialized plugin state and routes lifecycle commands', async () => {
     const plugins = {
       list: vi.fn(() => [{ id: 'goal', state: 'ready', updatedAt: 1 }]),

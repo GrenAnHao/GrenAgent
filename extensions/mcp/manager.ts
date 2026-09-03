@@ -84,14 +84,31 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
 }
 
 function defaultReadServers(): McpServerConfig[] {
+  const managed = managedServers(getConfig('PI_MCP_CONFIG'));
   const servers = injectDefaultServers(
-    readLayeredMcpServersSync(process.cwd(), getConfig("MCP_SERVERS") ?? ""),
+    managed ?? readLayeredMcpServersSync(process.cwd(), getConfig("MCP_SERVERS") ?? ""),
     getAllConfig(),
     process.platform,
     readToolsCache(),
     process.arch,
   );
   return expandServerVars(servers, process.cwd());
+}
+
+export function managedServers(raw: string | undefined): McpServerConfig[] | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const entries = JSON.parse(raw) as unknown;
+    if (!Array.isArray(entries)) return [];
+    const servers = Object.fromEntries(entries.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const value = entry as { name?: unknown; config?: unknown };
+      return typeof value.name === 'string' && value.config && typeof value.config === 'object' ? [[value.name, value.config]] : [];
+    }));
+    return parseMcpServers(JSON.stringify({ mcpServers: servers }));
+  } catch {
+    return [];
+  }
 }
 
 export function createManager(deps: ManagerDeps = {}): McpManager {

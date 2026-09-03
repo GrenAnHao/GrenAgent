@@ -19,7 +19,7 @@ interface QueueOptions {
   storage: AgentDataStorage;
   registry: ServiceTaskRegistry;
   execute: (task: ServiceTask & { threadId?: string; system: boolean }) => Promise<unknown>;
-  eventBus?: EventBus;
+  eventBus?: Pick<EventBus, 'publish'>;
   now?: () => number;
 }
 
@@ -58,7 +58,7 @@ export class TaskQueue {
       const task = this.map(row); const updated = this.writeStatus(task, 'queued');
       this.publish('task.queued', updated, this.threadId(task.id)); return updated;
     });
-    if (recovered.length > 0) this.pump();
+    this.pump();
     return recovered;
   }
 
@@ -91,7 +91,11 @@ export class TaskQueue {
     const started = this.writeStatus(task, 'running', { attempts: task.attempts + 1 });
     this.publish('task.started', started, threadId);
     try {
-      const output = await this.options.execute({ ...started, threadId, system });
+      const definition = this.options.registry.get(task.kind);
+      const output = this.options.registry.validateOutput(task.kind, await withTimeout(
+        this.options.execute({ ...started, threadId, system }),
+        definition?.timeoutMs ?? 30_000,
+      ));
       const completed = this.writeStatus(started, 'completed', { output });
       this.publish('task.completed', completed, threadId); this.waiters.get(task.id)?.resolve(completed); this.waiters.delete(task.id);
     } catch (error) {
@@ -116,4 +120,11 @@ export class TaskQueue {
   private threadId(id: string): string | undefined { const row = this.options.storage.db.prepare('SELECT source_thread_id FROM service_tasks WHERE id=?').get(id) as { source_thread_id?: string } | undefined; return row?.source_thread_id ?? undefined; }
   private isSystem(id: string): boolean { const row = this.options.storage.db.prepare('SELECT is_system FROM service_tasks WHERE id=?').get(id) as { is_system?: number } | undefined; return row?.is_system === 1; }
   private publish(type: AppEvent['type'], task: ServiceTask, threadId?: string): void { this.options.eventBus?.publish({ id: randomUUID(), type, timestamp: this.now(), projectId: task.sourceProjectId, threadId, data: task }); }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`service task timed out after ${timeoutMs}ms`)), timeoutMs);
+    promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
 }

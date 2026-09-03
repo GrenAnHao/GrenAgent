@@ -1,10 +1,11 @@
 // mcp: 把外部 MCP server（stdio/SSE）的工具暴露给 agent，名为 mcp__<server>__<tool>。
 // 连接/热更新在进程级管理器（manager.ts），跨会话存活；本文件只做每会话薄绑定：
 // session_start 用新鲜 pi 登记+激活当前目录并订阅变化，session_shutdown 解绑。
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { sanitize } from "./config.js";
 import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
+import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 
 export const pluginManifest = {
   id: "mcp",
@@ -20,6 +21,7 @@ export interface ServerSummary {
   tools: number;
   toolNames: string[];
 }
+type McpToolDetails = { server: string; tool: string; error?: 'denied' | 'blocked' };
 
 // 与旧 summary() 形状一致：每 server 的 status / 工具数 / 注册全名（权限面板依赖）。
 export function summary(snap: McpSnapshot): ServerSummary[] {
@@ -38,7 +40,7 @@ interface ProjectablePi {
 }
 
 // 把当前目录投射进会话：登记已连工具，激活它们，停用已不在连接中的 mcp__ 工具。
-export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">): void {
+export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">, control?: DesktopControlPort): void {
   const connected: string[] = [];
   for (const [server, entry] of snap.servers) {
     if (entry.status !== "connected") continue;
@@ -50,7 +52,19 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
         label: `${server}: ${t.name}`,
         description: t.description ?? `MCP tool "${t.name}" from server "${server}".`,
         parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params): Promise<AgentToolResult<McpToolDetails>> {
+          if (control) {
+            const authorization = await authorizeDesktopOperation(control, {
+              kind: 'mcp.call',
+              workspace: process.cwd(),
+              server,
+              toolName: t.name,
+              args: params ?? {},
+            });
+            if (authorization.status !== 'allowed') {
+              return { content: [{ type: 'text', text: `MCP 调用已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停' : '拒绝'}` }], details: { server, tool: t.name, error: authorization.status } };
+            }
+          }
           const r = await mgr.callTool(server, t.name, (params ?? {}) as Record<string, unknown>);
           return { content: [{ type: "text", text: r.text }], details: { server, tool: t.name } };
         },
@@ -68,7 +82,7 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
   }
 }
 
-export function bind(pi: ExtensionAPI, mgr: McpManager): void {
+export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlPort = desktopControl()): void {
   let alive = false;
   let unsub: (() => void) | undefined;
 
@@ -77,14 +91,11 @@ export function bind(pi: ExtensionAPI, mgr: McpManager): void {
     alive = true;
     const render = (snap: McpSnapshot): void => {
       if (!alive) return;
-      project(pi, snap, mgr);
-      if (ctx.hasUI) {
-        try {
-          ctx.ui.setStatus("mcp", JSON.stringify(summary(snap)));
-        } catch {
-          // 状态推送 best-effort
-        }
-      }
+      project(pi, snap, mgr, control);
+      void control.request('mcp.state.publish', {
+        workspace: typeof ctx.cwd === 'string' ? ctx.cwd : process.cwd(),
+        servers: summary(snap),
+      }).catch(() => {});
     };
     render(mgr.snapshot());
     unsub = mgr.subscribe(render);

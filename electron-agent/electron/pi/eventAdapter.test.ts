@@ -58,6 +58,14 @@ describe('adaptPiEvent', () => {
     });
   });
 
+  it('keeps final assistant content for non-streaming projections', () => {
+    const mapped = adaptPiEvent({
+      type: 'message_end',
+      message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'complete answer' }] },
+    });
+    expect(mapped).toMatchObject({ type: 'item.updated', data: { message: { content: [{ type: 'text', text: 'complete answer' }] } } });
+  });
+
   it('keeps thinking message updates as item.delta', () => {
     const raw = {
       type: 'message_update',
@@ -155,13 +163,9 @@ describe('adaptPiEvent', () => {
     }
   });
 
-  it('maps queue updates to a task queued event with compact data', () => {
-    const raw = { type: 'queue_update', steering: ['next'], followUp: [] };
-
-    expect(adaptPiEvent(raw)).toMatchObject({
-      type: 'task.queued',
-      data: { steering: ['next'], followUp: [] },
-    });
+  it('leaves extension errors and Pi steering queues on the legacy protocol', () => {
+    expect(adaptPiEvent({ type: 'extension_error', error: 'extension failed' })).toBeUndefined();
+    expect(adaptPiEvent({ type: 'queue_update', steering: ['next'], followUp: [] })).toBeUndefined();
   });
 
   it('assigns unique ids when Pi events do not provide an id', () => {

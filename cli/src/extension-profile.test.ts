@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CHAT_EXCLUDED, filterExtensionsByProfile } from "./extension-profile.js";
+import { CHAT_EXCLUDED, filterExtensionsByProfile, filterManagedExtensions } from "./extension-profile.js";
 
 const has = (arr: { name: string }[], n: string) => arr.some((e) => e.name === n);
 
@@ -29,4 +29,13 @@ test("chat profile drops heavy code extensions but keeps chat-relevant ones", ()
 
 test("safety is never in the exclusion set", () => {
   assert.equal(CHAT_EXCLUDED.has("safety"), false);
+});
+
+test("Electron allowed ids only filter managed plugins", () => {
+  const extensions = [
+    { name: "safety" },
+    { name: "goal", manifest: { id: "goal" } },
+    { name: "mcp", manifest: { id: "mcp" } },
+  ];
+  assert.deepEqual(filterManagedExtensions(extensions, '["goal"]'), [extensions[0], extensions[1]]);
 });

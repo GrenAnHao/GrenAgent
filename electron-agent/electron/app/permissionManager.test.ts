@@ -21,6 +21,7 @@ describe('PermissionManager', () => {
     await expect(manager.evaluate({ kind: 'filesystem.write', workspace: 'C:/repo', path: 'C:/repo/a.ts' }, 'readonly')).resolves.toBe('deny');
     await expect(manager.evaluate({ kind: 'process.execute', workspace: 'C:/repo' }, 'readonly')).resolves.toBe('deny');
     await expect(manager.evaluate({ kind: 'filesystem.read', workspace: 'C:/repo', path: 'C:/repo/a.ts' }, 'readonly')).resolves.toBe('allow');
+    await expect(manager.evaluate({ kind: 'network.request', workspace: 'C:/repo', url: 'https://example.com' }, 'readonly')).resolves.toBe('deny');
   });
 
   it('limits workspace filesystem access to the workspace root', async () => {

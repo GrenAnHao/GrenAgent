@@ -16,8 +16,6 @@ const eventTypeMap: Record<string, AppEventType> = {
   tool_execution_start: 'item.created',
   tool_execution_update: 'item.delta',
   tool_execution_end: 'item.updated',
-  extension_error: 'turn.failed',
-  queue_update: 'task.queued',
 };
 
 let fallbackEventId = 0;
@@ -63,7 +61,7 @@ function projectData(rawType: string, raw: Record<string, unknown>, message: Rec
   switch (rawType) {
     case 'message_start':
     case 'message_end':
-      return { message: projectMessage(message) };
+      return { message: projectMessage(message, true) };
     case 'message_update':
       return {
         message: projectMessage(message),
@@ -80,17 +78,13 @@ function projectData(rawType: string, raw: Record<string, unknown>, message: Rec
       const lastAssistant = [...messages].reverse().find((entry) => isRecord(entry) && entry.role === 'assistant');
       return pick(lastAssistant, ['stopReason', 'errorMessage']);
     }
-    case 'extension_error':
-      return pick(raw, ['error']);
-    case 'queue_update':
-      return pick(raw, ['steering', 'followUp']);
     default:
       return {};
   }
 }
 
-function projectMessage(message: Record<string, unknown> | undefined): Record<string, unknown> {
-  return pick(message, ['id', 'role']);
+function projectMessage(message: Record<string, unknown> | undefined, includeContent = false): Record<string, unknown> {
+  return pick(message, includeContent ? ['id', 'role', 'content', 'timestamp', 'errorMessage'] : ['id', 'role']);
 }
 
 function projectAssistantMessageEvent(value: unknown): Record<string, unknown> {
