@@ -19,6 +19,7 @@ import { CreateService } from "./app/createService";
 import { TempHtmlService } from "./app/tempHtmlService";
 import { ShellService } from "./app/shellService";
 import { AgentDataService } from "./app/agentDataService";
+import { PermissionManager } from "./app/permissionManager";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -44,6 +45,8 @@ if (!process.env.VITEST) {
     const settings = new SettingsService(app.getPath('userData'));
     const agentData = new AgentDataService({ dataPath: join(app.getPath('userData'), 'agent-data.db') });
     await agentData.start();
+    const permissions = new PermissionManager({ dataDir: app.getPath('userData') });
+    const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const pi = new PiManager(
@@ -60,8 +63,10 @@ if (!process.env.VITEST) {
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
         piCommand: piProcess,
         piPackageDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+        permissionManager: permissions,
+        publish: (event) => broadcastPiEvent('pi://event', event),
       }),
-      mcpConfig: new McpConfigService(app.getPath('home'), settings),
+      mcpConfig,
       subagent: new SubagentService(),
       files: new FileService(),
       skills: new SkillService(app.getPath('home')),
@@ -76,6 +81,8 @@ if (!process.env.VITEST) {
           return endpoint ? JSON.stringify(endpoint) : undefined;
         },
         resolveWorkspace: (path) => workspace.ensureWorkspace(path),
+        permissionManager: permissions,
+        mcpConfig,
       }),
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
@@ -110,6 +117,7 @@ if (!process.env.VITEST) {
         (path) => workspace.ensureWorkspace(path),
       ),
       agentData,
+      permissions,
     });
     app.on('before-quit', () => {
       void pi.closeAll();

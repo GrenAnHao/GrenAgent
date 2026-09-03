@@ -8,7 +8,7 @@ const electron = vi.hoisted(() => ({
 
 vi.mock('electron', () => electron);
 
-import { registerIpcHandlers } from './register';
+import { getRegisteredCommands, registerIpcHandlers } from './register';
 import { IPC_CHANNELS } from './contracts';
 
 function handler(channel: string): (...args: any[]) => any {
@@ -49,6 +49,17 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'is_workspace_approved', args: { path: 'C:/project' } })).resolves.toBe(true);
     expect(workspaceApproval.approve).toHaveBeenCalledWith('C:/project');
     expect(workspaceApproval.isApproved).toHaveBeenCalledWith('C:/project');
+  });
+
+  it('registers permission and effective MCP configuration commands', () => {
+    registerIpcHandlers({
+      permissions: { authorize: vi.fn(), resolve: vi.fn() } as any,
+      mcpConfig: { effective: vi.fn(), list: vi.fn(), upsert: vi.fn(), remove: vi.fn() } as any,
+    });
+    const commands = getRegisteredCommands();
+    expect(commands).toContain('permission_evaluate');
+    expect(commands).toContain('permission_resolve');
+    expect(commands).toContain('effective_mcp_configs');
   });
 
   it('routes all Git commands with their contract argument names', async () => {

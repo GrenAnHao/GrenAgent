@@ -18,6 +18,7 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
+import type { PermissionManager } from '../app/permissionManager';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -40,6 +41,7 @@ export interface IpcServices {
   tempHtml?: TempHtmlService;
   shell?: ShellService;
   agentData?: AgentDataService;
+  permissions?: PermissionManager;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -83,6 +85,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.settings) registerSettingsCommands(services.settings);
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
+  if (services.permissions) registerPermissionCommands(services.permissions);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
@@ -179,6 +182,7 @@ function registerMcpPolicyCommands(service: McpPolicyService): void {
 
 function registerMcpConfigCommands(service: McpConfigService): void {
   registerCommand('list_mcp_configs', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('effective_mcp_configs', (_event, args) => service.effective(readString(args, 'workspace')));
   registerCommand('upsert_mcp_config', (_event, args) => {
     if (typeof args.config !== 'object' || !args.config || Array.isArray(args.config)) throw new Error('config must be an object');
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be a boolean');
@@ -186,6 +190,15 @@ function registerMcpConfigCommands(service: McpConfigService): void {
   });
   registerCommand('remove_mcp_config', (_event, args) => service.remove(
     readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
+  ));
+}
+
+function registerPermissionCommands(service: PermissionManager): void {
+  registerCommand('permission_evaluate', (_event, args) => service.authorize(
+    readRecord(args, 'operation'), readString(args, 'profile'),
+  ));
+  registerCommand('permission_resolve', (_event, args) => service.resolve(
+    readString(args, 'requestId'), args.resolution === 'allow' ? 'allow' : 'deny',
   ));
 }
 

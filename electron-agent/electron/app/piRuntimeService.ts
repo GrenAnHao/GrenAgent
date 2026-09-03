@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PiManager, PiProcessCommand } from '../pi/manager';
 import type { AppEvent, Thread, Turn } from './appServer/types';
+import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
 
 type PiCommand = keyof typeof commandTypes;
 
@@ -53,6 +54,7 @@ interface ThreadStorePort {
   appendAppEvent?(event: AppEvent): Promise<AppEvent> | AppEvent;
 }
 interface EventBusPort { publish(event: Omit<AppEvent, 'sequence'>): AppEvent; }
+interface McpConfigPort { effective(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; }
 
 export interface PiRuntimeOptions {
   manager: PiManagerPort;
@@ -64,6 +66,8 @@ export interface PiRuntimeOptions {
   threadStore?: ThreadStorePort;
   emitAppEvent?: (event: Omit<AppEvent, 'sequence'>) => void;
   eventBus?: EventBusPort;
+  permissionManager?: Pick<PermissionManager, 'authorize'>;
+  mcpConfig?: McpConfigPort;
 }
 
 export class PiRuntimeService {
@@ -91,6 +95,9 @@ export class PiRuntimeService {
   async send(workspace: string, command: string, args: Record<string, unknown>): Promise<unknown> {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
+    const authorization = await this.authorize(workspace, command, args);
+    if (authorization.status === 'denied') throw new Error(`Pi operation denied: ${command}`);
+    if (authorization.status === 'blocked') return authorization;
     const client = await this.openClient(workspace);
     const adapter = this.options.threadStore && (command === 'agent_prompt' || command === 'agent_abort')
       ? await this.prepareTurn(workspace, command, args)
@@ -144,7 +151,14 @@ export class PiRuntimeService {
     if (this.options.runtimeConfigPath) env.PI_RUNTIME_CONFIG = this.options.runtimeConfigPath;
     const endpoint = this.options.agentDataEndpoint?.();
     if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
+    if (this.options.mcpConfig) env.PI_MCP_CONFIG = JSON.stringify(await this.options.mcpConfig.effective(workspace));
     return this.options.manager.open(workspace, cwd, env);
+  }
+
+  private authorize(workspace: string, command: string, args: Record<string, unknown>): Promise<PermissionAuthorization> {
+    const profile = typeof args.permissionProfile === 'string' ? args.permissionProfile as PermissionProfileName : 'interactive';
+    return this.options.permissionManager?.authorize({ kind: `pi.${command}`, workspace, args }, profile)
+      ?? Promise.resolve({ status: 'allowed', decision: 'allow' });
   }
 
   private async prepareTurn(workspace: string, command: string, args: Record<string, unknown>): Promise<{ threadId: string; turnId: string } | undefined> {

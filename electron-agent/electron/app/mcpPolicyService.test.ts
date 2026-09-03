@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { McpPolicyService } from './mcpPolicyService';
 
 const directories: string[] = [];
@@ -63,5 +63,22 @@ describe('McpPolicyService', () => {
     });
 
     await expect(service.probe('{}')).rejects.toThrow('bad MCP config');
+  });
+
+  it('audits policy changes and calls through PermissionManager and publishes MCP state', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'electron-agent-mcp-'));
+    directories.push(home);
+    const authorize = vi.fn(async () => ({ decision: 'allow' as const, status: 'allowed' as const }));
+    const publish = vi.fn();
+    const service = new McpPolicyService(home, { permissionManager: { authorize }, publish });
+
+    await service.writePolicy('{"rules":[]}');
+    await expect(service.evaluateCall('C:/repo', 'mcp__server__tool', { value: 1 }, 'workspace')).resolves.toMatchObject({ status: 'allowed' });
+
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ kind: 'mcp.policy.change' }), 'interactive');
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ kind: 'mcp.call', toolName: 'mcp__server__tool' }), 'workspace');
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'mcp.state_changed', data: expect.objectContaining({ action: 'policy.changed' }) }));
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'mcp.state_changed', data: expect.objectContaining({ action: 'tool.called' }) }));
   });
 });
