@@ -13,6 +13,14 @@ const enabled = () => (getConfig("GOAL_ENABLED") ?? "1") !== "0";
 const maxReact = () => Number(getConfig("GOAL_MAX_REACT") ?? "12") || 12;
 const goalModel = () => getConfig("GOAL_MODEL");
 
+export const pluginManifest = {
+  id: "goal",
+  version: "0.1.0",
+  apiVersion: "1",
+  capabilities: ["agent", "ui", "event-subscriber"],
+  permissions: { interaction: "auto" },
+} as const;
+
 export default function (pi: ExtensionAPI) {
   let state: GoalState | undefined;
 

@@ -38,6 +38,14 @@ import { getConfig, getAllConfig } from "../_shared/runtime-config.js";
 
 const TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? "15000") || 15000;
 const FETCH_BODY_MAX = 4000;
+
+export const pluginManifest = {
+  id: "web-search",
+  version: "0.1.0",
+  apiVersion: "1",
+  capabilities: ["tool"],
+  permissions: { network: "full" },
+} as const;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
 

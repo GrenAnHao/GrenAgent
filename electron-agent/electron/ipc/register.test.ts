@@ -62,6 +62,22 @@ describe('registerIpcHandlers', () => {
     expect(commands).toContain('effective_mcp_configs');
   });
 
+  it('returns serialized plugin state and routes lifecycle commands', async () => {
+    const plugins = {
+      list: vi.fn(() => [{ id: 'goal', state: 'ready', updatedAt: 1 }]),
+      start: vi.fn(async () => ({ id: 'goal', state: 'ready', updatedAt: 2 })),
+      stop: vi.fn(async () => ({ id: 'goal', state: 'stopped', updatedAt: 3 })),
+      allowedPluginIds: vi.fn(() => ['goal']),
+    };
+    registerIpcHandlers({ plugins } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'plugin_list' })).resolves.toEqual([{ id: 'goal', state: 'ready', updatedAt: 1 }]);
+    await expect(invoke({}, { command: 'plugin_start', args: { id: 'goal' } })).resolves.toMatchObject({ state: 'ready' });
+    await expect(invoke({}, { command: 'plugin_stop', args: { id: 'goal' } })).resolves.toMatchObject({ state: 'stopped' });
+    await expect(invoke({}, { command: 'plugin_allowed_list' })).resolves.toEqual(['goal']);
+  });
+
   it('routes all Git commands with their contract argument names', async () => {
     const git = {
       status: vi.fn().mockResolvedValue([]), diff: vi.fn().mockResolvedValue(''), branches: vi.fn().mockResolvedValue({ current: '', branches: [] }),

@@ -29,6 +29,7 @@ export interface EventEnvelope<T = unknown> {
 
 export type { AppEvent as AppEventDto, Item as ItemDto, Thread as ThreadDto, Turn as TurnDto } from '../app/appServer/types';
 export type { PermissionAuthorization, PermissionOperation, PermissionRequest } from '../app/permissionManager';
+export type { PluginManifest as PluginManifestDto, PluginStateRecord as PluginStateDto } from '../app/plugin/pluginManager';
 
 export function isInvokeRequest(value: unknown): value is InvokeRequest {
   if (!value || typeof value !== 'object') return false;

@@ -19,6 +19,7 @@ import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
 import type { PermissionManager } from '../app/permissionManager';
+import type { PluginManager } from '../app/plugin/pluginManager';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -42,6 +43,7 @@ export interface IpcServices {
   shell?: ShellService;
   agentData?: AgentDataService;
   permissions?: PermissionManager;
+  plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -86,6 +88,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.permissions) registerPermissionCommands(services.permissions);
+  if (services.plugins) registerPluginCommands(services.plugins);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
@@ -170,6 +173,13 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       limit: readPositiveInteger(args, 'limit', 20),
     }));
   }
+}
+
+function registerPluginCommands(service: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>): void {
+  registerCommand('plugin_list', () => service.list());
+  registerCommand('plugin_start', (_event, args) => service.start(readString(args, 'id')));
+  registerCommand('plugin_stop', (_event, args) => service.stop(readString(args, 'id')));
+  registerCommand('plugin_allowed_list', () => service.allowedPluginIds());
 }
 
 function registerMcpPolicyCommands(service: McpPolicyService): void {

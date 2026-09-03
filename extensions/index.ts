@@ -13,10 +13,10 @@ import diagnostics from "./diagnostics/index.js";
 import afterToolFeedback from "./after-tool-feedback/index.js";
 import imGateway from "./im-gateway/index.js";
 import imPlatforms from "./im-platforms/index.js";
-import goal from "./goal/index.js";
+import goal, { pluginManifest as goalManifest } from "./goal/index.js";
 import imageGen from "./image-gen/index.js";
 import sessionMemory from "./session-memory/index.js";
-import mcp from "./mcp/index.js";
+import mcp, { pluginManifest as mcpManifest } from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
 import multiAgent from "./multi-agent/index.js";
 import lsp from "./lsp/index.js";
@@ -33,7 +33,7 @@ import todo from "./todo/index.js";
 import tts from "./tts/index.js";
 import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
-import webSearch from "./web-search/index.js";
+import webSearch, { pluginManifest as webSearchManifest } from "./web-search/index.js";
 import resourceManager from "./resource-manager/index.js";
 import memory from "./memory/index.js";
 import codeRetrieval from "./code-retrieval/index.js";
@@ -154,3 +154,29 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "code-retrieval", factory: codeRetrieval },
   { name: "wiki-rag", factory: wikiRag },
 ];
+
+export type ExtensionCapability = "agent" | "tool" | "mcp" | "provider" | "ui" | "event-subscriber";
+export interface ExtensionManifest {
+  id: string;
+  version: string;
+  apiVersion: string;
+  capabilities: readonly ExtensionCapability[];
+  permissions?: Readonly<Record<string, string>>;
+}
+
+const builtinManifests = new Map<string, ExtensionManifest>([
+  [goalManifest.id, goalManifest],
+  [webSearchManifest.id, webSearchManifest],
+  [mcpManifest.id, mcpManifest],
+]);
+
+// Adapter keeps the legacy static factory array intact while exposing lifecycle metadata.
+export const manifestExtensions = namedExtensions.map((entry) => ({
+  ...entry,
+  manifest: builtinManifests.get(entry.name),
+}));
+
+export function selectAllowedExtensions(allowedIds: readonly string[]) {
+  const allowed = new Set(allowedIds);
+  return manifestExtensions.filter((entry) => allowed.has(entry.name));
+}

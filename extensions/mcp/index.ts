@@ -6,6 +6,14 @@ import { Type } from "typebox";
 import { sanitize } from "./config.js";
 import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
 
+export const pluginManifest = {
+  id: "mcp",
+  version: "0.1.0",
+  apiVersion: "1",
+  capabilities: ["mcp", "tool", "event-subscriber"],
+  permissions: { network: "full", process: "allowlist", secrets: "selected" },
+} as const;
+
 export interface ServerSummary {
   name: string;
   status: string;
