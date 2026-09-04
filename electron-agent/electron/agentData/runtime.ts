@@ -13,11 +13,18 @@ import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type 
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
+export interface AgentDataJobRunner {
+  run(jobId: string, workspace: string): Promise<void>;
+  cancel(jobId: string): void;
+}
+
 export interface AgentDataRuntimeOptions {
   dataPath: string;
   methods?: Record<string, AgentDataMethod>;
   stdin?: NodeJS.ReadableStream;
   executeServiceTask?: (task: ServiceTask) => Promise<unknown>;
+  /** 按 job kind 注册的执行器：创建即派发，取消时通知。未注册的 kind 只落库。 */
+  jobRunners?: Record<string, AgentDataJobRunner>;
 }
 
 export class AgentDataRuntime {
@@ -171,8 +178,32 @@ export class AgentDataRuntime {
     if (name === 'codeRetrieval.admin.status') return () => ({ connected: false, indexed: false });
     if (name === 'codeRetrieval.search') return (p) => ({ workspace: readString(p.workspace), available: false, results: [], message: 'CodeGraph index is not connected' });
     if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
-    if (name === 'admin.jobs.cancel') return (p) => this.jobs!.cancel(readString(p.id));
-    if (name === 'admin.jobs.create') return (p) => this.jobs!.create({ kind: readString(p.kind), workspace: readString(p.workspace) });
+    if (name === 'admin.jobs.cancel') return (p) => {
+      const id = readString(p.id);
+      const job = this.jobs!.get(id);
+      const runner = job ? this.options.jobRunners?.[job.kind] : undefined;
+      if (!runner) return this.jobs!.cancel(id);
+      // 有执行器时取消只是"请求"：状态由执行器确认停止后通过 admin.jobs.markCancelled 落定，
+      // 避免出现"状态已取消但后台还在写文件"。
+      runner.cancel(id);
+      return this.jobs!.get(id);
+    };
+    if (name === 'admin.jobs.markCancelled') return (p) => this.jobs!.cancel(readString(p.id));
+    if (name === 'admin.jobs.create') return (p) => {
+      const kind = readString(p.kind);
+      const workspace = readString(p.workspace);
+      const runner = this.options.jobRunners?.[kind];
+      // 同 workspace 同 kind 已有未结束任务时拒绝：避免两个同步进程并发写同一份索引。
+      if (runner && this.jobs!.hasActive(kind, workspace)) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
+      const job = this.jobs!.create({ kind, workspace });
+      // fire-and-forget：执行器自己把状态写回 agent_jobs，创建调用不等它完成。
+      if (runner) void runner.run(job.id, workspace).catch((error) => this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error)));
+      return job;
+    };
+    if (name === 'admin.jobs.start') return (p) => this.jobs!.start(readString(p.id));
+    if (name === 'admin.jobs.progress') return (p) => this.jobs!.progress(readString(p.id), typeof p.value === 'number' ? p.value : 0);
+    if (name === 'admin.jobs.complete') return (p) => this.jobs!.complete(readString(p.id));
+    if (name === 'admin.jobs.fail') return (p) => this.jobs!.fail(readString(p.id), readString(p.error));
     if (name === 'admin.config.get') return (p) => this.jobs!.config(readString(p.module));
     if (name === 'admin.config.update') return (p) => {
       try { return this.jobs!.updateConfig(readString(p.module), readRecord(p.value), typeof p.version === 'number' ? p.version : -1); }

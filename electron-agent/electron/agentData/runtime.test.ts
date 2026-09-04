@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentDataRuntime } from './runtime';
 import { AgentDataClient } from './client';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -125,6 +125,59 @@ describe('AgentDataRuntime', () => {
     await client.request('admin.jobs.create', { kind: 'wiki-sync', workspace: '/workspace' });
     await expect(client.request('admin.jobs.list', { state: 'running' })).resolves.toEqual([]);
     await expect(client.request('admin.jobs.list')).resolves.toHaveLength(1);
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('dispatches a created job to its registered runner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobrunner-'));
+    const started: Array<{ id: string; workspace: string }> = [];
+    const runtime = new AgentDataRuntime({
+      dataPath: join(dir, 'data.db'),
+      jobRunners: { 'wiki.sync': { run: (id, workspace) => { started.push({ id, workspace }); return Promise.resolve(); }, cancel: () => {} } },
+    });
+    const client = new AgentDataClient(await runtime.start());
+
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+    await vi.waitFor(() => expect(started).toEqual([{ id: job.id, workspace: '/repo' }]));
+
+    // 同 workspace 同 kind 并发创建被拒绝（避免两个同步进程写同一份索引）。
+    await expect(client.request('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' })).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
+    // 没有注册 runner 的 kind 仍然只落库，不报错、不做并发拒绝。
+    await expect(client.request('admin.jobs.create', { kind: 'unknown.kind', workspace: '/repo' })).resolves.toMatchObject({ state: 'pending' });
+
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defers the cancelled state to the runner so no work happens after it lands', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobcancel-'));
+    const cancelRequests: string[] = [];
+    const runtime = new AgentDataRuntime({
+      dataPath: join(dir, 'data.db'),
+      jobRunners: { 'wiki.sync': { run: () => new Promise(() => {}), cancel: (id) => { cancelRequests.push(id); } } },
+    });
+    const client = new AgentDataClient(await runtime.start());
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+
+    // 取消只是"请求"：runner 收到通知，状态还没落定。
+    await client.request('admin.jobs.cancel', { id: job.id });
+    expect(cancelRequests).toEqual([job.id]);
+    await expect(client.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'pending' });
+
+    // runner 确认停止后才写状态。
+    await client.request('admin.jobs.markCancelled', { id: job.id });
+    await expect(client.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'cancelled' });
+
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('cancels a runner-less job immediately because nothing is running', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobcancel-none-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'unknown.kind', workspace: '/repo' });
+
+    await expect(client.request('admin.jobs.cancel', { id: job.id })).resolves.toMatchObject({ state: 'cancelled' });
+
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 });

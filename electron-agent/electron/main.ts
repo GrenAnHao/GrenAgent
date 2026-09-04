@@ -20,6 +20,7 @@ import { TempHtmlService } from "./app/tempHtmlService";
 import { ShellService } from "./app/shellService";
 import { AgentDataService } from "./app/agentDataService";
 import { PermissionManager } from "./app/permissionManager";
+import { DevService } from "./app/devService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
@@ -27,17 +28,18 @@ import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
+import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
-import { EventBus } from "./app/appServer/eventBus";
-import type { AppEvent } from "./app/appServer/types";
-import { randomUUID } from "node:crypto";
 import { AgentDataStorage } from "./agentData/storage";
 import { PluginManager, type PluginDefinition } from "./app/plugin/pluginManager";
 import { SystemWorkerManager } from "./pi/systemWorkerManager";
+import { randomUUID } from "node:crypto";
+import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./app/wikiSyncService";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
   attachWebviewSecurity(window.webContents);
+  attachDevToolsShortcut(window);
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 
   if (rendererUrl) {
@@ -55,23 +57,13 @@ if (!process.env.VITEST) {
       join(app.getPath('appData'), 'com.rxstudio.grenagent'),
     ].filter((dir) => dir !== app.getPath('userData')));
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
-    const sequenceStorage = new AgentDataStorage(dataPath);
-    sequenceStorage.migrate();
-    const latestSequence = Number((sequenceStorage.db.prepare('SELECT COALESCE(MAX(sequence), 0) AS sequence FROM app_events').get() as { sequence: number }).sequence);
-    sequenceStorage.close();
-    const eventBus = new EventBus(1024, latestSequence + 1);
     let piRuntime: PiRuntimeService | undefined;
     let agentData: AgentDataService;
-    const publishAppEvent = (input: Omit<AppEvent, 'sequence'>) => {
-      const event = eventBus.publish(withEventProject(input));
-      void agentData?.appendAppEvent(event).catch((error) => console.error('Failed to persist app event', error));
-      broadcastPiEvent('app://event', { workspace: event.projectId ?? '__global__', event });
-    };
-    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), publish: publishAppEvent, resolveProfile: (operation, requested) => {
+    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
       const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
       return workspace ? (piRuntime?.permissionProfile(workspace) ?? requested) : requested;
     } });
-    const sandbox = new SandboxManager({ publish: publishAppEvent });
+    const sandbox = new SandboxManager({});
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
@@ -85,10 +77,30 @@ if (!process.env.VITEST) {
         PI_RUNTIME_CONFIG: join(app.getPath('userData'), 'runtime-settings.json'),
       },
     });
+    const wikiCancelled = new Set<string>();
+    const wikiSync = new WikiSyncService({
+      jobs: {
+        start: (id) => void agentData.request('admin.jobs.start', { id }),
+        progress: (id, value) => void agentData.request('admin.jobs.progress', { id, value }),
+        complete: (id) => void agentData.request('admin.jobs.complete', { id }),
+        fail: (id, error) => void agentData.request('admin.jobs.fail', { id, error }),
+        markCancelled: (id) => void agentData.request('admin.jobs.markCancelled', { id }),
+        cancelled: (id) => wikiCancelled.has(id),
+      },
+      scan: (workspace) => scanWorkspaceMarkdown(workspace),
+      readSource: (workspace, path) => readWorkspaceSource(workspace, path),
+      generate: (source, path) => systemWorker.run({ id: `wiki-${randomUUID()}`, kind: 'wiki_page_generate', input: { sourcePath: path, source } }).then((value) => String(value)),
+      writePage: (input) => agentData.request('wiki.replace', { ...input }),
+    });
     agentData = new AgentDataService({
       dataPath,
       executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
-      publishAppEvent,
+      jobRunners: {
+        'wiki.sync': {
+          run: async (id, workspace) => { wikiCancelled.delete(id); await wikiSync.run(id, workspace); wikiCancelled.delete(id); },
+          cancel: (id) => { wikiCancelled.add(id); },
+        },
+      },
       methods: {
         'turn.start': (params) => piRuntime?.enqueueTurn(
           readRpcString(params, 'workspace'),
@@ -99,16 +111,16 @@ if (!process.env.VITEST) {
           isRecord(params.operation) ? params.operation : {},
           typeof params.profile === 'string' ? params.profile : 'workspace',
         ),
-        'mcp.state.publish': (params) => {
-          publishAppEvent({ id: randomUUID(), type: 'mcp.state_changed', timestamp: Date.now(), projectId: readRpcString(params, 'workspace'), data: { servers: Array.isArray(params.servers) ? params.servers : [] } });
-          return null;
-        },
+        // pi 子进程会主动调这个 RPC 推送 MCP 连接状态。AppEvent 已移除，此处不再转发；
+        // UI 的 MCP 状态由 pi://ui-request 的 setStatus 分支填充（见 ExtensionUiHost）。
+        // 保留方法本身（返回 null）以免 pi 侧收到 "unknown method" 错误。
+        'mcp.state.publish': () => null,
       },
     });
     await agentData.start();
     const pluginStorage = new AgentDataStorage(dataPath);
     pluginStorage.migrate();
-    const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1', publish: publishAppEvent });
+    const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1' });
     plugins.discover(builtinPluginDefinitions());
     await plugins.startAll();
     const pi = new PiManager(
@@ -130,7 +142,6 @@ if (!process.env.VITEST) {
         piCommand: piProcess,
         piPackageDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         permissionManager: permissions,
-        publish: publishAppEvent,
       }),
       mcpConfig,
       subagent: new SubagentService(sandbox),
@@ -151,8 +162,6 @@ if (!process.env.VITEST) {
         mcpConfig,
         allowedPluginIds: () => plugins.allowedPluginIds(),
         threadStore: agentData,
-        eventBus,
-        emitAppEvent: (event) => broadcastPiEvent('app://event', { workspace: event.projectId ?? '__global__', event }),
       }),
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
@@ -190,6 +199,8 @@ if (!process.env.VITEST) {
       agentData,
       permissions,
       plugins,
+      // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。
+      dev: app.isPackaged ? undefined : new DevService(),
     });
     app.on('before-quit', () => {
       void pi.closeAll();
@@ -232,15 +243,6 @@ function broadcastPiEvent(event: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(`${IPC_CHANNELS.eventPrefix}${event}`, payload);
   }
-}
-
-function withEventProject(event: Omit<AppEvent, 'sequence'>): Omit<AppEvent, 'sequence'> {
-  if (event.projectId) return event;
-  const data = isRecord(event.data) ? event.data : {};
-  const request = isRecord(data.request) ? data.request : undefined;
-  const operation = request && isRecord(request.operation) ? request.operation : undefined;
-  const workspace = typeof data.workspace === 'string' ? data.workspace : operation && typeof operation.workspace === 'string' ? operation.workspace : undefined;
-  return workspace ? { ...event, projectId: workspace } : event;
 }
 
 function readRpcString(params: Record<string, unknown>, key: string): string {
