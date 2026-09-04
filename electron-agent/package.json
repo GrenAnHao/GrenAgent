@@ -24,6 +24,7 @@
     "@lobehub/fluent-emoji": "^4.1.1",
     "@lobehub/icons": "^5.16.0",
     "@lobehub/ui": "5.32.7",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "antd": "^6.6.1",
     "antd-style": "^4.1.0",
     "beautiful-mermaid": "^1.1.3",
