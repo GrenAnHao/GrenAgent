@@ -8,7 +8,7 @@ import { JobStore } from './jobStore';
 import { MemoryService, type MemoryTaskQueue } from '../app/memoryService';
 import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
 import { TaskQueue } from '../app/appServer/taskQueue';
-import type { AppEvent, ServiceTask } from '../app/appServer/types';
+import type { ServiceTask } from '../app/appServer/types';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -18,7 +18,6 @@ export interface AgentDataRuntimeOptions {
   methods?: Record<string, AgentDataMethod>;
   stdin?: NodeJS.ReadableStream;
   executeServiceTask?: (task: ServiceTask) => Promise<unknown>;
-  publishAppEvent?: (event: Omit<AppEvent, 'sequence'>) => AppEvent;
 }
 
 export class AgentDataRuntime {
@@ -60,14 +59,13 @@ export class AgentDataRuntime {
       const queue = new TaskQueue({
         storage: this.storage,
         registry,
-        eventBus: this.options.publishAppEvent ? { publish: this.options.publishAppEvent } : undefined,
         execute: async (task) => {
           const output = await this.options.executeServiceTask!(task);
           if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
           return output;
         },
       });
-      this.memoryService = new MemoryService({ store: this.memory, queue, eventBus: this.options.publishAppEvent ? { publish: this.options.publishAppEvent } : undefined });
+      this.memoryService = new MemoryService({ store: this.memory, queue });
       queue.recoverRunning();
     } else {
       this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue });
@@ -161,8 +159,8 @@ export class AgentDataRuntime {
     if (name === 'memory.capture') return (params) => this.memoryService!.capture({ ...readScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : readString(params.workspace), source: readString(params.source), transcript: readString(params.transcript), fingerprint: readString(params.fingerprint) });
     if (name === 'memory.captureCommit' || name === 'memory.commitCapture') return (params) => { this.memory!.commitCapture(readScope(params), readString(params.source), readString(params.fingerprint)); return null; };
     if (name === 'memory.completeExtraction') return (params) => this.memoryService!.completeExtraction(readString(params.taskId), params.output);
-    if (name === 'memory.search') return (params) => this.memoryService!.search({ ...readScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : readString(params.workspace), query: readString(params.query), limit: typeof params.limit === 'number' ? params.limit : 20 });
-    if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readScope(params));
+    if (name === 'memory.search') return (params) => this.memoryService!.search({ ...readQueryScope(params), projectId: typeof params.projectId === 'string' ? params.projectId : (typeof params.workspace === 'string' ? params.workspace : ''), query: readString(params.query), limit: typeof params.limit === 'number' ? params.limit : 20 });
+    if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readQueryScope(params));
     if (name === 'memory.delete') return (params) => { this.memory!.remove(readScope(params), readString(params.id)); return null; };
     return undefined;
   }
@@ -192,10 +190,6 @@ export class AgentDataRuntime {
     if (name === 'thread.create') return (p) => this.threads!.createThread({ id: readString(p.id), projectId: readString(p.projectId), workspace: readString(p.workspace), title: typeof p.title === 'string' ? p.title : undefined });
     if (name === 'thread.list') return () => this.threads!.listThreads();
     if (name === 'thread.read') return (p) => this.threads!.readThread(readString(p.id));
-    if (name === 'appEvent.replay') return (p) => this.threads!.listAppEvents(
-      typeof p.afterSequence === 'number' && Number.isFinite(p.afterSequence) && p.afterSequence >= 0 ? p.afterSequence : 0,
-      typeof p.limit === 'number' && Number.isInteger(p.limit) ? Math.max(1, Math.min(p.limit, 1024)) : 256,
-    );
     if (name === 'turn.create') return (p) => this.threads!.createTurn({ id: readString(p.id), threadId: readString(p.threadId), input: readString(p.input), permissionProfile: readString(p.permissionProfile), mode: p.mode === 'non-interactive' ? 'non-interactive' : 'interactive' });
     if (name === 'turn.update') return (p) => this.threads!.updateTurn(readString(p.id), {
       ...(isTurnStatus(p.status) ? { status: p.status } : {}),
@@ -205,7 +199,6 @@ export class AgentDataRuntime {
     });
     if (name === 'item.upsert') return (p) => this.threads!.upsertItem({ id: readString(p.id), threadId: readString(p.threadId), turnId: readString(p.turnId), type: readItemType(p.type), status: readItemStatus(p.status), payload: p.payload });
     if (name === 'item.list') return (p) => this.threads!.listItems(readString(p.threadId), p.turnId === undefined ? undefined : readString(p.turnId));
-    if (name === 'appEvent.append') return (p) => this.threads!.appendAppEvent(p as never);
     return undefined;
   }
 
@@ -218,6 +211,12 @@ function readString(value: unknown): string { if (typeof value !== 'string' || !
 function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
 function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
 function readScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: readString(value.workspace), projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
+/**
+ * 只读查询作用域：workspace 可缺省（全局视图没有"当前项目"）。
+ * MemoryStore.search/overview 只用 projectId(scope) 与 includeOtherProjects，不直接读 workspace，
+ * 因此缺省时传 '' 是安全的；写入路径仍用 readScope 强制要求 workspace。
+ */
+function readQueryScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: typeof value.workspace === 'string' && value.workspace.trim() ? value.workspace : '', projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
 function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }
 function readItemType(value: unknown): import('../app/appServer/types').ItemType { if (value === 'user_message' || value === 'assistant_message' || value === 'reasoning' || value === 'tool_call' || value === 'tool_result' || value === 'permission_request' || value === 'error') return value; throw new RpcError('INVALID_PARAMS', 'invalid item type'); }

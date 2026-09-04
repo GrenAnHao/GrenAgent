@@ -102,6 +102,22 @@ describe('AgentDataRuntime', () => {
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 
+  it('answers memory overview and search globally when no workspace is supplied', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-global-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+
+    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-a', level: 1, content: 'alpha fact' });
+    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-b', level: 1, content: 'beta fact' });
+
+    await expect(client.request('memory.admin.overview', { userId: 'u', includeOtherProjects: true }))
+      .resolves.toMatchObject({ total: 2, byLevel: { L0: 0, L1: 2, L2: 0, L3: 0 } });
+    await expect(client.request<Array<{ content: string }>>('memory.search', { userId: 'u', includeOtherProjects: true, query: 'fact', limit: 10 }))
+      .resolves.toHaveLength(2);
+
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
   it('filters admin jobs by requested state', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobs-'));
     const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
