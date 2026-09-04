@@ -197,7 +197,14 @@ export class AgentDataRuntime {
       if (runner && this.jobs!.hasActive(kind, workspace)) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
       const job = this.jobs!.create({ kind, workspace });
       // fire-and-forget：执行器自己把状态写回 agent_jobs，创建调用不等它完成。
-      if (runner) void runner.run(job.id, workspace).catch((error) => this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error)));
+      if (runner) {
+        void runner.run(job.id, workspace).catch((error) => {
+          const current = this.jobs!.get(job.id);
+          // 取消只是请求：runner 若因此 reject，不能把已 cancelled/completed/failed 再记成失败。
+          if (current?.state === 'cancelled' || current?.state === 'completed' || current?.state === 'failed') return;
+          this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error));
+        });
+      }
       return job;
     };
     if (name === 'admin.jobs.start') return (p) => this.jobs!.start(readString(p.id));

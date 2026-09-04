@@ -131,19 +131,68 @@ describe('AgentDataRuntime', () => {
   it('dispatches a created job to its registered runner', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobrunner-'));
     const started: Array<{ id: string; workspace: string }> = [];
+    let release!: () => void;
+    let released = false;
+    const gate = new Promise<void>((resolve) => {
+      release = () => { released = true; resolve(); };
+    });
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
-      jobRunners: { 'wiki.sync': { run: (id, workspace) => { started.push({ id, workspace }); return Promise.resolve(); }, cancel: () => {} } },
+      jobRunners: {
+        'wiki.sync': {
+          run: async (id, workspace) => {
+            started.push({ id, workspace });
+            await gate;
+          },
+          cancel: () => {},
+        },
+      },
     });
     const client = new AgentDataClient(await runtime.start());
 
     const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
-    await vi.waitFor(() => expect(started).toEqual([{ id: job.id, workspace: '/repo' }]));
+    // create 必须 fire-and-forget：返回时 gate 还没 resolve，证明没有 await run。
+    expect(released).toBe(false);
+    expect(started).toEqual([{ id: job.id, workspace: '/repo' }]);
+    await expect(client.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'pending' });
 
     // 同 workspace 同 kind 并发创建被拒绝（避免两个同步进程写同一份索引）。
     await expect(client.request('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' })).rejects.toMatchObject({ code: 'JOB_ALREADY_RUNNING' });
     // 没有注册 runner 的 kind 仍然只落库，不报错、不做并发拒绝。
     await expect(client.request('admin.jobs.create', { kind: 'unknown.kind', workspace: '/repo' })).resolves.toMatchObject({ state: 'pending' });
+
+    release();
+    await gate;
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not record a runner rejection as failure after the job is already terminal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-jobfail-terminal-'));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let runResult: Promise<void> | undefined;
+    const runtime = new AgentDataRuntime({
+      dataPath: join(dir, 'data.db'),
+      jobRunners: {
+        'wiki.sync': {
+          run: () => {
+            runResult = gate.then(() => { throw new Error('runner stopped'); });
+            return runResult;
+          },
+          cancel: () => {},
+        },
+      },
+    });
+    const client = new AgentDataClient(await runtime.start());
+    const job = await client.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: '/repo' });
+    await client.request('admin.jobs.markCancelled', { id: job.id });
+
+    release();
+    await runResult?.catch(() => {});
+
+    await expect(client.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'cancelled' });
+    const audit = await client.request<Array<{ action: string }>>('admin.audit.list');
+    expect(audit.map((event) => event.action)).not.toContain('job.fail');
 
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });

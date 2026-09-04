@@ -82,9 +82,9 @@ if (!process.env.VITEST) {
       jobs: {
         start: (id) => void agentData.request('admin.jobs.start', { id }),
         progress: (id, value) => void agentData.request('admin.jobs.progress', { id, value }),
-        complete: (id) => void agentData.request('admin.jobs.complete', { id }),
-        fail: (id, error) => void agentData.request('admin.jobs.fail', { id, error }),
-        markCancelled: (id) => void agentData.request('admin.jobs.markCancelled', { id }),
+        complete: (id) => agentData.request('admin.jobs.complete', { id }),
+        fail: (id, error) => agentData.request('admin.jobs.fail', { id, error }),
+        markCancelled: (id) => agentData.request('admin.jobs.markCancelled', { id }),
         cancelled: (id) => wikiCancelled.has(id),
       },
       scan: (workspace) => scanWorkspaceMarkdown(workspace),

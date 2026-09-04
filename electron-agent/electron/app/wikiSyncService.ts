@@ -4,10 +4,10 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 export interface WikiSyncJobPort {
   start(id: string): unknown;
   progress(id: string, value: number): unknown;
-  complete(id: string): unknown;
-  fail(id: string, error: string): unknown;
+  complete(id: string): unknown | Promise<unknown>;
+  fail(id: string, error: string): unknown | Promise<unknown>;
   /** 编排器确认已停止后，由它把 job 状态落定为 cancelled。 */
-  markCancelled(id: string): unknown;
+  markCancelled(id: string): unknown | Promise<unknown>;
   /** 该 job 是否已被请求取消（协作式取消的检查点）。 */
   cancelled(id: string): boolean;
 }
@@ -42,23 +42,23 @@ export class WikiSyncService {
     try {
       const files = await this.options.scan(workspace);
       // 扫描结束后立刻再看一次：空列表走 complete 之前也能停。
-      if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
+      if (jobs.cancelled(jobId)) { await jobs.markCancelled(jobId); return; }
       for (const [index, file] of files.entries()) {
         // 检查点一：不开始处理下一个文件。
-        if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
+        if (jobs.cancelled(jobId)) { await jobs.markCancelled(jobId); return; }
         const source = await this.options.readSource(workspace, file);
         const content = await this.options.generate(source, file);
         // 检查点二：生成期间被取消时，这一页也不写入。
         // 少了这一步就会出现"状态已取消但仍在写文件"的竞态（生成是耗时调用，窗口很大）。
-        if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
+        if (jobs.cancelled(jobId)) { await jobs.markCancelled(jobId); return; }
         await this.options.writePage({ workspace, page: file, title: titleFromPage(file), content, sourcePath: file });
         jobs.progress(jobId, ((index + 1) / files.length) * 100);
       }
-      if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
-      jobs.complete(jobId);
+      if (jobs.cancelled(jobId)) { await jobs.markCancelled(jobId); return; }
+      await jobs.complete(jobId);
     } catch (error) {
-      if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
-      jobs.fail(jobId, error instanceof Error ? error.message : String(error));
+      if (jobs.cancelled(jobId)) { await jobs.markCancelled(jobId); return; }
+      await jobs.fail(jobId, error instanceof Error ? error.message : String(error));
     }
   }
 }
