@@ -71,5 +71,46 @@ describe('SystemWorkerManager', () => {
     handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '{"l1":{"a":1}}' }] }] });
 
     await expect(running).resolves.toEqual({ l1: { a: 1 } });
+    const prompt = String(client.send.mock.calls[0][0].message);
+    expect(prompt).toContain('JSON only');
+  });
+
+  it('uses a 60s timeout for wiki_page_generate and 30s for memory_extract', async () => {
+    vi.useFakeTimers();
+    try {
+      const wikiClient = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
+      const wikiManager = new SystemWorkerManager({
+        processCommand: { command: 'pi', args: [] },
+        createClient: vi.fn(() => wikiClient as never),
+      });
+      const wikiRunning = wikiManager.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
+      let wikiSettled = false;
+      void wikiRunning.then(() => { wikiSettled = true; }, () => { wikiSettled = true; });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(wikiClient.send).toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(wikiSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(wikiRunning).rejects.toThrow('system Pi task timed out');
+
+      const memClient = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
+      const memManager = new SystemWorkerManager({
+        processCommand: { command: 'pi', args: [] },
+        createClient: vi.fn(() => memClient as never),
+      });
+      const memRunning = memManager.run({ id: 'mem', kind: 'memory_extract', input: {} });
+      const memExpect = expect(memRunning).rejects.toThrow('system Pi task timed out');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(memClient.send).toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await memExpect;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

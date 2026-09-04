@@ -14,6 +14,11 @@ const KIND_INSTRUCTIONS: Record<string, string> = {
   // 与 extensions/wiki-rag/sync.ts 的 SYSTEM 文案保持一致：输出必须是可直接落盘的 Markdown。
   wiki_page_generate: 'Write a concise Markdown knowledge page from the supplied source. Preserve important names, behavior, and references. Return Markdown only.',
 };
+
+/** 各 kind 的完成超时。未列出的 kind 走 options.taskTimeoutMs，再退回 30s。 */
+const KIND_TIMEOUT_MS: Record<string, number> = {
+  wiki_page_generate: 60_000,
+};
 interface WorkerOptions {
   processCommand: PiProcessCommand;
   cwd?: string;
@@ -43,15 +48,15 @@ export class SystemWorkerManager {
       state.attempts += 1; state.status = 'running'; this.current = task.id; this.currentKind = task.kind;
       try {
         const client = this.ensureClient();
-        const completion = this.waitForCompletion();
+        const completion = this.waitForCompletion(KIND_TIMEOUT_MS[task.kind] ?? this.options.taskTimeoutMs ?? 30_000);
         void completion.catch(() => {});
         const response = await client.send({ type: 'prompt', message: serviceTaskPrompt(task) });
         const output = response === undefined ? await completion : (this.resolveCompletion(response), response);
-        state.status = 'completed'; state.output = output; this.current = undefined; this.scheduleIdleClose(); return output;
+        state.status = 'completed'; state.output = output; this.current = undefined; this.currentKind = undefined; this.scheduleIdleClose(); return output;
       } catch (error) {
         this.clearCompletion();
         state.error = error instanceof Error ? error.message : String(error); this.closeClient();
-        if (state.attempts >= maxAttempts) { state.status = 'failed'; this.current = undefined; throw error; }
+        if (state.attempts >= maxAttempts) { state.status = 'failed'; this.current = undefined; this.currentKind = undefined; throw error; }
         state.status = 'queued';
       }
     }
@@ -86,13 +91,13 @@ export class SystemWorkerManager {
   private clearIdle(): void { if (this.idleTimer) clearTimeout(this.idleTimer); this.idleTimer = undefined; }
   private closeClient(): void { this.clearIdle(); const client = this.client; this.client = undefined; if (client) void client.close(); }
 
-  private waitForCompletion(): Promise<unknown> {
+  private waitForCompletion(timeoutMs: number): Promise<unknown> {
     this.rejectCompletion(new Error('system task superseded'));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.completion = undefined;
         reject(new Error('system Pi task timed out'));
-      }, this.options.taskTimeoutMs ?? 30_000);
+      }, timeoutMs);
       this.completion = { resolve, reject, timer };
     });
   }

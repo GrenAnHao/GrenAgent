@@ -18,4 +18,10 @@ describe('ServiceTaskRegistry', () => {
     expect(() => registry.assertCapabilities('test', ['network'])).toThrow('service task capability is not declared');
     expect(() => registry.validateOutput('test', { ok: 'yes' })).toThrow('service task output does not match schema');
   });
+
+  it('registers wiki_page_generate with a 60s timeout and accepts markdown string output', () => {
+    const registry = new ServiceTaskRegistry();
+    expect(registry.get('wiki_page_generate')).toMatchObject({ kind: 'wiki_page_generate', timeoutMs: 60_000 });
+    expect(() => registry.validateOutput('wiki_page_generate', '# md')).not.toThrow();
+  });
 });
