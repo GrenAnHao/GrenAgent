@@ -67,13 +67,13 @@ Memory tab 去掉"未绑定工作区"的空状态门槛，默认直接显示全�
 
 现状：`WikiPanel` 点"同步 Wiki"只是插入一条 `pending` 状态的 `agent_jobs` 记录，没有任何代码消费它。
 
-修复方案：Wiki 同步需要调用 LLM 生成页面内容，而 Data Runtime（主进程）不能直接访问会话模型（`docs/superpowers/specs/2026-08-31-electron-self-owned-agent-modules-design.md` 已确立的约束）。复用现有 `memory_extract` 的执行模式：
+修复方案需要注意一个关键约束：`SystemWorkerManager` 拉起的无界面 pi 子进程带有环境变量 `PI_SYSTEM_WORKER=1`，`cli/src/runtime.ts` 里这个变量会让子进程**加载零扩展**（`extensionFactories: []`）。也就是说系统 worker 进程里没有任何工具可调，包括 `wiki-rag` 扩展本身——现有 `memory_extract` 能工作，靠的是直接给系统 worker 发一段纯文本 prompt，模型把结果当文本吐出来，主进程自己解析文本并写入存储（`memoryService.ts` 的 `completeExtraction()`），全程不经过任何扩展。Wiki 同步必须照抄这个真实机制，不能指望"新增一个扩展工具给系统 worker 调用"：
 
-1. `extensions/wiki-rag` 新增一个"同步整个工作区"的工具（内部循环：`scanWorkspaceMarkdown(cwd)` 枚举 Markdown 文件 → 对每个文件用已有的 `WikiSync.update()` 逻辑生成页面并写入 → 返回同步的页面数量摘要）。这一步全部复用已有的 `chunker.ts`/`llm.ts`/`sync.ts` 逻辑，只是把"单页触发"改成"批量循环触发"。
-2. 主进程创建 `wiki.sync` job 后，通过 `TaskQueue`（`electron/app/appServer/taskQueue.ts`）派发一个系统任务，由 `SystemWorkerManager` 拉起无界面 pi 子进程执行这个工具，和 `memory_extract` 走的是同一条基础设施。
-3. 任务完成后把对应 `agent_jobs` 行状态更新为 `completed`（进度可以按"已处理文件数/总文件数"实时更新，因为文件列表在开始前就已知）；失败则写入 `failed` + 错误摘要。
+1. `SystemWorkerManager`（`electron/pi/systemWorkerManager.ts`）新增一个任务 kind `wiki_page_generate`：`serviceTaskPrompt()` 为这个 kind 生成"把源文本写成简洁 Markdown 知识页面"的提示词（复用 `extensions/wiki-rag/sync.ts` 里现有的 `SYSTEM` 提示词文案），`parseWorkerOutput()` 对这个 kind 直接返回原始文本（不当 JSON 解析）。这是给现有两个函数加一个 kind 分支，不改变已有的 `memory_extract` 行为。
+2. 主进程新增一个编排器（`electron/app/wikiSyncService.ts`），负责整个同步流程：枚举工作区 Markdown 文件（在主进程内实现等价的扫描逻辑，不 import `extensions/wiki-rag`——两个包本来就不能互相引用，这和 `MemoryScope` 类型在 `extensions/memory/store.ts` 与 `electron/agentData/memoryStore.ts` 两处各自定义一份是同一种既有模式）→ 对每个文件调用 `systemWorker.run({kind:'wiki_page_generate', input:{source}})` 拿到生成的 Markdown → 直接调 `wiki.replace` RPC 写入 → 更新 job 进度。
+3. 任务全部完成后把对应 `agent_jobs` 行状态更新为 `completed`（按"已处理文件数/总文件数"实时更新进度，文件列表在开始前已知）；任一环节失败则整体标记为 `failed` + 错误摘要（不做部分失败的复杂状态）。
 
-不新增任务类型体系，不新增调度器，复用 `TaskQueue`/`SystemWorkerManager` 现成的重试、超时、并发控制。
+不新增任务类型体系，不新增调度器；复用 `TaskQueue`/`SystemWorkerManager` 现成的重试、超时、并发控制，以及 `memory_extract` 已验证过的"系统 worker 只认文本 prompt"的通信方式。
 
 ## 5. CodeGraph
 
@@ -153,10 +153,13 @@ Wiki 同步（新增执行器）：
   WikiPanel「同步」
     → agentData_jobs_create({kind:'wiki.sync', workspace})
     → JobStore.create（pending）
-    → TaskQueue.enqueue（系统任务）
-    → SystemWorkerManager 拉起无界面 pi 子进程
-    → extensions/wiki-rag 新工具：扫描 md → 逐页 askLlm → wiki.replace
-    → 完成后 JobStore 状态 → completed/failed
+    → WikiSyncService（主进程新编排器）：
+        扫描 workspace 下的 Markdown 文件
+        逐个文件 → systemWorker.run({kind:'wiki_page_generate', input:{source}})
+                 → SystemWorkerManager 拉起无界面 pi 子进程，发文本 prompt，取回文本结果
+                 → wiki.replace（RPC 写入）
+                 → JobStore 更新进度（已处理数/总数）
+    → 全部完成后 JobStore 状态 → completed/failed
 
 CodeGraph 同步（新增执行器）：
   CodeRetrievalPanel「同步索引」
@@ -187,7 +190,8 @@ CodeGraph 查询（实例池）：
 - `MemoryStore`：`scope='global'` 写入路径的单测（L1 落 project、L2/L3 落 global 的边界情况）。
 - IPC 层：`agentData_memory_overview`/`search` 转发 `includeOtherProjects`/`scope`/`projectId` 字段的单测。
 - `WikiStore`：无 workspace 过滤的全局搜索单测。
-- 新增的 Wiki 同步系统任务：文件枚举、逐页生成、失败保留旧页面的单测（参考现有 `capture.test.ts`/`sync.test.ts` 模式）。
+- `SystemWorkerManager` 新增 `wiki_page_generate` kind 的 prompt 构造和文本结果解析单测（参考现有 `systemWorkerManager.test.ts` 里 `memory_extract` 分支的测试模式）。
+- 新增的 `WikiSyncService` 编排器：文件枚举、逐页生成调用顺序、失败保留旧页面、进度更新的单测（参考现有 `capture.test.ts`/`sync.test.ts` 的 mock client 模式）。
 - 新增的 CodeGraph 同步执行器：`.codegraph` 存在性判断分支（init vs sync）、子进程退出码映射 job 状态、并发拒绝（同 workspace 重复创建）的单测。
 - 实例池：惰性加载、复用、空闲超时关闭、同步后失效重建的单测。
 - 取消操作：Wiki 同步取消时对应系统任务被终止、CodeGraph 同步取消时子进程被 kill 的单测；job 状态只在进程/任务真正终止后才落定为 `cancelled` 的时序测试。
