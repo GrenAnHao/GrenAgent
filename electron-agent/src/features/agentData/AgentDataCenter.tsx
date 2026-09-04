@@ -81,7 +81,7 @@ export function AgentDataCenter({ userId, initialProject }: AgentDataCenterProps
       <div className={styles.content}>
         {loading && !status ? <div className={styles.state}>正在加载 Agent Data...</div> : null}
         {!loading && !error && tab === 'overview' ? <Overview status={status} jobs={jobs} memory={memory} wiki={wiki} /> : null}
-        {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} workspace={initialProject} onCreate={async (kind, targetWorkspace) => { await agentDataApi.jobs.create({ kind, workspace: targetWorkspace }); await refresh(); }} onRefresh={refresh} /> : null}
+        {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} onRefresh={refresh} /> : null}
         {tab === 'memory' && !loading ? <MemoryPanel userId={userId} initialProject={initialProject} /> : null}
         {tab === 'wiki' && !loading ? <WikiPanel initialProject={initialProject} onJobCreated={() => setTab('jobs')} /> : null}
         {tab === 'code' && !loading ? <CodeRetrievalPanel initialProject={initialProject} onJobCreated={() => setTab('jobs')} /> : null}

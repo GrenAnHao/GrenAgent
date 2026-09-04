@@ -5,8 +5,6 @@ import { styles } from './agentDataStyles';
 
 interface JobsPanelProps {
   jobs?: AgentJob[];
-  workspace?: string;
-  onCreate?: (kind: string, workspace: string) => Promise<void> | void;
   onRefresh?: () => Promise<void> | void;
 }
 
@@ -18,15 +16,13 @@ const stateLabels: Record<AgentJobState, string> = {
   cancelled: '已取消',
 };
 
-export function JobsPanel({ jobs: inputJobs, workspace, onCreate, onRefresh }: JobsPanelProps) {
+export function JobsPanel({ jobs: inputJobs, onRefresh }: JobsPanelProps) {
   const [jobs, setJobs] = useState<AgentJob[]>(inputJobs ?? []);
   const [query, setQuery] = useState('');
   const [state, setState] = useState<'all' | AgentJobState>('all');
   const [loading, setLoading] = useState(inputJobs === undefined);
   const [error, setError] = useState<string>();
   const [cancelling, setCancelling] = useState<string>();
-  const [creating, setCreating] = useState(false);
-  const [newKind, setNewKind] = useState('wiki.sync');
 
   useEffect(() => {
     if (inputJobs !== undefined) {
@@ -58,26 +54,15 @@ export function JobsPanel({ jobs: inputJobs, workspace, onCreate, onRefresh }: J
     finally { setCancelling(undefined); }
   };
 
-  const create = async () => {
-    if (!onCreate || !workspace) return;
-    setCreating(true);
-    try {
-      setError(undefined);
-      await onCreate(newKind, workspace);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setCreating(false); }
-  };
-
   if (loading) return <div className={styles.state}>正在加载任务...</div>;
   return <section data-testid="jobs-panel">
     <div className={styles.sectionHeading}><h3 className={styles.heading}>任务队列</h3><span className={styles.hint}>{filteredJobs.length}/{jobs.length} 项</span></div>
     <div className={styles.toolbar}>
-      <input className={styles.input} aria-label="搜索任务" placeholder="搜索任务或工作区" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <input className={styles.input} aria-label="搜索任务" placeholder="搜索任务或项目" value={query} onChange={(event) => setQuery(event.target.value)} />
       <select className={styles.select} aria-label="任务状态" value={state} onChange={(event) => setState(event.target.value as 'all' | AgentJobState)}>
         <option value="all">全部状态</option>
         {Object.entries(stateLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
-      {onCreate && workspace ? <><select className={styles.select} aria-label="新任务类型" value={newKind} onChange={(event) => setNewKind(event.target.value)}><option value="wiki.sync">Wiki 同步</option><option value="codegraph.sync">CodeGraph 同步</option></select><button type="button" className={styles.actionButton} onClick={() => void create()} disabled={creating}>创建任务</button></> : null}
     </div>
     {error ? <div className={styles.error} role="alert">{error}</div> : null}
     {filteredJobs.length === 0 ? <div className={styles.state}>暂无匹配任务</div> : <table className={styles.table}><thead><tr><th>任务</th><th>工作区</th><th>状态</th><th>进度</th><th>操作</th></tr></thead><tbody>{filteredJobs.map((job) => <tr key={job.id}>
