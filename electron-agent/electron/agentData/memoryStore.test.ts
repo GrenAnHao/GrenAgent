@@ -59,4 +59,48 @@ describe('MemoryStore', () => {
     expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a', includeOtherProjects: true }, 'fact')).toHaveLength(3);
     db.close();
   });
+
+  it('backfills project_id on rows written before that column existed, on every open', () => {
+    const db = new DatabaseSync(':memory:');
+    // 复现 project_id 加列前遗留下的行：直接绕过 MemoryStore 写入旧形状的记录
+    // （memory_scope 默认 'project'，project_id 缺省为 NULL）。
+    db.exec(`CREATE TABLE memories (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, workspace TEXT NOT NULL, session_id TEXT,
+      level INTEGER NOT NULL, content TEXT NOT NULL, source TEXT, fingerprint TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )`);
+    db.prepare(`INSERT INTO memories(id,user_id,workspace,level,content,fingerprint,created_at,updated_at)
+      VALUES('legacy-1','u','/legacy',0,'legacy content','fp-legacy',1,1)`).run();
+
+    // 打开（构造）时立即补齐缺失的列并回填 project_id，同一次 open 内就必须生效——
+    // 不能要等到 project_id 列本就存在的「下一次」打开才生效，否则历史数据永久搜不到。
+    const store = new MemoryStore(db);
+    expect((db.prepare('SELECT project_id FROM memories WHERE id=?').get('legacy-1') as { project_id: string | null }).project_id).toBe('/legacy');
+    expect(store.search({ userId: 'u', workspace: '/legacy' }, 'legacy').map((item) => item.content)).toEqual(['legacy content']);
+    expect(store.overview({ userId: 'u', workspace: '/legacy' })).toMatchObject({ total: 1, byLevel: { L0: 1, L1: 0, L2: 0, L3: 0 } });
+    db.close();
+  });
+
+  it('removes a record owned by the user even when queried from another project scope', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new MemoryStore(db);
+    const recordInB = store.upsert({ userId: 'u', projectId: 'project-B', workspace: '/b' }, { level: 1, content: 'b fact' });
+
+    // 全局视图停留在 project-A，却要删掉 project-B 的记录。
+    store.remove({ userId: 'u', workspace: '/a' }, recordInB.id);
+
+    expect(store.search({ userId: 'u', workspace: '/a', includeOtherProjects: true }, 'fact')).toHaveLength(0);
+    db.close();
+  });
+
+  it('does not remove a record owned by a different user', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new MemoryStore(db);
+    const mine = store.upsert({ userId: 'u', workspace: '/a' }, { level: 1, content: 'mine' });
+
+    store.remove({ userId: 'intruder', workspace: '/a' }, mine.id);
+
+    expect(store.search({ userId: 'u', workspace: '/a' }, 'mine')).toHaveLength(1);
+    db.close();
+  });
 });

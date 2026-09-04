@@ -21,6 +21,14 @@ export class MemoryStore {
     this.ensureColumn('memories', 'project_id', 'TEXT');
     this.ensureColumn('memories', 'memory_scope', "TEXT NOT NULL DEFAULT 'project'");
     this.ensureColumn('memory_captures', 'project_id', 'TEXT');
+    // project_id 是后加列，老数据落地为 NULL。search()/overview() 按
+    // `memory_scope='global' OR project_id=? OR (...)` 过滤，project_id 为 NULL 时三个条件都
+    // 不成立（SQL 里 NULL 不等于任何值），导致这些记录永久搜不到、总数统计也不含它们。
+    // 不能只在“刚新增该列”时回填一次：加列本身也曾用 ensureColumn 静默发生过（列已存在于
+    // 老数据库里，值仍是 NULL），错过了那次窗口。改为每次打开都无条件跑这条幂等 UPDATE——
+    // 健康数据库里 `project_id IS NULL` 天然匹配 0 行，是零开销的自愈检查。
+    // 回填规则对齐写入时的 projectId(scope) = scope.projectId ?? scope.workspace。
+    this.db.exec("UPDATE memories SET project_id = workspace WHERE project_id IS NULL AND memory_scope != 'global'");
   }
 
   capture(scope: MemoryScope, source: string, transcript: string, fingerprint: string): { changed: boolean; delta: string; fingerprint: string } {
@@ -85,7 +93,9 @@ export class MemoryStore {
   }
 
   remove(scope: MemoryScope, id: string): void {
-    this.db.prepare('DELETE FROM memories WHERE id=? AND user_id=? AND (workspace=? OR memory_scope=\'global\')').run(id, scope.userId, scope.workspace);
+    // id 已经是 hash(userId:project:memoryScope:session:fingerprint)，配合 user_id 足以判权。
+    // 不再约束 workspace：全局视图会列出其它项目的记录，带 workspace 条件会导致删除静默失败。
+    this.db.prepare('DELETE FROM memories WHERE id=? AND user_id=?').run(id, scope.userId);
   }
 
   private mapRecord(row: Record<string, unknown>): MemoryRecord {
