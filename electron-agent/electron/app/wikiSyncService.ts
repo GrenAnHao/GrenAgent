@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 export interface WikiSyncJobPort {
   start(id: string): unknown;
@@ -41,6 +41,8 @@ export class WikiSyncService {
     jobs.start(jobId);
     try {
       const files = await this.options.scan(workspace);
+      // 扫描结束后立刻再看一次：空列表走 complete 之前也能停。
+      if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
       for (const [index, file] of files.entries()) {
         // 检查点一：不开始处理下一个文件。
         if (jobs.cancelled(jobId)) { jobs.markCancelled(jobId); return; }
@@ -63,15 +65,26 @@ export class WikiSyncService {
 
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', '.pi']);
 
-/** 枚举工作区内的 Markdown 相对路径（POSIX 分隔符，已排序）。 */
+/** 枚举工作区内的 Markdown 相对路径（POSIX 分隔符，已排序）。遇到 SKIPPED_DIRECTORIES 直接不下降。 */
 export async function scanWorkspaceMarkdown(workspace: string): Promise<string[]> {
   const root = resolve(workspace);
-  const entries = await readdir(root, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-    .map((entry) => (entry.parentPath ? relative(root, resolve(entry.parentPath, entry.name)) : entry.name).replace(/\\/g, '/'))
-    .filter((path) => path && !path.split('/').some((part) => SKIPPED_DIRECTORIES.has(part)))
-    .sort();
+  const files: string[] = [];
+  await walk(root, '');
+  return files.sort();
+
+  async function walk(dir: string, relativeDir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+        const nextRel = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+        await walk(join(dir, entry.name), nextRel);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue;
+      files.push(relativeDir ? `${relativeDir}/${entry.name}` : entry.name);
+    }
+  }
 }
 
 /** 读取工作区内的源文件，拒绝越出工作区边界的路径。 */

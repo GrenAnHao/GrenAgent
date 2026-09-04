@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { WikiSyncService, scanWorkspaceMarkdown, type WikiSyncPageInput, type WikiSyncServiceOptions } from './wikiSyncService';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WikiSyncService, readWorkspaceSource, scanWorkspaceMarkdown, type WikiSyncPageInput, type WikiSyncServiceOptions } from './wikiSyncService';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 function deps(overrides: Partial<WikiSyncServiceOptions> = {}) {
   const jobs = {
@@ -14,15 +14,18 @@ function deps(overrides: Partial<WikiSyncServiceOptions> = {}) {
     cancelled: vi.fn<(id: string) => boolean>(() => false),
   };
   const writes: WikiSyncPageInput[] = [];
+  const scan = overrides.scan ?? vi.fn(async () => ['README.md', 'docs/guide.md']);
+  const readSource = overrides.readSource ?? vi.fn(async (_workspace: string, path: string) => `# source of ${path}`);
+  const generate = overrides.generate ?? vi.fn(async (source: string) => `# generated from ${source}`);
+  const writePage = overrides.writePage ?? vi.fn(async (input: WikiSyncPageInput) => { writes.push(input); });
   const service = new WikiSyncService({
     jobs,
-    scan: vi.fn(async () => ['README.md', 'docs/guide.md']),
-    readSource: vi.fn(async (_workspace: string, path: string) => `# source of ${path}`),
-    generate: vi.fn(async (source: string) => `# generated from ${source}`),
-    writePage: vi.fn(async (input: WikiSyncPageInput) => { writes.push(input); }),
-    ...overrides,
+    scan,
+    readSource,
+    generate,
+    writePage,
   });
-  return { service, jobs, writes };
+  return { service, jobs, writes, generate, readSource, scan };
 }
 
 describe('WikiSyncService', () => {
@@ -46,8 +49,12 @@ describe('WikiSyncService', () => {
 
     await service.run('job-1', '/repo');
 
+    expect(jobs.start).toHaveBeenCalledWith('job-1');
     expect(writes).toEqual([]);
     expect(jobs.complete).toHaveBeenCalledWith('job-1');
+    expect(jobs.progress).not.toHaveBeenCalled();
+    expect(jobs.fail).not.toHaveBeenCalled();
+    expect(jobs.markCancelled).not.toHaveBeenCalled();
   });
 
   it('fails the job and keeps earlier pages when one file cannot be generated', async () => {
@@ -64,12 +71,14 @@ describe('WikiSyncService', () => {
   });
 
   it('stops before the next file once the job is cancelled and marks it cancelled', async () => {
-    const { service, jobs, writes } = deps();
+    const { service, jobs, writes, generate, readSource } = deps();
     jobs.cancelled.mockImplementation(() => writes.length >= 1);
 
     await service.run('job-1', '/repo');
 
     expect(writes).toHaveLength(1);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(readSource).toHaveBeenCalledTimes(1);
     expect(jobs.markCancelled).toHaveBeenCalledWith('job-1');
     expect(jobs.complete).not.toHaveBeenCalled();
     expect(jobs.fail).not.toHaveBeenCalled();
@@ -92,16 +101,40 @@ describe('WikiSyncService', () => {
 });
 
 describe('scanWorkspaceMarkdown', () => {
+  let root = '';
+
+  afterEach(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
   it('lists markdown recursively and skips runtime directories', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'wiki-sync-scan-'));
+    root = await mkdtemp(join(tmpdir(), 'wiki-sync-scan-'));
     await mkdir(join(root, 'docs'), { recursive: true });
     await mkdir(join(root, 'node_modules', 'pkg'), { recursive: true });
     await mkdir(join(root, '.git'), { recursive: true });
+    await mkdir(join(root, '.pi'), { recursive: true });
     await writeFile(join(root, 'README.md'), '# Readme');
     await writeFile(join(root, 'docs', 'guide.md'), '# Guide');
     await writeFile(join(root, 'node_modules', 'pkg', 'ignored.md'), '# Ignored');
     await writeFile(join(root, '.git', 'ignored.md'), '# Ignored');
+    await writeFile(join(root, '.pi', 'ignored.md'), '# Ignored');
 
     await expect(scanWorkspaceMarkdown(root)).resolves.toEqual(['README.md', 'docs/guide.md']);
+  });
+});
+
+describe('readWorkspaceSource', () => {
+  let root = '';
+
+  afterEach(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  it('rejects relative escapes and absolute paths outside the workspace', async () => {
+    root = await mkdtemp(join(tmpdir(), 'wiki-sync-read-'));
+    await writeFile(join(root, 'inside.md'), '# in');
+
+    await expect(readWorkspaceSource(root, '../secret.md')).rejects.toThrow('sourcePath must stay inside workspace');
+    await expect(readWorkspaceSource(root, resolve(root, '..', 'outside.md'))).rejects.toThrow('sourcePath must stay inside workspace');
   });
 });
