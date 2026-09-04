@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
-import type { EventBus } from './appServer/eventBus';
+
 import type { ServiceTask } from './appServer/types';
 
 export interface MemorySearchScope extends MemoryScope { projectId: string; query: string; limit?: number }
@@ -10,7 +10,7 @@ export interface MemoryTaskQueue {
   enqueue(input: { id: string; kind: string; input: unknown; sourceProjectId?: string; sourceSessionId?: string; system?: boolean }): Promise<ServiceTask>;
   get?(id: string): ServiceTask | undefined;
 }
-interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; eventBus?: Pick<EventBus, 'publish'> }
+interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue }
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
 
 export class MemoryService {
@@ -43,12 +43,13 @@ export class MemoryService {
     if (!capture) throw new Error('memory capture task not found');
     const extraction = validateExtraction(output);
     const writes: MemoryRecord[] = [];
+    const globalScope = { ...capture.scope, scope: 'global' as const };
     if (extraction.l1 !== undefined) writes.push(this.options.store.upsert(capture.scope, { level: 1, content: JSON.stringify(extraction.l1), source: capture.source }));
-    if (extraction.l2) writes.push(this.options.store.upsert(capture.scope, { level: 2, content: extraction.l2, source: capture.source }));
-    if (extraction.l3) writes.push(this.options.store.upsert(capture.scope, { level: 3, content: extraction.l3, source: capture.source }));
+    if (extraction.l2) writes.push(this.options.store.upsert(globalScope, { level: 2, content: extraction.l2, source: capture.source }));
+    if (extraction.l3) writes.push(this.options.store.upsert(globalScope, { level: 3, content: extraction.l3, source: capture.source }));
     this.options.store.commitCapture(capture.scope, capture.source, capture.fingerprint);
     this.pending.delete(taskId);
-    if (writes.length) this.options.eventBus?.publish({ id: randomUUID(), type: 'memory.updated', timestamp: Date.now(), projectId: capture.scope.projectId, data: { taskId, records: writes } });
+
     return writes;
   }
 
