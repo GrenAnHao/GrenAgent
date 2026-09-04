@@ -13,7 +13,7 @@ describe('WikiPanel', () => {
   beforeEach(() => {
     vi.mocked(agentDataApi.wiki.overview).mockResolvedValue({ pages: 1, latestUpdatedAt: 2 });
     vi.mocked(agentDataApi.wiki.search).mockResolvedValue([{
-      page: 'architecture', title: 'Architecture', snippet: 'Agent Data Runtime', sourcePath: 'docs/architecture.md', chunks: 3,
+      workspace: '/workspace', page: 'architecture', title: 'Architecture', snippet: 'Agent Data Runtime', sourcePath: 'docs/architecture.md', chunks: 3,
     }]);
     vi.mocked(agentDataApi.jobs.create).mockResolvedValue({ id: 'job-1', kind: 'wiki.sync', workspace: '/workspace', state: 'pending', progress: 0, createdAt: 1, updatedAt: 1 });
   });

@@ -145,8 +145,8 @@ export class AgentDataRuntime {
   private wikiMethod(name: string): AgentDataMethod | undefined {
     if (!this.wiki) return undefined;
     if (name === 'wiki.replace') return (params) => this.wiki!.replacePage({ workspace: readString(params.workspace) }, readString(params.page), readString(params.title), readString(params.content), typeof params.sourcePath === 'string' ? params.sourcePath : undefined);
-    if (name === 'wiki.search') return (params) => this.wiki!.search({ workspace: readString(params.workspace) }, readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
-    if (name === 'wiki.admin.overview') return (params) => this.wiki!.overview({ workspace: readString(params.workspace) });
+    if (name === 'wiki.search') return (params) => this.wiki!.search(readWikiQueryScope(params), readString(params.query), typeof params.limit === 'number' ? params.limit : 20);
+    if (name === 'wiki.admin.overview') return (params) => this.wiki!.overview(readWikiQueryScope(params));
     if (name === 'wiki.deleteWorkspace') return (params) => { this.wiki!.deleteWorkspace({ workspace: readString(params.workspace) }); return null; };
     return undefined;
   }
@@ -217,6 +217,9 @@ function readScope(value: Record<string, unknown>): import('./memoryStore').Memo
  * 因此缺省时传 '' 是安全的；写入路径仍用 readScope 强制要求 workspace。
  */
 function readQueryScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: typeof value.workspace === 'string' && value.workspace.trim() ? value.workspace : '', projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
+function readWikiQueryScope(value: Record<string, unknown>): import('./wikiStore').WikiScope {
+  return typeof value.workspace === 'string' && value.workspace.trim() ? { workspace: value.workspace } : {};
+}
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
 function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }
 function readItemType(value: unknown): import('../app/appServer/types').ItemType { if (value === 'user_message' || value === 'assistant_message' || value === 'reasoning' || value === 'tool_call' || value === 'tool_result' || value === 'permission_request' || value === 'error') return value; throw new RpcError('INVALID_PARAMS', 'invalid item type'); }

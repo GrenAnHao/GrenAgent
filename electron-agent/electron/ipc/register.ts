@@ -146,7 +146,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
     }));
     registerCommand('agentData_wiki_overview', (_event, args) => services.agentData!.request('wiki.admin.overview', {
-      workspace: readString(args, 'workspace'),
+      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
     }));
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
@@ -170,7 +170,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       id: readString(args, 'id'),
     }));
     registerCommand('agentData_wiki_search', (_event, args) => services.agentData!.request('wiki.search', {
-      workspace: readString(args, 'workspace'),
+      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
       query: readString(args, 'query'),
       limit: readPositiveInteger(args, 'limit', 50),
     }));

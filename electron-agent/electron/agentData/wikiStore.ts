@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
-export interface WikiScope { workspace: string }
+/** 查询作用域：workspace 缺省表示跨全部项目（写入路径仍必须给定 workspace）。 */
+export interface WikiScope { workspace?: string }
+export interface WikiWriteScope { workspace: string }
+export interface WikiSearchHit { workspace: string; page: string; title: string; snippet: string; sourcePath: string; chunks: number }
 export interface WikiChunk { id: string; page: string; title: string; content: string; sourcePath: string; startLine: number; endLine: number; hash: string }
 export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
 
@@ -11,7 +14,7 @@ export class WikiStore {
       CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(workspace UNINDEXED, page UNINDEXED, title, content);`);
   }
 
-  replacePage(scope: WikiScope, page: string, title: string, content: string, sourcePath = page): WikiChunk[] {
+  replacePage(scope: WikiWriteScope, page: string, title: string, content: string, sourcePath = page): WikiChunk[] {
     const chunks = chunkMarkdown(content, sourcePath, title).map((chunk) => ({ ...chunk, id: createHash('sha256').update(`${scope.workspace}:${page}:${chunk.hash}`).digest('hex').slice(0, 32), page }));
     this.db.exec('BEGIN');
     try {
@@ -27,17 +30,30 @@ export class WikiStore {
     return chunks;
   }
 
-  search(scope: WikiScope, query: string, limit = 20): Array<{ page: string; title: string; snippet: string; sourcePath: string; chunks: number }> {
-    const rows = this.db.prepare("SELECT f.page,f.title,snippet(wiki_fts,3,'', '', '...', 24) as snippet,p.source_path as sourcePath,p.content FROM wiki_fts f JOIN wiki_pages p ON p.workspace=f.workspace AND p.page=f.page WHERE f.workspace=? AND wiki_fts MATCH ? LIMIT ?").all(scope.workspace, query.trim(), Math.max(1, Math.min(limit, 100))) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({ page: String(row.page), title: String(row.title), snippet: String(row.snippet), sourcePath: String(row.sourcePath), chunks: chunkMarkdown(String(row.content), String(row.sourcePath), String(row.title)).length }));
+  search(scope: WikiScope, query: string, limit = 20): WikiSearchHit[] {
+    const bounded = Math.max(1, Math.min(limit, 100));
+    const select = "SELECT f.workspace,f.page,f.title,snippet(wiki_fts,3,'', '', '...', 24) as snippet,p.source_path as sourcePath,p.content FROM wiki_fts f JOIN wiki_pages p ON p.workspace=f.workspace AND p.page=f.page";
+    const rows = (scope.workspace
+      ? this.db.prepare(`${select} WHERE f.workspace=? AND wiki_fts MATCH ? LIMIT ?`).all(scope.workspace, query.trim(), bounded)
+      : this.db.prepare(`${select} WHERE wiki_fts MATCH ? LIMIT ?`).all(query.trim(), bounded)) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      workspace: String(row.workspace),
+      page: String(row.page),
+      title: String(row.title),
+      snippet: String(row.snippet),
+      sourcePath: String(row.sourcePath),
+      chunks: chunkMarkdown(String(row.content), String(row.sourcePath), String(row.title)).length,
+    }));
   }
 
   overview(scope: WikiScope): WikiOverview {
-    const row = this.db.prepare('SELECT count(*) as pages, max(updated_at) as latestUpdatedAt FROM wiki_pages WHERE workspace=?').get(scope.workspace) as { pages: number; latestUpdatedAt: number | null };
+    const row = (scope.workspace
+      ? this.db.prepare('SELECT count(*) as pages, max(updated_at) as latestUpdatedAt FROM wiki_pages WHERE workspace=?').get(scope.workspace)
+      : this.db.prepare('SELECT count(*) as pages, max(updated_at) as latestUpdatedAt FROM wiki_pages').get()) as { pages: number; latestUpdatedAt: number | null };
     return { pages: Number(row.pages), latestUpdatedAt: row.latestUpdatedAt == null ? null : Number(row.latestUpdatedAt) };
   }
 
-  deleteWorkspace(scope: WikiScope): void { this.db.prepare('DELETE FROM wiki_pages WHERE workspace=?').run(scope.workspace); this.db.prepare('DELETE FROM wiki_fts WHERE workspace=?').run(scope.workspace); }
+  deleteWorkspace(scope: WikiWriteScope): void { this.db.prepare('DELETE FROM wiki_pages WHERE workspace=?').run(scope.workspace); this.db.prepare('DELETE FROM wiki_fts WHERE workspace=?').run(scope.workspace); }
 }
 
 export function chunkMarkdown(content: string, sourcePath: string, fallbackTitle = 'Untitled'): Array<Omit<WikiChunk, 'id' | 'page'>> {
