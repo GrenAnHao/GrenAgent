@@ -10,6 +10,7 @@ export interface MemoryRecord { id: string; level: 0 | 1 | 2 | 3; content: strin
 export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
 export interface WikiSearchResult { workspace: string; page: string; title: string; snippet: string; sourcePath: string; chunks: number }
 export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; files?: number; nodes?: number; edges?: number }
+export interface CodeGraphProject { workspace: string; indexed: boolean }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
 export interface AgentJobCreateInput { kind: string; workspace: string }
 export interface AgentAuditEvent { id: string; action: string; detail: Record<string, unknown>; createdAt: number }
@@ -37,6 +38,7 @@ export const agentDataApi = {
   code: {
     status: (workspace: string) => invoke<CodeGraphStatus>('agentData_code_status', { workspace }),
     search: (workspace: string, query: string, limit = 20) => invoke<{ workspace: string; available: boolean; results: CodeSearchResult[]; message?: string }>('agentData_code_search', { workspace, query, limit }),
+    projects: () => invoke<CodeGraphProject[]>('agentData_code_projects'),
   },
   config: {
     get: (module: string) => invoke<AgentConfig>('agentData_admin_config_get', { module }),

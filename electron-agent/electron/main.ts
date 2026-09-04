@@ -35,6 +35,7 @@ import { PluginManager, type PluginDefinition } from "./app/plugin/pluginManager
 import { SystemWorkerManager } from "./pi/systemWorkerManager";
 import { randomUUID } from "node:crypto";
 import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./app/wikiSyncService";
+import { CodeGraphService } from "./app/codeGraph/codeGraphService";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -77,6 +78,8 @@ if (!process.env.VITEST) {
         PI_RUNTIME_CONFIG: join(app.getPath('userData'), 'runtime-settings.json'),
       },
     });
+    const knownWorkspaces = new Set<string>();
+    const codeGraph = new CodeGraphService({ listWorkspaces: () => [...knownWorkspaces] });
     const wikiCancelled = new Set<string>();
     const wikiSync = new WikiSyncService({
       jobs: {
@@ -100,6 +103,27 @@ if (!process.env.VITEST) {
           run: async (id, workspace) => { wikiCancelled.delete(id); await wikiSync.run(id, workspace); wikiCancelled.delete(id); },
           cancel: (id) => { wikiCancelled.add(id); },
         },
+        'codegraph.sync': {
+          run: async (id, workspace) => {
+            await agentData.request('admin.jobs.start', { id });
+            try {
+              await codeGraph.runSync(id, workspace);
+              await agentData.request('admin.jobs.complete', { id });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              // cancelSync() 只 kill 进程、不写状态，所以取消会以 rejection 形式到达这里；
+              // 必须落成 cancelled 而不是 failed。
+              if (message.includes('cancelled')) await agentData.request('admin.jobs.markCancelled', { id });
+              else await agentData.request('admin.jobs.fail', { id, error: message });
+            }
+          },
+          cancel: (id) => codeGraph.cancelSync(id),
+        },
+      },
+      codeRetrieval: {
+        projects: () => codeGraph.projects(),
+        status: (workspace) => codeGraph.status(workspace) as unknown as Record<string, unknown>,
+        search: (workspace, query, limit) => codeGraph.search(workspace, query, limit) as unknown as Promise<Record<string, unknown>>,
       },
       methods: {
         'turn.start': (params) => piRuntime?.enqueueTurn(
@@ -157,7 +181,11 @@ if (!process.env.VITEST) {
           const endpoint = agentData.endpoint();
           return endpoint ? JSON.stringify(endpoint) : undefined;
         },
-        resolveWorkspace: (path) => workspace.ensureWorkspace(path),
+        resolveWorkspace: async (path) => {
+          const resolved = await workspace.ensureWorkspace(path);
+          knownWorkspaces.add(resolved);
+          return resolved;
+        },
         permissionManager: permissions,
         mcpConfig,
         allowedPluginIds: () => plugins.allowedPluginIds(),
@@ -205,6 +233,7 @@ if (!process.env.VITEST) {
     app.on('before-quit', () => {
       void pi.closeAll();
       systemWorker?.close();
+      void codeGraph.close();
       void agentData.stop();
       pluginStorage.close();
     });

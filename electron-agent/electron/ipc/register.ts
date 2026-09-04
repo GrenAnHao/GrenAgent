@@ -151,6 +151,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
     }));
+    registerCommand('agentData_code_projects', () => services.agentData!.request('codeRetrieval.admin.projects', {}));
     registerCommand('agentData_jobs_create', (_event, args) => services.agentData!.request('admin.jobs.create', {
       kind: readString(args, 'kind'),
       workspace: readString(args, 'workspace'),

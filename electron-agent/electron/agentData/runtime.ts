@@ -18,6 +18,12 @@ export interface AgentDataJobRunner {
   cancel(jobId: string): void;
 }
 
+export interface AgentDataCodeRetrievalProvider {
+  projects(): Array<{ workspace: string; indexed: boolean }>;
+  status(workspace: string): Record<string, unknown>;
+  search(workspace: string, query: string, limit: number): Promise<Record<string, unknown>>;
+}
+
 export interface AgentDataRuntimeOptions {
   dataPath: string;
   methods?: Record<string, AgentDataMethod>;
@@ -25,6 +31,7 @@ export interface AgentDataRuntimeOptions {
   executeServiceTask?: (task: ServiceTask) => Promise<unknown>;
   /** 按 job kind 注册的执行器：创建即派发，取消时通知。未注册的 kind 只落库。 */
   jobRunners?: Record<string, AgentDataJobRunner>;
+  codeRetrieval?: AgentDataCodeRetrievalProvider;
 }
 
 export class AgentDataRuntime {
@@ -175,8 +182,18 @@ export class AgentDataRuntime {
   private adminMethod(name: string): AgentDataMethod | undefined {
     if (!this.jobs) return undefined;
     if (name === 'admin.jobs.list') return (params) => this.jobs!.list(params.state === undefined ? undefined : readJobState(params.state));
-    if (name === 'codeRetrieval.admin.status') return () => ({ connected: false, indexed: false });
-    if (name === 'codeRetrieval.search') return (p) => ({ workspace: readString(p.workspace), available: false, results: [], message: 'CodeGraph index is not connected' });
+    if (name === 'codeRetrieval.admin.projects') return () => this.options.codeRetrieval?.projects() ?? [];
+    if (name === 'codeRetrieval.admin.status') return (p) => {
+      const workspace = typeof p.workspace === 'string' ? p.workspace : '';
+      return this.options.codeRetrieval?.status(workspace) ?? { workspace, connected: false, indexed: false, state: 'unavailable' };
+    };
+    if (name === 'codeRetrieval.search') return (p) => {
+      const workspace = readString(p.workspace);
+      const query = readString(p.query);
+      const limit = typeof p.limit === 'number' ? p.limit : 20;
+      return this.options.codeRetrieval?.search(workspace, query, limit)
+        ?? { workspace, available: false, results: [], message: 'CodeGraph is not available' };
+    };
     if (name === 'admin.jobs.get') return (p) => this.jobs!.get(readString(p.id));
     if (name === 'admin.jobs.cancel') return (p) => {
       const id = readString(p.id);

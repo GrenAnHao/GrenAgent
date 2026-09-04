@@ -149,6 +149,9 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_memory_search', args: { userId: 'u', projectId: '/w', query: 'x', limit: 10 } })).resolves.toEqual({
       method: 'memory.search', params: { userId: 'u', projectId: '/w', query: 'x', limit: 10 },
     });
+    await expect(invoke({}, { command: 'agentData_code_projects', args: {} })).resolves.toEqual({
+      method: 'codeRetrieval.admin.projects', params: {},
+    });
   });
 
   it('routes app server thread and turn commands through Agent Data', async () => {

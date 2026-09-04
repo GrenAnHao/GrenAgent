@@ -16,7 +16,7 @@ const expectedCommands = [
   'agentData_admin_audit_list', 'agentData_admin_diagnostics', 'agentData_admin_export', 'agentData_admin_import',
   'agentData_memory_overview', 'agentData_wiki_overview', 'agentData_code_status', 'agentData_jobs_create',
   'agentData_memory_search', 'agentData_memory_delete', 'agentData_wiki_search',
-  'agentData_code_search',
+  'agentData_code_search', 'agentData_code_projects',
 ] as const;
 
 describe('Rust handler coverage', () => {
