@@ -20,6 +20,36 @@ export class JobStore {
     return (rows as Array<Record<string, unknown>>).map((row) => this.mapJob(row));
   }
   cancel(id: string): Job | undefined { const job = this.get(id); if (!job) return undefined; this.db.prepare("UPDATE agent_jobs SET state='cancelled',updated_at=? WHERE id=? AND state IN ('pending','running')").run(Date.now(), id); this.record('job.cancel', { id }); return this.get(id); }
+  /** pending → running。已取消/已结束的 job 不再推进，原样返回。 */
+  start(id: string): Job | undefined {
+    this.db.prepare("UPDATE agent_jobs SET state='running',updated_at=? WHERE id=? AND state='pending'").run(Date.now(), id);
+    return this.get(id);
+  }
+
+  /** 更新进度（clamp 到 0..100）。仅对 running 生效，避免给已取消的 job 写进度。 */
+  progress(id: string, value: number): Job | undefined {
+    const clamped = Math.max(0, Math.min(100, Math.round(value)));
+    this.db.prepare("UPDATE agent_jobs SET progress=?,updated_at=? WHERE id=? AND state='running'").run(clamped, Date.now(), id);
+    return this.get(id);
+  }
+
+  complete(id: string): Job | undefined {
+    this.db.prepare("UPDATE agent_jobs SET state='completed',progress=100,updated_at=? WHERE id=? AND state IN ('pending','running')").run(Date.now(), id);
+    this.record('job.complete', { id });
+    return this.get(id);
+  }
+
+  fail(id: string, error: string): Job | undefined {
+    this.db.prepare("UPDATE agent_jobs SET state='failed',error=?,updated_at=? WHERE id=? AND state IN ('pending','running')").run(error.slice(0, 2000), Date.now(), id);
+    this.record('job.fail', { id, error: error.slice(0, 200) });
+    return this.get(id);
+  }
+
+  /** 该 workspace 是否已有同 kind 的未结束 job（供并发拒绝）。 */
+  hasActive(kind: string, workspace: string): boolean {
+    const row = this.db.prepare("SELECT count(*) as count FROM agent_jobs WHERE kind=? AND workspace=? AND state IN ('pending','running')").get(kind, workspace) as { count: number };
+    return Number(row.count) > 0;
+  }
   updateConfig(module: string, value: Record<string, unknown>, expectedVersion: number): ConfigValue { const current = this.config(module); if (current.version !== expectedVersion) throw new Error('VERSION_CONFLICT'); const next = current.version + 1; this.db.prepare('INSERT INTO agent_config(module,version,value) VALUES(?,?,?) ON CONFLICT(module) DO UPDATE SET version=excluded.version,value=excluded.value').run(module, next, JSON.stringify(value)); this.record('config.update', { module, version: next }); return { version: next, value }; }
   config(module: string): ConfigValue { const row = this.db.prepare('SELECT version,value FROM agent_config WHERE module=?').get(module) as { version?: number; value?: string } | undefined; return row ? { version: Number(row.version), value: JSON.parse(row.value!) as Record<string, unknown> } : { version: 0, value: {} }; }
   audit(limit = 100): Array<{ id: string; action: string; detail: Record<string, unknown>; createdAt: number }> { return (this.db.prepare('SELECT id,action,detail,created_at as createdAt FROM agent_audit ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(limit, 500))) as Array<Record<string, unknown>>).map((r) => ({ id: String(r.id), action: String(r.action), detail: JSON.parse(String(r.detail)) as Record<string, unknown>, createdAt: Number(r.createdAt) })); }
