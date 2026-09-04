@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
-import { agentDataApi, type AgentDataStatus, type AgentJob, type CodeGraphStatus, type MemoryOverview, type WikiOverview } from '../../lib/agentData';
+import { agentDataApi, type AgentDataStatus, type AgentJob, type MemoryOverview, type WikiOverview } from '../../lib/agentData';
 import { MemoryPanel } from './MemoryPanel';
 import { WikiPanel } from './WikiPanel';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
@@ -9,7 +9,11 @@ import { AuditDiagnosticsPanel } from './AuditDiagnosticsPanel';
 import { styles } from './agentDataStyles';
 
 type Tab = 'overview' | 'jobs' | 'memory' | 'wiki' | 'code' | 'audit';
-interface AgentDataCenterProps { userId?: string; workspace?: string }
+interface AgentDataCenterProps {
+  userId?: string;
+  /** 仅作为各子面板筛选器的初始值；面板打开后不再跟随对话/项目切换。 */
+  initialProject?: string;
+}
 
 const tabs: Array<{ id: Tab; label: string; Icon: typeof BrainCircuit }> = [
   { id: 'overview', label: '概览', Icon: BrainCircuit },
@@ -20,13 +24,12 @@ const tabs: Array<{ id: Tab; label: string; Icon: typeof BrainCircuit }> = [
   { id: 'audit', label: '审计诊断', Icon: ShieldCheck },
 ];
 
-export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
+export function AgentDataCenter({ userId, initialProject }: AgentDataCenterProps) {
   const [tab, setTab] = useState<Tab>('overview');
   const [status, setStatus] = useState<AgentDataStatus | null>(null);
   const [jobs, setJobs] = useState<AgentJob[]>([]);
   const [memory, setMemory] = useState<MemoryOverview | null>(null);
   const [wiki, setWiki] = useState<WikiOverview | null>(null);
-  const [code, setCode] = useState<CodeGraphStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const refresh = async () => {
@@ -36,24 +39,18 @@ export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
       const [nextStatus, nextJobs] = await Promise.all([agentDataApi.status(), agentDataApi.jobs.list()]);
       setStatus(nextStatus);
       setJobs(nextJobs);
-      if (userId && workspace) {
-        const [nextMemory, nextWiki, nextCode] = await Promise.all([
-          agentDataApi.memory.overview({ userId, workspace }),
-          agentDataApi.wiki.overview(workspace),
-          agentDataApi.code.status(workspace),
-        ]);
-        setMemory(nextMemory);
-        setWiki(nextWiki);
-        setCode(nextCode);
-      } else {
-        setMemory(null);
-        setWiki(null);
-        setCode(null);
-      }
+      // Memory/Wiki 默认统计全部项目；Code 需要显式选定项目，概览里不预取。
+      const [nextMemory, nextWiki] = await Promise.all([
+        userId ? agentDataApi.memory.overview({ userId, includeOtherProjects: true }) : Promise.resolve(null),
+        agentDataApi.wiki.overview(undefined),
+      ]);
+      setMemory(nextMemory);
+      setWiki(nextWiki);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void refresh(); }, [userId, workspace]);
+  // 刻意只依赖 userId：initialProject 变化（用户在侧栏切对话）不应该重查整个面板。
+  useEffect(() => { void refresh(); }, [userId]);
 
   return <section className={styles.root} data-testid="agent-data-center">
     <header className={styles.header}>
@@ -61,7 +58,7 @@ export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
         <span className={styles.icon}><BrainCircuit size={18} /></span>
         <div>
           <h2 className={styles.title}>Agent 数据</h2>
-          <div className={styles.subtitle}>{workspace ?? '未绑定工作区'}</div>
+          <div className={styles.subtitle}>全部项目 · {jobs.length} 个任务</div>
         </div>
       </div>
       <div className={styles.headerActions}>
@@ -83,31 +80,31 @@ export function AgentDataCenter({ userId, workspace }: AgentDataCenterProps) {
     <div className={styles.body}>
       <div className={styles.content}>
         {loading && !status ? <div className={styles.state}>正在加载 Agent Data...</div> : null}
-        {!loading && !error && tab === 'overview' ? <Overview status={status} jobs={jobs} memory={memory} wiki={wiki} code={code} workspace={workspace} /> : null}
-        {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} workspace={workspace} onCreate={async (kind, targetWorkspace) => { await agentDataApi.jobs.create({ kind, workspace: targetWorkspace }); await refresh(); }} onRefresh={refresh} /> : null}
-        {tab === 'memory' && !loading ? <MemoryPanel userId={userId} workspace={workspace} /> : null}
-        {tab === 'wiki' && !loading ? <WikiPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
-        {tab === 'code' && !loading ? <CodeRetrievalPanel workspace={workspace} onJobCreated={() => setTab('jobs')} /> : null}
+        {!loading && !error && tab === 'overview' ? <Overview status={status} jobs={jobs} memory={memory} wiki={wiki} /> : null}
+        {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} workspace={initialProject} onCreate={async (kind, targetWorkspace) => { await agentDataApi.jobs.create({ kind, workspace: targetWorkspace }); await refresh(); }} onRefresh={refresh} /> : null}
+        {tab === 'memory' && !loading ? <MemoryPanel userId={userId} initialProject={initialProject} /> : null}
+        {tab === 'wiki' && !loading ? <WikiPanel initialProject={initialProject} onJobCreated={() => setTab('jobs')} /> : null}
+        {tab === 'code' && !loading ? <CodeRetrievalPanel initialProject={initialProject} onJobCreated={() => setTab('jobs')} /> : null}
         {tab === 'audit' && !loading ? <AuditDiagnosticsPanel /> : null}
       </div>
     </div>
   </section>;
 }
 
-function Overview({ status, jobs, memory, wiki, code, workspace }: { status: AgentDataStatus | null; jobs: AgentJob[]; memory: MemoryOverview | null; wiki: WikiOverview | null; code: CodeGraphStatus | null; workspace?: string }) {
+function Overview({ status, jobs, memory, wiki }: { status: AgentDataStatus | null; jobs: AgentJob[]; memory: MemoryOverview | null; wiki: WikiOverview | null }) {
   return <>
-    <div className={styles.sectionHeading}><h3 className={styles.heading}>数据概览</h3><span className={styles.hint}>{workspace ? '当前工作区' : '等待工作区上下文'}</span></div>
+    <div className={styles.sectionHeading}><h3 className={styles.heading}>数据概览</h3><span className={styles.hint}>全部项目</span></div>
     <div className={styles.kpis}>
       <Kpi label="Memory" value={memory?.total ?? '-'} meta={memory ? `L0-L3 · ${memory.byLevel.L0}/${memory.byLevel.L1}/${memory.byLevel.L2}/${memory.byLevel.L3}` : '未加载'} />
       <Kpi label="Wiki 页面" value={wiki?.pages ?? '-'} meta={wiki ? formatTime(wiki.latestUpdatedAt) : '未加载'} />
-      <Kpi label="Code 文件" value={code?.indexed ? code.files ?? 0 : '-'} meta={code?.indexed ? `${code.nodes ?? 0} 个节点` : '未连接'} />
+      <Kpi label="Code 索引" value="—" meta="在 Code Retrieval 选择项目查看" />
       <Kpi label="任务" value={jobs.length} meta={status?.state === 'ready' ? 'Runtime 就绪' : 'Runtime 未就绪'} />
     </div>
     <div className={styles.sectionHeading}><h3 className={styles.heading}>模块状态</h3></div>
     <div className={styles.statusGrid}>
-      <StatusCard name="Memory Runtime" value={memory ? 'ready' : '未绑定范围'} />
-      <StatusCard name="Wiki 索引" value={wiki ? `${wiki.pages} pages` : '未绑定范围'} />
-      <StatusCard name="Code Retrieval" value={code?.indexed ? 'indexed' : 'unavailable'} />
+      <StatusCard name="Memory Runtime" value={memory ? 'ready' : '未加载'} />
+      <StatusCard name="Wiki 索引" value={wiki ? `${wiki.pages} pages` : '未加载'} />
+      <StatusCard name="Code Retrieval" value="按项目查看" />
     </div>
     <div className={styles.sectionHeading}><h3 className={styles.heading}>最近任务</h3><span className={styles.hint}>{jobs.length} 项</span></div>
     <JobsPreview jobs={jobs} />
