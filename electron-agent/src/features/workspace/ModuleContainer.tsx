@@ -5,7 +5,9 @@ import { ConnectionsPanel } from '../connections/ConnectionsPanel';
 import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
 import { UsagePanel } from '../usage/UsagePanel';
 import { AgentDataCenter } from '../agentData/AgentDataCenter';
+import { DevWorkbench } from '../devtools/DevWorkbench';
 import { useSessionStore } from '../../store';
+import { IS_DEV } from '../../lib/devMode';
 
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
@@ -20,7 +22,11 @@ function ActivePanel({ module }: { module: ModuleId }) {
     case 'usage':
       return <UsagePanel />;
     case 'agentData':
-      return <AgentDataCenter userId="local" workspace={workspace || undefined} />;
+      // 只作为面板筛选器的初始值：面板打开后不跟随对话/项目切换（见 AgentDataCenter 注释）。
+      return <AgentDataCenter userId="local" initialProject={workspace || undefined} />;
+    // 生产构建里入口不可达，但 store 仍可能被（比如被测试）手动置成该值，这里兜一层不渲染。
+    case 'devWorkbench':
+      return IS_DEV ? <DevWorkbench /> : null;
     default:
       return null;
   }

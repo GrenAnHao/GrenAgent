@@ -10,7 +10,9 @@ vi.mock('../settings/SettingsPanel', () => ({ SettingsPanel: () => <div>SET_PANE
 vi.mock('../connections/ConnectionsPanel', () => ({ ConnectionsPanel: () => <div>CONN_PANEL</div> }));
 vi.mock('../extensions/ExtensionsPanel', () => ({ ExtensionsPanel: () => <div>EXT_PANEL</div> }));
 vi.mock('../usage/UsagePanel', () => ({ UsagePanel: () => <div>USAGE_PANEL</div> }));
-vi.mock('../agentData/AgentDataCenter', () => ({ AgentDataCenter: ({ userId, workspace }: { userId?: string; workspace?: string }) => <div>AGENT_DATA:{userId}:{workspace}</div> }));
+vi.mock('../agentData/AgentDataCenter', () => ({ AgentDataCenter: ({ userId, initialProject }: { userId?: string; initialProject?: string }) => <div>AGENT_DATA:{userId}:{initialProject}</div> }));
+// 未打桩的话会渲染真实工作台（依赖 window.gren、zustand store 等），在 jsdom 下会炸。
+vi.mock('../devtools/DevWorkbench', () => ({ DevWorkbench: () => <div>DEV_WORKBENCH</div> }));
 
 beforeEach(() => {
   useModuleStore.setState({ activeModule: 'chat' });
@@ -32,6 +34,7 @@ describe('ModuleContainer', () => {
     ['connections', 'CONN_PANEL'],
     ['extensions', 'EXT_PANEL'],
     ['usage', 'USAGE_PANEL'],
+    ['devWorkbench', 'DEV_WORKBENCH'],
   ];
   for (const [mod, text] of cases) {
     it(`renders ${text} for ${mod} module`, () => {
@@ -41,7 +44,7 @@ describe('ModuleContainer', () => {
     });
   }
 
-  it('passes the active workspace to the Agent Data center', () => {
+  it('passes the active workspace as the panel initial project', () => {
     useModuleStore.setState({ activeModule: 'agentData' });
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     expect(screen.getByText('AGENT_DATA:local:/workspace')).toBeTruthy();
