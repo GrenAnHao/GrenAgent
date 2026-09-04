@@ -8,23 +8,26 @@ import { useSessionStore } from '../../store';
 beforeEach(() => {
   useSessionStore.setState({
     allSessions: [
-      { id: '1', path: '/s/1.jsonl', cwd: 'D:/proj/alpha', timestamp: '2026-09-01T00:00:00Z', name: null },
+      // 插入顺序刻意乱序：zeta 字典序排在 beta 之后，排序断言才可失效
+      { id: '1', path: '/s/1.jsonl', cwd: 'D:/proj/zeta', timestamp: '2026-09-01T00:00:00Z', name: null },
       { id: '2', path: '/s/2.jsonl', cwd: 'D:/home/.pi/agent/works/abc', timestamp: '2026-09-02T00:00:00Z', name: null },
     ],
     optimisticSessions: [],
     deletedSessionPaths: [],
     registeredProjects: ['D:/proj/beta'],
     worksDir: 'D:/home/.pi/agent/works',
-    activeWorkspace: 'D:/proj/alpha',
+    // 与上方 zeta 指向同一项目的大小写/分隔符/尾斜杠变体：朴素字符串去重无法合并它
+    activeWorkspace: 'd:\\proj\\zeta\\',
   });
 });
 
 describe('useProjectOptions', () => {
   it('lists project cwds with display names and excludes scratch conversations', () => {
     const { result } = renderHook(() => useProjectOptions());
+    // 排序后 beta 先于 zeta；zeta 的两个字符串变体经 pathsEquivalent 去重，仅保留首次出现的写法
     expect(result.current).toEqual([
-      { cwd: 'D:/proj/alpha', name: 'alpha' },
       { cwd: 'D:/proj/beta', name: 'beta' },
+      { cwd: 'D:/proj/zeta', name: 'zeta' },
     ]);
   });
 
