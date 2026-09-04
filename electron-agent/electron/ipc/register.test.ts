@@ -143,6 +143,12 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'wiki.sync', workspace: '/w' } })).resolves.toEqual({
       method: 'admin.jobs.create', params: { kind: 'wiki.sync', workspace: '/w' },
     });
+    await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', includeOtherProjects: true } })).resolves.toEqual({
+      method: 'memory.admin.overview', params: { userId: 'u', includeOtherProjects: true },
+    });
+    await expect(invoke({}, { command: 'agentData_memory_search', args: { userId: 'u', projectId: '/w', query: 'x', limit: 10 } })).resolves.toEqual({
+      method: 'memory.search', params: { userId: 'u', projectId: '/w', query: 'x', limit: 10 },
+    });
   });
 
   it('routes app server thread and turn commands through Agent Data', async () => {
@@ -154,7 +160,6 @@ describe('registerIpcHandlers', () => {
       updateTurn: vi.fn().mockResolvedValue({ id: 'turn', status: 'failed' }),
       upsertItem: vi.fn().mockResolvedValue({ id: 'item' }),
       listItems: vi.fn().mockResolvedValue([]),
-      appendAppEvent: vi.fn().mockResolvedValue({ id: 'event' }),
     };
     registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);

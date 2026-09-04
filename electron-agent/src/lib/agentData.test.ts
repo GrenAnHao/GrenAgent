@@ -15,6 +15,8 @@ describe('agentDataApi', () => {
     expect(spy).toHaveBeenNthCalledWith(2, 'agentData_wiki_overview', { workspace: '/w' });
     expect(spy).toHaveBeenNthCalledWith(3, 'agentData_code_status', { workspace: '/w' });
     expect(spy).toHaveBeenNthCalledWith(4, 'agentData_jobs_create', { kind: 'wiki.sync', workspace: '/w' });
+    await agentDataApi.memory.overview({ userId: 'u', includeOtherProjects: true });
+    expect(spy).toHaveBeenLastCalledWith('agentData_memory_overview', { userId: 'u', includeOtherProjects: true });
     spy.mockRestore();
   });
 });

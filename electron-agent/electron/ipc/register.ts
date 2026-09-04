@@ -20,6 +20,7 @@ import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
+import type { DevService } from '../app/devService';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -44,6 +45,8 @@ export interface IpcServices {
   agentData?: AgentDataService;
   permissions?: PermissionManager;
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
+  /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
+  dev?: DevService;
 }
 
 const commandHandlers = new Map<string, CommandHandler>();
@@ -103,6 +106,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.create) registerCreateCommands(services.create);
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
   if (services.shell) registerShellCommands(services.shell);
+  if (services.dev) registerDevCommands(services.dev);
   if (services.agentData) {
     registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
       id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
@@ -122,11 +126,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     }));
     registerCommand('item_upsert', (_event, args) => services.agentData!.upsertItem(args as never));
     registerCommand('item_list', (_event, args) => services.agentData!.listItems(readString(args, 'threadId'), args.turnId === undefined ? undefined : readString(args, 'turnId')));
-    registerCommand('app_event_append', (_event, args) => services.agentData!.appendAppEvent(args as never));
-    registerCommand('app_event_replay', (_event, args) => services.agentData!.replayAppEvents(
-      typeof args.afterSequence === 'number' ? args.afterSequence : 0,
-      typeof args.limit === 'number' ? args.limit : 256,
-    ));
     registerCommand('agentData_status', () => services.agentData!.status());
     registerCommand('agentData_start', () => services.agentData!.start());
     registerCommand('agentData_stop', () => services.agentData!.stop());
@@ -141,8 +140,10 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_admin_import', (_event, args) => services.agentData!.request('admin.import', { data: readRecord(args, 'data') }));
     registerCommand('agentData_memory_overview', (_event, args) => services.agentData!.request('memory.admin.overview', {
       userId: readString(args, 'userId'),
-      workspace: readString(args, 'workspace'),
+      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
+      ...(args.projectId === undefined ? {} : { projectId: readString(args, 'projectId') }),
       ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
+      ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
     }));
     registerCommand('agentData_wiki_overview', (_event, args) => services.agentData!.request('wiki.admin.overview', {
       workspace: readString(args, 'workspace'),
@@ -156,8 +157,10 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     }));
     registerCommand('agentData_memory_search', (_event, args) => services.agentData!.request('memory.search', {
       userId: readString(args, 'userId'),
-      workspace: readString(args, 'workspace'),
+      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
+      ...(args.projectId === undefined ? {} : { projectId: readString(args, 'projectId') }),
       ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
+      ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
       query: readString(args, 'query'),
       limit: readPositiveInteger(args, 'limit', 50),
     }));
@@ -261,7 +264,7 @@ function registerProviderCommands(service: ProviderService): void {
   registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
   registerCommand('refresh_model_registry', () => service.refresh());
   registerCommand('list_models_global', () => service.listModels());
-  registerCommand('fetch_provider_models', (_event, args) => service.fetchModels(readString(args, 'baseUrl'), readString(args, 'apiKey'), readString(args, 'api')));
+  registerCommand('fetch_provider_models', (_event, args) => service.fetchModels(readString(args, 'baseUrl'), readString(args, 'apiKey'), readString(args, 'api'), readOptionalHeaders(args, 'headers')));
   registerCommand('fix_mermaid_diagram', (_event, args) => service.fixMermaid(readString(args, 'workspace'), readText(args, 'code'), readText(args, 'error')));
   registerCommand('diagnose_provider_model', (event, args) => {
     const channel = args.onChunk;
@@ -380,6 +383,15 @@ function registerPiCommands(service: PiRuntimeService): void {
   }
 }
 
+/**
+ * 开发期诊断命令。dev_list_commands 复用 register 内部的注册表，故 DevService 不需要反向依赖本文件。
+ * 这些命令只查询、不写入，但仍仅在非打包时注册，避免成为生产版本的额外攻击面。
+ */
+function registerDevCommands(service: DevService): void {
+  registerCommand('dev_runtime_info', () => service.info());
+  registerCommand('dev_list_commands', () => getRegisteredCommands());
+}
+
 function readString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
@@ -402,4 +414,13 @@ function readRecord(args: Record<string, unknown>, key: string): Record<string, 
   const value = args[key];
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);
   return value as Record<string, unknown>;
+}
+
+function readOptionalHeaders(args: Record<string, unknown>, key: string): Record<string, string> | undefined {
+  const value = args[key];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);
+  const record = value as Record<string, unknown>;
+  if (!Object.values(record).every((v) => typeof v === 'string')) throw new Error(`${key} values must be strings`);
+  return record as Record<string, string>;
 }
