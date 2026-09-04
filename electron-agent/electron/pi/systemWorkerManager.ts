@@ -4,6 +4,16 @@ import type { SandboxManager } from '../app/sandbox/sandboxManager';
 
 export interface SystemWorkerTask { id: string; kind: string; input: unknown; maxAttempts?: number }
 export interface SystemWorkerState { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; output?: unknown; error?: string }
+
+/** 输出为纯文本（而非 JSON）的任务 kind：结果原样回传，不做 JSON 解析。 */
+const TEXT_OUTPUT_KINDS = new Set(['wiki_page_generate']);
+
+/** 各 kind 的指令。未列出的 kind 统一要求返回严格 JSON 对象。 */
+const KIND_INSTRUCTIONS: Record<string, string> = {
+  memory_extract: 'Extract durable memory as strict JSON with optional keys l1 (object), l2 (string), and l3 (string). Return JSON only.',
+  // 与 extensions/wiki-rag/sync.ts 的 SYSTEM 文案保持一致：输出必须是可直接落盘的 Markdown。
+  wiki_page_generate: 'Write a concise Markdown knowledge page from the supplied source. Preserve important names, behavior, and references. Return Markdown only.',
+};
 interface WorkerOptions {
   processCommand: PiProcessCommand;
   cwd?: string;
@@ -19,6 +29,7 @@ export class SystemWorkerManager {
   private client?: PiClient;
   private idleTimer?: ReturnType<typeof setTimeout>;
   private current?: string;
+  private currentKind?: string;
   private readonly states = new Map<string, SystemWorkerState>();
   private completion?: { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 
@@ -29,7 +40,7 @@ export class SystemWorkerManager {
     this.states.set(task.id, state);
     const maxAttempts = task.maxAttempts ?? this.options.maxAttempts ?? 1;
     while (state.attempts < maxAttempts) {
-      state.attempts += 1; state.status = 'running'; this.current = task.id;
+      state.attempts += 1; state.status = 'running'; this.current = task.id; this.currentKind = task.kind;
       try {
         const client = this.ensureClient();
         const completion = this.waitForCompletion();
@@ -89,7 +100,7 @@ export class SystemWorkerManager {
   private handleEvent(event: Record<string, unknown>): void {
     if (event.type !== 'agent_end' || !this.completion) return;
     try {
-      const value = parseWorkerOutput(event.messages);
+      const value = parseWorkerOutput(event.messages, this.currentKind);
       const completion = this.completion;
       this.completion = undefined;
       clearTimeout(completion.timer);
@@ -124,17 +135,19 @@ export class SystemWorkerManager {
 }
 
 function serviceTaskPrompt(task: SystemWorkerTask): string {
-  const instruction = task.kind === 'memory_extract'
-    ? 'Extract durable memory as strict JSON with optional keys l1 (object), l2 (string), and l3 (string). Return JSON only.'
-    : 'Complete the service task and return a strict JSON object only.';
+  const instruction = KIND_INSTRUCTIONS[task.kind] ?? 'Complete the service task and return a strict JSON object only.';
   return `${instruction}\nTask kind: ${task.kind}\nInput: ${JSON.stringify(task.input)}`;
 }
 
-function parseWorkerOutput(value: unknown): unknown {
+function parseWorkerOutput(value: unknown, kind?: string): unknown {
   if (!Array.isArray(value)) throw new Error('system Pi returned no messages');
   const assistant = [...value].reverse().find((message) => isRecord(message) && message.role === 'assistant');
   if (!assistant || !Array.isArray(assistant.content)) throw new Error('system Pi returned no assistant output');
   const text = assistant.content.filter(isRecord).filter((block) => block.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('').trim();
+  if (kind && TEXT_OUTPUT_KINDS.has(kind)) {
+    if (!text) throw new Error('system Pi returned empty text');
+    return text;
+  }
   const json = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try { return JSON.parse(json); } catch { throw new Error('system Pi returned invalid JSON'); }
 }

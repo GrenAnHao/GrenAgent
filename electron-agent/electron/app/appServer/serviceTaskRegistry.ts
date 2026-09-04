@@ -13,6 +13,7 @@ export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'context_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'wiki_page_generate', inputSchema: anyObject, outputSchema: z.custom<unknown>(() => true), timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
 ];
 
 export class ServiceTaskRegistry {

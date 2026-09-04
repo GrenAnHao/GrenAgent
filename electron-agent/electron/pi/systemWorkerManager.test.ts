@@ -39,4 +39,37 @@ describe('SystemWorkerManager', () => {
     await expect(running).resolves.toEqual({ l1: { theme: 'dark' } });
     expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt', message: expect.stringContaining('memory_extract') }));
   });
+
+  it('asks for markdown and returns raw text for wiki page generation', async () => {
+    let handlers: PiProcessOptions | undefined;
+    const client = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
+    const manager = new SystemWorkerManager({
+      processCommand: { command: 'pi', args: ['--mode', 'rpc'] },
+      createClient: vi.fn((_key, _command, options) => { handlers = options; return client as never; }),
+    });
+
+    const running = manager.run({ id: 'wiki', kind: 'wiki_page_generate', input: { sourcePath: 'README.md', source: '# Source' } });
+    await vi.waitFor(() => expect(client.send).toHaveBeenCalled());
+    handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '# Generated\n\nBody' }] }] });
+
+    await expect(running).resolves.toBe('# Generated\n\nBody');
+    const prompt = String(client.send.mock.calls[0][0].message);
+    expect(prompt).toContain('Markdown');
+    expect(prompt).not.toContain('JSON only');
+  });
+
+  it('still parses JSON for memory extraction after adding text kinds', async () => {
+    let handlers: PiProcessOptions | undefined;
+    const client = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
+    const manager = new SystemWorkerManager({
+      processCommand: { command: 'pi', args: ['--mode', 'rpc'] },
+      createClient: vi.fn((_key, _command, options) => { handlers = options; return client as never; }),
+    });
+
+    const running = manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'x' } });
+    await vi.waitFor(() => expect(client.send).toHaveBeenCalled());
+    handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '{"l1":{"a":1}}' }] }] });
+
+    await expect(running).resolves.toEqual({ l1: { a: 1 } });
+  });
 });
