@@ -608,7 +608,9 @@ export class AgentDataRuntime {
     if (project && !name.startsWith('goal.')) throw new RpcError('FORBIDDEN', 'admin Goal methods are application-only');
     if (!project && !name.startsWith('admin.goal.')) return undefined;
     const operation = project ? name.slice('goal.'.length) : name.slice('admin.goal.'.length);
-    const allowed = ['get', 'history', 'create', 'update', 'judgeResult'];
+    const allowed = project
+      ? ['get', 'history', 'create', 'update', 'recordProgress', 'requestCompletion', 'judgeResult']
+      : ['get', 'history', 'create', 'update', 'judgeResult'];
     if (!allowed.includes(operation)) return undefined;
     const authorize = async (sessionId: string): Promise<void> => {
       if (!project) return;
@@ -643,6 +645,18 @@ export class AgentDataRuntime {
         ...(p.payload === undefined ? {} : { payload: readRecord(p.payload) }),
       };
       return this.goals!.update(update);
+    };
+    if (operation === 'recordProgress') return async (p) => {
+      const sessionId = readString(p.sessionId); await authorize(sessionId);
+      if (readGoalAction(p.action) !== 'block') throw new RpcError('FORBIDDEN', 'project agents may only report progress with block');
+      return this.goals!.update({
+        sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision), action: 'block',
+        origin: 'human-agent', ...(p.payload === undefined ? {} : { payload: readRecord(p.payload) }),
+      });
+    };
+    if (operation === 'requestCompletion') return async (p) => {
+      const sessionId = readString(p.sessionId); await authorize(sessionId);
+      return this.goals!.update({ sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision), action: 'begin_judging', origin: 'human-agent' });
     };
     if (operation === 'judgeResult') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);

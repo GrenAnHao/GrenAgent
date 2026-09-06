@@ -74,4 +74,25 @@ describe('AgentDataRuntime Goal RPC', () => {
       await project.close(); await root.close(); runtime.close();
     }
   });
+
+  it('exposes project progress and completion goal operations', async () => {
+    const runtime = new AgentDataRuntime({ dataPath: ':memory:', resolveSession: (workspace, sessionId) => workspace === '/repo' && sessionId === 's' });
+    const root = new AgentDataClient(await runtime.start());
+    const project = new AgentDataClient(runtime.agentEndpoint('/repo'));
+    try {
+      const goal = await root.request<{ goalId: string; revision: number }>('admin.goal.create', { sessionId: 's', workspace: '/repo', condition: 'ship', origin: 'human-ui' });
+      const blocked = await project.request<{ revision: number; status: string }>('goal.recordProgress', {
+        sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'block', payload: { reason: 'waiting' },
+      });
+      expect(blocked).toMatchObject({ status: 'blocked' });
+      await expect(project.request('goal.recordProgress', {
+        sessionId: 's', goalId: goal.goalId, revision: blocked.revision, action: 'pause', payload: { reason: 'invalid' },
+      })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const resumed = await root.request<{ revision: number }>('admin.goal.update', { sessionId: 's', goalId: goal.goalId, revision: blocked.revision, action: 'resume', origin: 'human-ui' });
+      const judging = await project.request<{ revision: number; status: string }>('goal.requestCompletion', { sessionId: 's', goalId: goal.goalId, revision: resumed.revision });
+      expect(judging).toMatchObject({ status: 'judging' });
+    } finally {
+      await project.close(); await root.close(); runtime.close();
+    }
+  });
 });

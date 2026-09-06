@@ -90,6 +90,8 @@ export const agentDataApi = {
     get: (sessionId: string, workspace: string) => invoke<GoalSnapshot | undefined>('agentData_goal_get', { sessionId, workspace }),
     create: (input: Omit<CreateGoalInput, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_create', { ...input }),
     update: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_update', { ...input }),
+    recordProgress: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_recordProgress', { ...input, action: 'block' }),
+    requestCompletion: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_requestCompletion', { ...input, action: 'begin_judging' }),
     judgeResult: (input: JudgeResultInput) => invoke<GoalSnapshot>('agentData_goal_judgeResult', { ...input }),
     history: (sessionId: string, limit?: number) => invoke<GoalEvent[]>('agentData_goal_history', { sessionId, ...(limit === undefined ? {} : { limit }) }),
   },
