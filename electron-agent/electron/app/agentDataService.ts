@@ -1,8 +1,16 @@
 import { AgentDataClient } from '../agentData/client';
 import { AgentDataRuntime, type AgentDataRuntimeOptions } from '../agentData/runtime';
 import type { AgentDataEndpoint } from '../agentData/protocol';
-import type { Item, Thread, Turn, AppEvent } from './appServer/types';
+import type { Item, Thread, Turn } from './appServer/types';
 import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
+import type { QueueTaskInput } from './appServer/taskQueue';
+import type { WikiSyncSkipInput } from './wikiSyncService';
+import type { CreateGoalInput, GoalUpdateInput, GoalEvent, GoalSnapshot } from '../agentData/goalContracts';
+
+// CodeGraph calls may cold-load the embedded SDK and its index. Keep this aligned with
+// extensions/code-retrieval's 65s client timeout instead of AgentDataClient's
+// short default used by lightweight callers.
+const AGENT_DATA_SERVICE_TIMEOUT_MS = 65_000;
 
 export class AgentDataService {
   private runtime?: AgentDataRuntime;
@@ -19,7 +27,7 @@ export class AgentDataService {
       if (!this.client) {
         this.runtime = new AgentDataRuntime(this.options);
         const endpoint = await this.runtime.start();
-        this.client = new AgentDataClient(endpoint);
+        this.client = new AgentDataClient(endpoint, { timeoutMs: AGENT_DATA_SERVICE_TIMEOUT_MS, closeOnTimeout: false });
       }
       return this.client!.request<{ version: number }>('system.hello');
     })().finally(() => { this.startPromise = undefined; });
@@ -32,11 +40,60 @@ export class AgentDataService {
     this.stopPromise = (async () => {
       if (this.startPromise) await this.startPromise.catch(() => {});
       if (this.client) await this.client.request('system.shutdown').catch(() => {});
-      await this.client?.close(); this.runtime?.close(); this.client = undefined; this.runtime = undefined;
+      await this.client?.close(); this.runtime?.close();
+      await this.runtime?.waitClosed();
+      this.client = undefined; this.runtime = undefined;
     })().finally(() => { this.stopPromise = undefined; });
     return this.stopPromise;
   }
   endpoint(): AgentDataEndpoint | undefined { return this.runtime?.getEndpoint(); }
+  agentEndpoint(workspace: string): AgentDataEndpoint {
+    if (!this.runtime) throw new Error('agent data runtime is not started');
+    return this.runtime.agentEndpoint(workspace);
+  }
+  requestAdmin<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));
+    return this.runtime.requestAdmin<T>(method, params);
+  }
+  goalGet(sessionId: string, _workspace: string): Promise<GoalSnapshot | undefined> {
+    return this.requestAdmin<GoalSnapshot | undefined>('admin.goal.get', { sessionId });
+  }
+  goalCreate(input: Omit<CreateGoalInput, 'origin'> | CreateGoalInput): Promise<GoalSnapshot> {
+    const { origin: _origin, ...params } = input as CreateGoalInput;
+    return this.requestAdmin<GoalSnapshot>('admin.goal.create', { ...params, origin: 'human-ui' });
+  }
+  goalUpdate(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
+    const { origin: _origin, ...params } = input as GoalUpdateInput;
+    return this.requestAdmin<GoalSnapshot>('admin.goal.update', { ...params, origin: 'human-ui' });
+  }
+  goalRecordProgress(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
+    return this.goalUpdate(input);
+  }
+  goalRequestCompletion(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
+    return this.goalUpdate({ ...input, action: 'begin_judging' });
+  }
+  goalJudgeResult(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
+    return this.goalUpdate(input);
+  }
+  goalHistory(sessionId: string, limit?: number): Promise<GoalEvent[]> {
+    return this.requestAdmin<GoalEvent[]>('admin.goal.history', { sessionId, ...(limit === undefined ? {} : { limit }) });
+  }
+  resolveDiagnosticPath(id: string): Promise<string> {
+    if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));
+    return this.runtime.resolveDiagnosticPath(id);
+  }
+  recordJobStage(id: string, stage: string, processed?: number, total?: number): void {
+    if (!this.runtime) throw new Error('agent data runtime is not started');
+    this.runtime.recordJobStage(id, stage, processed, total);
+  }
+  recordWikiSyncSkip(input: WikiSyncSkipInput): void {
+    if (!this.runtime) throw new Error('agent data runtime is not started');
+    this.runtime.recordWikiSyncSkip(input);
+  }
+  async runServiceTask(input: Omit<QueueTaskInput, 'system'>): Promise<unknown> {
+    if (!this.runtime) throw new Error('agent data runtime is not started');
+    return this.runtime.runServiceTask(input);
+  }
   request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> { return this.requireClient().request<T>(method, params); }
   createThread(input: CreateThreadInput): Promise<Thread> { return this.request('thread.create', input); }
   listThreads(): Promise<Thread[]> { return this.request('thread.list'); }
@@ -45,7 +102,6 @@ export class AgentDataService {
   updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn> { return this.request('turn.update', { id, ...patch }); }
   upsertItem(item: Omit<Item, 'createdAt'> & Partial<Pick<Item, 'createdAt' | 'updatedAt'>>): Promise<Item> { return this.request('item.upsert', item); }
   listItems(threadId: string, turnId?: string): Promise<Item[]> { return this.request('item.list', { threadId, ...(turnId === undefined ? {} : { turnId }) }); }
-  appendAppEvent(event: AppEvent): Promise<AppEvent> { return this.request('appEvent.append', event); }
-  replayAppEvents(afterSequence = 0, limit = 256): Promise<AppEvent[]> { return this.request('appEvent.replay', { afterSequence, limit }); }
+
   private requireClient(): AgentDataClient { if (!this.client) throw new Error('agent data runtime is not started'); return this.client; }
 }

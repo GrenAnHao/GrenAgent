@@ -18,6 +18,8 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
+import type { GoalUpdateInput } from '../agentData/goalContracts';
+import type { WikiVersion, WikiSourceInput, WikiSourceRef } from '../agentData/wikiContracts';
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
@@ -108,6 +110,32 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.shell) registerShellCommands(services.shell);
   if (services.dev) registerDevCommands(services.dev);
   if (services.agentData) {
+    registerCommand('agentData_tasks_list', (_event, args) => services.agentData!.requestAdmin('admin.tasks.list', args));
+    registerCommand('agentData_tasks_read', (_event, args) => services.agentData!.requestAdmin('admin.tasks.read', args));
+    registerCommand('agentData_tasks_previewRetry', (_event, args) => services.agentData!.requestAdmin('admin.tasks.previewRetry', args));
+    registerCommand('agentData_tasks_retry', (_event, args) => services.agentData!.requestAdmin('admin.tasks.retry', args));
+    registerCommand('agentData_audit_query', (_event, args) => services.agentData!.requestAdmin('admin.audit.query', args));
+    registerCommand('agentData_audit_export', (_event, args) => services.agentData!.requestAdmin('admin.audit.export', args));
+    registerCommand('agentData_diagnostics_check', () => services.agentData!.requestAdmin('admin.diagnostics.check', {}));
+    registerCommand('agentData_overview', (_event, args) => services.agentData!.requestAdmin('admin.overview', { userId: readString(args, 'userId') }));
+    registerCommand('agentData_goal_get', (_event, args) => services.agentData!.goalGet(readString(args, 'sessionId'), readString(args, 'workspace')));
+    registerCommand('agentData_goal_create', (_event, args) => services.agentData!.goalCreate({
+      sessionId: readString(args, 'sessionId'), workspace: readString(args, 'workspace'), condition: readText(args, 'condition'),
+      ...(args.maxRounds === undefined ? {} : { maxRounds: readPositiveInteger(args, 'maxRounds', 1) }), origin: 'human-ui',
+    }));
+    registerCommand('agentData_goal_update', (_event, args) => services.agentData!.goalUpdate(readGoalUpdate(args)));
+    registerCommand('agentData_goal_history', (_event, args) => {
+      const sessionId = readString(args, 'sessionId');
+      return args.limit === undefined ? services.agentData!.goalHistory(sessionId) : services.agentData!.goalHistory(sessionId, readNonnegativeInteger(args, 'limit'));
+    });
+    registerCommand('agentData_goal_recordProgress', (_event, args) => services.agentData!.goalRecordProgress(readGoalUpdate(args)));
+    registerCommand('agentData_goal_requestCompletion', (_event, args) => services.agentData!.goalRequestCompletion(readGoalUpdate(args)));
+    registerCommand('agentData_goal_judgeResult', (_event, args) => services.agentData!.goalJudgeResult(readGoalUpdate(args)));
+    registerCommand('agentData_diagnostics_open', async (_event, args) => {
+      const path = await services.agentData!.resolveDiagnosticPath(readString(args, 'id'));
+      const error = await shell.openPath(path);
+      if (error) throw new Error(error);
+    });
     registerCommand('thread_create', (_event, args) => services.agentData!.createThread({
       id: readString(args, 'id'), projectId: readString(args, 'projectId'), workspace: readString(args, 'workspace'),
       ...(args.title === undefined ? {} : { title: readText(args, 'title') }),
@@ -132,6 +160,8 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_admin_jobs_list', () => services.agentData!.request('admin.jobs.list'));
     registerCommand('agentData_admin_jobs_get', (_event, args) => services.agentData!.request('admin.jobs.get', { id: readString(args, 'id') }));
     registerCommand('agentData_admin_jobs_cancel', (_event, args) => services.agentData!.request('admin.jobs.cancel', { id: readString(args, 'id') }));
+    registerCommand('agentData_admin_jobs_remove', (_event, args) => services.agentData!.request('admin.jobs.remove', { id: readString(args, 'id') }));
+    registerCommand('agentData_admin_jobs_clear', (_event, args) => services.agentData!.request('admin.jobs.clear', { ids: args.ids }));
     registerCommand('agentData_admin_config_get', (_event, args) => services.agentData!.request('admin.config.get', { module: readString(args, 'module') }));
     registerCommand('agentData_admin_config_update', (_event, args) => services.agentData!.request('admin.config.update', { module: readString(args, 'module'), value: readRecord(args, 'value'), version: args.version }));
     registerCommand('agentData_admin_audit_list', () => services.agentData!.request('admin.audit.list'));
@@ -145,7 +175,8 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       ...(args.sessionId === undefined ? {} : { sessionId: readString(args, 'sessionId') }),
       ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
     }));
-    registerCommand('agentData_wiki_overview', (_event, args) => services.agentData!.request('wiki.admin.overview', {
+    registerWikiManagement(services.agentData);
+    registerCommand('agentData_wiki_overview', (_event, args) => services.agentData!.requestAdmin('wiki.admin.overview', {
       ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
     }));
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
@@ -165,12 +196,17 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       query: readString(args, 'query'),
       limit: readPositiveInteger(args, 'limit', 50),
     }));
-    registerCommand('agentData_memory_delete', (_event, args) => services.agentData!.request('memory.delete', {
+    registerCommand('agentData_memory_list', (_event, args) => services.agentData!.requestAdmin('memory.list', args));
+    registerCommand('agentData_memory_read', (_event, args) => services.agentData!.requestAdmin('memory.read', args));
+    registerCommand('agentData_memory_create', (_event, args) => services.agentData!.requestAdmin('memory.create', args));
+    registerCommand('agentData_memory_update', (_event, args) => services.agentData!.requestAdmin('memory.update', args));
+    registerCommand('agentData_memory_conversations_list', (_event, args) => services.agentData!.requestAdmin('memory.conversations.list', args));
+    registerCommand('agentData_memory_conversations_read', (_event, args) => services.agentData!.requestAdmin('memory.conversations.read', args));
+    registerCommand('agentData_memory_delete', (_event, args) => services.agentData!.requestAdmin('memory.delete', {
       userId: readString(args, 'userId'),
-      workspace: readString(args, 'workspace'),
       id: readString(args, 'id'),
     }));
-    registerCommand('agentData_wiki_search', (_event, args) => services.agentData!.request('wiki.search', {
+    registerCommand('agentData_wiki_search', (_event, args) => services.agentData!.requestAdmin('wiki.search', {
       ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
       query: readString(args, 'query'),
       limit: readPositiveInteger(args, 'limit', 50),
@@ -179,6 +215,9 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       workspace: readString(args, 'workspace'),
       query: readString(args, 'query'),
       limit: readPositiveInteger(args, 'limit', 20),
+    }));
+    registerCommand('agentData_code_call', (_event, args) => services.agentData!.request('codeRetrieval.call', {
+      workspace: readString(args, 'workspace'), tool: readString(args, 'tool'), args: readRecord(args, 'args'),
     }));
   }
 }
@@ -393,6 +432,64 @@ function registerDevCommands(service: DevService): void {
   registerCommand('dev_list_commands', () => getRegisteredCommands());
 }
 
+function registerWikiManagement(service: AgentDataService): void {
+  registerCommand('agentData_wiki_libraries_list', (_event, args) => service.requestAdmin('wiki.libraries.list', {
+    ...(args.query === undefined ? {} : { query: readText(args, 'query') }), ...(args.project === undefined ? {} : { project: readString(args, 'project') }),
+  }));
+  registerCommand('agentData_wiki_libraries_read', (_event, args) => service.requestAdmin('wiki.libraries.read', { kbId: readString(args, 'kbId') }));
+  registerCommand('agentData_wiki_libraries_create', (_event, args) => service.requestAdmin('wiki.libraries.create', readLibraryInput(args)));
+  registerCommand('agentData_wiki_libraries_update', (_event, args) => service.requestAdmin('wiki.libraries.update', { kbId: readString(args, 'kbId'), ...readLibraryInput(args), expectedRevision: readRevision(args, 'expectedRevision') }));
+  registerCommand('agentData_wiki_libraries_previewDelete', (_event, args) => service.requestAdmin('wiki.libraries.previewDelete', { kbId: readString(args, 'kbId') }));
+  registerCommand('agentData_wiki_libraries_remove', (_event, args) => service.requestAdmin('wiki.libraries.remove', { kbId: readString(args, 'kbId'), cancelActive: readBoolean(args, 'cancelActive') }));
+  registerCommand('agentData_wiki_libraries_previewIngest', (_event, args) => service.requestAdmin('wiki.libraries.previewIngest', readIngestInput(args)));
+  registerCommand('agentData_wiki_libraries_ingest', (_event, args) => service.requestAdmin('wiki.libraries.ingest', { ...readIngestInput(args), ...(args.expectedModel === undefined ? {} : { expectedModel: readString(args, 'expectedModel') }) }));
+  registerCommand('agentData_wiki_libraries_reindex', (_event, args) => service.requestAdmin('wiki.libraries.reindex', { kbId: readString(args, 'kbId') }));
+  registerCommand('agentData_wiki_sources_list', (_event, args) => service.requestAdmin('wiki.sources.list', { kbId: readString(args, 'kbId') }));
+  registerCommand('agentData_wiki_sources_read', (_event, args) => service.requestAdmin('wiki.sources.read', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), ...(args.revision === undefined ? {} : { revision: readRevision(args, 'revision') }) }));
+  registerCommand('agentData_wiki_sources_previewImport', (_event, args) => service.requestAdmin('wiki.sources.previewImport', { kbId: readString(args, 'kbId'), projectWorkspace: readString(args, 'projectWorkspace'), relativePath: readString(args, 'relativePath') }));
+  registerCommand('agentData_wiki_sources_create', (_event, args) => service.requestAdmin('wiki.sources.create', { kbId: readString(args, 'kbId'), ...readWikiSourceInput(args) }));
+  registerCommand('agentData_wiki_sources_update', (_event, args) => service.requestAdmin('wiki.sources.update', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), content: readText(args, 'content'), expected: readVersion(args) }));
+  registerCommand('agentData_wiki_sources_previewDelete', (_event, args) => service.requestAdmin('wiki.sources.previewDelete', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId') }));
+  registerCommand('agentData_wiki_sources_remove', (_event, args) => service.requestAdmin('wiki.sources.remove', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), cancelActive: readBoolean(args, 'cancelActive') }));
+  registerCommand('agentData_wiki_pages_list', (_event, args) => service.requestAdmin('wiki.pages.list', { kbId: readString(args, 'kbId') }));
+  registerCommand('agentData_wiki_pages_read', (_event, args) => service.requestAdmin('wiki.pages.read', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId') }));
+  registerCommand('agentData_wiki_pages_create', (_event, args) => service.requestAdmin('wiki.pages.create', { kbId: readString(args, 'kbId'), ...readPageInput(args) }));
+  registerCommand('agentData_wiki_pages_update', (_event, args) => service.requestAdmin('wiki.pages.update', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), ...readPageInput(args), expected: readVersion(args) }));
+  registerCommand('agentData_wiki_pages_setLocked', (_event, args) => service.requestAdmin('wiki.pages.setLocked', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), locked: readBoolean(args, 'locked'), expected: readVersion(args) }));
+  registerCommand('agentData_wiki_pages_previewDelete', (_event, args) => service.requestAdmin('wiki.pages.previewDelete', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId') }));
+  registerCommand('agentData_wiki_pages_remove', (_event, args) => service.requestAdmin('wiki.pages.remove', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), cancelActive: readBoolean(args, 'cancelActive') }));
+}
+
+function readLibraryInput(args: Record<string, unknown>) { return { name: readString(args, 'name'), description: readText(args, 'description'), bindings: readStringArray(args, 'bindings') }; }
+function readPageInput(args: Record<string, unknown>) { return { title: readString(args, 'title'), content: readText(args, 'content'), sourceRefs: readSourceRefs(args) }; }
+function readIngestInput(args: Record<string, unknown>) { return { kbId: readString(args, 'kbId'), ...(args.sourceIds === undefined ? {} : { sourceIds: readStringArray(args, 'sourceIds') }), ...(args.regenerateSourceIds === undefined ? {} : { regenerateSourceIds: readStringArray(args, 'regenerateSourceIds') }) }; }
+function readBoolean(args: Record<string, unknown>, key: string): boolean { if (typeof args[key] !== 'boolean') throw new Error(`${key} must be a boolean`); return args[key]; }
+function readRevision(args: Record<string, unknown>, key: string): number { if (!Number.isInteger(args[key]) || Number(args[key]) < 0) throw new Error(`${key} must be a nonnegative integer`); return Number(args[key]); }
+function readStringArray(args: Record<string, unknown>, key: string): string[] {
+  const values = args[key];
+  if (!Array.isArray(values) || values.some((v) => typeof v !== 'string' || !v.trim())) throw new Error(`${key} must be a string array`);
+  return [...new Set(values as string[])];
+}
+function readVersion(args: Record<string, unknown>): WikiVersion {
+  const expected = readRecord(args, 'expected');
+  if (!Number.isInteger(expected.revision) || Number(expected.revision) < 0 || typeof expected.contentHash !== 'string' || !expected.contentHash) throw new Error('expected version is required');
+  return { revision: Number(expected.revision), contentHash: expected.contentHash };
+}
+function readSourceRefs(args: Record<string, unknown>): WikiSourceRef[] {
+  if (!Array.isArray(args.sourceRefs)) throw new Error('invalid sourceRefs');
+  const refs = new Map<string, WikiSourceRef>();
+  for (const ref of args.sourceRefs) {
+    if (!ref || typeof ref.sourceId !== 'string' || !ref.sourceId.trim() || !Number.isInteger(ref.revision) || ref.revision < 1) throw new Error('invalid sourceRefs');
+    refs.set(JSON.stringify([ref.sourceId, ref.revision]), { sourceId: ref.sourceId, revision: ref.revision });
+  }
+  return [...refs.values()];
+}
+function readWikiSourceInput(args: Record<string, unknown>): WikiSourceInput {
+  if (args.kind === 'manual' || args.kind === 'upload') return { kind: args.kind, name: readString(args, 'name'), content: readText(args, 'content') };
+  if (args.kind === 'project') return { kind: args.kind, projectWorkspace: readString(args, 'projectWorkspace'), relativePath: readString(args, 'relativePath'), expectedContentHash: readString(args, 'expectedContentHash') };
+  throw new Error('invalid source kind');
+}
+
 function readString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
@@ -409,6 +506,32 @@ function readPositiveInteger(args: Record<string, unknown>, key: string, fallbac
   const value = args[key] ?? fallback;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`);
   return value;
+}
+function readNonnegativeInteger(args: Record<string, unknown>, key: string): number {
+  const value = args[key];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) throw new Error(`${key} must be a nonnegative integer`);
+  return value;
+}
+
+function readGoalAction(value: unknown): GoalUpdateInput['action'] {
+  if (value === 'pause' || value === 'resume' || value === 'begin_judging' || value === 'block' || value === 'disarm' || value === 'clear' || value === 'judge_pass' || value === 'judge_fail') return value;
+  throw new Error('action must be a valid goal action');
+}
+
+function readGoalUpdate(args: Record<string, unknown>): GoalUpdateInput {
+  return {
+    sessionId: readString(args, 'sessionId'),
+    goalId: readString(args, 'goalId'),
+    revision: readGoalRevision(args, 'revision'),
+    action: readGoalAction(args.action),
+    ...(args.payload === undefined ? {} : { payload: readRecord(args, 'payload') }),
+    origin: 'human-ui' as const,
+  };
+}
+
+function readGoalRevision(args: Record<string, unknown>, key: string): number {
+  if (!Number.isSafeInteger(args[key]) || Number(args[key]) < 1) throw new Error(`${key} must be a positive integer`);
+  return Number(args[key]);
 }
 
 function readRecord(args: Record<string, unknown>, key: string): Record<string, unknown> {
