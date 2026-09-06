@@ -47,6 +47,9 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     status,
     revision: snapshot.revision + 1,
     updatedAt: new Date().toISOString(),
+    stopReason: snapshot.status === "active" && event.type === "pause"
+      ? { reason: event.reason ?? "user_pause" }
+      : snapshot.stopReason,
     blockage: status === "active" && snapshot.status === "paused" && snapshot.blockage
       ? { ...snapshot.blockage, consecutiveRounds: 0 }
       : snapshot.blockage,

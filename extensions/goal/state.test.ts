@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restoreFromEntries, assertRevision, transition } from "./state.js";
+import { restoreFromEntries, assertRevision, transition, validateMaxRounds } from "./state.js";
 import type { GoalSnapshot } from "./contracts.js";
 
 describe("restoreFromEntries", () => {
@@ -36,9 +36,20 @@ const snapshot = (status: GoalSnapshot["status"]): GoalSnapshot => ({
 
 describe("goal state contract", () => {
   it("allows only the specified transitions", () => {
-    expect(transition(snapshot("active"), { type: "pause", reason: "user_pause" }).status).toBe("paused");
+    const paused = transition(snapshot("active"), { type: "pause", reason: "user_pause" });
+    expect(paused.status).toBe("paused");
+    expect(paused.stopReason).toEqual({ reason: "user_pause" });
     expect(transition(snapshot("judging"), { type: "judge_pass", revision: 4 }).status).toBe("complete");
     expect(transition(snapshot("judging"), { type: "judge_fail", revision: 4 }).status).toBe("paused");
+  });
+  it("defaults max rounds and rejects unsafe values", () => {
+    expect(validateMaxRounds(undefined)).toBe(256);
+    expect(() => validateMaxRounds(0)).toThrow("INVALID_MAX_ROUNDS");
+    expect(() => validateMaxRounds(Number.MAX_SAFE_INTEGER + 1)).toThrow("INVALID_MAX_ROUNDS");
+  });
+  it("keeps disarmed and cleared read-only", () => {
+    expect(() => transition(snapshot("disarmed"), { type: "pause" })).toThrow("INVALID_TRANSITION");
+    expect(() => transition(snapshot("cleared"), { type: "resume" })).toThrow("INVALID_TRANSITION");
   });
   it("resets consecutive blockage rounds when resumed", () => {
     const paused = { ...snapshot("paused"), blockage: { reason: "blocked", consecutiveRounds: 3 } };

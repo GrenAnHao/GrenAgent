@@ -11,10 +11,12 @@ export interface GoalSnapshot {
   maxRounds: number;
   createdAt: string;
   updatedAt: string;
-  stopReason?: string;
+  stopReason?: { reason: string; code?: string };
   judge?: { verdict: "pass" | "fail" | "error"; reason: string; missing?: string[]; fingerprint?: string; turnId?: string };
   blockage?: { reason: string; fingerprint?: string; consecutiveRounds: number };
-  source?: string;
+  sourceGoalId?: string;
+  sourceSessionId?: string;
+  clearedAt?: string;
 }
 
 export interface GoalEvent {
@@ -42,9 +44,8 @@ export interface CreateGoalInput {
   sessionId: string;
   workspace: string;
   condition: string;
-  goalId?: string;
+  origin: "human-ui" | "human-agent";
   maxRounds?: number;
-  source?: string;
 }
 
 export interface GoalCasUpdate {
