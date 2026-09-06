@@ -47,8 +47,12 @@ describe("parseVerdict", () => {
     });
   });
   it("legacy judge wrapper is fail-closed", async () => {
-    const malformed: AskFn = async () => "not json";
+    let system = "";
+    const malformed: AskFn = async (prompt) => { system = prompt; return "not json"; };
     expect(await judge(malformed, [], "c")).toEqual({ ok: false, reason: "裁判输出无法解析" });
+    expect(system).toContain("strict independent judge");
+    const valid: AskFn = async () => '{"verdict":"ok","reason":"done"}';
+    expect(await judge(valid, [], "c")).toEqual({ ok: true, reason: "done" });
     const unavailable: AskFn = async () => { throw new Error("offline"); };
     expect(await judge(unavailable, [], "c")).toEqual({ ok: false, reason: "裁判调用失败" });
   });

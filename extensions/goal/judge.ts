@@ -12,6 +12,10 @@ export type Verdict = JudgeResult;
 
 export interface LegacyVerdict { ok: boolean; reason: string }
 
+const JUDGE_SYSTEM =
+  "You are a strict independent judge. Decide whether the assistant has ACTUALLY satisfied the user's stated completion condition, based solely on concrete evidence in the transcript. " +
+  'Output STRICT JSON only: {"verdict":"ok"|"not_ok","reason":string,"missing":string[]}."';
+
 export function buildJudgeUser(condition: string, transcript: string): string {
   return `Completion condition:\n${condition}\n\nTranscript (most recent last):\n${transcript}`;
 }
@@ -39,7 +43,7 @@ export function parseVerdict(raw: string): JudgeResult {
 export async function judge(ask: AskFn, messages: unknown[], condition: string, maxChars = 12000): Promise<LegacyVerdict> {
   try {
     const transcript = flattenTranscript(messages, maxChars);
-    const raw = await ask("", buildJudgeUser(condition, transcript));
+    const raw = await ask(JUDGE_SYSTEM, buildJudgeUser(condition, transcript));
     const result = parseVerdict(raw);
     return result.kind === "pass" ? { ok: true, reason: result.reason } : { ok: false, reason: result.reason };
   } catch {

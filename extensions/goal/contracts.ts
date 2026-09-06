@@ -28,7 +28,7 @@ export interface GoalEvent {
   goalId: string;
   sessionId: string;
   revision: number;
-  kind: string;
+  kind: "pause" | "resume" | "begin_judging" | "block" | "disarm" | "clear" | "judge_pass" | "judge_fail";
   payload: Record<string, unknown>;
   idempotencyKey?: string;
   createdAt: string;
@@ -56,9 +56,9 @@ export interface GoalCasUpdate {
   sessionId: string;
   goalId: string;
   revision: number;
-  action: string;
+  action: "pause" | "resume" | "begin_judging" | "block" | "disarm" | "clear" | "judge_pass" | "judge_fail";
   payload?: Record<string, unknown>;
-  origin: string;
+  origin: "human-ui" | "human-agent" | "system";
 }
 
 export type GoalUpdateInput = GoalCasUpdate;

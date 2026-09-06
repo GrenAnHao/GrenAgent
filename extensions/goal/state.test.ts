@@ -36,7 +36,7 @@ const snapshot = (status: GoalSnapshot["status"]): GoalSnapshot => ({
 
 describe("goal state contract", () => {
   it("allows only the specified transitions", () => {
-    const paused = transition(snapshot("active"), { type: "pause", reason: "user_pause" });
+    const paused = transition(snapshot("active"), { type: "pause", reason: "user_pause", revision: 4 });
     expect(paused.status).toBe("paused");
     expect(paused.stopReason?.kind).toBe("user_pause");
     expect(paused.stopReason?.summary).toBe("user_pause");
@@ -53,8 +53,8 @@ describe("goal state contract", () => {
     }
   });
   it("keeps disarmed and cleared read-only", () => {
-    expect(() => transition(snapshot("disarmed"), { type: "pause" })).toThrow("INVALID_TRANSITION");
-    expect(() => transition(snapshot("cleared"), { type: "resume" })).toThrow("INVALID_TRANSITION");
+    expect(() => transition(snapshot("disarmed"), { type: "pause", revision: 4 })).toThrow("INVALID_TRANSITION");
+    expect(() => transition(snapshot("cleared"), { type: "resume", revision: 4 })).toThrow("INVALID_TRANSITION");
   });
   it("resets consecutive blockage rounds when resumed", () => {
     const paused = { ...snapshot("paused"), blockage: { fingerprint: "x", count: 3, summary: "blocked", at: "now" } };
@@ -65,13 +65,19 @@ describe("goal state contract", () => {
   });
   it("rejects stale transition revisions", () => {
     expect(() => transition(snapshot("active"), { type: "pause", revision: 3 })).toThrow("VERSION_CONFLICT");
+    expect(() => transition(snapshot("active"), { type: "pause" } as never)).toThrow("VERSION_CONFLICT");
   });
   it("covers the lifecycle transition matrix", () => {
     expect(transition(snapshot("active"), { type: "begin_judging", revision: 4 }).status).toBe("judging");
-    expect(transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" }).status).toBe("blocked");
+    const blocked = transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" });
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.blockage).toMatchObject({ fingerprint: "fp", count: 1, summary: "blocked" });
     expect(transition(snapshot("active"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("paused"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("active"), { type: "clear", revision: 4 }).status).toBe("cleared");
+    const cleared = transition(snapshot("active"), { type: "clear", revision: 4 });
+    expect(cleared.clearedAt).toEqual(expect.any(String));
+    expect(cleared.stopReason?.kind).toBe("cleared");
     expect(transition(snapshot("blocked"), { type: "resume", revision: 4 }).status).toBe("active");
     expect(transition(snapshot("disarmed"), { type: "resume", revision: 4 }).status).toBe("active");
     expect(transition(snapshot("error"), { type: "resume", revision: 4 }).status).toBe("active");
