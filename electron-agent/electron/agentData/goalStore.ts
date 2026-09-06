@@ -115,8 +115,12 @@ export class GoalStore {
     });
   }
 
-  history(sessionId: string): GoalEvent[] {
-    return (this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,id').all(sessionId) as Array<Record<string, unknown>>).map(mapEvent);
+  history(sessionId: string, limit?: number): GoalEvent[] {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) throw new Error('INVALID_HISTORY_LIMIT');
+    const rows = limit === undefined
+      ? this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,id').all(sessionId)
+      : this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,id LIMIT ?').all(sessionId, limit);
+    return (rows as Array<Record<string, unknown>>).map(mapEvent);
   }
 
   clear(input: GoalCasUpdate): GoalSnapshot { return this.update({ ...input, action: 'clear' }); }
@@ -157,11 +161,11 @@ export class GoalStore {
   private publishPending(): void {
     for (let index = 0; index < this.pending.length;) {
       const event = this.pending[index];
-      let failed = false;
+      let delivered = false;
       for (const listener of this.listeners) {
-        try { listener(event); } catch { failed = true; }
+        try { listener(event); delivered = true; } catch { /* retain the event only when nobody received it */ }
       }
-      if (failed) { index += 1; continue; }
+      if (!delivered) { index += 1; continue; }
       try {
         this.db.prepare('UPDATE goal_events SET published_at=? WHERE id=?').run(new Date().toISOString(), event.id);
         this.pending.splice(index, 1);

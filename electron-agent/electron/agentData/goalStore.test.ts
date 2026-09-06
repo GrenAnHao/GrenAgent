@@ -23,6 +23,10 @@ describe('GoalStore', () => {
     expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: 0, action: 'pause', origin: 'human-ui' })).toThrow('VERSION_CONFLICT');
     const cleared = store.clear({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'clear', origin: 'human-ui' });
     expect(cleared.status).toBe('cleared'); expect(store.get('s')?.status).toBe('cleared'); expect(store.history('s').length).toBeGreaterThan(1);
+    expect(store.history('s', 1)).toHaveLength(1);
+    expect(store.history('s', 0)).toEqual([]);
+    expect(() => store.history('s', -1)).toThrow('INVALID_HISTORY_LIMIT');
+    expect(() => store.history('s', 1.5)).toThrow('INVALID_HISTORY_LIMIT');
   });
 
   it('forks a disarmed goal with source references and restarts active goals', () => {
@@ -77,6 +81,21 @@ describe('GoalStore', () => {
     const restarted = new GoalStore(storage.db, (event) => replayed.push(event));
     restarted.replay();
     expect(replayed).toHaveLength(1);
+    expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).not.toMatchObject({ published_at: null });
+    storage.close();
+  });
+
+  it('keeps events pending until a listener successfully receives them', () => {
+    const storage = new AgentDataStorage(':memory:'); storage.migrate();
+    const store = new GoalStore(storage.db);
+    store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).toMatchObject({ published_at: null });
+    store.replay();
+    expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).toMatchObject({ published_at: null });
+    const received: unknown[] = [];
+    store.onPublish((event) => received.push(event));
+    store.replay();
+    expect(received).toHaveLength(1);
     expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).not.toMatchObject({ published_at: null });
     storage.close();
   });
