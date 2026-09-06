@@ -27,6 +27,16 @@ describe('GoalStore', () => {
     expect(store.getLive('s')).toBeUndefined();
   });
 
+  it('uses the newest row when goal generations share an updated timestamp', () => {
+    const { db, store } = fixture();
+    const first = store.create({ sessionId: 's', workspace: '/w', condition: 'first', origin: 'human-ui' });
+    store.clear({ sessionId: 's', goalId: first.goalId, revision: first.revision, action: 'clear', origin: 'human-ui' });
+    const second = store.create({ sessionId: 's', workspace: '/w', condition: 'second', origin: 'human-ui' });
+    db.prepare('UPDATE goal_snapshots SET updated_at=? WHERE session_id=?').run('same-time', 's');
+    expect(store.get('s')?.goalId).toBe(second.goalId);
+    expect(store.getLive('s')?.goalId).toBe(second.goalId);
+  });
+
   it('requires human-ui authority to change maxRounds', () => {
     const { store } = fixture();
     const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
@@ -65,27 +75,38 @@ describe('GoalStore', () => {
 
   it('claims and settles a round idempotently and pauses at the cap', () => {
     const { store } = fixture(); const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui', maxRounds: 1 });
-    const claim = store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'k' });
-    expect(store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'k2' })).toEqual(claim);
-    const settled = store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'k', turnId: 't', summary: 'done' });
+    const key = `${goal.goalId}:${goal.revision}:1`;
+    const claim = store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: key });
+    expect(store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: key })).toEqual(claim);
+    const settled = store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: key, turnId: 't', summary: 'done' });
     expect(settled.snapshot).toMatchObject({ roundsUsed: 1, status: 'paused', stopReason: { kind: 'max_rounds' } });
-    expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'k', turnId: 't', summary: 'done' }).dispatch.status).toBe('settled');
-    expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'different', turnId: 't', summary: 'retry' })).toMatchObject({ dispatch: { idempotencyKey: 'k', status: 'settled' } });
+    expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: key, turnId: 't', summary: 'done' }).dispatch.status).toBe('settled');
+    expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'different', turnId: 't', summary: 'retry' })).toMatchObject({ dispatch: { idempotencyKey: key, status: 'settled' } });
+  });
+
+  it('rejects non-canonical claim idempotency keys', () => {
+    const { db, store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    const canonical = `${goal.goalId}:${goal.revision}:1`;
+    expect(() => store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'custom-key' })).toThrow('INVALID_IDEMPOTENCY_KEY');
+    store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: canonical });
+    expect(db.prepare('SELECT idempotency_key FROM goal_turn_leases').get()).toMatchObject({ idempotency_key: canonical });
   });
 
   it('does not settle an unclaimed lease through a new idempotency key', () => {
     const { store } = fixture();
     const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
-    store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'claim' });
+    store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: `${goal.goalId}:${goal.revision}:1` });
     expect(() => store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'other', turnId: 'turn', summary: 'done' })).toThrow('ROUND_NOT_CLAIMED');
   });
 
   it('rejects skipped rounds while keeping repeated claims idempotent', () => {
     const { store } = fixture();
     const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
-    expect(() => store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 2, idempotencyKey: 'skip' })).toThrow('INVALID_ROUND');
-    const claim = store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'round-1' });
-    expect(store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'retry' })).toEqual(claim);
+    expect(() => store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 2, idempotencyKey: `${goal.goalId}:${goal.revision}:2` })).toThrow('INVALID_ROUND');
+    const key = `${goal.goalId}:${goal.revision}:1`;
+    const claim = store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: key });
+    expect(store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: key })).toEqual(claim);
   });
 
   it('returns committed results when a publish listener throws', () => {
@@ -134,8 +155,9 @@ describe('GoalStore', () => {
     const { store } = fixture();
     const first = store.create({ sessionId: 's1', workspace: '/w', condition: 'c', origin: 'human-ui' });
     const second = store.create({ sessionId: 's2', workspace: '/w', condition: 'c', origin: 'human-ui' });
-    store.claimRound({ sessionId: 's1', goalId: first.goalId, revision: first.revision, nextRound: 1, idempotencyKey: 'shared' });
-    expect(() => store.claimRound({ sessionId: 's2', goalId: second.goalId, revision: second.revision, nextRound: 1, idempotencyKey: 'shared' })).toThrow('IDEMPOTENCY_CONFLICT');
+    expect(() => store.claimRound({ sessionId: 's1', goalId: first.goalId, revision: first.revision, nextRound: 1, idempotencyKey: 'shared' })).toThrow('INVALID_IDEMPOTENCY_KEY');
+    store.claimRound({ sessionId: 's1', goalId: first.goalId, revision: first.revision, nextRound: 1, idempotencyKey: `${first.goalId}:${first.revision}:1` });
+    store.claimRound({ sessionId: 's2', goalId: second.goalId, revision: second.revision, nextRound: 1, idempotencyKey: `${second.goalId}:${second.revision}:1` });
   });
 
   it('requires judging state before recording a judge result', () => {

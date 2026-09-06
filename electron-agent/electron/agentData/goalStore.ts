@@ -25,12 +25,12 @@ export class GoalStore {
   replay(): void { this.publishPending(); }
 
   get(sessionId: string): GoalSnapshot | undefined {
-    const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? ORDER BY updated_at DESC LIMIT 1').get(sessionId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 1').get(sessionId) as Record<string, unknown> | undefined;
     return row ? mapSnapshot(row) : undefined;
   }
 
   getLive(sessionId: string): GoalSnapshot | undefined {
-    const row = this.db.prepare("SELECT * FROM goal_snapshots WHERE session_id=? AND status <> 'cleared' ORDER BY updated_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT * FROM goal_snapshots WHERE session_id=? AND status <> 'cleared' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
     return row ? mapSnapshot(row) : undefined;
   }
 
@@ -62,8 +62,9 @@ export class GoalStore {
 
   claimRound(input: RoundClaimInput): GoalDispatch {
     return this.tx(() => {
-      if (!input.idempotencyKey.trim()) throw new Error('INVALID_IDEMPOTENCY_KEY');
-      const prior = this.db.prepare('SELECT * FROM goal_turn_leases WHERE idempotency_key=?').get(input.idempotencyKey) as Record<string, unknown> | undefined;
+      const canonicalKey = `${input.goalId}:${input.revision}:${input.nextRound}`;
+      if (input.idempotencyKey && input.idempotencyKey !== canonicalKey) throw new Error('INVALID_IDEMPOTENCY_KEY');
+      const prior = this.db.prepare('SELECT * FROM goal_turn_leases WHERE idempotency_key=?').get(canonicalKey) as Record<string, unknown> | undefined;
       if (prior) {
         assertLeaseMatches(prior, input.sessionId, input.goalId, input.revision);
         return mapDispatch(prior);
@@ -77,16 +78,16 @@ export class GoalStore {
       if (current.status !== 'active') throw new Error('GOAL_NOT_ACTIVE');
       if (current.roundsUsed >= current.maxRounds) throw new Error('MAX_ROUNDS_REACHED');
       if (!Number.isSafeInteger(input.nextRound) || input.nextRound !== current.roundsUsed + 1 || input.nextRound > current.maxRounds) throw new Error('INVALID_ROUND');
-      const dispatch: GoalDispatch = { idempotencyKey: input.idempotencyKey, goalId: input.goalId, revision: input.revision, nextRound: input.nextRound, status: 'claimed' };
+      const dispatch: GoalDispatch = { idempotencyKey: canonicalKey, goalId: input.goalId, revision: input.revision, nextRound: input.nextRound, status: 'claimed' };
       const now = new Date().toISOString();
       this.db.prepare(`INSERT INTO goal_turn_leases(
         idempotency_key,goal_id,session_id,revision,next_round,status,turn_id,workspace,origin,prompt_digest,continuous_intent,summary,error,created_at,claimed_at,settled_at
       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        input.idempotencyKey, input.goalId, input.sessionId, input.revision, input.nextRound, dispatch.status, null,
+        canonicalKey, input.goalId, input.sessionId, input.revision, input.nextRound, dispatch.status, null,
         input.workspace ?? current.workspace, input.origin ?? 'system', input.promptDigest ?? '', input.continuousIntent ? 1 : 0,
         null, null, now, now, null,
       );
-      this.event(current, 'round_claim', { nextRound: input.nextRound }, input.idempotencyKey); return dispatch;
+      this.event(current, 'round_claim', { nextRound: input.nextRound }, canonicalKey); return dispatch;
     });
   }
 
