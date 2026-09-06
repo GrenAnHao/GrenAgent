@@ -17,6 +17,7 @@ export class GoalStore {
   constructor(readonly db: DatabaseSync, publish?: GoalPublish) {
     if (publish) this.listeners.add(publish);
     this.pending = (this.db.prepare('SELECT * FROM goal_events WHERE published_at IS NULL ORDER BY created_at,id').all() as Array<Record<string, unknown>>).map(mapEvent);
+    this.recoverActiveGoals();
   }
 
   onPublish(listener: GoalPublish): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -25,6 +26,11 @@ export class GoalStore {
 
   get(sessionId: string): GoalSnapshot | undefined {
     const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? ORDER BY updated_at DESC LIMIT 1').get(sessionId) as Record<string, unknown> | undefined;
+    return row ? mapSnapshot(row) : undefined;
+  }
+
+  getLive(sessionId: string): GoalSnapshot | undefined {
+    const row = this.db.prepare("SELECT * FROM goal_snapshots WHERE session_id=? AND status <> 'cleared' ORDER BY updated_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
     return row ? mapSnapshot(row) : undefined;
   }
 
@@ -41,9 +47,11 @@ export class GoalStore {
 
   update(input: GoalCasUpdate): GoalSnapshot {
     return this.tx(() => {
+      const hasMaxRounds = Boolean(input.payload && Object.prototype.hasOwnProperty.call(input.payload, 'maxRounds'));
+      if (hasMaxRounds && input.origin !== 'human-ui') throw new Error('HUMAN_AUTH_REQUIRED');
       const current = this.require(input.sessionId, input.goalId); assertRevision(current, input.goalId, input.revision);
       const next = transition(current, input.action, input.payload);
-      if (input.payload && Object.prototype.hasOwnProperty.call(input.payload, 'maxRounds')) {
+      if (hasMaxRounds) {
         const maxRounds = validateMaxRounds(Number(input.payload.maxRounds));
         if (maxRounds < current.roundsUsed) throw new Error('MAX_ROUNDS_BELOW_USAGE');
         next.maxRounds = maxRounds;
@@ -141,6 +149,19 @@ export class GoalStore {
   }
 
   private require(sessionId: string, goalId: string): GoalSnapshot { const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? AND goal_id=?').get(sessionId, goalId) as Record<string, unknown> | undefined; if (!row) throw new Error('GOAL_NOT_FOUND'); return mapSnapshot(row); }
+  private recoverActiveGoals(): void {
+    const rows = this.db.prepare("SELECT * FROM goal_snapshots WHERE status='active' ORDER BY session_id, goal_id").all() as Array<Record<string, unknown>>;
+    if (!rows.length) return;
+    this.tx(() => {
+      for (const row of rows) {
+        const current = mapSnapshot(row);
+        const now = new Date().toISOString();
+        const next: GoalSnapshot = { ...current, status: 'disarmed', revision: current.revision + 1, updatedAt: now };
+        this.persist(next);
+        this.event(next, 'disarm', { origin: 'system', reason: 'restart' });
+      }
+    });
+  }
   private persist(snapshot: GoalSnapshot): void { this.db.prepare(`INSERT INTO goal_snapshots(goal_id,session_id,workspace,revision,condition,status,rounds_used,max_rounds,created_at,updated_at,stop_reason,judge,blockage,source_goal_id,source_session_id,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(goal_id) DO UPDATE SET revision=excluded.revision,condition=excluded.condition,status=excluded.status,rounds_used=excluded.rounds_used,max_rounds=excluded.max_rounds,updated_at=excluded.updated_at,stop_reason=excluded.stop_reason,judge=excluded.judge,blockage=excluded.blockage,source_goal_id=excluded.source_goal_id,source_session_id=excluded.source_session_id,cleared_at=excluded.cleared_at`).run(snapshot.goalId,snapshot.sessionId,snapshot.workspace,snapshot.revision,snapshot.condition,snapshot.status,snapshot.roundsUsed,snapshot.maxRounds,snapshot.createdAt,snapshot.updatedAt,json(snapshot.stopReason),json(snapshot.judge),json(snapshot.blockage),snapshot.sourceGoalId ?? null,snapshot.sourceSessionId ?? null,snapshot.clearedAt ?? null); }
   private event(snapshot: GoalSnapshot, kind: string, payload: Record<string, unknown>, idempotencyKey?: string): void { const event: GoalEvent = { id: randomUUID(), goalId: snapshot.goalId, sessionId: snapshot.sessionId, revision: snapshot.revision, kind, payload, ...(idempotencyKey ? { idempotencyKey } : {}), createdAt: new Date().toISOString() }; this.db.prepare('INSERT INTO goal_events(id,goal_id,session_id,revision,kind,payload,idempotency_key,created_at,published_at) VALUES(?,?,?,?,?,?,?,?,?)').run(event.id,event.goalId,event.sessionId,event.revision,event.kind,JSON.stringify(event.payload),event.idempotencyKey ?? null,event.createdAt,null); this.pending.push(event); }
   private tx<T>(fn: () => T): T {

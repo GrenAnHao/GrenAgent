@@ -18,6 +18,24 @@ describe('GoalStore', () => {
     expect(() => store.create({ sessionId: 'a', workspace: '/w', condition: 'again', origin: 'human-ui' })).toThrow('GOAL_ALREADY_EXISTS');
   });
 
+  it('returns only live snapshots from getLive while get keeps tombstones', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    expect(store.getLive('s')?.goalId).toBe(goal.goalId);
+    store.clear({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'clear', origin: 'human-ui' });
+    expect(store.get('s')?.status).toBe('cleared');
+    expect(store.getLive('s')).toBeUndefined();
+  });
+
+  it('requires human-ui authority to change maxRounds', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    const update = { sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'pause' as const, payload: { maxRounds: 4 }, origin: 'system' as const };
+    expect(() => store.update(update)).toThrow('HUMAN_AUTH_REQUIRED');
+    expect(() => store.update({ ...update, origin: 'human-agent' })).toThrow('HUMAN_AUTH_REQUIRED');
+    expect(store.update({ ...update, origin: 'human-ui' })).toMatchObject({ status: 'paused', maxRounds: 4 });
+  });
+
   it('enforces compare-and-swap and retains clear tombstone/history', () => {
     const { store } = fixture(); const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
     expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: 0, action: 'pause', origin: 'human-ui' })).toThrow('VERSION_CONFLICT');
@@ -80,8 +98,20 @@ describe('GoalStore', () => {
     const replayed: unknown[] = [];
     const restarted = new GoalStore(storage.db, (event) => replayed.push(event));
     restarted.replay();
-    expect(replayed).toHaveLength(1);
+    expect(replayed).toHaveLength(2);
     expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).not.toMatchObject({ published_at: null });
+    storage.close();
+  });
+
+  it('disarms active goals when reopening the store and keeps restart history', () => {
+    const storage = new AgentDataStorage(':memory:'); storage.migrate();
+    const first = new GoalStore(storage.db);
+    const goal = first.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    const reopened = new GoalStore(storage.db);
+    expect(reopened.get('s')).toMatchObject({ goalId: goal.goalId, status: 'disarmed', revision: goal.revision + 1 });
+    expect(reopened.getLive('s')).toMatchObject({ status: 'disarmed' });
+    expect(reopened.history('s').map((event) => event.kind)).toEqual(['create', 'disarm']);
+    expect(reopened.history('s')[1].payload).toMatchObject({ reason: 'restart' });
     storage.close();
   });
 
