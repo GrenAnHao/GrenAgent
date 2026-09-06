@@ -46,6 +46,24 @@ describe('GoalStore', () => {
     expect(store.update({ ...update, origin: 'human-ui' })).toMatchObject({ status: 'paused', maxRounds: 4 });
   });
 
+  it('requires human-ui authority for pause, resume, and clear', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'pause', origin: 'system' })).toThrow('HUMAN_AUTH_REQUIRED');
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'pause', origin: 'human-agent' })).toThrow('HUMAN_AUTH_REQUIRED');
+    const paused = store.update({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'pause', origin: 'human-ui' });
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: paused.revision, action: 'resume', origin: 'system' })).toThrow('HUMAN_AUTH_REQUIRED');
+    const resumed = store.update({ sessionId: 's', goalId: goal.goalId, revision: paused.revision, action: 'resume', origin: 'human-ui' });
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: resumed.revision, action: 'clear', origin: 'human-agent' })).toThrow('HUMAN_AUTH_REQUIRED');
+    expect(store.update({ sessionId: 's', goalId: goal.goalId, revision: resumed.revision, action: 'clear', origin: 'human-ui' }).status).toBe('cleared');
+  });
+
+  it('rejects condition changes from non-human origins', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'old', origin: 'human-ui' });
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'begin_judging', payload: { condition: 'new' }, origin: 'system' })).toThrow('HUMAN_AUTH_REQUIRED');
+  });
+
   it('enforces compare-and-swap and retains clear tombstone/history', () => {
     const { store } = fixture(); const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
     expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: 0, action: 'pause', origin: 'human-ui' })).toThrow('VERSION_CONFLICT');
@@ -173,6 +191,7 @@ describe('GoalStore', () => {
     const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
     expect(() => store.recordJudge({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, verdict: 'pass', reason: 'done' })).toThrow('INVALID_TRANSITION');
     const judging = store.update({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, action: 'begin_judging', origin: 'system' });
+    expect(() => store.update({ sessionId: 's', goalId: goal.goalId, revision: judging.revision, action: 'judge_pass', origin: 'system' })).toThrow('INVALID_TRANSITION');
     expect(store.recordJudge({ sessionId: 's', goalId: goal.goalId, revision: judging.revision, verdict: 'pass', reason: 'done' }).status).toBe('complete');
   });
 

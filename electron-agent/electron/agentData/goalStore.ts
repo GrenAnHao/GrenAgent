@@ -48,13 +48,19 @@ export class GoalStore {
   update(input: GoalCasUpdate): GoalSnapshot {
     return this.tx(() => {
       const hasMaxRounds = Boolean(input.payload && Object.prototype.hasOwnProperty.call(input.payload, 'maxRounds'));
-      if (hasMaxRounds && input.origin !== 'human-ui') throw new Error('HUMAN_AUTH_REQUIRED');
+      const hasCondition = Boolean(input.payload && Object.prototype.hasOwnProperty.call(input.payload, 'condition'));
+      if (input.action === 'judge_pass' || input.action === 'judge_fail') throw new Error('INVALID_TRANSITION');
+      if ((['pause', 'resume', 'clear'].includes(input.action) || hasMaxRounds || hasCondition) && input.origin !== 'human-ui') throw new Error('HUMAN_AUTH_REQUIRED');
       const current = this.require(input.sessionId, input.goalId); assertRevision(current, input.goalId, input.revision);
       const next = transition(current, input.action, input.payload);
       if (hasMaxRounds) {
         const maxRounds = validateMaxRounds(Number(input.payload.maxRounds));
         if (maxRounds < current.roundsUsed) throw new Error('MAX_ROUNDS_BELOW_USAGE');
         next.maxRounds = maxRounds;
+      }
+      if (hasCondition) {
+        if (typeof input.payload?.condition !== 'string' || !input.payload.condition.trim()) throw new Error('INVALID_GOAL');
+        next.condition = input.payload.condition.trim();
       }
       this.persist(next); this.event(next, input.action, input.payload ?? {}); return next;
     });
