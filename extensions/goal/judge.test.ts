@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { flattenTranscript, parseVerdict } from "./judge.js";
+import { flattenTranscript, judge, parseVerdict } from "./judge.js";
+import type { AskFn } from "./llm.js";
 
 describe("flattenTranscript", () => {
   it("joins string and block content as role: text", () => {
@@ -44,5 +45,11 @@ describe("parseVerdict", () => {
     expect(parseVerdict('{"verdict":"fail","reason":"missing","missing":["tests"]}')).toEqual({
       kind: "fail", reason: "missing", missing: ["tests"],
     });
+  });
+  it("legacy judge wrapper is fail-closed", async () => {
+    const malformed: AskFn = async () => "not json";
+    expect(await judge(malformed, [], "c")).toEqual({ ok: false, reason: "裁判输出无法解析" });
+    const unavailable: AskFn = async () => { throw new Error("offline"); };
+    expect(await judge(unavailable, [], "c")).toEqual({ ok: false, reason: "裁判调用失败" });
   });
 });
