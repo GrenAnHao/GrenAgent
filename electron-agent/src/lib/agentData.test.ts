@@ -99,11 +99,13 @@ describe('agentDataApi', () => {
       await agentDataApi.goals.get('session-1', '/repo');
       await agentDataApi.goals.create({ sessionId: 'session-1', workspace: '/repo', condition: 'ship it' });
       await agentDataApi.goals.update({ sessionId: 'session-1', goalId: 'goal-1', revision: 2, action: 'pause' });
+      await agentDataApi.goals.judgeResult({ sessionId: 'session-1', goalId: 'goal-1', revision: 3, verdict: 'pass', reason: 'done' });
       await agentDataApi.goals.history('session-1');
       expect(spy.mock.calls).toEqual([
         ['agentData_goal_get', { sessionId: 'session-1', workspace: '/repo' }],
         ['agentData_goal_create', { sessionId: 'session-1', workspace: '/repo', condition: 'ship it' }],
         ['agentData_goal_update', { sessionId: 'session-1', goalId: 'goal-1', revision: 2, action: 'pause' }],
+        ['agentData_goal_judgeResult', { sessionId: 'session-1', goalId: 'goal-1', revision: 3, verdict: 'pass', reason: 'done' }],
         ['agentData_goal_history', { sessionId: 'session-1' }],
       ]);
     } finally { spy.mockRestore(); }

@@ -5,7 +5,7 @@ import type { Item, Thread, Turn } from './appServer/types';
 import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
 import type { QueueTaskInput } from './appServer/taskQueue';
 import type { WikiSyncSkipInput } from './wikiSyncService';
-import type { CreateGoalInput, GoalUpdateInput, GoalEvent, GoalSnapshot } from '../agentData/goalContracts';
+import type { CreateGoalInput, GoalUpdateInput, JudgeResultInput, GoalEvent, GoalSnapshot } from '../agentData/goalContracts';
 
 // CodeGraph calls may cold-load the embedded SDK and its index. Keep this aligned with
 // extensions/code-retrieval's 65s client timeout instead of AgentDataClient's
@@ -72,7 +72,8 @@ export class AgentDataService {
   goalRequestCompletion(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
     return this.goalUpdate({ ...input, action: 'begin_judging' });
   }
-  goalJudgeResult(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
+  goalJudgeResult(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput | JudgeResultInput): Promise<GoalSnapshot> {
+    if ('verdict' in input) return this.requestAdmin<GoalSnapshot>('admin.goal.judgeResult', { ...input, origin: 'human-ui' });
     return this.goalUpdate(input);
   }
   goalHistory(sessionId: string, limit?: number): Promise<GoalEvent[]> {

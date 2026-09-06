@@ -60,8 +60,11 @@ describe('Rust handler coverage', () => {
     expect(agentData.goalCreate).toHaveBeenCalledWith({ sessionId: 's', workspace: '/repo', condition: 'ship', origin: 'human-ui' });
     await invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: 'g', revision: 1, action: 'pause', origin: 'system' } });
     expect(agentData.goalUpdate).toHaveBeenCalledWith({ sessionId: 's', goalId: 'g', revision: 1, action: 'pause', origin: 'human-ui' });
+    await invoke({}, { command: 'agentData_goal_judgeResult', args: { sessionId: 's', goalId: 'g', revision: 2, verdict: 'pass', reason: 'done', origin: 'system' } });
+    expect(agentData.goalJudgeResult).toHaveBeenCalledWith({ sessionId: 's', goalId: 'g', revision: 2, verdict: 'pass', reason: 'done' });
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: 'g', revision: 0, action: 'pause' } })).rejects.toThrow(/revision/);
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: 'g', revision: 1, action: 'invalid' } })).rejects.toThrow(/action/);
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: '', revision: 1, action: 'pause' } })).rejects.toThrow(/goalId/);
+    await expect(invoke({}, { command: 'agentData_goal_judgeResult', args: { sessionId: 's', goalId: 'g', revision: 2, verdict: 'unknown', reason: 'done' } })).rejects.toThrow(/verdict/);
   });
 });

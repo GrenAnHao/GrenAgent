@@ -18,7 +18,7 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
-import type { GoalUpdateInput } from '../agentData/goalContracts';
+import type { GoalUpdateInput, JudgeResultInput } from '../agentData/goalContracts';
 import type { WikiVersion, WikiSourceInput, WikiSourceRef } from '../agentData/wikiContracts';
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
@@ -130,7 +130,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     });
     registerCommand('agentData_goal_recordProgress', (_event, args) => services.agentData!.goalRecordProgress(readGoalUpdate(args)));
     registerCommand('agentData_goal_requestCompletion', (_event, args) => services.agentData!.goalRequestCompletion(readGoalUpdate(args)));
-    registerCommand('agentData_goal_judgeResult', (_event, args) => services.agentData!.goalJudgeResult(readGoalUpdate(args)));
+    registerCommand('agentData_goal_judgeResult', (_event, args) => services.agentData!.goalJudgeResult(readGoalJudgeResult(args)));
     registerCommand('agentData_diagnostics_open', async (_event, args) => {
       const path = await services.agentData!.resolveDiagnosticPath(readString(args, 'id'));
       const error = await shell.openPath(path);
@@ -529,9 +529,28 @@ function readGoalUpdate(args: Record<string, unknown>): GoalUpdateInput {
   };
 }
 
+function readGoalJudgeResult(args: Record<string, unknown>): JudgeResultInput {
+  return {
+    sessionId: readString(args, 'sessionId'),
+    goalId: readString(args, 'goalId'),
+    revision: readGoalRevision(args, 'revision'),
+    verdict: readGoalVerdict(args.verdict),
+    reason: readText(args, 'reason'),
+    ...(args.missing === undefined ? {} : { missing: readStringArray(args, 'missing') }),
+    ...(args.fingerprint === undefined ? {} : { fingerprint: readString(args, 'fingerprint') }),
+    ...(args.turnId === undefined ? {} : { turnId: readString(args, 'turnId') }),
+    ...(args.model === undefined ? {} : { model: readString(args, 'model') }),
+  };
+}
+
 function readGoalRevision(args: Record<string, unknown>, key: string): number {
   if (!Number.isSafeInteger(args[key]) || Number(args[key]) < 1) throw new Error(`${key} must be a positive integer`);
   return Number(args[key]);
+}
+
+function readGoalVerdict(value: unknown): JudgeResultInput['verdict'] {
+  if (value === 'pass' || value === 'fail' || value === 'error') return value;
+  throw new Error('verdict must be pass, fail or error');
 }
 
 function readRecord(args: Record<string, unknown>, key: string): Record<string, unknown> {
