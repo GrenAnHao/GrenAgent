@@ -67,7 +67,7 @@ export class AgentDataService {
     return this.requestAdmin<GoalSnapshot>('admin.goal.update', { ...params, origin: 'human-ui' });
   }
   goalRecordProgress(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
-    return this.goalUpdate(input);
+    return this.goalUpdate({ ...input, action: 'block' });
   }
   goalRequestCompletion(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
     return this.goalUpdate({ ...input, action: 'begin_judging' });

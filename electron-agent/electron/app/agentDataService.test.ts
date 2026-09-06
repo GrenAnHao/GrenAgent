@@ -144,12 +144,12 @@ describe('AgentDataService', () => {
   it('provides the progress, completion and judge helpers as fixed-origin goal updates', async () => {
     const service = Object.create(AgentDataService.prototype) as AgentDataService;
     const requestAdmin = vi.spyOn(service, 'requestAdmin').mockResolvedValue({} as never);
-    const input = { sessionId: 's', goalId: 'g', revision: 2, action: 'block' as const, payload: { reason: 'progress' }, origin: 'system' as const };
+    const input = { sessionId: 's', goalId: 'g', revision: 2, action: 'pause' as const, payload: { reason: 'progress' }, origin: 'system' as const };
     await service.goalRecordProgress(input);
     await service.goalRequestCompletion({ ...input, action: 'begin_judging' });
     await service.goalJudgeResult({ sessionId: 's', goalId: 'g', revision: 2, verdict: 'fail', reason: 'not yet', missing: ['tests'] });
     expect(requestAdmin.mock.calls).toEqual([
-      ['admin.goal.update', { ...input, origin: 'human-ui' }],
+      ['admin.goal.update', { ...input, action: 'block', origin: 'human-ui' }],
       ['admin.goal.update', { ...input, action: 'begin_judging', origin: 'human-ui' }],
       ['admin.goal.judgeResult', { sessionId: 's', goalId: 'g', revision: 2, verdict: 'fail', reason: 'not yet', missing: ['tests'], origin: 'human-ui' }],
     ]);
