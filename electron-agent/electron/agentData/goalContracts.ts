@@ -25,3 +25,4 @@ export interface RoundClaimInput {
 }
 export interface RoundSettlementInput { sessionId: string; goalId: string; revision: number; idempotencyKey: string; turnId: string; summary: string }
 export interface JudgeResultInput { sessionId: string; goalId: string; revision: number; verdict: 'pass' | 'fail' | 'error'; reason: string; missing?: string[]; fingerprint?: string; turnId?: string; model?: string }
+export interface ForkGoalInput { sourceSessionId: string; sourceGoalId: string; targetSessionId: string }

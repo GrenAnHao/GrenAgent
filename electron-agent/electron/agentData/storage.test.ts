@@ -25,7 +25,7 @@ describe('AgentDataStorage', () => {
     expect(storage.schemaVersion()).toBeGreaterThanOrEqual(2);
     const tables = storage.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
     expect(tables.map((table) => table.name)).toEqual(expect.arrayContaining([
-      'threads', 'turns', 'items', 'service_tasks', 'plugin_state',
+      'threads', 'turns', 'items', 'app_events', 'service_tasks', 'plugin_state',
     ]));
     storage.close();
     rmSync(dir, { recursive: true, force: true });

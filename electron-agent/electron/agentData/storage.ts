@@ -32,6 +32,11 @@ export class AgentDataStorage {
       turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, type TEXT NOT NULL, status TEXT NOT NULL,
       payload TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS app_events (
+      id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, type TEXT NOT NULL, timestamp INTEGER NOT NULL,
+      project_id TEXT, thread_id TEXT, turn_id TEXT, item_id TEXT, data TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS app_events_sequence_idx ON app_events(sequence);
     CREATE TABLE IF NOT EXISTS service_tasks (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, source_project_id TEXT, source_session_id TEXT, source_thread_id TEXT, is_system INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL, input TEXT NOT NULL, output TEXT, attempts INTEGER NOT NULL, error TEXT,
@@ -57,6 +62,7 @@ export class AgentDataStorage {
     );
     DROP INDEX IF EXISTS goal_events_idempotency;
     CREATE UNIQUE INDEX IF NOT EXISTS goal_events_goal_idempotency ON goal_events(goal_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS goal_events_session_created ON goal_events(session_id, created_at, id);
     CREATE TABLE IF NOT EXISTS goal_turn_leases (
       idempotency_key TEXT PRIMARY KEY, goal_id TEXT NOT NULL, session_id TEXT NOT NULL, revision INTEGER NOT NULL,
       next_round INTEGER NOT NULL, status TEXT NOT NULL, turn_id TEXT, workspace TEXT NOT NULL DEFAULT '',

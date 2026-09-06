@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { GoalCasUpdate, GoalDispatch, GoalEvent, GoalJudgeRecord, GoalSnapshot, GoalStatus, CreateGoalInput, RoundClaimInput, RoundSettlementInput, JudgeResultInput } from './goalContracts';
+import type { GoalCasUpdate, GoalDispatch, GoalEvent, GoalJudgeRecord, GoalSnapshot, GoalStatus, CreateGoalInput, RoundClaimInput, RoundSettlementInput, JudgeResultInput, ForkGoalInput } from './goalContracts';
 
 export const DEFAULT_MAX_ROUNDS = 256;
 export type GoalPublish = (event: GoalEvent) => void;
@@ -13,11 +13,15 @@ function validateMaxRounds(value: number | undefined): number {
 
 export class GoalStore {
   private readonly listeners = new Set<GoalPublish>();
+  private pending: GoalEvent[];
   constructor(readonly db: DatabaseSync, publish?: GoalPublish) {
     if (publish) this.listeners.add(publish);
+    this.pending = (this.db.prepare('SELECT * FROM goal_events WHERE published_at IS NULL ORDER BY created_at,id').all() as Array<Record<string, unknown>>).map(mapEvent);
   }
 
   onPublish(listener: GoalPublish): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+
+  replay(): void { this.publishPending(); }
 
   get(sessionId: string): GoalSnapshot | undefined {
     const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? ORDER BY updated_at DESC LIMIT 1').get(sessionId) as Record<string, unknown> | undefined;
@@ -83,6 +87,8 @@ export class GoalStore {
       const prior = this.db.prepare('SELECT * FROM goal_turn_leases WHERE idempotency_key=?').get(input.idempotencyKey) as Record<string, unknown> | undefined;
       if (prior) assertLeaseMatches(prior, input.sessionId, input.goalId, input.revision);
       if (prior && String(prior.status) === 'settled') return { snapshot: this.require(input.sessionId, input.goalId), dispatch: mapDispatch(prior) };
+      const settledByTurn = this.db.prepare("SELECT * FROM goal_turn_leases WHERE goal_id=? AND session_id=? AND turn_id=? AND status='settled' ORDER BY settled_at DESC LIMIT 1").get(input.goalId, input.sessionId, input.turnId) as Record<string, unknown> | undefined;
+      if (settledByTurn) return { snapshot: this.require(input.sessionId, input.goalId), dispatch: mapDispatch(settledByTurn) };
       const lease = prior ?? this.db.prepare('SELECT * FROM goal_turn_leases WHERE goal_id=? AND revision=? AND turn_id=?').get(input.goalId, input.revision, input.turnId) as Record<string, unknown> | undefined;
       if (!lease) throw new Error('ROUND_NOT_CLAIMED');
       assertLeaseMatches(lease, input.sessionId, input.goalId, input.revision);
@@ -120,13 +126,9 @@ export class GoalStore {
     return this.update({ sessionId, goalId: current.goalId, revision: current.revision, action: 'disarm', origin: 'system' });
   }
 
-  fork(...args: unknown[]): GoalSnapshot {
-    const input = (args.length === 1 && typeof args[0] === 'object'
-      ? args[0] as Record<string, unknown>
-      : { sourceSessionId: args[0], sourceGoalId: args[1], newSessionId: args[2] }) as Record<string, unknown>;
-    const sourceSessionId = String(input.sourceSessionId ?? input.sessionId); const sourceGoalId = String(input.sourceGoalId ?? input.goalId);
-    const source = this.require(sourceSessionId, sourceGoalId); const sessionId = String(input.newSessionId ?? input.targetSessionId ?? input.sessionId);
-    if (!sessionId || sessionId === source.sessionId) throw new Error('INVALID_FORK_SESSION');
+  fork(input: ForkGoalInput): GoalSnapshot {
+    if (!input || !input.sourceSessionId?.trim() || !input.sourceGoalId?.trim() || !input.targetSessionId?.trim() || input.sourceSessionId === input.targetSessionId) throw new Error('INVALID_FORK_SESSION');
+    const source = this.require(input.sourceSessionId, input.sourceGoalId); const sessionId = input.targetSessionId;
     return this.tx(() => {
       const existing = this.db.prepare("SELECT 1 FROM goal_snapshots WHERE session_id=? AND status <> 'cleared'").get(sessionId); if (existing) throw new Error('GOAL_ALREADY_EXISTS');
       const now = new Date().toISOString(); const snapshot: GoalSnapshot = { ...source, goalId: randomUUID(), sessionId, status: 'disarmed', revision: 1, roundsUsed: 0, createdAt: now, updatedAt: now, sourceGoalId: source.goalId, sourceSessionId: source.sessionId, stopReason: undefined, judge: undefined, blockage: undefined, clearedAt: undefined };
@@ -137,7 +139,6 @@ export class GoalStore {
   private require(sessionId: string, goalId: string): GoalSnapshot { const row = this.db.prepare('SELECT * FROM goal_snapshots WHERE session_id=? AND goal_id=?').get(sessionId, goalId) as Record<string, unknown> | undefined; if (!row) throw new Error('GOAL_NOT_FOUND'); return mapSnapshot(row); }
   private persist(snapshot: GoalSnapshot): void { this.db.prepare(`INSERT INTO goal_snapshots(goal_id,session_id,workspace,revision,condition,status,rounds_used,max_rounds,created_at,updated_at,stop_reason,judge,blockage,source_goal_id,source_session_id,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(goal_id) DO UPDATE SET revision=excluded.revision,condition=excluded.condition,status=excluded.status,rounds_used=excluded.rounds_used,max_rounds=excluded.max_rounds,updated_at=excluded.updated_at,stop_reason=excluded.stop_reason,judge=excluded.judge,blockage=excluded.blockage,source_goal_id=excluded.source_goal_id,source_session_id=excluded.source_session_id,cleared_at=excluded.cleared_at`).run(snapshot.goalId,snapshot.sessionId,snapshot.workspace,snapshot.revision,snapshot.condition,snapshot.status,snapshot.roundsUsed,snapshot.maxRounds,snapshot.createdAt,snapshot.updatedAt,json(snapshot.stopReason),json(snapshot.judge),json(snapshot.blockage),snapshot.sourceGoalId ?? null,snapshot.sourceSessionId ?? null,snapshot.clearedAt ?? null); }
   private event(snapshot: GoalSnapshot, kind: string, payload: Record<string, unknown>, idempotencyKey?: string): void { const event: GoalEvent = { id: randomUUID(), goalId: snapshot.goalId, sessionId: snapshot.sessionId, revision: snapshot.revision, kind, payload, ...(idempotencyKey ? { idempotencyKey } : {}), createdAt: new Date().toISOString() }; this.db.prepare('INSERT INTO goal_events(id,goal_id,session_id,revision,kind,payload,idempotency_key,created_at,published_at) VALUES(?,?,?,?,?,?,?,?,?)').run(event.id,event.goalId,event.sessionId,event.revision,event.kind,JSON.stringify(event.payload),event.idempotencyKey ?? null,event.createdAt,null); this.pending.push(event); }
-  private pending: GoalEvent[] = [];
   private tx<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     const start = this.pending.length;

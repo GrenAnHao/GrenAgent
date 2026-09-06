@@ -27,7 +27,7 @@ describe('GoalStore', () => {
 
   it('forks a disarmed goal with source references and restarts active goals', () => {
     const { store } = fixture(); const source = store.create({ sessionId: 's1', workspace: '/w', condition: 'c', origin: 'human-ui' });
-    const fork = store.fork({ sessionId: 's1', goalId: source.goalId, newSessionId: 's2' });
+    const fork = store.fork({ sourceSessionId: 's1', sourceGoalId: source.goalId, targetSessionId: 's2' });
     expect(fork.status).toBe('disarmed'); expect(fork.sourceGoalId).toBe(source.goalId); expect(fork.sourceSessionId).toBe('s1');
     expect(store.restart('s1')?.status).toBe('disarmed');
   });
@@ -48,6 +48,14 @@ describe('GoalStore', () => {
     const settled = store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'k', turnId: 't', summary: 'done' });
     expect(settled.snapshot).toMatchObject({ roundsUsed: 1, status: 'paused', stopReason: { kind: 'max_rounds' } });
     expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'k', turnId: 't', summary: 'done' }).dispatch.status).toBe('settled');
+    expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'different', turnId: 't', summary: 'retry' })).toMatchObject({ dispatch: { idempotencyKey: 'k', status: 'settled' } });
+  });
+
+  it('does not settle an unclaimed lease through a new idempotency key', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'claim' });
+    expect(() => store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'other', turnId: 'turn', summary: 'done' })).toThrow('ROUND_NOT_CLAIMED');
   });
 
   it('rejects skipped rounds while keeping repeated claims idempotent', () => {
@@ -65,6 +73,11 @@ describe('GoalStore', () => {
     expect(store.get('s')?.status).toBe('active');
     expect(store.history('s')).toHaveLength(1);
     expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).toMatchObject({ published_at: null });
+    const replayed: unknown[] = [];
+    const restarted = new GoalStore(storage.db, (event) => replayed.push(event));
+    restarted.replay();
+    expect(replayed).toHaveLength(1);
+    expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).not.toMatchObject({ published_at: null });
     storage.close();
   });
 
