@@ -1,5 +1,6 @@
 export type GoalStatus = "active" | "paused" | "disarmed" | "judging" | "blocked" | "complete" | "error" | "cleared";
-export interface GoalStopReason { kind: string; summary: string; at: string; turnId?: string }
+export type GoalStopReasonKind = "user_pause" | "judge_failed" | "max_rounds" | "user_abort" | "error";
+export interface GoalStopReason { kind: GoalStopReasonKind; summary: string; at: string; turnId?: string }
 export interface GoalJudgeRecord { model: string; verdict: "pass" | "fail" | "error"; reason: string; missing: string[]; revision: number; turnId?: string; at: string }
 export interface GoalBlockageRecord { fingerprint: string; count: number; summary: string; lastTurnId?: string; at: string }
 

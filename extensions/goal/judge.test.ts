@@ -33,4 +33,16 @@ describe("parseVerdict", () => {
       expect(parseVerdict(raw).kind).toBe("error");
     }
   });
+  it("requires missing to be a complete string array for failures", () => {
+    for (const raw of [
+      '{"verdict":"fail","reason":"missing"}',
+      '{"verdict":"fail","reason":"missing","missing":null}',
+      '{"verdict":"fail","reason":"missing","missing":["ok",3]}',
+    ]) {
+      expect(parseVerdict(raw).kind).toBe("error");
+    }
+    expect(parseVerdict('{"verdict":"fail","reason":"missing","missing":["tests"]}')).toEqual({
+      kind: "fail", reason: "missing", missing: ["tests"],
+    });
+  });
 });

@@ -38,12 +38,12 @@ describe("goal state contract", () => {
   it("allows only the specified transitions", () => {
     const paused = transition(snapshot("active"), { type: "pause", reason: "user_pause" });
     expect(paused.status).toBe("paused");
-    expect(paused.stopReason?.kind).toBe("pause");
+    expect(paused.stopReason?.kind).toBe("user_pause");
     expect(paused.stopReason?.summary).toBe("user_pause");
     expect(transition(snapshot("judging"), { type: "judge_pass", revision: 4 }).status).toBe("complete");
     const failed = transition(snapshot("judging"), { type: "judge_fail", revision: 4, reason: "missing tests" });
     expect(failed.status).toBe("paused");
-    expect(failed.stopReason?.kind).toBe("judge_fail");
+    expect(failed.stopReason?.kind).toBe("judge_failed");
     expect(failed.stopReason?.summary).toBe("missing tests");
   });
   it("defaults max rounds and rejects unsafe values", () => {

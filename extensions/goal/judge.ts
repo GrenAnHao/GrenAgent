@@ -25,7 +25,8 @@ export function parseVerdict(raw: string): JudgeResult {
   if (typeof parsed.reason !== "string" || parsed.reason.trim() === "") return { kind: "error", reason: "裁判输出缺少原因" };
   if (parsed.verdict === "not_ok" || parsed.verdict === "fail") {
     const missing = parsed.missing;
-    return { kind: "fail", reason: parsed.reason, missing: Array.isArray(missing) && missing.every((item) => typeof item === "string") ? missing : [] };
+    if (!Array.isArray(missing) || !missing.every((item) => typeof item === "string")) return { kind: "error", reason: "裁判输出缺少缺失项" };
+    return { kind: "fail", reason: parsed.reason, missing };
   }
   if (parsed.verdict === "ok" || parsed.verdict === "pass") return { kind: "pass", reason: parsed.reason };
   return { kind: "error", reason: "裁判输出无法解析" };

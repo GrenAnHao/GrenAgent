@@ -48,9 +48,9 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     revision: snapshot.revision + 1,
     updatedAt: new Date().toISOString(),
     stopReason: snapshot.status === "active" && event.type === "pause"
-      ? { kind: "pause", summary: event.reason ?? "user_pause", at: new Date().toISOString() }
+      ? { kind: "user_pause", summary: event.reason ?? "user_pause", at: new Date().toISOString() }
       : snapshot.status === "judging" && event.type === "judge_fail"
-        ? { kind: "judge_fail", summary: event.reason ?? "条件未满足", at: new Date().toISOString(), turnId: event.turnId }
+        ? { kind: "judge_failed", summary: event.reason ?? "条件未满足", at: new Date().toISOString(), turnId: event.turnId }
       : snapshot.stopReason,
     blockage: status === "active" && snapshot.status === "paused" && snapshot.blockage
       ? { ...snapshot.blockage, count: 0 }
