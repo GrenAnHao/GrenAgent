@@ -14,23 +14,23 @@ describe("flattenTranscript", () => {
 
 describe("parseVerdict", () => {
   it("ok verdict → pass", () => {
-    expect(parseVerdict('{"verdict":"ok","reason":"done"}')).toEqual({ verdict: "pass", reason: "done" });
+    expect(parseVerdict('{"verdict":"ok","reason":"done"}')).toEqual({ kind: "pass", reason: "done" });
   });
   it("non-strict JSON → error", () => {
-    expect(parseVerdict('```json\n{"verdict":"not_ok","reason":"tests missing"}\n```').verdict).toBe("error");
+    expect(parseVerdict('```json\n{"verdict":"not_ok","reason":"tests missing"}\n```').kind).toBe("error");
   });
   it("text fallback → error", () => {
-    expect(parseVerdict("Honestly this is not ok yet.").verdict).toBe("error");
+    expect(parseVerdict("Honestly this is not ok yet.").kind).toBe("error");
   });
   it("unparseable → explicit error", () => {
-    expect(parseVerdict("hmm maybe?").verdict).toBe("error");
+    expect(parseVerdict("hmm maybe?").kind).toBe("error");
   });
   it("never marks malformed verdict as pass", () => {
-    expect(parseVerdict("hmm maybe?").verdict).toBe("error");
+    expect(parseVerdict("hmm maybe?").kind).toBe("error");
   });
   it("requires a supported verdict and non-empty reason", () => {
-    expect(parseVerdict('{"verdict":"maybe","reason":"no"}').verdict).toBe("error");
-    expect(parseVerdict('{"verdict":"ok","reason":""}').verdict).toBe("error");
-    expect(parseVerdict('{"verdict":"ok"}').verdict).toBe("error");
+    for (const raw of ['{"verdict":"maybe","reason":"no"}', '{"verdict":"ok","reason":""}', '{"verdict":"ok"}', 'null', '[]', '{"reason":"x"}']) {
+      expect(parseVerdict(raw).kind).toBe("error");
+    }
   });
 });

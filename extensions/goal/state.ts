@@ -14,7 +14,7 @@ export type GoalTransition =
   | { type: "pause"; reason?: string; revision?: number }
   | { type: "resume"; revision?: number }
   | { type: "judge_pass"; revision: number }
-  | { type: "judge_fail"; revision: number };
+  | { type: "judge_fail"; revision: number; reason?: string; turnId?: string };
 
 const statuses = new Set<GoalStatus>(["active", "paused", "disarmed", "judging", "blocked", "complete", "error", "cleared"]);
 
@@ -48,10 +48,12 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     revision: snapshot.revision + 1,
     updatedAt: new Date().toISOString(),
     stopReason: snapshot.status === "active" && event.type === "pause"
-      ? { reason: event.reason ?? "user_pause" }
+      ? { kind: "pause", summary: event.reason ?? "user_pause", at: new Date().toISOString() }
+      : snapshot.status === "judging" && event.type === "judge_fail"
+        ? { kind: "judge_fail", summary: event.reason ?? "条件未满足", at: new Date().toISOString(), turnId: event.turnId }
       : snapshot.stopReason,
     blockage: status === "active" && snapshot.status === "paused" && snapshot.blockage
-      ? { ...snapshot.blockage, consecutiveRounds: 0 }
+      ? { ...snapshot.blockage, count: 0 }
       : snapshot.blockage,
   };
 }

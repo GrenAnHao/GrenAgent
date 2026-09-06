@@ -38,25 +38,33 @@ describe("goal state contract", () => {
   it("allows only the specified transitions", () => {
     const paused = transition(snapshot("active"), { type: "pause", reason: "user_pause" });
     expect(paused.status).toBe("paused");
-    expect(paused.stopReason).toEqual({ reason: "user_pause" });
+    expect(paused.stopReason?.kind).toBe("pause");
+    expect(paused.stopReason?.summary).toBe("user_pause");
     expect(transition(snapshot("judging"), { type: "judge_pass", revision: 4 }).status).toBe("complete");
-    expect(transition(snapshot("judging"), { type: "judge_fail", revision: 4 }).status).toBe("paused");
+    const failed = transition(snapshot("judging"), { type: "judge_fail", revision: 4, reason: "missing tests" });
+    expect(failed.status).toBe("paused");
+    expect(failed.stopReason?.kind).toBe("judge_fail");
+    expect(failed.stopReason?.summary).toBe("missing tests");
   });
   it("defaults max rounds and rejects unsafe values", () => {
     expect(validateMaxRounds(undefined)).toBe(256);
-    expect(() => validateMaxRounds(0)).toThrow("INVALID_MAX_ROUNDS");
-    expect(() => validateMaxRounds(Number.MAX_SAFE_INTEGER + 1)).toThrow("INVALID_MAX_ROUNDS");
+    for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => validateMaxRounds(value)).toThrow("INVALID_MAX_ROUNDS");
+    }
   });
   it("keeps disarmed and cleared read-only", () => {
     expect(() => transition(snapshot("disarmed"), { type: "pause" })).toThrow("INVALID_TRANSITION");
     expect(() => transition(snapshot("cleared"), { type: "resume" })).toThrow("INVALID_TRANSITION");
   });
   it("resets consecutive blockage rounds when resumed", () => {
-    const paused = { ...snapshot("paused"), blockage: { reason: "blocked", consecutiveRounds: 3 } };
-    expect(transition(paused, { type: "resume", revision: 4 }).blockage?.consecutiveRounds).toBe(0);
+    const paused = { ...snapshot("paused"), blockage: { fingerprint: "x", count: 3, summary: "blocked", at: "now" } };
+    expect(transition(paused, { type: "resume", revision: 4 }).blockage?.count).toBe(0);
   });
   it("rejects completed writes with a stable error code", () => {
     expect(() => transition(snapshot("complete"), { type: "resume", revision: 4 })).toThrow("INVALID_TRANSITION");
+  });
+  it("rejects stale transition revisions", () => {
+    expect(() => transition(snapshot("active"), { type: "pause", revision: 3 })).toThrow("VERSION_CONFLICT");
   });
   it("checks goal id and revision for compare-and-swap", () => {
     expect(() => assertRevision({ goalId: "g", revision: 4 }, { goalId: "g", revision: 3 })).toThrow("VERSION_CONFLICT");

@@ -1,4 +1,7 @@
 export type GoalStatus = "active" | "paused" | "disarmed" | "judging" | "blocked" | "complete" | "error" | "cleared";
+export interface GoalStopReason { kind: string; summary: string; at: string; turnId?: string }
+export interface GoalJudgeRecord { model: string; verdict: "pass" | "fail" | "error"; reason: string; missing: string[]; revision: number; turnId?: string; at: string }
+export interface GoalBlockageRecord { fingerprint: string; count: number; summary: string; lastTurnId?: string; at: string }
 
 export interface GoalSnapshot {
   goalId: string;
@@ -11,9 +14,9 @@ export interface GoalSnapshot {
   maxRounds: number;
   createdAt: string;
   updatedAt: string;
-  stopReason?: { reason: string; code?: string };
-  judge?: { verdict: "pass" | "fail" | "error"; reason: string; missing?: string[]; fingerprint?: string; turnId?: string };
-  blockage?: { reason: string; fingerprint?: string; consecutiveRounds: number };
+  stopReason?: GoalStopReason;
+  judge?: GoalJudgeRecord;
+  blockage?: GoalBlockageRecord;
   sourceGoalId?: string;
   sourceSessionId?: string;
   clearedAt?: string;

@@ -2,10 +2,10 @@ import { flattenTranscript } from "../_shared/transcript.js";
 
 export { flattenTranscript };
 
-export interface JudgeResult {
-  verdict: "pass" | "fail" | "error";
-  reason: string;
-}
+export type JudgeResult =
+  | { kind: "pass"; reason: string }
+  | { kind: "fail"; reason: string; missing: string[] }
+  | { kind: "error"; reason: string };
 
 export type Verdict = JudgeResult;
 
@@ -14,14 +14,19 @@ export function buildJudgeUser(condition: string, transcript: string): string {
 }
 
 export function parseVerdict(raw: string): JudgeResult {
-  let parsed: { verdict?: string; reason?: string };
+  let parsed: { verdict?: unknown; reason?: unknown; missing?: unknown };
   try {
-    parsed = JSON.parse(raw) as { verdict?: string; reason?: string };
+    const value: unknown = JSON.parse(raw);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return { kind: "error", reason: "裁判输出无法解析" };
+    parsed = value as typeof parsed;
   } catch {
-    return { verdict: "error", reason: "裁判输出无法解析" };
+    return { kind: "error", reason: "裁判输出无法解析" };
   }
-  if (typeof parsed.reason !== "string" || parsed.reason.trim() === "") return { verdict: "error", reason: "裁判输出缺少原因" };
-  if (parsed.verdict === "not_ok" || parsed.verdict === "fail") return { verdict: "fail", reason: parsed.reason };
-  if (parsed.verdict === "ok" || parsed.verdict === "pass") return { verdict: "pass", reason: parsed.reason };
-  return { verdict: "error", reason: "裁判输出无法解析" };
+  if (typeof parsed.reason !== "string" || parsed.reason.trim() === "") return { kind: "error", reason: "裁判输出缺少原因" };
+  if (parsed.verdict === "not_ok" || parsed.verdict === "fail") {
+    const missing = parsed.missing;
+    return { kind: "fail", reason: parsed.reason, missing: Array.isArray(missing) && missing.every((item) => typeof item === "string") ? missing : [] };
+  }
+  if (parsed.verdict === "ok" || parsed.verdict === "pass") return { kind: "pass", reason: parsed.reason };
+  return { kind: "error", reason: "裁判输出无法解析" };
 }
