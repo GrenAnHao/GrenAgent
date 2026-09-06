@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { restoreFromEntries } from "./state.js";
+import { restoreFromEntries, assertRevision, transition } from "./state.js";
+import type { GoalSnapshot } from "./contracts.js";
 
 describe("restoreFromEntries", () => {
   it("returns undefined when no goal entry", () => {
@@ -25,5 +26,29 @@ describe("restoreFromEntries", () => {
         { type: "custom", customType: "goal", data: null },
       ]),
     ).toBeUndefined();
+  });
+});
+
+const snapshot = (status: GoalSnapshot["status"]): GoalSnapshot => ({
+  goalId: "g", sessionId: "s", workspace: "/w", revision: 4, condition: "c", status,
+  roundsUsed: 0, maxRounds: 256, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+});
+
+describe("goal state contract", () => {
+  it("allows only the specified transitions", () => {
+    expect(transition(snapshot("active"), { type: "pause", reason: "user_pause" }).status).toBe("paused");
+    expect(transition(snapshot("judging"), { type: "judge_pass", revision: 4 }).status).toBe("complete");
+    expect(transition(snapshot("judging"), { type: "judge_fail", revision: 4 }).status).toBe("paused");
+  });
+  it("resets consecutive blockage rounds when resumed", () => {
+    const paused = { ...snapshot("paused"), blockage: { reason: "blocked", consecutiveRounds: 3 } };
+    expect(transition(paused, { type: "resume", revision: 4 }).blockage?.consecutiveRounds).toBe(0);
+  });
+  it("rejects completed writes with a stable error code", () => {
+    expect(() => transition(snapshot("complete"), { type: "resume", revision: 4 })).toThrow("INVALID_TRANSITION");
+  });
+  it("checks goal id and revision for compare-and-swap", () => {
+    expect(() => assertRevision({ goalId: "g", revision: 4 }, { goalId: "g", revision: 3 })).toThrow("VERSION_CONFLICT");
+    expect(() => assertRevision({ goalId: "g", revision: 4 }, { goalId: "other", revision: 4 })).toThrow("VERSION_CONFLICT");
   });
 });

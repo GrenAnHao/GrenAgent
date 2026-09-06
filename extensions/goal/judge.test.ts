@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type AskFn } from "./llm.js";
-import { flattenTranscript, judge } from "./judge.js";
+import { flattenTranscript, parseVerdict } from "./judge.js";
 
 describe("flattenTranscript", () => {
   it("joins string and block content as role: text", () => {
@@ -13,27 +12,20 @@ describe("flattenTranscript", () => {
   });
 });
 
-describe("judge", () => {
-  it("ok verdict → ok:true", async () => {
-    const ask: AskFn = async () => '{"verdict":"ok","reason":"done"}';
-    expect(await judge(ask, [], "c")).toEqual({ ok: true, reason: "done" });
+describe("parseVerdict", () => {
+  it("ok verdict → pass", () => {
+    expect(parseVerdict('{"verdict":"ok","reason":"done"}')).toEqual({ verdict: "pass", reason: "done" });
   });
-  it("fenced not_ok verdict → ok:false", async () => {
-    const ask: AskFn = async () => '```json\n{"verdict":"not_ok","reason":"tests missing"}\n```';
-    expect(await judge(ask, [], "c")).toEqual({ ok: false, reason: "tests missing" });
+  it("fenced not_ok verdict → fail", () => {
+    expect(parseVerdict('```json\n{"verdict":"not_ok","reason":"tests missing"}\n```')).toEqual({ verdict: "fail", reason: "tests missing" });
   });
-  it("text 'not ok' fallback → ok:false", async () => {
-    const ask: AskFn = async () => "Honestly this is not ok yet.";
-    expect((await judge(ask, [], "c")).ok).toBe(false);
+  it("text 'not ok' fallback → fail", () => {
+    expect(parseVerdict("Honestly this is not ok yet.").verdict).toBe("fail");
   });
-  it("unparseable → fail-open ok:true", async () => {
-    const ask: AskFn = async () => "hmm maybe?";
-    expect((await judge(ask, [], "c")).ok).toBe(true);
+  it("unparseable → explicit error", () => {
+    expect(parseVerdict("hmm maybe?").verdict).toBe("error");
   });
-  it("ask throws → fail-open ok:true", async () => {
-    const ask: AskFn = async () => {
-      throw new Error("no model");
-    };
-    expect((await judge(ask, [], "c")).ok).toBe(true);
+  it("never marks malformed verdict as pass", () => {
+    expect(parseVerdict("hmm maybe?").verdict).toBe("error");
   });
 });
