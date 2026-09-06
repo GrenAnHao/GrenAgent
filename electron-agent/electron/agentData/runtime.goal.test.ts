@@ -47,6 +47,16 @@ describe('AgentDataRuntime Goal RPC', () => {
       await expect(client.request<{ status: string; judge: { verdict: string } }>('admin.goal.judgeResult', {
         sessionId: 'judge-fail', goalId: failed.goalId, revision: failedJudging.revision, verdict: 'fail', reason: 'missing tests', missing: ['tests'],
       })).resolves.toMatchObject({ status: 'paused', judge: { verdict: 'fail' } });
+
+      const errored = await client.request<{ goalId: string; revision: number }>('admin.goal.create', {
+        sessionId: 'judge-error', workspace: '/repo', condition: 'ship it', origin: 'human-ui',
+      });
+      const erroredJudging = await client.request<{ revision: number }>('admin.goal.update', {
+        sessionId: 'judge-error', goalId: errored.goalId, revision: errored.revision, action: 'begin_judging', origin: 'human-ui',
+      });
+      await expect(client.request<{ status: string; judge: { verdict: string } }>('admin.goal.judgeResult', {
+        sessionId: 'judge-error', goalId: errored.goalId, revision: erroredJudging.revision, verdict: 'error', reason: 'judge unavailable', model: 'test-model', turnId: 'turn-1',
+      })).resolves.toMatchObject({ status: 'error', judge: { verdict: 'error', turnId: 'turn-1' } });
     } finally {
       await client.close(); runtime.close();
     }

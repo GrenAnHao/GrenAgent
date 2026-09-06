@@ -608,6 +608,8 @@ export class AgentDataRuntime {
     if (project && !name.startsWith('goal.')) throw new RpcError('FORBIDDEN', 'admin Goal methods are application-only');
     if (!project && !name.startsWith('admin.goal.')) return undefined;
     const operation = project ? name.slice('goal.'.length) : name.slice('admin.goal.'.length);
+    const allowed = ['get', 'history', 'create', 'update', 'judgeResult'];
+    if (!allowed.includes(operation)) return undefined;
     const authorize = async (sessionId: string): Promise<void> => {
       if (!project) return;
       if (!this.options.resolveSession || !(await this.options.resolveSession(context.resolverWorkspace, sessionId))) throw new RpcError('FORBIDDEN', 'session is not owned by this workspace');
