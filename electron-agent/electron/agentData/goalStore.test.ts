@@ -50,6 +50,24 @@ describe('GoalStore', () => {
     expect(store.settleRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, idempotencyKey: 'k', turnId: 't', summary: 'done' }).dispatch.status).toBe('settled');
   });
 
+  it('rejects skipped rounds while keeping repeated claims idempotent', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    expect(() => store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 2, idempotencyKey: 'skip' })).toThrow('INVALID_ROUND');
+    const claim = store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'round-1' });
+    expect(store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey: 'retry' })).toEqual(claim);
+  });
+
+  it('returns committed results when a publish listener throws', () => {
+    const storage = new AgentDataStorage(':memory:'); storage.migrate();
+    const store = new GoalStore(storage.db, () => { throw new Error('publisher offline'); });
+    expect(() => store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' })).not.toThrow();
+    expect(store.get('s')?.status).toBe('active');
+    expect(store.history('s')).toHaveLength(1);
+    expect(storage.db.prepare('SELECT published_at FROM goal_events').get()).toMatchObject({ published_at: null });
+    storage.close();
+  });
+
   it('does not reuse an idempotency key across sessions', () => {
     const { store } = fixture();
     const first = store.create({ sessionId: 's1', workspace: '/w', condition: 'c', origin: 'human-ui' });

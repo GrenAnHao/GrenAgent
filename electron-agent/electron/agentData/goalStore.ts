@@ -64,7 +64,7 @@ export class GoalStore {
       const current = this.require(input.sessionId, input.goalId); assertRevision(current, input.goalId, input.revision);
       if (current.status !== 'active') throw new Error('GOAL_NOT_ACTIVE');
       if (current.roundsUsed >= current.maxRounds) throw new Error('MAX_ROUNDS_REACHED');
-      if (!Number.isSafeInteger(input.nextRound) || input.nextRound <= current.roundsUsed || input.nextRound > current.maxRounds) throw new Error('INVALID_ROUND');
+      if (!Number.isSafeInteger(input.nextRound) || input.nextRound !== current.roundsUsed + 1 || input.nextRound > current.maxRounds) throw new Error('INVALID_ROUND');
       const dispatch: GoalDispatch = { idempotencyKey: input.idempotencyKey, goalId: input.goalId, revision: input.revision, nextRound: input.nextRound, status: 'claimed' };
       const now = new Date().toISOString();
       this.db.prepare(`INSERT INTO goal_turn_leases(
@@ -138,7 +138,37 @@ export class GoalStore {
   private persist(snapshot: GoalSnapshot): void { this.db.prepare(`INSERT INTO goal_snapshots(goal_id,session_id,workspace,revision,condition,status,rounds_used,max_rounds,created_at,updated_at,stop_reason,judge,blockage,source_goal_id,source_session_id,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(goal_id) DO UPDATE SET revision=excluded.revision,condition=excluded.condition,status=excluded.status,rounds_used=excluded.rounds_used,max_rounds=excluded.max_rounds,updated_at=excluded.updated_at,stop_reason=excluded.stop_reason,judge=excluded.judge,blockage=excluded.blockage,source_goal_id=excluded.source_goal_id,source_session_id=excluded.source_session_id,cleared_at=excluded.cleared_at`).run(snapshot.goalId,snapshot.sessionId,snapshot.workspace,snapshot.revision,snapshot.condition,snapshot.status,snapshot.roundsUsed,snapshot.maxRounds,snapshot.createdAt,snapshot.updatedAt,json(snapshot.stopReason),json(snapshot.judge),json(snapshot.blockage),snapshot.sourceGoalId ?? null,snapshot.sourceSessionId ?? null,snapshot.clearedAt ?? null); }
   private event(snapshot: GoalSnapshot, kind: string, payload: Record<string, unknown>, idempotencyKey?: string): void { const event: GoalEvent = { id: randomUUID(), goalId: snapshot.goalId, sessionId: snapshot.sessionId, revision: snapshot.revision, kind, payload, ...(idempotencyKey ? { idempotencyKey } : {}), createdAt: new Date().toISOString() }; this.db.prepare('INSERT INTO goal_events(id,goal_id,session_id,revision,kind,payload,idempotency_key,created_at,published_at) VALUES(?,?,?,?,?,?,?,?,?)').run(event.id,event.goalId,event.sessionId,event.revision,event.kind,JSON.stringify(event.payload),event.idempotencyKey ?? null,event.createdAt,null); this.pending.push(event); }
   private pending: GoalEvent[] = [];
-  private tx<T>(fn: () => T): T { this.db.exec('BEGIN IMMEDIATE'); const start = this.pending.length; try { const result = fn(); this.db.exec('COMMIT'); const events = this.pending.splice(start); for (const event of events) for (const listener of this.listeners) listener(event); return result; } catch (error) { try { this.db.exec('ROLLBACK'); } catch {} this.pending.splice(start); throw error; } }
+  private tx<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    const start = this.pending.length;
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      this.publishPending();
+      return result;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      this.pending.splice(start);
+      throw error;
+    }
+  }
+
+  private publishPending(): void {
+    for (let index = 0; index < this.pending.length;) {
+      const event = this.pending[index];
+      let failed = false;
+      for (const listener of this.listeners) {
+        try { listener(event); } catch { failed = true; }
+      }
+      if (failed) { index += 1; continue; }
+      try {
+        this.db.prepare('UPDATE goal_events SET published_at=? WHERE id=?').run(new Date().toISOString(), event.id);
+        this.pending.splice(index, 1);
+      } catch {
+        index += 1;
+      }
+    }
+  }
 }
 
 function json(value: unknown): string | null { return value == null ? null : JSON.stringify(value); }
