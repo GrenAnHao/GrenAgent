@@ -46,7 +46,7 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
   else if (snapshot.status === "active" && event.type === "begin_judging") status = "judging";
   else if (snapshot.status === "active" && event.type === "block") status = "blocked";
   else if ((snapshot.status === "active" || snapshot.status === "paused") && event.type === "disarm") status = "disarmed";
-  else if (snapshot.status !== "cleared" && event.type === "clear") status = "cleared";
+  else if (["active", "paused", "blocked", "disarmed", "error"].includes(snapshot.status) && event.type === "clear") status = "cleared";
   else if (snapshot.status === "judging" && event.type === "judge_pass") status = "complete";
   else if (snapshot.status === "judging" && event.type === "judge_fail") status = "paused";
   else throw stateError("INVALID_TRANSITION");
