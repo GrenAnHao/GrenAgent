@@ -66,6 +66,19 @@ describe("goal state contract", () => {
   it("rejects stale transition revisions", () => {
     expect(() => transition(snapshot("active"), { type: "pause", revision: 3 })).toThrow("VERSION_CONFLICT");
   });
+  it("covers the lifecycle transition matrix", () => {
+    expect(transition(snapshot("active"), { type: "begin_judging", revision: 4 }).status).toBe("judging");
+    expect(transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" }).status).toBe("blocked");
+    expect(transition(snapshot("active"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
+    expect(transition(snapshot("paused"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
+    expect(transition(snapshot("complete"), { type: "clear", revision: 4 }).status).toBe("cleared");
+    expect(transition(snapshot("active"), { type: "clear", revision: 4 }).status).toBe("cleared");
+    expect(transition(snapshot("blocked"), { type: "resume", revision: 4 }).status).toBe("active");
+    expect(transition(snapshot("disarmed"), { type: "resume", revision: 4 }).status).toBe("active");
+    expect(transition(snapshot("error"), { type: "resume", revision: 4 }).status).toBe("active");
+    expect(() => transition(snapshot("complete"), { type: "pause", revision: 4 })).toThrow("INVALID_TRANSITION");
+    expect(() => transition(snapshot("cleared"), { type: "clear", revision: 4 })).toThrow("INVALID_TRANSITION");
+  });
   it("checks goal id and revision for compare-and-swap", () => {
     expect(() => assertRevision({ goalId: "g", revision: 4 }, { goalId: "g", revision: 3 })).toThrow("VERSION_CONFLICT");
     expect(() => assertRevision({ goalId: "g", revision: 4 }, { goalId: "other", revision: 4 })).toThrow("VERSION_CONFLICT");

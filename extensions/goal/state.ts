@@ -13,6 +13,10 @@ export const DEFAULT_MAX_ROUNDS = 256;
 export type GoalTransition =
   | { type: "pause"; reason?: string; revision?: number }
   | { type: "resume"; revision?: number }
+  | { type: "begin_judging"; revision: number }
+  | { type: "block"; revision: number; reason?: string; fingerprint?: string }
+  | { type: "disarm"; revision: number }
+  | { type: "clear"; revision: number }
   | { type: "judge_pass"; revision: number }
   | { type: "judge_fail"; revision: number; reason?: string; turnId?: string };
 
@@ -38,7 +42,11 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
   if (event.revision !== undefined && event.revision !== snapshot.revision) throw stateError("VERSION_CONFLICT");
   let status: GoalStatus;
   if (snapshot.status === "active" && event.type === "pause") status = "paused";
-  else if (snapshot.status === "paused" && event.type === "resume") status = "active";
+  else if (["paused", "blocked", "disarmed", "error"].includes(snapshot.status) && event.type === "resume") status = "active";
+  else if (snapshot.status === "active" && event.type === "begin_judging") status = "judging";
+  else if (snapshot.status === "active" && event.type === "block") status = "blocked";
+  else if ((snapshot.status === "active" || snapshot.status === "paused") && event.type === "disarm") status = "disarmed";
+  else if (snapshot.status !== "cleared" && event.type === "clear") status = "cleared";
   else if (snapshot.status === "judging" && event.type === "judge_pass") status = "complete";
   else if (snapshot.status === "judging" && event.type === "judge_fail") status = "paused";
   else throw stateError("INVALID_TRANSITION");
@@ -49,10 +57,12 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     updatedAt: new Date().toISOString(),
     stopReason: snapshot.status === "active" && event.type === "pause"
       ? { kind: "user_pause", summary: event.reason ?? "user_pause", at: new Date().toISOString() }
+      : snapshot.status === "active" && event.type === "block"
+        ? { kind: "blocked", summary: event.reason ?? "blocked", at: new Date().toISOString() }
       : snapshot.status === "judging" && event.type === "judge_fail"
         ? { kind: "judge_failed", summary: event.reason ?? "条件未满足", at: new Date().toISOString(), turnId: event.turnId }
       : snapshot.stopReason,
-    blockage: status === "active" && snapshot.status === "paused" && snapshot.blockage
+    blockage: status === "active" && ["paused", "blocked", "disarmed", "error"].includes(snapshot.status) && snapshot.blockage
       ? { ...snapshot.blockage, count: 0 }
       : snapshot.blockage,
   };
