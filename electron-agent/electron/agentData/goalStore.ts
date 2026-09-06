@@ -16,7 +16,7 @@ export class GoalStore {
   private pending: GoalEvent[];
   constructor(readonly db: DatabaseSync, publish?: GoalPublish) {
     if (publish) this.listeners.add(publish);
-    this.pending = (this.db.prepare('SELECT * FROM goal_events WHERE published_at IS NULL ORDER BY created_at,id').all() as Array<Record<string, unknown>>).map(mapEvent);
+    this.pending = (this.db.prepare('SELECT * FROM goal_events WHERE published_at IS NULL ORDER BY created_at,rowid').all() as Array<Record<string, unknown>>).map(mapEvent);
     this.recoverActiveGoals();
   }
 
@@ -126,8 +126,8 @@ export class GoalStore {
   history(sessionId: string, limit?: number): GoalEvent[] {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) throw new Error('INVALID_HISTORY_LIMIT');
     const rows = limit === undefined
-      ? this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,id').all(sessionId)
-      : this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,id LIMIT ?').all(sessionId, limit);
+      ? this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,rowid').all(sessionId)
+      : this.db.prepare('SELECT * FROM goal_events WHERE session_id=? ORDER BY created_at,rowid LIMIT ?').all(sessionId, limit);
     return (rows as Array<Record<string, unknown>>).map(mapEvent);
   }
 
