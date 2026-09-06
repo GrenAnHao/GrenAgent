@@ -72,6 +72,9 @@ describe("goal state contract", () => {
     const blocked = transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" });
     expect(blocked.status).toBe("blocked");
     expect(blocked.blockage).toMatchObject({ fingerprint: "fp", count: 1, summary: "blocked" });
+    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "again", fingerprint: "fp" }).blockage?.count).toBe(2);
+    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "other", fingerprint: "other" }).blockage?.count).toBe(1);
+    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "unknown" }).blockage?.count).toBe(1);
     expect(transition(snapshot("active"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("paused"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("active"), { type: "clear", revision: 4 }).status).toBe("cleared");

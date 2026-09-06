@@ -66,7 +66,14 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
       : snapshot.stopReason,
     clearedAt: status === "cleared" ? new Date().toISOString() : snapshot.clearedAt,
     blockage: snapshot.status === "active" && event.type === "block"
-      ? { fingerprint: event.fingerprint ?? "", count: (snapshot.blockage?.count ?? 0) + 1, summary: event.reason ?? "blocked", at: new Date().toISOString() }
+      ? {
+          fingerprint: event.fingerprint ?? "",
+          count: event.fingerprint && event.fingerprint === snapshot.blockage?.fingerprint
+            ? (snapshot.blockage?.count ?? 0) + 1
+            : 1,
+          summary: event.reason ?? "blocked",
+          at: new Date().toISOString(),
+        }
       : status === "active" && ["paused", "blocked", "disarmed", "error"].includes(snapshot.status) && snapshot.blockage
         ? { ...snapshot.blockage, count: 0 }
         : snapshot.blockage,
