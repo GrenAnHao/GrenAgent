@@ -63,7 +63,7 @@ export class GoalStore {
   claimRound(input: RoundClaimInput): GoalDispatch {
     return this.tx(() => {
       const canonicalKey = `${input.goalId}:${input.revision}:${input.nextRound}`;
-      if (input.idempotencyKey && input.idempotencyKey !== canonicalKey) throw new Error('INVALID_IDEMPOTENCY_KEY');
+      if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim() || input.idempotencyKey !== canonicalKey) throw new Error('INVALID_IDEMPOTENCY_KEY');
       const prior = this.db.prepare('SELECT * FROM goal_turn_leases WHERE idempotency_key=?').get(canonicalKey) as Record<string, unknown> | undefined;
       if (prior) {
         assertLeaseMatches(prior, input.sessionId, input.goalId, input.revision);

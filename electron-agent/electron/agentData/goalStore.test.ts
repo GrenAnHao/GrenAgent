@@ -93,6 +93,14 @@ describe('GoalStore', () => {
     expect(db.prepare('SELECT idempotency_key FROM goal_turn_leases').get()).toMatchObject({ idempotency_key: canonical });
   });
 
+  it('rejects empty claim idempotency keys', () => {
+    const { store } = fixture();
+    const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
+    for (const idempotencyKey of ['', '   ']) {
+      expect(() => store.claimRound({ sessionId: 's', goalId: goal.goalId, revision: goal.revision, nextRound: 1, idempotencyKey })).toThrow('INVALID_IDEMPOTENCY_KEY');
+    }
+  });
+
   it('does not settle an unclaimed lease through a new idempotency key', () => {
     const { store } = fixture();
     const goal = store.create({ sessionId: 's', workspace: '/w', condition: 'c', origin: 'human-ui' });
