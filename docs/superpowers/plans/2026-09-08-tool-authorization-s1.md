@@ -24,6 +24,22 @@
 
 **S1 不碰渲染层。** sidecar 用 `ctx.ui.select` 发三个选项，现有 `PromptRequestCard` 的 select 分支（`src/features/chat/input/PromptRequestCard.tsx:122-148`）已能渲染。`__approval` 哨兵富卡是 S2 的范围。
 
+**类型检查必须用 `tsconfig.node.json`，且以「新增错误数为 0」为判据。** `electron-agent/tsconfig.json` 是 `"files": []` 加 `references` 的 solution 风格配置，非 `--build` 模式下检查 0 个文件——`npx tsc -p tsconfig.json --noEmit` 恒定退出码 0 且无输出，证明不了任何事。真正覆盖 `electron/**` 的是 `tsconfig.node.json`，但该配置下仓库有 53 处历史报错（`threadStore.ts` 的类型断言、若干测试文件的跨包引用等），与本计划无关，不要去修。
+
+因此每处类型检查一律用这条命令，判据是输出为 0：
+
+```powershell
+cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "toolPermission" | Measure-Object | Select-Object -ExpandProperty Count
+```
+
+需要确认没有波及其他文件时，另跑一次总数，应仍为 53：
+
+```powershell
+cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "error TS" | Measure-Object | Select-Object -ExpandProperty Count
+```
+
+注意 `tsconfig.node.json` 的 `include` 只有 `electron/**/*.ts`，不含渲染层 `src/**`，也不含 `extensions/**`（另一个包）。任务 10 与 11 改的是 `extensions/`，那两个任务靠 vitest 与运行时验证，没有对应的 tsc 步骤。
+
 **`thread_id` 与 `turn_id` 在 S1 恒为 NULL。** 这两列属于 Electron 主进程的会话模型，sidecar 不知道自己处在哪个 thread / turn，传不上来。S1 的关联靠 `session_id` 加 `tool_call_id`，足够回答「这次调用是谁、什么时候、批没批」。S3 需要按轮次给文件变更分组时才需要 `turn_id`，届时由主进程在 RPC 处理中按 workspace 查当前 turn 补齐。这是有意的空缺，不是遗漏，实现时不要为了填满列而编造值。
 
 ---
@@ -285,8 +301,8 @@ export interface ToolDecision {
 
 - [ ] **步骤 2：确认类型编译通过**
 
-运行：`cd electron-agent && npx tsc -p tsconfig.json --noEmit`
-预期：无错误输出
+运行：`cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "toolPermission" | Measure-Object | Select-Object -ExpandProperty Count`
+预期：输出 `0`
 
 - [ ] **步骤 3：Commit**
 
@@ -1413,8 +1429,8 @@ export class ToolDecisionService {
 
 - [ ] **步骤 4：运行测试与类型检查**
 
-运行：`cd electron-agent && npx vitest run electron/app/toolPermission/ && npx tsc -p tsconfig.json --noEmit`
-预期：10 个测试全部 PASS，无类型错误
+运行：`cd electron-agent; npx vitest run electron/app/toolPermission/; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "toolPermission" | Measure-Object | Select-Object -ExpandProperty Count`
+预期：10 个测试全部 PASS，类型错误计数为 `0`
 
 - [ ] **步骤 5：Commit**
 
@@ -1815,8 +1831,8 @@ describe('permission.tool.* over the socket', () => {
 
 - [ ] **步骤 8：运行测试与类型检查**
 
-运行：`cd electron-agent && npx vitest run electron/agentData/runtime.toolPermission.test.ts electron/app/toolPermission/ && npx tsc -p tsconfig.json --noEmit`
-预期：全部 PASS，无类型错误
+运行：`cd electron-agent; npx vitest run electron/agentData/runtime.toolPermission.test.ts electron/app/toolPermission/; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "toolPermission" | Measure-Object | Select-Object -ExpandProperty Count`
+预期：全部 PASS，类型错误计数为 `0`
 
 - [ ] **步骤 9：Commit**
 
@@ -2359,8 +2375,10 @@ function draftRule(facts: ToolCallFacts): ToolRuleDraft {
 
 - [ ] **步骤 6：类型检查**
 
-运行：`cd electron-agent && npx tsc -p tsconfig.json --noEmit`
-预期：无错误
+本任务改的是 `extensions/`，不在 `tsconfig.node.json` 的 `include`（只含 `electron/**/*.ts`）范围内，没有对应的 tsc 步骤。改用 vitest 覆盖，并确认主进程侧未被波及：
+
+运行：`cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "error TS" | Measure-Object | Select-Object -ExpandProperty Count`
+预期：仍为 `53`，即历史基线未变
 
 - [ ] **步骤 7：Commit**
 
