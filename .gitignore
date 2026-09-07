@@ -32,6 +32,27 @@ output/
 /tauri-agent/.superpowers/
 /tauri-agent/.vscode/
 
+# Local code index (tens of MB, rebuilt by `codegraph init`)
+/.codegraph/
+
+# Editor / agent tool state (same class as .cursor/.claude/.codex above)
+/.idea/
+/.agents/
+/.codebuddy/
+
+# Debug + throwaway run artifacts
+/.playwright-cli/
+/.playwright-mcp/
+/.tmp-electron-browser/
+/electron-agent/.mermaid-repro/
+/electron-agent/.runtime/
+/dump-event.err
+/.tsc-out.txt
+/.tsc-src.txt
+/.vitest-out.txt
+/.vitest-sync-runner.txt
+*.tsbuildinfo
+
 # Windows junk
 nul
 .pi/
