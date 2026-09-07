@@ -16,7 +16,7 @@ export interface GoalDispatch {
   idempotencyKey: string; goalId: string; revision: number; nextRound: number;
   status: 'claimed' | 'queued' | 'settled' | 'failed'; turnId?: string;
 }
-export interface CreateGoalInput { sessionId: string; workspace: string; condition: string; origin: 'human-ui' | 'human-agent'; maxRounds?: number }
+export interface CreateGoalInput { sessionId: string; workspace: string; condition: string; origin: 'human-ui' | 'human-agent'; maxRounds?: number; continuousIntentEvidence?: string }
 export interface GoalCasUpdate { sessionId: string; goalId: string; revision: number; action: 'pause' | 'resume' | 'begin_judging' | 'block' | 'disarm' | 'clear' | 'judge_pass' | 'judge_fail'; payload?: Record<string, unknown>; origin: 'human-ui' | 'human-agent' | 'system' }
 export type GoalUpdateInput = GoalCasUpdate;
 export interface RoundClaimInput {

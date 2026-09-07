@@ -41,7 +41,7 @@ export class GoalStore {
       const existing = this.db.prepare("SELECT 1 FROM goal_snapshots WHERE session_id=? AND status <> 'cleared' LIMIT 1").get(input.sessionId);
       if (existing) throw new Error('GOAL_ALREADY_EXISTS');
       const now = new Date().toISOString(); const snapshot: GoalSnapshot = { goalId: randomUUID(), sessionId: input.sessionId, workspace: input.workspace, revision: 1, condition: input.condition, status: 'active', roundsUsed: 0, maxRounds, createdAt: now, updatedAt: now };
-      this.persist(snapshot); this.event(snapshot, 'create', { origin: input.origin }); return snapshot;
+      this.persist(snapshot); this.event(snapshot, 'create', { origin: input.origin, ...(input.continuousIntentEvidence ? { continuousIntentEvidence: input.continuousIntentEvidence } : {}) }); return snapshot;
     });
   }
 

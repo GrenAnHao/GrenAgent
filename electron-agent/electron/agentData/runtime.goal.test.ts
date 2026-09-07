@@ -95,4 +95,22 @@ describe('AgentDataRuntime Goal RPC', () => {
       await project.close(); await root.close(); runtime.close();
     }
   });
+
+  it('requires and audits explicit continuous intent evidence for project creates', async () => {
+    const runtime = new AgentDataRuntime({ dataPath: ':memory:', resolveSession: () => true });
+    await runtime.start();
+    const project = new AgentDataClient(runtime.agentEndpoint('/repo'));
+    try {
+      await expect(project.request('goal.create', { sessionId: 'missing', condition: 'ship' })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+      await expect(project.request('goal.create', { sessionId: 'bad', condition: 'ship', continuousIntentEvidence: 'do it' })).rejects.toMatchObject({ code: 'GOAL_CREATE_INTENT_REQUIRED' });
+      const goal = await project.request<{ goalId: string; sessionId: string }>('goal.create', {
+        sessionId: 'good', condition: 'ship', continuousIntentEvidence: '直到完成后再停止',
+      });
+      expect(goal).toMatchObject({ sessionId: 'good' });
+      const events = await project.request<Array<{ kind: string; payload: Record<string, unknown> }>>('goal.history', { sessionId: 'good' });
+      expect(events[0]).toMatchObject({ kind: 'create', payload: { continuousIntentEvidence: '直到完成后再停止' } });
+    } finally {
+      await project.close(); runtime.close();
+    }
+  });
 });

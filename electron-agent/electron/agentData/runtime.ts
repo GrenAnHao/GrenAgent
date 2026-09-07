@@ -626,12 +626,14 @@ export class AgentDataRuntime {
     };
     if (operation === 'create') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
+      const continuousIntentEvidence = project ? readContinuousIntentEvidence(p.continuousIntentEvidence) : undefined;
       const input: CreateGoalInput = {
         sessionId,
         workspace: project ? context.workspace : readString(p.workspace),
         condition: readString(p.condition),
         origin: project ? 'human-agent' : readGoalCreateOrigin(p.origin ?? 'human-ui'),
         ...(p.maxRounds === undefined ? {} : { maxRounds: readGoalLimit(p.maxRounds) }),
+        ...(continuousIntentEvidence === undefined ? {} : { continuousIntentEvidence }),
       };
       return this.goals!.create(input);
     };
@@ -906,6 +908,11 @@ function readWikiSource(value: Record<string, unknown>): WikiSourceInput {
 function wikiLimit(value: unknown, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? Math.max(1, Math.min(100, Math.trunc(value))) : fallback; }
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
 function readGoalRevision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) throw new RpcError('INVALID_PARAMS', 'goal revision is required'); return Number(value); }
+function readContinuousIntentEvidence(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 4000) throw new RpcError('INVALID_PARAMS', 'continuous intent evidence is required');
+  if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous)/i.test(value)) throw new RpcError('GOAL_CREATE_INTENT_REQUIRED', 'continuous intent evidence is not explicit');
+  return value;
+}
 function readGoalLimit(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new RpcError('INVALID_PARAMS', 'goal limit must be a nonnegative integer'); return Number(value); }
 function readGoalOrigin(value: unknown): 'human-ui' | 'human-agent' | 'system' {
   if (value === 'human-ui' || value === 'human-agent' || value === 'system') return value;
