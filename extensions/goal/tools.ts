@@ -16,12 +16,17 @@ function automaticTurn(): boolean {
   return process.env.PI_IS_SUBAGENT === '1' || process.env.PI_SYSTEM_WORKER === '1' || process.env.PI_GOAL_WORKER === '1';
 }
 
+function trustedHumanOrigin(): boolean {
+  const origin = process.env.PI_TURN_ORIGIN ?? process.env.PI_INPUT_ORIGIN ?? process.env.PI_GOAL_ORIGIN;
+  return origin === 'human' || origin === 'human-ui' || process.env.PI_HUMAN_ORIGIN_TOKEN === '1';
+}
+
 function userTurnRequired(): void {
-  if (automaticTurn()) throw new Error('GOAL_CREATE_FORBIDDEN');
+  if (automaticTurn() || !trustedHumanOrigin()) throw new Error('GOAL_CREATE_FORBIDDEN');
 }
 
 function result(value: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: value };
+  return { content: [{ type: 'text' as const, text: value === undefined ? 'null' : JSON.stringify(value) }], details: value };
 }
 
 function validateSnapshot(value: unknown, scopeRef: { sessionId: string; workspace: string }, expected?: { goalId: string; revision: number }): unknown {

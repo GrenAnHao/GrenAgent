@@ -13,6 +13,10 @@ afterEach(() => {
   delete process.env.PI_IS_SUBAGENT;
   delete process.env.PI_SYSTEM_WORKER;
   delete process.env.PI_GOAL_WORKER;
+  delete process.env.PI_TURN_ORIGIN;
+  delete process.env.PI_INPUT_ORIGIN;
+  delete process.env.PI_GOAL_ORIGIN;
+  delete process.env.PI_HUMAN_ORIGIN_TOKEN;
 });
 
 describe("goal tools", () => {
@@ -34,6 +38,15 @@ describe("goal tools", () => {
     const { defs, ctx } = setup(request);
     await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("requires a trusted human origin token for create", async () => {
+    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
+    const { defs, ctx } = setup(request);
+    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
+    process.env.PI_TURN_ORIGIN = "human";
+    await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
+    expect(request).toHaveBeenCalledWith("goal.create", expect.objectContaining({ sessionId: "session-a", workspace: "/repo", continuousIntentEvidence: "直到完成" }));
   });
 
   it("sends update CAS with current context scope and goal reference", async () => {

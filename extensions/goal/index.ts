@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
         if (text === "" || text === "clear" || text === "reset") {
           if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
           const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: "clear" }), requestScope, current);
+          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: "clear", origin: "human-ui" }), requestScope, current);
           pushStatus(ctx);
           ctx.ui.notify("已清除目标。", "info");
           return;
@@ -77,14 +77,14 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
         if (text === "pause" || text === "resume") {
           if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
           const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: text }), requestScope, current);
+          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: text, origin: "human-ui" }), requestScope, current);
           pushStatus(ctx);
           ctx.ui.notify(text === "pause" ? "目标已暂停。" : "目标已恢复。", "info");
           return;
         }
         if (text.length > 4000) throw new Error("INVALID_PARAMS");
         const requestScope = scope(ctx);
-        cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.create", { ...requestScope, condition: text, continuousIntentEvidence: text }), requestScope);
+        cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.create", { ...requestScope, condition: text, continuousIntentEvidence: text, origin: "human-ui" }), requestScope);
         pushStatus(ctx);
         ctx.ui.notify(`已设定目标：${text}`, "info");
       } catch (error) {
