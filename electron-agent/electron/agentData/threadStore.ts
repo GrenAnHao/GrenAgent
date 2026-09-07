@@ -1,10 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { AppEvent, Item, Thread, Turn } from '../app/appServer/types';
+import type { Item, Thread, Turn } from '../app/appServer/types';
 import type { AgentDataStorage } from './storage';
 
 export interface ThreadStoreOptions { now?: () => number; }
-export interface CreateThreadInput { id: string; projectId: string; workspace: string; title?: string; }
-export interface CreateTurnInput { id: string; threadId: string; input: string; permissionProfile: string; mode?: Turn['mode']; }
+export interface CreateThreadInput { id: string; projectId: string; workspace: string; title?: string; sessionId?: string; }
+export interface CreateTurnInput { id: string; threadId: string; input: string; permissionProfile: string; mode?: Turn['mode']; sessionId?: string; }
 export interface ThreadSnapshot { thread: Thread; turns: Turn[]; items: Item[]; }
 
 export class ThreadStore {
@@ -19,8 +19,8 @@ export class ThreadStore {
   createThread(input: CreateThreadInput): Thread {
     const timestamp = this.now();
     const thread: Thread = { ...input, status: 'active', createdAt: timestamp, updatedAt: timestamp };
-    this.db.prepare(`INSERT INTO threads (id, project_id, workspace, title, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(thread.id, thread.projectId, thread.workspace, thread.title ?? null, thread.status, timestamp, timestamp);
+    this.db.prepare(`INSERT INTO threads (id, project_id, workspace, title, status, created_at, updated_at, session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(thread.id, thread.projectId, thread.workspace, thread.title ?? null, thread.status, timestamp, timestamp, thread.sessionId ?? null);
     return thread;
   }
 
@@ -40,8 +40,8 @@ export class ThreadStore {
   createTurn(input: CreateTurnInput): Turn {
     const timestamp = this.now();
     const turn: Turn = { ...input, mode: input.mode ?? 'interactive', status: 'queued', createdAt: timestamp };
-    this.db.prepare(`INSERT INTO turns (id, thread_id, status, mode, input, permission_profile, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(turn.id, turn.threadId, turn.status, turn.mode, turn.input, turn.permissionProfile, timestamp);
+    this.db.prepare(`INSERT INTO turns (id, thread_id, status, mode, input, permission_profile, created_at, session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(turn.id, turn.threadId, turn.status, turn.mode, turn.input, turn.permissionProfile, timestamp, turn.sessionId ?? null);
     this.touchThread(turn.threadId, timestamp);
     return turn;
   }
@@ -74,29 +74,12 @@ export class ThreadStore {
     return rows.map(toItem);
   }
 
-  appendAppEvent(event: AppEvent): AppEvent {
-    const sequence = event.sequence > 0 ? event.sequence : ((this.db.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM app_events').get() as { next: number }).next);
-    const persisted = { ...event, sequence };
-    this.db.prepare(`INSERT INTO app_events (id, sequence, type, timestamp, project_id, thread_id, turn_id, item_id, data)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(persisted.id, persisted.sequence, persisted.type, persisted.timestamp, persisted.projectId ?? null, persisted.threadId ?? null, persisted.turnId ?? null, persisted.itemId ?? null, JSON.stringify(persisted.data));
-    return persisted;
-  }
-
-  listAppEvents(afterSequence = 0, limit = 256): AppEvent[] {
-    if (!Number.isFinite(afterSequence) || afterSequence < 0) throw new Error('afterSequence must be a finite non-negative number');
-    const rows = this.db.prepare('SELECT * FROM app_events WHERE sequence > ? ORDER BY sequence ASC LIMIT ?').all(afterSequence, limit) as AppEventRow[];
-    return rows.map((row) => ({ id: row.id, type: row.type, sequence: row.sequence, timestamp: row.timestamp,
-      ...(row.project_id === null ? {} : { projectId: row.project_id }), ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
-      ...(row.turn_id === null ? {} : { turnId: row.turn_id }), ...(row.item_id === null ? {} : { itemId: row.item_id }), data: JSON.parse(row.data) }));
-  }
-
   private touchThread(id: string, timestamp: number): void { this.db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(timestamp, id); }
 }
 
-interface ThreadRow { id: string; project_id: string; workspace: string; title: string | null; status: Thread['status']; created_at: number; updated_at: number; }
-interface TurnRow { id: string; thread_id: string; status: Turn['status']; mode: Turn['mode']; input: string; permission_profile: string; created_at: number; started_at: number | null; completed_at: number | null; error: string | null; }
+interface ThreadRow { id: string; project_id: string; workspace: string; title: string | null; status: Thread['status']; created_at: number; updated_at: number; session_id?: string | null; }
+interface TurnRow { id: string; thread_id: string; status: Turn['status']; mode: Turn['mode']; input: string; permission_profile: string; created_at: number; started_at: number | null; completed_at: number | null; error: string | null; session_id?: string | null; }
 interface ItemRow { id: string; thread_id: string; turn_id: string; type: Item['type']; status: Item['status']; payload: string; created_at: number; updated_at: number | null; }
-interface AppEventRow { id: string; type: AppEvent['type']; sequence: number; timestamp: number; project_id: string | null; thread_id: string | null; turn_id: string | null; item_id: string | null; data: string; }
-function toThread(row: ThreadRow): Thread { return { id: row.id, projectId: row.project_id, workspace: row.workspace, ...(row.title === null ? {} : { title: row.title }), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
-function toTurn(row: TurnRow): Turn { return { id: row.id, threadId: row.thread_id, status: row.status, mode: row.mode, input: row.input, permissionProfile: row.permission_profile, createdAt: row.created_at, ...(row.started_at === null ? {} : { startedAt: row.started_at }), ...(row.completed_at === null ? {} : { completedAt: row.completed_at }), ...(row.error === null ? {} : { error: row.error }) }; }
+function toThread(row: ThreadRow): Thread { return { id: row.id, projectId: row.project_id, workspace: row.workspace, ...(row.title === null ? {} : { title: row.title }), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.session_id ? { sessionId: row.session_id } : {}) }; }
+function toTurn(row: TurnRow): Turn { return { id: row.id, threadId: row.thread_id, status: row.status, mode: row.mode, input: row.input, permissionProfile: row.permission_profile, createdAt: row.created_at, ...(row.started_at === null ? {} : { startedAt: row.started_at }), ...(row.completed_at === null ? {} : { completedAt: row.completed_at }), ...(row.error === null ? {} : { error: row.error }), ...(row.session_id ? { sessionId: row.session_id } : {}) }; }
 function toItem(row: ItemRow): Item { return { id: row.id, threadId: row.thread_id, turnId: row.turn_id, type: row.type, status: row.status, payload: JSON.parse(row.payload), createdAt: row.created_at, ...(row.updated_at === null ? {} : { updatedAt: row.updated_at }) }; }

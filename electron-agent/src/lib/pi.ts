@@ -7,10 +7,8 @@ export type { UsageReport } from './usageReport';
 export interface PiEventEnvelope {
   workspace: string;
   event: AgentEvent;
-}
-export interface AppEventEnvelope {
-  workspace: string;
-  event: AppEvent;
+  sessionId?: string;
+  source?: 'interactive' | 'goal';
 }
 export interface PiUiRequestEnvelope {
   workspace: string;
@@ -50,26 +48,6 @@ export type AssistantMessageEvent =
   | { type: 'thinking_delta'; delta: string }
   | { type: string; [k: string]: unknown };
 
-export type AppEventType =
-  | 'thread.created' | 'thread.updated'
-  | 'turn.queued' | 'turn.started' | 'turn.completed' | 'turn.failed' | 'turn.cancelled'
-  | 'item.created' | 'item.updated' | 'item.delta'
-  | 'permission.requested' | 'permission.resolved'
-  | 'task.queued' | 'task.started' | 'task.completed' | 'task.failed' | 'task.cancelled'
-  | 'plugin.state_changed' | 'mcp.state_changed' | 'memory.updated' | 'sandbox.degraded';
-
-export interface AppEvent {
-  id: string;
-  type: AppEventType;
-  sequence: number;
-  timestamp: number;
-  projectId?: string;
-  threadId?: string;
-  turnId?: string;
-  itemId?: string;
-  data: unknown;
-}
-
 export interface ExtensionUiRequest {
   id: string;
   method: 'select' | 'confirm' | 'input' | 'editor' | 'notify' | 'setStatus' | 'setWidget' | 'setTitle' | 'set_editor_text' | string;
@@ -85,6 +63,7 @@ export interface ExtensionUiRequest {
 export interface OpenWorkspaceResult {
   restoredSession: string | null;
   sessionFile: string | null;
+  sessionId?: string | null;
 }
 
 export interface ImageItem {
@@ -238,8 +217,6 @@ export const pi = {
     invoke<void>('extension_ui_respond', { workspace, response }),
   resolvePermission: (id: string, resolution: 'allow' | 'deny') =>
     invoke<unknown>('permission_resolve', { requestId: id, resolution }),
-  replayAppEvents: (afterSequence = 0, limit = 256) =>
-    invoke<AppEvent[]>('app_event_replay', { afterSequence, limit }),
   getSessionStats: (workspace: string) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
@@ -265,8 +242,8 @@ export const pi = {
   setProviderConfig: (modelsJson: string, authJson: string) =>
     invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),
   refreshModelRegistry: () => invoke<RefreshResult>('refresh_model_registry'),
-  fetchProviderModels: (baseUrl: string, apiKey: string, api: string) =>
-    invoke<string[]>('fetch_provider_models', { baseUrl, apiKey, api }),
+  fetchProviderModels: (baseUrl: string, apiKey: string, api: string, headers?: Record<string, string>) =>
+    invoke<string[]>('fetch_provider_models', { baseUrl, apiKey, api, headers }),
   /** 项目无关地列出运行时解析后的模型（probe-models 子命令）：未打开项目 / 冷启动 / 真对话模式可用。 */
   listModelsGlobal: () => invoke<unknown>('list_models_global'),
   /** Mermaid 渲染失败时的非流式一次性修复：用当前会话模型生成修正后的 mermaid 代码（不进对话历史）。 */
@@ -320,9 +297,6 @@ export interface SessionInfo {
 
 export function onPiEvent(handler: (e: PiEventEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiEventEnvelope>('pi://event', (e) => handler(e.payload));
-}
-export function onAppEvent(handler: (e: AppEventEnvelope) => void): Promise<UnlistenFn> {
-  return listen<AppEventEnvelope>('app://event', (e) => handler(e.payload));
 }
 export function onPiUiRequest(handler: (e: PiUiRequestEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiUiRequestEnvelope>('pi://ui-request', (e) => handler(e.payload));

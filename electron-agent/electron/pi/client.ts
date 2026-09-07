@@ -9,10 +9,18 @@ export interface PiResponse {
   error?: string;
 }
 
+export interface PiClientMetadata {
+  key: string;
+  logicalWorkspace: string;
+  sessionId?: string;
+  sessionPath?: string;
+  source?: 'interactive' | 'goal';
+}
+
 export interface PiClientHandlers {
-  onEvent?: (workspace: string, event: Record<string, unknown>) => void;
-  onUiRequest?: (workspace: string, request: Record<string, unknown>) => void;
-  onExit?: (workspace: string, code: number | null) => void;
+  onEvent?: (workspace: string, event: Record<string, unknown>, metadata?: PiClientMetadata) => void;
+  onUiRequest?: (workspace: string, request: Record<string, unknown>, metadata?: PiClientMetadata) => void;
+  onExit?: (workspace: string, code: number | null, metadata?: PiClientMetadata) => void;
   onLog?: (message: string) => void;
 }
 
@@ -24,12 +32,25 @@ export interface PiLineTransport {
 export class PiClient {
   private readonly pending = new Map<string, { resolve: (response: PiResponse) => void; reject: (error: Error) => void }>();
   private closed = false;
+  metadata?: PiClientMetadata;
 
   constructor(
     readonly workspace: string,
     private readonly transport: PiLineTransport,
     private readonly handlers: PiClientHandlers = {},
-  ) {}
+    metadata?: PiClientMetadata,
+  ) { this.metadata = metadata; }
+
+  setSessionIdentity(sessionId: string, sessionPath?: string): void {
+    this.metadata = {
+      key: this.metadata?.key ?? this.workspace,
+      logicalWorkspace: this.metadata?.logicalWorkspace ?? this.workspace,
+      ...(this.metadata ?? {}),
+      sessionId,
+      ...(sessionPath ? { sessionPath } : {}),
+      source: this.metadata?.source ?? 'interactive',
+    };
+  }
 
   async send<T = unknown>(command: Record<string, unknown>): Promise<T> {
     if (this.closed) throw new Error(`pi client is closed: ${this.workspace}`);
@@ -64,13 +85,19 @@ export class PiClient {
       const id = typeof value.id === 'string' ? value.id : undefined;
       const waiter = id ? this.pending.get(id) : undefined;
       if (waiter) {
-        this.pending.delete(id);
-        waiter.resolve(value as PiResponse);
+        this.pending.delete(id!);
+        waiter.resolve(value as unknown as PiResponse);
       }
       return;
     }
-    if (value.type === 'extension_ui_request') this.handlers.onUiRequest?.(this.workspace, value);
-    else this.handlers.onEvent?.(this.workspace, value);
+    if (value.type === 'extension_ui_request') {
+      if (this.metadata) this.handlers.onUiRequest?.(this.workspace, value, this.metadata);
+      else this.handlers.onUiRequest?.(this.workspace, value);
+    } else if (this.metadata) {
+      this.handlers.onEvent?.(this.workspace, value, this.metadata);
+    } else {
+      this.handlers.onEvent?.(this.workspace, value);
+    }
   }
 
   async close(code: number | null = null): Promise<void> {
@@ -80,6 +107,7 @@ export class PiClient {
     for (const waiter of this.pending.values()) waiter.reject(error);
     this.pending.clear();
     await this.transport.kill();
-    this.handlers.onExit?.(this.workspace, code);
+    if (this.metadata) this.handlers.onExit?.(this.workspace, code, this.metadata);
+    else this.handlers.onExit?.(this.workspace, code);
   }
 }

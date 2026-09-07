@@ -10,6 +10,7 @@ export interface Thread {
   status: ThreadStatus;
   createdAt: number;
   updatedAt: number;
+  sessionId?: string;
 }
 
 export interface Turn {
@@ -23,6 +24,7 @@ export interface Turn {
   startedAt?: number;
   completedAt?: number;
   error?: string;
+  sessionId?: string;
 }
 
 export type ItemType =
@@ -43,41 +45,6 @@ export interface Item {
   payload: unknown;
   createdAt: number;
   updatedAt?: number;
-}
-
-export type AppEventType =
-  | 'thread.created'
-  | 'thread.updated'
-  | 'turn.queued'
-  | 'turn.started'
-  | 'turn.completed'
-  | 'turn.failed'
-  | 'turn.cancelled'
-  | 'item.created'
-  | 'item.updated'
-  | 'item.delta'
-  | 'permission.requested'
-  | 'permission.resolved'
-  | 'task.queued'
-  | 'task.started'
-  | 'task.completed'
-  | 'task.failed'
-  | 'task.cancelled'
-  | 'plugin.state_changed'
-  | 'mcp.state_changed'
-  | 'memory.updated'
-  | 'sandbox.degraded';
-
-export interface AppEvent {
-  id: string;
-  type: AppEventType;
-  sequence: number;
-  timestamp: number;
-  projectId?: string;
-  threadId?: string;
-  turnId?: string;
-  itemId?: string;
-  data: unknown;
 }
 
 export interface PermissionProfile {

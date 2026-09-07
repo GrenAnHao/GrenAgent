@@ -45,12 +45,4 @@ describe('ThreadStore', () => {
     secondStorage.close(); rmSync(dir, { recursive: true, force: true });
   });
 
-  it('lists durable app events after a sequence cursor', () => withStore((store) => {
-    store.appendAppEvent({ id: 'e1', type: 'turn.started', sequence: 1, timestamp: 10, projectId: '/work', data: { n: 1 } });
-    store.appendAppEvent({ id: 'e2', type: 'turn.completed', sequence: 2, timestamp: 11, projectId: '/work', data: { n: 2 } });
-
-    expect(store.listAppEvents(1)).toEqual([
-      expect.objectContaining({ id: 'e2', sequence: 2, projectId: '/work', data: { n: 2 } }),
-    ]);
-  }));
 });

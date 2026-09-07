@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { JsonlBuffer } from './jsonl';
-import { PiClient, type PiClientHandlers } from './client';
+import { PiClient, type PiClientHandlers, type PiClientMetadata } from './client';
 import { processRegistry, type ProcessRegistry } from '../app/processRegistry';
 import { SandboxManager } from '../app/sandbox/sandboxManager';
 import type { PermissionProfileName } from '../app/permissionManager';
@@ -21,12 +21,27 @@ export type PiSpawn = (command: string, args: string[], options: {
 export interface PiProcessOptions extends PiClientHandlers {
   cwd: string;
   env?: Record<string, string>;
+  key?: string;
+  logicalWorkspace?: string;
+  sessionId?: string;
+  sessionPath?: string;
+  source?: 'interactive' | 'goal';
   registry?: ProcessRegistry;
   spawnImpl?: PiSpawn;
   killTimeoutMs?: number;
   sandbox?: SandboxManager;
   profile?: PermissionProfileName;
   workspaceRoot?: string;
+}
+
+export interface PiWorkerOpenOptions {
+  key: string;
+  cwd: string;
+  logicalWorkspace: string;
+  sessionId?: string;
+  sessionPath?: string;
+  source?: 'interactive' | 'goal';
+  env?: Record<string, string>;
 }
 
 class ChildTransport {
@@ -89,15 +104,25 @@ export function spawnPiClient(workspace: string, processCommand: PiProcessComman
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
   }) ?? { profile: 'workspace' as const, cwd: options.cwd, env: { ...process.env, ...options.env }, network: 'none' as const, degraded: false };
-  const child = spawnImpl(processCommand.command, processCommand.args, {
-    cwd: launch.cwd,
+  const args = options.sessionPath ? [...processCommand.args, '--session', options.sessionPath] : processCommand.args;
+  const child = spawnImpl(processCommand.command, args, {
+    cwd: launch.cwd ?? options.cwd,
     env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     detached: process.platform !== 'win32',
   });
   registry.register(child, `pi:${workspace}`);
-  const client = new PiClient(workspace, new ChildTransport(child, registry, options.killTimeoutMs ?? 3_000), options);
+  const metadata: PiClientMetadata | undefined = options.sessionId || options.sessionPath || options.source
+    ? {
+      key: options.key ?? workspace,
+      logicalWorkspace: options.logicalWorkspace ?? workspace,
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.sessionPath ? { sessionPath: options.sessionPath } : {}),
+      ...(options.source ? { source: options.source } : {}),
+    }
+    : undefined;
+  const client = new PiClient(options.logicalWorkspace ?? workspace, new ChildTransport(child, registry, options.killTimeoutMs ?? 3_000), options, metadata);
   const buffer = new JsonlBuffer();
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => buffer.push(chunk).forEach((line) => client.handleLine(line)));
@@ -125,26 +150,44 @@ export class PiManager {
     return [...this.clients.entries()];
   }
 
-  open(workspace: string, cwd: string, env?: Record<string, string>): PiClient {
-    const existing = this.clients.get(workspace);
+  open(workspace: string, cwd: string, env?: Record<string, string>): PiClient;
+  open(options: PiWorkerOpenOptions): PiClient;
+  open(workspaceOrOptions: string | PiWorkerOpenOptions, cwd?: string, env?: Record<string, string>): PiClient {
+    const spec: PiWorkerOpenOptions = typeof workspaceOrOptions === 'string'
+      ? { key: workspaceOrOptions, cwd: cwd ?? workspaceOrOptions, logicalWorkspace: workspaceOrOptions, env }
+      : workspaceOrOptions;
+    const { key, logicalWorkspace } = spec;
+    const existing = this.clients.get(key);
     if (existing) return existing;
     let spawned: PiClient | undefined;
-    const client = spawnPiClient(workspace, this.command, {
-      cwd,
-      env,
+    const client = spawnPiClient(key, this.command, {
       ...this.options,
-      sandbox: this.options.sandbox,
-      profile: workspace === '__system__' ? 'automation' : 'workspace',
       ...this.handlers,
-      onExit: (ws, code) => {
-        if (spawned && this.clients.get(ws) === spawned) this.clients.delete(ws);
-        this.handlers.onExit?.(ws, code);
+      cwd: spec.cwd,
+      env: spec.env,
+      key,
+      logicalWorkspace,
+      ...(spec.sessionId ? { sessionId: spec.sessionId } : {}),
+      ...(spec.sessionPath ? { sessionPath: spec.sessionPath } : {}),
+      ...(spec.source ? { source: spec.source } : {}),
+      sandbox: this.options.sandbox,
+      profile: logicalWorkspace === '__system__' ? 'automation' : 'workspace',
+      onExit: (ws, code, metadata) => {
+        if (spawned && this.clients.get(key) === spawned) this.clients.delete(key);
+        if (metadata) this.handlers.onExit?.(ws, code, metadata);
+        else this.handlers.onExit?.(ws, code);
       },
     });
     spawned = client;
-    this.clients.set(workspace, client);
+    this.clients.set(key, client);
     return client;
   }
+
+  openGoalWorker(sessionId: string, workspace: string, sessionPath: string, cwd = workspace, env?: Record<string, string>): PiClient {
+    return this.open({ key: `__goal__:${sessionId}`, cwd, logicalWorkspace: workspace, sessionId, sessionPath, source: 'goal', env });
+  }
+
+  closeGoalWorker(sessionId: string): Promise<void> { return this.close(`__goal__:${sessionId}`); }
 
   openSystem(cwd: string, env?: Record<string, string>): PiClient {
     return this.open('__system__', cwd, { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1', ...env });

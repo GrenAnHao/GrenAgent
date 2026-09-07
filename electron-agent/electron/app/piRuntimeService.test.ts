@@ -5,6 +5,58 @@ import { describe, expect, it, vi } from 'vitest';
 import { PiRuntimeService } from './piRuntimeService';
 
 describe('PiRuntimeService', () => {
+  it('keeps turns and late lifecycle events isolated for two sessions in one workspace', async () => {
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'A', sessionId: 'session-a' });
+    await service.send('C:/work', 'agent_prompt', { message: 'B', sessionId: 'session-b' });
+    const turns = thread.createTurn.mock.calls.map(([input]) => input);
+    expect(turns).toEqual([
+      expect.objectContaining({ input: 'A', sessionId: 'session-a' }),
+      expect.objectContaining({ input: 'B', sessionId: 'session-b' }),
+    ]);
+
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a');
+    expect(thread.updateTurn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
+    const completedTurnId = thread.updateTurn.mock.calls.at(-1)?.[0];
+    expect(completedTurnId).toBe(turns[0].id);
+
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a');
+    expect(thread.updateTurn).toHaveBeenCalledTimes(1);
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-b');
+    expect(thread.updateTurn).toHaveBeenCalledWith(turns[1].id, expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('emits accepted runtime events with session identity and source', async () => {
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = { createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })), createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })), updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })) };
+    const onEvent = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onEvent });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'hello', sessionId: 'session-a', source: 'goal' });
+    await service.handlePiEvent('C:/work', { type: 'agent_start' }, 'session-a', 'goal');
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ workspace: 'C:/work', sessionId: 'session-a', source: 'goal', event: { type: 'agent_start' } }));
+  });
+
+  it('issues the Agent Data endpoint for the resolved project cwd', async () => {
+    const client = { send: async <T>() => ({} as T), respondUi: vi.fn() };
+    const manager = { get: vi.fn(), open: vi.fn(() => client), close: vi.fn() };
+    const endpoint = vi.fn(() => 'project-endpoint');
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      resolveWorkspace: async () => 'D:/resolved-project', agentDataEndpoint: endpoint });
+    await service.openWorkspace('alias');
+    expect(endpoint).toHaveBeenCalledWith('D:/resolved-project');
+    expect(manager.open).toHaveBeenCalledWith('alias', 'D:/resolved-project', expect.objectContaining({ AGENT_DATA_ENDPOINT: 'project-endpoint' }));
+  });
+
   it('opens a workspace and forwards agent commands to its Pi client', async () => {
     const client = { send: vi.fn(async (command: Record<string, unknown>) => ({ sessionFile: 'C:/sessions/a.jsonl', command })), respondUi: vi.fn() };
     let activeClient: typeof client | undefined;
@@ -44,15 +96,13 @@ describe('PiRuntimeService', () => {
     const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
     const thread = { createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })), createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })), updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })), upsertItem: vi.fn(async (item) => item) };
-    const events: any[] = [];
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, emitAppEvent: (event) => events.push(event) });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
 
     await service.send('C:/work', 'agent_prompt', { prompt: 'hello' });
 
     expect(thread.createThread).toHaveBeenCalledOnce();
     expect(thread.createTurn).toHaveBeenCalledWith(expect.objectContaining({ input: 'hello' }));
     expect(thread.updateTurn).not.toHaveBeenCalled();
-    expect(events.map((event) => event.type)).toEqual(['thread.created', 'turn.queued']);
 
     await service.handlePiEvent('C:/work', { type: 'agent_start' });
     await service.handlePiEvent('C:/work', { type: 'message_start', message: { role: 'assistant', content: [] } });
@@ -60,15 +110,17 @@ describe('PiRuntimeService', () => {
     await service.handlePiEvent('C:/work', { type: 'message_end', message: { role: 'assistant', content: [] } });
     await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] });
 
-    expect(events.map((event) => event.type)).toEqual([
-      'thread.created', 'turn.queued', 'turn.started', 'item.created', 'item.delta', 'item.updated', 'turn.completed',
-    ]);
-    expect(events.filter((event) => event.itemId).map((event) => event.itemId)).toEqual([
-      expect.any(String), expect.any(String), expect.any(String),
-    ]);
-    expect(new Set(events.filter((event) => event.itemId).map((event) => event.itemId)).size).toBe(1);
     expect(thread.updateTurn).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
-    expect(thread.upsertItem).toHaveBeenCalledTimes(3);
+    // 流式中间态（message_update → item.delta）不落盘：逐条写走 node:sqlite 的同步 API，会阻塞
+    // 主进程事件循环、把 webContents.send 排到后面，表现为思考/正文「卡在第一个字直到整段返回」。
+    // 只有 created（message_start）与 updated（message_end）落盘，items 表终态语义不变。
+    expect(thread.upsertItem).toHaveBeenCalledTimes(2);
+    // start / end 两条必须落到同一个 item：withStableItemId 为未带 id 的 assistant
+    // 消息补一个稳定 id，否则每条生命周期事件会各建一条 item。
+    const itemIds = thread.upsertItem.mock.calls.map(([item]) => item.id);
+    expect(itemIds).toHaveLength(2);
+    expect(new Set(itemIds).size).toBe(1);
+    expect(thread.upsertItem).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'assistant_message', status: 'completed' }));
   });
 
   it('does not create a turn for extension slash commands', async () => {

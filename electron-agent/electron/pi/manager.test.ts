@@ -41,6 +41,42 @@ function fakeRegistry() {
 const command = { command: 'pi', args: ['--mode', 'rpc'] };
 
 describe('PiManager', () => {
+  it('opens a goal worker under a session key and passes the session path directly to Pi', () => {
+    const child = fakeChild();
+    const spawnImpl = vi.fn((_cmd: string, _args: string[], _opts: Parameters<PiSpawn>[2]) => child as never);
+    const registry = fakeRegistry();
+    const onEvent = vi.fn();
+    const manager = new PiManager(command, { onEvent }, { spawnImpl: spawnImpl as never, registry: registry as never });
+
+    const client = manager.openGoalWorker('session-a', 'C:/work', 'C:/sessions/a.jsonl');
+
+    expect(manager.get('__goal__:session-a')).toBe(client);
+    expect(manager.get('C:/work')).toBeUndefined();
+    expect(client.metadata).toMatchObject({ source: 'goal', sessionId: 'session-a' });
+    expect(spawnImpl).toHaveBeenCalledWith('pi', [...command.args, '--session', 'C:/sessions/a.jsonl'], expect.any(Object));
+    client.handleLine('{"type":"agent_start"}');
+    expect(onEvent).toHaveBeenCalledWith('C:/work', { type: 'agent_start' }, expect.objectContaining({
+      key: '__goal__:session-a', logicalWorkspace: 'C:/work', sessionId: 'session-a', source: 'goal',
+    }));
+  });
+
+  it('closes a goal worker without closing the interactive workspace worker', async () => {
+    const interactive = fakeChild(4321);
+    const goal = fakeChild(4322);
+    const spawnImpl = vi.fn()
+      .mockImplementationOnce(() => interactive as never)
+      .mockImplementationOnce(() => goal as never);
+    const registry = fakeRegistry();
+    const manager = new PiManager(command, {}, { spawnImpl: spawnImpl as never, registry: registry as never });
+
+    manager.open('C:/work', 'C:/work');
+    manager.openGoalWorker('session-a', 'C:/work', 'C:/sessions/a.jsonl');
+    await manager.closeGoalWorker('session-a');
+
+    expect(manager.get('C:/work')).toBeDefined();
+    expect(manager.get('__goal__:session-a')).toBeUndefined();
+  });
+
   it('removes the client from the map when the sidecar exits on its own', async () => {
     const child = fakeChild();
     const spawnImpl = vi.fn(() => child as never);
