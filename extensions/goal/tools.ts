@@ -29,10 +29,17 @@ function result(value: unknown) {
   return { content: [{ type: 'text' as const, text: value === undefined ? 'null' : JSON.stringify(value) }], details: value };
 }
 
-function validateSnapshot(value: unknown, scopeRef: { sessionId: string; workspace: string }, expected?: { goalId: string; revision: number }): unknown {
-  if (!value || typeof value !== 'object') throw new Error('INVALID_GOAL_RESPONSE');
+function validateSnapshot(
+  value: unknown,
+  scopeRef: { sessionId: string; workspace: string },
+  expected?: { goalId: string; revision: number },
+  options: { initialRevision?: boolean } = {},
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_GOAL_RESPONSE');
   const snapshot = value as { sessionId?: unknown; workspace?: unknown; goalId?: unknown; revision?: unknown };
   if (snapshot.sessionId !== scopeRef.sessionId || snapshot.workspace !== scopeRef.workspace) throw new Error('GOAL_SCOPE_MISMATCH');
+  if (typeof snapshot.goalId !== 'string' || !snapshot.goalId.trim() || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 1) throw new Error('INVALID_GOAL_RESPONSE');
+  if (options.initialRevision && snapshot.revision !== 1) throw new Error('INVALID_GOAL_RESPONSE');
   if (expected && (snapshot.goalId !== expected.goalId || snapshot.revision !== expected.revision + 1)) throw new Error('VERSION_CONFLICT');
   return value;
 }
@@ -58,7 +65,7 @@ export function registerGoalTools(pi: ExtensionAPI, client = new MemoryClient())
       if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous)/i.test(params.continuousIntentEvidence)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
       const ref = session(ctx);
       const value = await client.request('goal.create', { ...ref, condition: params.condition, continuousIntentEvidence: params.continuousIntentEvidence, ...(params.maxRounds === undefined ? {} : { maxRounds: params.maxRounds }) });
-      return result(validateSnapshot(value, ref));
+      return result(validateSnapshot(value, ref, undefined, { initialRevision: true }));
     },
   });
   pi.registerTool({
