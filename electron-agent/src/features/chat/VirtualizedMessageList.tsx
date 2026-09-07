@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { VList, type VListHandle } from 'virtua';
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
@@ -26,14 +26,16 @@ interface VirtualizedMessageListProps {
 
 // 距底多少像素内算「贴底」：与原手写滚动阈值一致。
 const BOTTOM_THRESHOLD = 120;
-// 离屏缓冲条数（virtua 默认 4）：调大以减少快速滚动时的空白——离屏多预渲染几条、提前挂载与测高。
-// 取 18 折中：够挡住常速快速滚动的露白，又不至于让过多重型 Markdown 常驻挂载拖累基线性能。
-const BUFFER_SIZE = 18;
-// 未测量项的高度预估（hint）：减少离屏项进入视口实测时的滚动跳动。消息高度并不均匀，故仅作初始估算、
-// 测量后即被真实高度取代（virtua 文档建议 uniform 时使用，这里取一个中位量级、副作用可控）。
-const ITEM_SIZE_HINT = 100;
+// 离屏缓冲：virtua 用 bufferSize 取代旧的 overscan 后，单位从「条数」改成了「像素」，默认 200。
+// 快速滚动时浏览器先合成滚动、React 才补渲染新区间，缓冲不足就会先露白再补上；聊天条目高，
+// 一帧位移常有数百像素，200px 挡不住。取 800（约一屏）覆盖数帧的快速滚动。
+// 缓冲只在滚动方向生效（静止时两侧才都加），代价约是多挂载一两条消息。
+const BUFFER_SIZE = 800;
 // 「回到底部」按钮显示所需最少条数（对齐旧手写列表：太短的列表不必显示）。
 const JUMP_MIN_ITEMS = 3;
+// footer 槽位：作为 data 的最后一项参与测高与贴底，避免为它单独维护一套下标换算。
+const FOOTER_ROW = '__footer';
+type Row = DisplayMessage | typeof FOOTER_ROW;
 
 const styles = createStaticStyles(({ css }) => ({
   jump: css`
@@ -90,20 +92,14 @@ export function VirtualizedMessageList({
   const [showJump, setShowJump] = useState(false);
 
   const itemStyle: CSSProperties = { paddingInline, paddingBlock: 4 };
-  const children: ReactNode[] = display.map((msg) => (
-    <div key={msg.id} style={itemStyle}>
-      {renderItem(msg)}
-    </div>
-  ));
-  if (footer) {
-    children.push(
-      <div key="__footer" style={itemStyle}>
-        {footer}
-      </div>,
-    );
-  }
-  const count = children.length;
-  countRef.current = count;
+  // 只把数据交给 virtua，元素由渲染函数按需创建：children 数组形态下，每次重渲染都要为全部消息
+  // 创建元素、再被 virtua 整体摊平一遍，而流式期间列表每 100ms 就重渲一次，长会话下这笔开销很可观。
+  const hasFooter = Boolean(footer);
+  const rows = useMemo<Row[]>(
+    () => (hasFooter ? [...display, FOOTER_ROW] : display),
+    [display, hasFooter],
+  );
+  countRef.current = rows.length;
 
   // 贴底：仅在用户停留在底部时滚到最后一条（用 ref 读最新 count，供 resize 回调复用）。
   const stickToBottom = () => {
@@ -205,9 +201,9 @@ export function VirtualizedMessageList({
       >
         <VList
           ref={ref}
+          data={rows}
           style={{ height: '100%', flex: 1, minHeight: 0 }}
           bufferSize={BUFFER_SIZE}
-          itemSize={ITEM_SIZE_HINT}
           onScroll={() => {
             if (resizingRef.current) return;
             const h = ref.current;
@@ -221,7 +217,17 @@ export function VirtualizedMessageList({
             anchorWithinRef.current = h.scrollOffset - h.getItemOffset(anchorIndexRef.current);
           }}
         >
-          {children}
+          {(row: Row) =>
+            row === FOOTER_ROW ? (
+              <div key={FOOTER_ROW} style={itemStyle}>
+                {footer}
+              </div>
+            ) : (
+              <div key={row.id} style={itemStyle}>
+                {renderItem(row)}
+              </div>
+            )
+          }
         </VList>
       </div>
       {showJump ? (

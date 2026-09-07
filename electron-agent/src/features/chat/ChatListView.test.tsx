@@ -8,14 +8,16 @@ import type { ChatMessage } from '../../stores/agentReducer';
 vi.mock('virtua', async () => {
   const React = await import('react');
   return {
-    VList: React.forwardRef(function MockVList({ children, ...props }: any, ref: any) {
+    VList: React.forwardRef(function MockVList({ children, data, ...props }: any, ref: any) {
       React.useImperativeHandle(ref, () => ({
         scrollToIndex: () => {},
         scrollOffset: 0,
         viewportSize: 0,
         scrollSize: 0,
       }));
-      return React.createElement('div', props, children);
+      // 真实 VList 走 data + 渲染函数形态：这里对全部数据求值，让内容/footer 进入 DOM。
+      const items = typeof children === 'function' ? Array.from(data ?? [], children as any) : children;
+      return React.createElement('div', props, items);
     }),
   };
 });
