@@ -118,4 +118,38 @@ describe("LayeredMemoryCapture", () => {
     expect(c.calls.length - callsBefore).toBe(1);
     expect(c.calls.at(-1)?.method).toBe("memory.capture");
   });
+
+  it("commits a valid empty extraction without retrying it forever", async () => {
+    const c = client();
+    const ask = vi.fn(async () => '{}');
+    const capture = new LayeredMemoryCapture(c, () => ask);
+    const messages = [{ role: 'user', content: 'hello' }];
+    await capture.enqueue(ctx, messages);
+    await capture.enqueue(ctx, messages);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(c.calls.filter((call) => call.method === 'memory.upsert')).toHaveLength(0);
+    expect(c.calls.filter((call) => call.method === 'memory.commitCapture')).toHaveLength(1);
+  });
+
+  it("retains the beginning of a cumulative transcript beyond the old tail window", async () => {
+    const c = client();
+    const capture = new LayeredMemoryCapture(c, () => async () => '{}');
+    await capture.enqueue(ctx, [{ role: 'user', content: 'first fact' }, { role: 'assistant', content: 'x'.repeat(13_000) }]);
+    expect(c.calls[0].params.transcript).toMatch(/^user: first fact/);
+  });
+
+  it("does not call the fallback model when extraction is disabled", async () => {
+    const c = client();
+    const ask = vi.fn(async () => '{"l1":{"fact":"unused"}}');
+    await new LayeredMemoryCapture(c, () => ask).enqueue({ ...ctx, extract: false }, [{ role: 'user', content: 'raw only' }]);
+    expect(ask).not.toHaveBeenCalled();
+    expect(c.calls[0]).toMatchObject({ method: 'memory.capture', params: { extract: false } });
+  });
+
+  it.each(['{"result":"wrong schema"}', '{"l1":"not an object"}', '{"l2":2}', '{"l3":null}'])('keeps malformed extraction %s pending instead of committing it', async (output) => {
+    const c = client();
+    await new LayeredMemoryCapture(c, () => async () => output).enqueue(ctx, [{ role: 'user', content: 'remember me' }]);
+    expect(c.calls.some((call) => call.method === 'memory.commitCapture')).toBe(false);
+    expect(c.calls.some((call) => call.method === 'memory.upsert')).toBe(false);
+  });
 });

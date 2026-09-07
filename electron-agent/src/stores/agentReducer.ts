@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, AppEvent, AssistantMessageEvent } from '../lib/pi';
+import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
 
 /** 用户消息里的图片（base64），用于在气泡中回显发送的图片。 */
 export interface UserImage {
@@ -51,11 +51,10 @@ export interface AgentState {
   /** 上下文压缩进行中：由 pi 的 compaction_start/compaction_end 事件驱动，UI 据此显示「正在压缩上下文…」。
    * 此前这两个事件被前端丢弃，压缩（手动 /compact 或自动）全程无任何状态反馈。 */
   compacting?: boolean;
-  pendingPermissions: Record<string, { id: string; operation: Record<string, unknown>; profile: string }>;
 }
 
 export function initialAgentState(): AgentState {
-  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [], pendingPermissions: {} };
+  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [] };
 }
 
 let counter = 0;
@@ -224,8 +223,7 @@ function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
   };
 }
 
-export function applyEvent(state: AgentState, event: AgentEvent | AppEvent): AgentState {
-  if (isAppEvent(event)) return applyAppEvent(state, event);
+export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
@@ -234,6 +232,28 @@ export function applyEvent(state: AgentState, event: AgentEvent | AppEvent): Age
 
     case 'agent_end': {
       // 只克隆仍处于 streaming 的 assistant（通常 0~1 条），其余保留引用，避免每轮克隆整段历史。
+      let touched = false;
+      const messages = state.messages.map((m) => {
+        if (m.kind === 'assistant' && m.streaming) {
+          touched = true;
+          return { ...m, streaming: false };
+        }
+        return m;
+      });
+      return {
+        ...state,
+        isStreaming: false,
+        awaitingResponse: false,
+        aborting: false,
+        compacting: false,
+        messages: touched ? messages : state.messages,
+      };
+    }
+
+    case 'agent_settled': {
+      // agent_settled 是 RPC 流程的最终收尾事件，晚于 agent_end（扩展的 agent_end hooks 可能仍在执行）。
+      // 即使中间的历史快照刷新覆盖过状态，也必须在此清掉停止按钮对应的 streaming 标记，
+      // 避免 UI 永久停在「待停止」。
       let touched = false;
       const messages = state.messages.map((m) => {
         if (m.kind === 'assistant' && m.streaming) {
@@ -336,39 +356,49 @@ export function applyEvent(state: AgentState, event: AgentEvent | AppEvent): Age
 
     case 'message_update': {
       const ev = event as Extract<AgentEvent, { type: 'message_update' }>;
-      const { text, thinking } = extractText(ev.message);
+      // pi 的流式增量事件只带 assistantMessageEvent、不带 message 快照（实测 2532/2532 条
+      // message_update 均无 message 字段，只有 message_start / message_end 带完整快照）。
+      // 直接读 ev.message 会因 undefined 抛 TypeError —— 修复前会中断整个 flush 批次（观感
+      // 「卡在第一个字」），被 try/catch 兜住后又会让增量完全无法累积（观感「结果直出」）。
+      // 因此统一取防御后的快照，并以 assistantMessageEvent.delta 作为 thinking / text 的累积来源。
+      const snapshot = (ev.message ?? {}) as AgentMessage;
+      const { text, thinking } = extractText(snapshot);
       // 有些模型（如部分 OpenAI 兼容 / MiMo）只在流式 thinking_delta 里给推理、不写进 message.content，
-      // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。
+      // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。正文同理需要 text_delta 累积。
       const ame = ev.assistantMessageEvent as AssistantMessageEvent | undefined;
-      const thinkingDelta =
-        ame && ame.type === 'thinking_delta' && typeof ame.delta === 'string' ? ame.delta : '';
+      const delta = ame && typeof ame.delta === 'string' ? ame.delta : '';
+      const thinkingDelta = ame?.type === 'thinking_delta' ? delta : '';
+      const textDelta = ame?.type === 'text_delta' ? delta : '';
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
       if (idx >= 0) {
         const cur = messages[idx] as Extract<ChatMessage, { kind: 'assistant' }>;
         const nextThinking = thinking || cur.thinking + thinkingDelta;
+        // 正文同样需要 delta 累积：message 快照缺失时 text 恒为空，否则正文也会「直出」。
+        const nextText = text || cur.text + textDelta;
         messages[idx] = {
           ...cur,
-          text,
+          text: nextText,
           thinking: nextThinking,
-          timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
-          ...thinkingTiming(cur, nextThinking, text),
+          timestamp: messageTimestamp(snapshot) ?? cur.timestamp,
+          ...thinkingTiming(cur, nextThinking, nextText),
         };
       } else {
         const nextThinking = thinking || thinkingDelta;
+        const nextText = text || textDelta;
         messages.push({
           kind: 'assistant',
           id: nextId(),
-          text,
+          text: nextText,
           thinking: nextThinking,
           streaming: true,
-          timestamp: messageTimestamp(ev.message),
-          ...thinkingTiming({}, nextThinking, text),
+          timestamp: messageTimestamp(snapshot),
+          ...thinkingTiming({}, nextThinking, nextText),
         });
       }
       // 解析 content 里随流式渐全的 toolCall 块 → 在工具参数生成阶段就把 running 卡片立起来，
       // 不再等 tool_execution_start（参数已写完、开始执行）才整条蹦出来。
-      return { ...state, messages: syncStreamingToolCalls(messages, ev.message) };
+      return { ...state, messages: syncStreamingToolCalls(messages, snapshot) };
     }
 
     case 'tool_execution_start': {
@@ -461,97 +491,6 @@ export function applyEvent(state: AgentState, event: AgentEvent | AppEvent): Age
       return state;
     }
   }
-}
-
-function applyAppEvent(state: AgentState, event: AppEvent): AgentState {
-  const data = isRecord(event.data) ? event.data : {};
-  if (event.type === 'turn.started') {
-    return { ...state, isStreaming: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false };
-  }
-  if (event.type === 'turn.completed' || event.type === 'turn.cancelled' || event.type === 'turn.failed') {
-    const messages = state.messages.map((message) => message.kind === 'assistant' && message.streaming
-      ? { ...message, streaming: false }
-      : message);
-    const error = event.type === 'turn.failed'
-      ? readString(data.error) ?? readString(data.errorMessage) ?? state.lastError
-      : state.lastError;
-    return { ...state, messages, isStreaming: false, awaitingResponse: false, aborting: false, compacting: false, lastError: error };
-  }
-  if (event.type === 'permission.requested') {
-    const request = isRecord(data.request) ? data.request : undefined;
-    const id = request && readString(request.id);
-    if (!id) return state;
-    return {
-      ...state,
-      pendingPermissions: {
-        ...state.pendingPermissions,
-        [id]: {
-          id,
-          operation: isRecord(request.operation) ? request.operation : {},
-          profile: readString(request.profile) ?? 'interactive',
-        },
-      },
-    };
-  }
-  if (event.type === 'permission.resolved') {
-    const requestId = readString(data.requestId);
-    if (!requestId || !state.pendingPermissions[requestId]) return state;
-    const pendingPermissions = { ...state.pendingPermissions };
-    delete pendingPermissions[requestId];
-    return { ...state, pendingPermissions };
-  }
-  if (!event.itemId) return state;
-
-  const message = isRecord(data.message) ? data.message : undefined;
-  const isAssistant = message?.role === 'assistant' || state.messages.some((entry) => entry.kind === 'assistant' && entry.id === event.itemId);
-  if (isAssistant) return applyAssistantItem(state, event, data, message);
-
-  const toolCallId = readString(data.toolCallId) ?? event.itemId;
-  if (event.type === 'item.created') {
-    return applyEvent(state, { type: 'tool_execution_start', toolCallId, toolName: readString(data.toolName) ?? 'tool', args: data.args ?? {} });
-  }
-  if (event.type === 'item.delta') {
-    return applyEvent(state, { type: 'tool_execution_update', toolCallId, toolName: readString(data.toolName) ?? 'tool', partialResult: data.partialResult });
-  }
-  if (event.type === 'item.updated') {
-    return applyEvent(state, { type: 'tool_execution_end', toolCallId, toolName: readString(data.toolName) ?? 'tool', result: data.result, isError: data.isError === true });
-  }
-  return state;
-}
-
-function applyAssistantItem(state: AgentState, event: AppEvent, data: Record<string, unknown>, message?: Record<string, unknown>): AgentState {
-  const messages = [...state.messages];
-  let index = messages.findIndex((entry) => entry.kind === 'assistant' && entry.id === event.itemId);
-  if (index < 0) {
-    messages.push({ kind: 'assistant', id: event.itemId!, text: '', thinking: '', streaming: true });
-    index = messages.length - 1;
-  }
-  const current = messages[index] as Extract<ChatMessage, { kind: 'assistant' }>;
-  let text = current.text;
-  let thinking = current.thinking;
-  if (message) {
-    const projected = extractText(message as AgentMessage);
-    if (projected.text) text = projected.text;
-    if (projected.thinking) thinking = projected.thinking;
-  }
-  const delta = isRecord(data.assistantMessageEvent) ? data.assistantMessageEvent : undefined;
-  if (delta?.type === 'text_delta' && typeof delta.delta === 'string') text += delta.delta;
-  if (delta?.type === 'thinking_delta' && typeof delta.delta === 'string') thinking += delta.delta;
-  const final = event.type === 'item.updated';
-  messages[index] = { ...current, text, thinking, streaming: !final, ...thinkingTiming(current, thinking, text, final) };
-  return { ...state, messages };
-}
-
-function isAppEvent(event: AgentEvent | AppEvent): event is AppEvent {
-  return typeof (event as AppEvent).sequence === 'number' && typeof (event as AppEvent).timestamp === 'number';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value ? value : undefined;
 }
 
 /**

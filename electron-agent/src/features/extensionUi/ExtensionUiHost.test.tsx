@@ -1,17 +1,24 @@
+// @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { setStatus, goalSetGoal, setServers, msg, setRequest } = vi.hoisted(() => ({
+const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest } = vi.hoisted(() => ({
   setStatus: vi.fn(),
   goalSetGoal: vi.fn(),
+  goalSetSnapshot: vi.fn(),
   setServers: vi.fn(),
   msg: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   setRequest: vi.fn(),
 }));
 let emit: (e: unknown) => void = () => {};
+let emitGoal: (e: unknown) => void = () => {};
 vi.mock('../../lib/pi', () => ({
   onPiUiRequest: (h: (e: unknown) => void) => {
     emit = h;
+    return Promise.resolve(() => {});
+  },
+  onGoalStatus: (h: (e: unknown) => void) => {
+    emitGoal = h;
     return Promise.resolve(() => {});
   },
 }));
@@ -23,7 +30,7 @@ vi.mock('../../stores/planModeStore', () => ({
   usePlanModeStore: { getState: () => ({ setStatus }) },
 }));
 vi.mock('../../stores/goalStore', () => ({
-  useGoalStore: { getState: () => ({ setGoal: goalSetGoal }) },
+  useGoalStore: { getState: () => ({ setGoal: goalSetGoal, setSnapshot: goalSetSnapshot }) },
 }));
 vi.mock('../../stores/mcpStatusStore', () => ({
   useMcpStatusStore: { getState: () => ({ setServers }) },
@@ -39,8 +46,11 @@ afterEach(() => {
   cleanup();
   setStatus.mockClear();
   goalSetGoal.mockClear();
+  goalSetSnapshot.mockClear();
   setServers.mockClear();
   setRequest.mockClear();
+  emit = () => {};
+  emitGoal = () => {};
   msg.info.mockClear();
   msg.warning.mockClear();
   useImMessagesStore.getState().setConversations([]);
@@ -110,18 +120,90 @@ describe('ExtensionUiHost', () => {
     expect(useImMessagesStore.getState().conversations).toEqual([]);
   });
 
-  it('parses setStatus(goal) JSON into the goal store', () => {
+  it('routes a schema v1 goal snapshot by its session id', () => {
     render(<ExtensionUiHost />);
+    const snapshot = {
+      goalId: 'goal-a',
+      sessionId: 'session-a',
+      workspace: '/ws',
+      revision: 2,
+      condition: '写完测试',
+      status: 'active',
+      roundsUsed: 1,
+      maxRounds: 256,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:01.000Z',
+    };
     emit({
       workspace: '/ws',
       request: {
         id: 'g1',
         method: 'setStatus',
         statusKey: 'goal',
-        statusText: JSON.stringify({ condition: '写完测试', paused: false, react: 0 }),
+        statusText: JSON.stringify({ schemaVersion: 1, ...snapshot }),
       },
     });
-    expect(goalSetGoal).toHaveBeenCalledWith({ condition: '写完测试', paused: false, react: 0 });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', expect.objectContaining(snapshot));
+    expect(goalSetGoal).not.toHaveBeenCalled();
+  });
+
+  it('ignores goal payloads without schema v1 or session id', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: { id: 'g2', method: 'setStatus', statusKey: 'goal', statusText: JSON.stringify({ condition: '旧状态', paused: false, react: 0 }) },
+    });
+    emit({
+      workspace: '/ws',
+      request: { id: 'g3', method: 'setStatus', statusKey: 'goal', statusText: JSON.stringify({ schemaVersion: 2, sessionId: 'session-a', condition: '未来状态' }) },
+    });
+    expect(goalSetSnapshot).not.toHaveBeenCalled();
+    expect(goalSetGoal).not.toHaveBeenCalled();
+  });
+
+  it('clears a schema v1 session projection when the payload has no snapshot', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 'g4',
+        method: 'setStatus',
+        statusKey: 'goal',
+        statusText: JSON.stringify({ schemaVersion: 1, sessionId: 'session-a', snapshot: null }),
+      },
+    });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', undefined);
+  });
+
+  it('routes goal://status payloads by schema version and session id', () => {
+    render(<ExtensionUiHost />);
+    const snapshot = {
+      goalId: 'goal-channel',
+      sessionId: 'session-channel',
+      workspace: '/ws',
+      revision: 3,
+      condition: '渠道事件',
+      status: 'paused',
+      roundsUsed: 2,
+      maxRounds: 8,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:01.000Z',
+    };
+    emitGoal({ schemaVersion: 1, workspace: '/ws', sessionId: 'session-channel', snapshot });
+    emitGoal({ schemaVersion: 2, workspace: '/ws', sessionId: 'session-channel', snapshot });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-channel', expect.objectContaining(snapshot));
+    expect(goalSetSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores Goal worker UI requests', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      source: 'goal',
+      sessionId: 'session-worker',
+      request: { id: 'g-worker', method: 'confirm', title: '不应显示' },
+    });
+    expect(setRequest).not.toHaveBeenCalled();
   });
 
   it('shows a toast for notify (default info level)', () => {

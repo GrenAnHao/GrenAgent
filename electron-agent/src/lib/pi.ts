@@ -1,4 +1,5 @@
 import { Channel, invoke, listen, type UnlistenFn } from '../platform/runtime';
+import type { GoalSnapshot } from '../../electron/agentData/goalContracts';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
 import type { UsageReport } from './usageReport';
@@ -12,11 +13,21 @@ export interface PiEventEnvelope {
 }
 export interface PiUiRequestEnvelope {
   workspace: string;
+  sessionId?: string;
+  source?: 'interactive' | 'goal';
   request: ExtensionUiRequest;
+}
+export interface GoalStatusEnvelope {
+  schemaVersion: 1;
+  workspace: string;
+  sessionId: string;
+  snapshot: GoalSnapshot | null;
 }
 export interface PiExitEnvelope {
   workspace: string;
   code: number | null;
+  sessionId?: string;
+  source?: 'interactive' | 'goal';
 }
 
 export type AgentEvent =
@@ -300,6 +311,9 @@ export function onPiEvent(handler: (e: PiEventEnvelope) => void): Promise<Unlist
 }
 export function onPiUiRequest(handler: (e: PiUiRequestEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiUiRequestEnvelope>('pi://ui-request', (e) => handler(e.payload));
+}
+export function onGoalStatus(handler: (e: GoalStatusEnvelope) => void): Promise<UnlistenFn> {
+  return listen<GoalStatusEnvelope>('goal://status', (e) => handler(e.payload));
 }
 export function onPiExit(handler: (e: PiExitEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiExitEnvelope>('pi://exit', (e) => handler(e.payload));

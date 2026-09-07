@@ -31,11 +31,16 @@ import { attachWebviewSecurity } from "./webviewSecurity";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
 import { AgentDataStorage } from "./agentData/storage";
-import { PluginManager, type PluginDefinition } from "./app/plugin/pluginManager";
+import { PluginManager } from "./app/plugin/pluginManager";
+import { builtinPluginDefinitions } from "./app/plugin/builtinPlugins";
 import { SystemWorkerManager } from "./pi/systemWorkerManager";
 import { randomUUID } from "node:crypto";
 import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./app/wikiSyncService";
 import { CodeGraphService } from "./app/codeGraph/codeGraphService";
+import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
+import { validateProject } from "./app/validateProject";
+import { GoalCoordinator } from "./app/goalCoordinator";
+import { judgeGoal } from "./app/goalJudge";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -59,14 +64,19 @@ if (!process.env.VITEST) {
     ].filter((dir) => dir !== app.getPath('userData')));
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
     let piRuntime: PiRuntimeService | undefined;
+    let goalCoordinator: GoalCoordinator | undefined;
     let agentData: AgentDataService;
     const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
       const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
-      return workspace ? (piRuntime?.permissionProfile(workspace) ?? requested) : requested;
+      const args = isRecord(operation.args) ? operation.args : undefined;
+      const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : undefined;
+      const source = args?.source === 'goal' ? 'goal' : 'interactive';
+      return workspace && source !== 'goal' ? (piRuntime?.permissionProfile(workspace, sessionId) ?? requested) : requested;
     } });
     const sandbox = new SandboxManager({});
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
+    const worksDir = await workspace.getWorksDir();
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const systemWorker = new SystemWorkerManager({
       processCommand: piProcess,
@@ -80,6 +90,13 @@ if (!process.env.VITEST) {
     });
     const knownWorkspaces = new Set<string>();
     const codeGraph = new CodeGraphService({ listWorkspaces: () => [...knownWorkspaces] });
+    const codeGraphJobs = new CodeGraphJobs(codeGraph, {
+      start: (id) => agentData.request('admin.jobs.start', { id }),
+      complete: (id) => agentData.request('admin.jobs.complete', { id }),
+      fail: (id, error) => agentData.request('admin.jobs.fail', { id, error }),
+      cancelled: (id) => agentData.request('admin.jobs.markCancelled', { id }),
+      stage: (id, stage, processed, total) => agentData.recordJobStage(id, stage, processed, total),
+    });
     const wikiCancelled = new Set<string>();
     const wikiSync = new WikiSyncService({
       jobs: {
@@ -92,44 +109,41 @@ if (!process.env.VITEST) {
       },
       scan: (workspace) => scanWorkspaceMarkdown(workspace),
       readSource: (workspace, path) => readWorkspaceSource(workspace, path),
-      generate: (source, path) => systemWorker.run({ id: `wiki-${randomUUID()}`, kind: 'wiki_page_generate', input: { sourcePath: path, source } }).then((value) => String(value)),
-      writePage: (input) => agentData.request('wiki.replace', { ...input }),
+      generate: (source, path, workspace, expectedModel) => agentData.runServiceTask({ id: `wiki-${randomUUID()}`, kind: 'wiki_page_generate', input: { workspace, sourcePath: path, source, ...(expectedModel ? { expectedModel } : {}) } }).then((value) => String(value)),
+      readPage: (workspace, page) => agentData.requestAdmin('wiki.read', { workspace, page }),
+      writePage: (input) => agentData.requestAdmin('wiki.replace', { ...input }),
+      onSkip: (input) => agentData.recordWikiSyncSkip(input),
+      onStage: (id, stage, processed, total) => agentData.recordJobStage(id, stage, processed, total),
     });
     agentData = new AgentDataService({
       dataPath,
+      validateProject: (project) => validateProject(project, worksDir),
+      resolveSession: (project, sessionId) => piRuntime?.ownsSession(project, sessionId) ?? false,
+      wikiModelLabel: () => systemWorker.describeModel(),
       executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
       jobRunners: {
         'wiki.sync': {
-          run: async (id, workspace) => { wikiCancelled.delete(id); await wikiSync.run(id, workspace); wikiCancelled.delete(id); },
+          run: async (id, workspace, expectedModel) => { wikiCancelled.delete(id); await wikiSync.run(id, workspace, expectedModel); wikiCancelled.delete(id); },
           cancel: (id) => { wikiCancelled.add(id); },
         },
-        'codegraph.sync': {
-          run: async (id, workspace) => {
-            await agentData.request('admin.jobs.start', { id });
-            try {
-              await codeGraph.runSync(id, workspace);
-              await agentData.request('admin.jobs.complete', { id });
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              // cancelSync() 只 kill 进程、不写状态，所以取消会以 rejection 形式到达这里；
-              // 必须落成 cancelled 而不是 failed。
-              if (message.includes('cancelled')) await agentData.request('admin.jobs.markCancelled', { id });
-              else await agentData.request('admin.jobs.fail', { id, error: message });
-            }
-          },
-          cancel: (id) => codeGraph.cancelSync(id),
-        },
+        'codegraph.sync': codeGraphJobs,
       },
       codeRetrieval: {
         projects: () => codeGraph.projects(),
-        status: (workspace) => codeGraph.status(workspace) as unknown as Record<string, unknown>,
-        search: (workspace, query, limit) => codeGraph.search(workspace, query, limit) as unknown as Promise<Record<string, unknown>>,
+        status: async (workspace) => ({ ...await codeGraph.status(workspace) }),
+        search: async (workspace, query, limit) => ({ ...await codeGraph.search(workspace, query, limit) }),
+        call: (workspace, tool, args) => codeGraph.call(workspace, tool, args),
       },
       methods: {
         'turn.start': (params) => piRuntime?.enqueueTurn(
           readRpcString(params, 'workspace'),
           readRpcString(params, 'input'),
           typeof params.permissionProfile === 'string' ? params.permissionProfile : 'workspace',
+          {
+            ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+            ...(typeof params.sessionPath === 'string' ? { sessionPath: params.sessionPath } : {}),
+            ...(params.source === 'goal' ? { source: 'goal' as const } : { source: 'interactive' as const }),
+          },
         ),
         'permission.authorize': (params) => permissions.authorize(
           isRecord(params.operation) ? params.operation : {},
@@ -150,12 +164,44 @@ if (!process.env.VITEST) {
     const pi = new PiManager(
       piProcess,
       {
-        onEvent: (workspace, event) => {
-          void piRuntime?.handlePiEvent(workspace, event);
-          broadcastPiEvent('pi://event', { workspace, event });
+        onEvent: (workspace, event, metadata) => {
+          // 先转发渲染层、后落盘：流式 UI 的实时性优先于持久化。
+          // handlePiEvent 内部会走 node:sqlite 的同步写，若放在前面会阻塞主进程事件循环，
+          // 把本帧的 webContents.send 延后，表现为思考/正文「卡住直到整段返回才突然出现」。
+          const envelope = piRuntime?.eventEnvelope(workspace, event, metadata) ?? {
+            workspace,
+            event,
+            ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
+            source: metadata?.source ?? 'interactive',
+          };
+          broadcastPiEvent('pi://event', envelope);
+          void piRuntime?.handlePiEvent(workspace, event, metadata).catch((error) => console.error('Pi event handling failed', error));
         },
-        onUiRequest: (workspace, request) => broadcastPiEvent('pi://ui-request', { workspace, request }),
-        onExit: (workspace, code) => broadcastPiEvent('pi://exit', { workspace, code }),
+        onUiRequest: (workspace, request, metadata) => {
+          // Automatic Goal workers must never surface interactive prompts in
+          // the visible session; their turn will fail closed if they cannot
+          // proceed without user input.
+          if (metadata?.source === 'goal') {
+            const requestId = typeof request.id === 'string' ? request.id : '';
+            void piRuntime?.rejectUiRequest(workspace, metadata, requestId).catch((error) => console.error('Goal UI rejection failed', error));
+            return;
+          }
+          broadcastPiEvent('pi://ui-request', {
+          workspace,
+          request,
+          ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
+          ...(metadata?.source ? { source: metadata.source } : {}),
+          });
+        },
+        onExit: (workspace, code, metadata) => {
+          broadcastPiEvent('pi://exit', {
+            workspace,
+            code,
+            ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
+            ...(metadata?.source ? { source: metadata.source } : {}),
+          });
+          void piRuntime?.handlePiExit(workspace, code, metadata).catch((error) => console.error('Pi exit handling failed', error));
+        },
         onLog: (message) => console.error(message),
       },
       { sandbox },
@@ -177,10 +223,15 @@ if (!process.env.VITEST) {
         processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
-        agentDataEndpoint: () => {
-          const endpoint = agentData.endpoint();
-          return endpoint ? JSON.stringify(endpoint) : undefined;
-        },
+        agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
+        migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused, legacyEntryTimestamp }) => agentData.requestAdmin('admin.goal.recoverLegacy', {
+          workspace,
+          sessionId,
+          condition,
+          react,
+          paused,
+          ...(legacyEntryTimestamp === undefined ? {} : { legacyEntryTimestamp }),
+        }).then(() => undefined),
         resolveWorkspace: async (path) => {
           const resolved = await workspace.ensureWorkspace(path);
           knownWorkspaces.add(resolved);
@@ -190,6 +241,32 @@ if (!process.env.VITEST) {
         mcpConfig,
         allowedPluginIds: () => plugins.allowedPluginIds(),
         threadStore: agentData,
+        onTurnSettled: (result) => {
+          if (!result.goal || !result.sessionId) return;
+          return goalCoordinator?.onTurnCompleted({
+            workspace: result.workspace,
+            sessionId: result.sessionId,
+            ...(result.sessionPath ? { sessionPath: result.sessionPath } : {}),
+            turnId: result.turnId,
+            status: result.status,
+            summary: result.summary,
+            goal: result.goal,
+          });
+        },
+        bindGoalSession: (project, sessionId, source) => agentData.bindGoalSession(project, sessionId, source).then(() => undefined),
+        unbindGoalSession: (project, sessionId) => agentData.unbindGoalSession(project, sessionId).then(() => undefined),
+        onSessionForked: async ({ workspace, sourceSessionId, targetSessionId }) => {
+          const source = await agentData.goalGet(sourceSessionId, workspace);
+          if (!source) return;
+          // A cleared source is forked as a tombstone rather than skipped: the
+          // copied JSONL still carries the old legacy Goal entry, and without a
+          // tombstone the later legacy migration would resurrect it.
+          await agentData.requestAdmin('admin.goal.fork', {
+            sourceSessionId,
+            sourceGoalId: source.goalId,
+            targetSessionId,
+          });
+        },
       }),
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
@@ -230,12 +307,56 @@ if (!process.env.VITEST) {
       // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。
       dev: app.isPackaged ? undefined : new DevService(),
     });
-    app.on('before-quit', () => {
-      void pi.closeAll();
-      systemWorker?.close();
-      void codeGraph.close();
-      void agentData.stop();
-      pluginStorage.close();
+    goalCoordinator = new GoalCoordinator({
+      data: {
+        get: (sessionId) => agentData.goalGet(sessionId, ''),
+        update: (input) => agentData.requestAdmin('admin.goal.update', input),
+        claimRound: (input) => agentData.goalClaimRound(input),
+        settleRound: (input) => agentData.goalSettleRound(input),
+        cancelRound: (input) => agentData.goalCancelRound(input),
+        judgeResult: (input) => agentData.requestAdmin('admin.goal.judgeResult', { ...input, origin: 'system' }),
+        runtimeError: (input) => agentData.goalRuntimeError(input),
+      },
+      worker: {
+        enqueueGoalTurn: (input) => piRuntime!.enqueueGoalTurn(input),
+        closeGoalWorker: (sessionId, workspace) => piRuntime!.closeGoalWorker(sessionId, workspace),
+      },
+      judge: {
+        judge: (input) => judgeGoal({
+          run: (task) => agentData.runServiceTask({ id: task.id, kind: task.kind, input: task.input, capabilities: ['llm_completion'] }),
+        }, input),
+      },
+      onGoalChanged: (snapshot) => broadcastPiEvent('goal://status', {
+        schemaVersion: 1,
+        workspace: snapshot.workspace,
+        sessionId: snapshot.sessionId,
+        snapshot,
+      }),
+    });
+    agentData.onGoalEvent((event, snapshot) => {
+      if (snapshot) return goalCoordinator?.onGoalChanged(snapshot, event);
+    });
+    workspace.setWorkspaceCloser(async (project) => {
+      await goalCoordinator?.onWorkspaceDeleted(project);
+      await piRuntime?.closeWorkspace(project);
+    });
+    let shutdownStarted = false;
+    let shutdownDone = false;
+    app.on('before-quit', (event) => {
+      if (shutdownDone) return;
+      event.preventDefault();
+      if (shutdownStarted) return;
+      shutdownStarted = true;
+      void (async () => {
+        await goalCoordinator?.stop();
+        await Promise.allSettled([pi.closeAll(), codeGraphJobs.close()]);
+        systemWorker.close();
+        await agentData.stop();
+        pluginStorage.close();
+      })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {
+        shutdownDone = true;
+        app.quit();
+      });
     });
     createWindow();
   });
@@ -282,12 +403,4 @@ function readRpcString(params: Record<string, unknown>, key: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function builtinPluginDefinitions(): PluginDefinition[] {
-  return [
-    { id: 'goal', manifest: { id: 'goal', version: '0.1.0', apiVersion: '1', capabilities: ['agent', 'ui', 'event-subscriber'], permissions: { interaction: 'auto' } }, load: () => ({}) },
-    { id: 'web-search', manifest: { id: 'web-search', version: '0.1.0', apiVersion: '1', capabilities: ['tool'], permissions: { network: 'full' } }, load: () => ({}) },
-    { id: 'mcp', manifest: { id: 'mcp', version: '0.1.0', apiVersion: '1', capabilities: ['mcp', 'tool', 'event-subscriber'], permissions: { network: 'full', process: 'allowlist', secrets: 'selected' } }, load: () => ({}) },
-  ];
 }

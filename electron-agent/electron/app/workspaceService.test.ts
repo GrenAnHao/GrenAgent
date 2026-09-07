@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rm, readFile, realpath } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile, rm, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
@@ -36,6 +36,72 @@ describe('WorkspaceService', () => {
 
     await expect(service.listAllSessions()).resolves.toEqual([
       { id: 'one', path: join(sessionsDir, 'kept.jsonl'), cwd: 'C:/work', timestamp: '2026-08-30T00:00:00Z', name: null },
+    ]);
+  });
+
+  it('reads generated titles from session_info entries after the session header', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'named.jsonl');
+    await writeFile(path, [
+      JSON.stringify({ type: 'session', id: 'named', cwd: 'C:/work', timestamp: '2026-09-05T00:00:00Z' }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: '排查标题问题' } }),
+      JSON.stringify({ type: 'session_info', name: '修复对话标题' }),
+    ].join('\n'));
+
+    await expect(service.listAllSessions()).resolves.toEqual([
+      { id: 'named', path, cwd: 'C:/work', timestamp: '2026-09-05T00:00:00Z', name: '修复对话标题' },
+    ]);
+  });
+
+  it('returns the latest renamed title on subsequent workspace listings', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'renamed.jsonl');
+    await writeFile(path, '{"type":"session","id":"renamed","cwd":"C:/work"}\n');
+    await expect(service.listSessions('C:/work')).resolves.toMatchObject([{ name: null }]);
+
+    await appendFile(path, '{"type":"session_info","name":"自动标题"}\n');
+    await expect(service.listSessions('C:/work')).resolves.toMatchObject([{ name: '自动标题' }]);
+
+    await appendFile(path, '{"type":"session_info","name":"手动标题"}\n');
+    await expect(service.listSessions('C:/work')).resolves.toMatchObject([{ name: '手动标题' }]);
+  });
+
+  it('preserves the latest non-empty title when other entries are invalid or incomplete', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'partial.jsonl'), [
+      '{"type":"session","cwd":"C:/work"}',
+      '{"type":"session_info","name":"旧标题"}',
+      'not JSON',
+      'null',
+      '{"type":"session_info","name":"  最新标题  "}',
+      '{"type":"session_info","name":"   "}',
+      '{"type":"session_info","name":123}',
+      '{"type":"message","name":"不是会话标题"}',
+      '{"type":"session_info","name":"未写完',
+    ].join('\r\n'));
+
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '最新标题' }]);
+  });
+
+  it('reads titles for headerless sessions while inferring metadata from the path', async () => {
+    const { service, agentDir } = await createService();
+    const { cwd } = await service.createConversation();
+    const sessionsDir = join(agentDir, 'sessions', `--${cwd.replace(/[\\/:]/g, '-')}--`);
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, '2026-09-05T00-00-00-000Z_headerless.jsonl');
+    await writeFile(path, [
+      '{"type":"message","message":{"role":"user","content":"你好"}}',
+      '{"type":"session_info","name":"无头部会话标题"}',
+    ].join('\n'));
+
+    await expect(service.listSessions(cwd)).resolves.toEqual([
+      { id: 'headerless', path, cwd, timestamp: '2026-09-05T00:00:00.000Z', name: '无头部会话标题' },
     ]);
   });
 

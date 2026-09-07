@@ -7,7 +7,7 @@ export interface CaptureClient {
   request<T>(method: string, params: Record<string, unknown>): Promise<T>;
 }
 
-type CaptureContext = Pick<ExtensionContext, "model" | "modelRegistry" | "signal"> & MemoryScope;
+type CaptureContext = Pick<ExtensionContext, "model" | "modelRegistry" | "signal"> & MemoryScope & { extract?: boolean };
 type AskFactory = (ctx: CaptureContext) => AskFn | undefined;
 
 interface Extraction {
@@ -33,12 +33,13 @@ export class LayeredMemoryCapture {
   }
 
   private async capture(ctx: CaptureContext, messages: unknown[]): Promise<void> {
-    const transcript = flattenTranscript(messages);
+    const transcript = flattenTranscript(messages, Infinity);
     if (!transcript) return;
     const fingerprint = hash(transcript);
     const source = `session:${ctx.sessionId ?? "unknown"}`;
-    const captured = await this.client.request<{ changed: boolean; delta: string; taskId?: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint });
+    const captured = await this.client.request<{ changed: boolean; delta: string; taskId?: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint, ...(ctx.extract === false ? { extract: false } : {}) });
     if (!captured.changed || !captured.delta) return;
+    if (ctx.extract === false) return;
     // Electron-owned MemoryService queues extraction in the system worker. The
     // local fallback below remains for older sidecars that do not return taskId.
     if (captured.taskId) return;
@@ -52,7 +53,11 @@ export class LayeredMemoryCapture {
     } catch {
       return;
     }
-    if (!extracted || typeof extracted !== "object") return;
+    if (!extracted || typeof extracted !== "object" || Array.isArray(extracted)) return;
+    if (Object.keys(extracted).some((key) => !['l1', 'l2', 'l3'].includes(key))) return;
+    if (extracted.l1 !== undefined && (!extracted.l1 || typeof extracted.l1 !== 'object')) return;
+    if (extracted.l2 !== undefined && typeof extracted.l2 !== 'string') return;
+    if (extracted.l3 !== undefined && typeof extracted.l3 !== 'string') return;
 
     const writes: Array<{ level: 1 | 2 | 3; content: string }> = [];
     if (extracted.l1 !== undefined) {
@@ -61,8 +66,6 @@ export class LayeredMemoryCapture {
     }
     if (typeof extracted.l2 === "string" && extracted.l2.trim()) writes.push({ level: 2, content: markdown(extracted.l2, source) });
     if (typeof extracted.l3 === "string" && extracted.l3.trim()) writes.push({ level: 3, content: markdown(extracted.l3, source) });
-    if (!writes.length) return;
-
     try {
       for (const write of writes) await this.client.request("memory.upsert", { ...scope(ctx), ...write, source });
       await this.client.request("memory.commitCapture", { ...scope(ctx), source, fingerprint });
@@ -78,7 +81,7 @@ function defaultAsk(ctx: CaptureContext): AskFn | undefined {
 }
 
 function scope(ctx: MemoryScope): Record<string, unknown> {
-  return { userId: ctx.userId, workspace: ctx.workspace, ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) };
+  return { userId: ctx.userId, workspace: ctx.workspace, ...(ctx.projectId ? { projectId: ctx.projectId } : {}), ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) };
 }
 
 function markdown(content: string, source: string): string {

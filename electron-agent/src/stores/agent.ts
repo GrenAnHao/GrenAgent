@@ -9,12 +9,10 @@ import {
   type ChatMessage,
   type UserImage,
 } from './agentReducer';
-import { pi, onAppEvent, onPiEvent, onPiExit, type AgentEvent, type AgentMessage, type AppEvent } from '../lib/pi';
+import { pi, onPiEvent, onPiExit, type AgentEvent, type AgentMessage } from '../lib/pi';
 import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurations';
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
 import { sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
-import { useUiPromptStore } from './uiPromptStore';
-import { useMcpStatusStore, type McpServerStatus } from './mcpStatusStore';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -26,23 +24,6 @@ export interface LoadMessagesOptions {
    * rewind 等需要后端权威结果的场景不传（走后端）。
    */
   uiHistory?: ChatMessage[];
-}
-
-const PROJECTED_PI_EVENTS = new Set([
-  'agent_start', 'agent_end', 'message_start', 'message_update', 'message_end',
-  'tool_execution_start', 'tool_execution_update', 'tool_execution_end',
-]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isProjectedPiEvent(event: AgentEvent): boolean {
-  if (!PROJECTED_PI_EVENTS.has(event.type)) return false;
-  if (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end') {
-    return (event as { message?: { role?: unknown } }).message?.role === 'assistant';
-  }
-  return true;
 }
 
 export interface AgentStoreApi {
@@ -99,11 +80,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   // —— 事件按动画帧批量应用（对齐 lobehub 流式平滑的思路）——
   // 高频 thinking/text delta 一帧内合并为一次 setState，降低渲染压力；
   // 打字机视觉由 Markdown animated 承担，不丢任何事件、保持顺序。
-  let queue: Array<AgentEvent | AppEvent> = [];
-  let appEventsActive = false;
-  const seenAppEvents = new Set<string>();
-  const appEventCursorKey = `pi-app-event-cursor:${workspace}`;
-  let appEventCursor = readAppEventCursor(appEventCursorKey);
+  //
+  // 渲染只吃 pi://event：它是 pi 子进程逐 token 转发的原始事件，无中间状态依赖，
+  // 工作区一打开就能收到。此前还有一条 app://event（AppEvent 投影）与它抢渲染队列，
+  // 但那条依赖 turn/item 追踪状态，追踪缺失时会静默丢事件，表现为「看不到过程，
+  // 结果直接蹦出来」；权限确认走 pi://ui-request、MCP 状态走 setStatus，都有各自通道，
+  // 因此 AppEvent 已整体移除。
+  let queue: AgentEvent[] = [];
   let rafId: number | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let active = true;
@@ -123,6 +106,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   };
 
   const flush = () => {
+    // 双保险下可能挂着一个未触发的调度：取消它，避免重复 flush（幂等但浪费一帧）。
+    if (rafId != null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+    if (timeoutId != null) clearTimeout(timeoutId);
     rafId = null;
     timeoutId = null;
     if (!queue.length) return;
@@ -131,20 +117,31 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     let state = useStore.getState();
     let reachedEnd = false;
     for (const ev of events) {
-      state = applyEvent(state, ev);
+      // 单个「毒事件」apply 失败只丢自己，不中断整批——否则长任务恢复时一批事件里
+      // 一个异常会把其后的正文/thinking 全部丢弃，表现为「跑到一半直接停了」。
+      try {
+        state = applyEvent(state, ev);
+      } catch {
+        continue;
+      }
       if (ev.type === 'message_end' || ev.type === 'agent_end') reachedEnd = true;
     }
     setFullState(state);
     if (reachedEnd) {
-      persistThinkingDurations(state);
-      // 一轮结束后把当前会话最新内容写回缓存，使切走再切回时缓存即最新（不会先显旧快照再刷新闪动）。
-      if (loadedSessionPath != null) {
-        currentSig = sessionSignature(state.messages);
-        setCachedSession(loadedSessionPath, state.messages, currentSig);
-        // 持久化 UI 完整历史：state.messages 是前端累积的完整对话（reducer 不删），每轮结束覆盖写盘。
-        // 即使随后 pi auto-compaction 压缩了后端会话，这份磁盘历史仍完整，重载时据此还原（fire-and-forget）。
-        const key = sessionKeyFromPath(loadedSessionPath);
-        if (key) void pi.writeUiHistory(workspace, key, serializeHistory(state.messages)).catch(() => {});
+      // 持久化失败（localStorage 满 / 序列化异常）不影响已渲染内容。
+      try {
+        persistThinkingDurations(state);
+        // 一轮结束后把当前会话最新内容写回缓存，使切走再切回时缓存即最新（不会先显旧快照再刷新闪动）。
+        if (loadedSessionPath != null) {
+          currentSig = sessionSignature(state.messages);
+          setCachedSession(loadedSessionPath, state.messages, currentSig);
+          // 持久化 UI 完整历史：state.messages 是前端累积的完整对话（reducer 不删），每轮结束覆盖写盘。
+          // 即使随后 pi auto-compaction 压缩了后端会话，这份磁盘历史仍完整，重载时据此还原（fire-and-forget）。
+          const key = sessionKeyFromPath(loadedSessionPath);
+          if (key) void pi.writeUiHistory(workspace, key, serializeHistory(state.messages)).catch(() => {});
+        }
+      } catch {
+        // ignore
       }
     }
   };
@@ -153,6 +150,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     if (rafId != null || timeoutId != null) return;
     if (active && typeof requestAnimationFrame === 'function') {
       rafId = requestAnimationFrame(flush);
+      // 双保险：rAF 会被浏览器暂停（窗口最小化/隐藏/webview 节流），一旦暂停 rafId 永久非 null，
+      // 此前的单 rAF 调度会把 setTimeout 兜底永久挡死（rafId != null 直接 return），queue 无限堆积、
+      // UI 冻结成「跑到一半直接停了」。补一个 timeout 兜底唤醒，flush 时取消未触发的一方。
+      timeoutId = setTimeout(flush, BACKGROUND_FLUSH_MS);
     } else {
       timeoutId = setTimeout(flush, BACKGROUND_FLUSH_MS);
     }
@@ -172,56 +173,15 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   };
 
   onPiEvent((env) => {
-    if (env.workspace !== workspace) return;
-    if (appEventsActive && isProjectedPiEvent(env.event)) return;
+    // Goal workers share the pi://event channel but are headless; their stream
+    // must never be applied to the interactive session's message reducer.
+    if (env.workspace !== workspace || env.source === 'goal') return;
     queue.push(env.event);
     scheduleFlush();
   }).then((un) => unsubs.push(un));
-
-  onAppEvent((env) => {
-    if (env.workspace !== workspace) return;
-    if (!acceptAppEvent(env.event)) return;
-    appEventsActive = true;
-    const data = isRecord(env.event.data) ? env.event.data : {};
-    if (env.event.type === 'permission.requested') {
-      const request = isRecord(data.request) ? data.request : undefined;
-      const id = request && typeof request.id === 'string' ? request.id : undefined;
-      if (id) {
-        const operation = isRecord(request.operation) ? request.operation : {};
-        useUiPromptStore.getState().setRequest({
-          workspace,
-          request: {
-            id,
-            method: 'confirm',
-            source: 'permission',
-            title: '权限请求',
-            message: typeof operation.kind === 'string' ? operation.kind : '允许本次操作？',
-          },
-        });
-      }
-    } else if (env.event.type === 'permission.resolved') {
-      const id = typeof data.requestId === 'string' ? data.requestId : undefined;
-      useUiPromptStore.getState().clear(workspace, id);
-    } else if (env.event.type === 'mcp.state_changed' && Array.isArray(data.servers)) {
-      useMcpStatusStore.getState().setServers(data.servers as McpServerStatus[]);
-    }
-    queue.push(env.event);
-    scheduleFlush();
-  }).then((un) => unsubs.push(un));
-
-  if (typeof pi.replayAppEvents === 'function' && appEventCursor > 0) {
-    void pi.replayAppEvents(appEventCursor, 1024).then((events) => {
-      for (const event of events) {
-        if (!acceptAppEvent(event) || event.projectId !== workspace) continue;
-        appEventsActive = true;
-        queue.push(event);
-      }
-      if (events.some((event) => event.projectId === workspace)) scheduleFlush();
-    }).catch(() => {});
-  }
 
   onPiExit((env) => {
-    if (env.workspace !== workspace) return;
+    if (env.workspace !== workspace || env.source === 'goal') return;
     useStore.setState({ isStreaming: false });
   }).then((un) => unsubs.push(un));
 
@@ -230,20 +190,23 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     setFullState(addUserMessage(useStore.getState(), text, images, steering));
   };
 
-  function acceptAppEvent(event: AppEvent): boolean {
-    if (seenAppEvents.has(event.id)) return false;
-    seenAppEvents.add(event.id);
-    if (Number.isFinite(event.sequence) && event.sequence > appEventCursor) {
-      appEventCursor = event.sequence;
-      try { localStorage.setItem(appEventCursorKey, String(appEventCursor)); } catch { /* storage unavailable */ }
-    }
-    return true;
-  }
-
   const loadMessages = (msgs: AgentMessage[], options?: LoadMessagesOptions) => {
     if (liveActivity && !options?.force) return;
     const sessionPath =
       options && 'sessionPath' in options ? options.sessionPath ?? null : undefined;
+    // 后台 getMessages 可能与 prompt 并发返回。实时轮次尚未 flush 时，强制重载会 clearQueue()
+    // 并把 store 重置为 initialAgentState()，后果是：已排队的 message_update（含 thinking delta）
+    // 与 tool_execution_start 永久丢失、isStreaming/awaitingResponse 被清零、流式累积的推理内容
+    // 被后端快照覆盖 —— 表现为「看不到过程、没有正在工作提示、没有深度思考，结果直接蹦出来」，
+    // 且运行中的工具卡会被下方 sanitized 误标成 error。
+    // 同一会话在等待首响应或已进入流式后，实时事件是唯一权威来源，快照延后到本轮结束再取；
+    // 切换到另一会话仍允许强制加载。
+    const liveState = useStore.getState();
+    const sameSession =
+      sessionPath === undefined ||
+      (loadedSessionPath != null && sessionPath === loadedSessionPath) ||
+      (loadedSessionPath === undefined && liveActivity);
+    if (options?.force && sameSession && (liveState.isStreaming || liveState.awaitingResponse)) return;
     const backend = messagesFromAgent(msgs, getThinkingDuration);
     // UI 完整历史优先：pi auto-compaction 会让后端历史变短，前端持久化的完整历史（uiHistory）更长时用它，
     // 避免压缩后的短历史盖掉完整对话（rewind 等需要后端权威时调用方不传 uiHistory，自然走后端）。
@@ -355,13 +318,4 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       unsubs.length = 0;
     },
   };
-}
-
-function readAppEventCursor(key: string): number {
-  try {
-    const value = Number(localStorage.getItem(key) ?? '0');
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch {
-    return 0;
-  }
 }

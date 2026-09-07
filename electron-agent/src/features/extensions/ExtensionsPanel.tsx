@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi, type McpConfigScope } from '../../lib/pi';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
-import { useMcpStatusStore } from '../../stores/mcpStatusStore';
+import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
@@ -21,6 +21,9 @@ import { getCacheEntry, getCachedTools, parseToolsCache, toProbeConfigJson, type
 import { ToolPermissionModal } from './ToolPermissionModal';
 
 const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+/** 稳定空数组回退：避免 selector 未命中时每次返回新引用触发 useSyncExternalStore 无限循环。 */
+const EMPTY_SERVERS: McpServerStatus[] = [];
 
 const styles = createStaticStyles(({ css }) => ({
   panel: css`
@@ -152,7 +155,7 @@ export function ExtensionsPanel() {
   const [mcpLoading, setMcpLoading] = useState(true);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const entries = [...managedEntries].sort((a, b) => Number(b.enabled) - Number(a.enabled));
-  const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? []);
+  const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? EMPTY_SERVERS);
   const existingNames = entries.map((entry) => entry.name);
 
   const [tab, setTab] = useState<'mcp' | 'skills'>('mcp');

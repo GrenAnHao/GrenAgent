@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restoreFromEntries, assertRevision, transition, validateMaxRounds } from "./state.js";
+import { restoreFromEntries, restoreLegacyFromEntries, assertRevision, transition, validateMaxRounds } from "./state.js";
 import type { GoalSnapshot } from "./contracts.js";
 
 describe("restoreFromEntries", () => {
@@ -26,6 +26,21 @@ describe("restoreFromEntries", () => {
         { type: "custom", customType: "goal", data: null },
       ]),
     ).toBeUndefined();
+  });
+});
+
+describe("restoreLegacyFromEntries", () => {
+  it("imports only the old format and carries the entry timestamp", () => {
+    expect(restoreLegacyFromEntries([
+      { type: "custom", customType: "goal", timestamp: "2026-09-07T00:00:00.000Z", data: { condition: "legacy", react: 2, paused: true } },
+    ])).toEqual({ condition: "legacy", react: 2, paused: true, legacyEntryTimestamp: "2026-09-07T00:00:00.000Z" });
+  });
+  it("does not re-import a new snapshot or a latest clear", () => {
+    expect(restoreLegacyFromEntries([{ type: "custom", customType: "goal", data: { condition: "new", goalId: "g" } }])).toBeUndefined();
+    expect(restoreLegacyFromEntries([
+      { type: "custom", customType: "goal", data: { condition: "old", react: 1 } },
+      { type: "custom", customType: "goal", data: null },
+    ])).toBeUndefined();
   });
 });
 
@@ -69,12 +84,16 @@ describe("goal state contract", () => {
   });
   it("covers the lifecycle transition matrix", () => {
     expect(transition(snapshot("active"), { type: "begin_judging", revision: 4 }).status).toBe("judging");
-    const blocked = transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" });
+    const first = transition(snapshot("active"), { type: "block", revision: 4, reason: "blocked", fingerprint: "fp" });
+    expect(first.status).toBe("active");
+    const second = transition({ ...first, revision: 5 }, { type: "block", revision: 5, reason: "again", fingerprint: "fp" });
+    expect(second.status).toBe("active");
+    const blocked = transition({ ...second, revision: 6 }, { type: "block", revision: 6, reason: "third", fingerprint: "fp" });
     expect(blocked.status).toBe("blocked");
-    expect(blocked.blockage).toMatchObject({ fingerprint: "fp", count: 1, summary: "blocked" });
-    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "again", fingerprint: "fp" }).blockage?.count).toBe(2);
-    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "other", fingerprint: "other" }).blockage?.count).toBe(1);
-    expect(transition({ ...blocked, status: "active", revision: 5 }, { type: "block", revision: 5, reason: "unknown" }).blockage?.count).toBe(1);
+    expect(blocked.blockage).toMatchObject({ fingerprint: "fp", count: 3, summary: "third" });
+    expect(blocked.blockage?.count).toBe(3);
+    expect(transition({ ...second, revision: 6 }, { type: "block", revision: 6, reason: "other", fingerprint: "other" }).blockage?.count).toBe(1);
+    expect(transition({ ...second, revision: 6 }, { type: "block", revision: 6, reason: "unknown" }).blockage?.count).toBe(1);
     expect(transition(snapshot("active"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("paused"), { type: "disarm", revision: 4 }).status).toBe("disarmed");
     expect(transition(snapshot("active"), { type: "clear", revision: 4 }).status).toBe("cleared");

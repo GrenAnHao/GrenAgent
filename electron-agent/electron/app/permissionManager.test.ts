@@ -10,8 +10,7 @@ afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm
 async function fixture(providers: PermissionProvider[] = []) {
   const dataDir = await mkdtemp(join(tmpdir(), 'electron-agent-permissions-'));
   directories.push(dataDir);
-  const publish = vi.fn();
-  return { dataDir, publish, manager: new PermissionManager({ dataDir, providers, publish, now: () => 42 }) };
+  return { dataDir, manager: new PermissionManager({ dataDir, providers, now: () => 42 }) };
 }
 
 describe('PermissionManager', () => {
@@ -45,15 +44,13 @@ describe('PermissionManager', () => {
     expect(calls).toEqual(['approval', 'safety', 'mcp-policy', 'workspace-trust']);
   });
 
-  it('turns an automation ask into a persisted blocked request and resolves it with events', async () => {
-    const { dataDir, manager, publish } = await fixture([{ name: 'approval', evaluate: async () => 'ask' }]);
+  it('turns an automation ask into a persisted blocked request and resolves it', async () => {
+    const { dataDir, manager } = await fixture([{ name: 'approval', evaluate: async () => 'ask' }]);
 
     const result = await manager.authorize({ kind: 'web.search', workspace: 'C:/repo', mode: 'automation' }, 'automation');
 
     expect(result).toMatchObject({ status: 'blocked', decision: 'ask', request: { operation: { kind: 'web.search' } } });
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'permission.requested' }));
-    await manager.resolve(result.request!.id, 'deny');
-    expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'permission.resolved', data: expect.objectContaining({ resolution: 'deny' }) }));
+    await expect(manager.resolve(result.request!.id, 'deny')).resolves.toMatchObject({ status: 'resolved', resolution: 'deny' });
 
     const records = (await readFile(join(dataDir, 'permission-audit.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     expect(records).toEqual([

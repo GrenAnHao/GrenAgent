@@ -55,7 +55,8 @@ describe('MemoryStore', () => {
     store.upsert({ userId: 'u', projectId: 'project-A', workspace: '/a', scope: 'global' }, { level: 1, content: 'global fact' });
     store.upsert({ userId: 'u', projectId: 'project-A', workspace: '/a' }, { level: 1, content: 'a fact' });
     store.upsert({ userId: 'u', projectId: 'project-B', workspace: '/b' }, { level: 1, content: 'b fact' });
-    expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a' }, 'fact').map((item) => item.content)).toEqual(['global fact', 'a fact']);
+    // Scope membership is independent of the ordering of equal-millisecond writes.
+    expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a' }, 'fact').map((item) => item.content).sort()).toEqual(['a fact', 'global fact']);
     expect(store.search({ userId: 'u', projectId: 'project-A', workspace: '/a', includeOtherProjects: true }, 'fact')).toHaveLength(3);
     db.close();
   });
@@ -101,6 +102,42 @@ describe('MemoryStore', () => {
     store.remove({ userId: 'intruder', workspace: '/a' }, mine.id);
 
     expect(store.search({ userId: 'u', workspace: '/a' }, 'mine')).toHaveLength(1);
+    db.close();
+  });
+
+  it('retains uncommitted text when a later capture appends a new turn', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new MemoryStore(db);
+    const scope = { userId: 'u', workspace: '/a', sessionId: 's' };
+    store.capture(scope, 'session:s', 'user: first', 'fp1');
+    expect(store.capture(scope, 'session:s', 'user: first\nuser: second', 'fp2').delta).toBe('user: first\nuser: second');
+    // An earlier job may complete after another turn has updated the cursor.
+    store.commitCapture(scope, 'session:s', 'fp1', 'user: first');
+    expect(store.capture(scope, 'session:s', 'user: first\nuser: second', 'fp2').delta).toBe('user: second');
+    store.commitCapture(scope, 'session:s', 'fp2', 'user: second');
+    expect(store.capture(scope, 'session:s', 'user: first\nuser: second', 'fp2').changed).toBe(false);
+    db.close();
+  });
+
+  it('searches captured conversations with source metadata and bounded matching snippets', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new MemoryStore(db);
+    const scope = { userId: 'u', projectId: 'project-A', workspace: '/a', sessionId: 's' };
+    store.capture(scope, 'session:s', `user: ${'x'.repeat(2000)} raw needle ${'y'.repeat(2000)}`, 'fp');
+    store.capture({ ...scope, projectId: 'project-B', workspace: '/b' }, 'session:b', 'other raw needle', 'other');
+    store.capture({ ...scope, userId: 'other' }, 'session:other', 'private raw needle', 'private');
+    store.upsert(scope, { level: 1, content: 'derived-only fact' });
+    const result = store.searchConversations(scope, 'raw needle');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: expect.any(String), source: 'session:s', sessionId: 's', workspace: '/a', sourceProjectId: 'project-A', updatedAt: expect.any(Number) });
+    expect(result[0].snippet).toContain('raw needle');
+    expect(result[0].snippet.length).toBeLessThanOrEqual(1200);
+    expect(result[0]).not.toHaveProperty('transcript');
+    expect(store.searchConversations(scope, 'derived-only')).toEqual([]);
+    expect(store.searchConversations({ ...scope, includeOtherProjects: true }, 'raw needle')).toHaveLength(2);
+    expect(store.searchConversations({ ...scope, includeOtherProjects: true }, 'raw needle', 1)).toHaveLength(1);
+    expect(store.searchConversations(scope, '   ')).toEqual([]);
+    expect(store.searchConversations(scope, '%')).toEqual([]);
     db.close();
   });
 });

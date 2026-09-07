@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { PiManager, type PiSpawn } from './manager';
+import { PiManager, piGoalWorkerKey, type PiSpawn } from './manager';
 
 function fakeChild(pid = 4321) {
   const child = new EventEmitter() as EventEmitter & {
@@ -50,13 +50,13 @@ describe('PiManager', () => {
 
     const client = manager.openGoalWorker('session-a', 'C:/work', 'C:/sessions/a.jsonl');
 
-    expect(manager.get('__goal__:session-a')).toBe(client);
+    expect(manager.get(piGoalWorkerKey('C:/work', 'session-a'))).toBe(client);
     expect(manager.get('C:/work')).toBeUndefined();
     expect(client.metadata).toMatchObject({ source: 'goal', sessionId: 'session-a' });
     expect(spawnImpl).toHaveBeenCalledWith('pi', [...command.args, '--session', 'C:/sessions/a.jsonl'], expect.any(Object));
     client.handleLine('{"type":"agent_start"}');
     expect(onEvent).toHaveBeenCalledWith('C:/work', { type: 'agent_start' }, expect.objectContaining({
-      key: '__goal__:session-a', logicalWorkspace: 'C:/work', sessionId: 'session-a', source: 'goal',
+      key: piGoalWorkerKey('C:/work', 'session-a'), logicalWorkspace: 'C:/work', sessionId: 'session-a', source: 'goal',
     }));
   });
 
@@ -71,10 +71,30 @@ describe('PiManager', () => {
 
     manager.open('C:/work', 'C:/work');
     manager.openGoalWorker('session-a', 'C:/work', 'C:/sessions/a.jsonl');
-    await manager.closeGoalWorker('session-a');
+    await manager.closeGoalWorker('session-a', 'C:/work');
 
     expect(manager.get('C:/work')).toBeDefined();
-    expect(manager.get('__goal__:session-a')).toBeUndefined();
+    expect(manager.get(piGoalWorkerKey('C:/work', 'session-a'))).toBeUndefined();
+  });
+
+  it('keeps same-named Goal workers isolated by workspace', async () => {
+    const first = fakeChild(4322);
+    const second = fakeChild(4323);
+    const spawnImpl = vi.fn()
+      .mockImplementationOnce(() => first as never)
+      .mockImplementationOnce(() => second as never);
+    const registry = fakeRegistry();
+    const manager = new PiManager(command, {}, { spawnImpl: spawnImpl as never, registry: registry as never });
+
+    const firstClient = manager.openGoalWorker('same-session', 'C:/one', 'C:/sessions/one.jsonl');
+    const secondClient = manager.openGoalWorker('same-session', 'C:/two', 'C:/sessions/two.jsonl');
+
+    expect(firstClient).not.toBe(secondClient);
+    expect(manager.get(piGoalWorkerKey('C:/one', 'same-session'))).toBe(firstClient);
+    expect(manager.get(piGoalWorkerKey('C:/two', 'same-session'))).toBe(secondClient);
+    await expect(manager.closeGoalWorker('same-session')).rejects.toThrow('AMBIGUOUS_GOAL_SESSION');
+    await manager.closeGoalWorker('same-session', 'C:/one');
+    expect(manager.get(piGoalWorkerKey('C:/two', 'same-session'))).toBe(secondClient);
   });
 
   it('removes the client from the map when the sidecar exits on its own', async () => {

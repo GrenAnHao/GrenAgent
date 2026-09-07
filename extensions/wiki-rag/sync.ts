@@ -1,7 +1,7 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { readdir, readFile, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { askLlm, resolveModel, type AskFn } from './llm.js';
+import { askLlm, type AskFn } from './llm.js';
 
 export interface WikiSyncClient {
   request<T>(method: string, params: Record<string, unknown>): Promise<T>;
@@ -22,32 +22,47 @@ export class WikiSync {
   constructor(private readonly client: WikiSyncClient, private readonly askFactory: AskFactory = defaultAsk) {}
 
   async update(ctx: WikiContext, input: WikiUpdateInput): Promise<boolean> {
+    if (ctx.signal?.aborted) return false;
     const ask = this.askFactory(ctx);
     if (!ask) return false;
     let content: string;
+    let expected: { revision: number; contentHash: string } | null;
     try {
+      const page = await this.client.request<{ revision: number; contentHash: string } | undefined>('wiki.read', { workspace: ctx.cwd, page: input.page });
+      if (page && (!Number.isSafeInteger(page.revision) || typeof page.contentHash !== 'string')) return false;
+      expected = page ? { revision: page.revision, contentHash: page.contentHash } : null;
+      if (ctx.signal?.aborted) return false;
       content = (await ask(SYSTEM, input.source)).trim();
     } catch {
       return false;
     }
-    if (!content) return false;
-    await this.client.request('wiki.replace', {
+    if (!content || ctx.signal?.aborted) return false;
+    const result = await this.client.request<{ state?: string } | undefined>('wiki.replace', {
       workspace: ctx.cwd,
       page: input.page,
       title: titleFromPage(input.page),
       content,
       sourcePath: input.sourcePath,
+      sourceContent: input.source,
+      expected,
     });
-    return true;
+    return result?.state !== 'skipped';
   }
 }
 
 export async function readWorkspaceSource(cwd: string, sourcePath: string): Promise<string> {
+  if (isAbsolute(sourcePath) || win32.isAbsolute(sourcePath) || /[<>:"|?*\x00-\x1f]/.test(sourcePath) || sourcePath.split(/[\\/]/).some((part) => /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) throw new Error('sourcePath must stay inside workspace');
   const root = resolve(cwd);
   const path = resolve(root, sourcePath);
+  if (!isInside(root, path)) throw new Error('sourcePath must stay inside workspace');
+  const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)]);
+  if (!isInside(realRoot, realPath)) throw new Error('sourcePath must stay inside workspace');
+  return readFile(realPath, 'utf8');
+}
+
+function isInside(root: string, path: string): boolean {
   const rel = relative(root, path);
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('sourcePath must stay inside workspace');
-  return readFile(path, 'utf8');
+  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 export async function scanWorkspaceMarkdown(cwd: string): Promise<string[]> {
@@ -61,8 +76,7 @@ export async function scanWorkspaceMarkdown(cwd: string): Promise<string[]> {
 }
 
 function defaultAsk(ctx: WikiContext): AskFn | undefined {
-  const model = resolveModel(ctx.model, ctx.modelRegistry ?? { find: () => undefined }, undefined);
-  return model ? (system, user) => askLlm(model, system, user, ctx.signal) : undefined;
+  return ctx.model ? (system, user) => askLlm(ctx, system, user) : undefined;
 }
 
 function titleFromPage(page: string): string {

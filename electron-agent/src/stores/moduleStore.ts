@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 
-/** 全局模块：应用级、不绑定具体项目（或以全局数据为主），常驻最左 ModuleRail。 */
-export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'agentData' | 'settings';
+/**
+ * 全局模块：应用级、不绑定具体项目（或以全局数据为主），常驻最左 ModuleRail。
+ *
+ * 'devWorkbench' 只在 DEV 构建里由 ModuleRail 渲染入口并可达（生产构建整棵子树被 tree-shake），
+ * 但仍列在联合类型里：类型层不区分构建模式，运行时由 ModuleRail 决定要不要露出来。
+ */
+export type ModuleId = 'chat' | 'connections' | 'extensions' | 'usage' | 'agentData' | 'devWorkbench' | 'settings';
 
 /**
  * 工作区视图：项目级、绑定当前活跃工作区，渲染在主列内（对话区位置），侧栏常驻。

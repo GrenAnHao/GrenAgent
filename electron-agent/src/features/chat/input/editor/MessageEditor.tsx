@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Flexbox } from '@lobehub/ui';
 import { Editor } from '@lobehub/editor/react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
@@ -8,6 +8,7 @@ import { ActionBar } from '../ActionBar';
 import { SendArea } from '../SendArea';
 import { SteerQueue } from '../SteerQueue';
 import { GoalPill } from '../GoalPill';
+import { SessionGoalDrawer } from '../SessionGoalDrawer';
 import { WorkspaceBar } from '../workspace/WorkspaceBar';
 import { PromptRequestCard } from '../PromptRequestCard';
 import { ContextUsageTag } from '../ContextUsageTag';
@@ -21,6 +22,7 @@ import { usePasteCapture } from './usePasteCapture';
 import { useFileMention } from './useFileMention';
 import { useSlashOptions } from './useSlashOptions';
 import { useTauriFileDrop } from './useTauriFileDrop';
+import { useGoalStore, type GoalSnapshot } from '../../../../stores/goalStore';
 
 const PLACEHOLDER = '输入消息，@ 引用文件/目录，/ 调用命令…';
 const STREAMING_PLACEHOLDER = '继续跟进，引导当前回答…';
@@ -107,6 +109,11 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     useChatInput();
   const zoneRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const [goalDrawerSessionId, setGoalDrawerSessionId] = useState<string>();
+  const goalDrawerSnapshot = useGoalStore((state) =>
+    goalDrawerSessionId ? state.bySession[goalDrawerSessionId] : undefined,
+  );
+  const setGoalSnapshot = useGoalStore((state) => state.setSnapshot);
 
   // 菜单锚定在输入框上方，宽度与输入框齐宽（@ 与 / 共用）。
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
@@ -138,7 +145,14 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   return (
     <div ref={zoneRef} className={styles.zone}>
       <SteerQueue />
-      <GoalPill />
+      <GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} />
+      <SessionGoalDrawer
+        onClose={() => setGoalDrawerSessionId(undefined)}
+        onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
+        open={!!goalDrawerSessionId}
+        sessionId={goalDrawerSessionId ?? ''}
+        snapshot={goalDrawerSnapshot}
+      />
       <WorkspaceBar onReferencePastedText={addPastedText} />
       <PromptRequestCard />
       <div ref={surfaceRef} className={styles.surface}>

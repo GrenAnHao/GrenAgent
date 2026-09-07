@@ -1,12 +1,15 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
+import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal, Webhook } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
+import { IS_DEV } from '../../lib/devMode';
 
 interface ModuleDef {
   id: ModuleId;
   label: string;
   Icon: LucideIcon;
   footer?: boolean;
+  /** 仅 DEV 构建渲染入口。生产构建里 IS_DEV 被折叠为 false，这一项连同它 import 的面板一起被 tree-shake。 */
+  devOnly?: boolean;
 }
 
 // 全局 Agent Data 中心统一管理本地 CodeGraph、Wiki 与 Memory。
@@ -16,6 +19,7 @@ const MODULES: ModuleDef[] = [
   { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'usage', label: '用量', Icon: BarChart3 },
   { id: 'agentData', label: 'Agent 数据', Icon: BrainCircuit },
+  { id: 'devWorkbench', label: '开发者工作台', Icon: SquareTerminal, footer: true, devOnly: true },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },
 ];
 
@@ -94,6 +98,7 @@ const styles = createStaticStyles(({ css }) => ({
 export function ModuleRail() {
   const activeModule = useModuleStore((s) => s.activeModule);
   const setActiveModule = useModuleStore((s) => s.setActiveModule);
+  const modules = IS_DEV ? MODULES : MODULES.filter((module) => !module.devOnly);
 
   const renderButton = ({ id, label, Icon }: ModuleDef) => {
     const active = activeModule === id;
@@ -114,9 +119,9 @@ export function ModuleRail() {
 
   return (
     <div data-testid="module-rail" className={styles.rail}>
-      {MODULES.filter((m) => !m.footer).map(renderButton)}
+      {modules.filter((m) => !m.footer).map(renderButton)}
       <div className={styles.spacer} />
-      {MODULES.filter((m) => m.footer).map(renderButton)}
+      {modules.filter((m) => m.footer).map(renderButton)}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AppEvent } from './appServer/types';
 
 export type PermissionDecision = 'allow' | 'deny' | 'ask';
 export type PermissionResolution = 'allow' | 'deny';
@@ -10,7 +9,7 @@ export interface PermissionOperation { kind: string; workspace?: string; path?: 
 export interface PermissionProvider { name: string; evaluate(operation: PermissionOperation, profile: PermissionProfileName): PermissionDecision | Promise<PermissionDecision>; }
 export interface PermissionRequest { id: string; operation: PermissionOperation; profile: PermissionProfileName; createdAt: number; status: 'blocked' | 'resolved'; resolution?: PermissionResolution; }
 export interface PermissionAuthorization { status: 'allowed' | 'denied' | 'blocked'; decision: PermissionDecision; request?: PermissionRequest; }
-export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; publish?: (event: Omit<AppEvent, 'sequence'>) => void; resolveProfile?: (operation: PermissionOperation, requested: PermissionProfileName) => PermissionProfileName; now?: () => number; }
+export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; resolveProfile?: (operation: PermissionOperation, requested: PermissionProfileName) => PermissionProfileName; now?: () => number; }
 
 export class PermissionManager {
   private readonly requests = new Map<string, PermissionRequest>();
@@ -33,7 +32,6 @@ export class PermissionManager {
     const request: PermissionRequest = { id: randomUUID(), operation, profile: effectiveProfile, createdAt: this.now(), status: 'blocked' };
     this.requests.set(request.id, request);
     await this.audit({ type: 'requested', requestId: request.id, operation, profile: effectiveProfile, createdAt: request.createdAt });
-    this.publish('permission.requested', { request });
     return { status: 'blocked', decision, request };
   }
 
@@ -42,7 +40,6 @@ export class PermissionManager {
     if (!request) throw new Error(`permission request not found: ${id}`);
     request.status = 'resolved'; request.resolution = resolution;
     await this.audit({ type: 'resolved', requestId: id, resolution, resolvedAt: this.now() });
-    this.publish('permission.resolved', { requestId: id, resolution });
     return request;
   }
 
@@ -58,7 +55,6 @@ export class PermissionManager {
     return 'allow';
   }
 
-  private publish(type: AppEvent['type'], data: unknown): void { this.options.publish?.({ id: randomUUID(), type, timestamp: this.now(), data }); }
   private async audit(record: Record<string, unknown>): Promise<void> {
     await mkdir(this.options.dataDir, { recursive: true });
     await appendFile(join(this.options.dataDir, 'permission-audit.jsonl'), `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });

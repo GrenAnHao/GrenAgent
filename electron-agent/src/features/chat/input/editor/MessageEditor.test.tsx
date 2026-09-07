@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useGoalStore } from '../../../../stores/goalStore';
 
 const { addPastedText, send } = vi.hoisted(() => ({
   addPastedText: vi.fn(),
@@ -48,7 +50,31 @@ vi.mock('@lobehub/editor/react', () => ({ Editor: () => null }));
 vi.mock('../ActionBar', () => ({ ActionBar: () => null }));
 vi.mock('../SendArea', () => ({ SendArea: () => null }));
 vi.mock('../SteerQueue', () => ({ SteerQueue: () => null }));
-vi.mock('../GoalPill', () => ({ GoalPill: () => null }));
+vi.mock('../GoalPill', () => ({
+  GoalPill: ({ onOpenDetails }: { onOpenDetails?: (snapshot: { sessionId: string }) => void }) => (
+    <button
+      type="button"
+      onClick={() => onOpenDetails?.({
+        sessionId: 'session-a',
+        goalId: 'goal-a',
+        workspace: '/repo',
+        revision: 1,
+        condition: '完成测试',
+        status: 'active',
+        roundsUsed: 1,
+        maxRounds: 10,
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:01.000Z',
+      } as never)}
+    >
+      查看目标详情
+    </button>
+  ),
+}));
+vi.mock('../SessionGoalDrawer', () => ({
+  SessionGoalDrawer: ({ open, snapshot }: { open: boolean; snapshot?: { condition?: string } }) =>
+    open ? <div data-testid="session-goal-drawer">{snapshot?.condition}</div> : null,
+}));
 vi.mock('../PromptRequestCard', () => ({ PromptRequestCard: () => null }));
 vi.mock('../ContextUsageTag', () => ({ ContextUsageTag: () => null }));
 vi.mock('./InputChips', () => ({ InputChips: () => null }));
@@ -65,6 +91,7 @@ import { MessageEditor } from './MessageEditor';
 
 afterEach(() => {
   cleanup();
+  useGoalStore.setState({ bySession: {}, goal: undefined });
   addPastedText.mockClear();
   send.mockClear();
 });
@@ -83,5 +110,25 @@ describe('MessageEditor project context citations', () => {
       }),
     );
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('opens the Goal drawer in the input surface for the selected session', () => {
+    useGoalStore.getState().setSnapshot('session-a', {
+      goalId: 'goal-a',
+      sessionId: 'session-a',
+      workspace: '/repo',
+      revision: 1,
+      condition: '完成测试',
+      status: 'active',
+      roundsUsed: 1,
+      maxRounds: 10,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:01.000Z',
+    });
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查看目标详情' }));
+
+    expect(screen.getByTestId('session-goal-drawer')).toHaveTextContent('完成测试');
   });
 });

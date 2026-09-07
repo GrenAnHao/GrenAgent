@@ -17,7 +17,6 @@ export interface McpPolicyServiceOptions {
   piPackageDir?: string;
   run?: ProbeRunner;
   permissionManager?: Pick<PermissionManager, 'authorize'>;
-  publish?: (event: { id: string; type: 'mcp.state_changed'; timestamp: number; data: unknown }) => void;
 }
 
 export class McpPolicyService {
@@ -47,13 +46,10 @@ export class McpPolicyService {
     const temporary = `${target}.tmp`;
     await writeFile(temporary, content);
     await rename(temporary, target);
-    this.publish({ action: 'policy.changed' });
   }
 
   async evaluateCall(workspace: string, toolName: string, args: Record<string, unknown>, profile: PermissionProfileName = 'interactive'): Promise<PermissionAuthorization> {
-    const result = await this.authorize({ kind: 'mcp.call', workspace, toolName, args }, profile);
-    this.publish({ action: 'tool.called', workspace, toolName, status: result.status });
-    return result;
+    return this.authorize({ kind: 'mcp.call', workspace, toolName, args }, profile);
   }
 
   async probe(configJson: string): Promise<string> {
@@ -86,9 +82,6 @@ export class McpPolicyService {
     return this.options.permissionManager?.authorize(operation, profile) ?? Promise.resolve({ status: 'allowed', decision: 'allow' });
   }
 
-  private publish(data: unknown): void {
-    this.options.publish?.({ id: randomUUID(), type: 'mcp.state_changed', timestamp: Date.now(), data });
-  }
 }
 
 function probeArgs(command: PiProcessCommand): string[] {

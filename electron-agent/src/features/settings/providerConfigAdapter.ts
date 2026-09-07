@@ -131,7 +131,7 @@ function hasUserAgent(headers: Record<string, string> | undefined): boolean {
   return !!headers && Object.keys(headers).some((k) => k.toLowerCase() === 'user-agent');
 }
 
-function withDefaultUserAgent(headers: Record<string, string> | undefined): Record<string, string> {
+export function withDefaultUserAgent(headers: Record<string, string> | undefined): Record<string, string> {
   const h = { ...(headers ?? {}) };
   if (!hasUserAgent(h)) h['User-Agent'] = DEFAULT_USER_AGENT;
   return h;

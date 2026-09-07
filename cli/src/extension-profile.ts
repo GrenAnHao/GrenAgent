@@ -37,5 +37,5 @@ export function filterManagedExtensions<T extends { name: string; manifest?: { i
     return extensions.filter((entry) => !entry.manifest);
   }
   const allowed = new Set(ids as string[]);
-  return extensions.filter((entry) => entry.name === 'safety' || (entry.manifest !== undefined && allowed.has(entry.manifest.id)));
+  return extensions.filter((entry) => entry.name === 'safety' || entry.name === 'auto-title' || (entry.manifest !== undefined && allowed.has(entry.manifest.id)));
 }

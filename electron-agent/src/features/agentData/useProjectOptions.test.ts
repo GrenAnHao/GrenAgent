@@ -36,4 +36,13 @@ describe('useProjectOptions', () => {
     const { result } = renderHook(() => useProjectOptions());
     expect(result.current.map((option) => option.cwd)).toContain('D:/proj/gamma');
   });
+
+  it('distinguishes equal project names using their parent paths', () => {
+    useSessionStore.setState({ allSessions: [], activeWorkspace: '', registeredProjects: ['D:/one/app', 'D:/two/app'] });
+    const { result } = renderHook(() => useProjectOptions());
+    expect(result.current).toEqual([
+      { cwd: 'D:/one/app', name: 'app · D:/one' },
+      { cwd: 'D:/two/app', name: 'app · D:/two' },
+    ]);
+  });
 });

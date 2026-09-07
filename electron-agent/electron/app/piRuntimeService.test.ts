@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { PiRuntimeService } from './piRuntimeService';
+import { AgentDataStorage } from '../agentData/storage';
+import { GoalStore } from '../agentData/goalStore';
 
 describe('PiRuntimeService', () => {
   it('keeps turns and late lifecycle events isolated for two sessions in one workspace', async () => {
@@ -41,9 +43,20 @@ describe('PiRuntimeService', () => {
     const onEvent = vi.fn();
     const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onEvent });
 
-    await service.send('C:/work', 'agent_prompt', { message: 'hello', sessionId: 'session-a', source: 'goal' });
+    await service.send('C:/work', 'agent_prompt', {
+      message: 'hello', sessionId: 'session-a', source: 'goal', goalId: 'goal-a', revision: 1,
+      nextRound: 1, idempotencyKey: 'goal-a:1:1', turnId: 'turn-a',
+    });
     await service.handlePiEvent('C:/work', { type: 'agent_start' }, 'session-a', 'goal');
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ workspace: 'C:/work', sessionId: 'session-a', source: 'goal', event: { type: 'agent_start' } }));
+  });
+
+  it('rejects a Goal turn without its revision and idempotency metadata', async () => {
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'goal turn', source: 'goal', sessionId: 'session-a' })).rejects.toThrow('INVALID_GOAL_TURN');
+    expect(client.send).not.toHaveBeenCalled();
   });
 
   it('issues the Agent Data endpoint for the resolved project cwd', async () => {
@@ -72,8 +85,355 @@ describe('PiRuntimeService', () => {
 
     await expect(service.openWorkspace('C:/work')).resolves.toEqual({ restoredSession: null, sessionFile: 'C:/sessions/a.jsonl' });
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ sessionFile: 'C:/sessions/a.jsonl', command: { type: 'get_state' } });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace' });
+    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace', PI_HUMAN_ORIGIN_TOKEN: '1' });
     expect(client.send).toHaveBeenLastCalledWith({ type: 'get_state' });
+  });
+
+  it('migrates the latest legacy Goal entry once when opening a session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-'));
+    const sessionFile = join(root, 'session.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'root', customType: 'goal', timestamp: '2026-09-07T00:00:00.000Z', data: { condition: 'finish migration', react: 2, paused: true } }),
+    ].join('\n'));
+    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const migrateLegacyGoal = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    try {
+      await service.openWorkspace('C:/work');
+      await service.openWorkspace('C:/work');
+      expect(migrateLegacyGoal).toHaveBeenCalledOnce();
+      expect(migrateLegacyGoal).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'C:/work', sessionId: 'legacy-session', sessionPath: sessionFile,
+        condition: 'finish migration', react: 2, paused: true, legacyEntryTimestamp: '2026-09-07T00:00:00.000Z',
+      }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('deduplicates concurrent legacy migration requests for one session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-concurrent-'));
+    const sessionFile = join(root, 'session.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'legacy-session', customType: 'goal', data: { condition: 'finish migration' } }),
+    ].join('\n'));
+    let release!: () => void;
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const migrateLegacyGoal = vi.fn(async () => {
+      signalStarted();
+      await gate;
+    });
+    const service = new PiRuntimeService({ manager: {} as any, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const identity = { sessionId: 'legacy-session', sessionPath: sessionFile, source: 'interactive' as const };
+    try {
+      const first = (service as any).migrateLegacyGoal('C:/work', identity) as Promise<void>;
+      await started;
+      const second = (service as any).migrateLegacyGoal('C:/work', identity) as Promise<void>;
+      expect(migrateLegacyGoal).toHaveBeenCalledOnce();
+      release();
+      await Promise.all([first, second]);
+      expect(migrateLegacyGoal).toHaveBeenCalledOnce();
+    } finally {
+      release();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retries legacy migration after a partially written final JSONL entry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-partial-'));
+    const sessionFile = join(root, 'session.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
+      '{"type":"custom","customType":"goal"',
+    ].join('\n'));
+    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const migrateLegacyGoal = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    try {
+      await service.openWorkspace('C:/work');
+      expect(migrateLegacyGoal).not.toHaveBeenCalled();
+      await writeFile(sessionFile, [
+        JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
+        JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'legacy-session', customType: 'goal', data: { condition: 'finish partial recovery' } }),
+      ].join('\n'));
+      await service.openWorkspace('C:/work');
+      expect(migrateLegacyGoal).toHaveBeenCalledOnce();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['agent_fork', 'agent_clone'] as const)('orders session fork handling before legacy migration for %s', async (command) => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-fork-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, [
+      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'target-session', customType: 'goal', data: { condition: 'restore this goal', react: 1 } }),
+    ].join('\n'));
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: targetFile };
+        return { type: rpc.type };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const order: string[] = [];
+    const service = new PiRuntimeService({
+      manager,
+      processCommand: { command: 'pi', args: [] },
+      agentDir: 'C:/agent',
+      onSessionForked: vi.fn(async () => { order.push('forked'); }),
+      migrateLegacyGoal: vi.fn(async () => { order.push('migrated'); }),
+    });
+    try {
+      await expect(service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ type: command === 'agent_fork' ? 'fork' : 'clone' });
+      expect(order).toEqual(['forked', 'migrated']);
+      expect(client.setSessionIdentity).toHaveBeenCalledWith('target-session', targetFile);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['agent_fork', 'agent_clone'] as const)('does not migrate a cancelled session fork for %s', async (command) => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-fork-cancelled-'));
+    const sourceFile = join(root, 'source.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => rpc.type === 'get_state' ? { sessionFile: sourceFile } : { cancelled: true }),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const onSessionForked = vi.fn();
+    const migrateLegacyGoal = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', onSessionForked, migrateLegacyGoal });
+    try {
+      await expect(service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ cancelled: true });
+      expect(onSessionForked).not.toHaveBeenCalled();
+      expect(migrateLegacyGoal).not.toHaveBeenCalled();
+      expect(client.send).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retries failed Goal fork synchronization before migrating the target legacy entry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-fork-retry-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, [
+      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'target-session', customType: 'goal', data: { condition: 'legacy target goal' } }),
+    ].join('\n'));
+    let activeFile = sourceFile;
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: activeFile };
+        if (rpc.type === 'fork') {
+          activeFile = targetFile;
+          return { cancelled: false };
+        }
+        return { ok: true };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    let forkAttempts = 0;
+    const onSessionForked = vi.fn(async () => {
+      forkAttempts += 1;
+      if (forkAttempts === 1) throw new Error('temporary AgentData outage');
+    });
+    const migrateLegacyGoal = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', onSessionForked, migrateLegacyGoal });
+    try {
+      await expect(service.send('C:/work', 'agent_fork', { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ cancelled: false });
+      expect(onSessionForked).toHaveBeenCalledOnce();
+      expect(migrateLegacyGoal).not.toHaveBeenCalled();
+
+      await service.send('C:/work', 'agent_get_state', {});
+      expect(onSessionForked).toHaveBeenCalledTimes(2);
+      expect(migrateLegacyGoal).toHaveBeenCalledOnce();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('binds and migrates a switched session only after Pi accepts the switch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-switch-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
+    let activeFile = sourceFile;
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: activeFile };
+        if (rpc.type === 'switch_session') {
+          expect(rpc).toEqual({ type: 'switch_session', sessionPath: targetFile });
+          activeFile = targetFile;
+          return { cancelled: false };
+        }
+        return { ok: true };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const bindGoalSession = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession });
+    try {
+      await service.openWorkspace('C:/work');
+      bindGoalSession.mockClear();
+      await service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile });
+      expect(bindGoalSession).toHaveBeenCalledWith('C:/work', 'target-session', 'interactive');
+      expect(bindGoalSession).not.toHaveBeenCalledWith('C:/work', 'source-session', 'interactive');
+      expect(client.setSessionIdentity).toHaveBeenCalledWith('target-session', targetFile);
+      await expect(service.ownsSession('C:/work', 'target-session')).resolves.toBe(true);
+      await expect(service.ownsSession('C:/work', 'source-session')).resolves.toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the current session when Pi cancels a session switch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-switch-cancelled-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => rpc.type === 'get_state' ? { sessionFile: sourceFile } : { cancelled: true }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const bindGoalSession = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession });
+    try {
+      await service.openWorkspace('C:/work');
+      bindGoalSession.mockClear();
+      client.setSessionIdentity.mockClear();
+      await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile })).resolves.toEqual({ cancelled: true });
+      expect(client.send).toHaveBeenCalledTimes(2);
+      expect(bindGoalSession).not.toHaveBeenCalled();
+      expect(client.setSessionIdentity).not.toHaveBeenCalled();
+      await expect(service.ownsSession('C:/work', 'source-session')).resolves.toBe(true);
+      await expect(service.ownsSession('C:/work', 'target-session')).resolves.toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the source mapping when binding the switched session fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-switch-bind-failure-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
+    let activeFile = sourceFile;
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: activeFile };
+        activeFile = targetFile;
+        return { cancelled: false };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const unbindGoalSession = vi.fn();
+    const bindGoalSession = vi.fn((_workspace: string, sessionId: string) => {
+      if (sessionId === 'target-session') throw new Error('target binding failed');
+    });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession, unbindGoalSession });
+    try {
+      await service.openWorkspace('C:/work');
+      await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile })).rejects.toThrow('target binding failed');
+      await expect(service.ownsSession('C:/work', 'source-session')).resolves.toBe(true);
+      await expect(service.ownsSession('C:/work', 'target-session')).resolves.toBe(false);
+      expect(unbindGoalSession).not.toHaveBeenCalledWith('C:/work', 'source-session');
+      expect(unbindGoalSession).toHaveBeenCalledWith('C:/work', 'target-session');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not migrate a cleared legacy Goal or a new AgentData snapshot', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-clear-'));
+    const makeService = async (name: string, entries: Record<string, unknown>[]) => {
+      const sessionFile = join(root, name);
+      await writeFile(sessionFile, [JSON.stringify({ type: 'session', id: name, cwd: 'C:/work' }), ...entries.map((entry) => JSON.stringify(entry))].join('\n'));
+      const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
+      const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+      const migrateLegacyGoal = vi.fn(async () => {});
+      const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+      await service.openWorkspace('C:/work');
+      return migrateLegacyGoal;
+    };
+    try {
+      const cleared = await makeService('cleared.jsonl', [
+        { type: 'custom', id: 'old', customType: 'goal', data: { condition: 'old', react: 1 } },
+        { type: 'custom', id: 'clear', customType: 'goal', data: null },
+      ]);
+      const current = await makeService('current.jsonl', [
+        { type: 'custom', id: 'new', customType: 'goal', data: { goalId: 'g', condition: 'new', status: 'active' } },
+      ]);
+      expect(cleared).not.toHaveBeenCalled();
+      expect(current).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('only considers the current JSONL branch when migrating', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-branch-'));
+    const sessionFile = join(root, 'branch.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'branch-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-a', parentId: 'root', customType: 'goal', data: { condition: 'abandoned', react: 1 } }),
+      JSON.stringify({ type: 'message', id: 'branch-b', parentId: 'root', message: { role: 'user', content: 'new branch' } }),
+    ].join('\n'));
+    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const migrateLegacyGoal = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    try {
+      await service.openWorkspace('C:/work');
+      expect(migrateLegacyGoal).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates a legacy Goal inherited by the current JSONL branch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-legacy-goal-ancestor-'));
+    const sessionFile = join(root, 'ancestor.jsonl');
+    await writeFile(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'ancestor-session', cwd: 'C:/work' }),
+      JSON.stringify({ type: 'custom', id: 'goal-a', parentId: 'ancestor-session', customType: 'goal', data: { condition: 'inherited goal', react: 2 } }),
+      JSON.stringify({ type: 'message', id: 'active-child', parentId: 'goal-a', message: { role: 'user', content: 'continue' } }),
+    ].join('\n'));
+    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const migrateLegacyGoal = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    try {
+      await service.openWorkspace('C:/work');
+      expect(migrateLegacyGoal).toHaveBeenCalledWith(expect.objectContaining({ condition: 'inherited goal', react: 2 }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('rejects commands that do not map to a Pi RPC operation', async () => {
@@ -89,7 +449,7 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
 
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ type: 'get_state' });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace' });
+    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace', PI_HUMAN_ORIGIN_TOKEN: '1' });
   });
 
   it('keeps a prompt queued until Pi lifecycle events persist its items and complete it', async () => {
@@ -152,6 +512,350 @@ describe('PiRuntimeService', () => {
 
     expect(thread.createTurn).toHaveBeenCalledOnce();
     expect(client.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains a queued follow-up when the terminal callback rejects', async () => {
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const onTurnSettled = vi.fn(async () => { throw new Error('settled hook failed'); });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'first', sessionId: 'session-a' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'after this', streamingBehavior: 'followUp', sessionId: 'session-a' }))
+      .resolves.toMatchObject({ status: 'queued', position: 1 });
+
+    await expect(service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a')).rejects.toThrow('settled hook failed');
+    expect(client.send).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'follow_up', message: 'after this' }));
+    expect(thread.createTurn).toHaveBeenCalledTimes(2);
+    expect(onTurnSettled).toHaveBeenCalledOnce();
+  });
+
+  it('keeps Goal worker paths scoped and releases them when close fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-worker-'));
+    const pathOne = join(root, 'one.jsonl');
+    const pathTwo = join(root, 'two.jsonl');
+    await writeFile(pathOne, `${JSON.stringify({ type: 'session', id: 'same-session', cwd: 'C:/one' })}\n`);
+    await writeFile(pathTwo, `${JSON.stringify({ type: 'session', id: 'same-session', cwd: 'C:/two' })}\n`);
+    const clientOne = { send: vi.fn(async () => ({ sessionId: 'same-session', sessionFile: pathOne })), respondUi: vi.fn() };
+    const clientTwo = { send: vi.fn(async () => ({ sessionId: 'same-session', sessionFile: pathTwo })), respondUi: vi.fn() };
+    const clients = new Map<string, typeof clientOne>([
+      [`__goal__:C:/one\0same-session`, clientOne],
+      [`__goal__:C:/two\0same-session`, clientTwo],
+    ]);
+    const manager = {
+      get: vi.fn((key: string) => clients.get(key)),
+      open: vi.fn((options: { key: string }) => {
+        const client = clients.get(options.key);
+        if (!client) throw new Error(`unexpected worker key: ${options.key}`);
+        return client;
+      }),
+      close: vi.fn(async (key: string) => {
+        if (key === `__goal__:C:/one\0same-session`) throw new Error('worker already exited');
+      }),
+    } as any;
+    const bindGoalSession = vi.fn();
+    const unbindGoalSession = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession, unbindGoalSession });
+
+    try {
+      await service.openGoalWorker('same-session', 'C:/one', pathOne);
+      await service.openGoalWorker('same-session', 'C:/two', pathTwo);
+      expect(manager.open).toHaveBeenNthCalledWith(1, expect.objectContaining({ key: `__goal__:C:/one\0same-session` }));
+      expect(manager.open).toHaveBeenNthCalledWith(2, expect.objectContaining({ key: `__goal__:C:/two\0same-session` }));
+
+      await expect(service.closeGoalWorker('same-session', 'C:/one')).rejects.toThrow('worker already exited');
+      expect(unbindGoalSession).toHaveBeenCalledWith('C:/one', 'same-session');
+      await expect(service.enqueueGoalTurn({
+        workspace: 'C:/one', sessionId: 'same-session', turnId: 'turn-after-close',
+        goal: { goalId: 'goal', revision: 1, nextRound: 1, idempotencyKey: 'goal:1:1', condition: 'condition' },
+      })).rejects.toThrow('INVALID_GOAL_TURN');
+      expect(manager.get(`__goal__:C:/two\0same-session`)).toBe(clientTwo);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('settles active Goal turns as cancelled before closing a workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-close-turn-'));
+    const sessionPath = join(root, 'session.jsonl');
+    await writeFile(sessionPath, `${JSON.stringify({ type: 'session', id: 'session-a', cwd: 'C:/work' })}\n`);
+    const client = { send: vi.fn(async (rpc: Record<string, unknown>) => rpc.type === 'get_state' ? { sessionId: 'session-a', sessionFile: sessionPath } : { ok: true }), respondUi: vi.fn() };
+    const manager = {
+      get: vi.fn(() => undefined),
+      open: vi.fn(() => client),
+      openGoalWorker: vi.fn(() => client),
+      closeGoalWorker: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'goal', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const onTurnSettled = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+    try {
+      await service.send('C:/work', 'agent_prompt', {
+        message: 'continue goal', source: 'goal', sessionId: 'session-a', sessionPath,
+        goalId: 'goal-a', revision: 1, nextRound: 1, idempotencyKey: 'goal-a:1:1', turnId: 'turn-a',
+      });
+      await service.closeWorkspace('C:/work');
+      expect(onTurnSettled).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'C:/work', sessionId: 'session-a', turnId: 'turn-a', status: 'cancelled',
+        goal: expect.objectContaining({ goalId: 'goal-a', revision: 1 }),
+      }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes workspace cleanup when a Goal worker close rejects', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-workspace-'));
+    const sessionPath = join(root, 'session.jsonl');
+    const goalKey = '__goal__:C:/work\0session-a';
+    await writeFile(sessionPath, `${JSON.stringify({ type: 'session', id: 'session-a', cwd: 'C:/work' })}\n`);
+    const client = { send: vi.fn(async () => ({ sessionId: 'session-a', sessionFile: sessionPath })), respondUi: vi.fn() };
+    const close = vi.fn(async (key: string) => {
+      if (key === goalKey) throw new Error('goal worker close failed');
+    });
+    const manager = {
+      get: vi.fn((key: string) => key === goalKey ? client : undefined),
+      open: vi.fn(() => client),
+      close,
+    } as any;
+    const unbindGoalSession = vi.fn();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', unbindGoalSession });
+
+    try {
+      await service.openGoalWorker('session-a', 'C:/work', sessionPath);
+      await expect(service.closeWorkspace('C:/work')).rejects.toThrow('goal worker close failed');
+      expect(close).toHaveBeenNthCalledWith(1, goalKey);
+      expect(close).toHaveBeenNthCalledWith(2, 'C:/work');
+      expect(unbindGoalSession).toHaveBeenCalledWith('C:/work', 'session-a');
+      await expect(service.enqueueGoalTurn({
+        workspace: 'C:/work', sessionId: 'session-a', turnId: 'after-close',
+        goal: { goalId: 'goal', revision: 1, nextRound: 1, idempotencyKey: 'goal:1:1', condition: 'condition' },
+      })).rejects.toThrow('INVALID_GOAL_TURN');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a background Goal worker from repointing the visible session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-isolation-'));
+    const visiblePath = join(root, 'visible.jsonl');
+    const goalPath = join(root, 'goal.jsonl');
+    await writeFile(visiblePath, `${JSON.stringify({ type: 'session', id: 'visible-session', cwd: 'C:/work' })}\n`);
+    await writeFile(goalPath, `${JSON.stringify({ type: 'session', id: 'goal-session', cwd: 'C:/work' })}\n`);
+    const goalKey = '__goal__:C:/work\0goal-session';
+    const visibleClient = { send: vi.fn(async () => ({ sessionId: 'visible-session', sessionFile: visiblePath })), setSessionIdentity: vi.fn(), respondUi: vi.fn() };
+    const goalClient = { send: vi.fn(async () => ({ sessionId: 'goal-session', sessionFile: goalPath })), setSessionIdentity: vi.fn(), respondUi: vi.fn() };
+    const manager = {
+      get: vi.fn((key: string) => (key === goalKey ? goalClient : key === 'C:/work' ? visibleClient : undefined)),
+      open: vi.fn(() => visibleClient),
+      openGoalWorker: vi.fn(() => goalClient),
+      closeGoalWorker: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    try {
+      await service.openWorkspace('C:/work');
+      await service.openGoalWorker('goal-session', 'C:/work', goalPath);
+      goalClient.send.mockClear();
+
+      await service.send('C:/work', 'agent_get_state', { source: 'goal', sessionId: 'goal-session', sessionPath: goalPath });
+      expect(goalClient.send).toHaveBeenCalledWith({ type: 'get_state' });
+      // The visible session must still own the workspace: the next interactive
+      // turn belongs to it, not to the headless Goal session.
+      await service.send('C:/work', 'agent_prompt', { message: 'user turn' });
+      expect(thread.createTurn).toHaveBeenCalledWith(expect.objectContaining({ input: 'user turn', sessionId: 'visible-session' }));
+      expect(visibleClient.setSessionIdentity).not.toHaveBeenCalledWith('goal-session', goalPath);
+
+      for (const command of ['agent_switch_session', 'agent_new_session', 'agent_fork', 'agent_clone', 'agent_rewind_to']) {
+        await expect(service.send('C:/work', command, { source: 'goal', sessionId: 'goal-session', sessionPath: goalPath }))
+          .rejects.toThrow('GOAL_SESSION_COMMAND_FORBIDDEN');
+      }
+      expect(goalClient.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'switch_session' }));
+      expect(goalClient.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fork' }));
+      expect(goalClient.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'clone' }));
+      expect(goalClient.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'new_session' }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports the active and every queued Goal turn as failed when the worker exits', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-exit-'));
+    const sessionPath = join(root, 'session.jsonl');
+    await writeFile(sessionPath, `${JSON.stringify({ type: 'session', id: 'session-a', cwd: 'C:/work' })}\n`);
+    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), closeGoalWorker: vi.fn(async () => {}), close: vi.fn(async () => {}) } as any;
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'goal', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const onTurnSettled = vi.fn(async (result: { turnId: string }) => {
+      if (result.turnId === 'turn-2') throw new Error('coordinator offline');
+    });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+    try {
+      for (const [index, turnId] of ['turn-1', 'turn-2', 'turn-3'].entries()) {
+        const revision = index * 2 + 1;
+        await service.enqueueGoalTurn({
+          workspace: 'C:/work', sessionId: 'session-a', sessionPath, turnId,
+          goal: { goalId: 'goal-a', revision, nextRound: 1, idempotencyKey: `goal-a:${revision}:1`, condition: 'ship it' },
+        });
+      }
+      onTurnSettled.mockClear();
+
+      await service.handlePiExit('C:/work', 1, { key: 'k', logicalWorkspace: 'C:/work', sessionId: 'session-a', source: 'goal' } as any);
+
+      // Every queued turn already holds a claimed AgentData lease, so each one
+      // needs its own terminal report even when an earlier callback rejects.
+      expect(onTurnSettled).toHaveBeenCalledTimes(3);
+      for (const [index, turnId] of ['turn-1', 'turn-2', 'turn-3'].entries()) {
+        expect(onTurnSettled).toHaveBeenNthCalledWith(index + 1, expect.objectContaining({
+          workspace: 'C:/work', sessionId: 'session-a', turnId, status: 'failed',
+          summary: 'Pi exited unexpectedly (1)',
+          goal: { goalId: 'goal-a', revision: index * 2 + 1, nextRound: 1, idempotencyKey: `goal-a:${index * 2 + 1}:1` },
+        }));
+      }
+      // The released idempotency keys must be dispatchable again after recovery.
+      onTurnSettled.mockClear();
+      await service.enqueueGoalTurn({
+        workspace: 'C:/work', sessionId: 'session-a', sessionPath, turnId: 'turn-3',
+        goal: { goalId: 'goal-a', revision: 5, nextRound: 1, idempotencyKey: 'goal-a:5:1', condition: 'ship it' },
+      });
+      expect(client.send).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'prompt' }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['agent_fork', 'agent_clone'] as const)('does not resurrect a cleared Goal through the %s legacy entry', async (command) => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-cleared-fork-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    const legacyGoal = { type: 'custom', id: 'goal-1', customType: 'goal', data: { condition: 'legacy goal', react: 2 } };
+    await writeFile(sourceFile, [
+      JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }),
+      JSON.stringify({ ...legacyGoal, parentId: 'source-session' }),
+    ].join('\n'));
+    // Pi copies the session log when it forks, so the target still carries the
+    // same legacy Goal entry.
+    await writeFile(targetFile, [
+      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
+      JSON.stringify({ ...legacyGoal, parentId: 'target-session' }),
+    ].join('\n'));
+    const storage = new AgentDataStorage(':memory:');
+    storage.migrate();
+    const store = new GoalStore(storage.db);
+    let activeFile = sourceFile;
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: activeFile };
+        activeFile = targetFile;
+        return { cancelled: false };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const service = new PiRuntimeService({
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      // Mirrors main.ts: a cleared source is forked as a tombstone instead of
+      // being skipped, so the copied legacy entry has nothing left to restore.
+      onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
+        const source = store.get(sourceSessionId);
+        if (!source) return;
+        store.fork({ sourceSessionId, sourceGoalId: source.goalId, targetSessionId });
+      },
+      migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused }) => {
+        store.recoverLegacy({ workspace, sessionId, condition, react, paused });
+      },
+    });
+    try {
+      await service.openWorkspace('C:/work');
+      const legacy = store.get('source-session');
+      expect(legacy).toMatchObject({ status: 'disarmed', source: 'legacy', condition: 'legacy goal' });
+      store.clear({ sessionId: 'source-session', goalId: legacy!.goalId, revision: legacy!.revision, action: 'clear', origin: 'human-ui' });
+
+      await service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile });
+
+      expect(store.getLive('target-session')).toBeUndefined();
+      expect(store.get('target-session')).toMatchObject({
+        status: 'cleared', source: 'fork', sourceGoalId: legacy!.goalId, sourceSessionId: 'source-session',
+      });
+      expect(store.history('target-session').map((event) => event.kind)).toEqual(['fork']);
+    } finally {
+      storage.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['agent_fork', 'agent_clone'] as const)('forks a live legacy Goal into one disarmed copy for %s', async (command) => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-live-fork-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    const legacyGoal = { type: 'custom', id: 'goal-1', customType: 'goal', data: { condition: 'legacy goal', react: 2 } };
+    await writeFile(sourceFile, [
+      JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }),
+      JSON.stringify({ ...legacyGoal, parentId: 'source-session' }),
+    ].join('\n'));
+    await writeFile(targetFile, [
+      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
+      JSON.stringify({ ...legacyGoal, parentId: 'target-session' }),
+    ].join('\n'));
+    const storage = new AgentDataStorage(':memory:');
+    storage.migrate();
+    const store = new GoalStore(storage.db);
+    let activeFile = sourceFile;
+    const client = {
+      send: vi.fn(async (rpc: Record<string, unknown>) => {
+        if (rpc.type === 'get_state') return { sessionFile: activeFile };
+        activeFile = targetFile;
+        return { cancelled: false };
+      }),
+      setSessionIdentity: vi.fn(),
+      respondUi: vi.fn(),
+    };
+    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const service = new PiRuntimeService({
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
+        const source = store.get(sourceSessionId);
+        if (!source) return;
+        store.fork({ sourceSessionId, sourceGoalId: source.goalId, targetSessionId });
+      },
+      migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused }) => {
+        store.recoverLegacy({ workspace, sessionId, condition, react, paused });
+      },
+    });
+    try {
+      await service.openWorkspace('C:/work');
+      const legacy = store.get('source-session');
+
+      await service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile });
+
+      expect(store.get('target-session')).toMatchObject({
+        status: 'disarmed', source: 'fork', condition: 'legacy goal', sourceGoalId: legacy!.goalId,
+      });
+      expect(store.history('target-session').map((event) => event.kind)).toEqual(['fork']);
+    } finally {
+      storage.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('routes extension-backed mode and approval changes through prompt commands', async () => {

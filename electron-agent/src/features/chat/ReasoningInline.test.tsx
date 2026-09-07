@@ -38,7 +38,9 @@ describe('ReasoningInline', () => {
     render(<ReasoningInline content="部分推理" streaming />);
     const root = screen.getByTestId('reasoning-inline');
     expect(root.textContent).toContain('正在深度思考...');
-    expect(screen.getByTestId('md').textContent).toContain('部分推理');
+    // 流式期间走纯文本增量渲染（不走 Markdown/animated）：Markdown 每个 delta 重解析整段是
+    // O(n²)，animated 打字机在快速更新时会直接跳到最新 —— 两者都会让观感变成「结果直出」。
+    expect(screen.getByTestId('reasoning-stream-text').textContent).toContain('部分推理');
     expect(screen.queryByRole('button')).toBeNull();
   });
 });

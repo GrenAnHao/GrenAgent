@@ -44,6 +44,11 @@ export interface PiWorkerOpenOptions {
   env?: Record<string, string>;
 }
 
+/** Stable key for a headless Goal worker. Caller-supplied session ids are keyed with their workspace so one can never address another workspace's worker. */
+export function piGoalWorkerKey(workspace: string, sessionId: string): string {
+  return `__goal__:${workspace}\0${sessionId}`;
+}
+
 class ChildTransport {
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -184,10 +189,23 @@ export class PiManager {
   }
 
   openGoalWorker(sessionId: string, workspace: string, sessionPath: string, cwd = workspace, env?: Record<string, string>): PiClient {
-    return this.open({ key: `__goal__:${sessionId}`, cwd, logicalWorkspace: workspace, sessionId, sessionPath, source: 'goal', env });
+    return this.open({ key: piGoalWorkerKey(workspace, sessionId), cwd, logicalWorkspace: workspace, sessionId, sessionPath, source: 'goal', env });
   }
 
-  closeGoalWorker(sessionId: string): Promise<void> { return this.close(`__goal__:${sessionId}`); }
+  /**
+   * The workspace argument is optional for callers written against the old
+   * session-only API. Omitted workspace is accepted only when there is one
+   * matching worker; ambiguous sessions are rejected instead of closing the
+   * wrong workspace's worker.
+   */
+  closeGoalWorker(sessionId: string, workspace?: string): Promise<void> {
+    if (workspace !== undefined) return this.close(piGoalWorkerKey(workspace, sessionId));
+    const matches = [...this.clients.keys()].filter((key) => key.endsWith(`\0${sessionId}`));
+    if (matches.length > 1) return Promise.reject(new Error('AMBIGUOUS_GOAL_SESSION'));
+    if (matches.length === 1) return this.close(matches[0]);
+    // Preserve the legacy no-op behavior when no composite worker exists.
+    return this.close(`__goal__:${sessionId}`);
+  }
 
   openSystem(cwd: string, env?: Record<string, string>): PiClient {
     return this.open('__system__', cwd, { PI_SYSTEM_WORKER: '1', PI_DISABLE_PROJECT_CONTEXT: '1', ...env });

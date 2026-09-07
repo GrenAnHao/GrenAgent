@@ -4,9 +4,9 @@ import type { JobMetadata } from '../../electron/agentData/operationsContracts';
 import type { TaskRef, TaskView, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, AuditQuery, AuditPage, AuditExport, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 import type { MemoryRecord, ManagedMemoryRecord, MemoryListInput, MemoryPage, MemoryReadInput, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail } from '../../electron/ipc/contracts';
-import type { CreateGoalInput, GoalCasUpdate, GoalEvent, GoalSnapshot, JudgeResultInput } from '../../electron/agentData/goalContracts';
+import type { CreateGoalInput, GoalCasUpdate, GoalEvent, GoalSnapshot } from '../../electron/agentData/goalContracts';
 export type { MemoryRecord, ManagedMemoryRecord, MemoryOwner, MemoryFilter, MemoryLevel, MemoryOrigin, MemoryListInput, MemoryPage, MemoryReadInput, MemoryDraft, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail, MemoryItem } from '../../electron/ipc/contracts';
-export type { CreateGoalInput, GoalCasUpdate, GoalEvent, GoalSnapshot, JudgeResultInput } from '../../electron/agentData/goalContracts';
+export type { CreateGoalInput, GoalCasUpdate, GoalEvent, GoalSnapshot } from '../../electron/agentData/goalContracts';
 
 export interface AgentDataStatus { state: 'ready' | 'closed'; version: number }
 export type AgentJobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -92,7 +92,6 @@ export const agentDataApi = {
     update: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_update', { ...input }),
     recordProgress: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_recordProgress', { ...input, action: 'block' }),
     requestCompletion: (input: Omit<GoalCasUpdate, 'origin'>) => invoke<GoalSnapshot>('agentData_goal_requestCompletion', { ...input, action: 'begin_judging' }),
-    judgeResult: (input: JudgeResultInput) => invoke<GoalSnapshot>('agentData_goal_judgeResult', { ...input }),
     history: (sessionId: string, limit?: number) => invoke<GoalEvent[]>('agentData_goal_history', { sessionId, ...(limit === undefined ? {} : { limit }) }),
   },
   start: () => invoke<{ version: number }>('agentData_start'),

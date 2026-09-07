@@ -1,7 +1,10 @@
+// @vitest-environment jsdom
+
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ModuleRail } from './ModuleRail';
 import { useModuleStore } from '../../stores/moduleStore';
+import { IS_DEV } from '../../lib/devMode';
 
 beforeEach(() => {
   useModuleStore.setState({ activeModule: 'chat' });
@@ -24,6 +27,25 @@ describe('ModuleRail', () => {
     for (const id of ['memory', 'knowledge']) {
       expect(screen.queryByTestId(`module-${id}`)).toBeNull();
     }
+  });
+
+  // 入口存在与否完全由构建模式决定：DEV 构建（vitest 跑的就是）应该露出来。
+  it('renders the dev workbench entry only in dev builds', () => {
+    render(<ModuleRail />);
+    const entry = screen.queryByTestId('module-devWorkbench');
+    if (IS_DEV) expect(entry).toBeTruthy();
+    else expect(entry).toBeNull();
+  });
+
+  it('opens the dev workbench from the rail in dev builds', () => {
+    render(<ModuleRail />);
+    const entry = screen.queryByTestId('module-devWorkbench');
+    if (!entry) {
+      expect(IS_DEV).toBe(false);
+      return;
+    }
+    fireEvent.click(entry);
+    expect(useModuleStore.getState().activeModule).toBe('devWorkbench');
   });
 
   it('switches active module on click', () => {

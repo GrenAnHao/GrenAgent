@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MemoryClient } from "../memory/client.js";
-import { registerGoalTools } from "./tools.js";
+import { clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
 import type { GoalSnapshot } from "./contracts.js";
 
 export const pluginManifest = {
@@ -46,7 +46,19 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
     ctx.ui.setStatus(
       "goal",
       snapshot
-        ? JSON.stringify({ condition: snapshot.condition, paused: snapshot.status === "paused", status: snapshot.status, revision: snapshot.revision, goalId: snapshot.goalId })
+        ? JSON.stringify({
+          schemaVersion: 1,
+          sessionId: snapshot.sessionId,
+          workspace: snapshot.workspace,
+          snapshot,
+          // Keep the legacy flat fields for older sidecars; the renderer uses
+          // the nested, revisioned snapshot above.
+          condition: snapshot.condition,
+          paused: snapshot.status === "paused",
+          status: snapshot.status,
+          revision: snapshot.revision,
+          goalId: snapshot.goalId,
+        })
         : undefined,
     );
   };
@@ -69,7 +81,7 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
         if (text === "" || text === "clear" || text === "reset") {
           if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
           const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: "clear", origin: "human-ui" }), requestScope, current);
+          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: "clear" }), requestScope, current);
           pushStatus(ctx);
           ctx.ui.notify("已清除目标。", "info");
           return;
@@ -77,14 +89,20 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
         if (text === "pause" || text === "resume") {
           if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
           const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: text, origin: "human-ui" }), requestScope, current);
+          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: text }), requestScope, current);
           pushStatus(ctx);
           ctx.ui.notify(text === "pause" ? "目标已暂停。" : "目标已恢复。", "info");
           return;
         }
         if (text.length > 4000) throw new Error("INVALID_PARAMS");
         const requestScope = scope(ctx);
-        cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.create", { ...requestScope, condition: text, continuousIntentEvidence: text, origin: "human-ui" }), requestScope);
+        cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.create", {
+          ...requestScope,
+          condition: text,
+          // The explicit slash command is itself a durable human-intent
+          // signal; keep it in the audit payload without changing the goal.
+          continuousIntentEvidence: `/goal ${text}`,
+        }), requestScope);
         pushStatus(ctx);
         ctx.ui.notify(`已设定目标：${text}`, "info");
       } catch (error) {
@@ -93,11 +111,21 @@ export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedCl
     },
   });
 
+  // Pi exposes the provenance of the input that starts an agent run. Keep it
+  // outside the tool schema so a model cannot self-assert human authority.
+  pi.on("input", async (event) => {
+    setGoalInputContext(event.source, event.text);
+    return { action: "continue" as const };
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     try { await read(ctx); } catch { cached = undefined; pushStatus(ctx); }
   });
 
   // GoalCoordinator owns judging, retries, and turn scheduling. The extension
   // deliberately performs no recursive sendMessage/turn.start work here.
-  pi.on("agent_end", async () => undefined);
+  pi.on("agent_end", async () => {
+    clearGoalInputContext();
+    return undefined;
+  });
 }

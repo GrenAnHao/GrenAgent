@@ -18,6 +18,82 @@ function handler(channel: string): (...args: any[]) => any {
 }
 
 describe('registerIpcHandlers', () => {
+  it('dispatches operations only to fixed management methods and opens diagnostic IDs not caller paths', async () => {
+    const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn(), resolveDiagnosticPath: vi.fn().mockResolvedValue('D:/safe/wiki/page.md') };
+    registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
+    const cases: Array<[string, string, Record<string, unknown>]> = [
+      ['tasks_list', 'admin.tasks.list', { source: 'system', group: 'active', limit: 10 }],
+      ['tasks_read', 'admin.tasks.read', { source: 'system', id: 'same' }], ['tasks_previewRetry', 'admin.tasks.previewRetry', { source: 'user', id: 'same' }],
+      ['tasks_retry', 'admin.tasks.retry', { source: 'user', id: 'same', expectedModel: 'model' }],
+      ['audit_query', 'admin.audit.query', { action: 'job.stage' }], ['audit_export', 'admin.audit.export', { from: 1, to: 2 }],
+      ['diagnostics_check', 'admin.diagnostics.check', {}], ['overview', 'admin.overview', { userId: 'u' }],
+    ];
+    for (const [command, method, args] of cases) {
+      await invoke({}, { command: `agentData_${command}`, args });
+      expect(agentData.requestAdmin).toHaveBeenLastCalledWith(method, args);
+    }
+    await invoke({}, { command: 'agentData_diagnostics_open', args: { id: 'known', path: 'D:/untrusted/file' } });
+    expect(agentData.resolveDiagnosticPath).toHaveBeenCalledExactlyOnceWith('known');
+    expect(electron.shell.openPath).toHaveBeenCalledWith('D:/safe/wiki/page.md');
+    expect(agentData.request).not.toHaveBeenCalled();
+  });
+
+  it('routes Memory management through fixed in-process methods instead of the socket', async () => {
+    const requestAdmin = vi.fn().mockResolvedValue({}), request = vi.fn();
+    registerIpcHandlers({ agentData: { requestAdmin, request } as never }); const invoke = handler(IPC_CHANNELS.invoke);
+    const draft = { content: 'manual', level: 2, owner: { scope: 'global' } };
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['list', { userId: 'u', filter: { scope: 'all' }, query: '', cursor: 'cursor', limit: 50 }], ['read', { userId: 'u', id: 'm' }],
+      ['create', { userId: 'u', draft }], ['update', { userId: 'u', id: 'm', expectedRevision: 2, draft }],
+      ['conversations.list', { userId: 'u', filter: { scope: 'project', projectId: 'D:/real' } }], ['conversations.read', { userId: 'u', id: 'capture' }],
+    ];
+    for (const [method, args] of cases) {
+      await invoke({}, { command: `agentData_memory_${method.replace('.', '_')}`, args });
+      expect(requestAdmin).toHaveBeenLastCalledWith(`memory.${method}`, args);
+    }
+    await invoke({}, { command: 'agentData_memory_delete', args: { userId: 'u', id: 'm', workspace: 'D:/current-chat' } });
+    expect(requestAdmin).toHaveBeenLastCalledWith('memory.delete', { userId: 'u', id: 'm' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('dispatches every Wiki management operation to its fixed method with only supported fields', async () => {
+    const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn() };
+    registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
+    const kb = { kbId: 'k' }, source = { ...kb, sourceId: 's' }, page = { ...kb, pageId: 'p' };
+    const input = { title: 'Title', content: '', sourceRefs: [{ sourceId: 's', revision: 1 }] }, expected = { revision: 1, contentHash: 'h' };
+    const library = { name: 'Library', description: '', bindings: ['D:/a'] };
+    const operations: Array<[string, Record<string, unknown>]> = [
+      ['libraries.list', { query: 'Library', project: 'D:/a' }], ['libraries.read', kb], ['libraries.create', library], ['libraries.update', { ...kb, ...library, expectedRevision: 1 }],
+      ['libraries.previewDelete', kb], ['libraries.remove', { ...kb, cancelActive: false }], ['libraries.previewIngest', { ...kb, sourceIds: ['s'], regenerateSourceIds: [] }], ['libraries.ingest', { ...kb, sourceIds: ['s'], expectedModel: 'fixture/model' }], ['libraries.reindex', kb],
+      ['sources.list', kb], ['sources.read', { ...source, revision: 1 }], ['sources.previewImport', { ...kb, projectWorkspace: 'D:/a', relativePath: 'README.md' }],
+      ['sources.create', { ...kb, kind: 'project', projectWorkspace: 'D:/a', relativePath: 'README.md', expectedContentHash: 'h' }], ['sources.update', { ...source, content: '', expected }], ['sources.previewDelete', source], ['sources.remove', { ...source, cancelActive: true }],
+      ['pages.list', kb], ['pages.read', page], ['pages.create', { ...kb, ...input }], ['pages.update', { ...page, ...input, expected }], ['pages.setLocked', { ...page, locked: false, expected }], ['pages.previewDelete', page], ['pages.remove', { ...page, cancelActive: true }],
+    ];
+    for (const [method, args] of operations) {
+      await invoke({}, { command: `agentData_wiki_${method.replace('.', '_')}`, args: { ...args, method: 'untrusted', admin: false } });
+      expect(agentData.requestAdmin).toHaveBeenLastCalledWith(`wiki.${method}`, args);
+    }
+    expect(agentData.request).not.toHaveBeenCalled();
+  });
+
+  it('uses a fixed in-process Wiki admin entry and requires versions before dispatch', async () => {
+    const agentData = { requestAdmin: vi.fn().mockResolvedValue({ kbId: 'k' }), request: vi.fn() };
+    registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
+    await invoke({}, { command: 'agentData_wiki_libraries_create', args: { name: '手册', description: '', bindings: [], admin: false, method: 'wiki.deleteWorkspace' } });
+    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.libraries.create', { name: '手册', description: '', bindings: [] });
+    expect(agentData.request).not.toHaveBeenCalled();
+    const input = { kbId: 'k', pageId: 'p', title: 'x', content: '', sourceRefs: [] };
+    await expect(invoke({}, { command: 'agentData_wiki_pages_update', args: input })).rejects.toThrow(/expected/);
+    await expect(invoke({}, { command: 'agentData_wiki_pages_update', args: { ...input, expected: { revision: 1, contentHash: '' } } })).rejects.toThrow(/expected/);
+    const expected = { revision: 1, contentHash: 'h' };
+    await invoke({}, { command: 'agentData_wiki_pages_update', args: { ...input, expected } });
+    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.pages.update', { ...input, expected });
+    await invoke({}, { command: 'agentData_wiki_sources_read', args: { kbId: 'k', sourceId: 's', revision: 1 } });
+    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.sources.read', { kbId: 'k', sourceId: 's', revision: 1 });
+    await expect(invoke({}, { command: 'agentData_wiki_pages_create', args: { ...input, sourceRefs: [{ sourceId: 's', revision: -1 }] } })).rejects.toThrow(/sourceRefs/);
+    await expect(invoke({}, { command: 'agentData_wiki_invoke', args: { method: 'wiki.libraries.list' } })).rejects.toThrow();
+  });
+
   beforeEach(() => {
     electron.ipcMain.handle.mockReset();
   });
@@ -124,10 +200,14 @@ describe('registerIpcHandlers', () => {
     const invoke = handler(IPC_CHANNELS.invoke);
     await expect(invoke({}, { command: 'agentData_admin_jobs_list', args: {} })).resolves.toEqual({ method: 'admin.jobs.list' });
     await expect(invoke({}, { command: 'agentData_admin_config_update', args: { module: 'memory', value: {}, version: 0 } })).resolves.toEqual({ method: 'admin.config.update' });
+    await expect(invoke({}, { command: 'agentData_admin_jobs_remove', args: { id: 'job-1' } })).resolves.toEqual({ method: 'admin.jobs.remove' });
+    await expect(invoke({}, { command: 'agentData_admin_jobs_clear', args: { ids: ['job-1', 'job-2'] } })).resolves.toEqual({ method: 'admin.jobs.clear' });
+    expect(agentData.request).toHaveBeenCalledWith('admin.jobs.remove', { id: 'job-1' });
+    expect(agentData.request).toHaveBeenCalledWith('admin.jobs.clear', { ids: ['job-1', 'job-2'] });
   });
 
   it('routes Agent Data module queries and job creation with explicit scope', async () => {
-    const agentData = { request: vi.fn(async (method: string, params: Record<string, unknown>) => ({ method, params })) };
+    const agentData = { request: vi.fn(async (method: string, params: Record<string, unknown>) => ({ method, params })), requestAdmin: vi.fn(async (method: string, params: Record<string, unknown>) => ({ method, params })) };
     registerIpcHandlers({ agentData } as any);
     const invoke = handler(IPC_CHANNELS.invoke);
 
@@ -137,6 +217,7 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_wiki_overview', args: { workspace: '/w' } })).resolves.toEqual({
       method: 'wiki.admin.overview', params: { workspace: '/w' },
     });
+    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.admin.overview', { workspace: '/w' });
     await expect(invoke({}, { command: 'agentData_code_status', args: { workspace: '/w' } })).resolves.toEqual({
       method: 'codeRetrieval.admin.status', params: { workspace: '/w' },
     });

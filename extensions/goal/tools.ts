@@ -2,6 +2,24 @@ import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { MemoryClient } from '../memory/client.js';
 
+interface GoalInputContext {
+  source: 'interactive' | 'rpc' | 'extension';
+  text: string;
+}
+
+// A Pi sidecar serves one session, so this process-local context is sufficient
+// to bind a create request to the input that started the current agent turn.
+// It is deliberately not accepted from tool arguments or the AgentData RPC.
+let currentInput: GoalInputContext | undefined;
+
+export function setGoalInputContext(source: GoalInputContext['source'], text: string): void {
+  currentInput = { source, text };
+}
+
+export function clearGoalInputContext(): void {
+  currentInput = undefined;
+}
+
 const condition = Type.String({ minLength: 1, maxLength: 4000 });
 const revision = Type.Integer({ minimum: 1 });
 const goalRef = Type.Object({ goalId: Type.String({ minLength: 1 }), revision });
@@ -21,8 +39,16 @@ function trustedHumanOrigin(): boolean {
   return origin === 'human' || origin === 'human-ui' || process.env.PI_HUMAN_ORIGIN_TOKEN === '1';
 }
 
+function hasContinuousIntent(text: string): boolean {
+  return /(?:持续|直到完成|完成后再停止|keep going|until complete|continuous|\/goal\b)/i.test(text);
+}
+
 function userTurnRequired(): void {
   if (automaticTurn() || !trustedHumanOrigin()) throw new Error('GOAL_CREATE_FORBIDDEN');
+  if (currentInput) {
+    if (currentInput.source === 'extension') throw new Error('GOAL_CREATE_FORBIDDEN');
+    if (!hasContinuousIntent(currentInput.text)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
+  }
 }
 
 function result(value: unknown) {
@@ -33,14 +59,14 @@ function validateSnapshot(
   value: unknown,
   scopeRef: { sessionId: string; workspace: string },
   expected?: { goalId: string; revision: number },
-  options: { initialRevision?: boolean } = {},
+  options: { initialRevision?: boolean; allowSameRevision?: boolean } = {},
 ): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_GOAL_RESPONSE');
   const snapshot = value as { sessionId?: unknown; workspace?: unknown; goalId?: unknown; revision?: unknown };
   if (snapshot.sessionId !== scopeRef.sessionId || snapshot.workspace !== scopeRef.workspace) throw new Error('GOAL_SCOPE_MISMATCH');
   if (typeof snapshot.goalId !== 'string' || !snapshot.goalId.trim() || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 1) throw new Error('INVALID_GOAL_RESPONSE');
   if (options.initialRevision && snapshot.revision !== 1) throw new Error('INVALID_GOAL_RESPONSE');
-  if (expected && (snapshot.goalId !== expected.goalId || snapshot.revision !== expected.revision + 1)) throw new Error('VERSION_CONFLICT');
+  if (expected && (snapshot.goalId !== expected.goalId || (options.allowSameRevision ? ![expected.revision, expected.revision + 1].includes(snapshot.revision as number) : snapshot.revision !== expected.revision + 1))) throw new Error('VERSION_CONFLICT');
   return value;
 }
 
@@ -62,7 +88,7 @@ export function registerGoalTools(pi: ExtensionAPI, client = new MemoryClient())
       userTurnRequired();
       if (typeof params.condition !== 'string' || params.condition.length === 0 || params.condition.length > 4000) throw new Error('INVALID_PARAMS');
       if (typeof params.continuousIntentEvidence !== 'string' || params.continuousIntentEvidence.length === 0 || params.continuousIntentEvidence.length > 4000) throw new Error('INVALID_PARAMS');
-      if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous)/i.test(params.continuousIntentEvidence)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
+      if (!hasContinuousIntent(params.continuousIntentEvidence)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
       const ref = session(ctx);
       const value = await client.request('goal.create', { ...ref, condition: params.condition, continuousIntentEvidence: params.continuousIntentEvidence, ...(params.maxRounds === undefined ? {} : { maxRounds: params.maxRounds }) });
       return result(validateSnapshot(value, ref, undefined, { initialRevision: true }));
@@ -75,15 +101,21 @@ export function registerGoalTools(pi: ExtensionAPI, client = new MemoryClient())
       const ref = session(ctx);
       if (!automaticTurn() && params.action !== 'block' && params.action !== 'begin_judging') throw new Error('INVALID_GOAL_ACTION');
       const value = await client.request('goal.update', { ...ref, goalId: params.goalId, revision: params.revision, action: params.action, payload: { reason: params.summary, fingerprint: params.fingerprint } });
-      return result(validateSnapshot(value, ref, { goalId: params.goalId, revision: params.revision }));
+      return result(validateSnapshot(value, ref, { goalId: params.goalId, revision: params.revision }, { allowSameRevision: params.action === 'block' }));
     },
   });
   pi.registerTool({
     name: 'request_goal_completion', label: 'Request Goal Completion', description: 'Ask the independent coordinator to judge the current Goal.',
-    parameters: goalRef,
+    parameters: Type.Object({ ...goalRef.properties, evidence: Type.Optional(Type.String({ maxLength: 32000 })) }),
     async execute(_id, params, _signal, _update, ctx) {
       const ref = session(ctx);
-      const value = await client.request('goal.requestCompletion', { ...ref, goalId: params.goalId, revision: params.revision, action: 'begin_judging' });
+      const value = await client.request('goal.requestCompletion', {
+        ...ref,
+        goalId: params.goalId,
+        revision: params.revision,
+        action: 'begin_judging',
+        ...(params.evidence === undefined ? {} : { payload: { evidence: params.evidence } }),
+      });
       return result(validateSnapshot(value, ref, { goalId: params.goalId, revision: params.revision }));
     },
   });

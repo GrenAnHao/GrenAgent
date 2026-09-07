@@ -53,6 +53,36 @@ describe('ProviderService', () => {
     }));
   });
 
+  it('applies custom headers (e.g. a neutral User-Agent) to the model probe request', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 }));
+    const service = new ProviderService({ agentDir: 'C:/agent', fetch });
+
+    await service.fetchModels('https://provider.example', 'secret', 'openai-completions', { 'User-Agent': 'pi-agent/1.0' });
+    expect(fetch).toHaveBeenCalledWith('https://provider.example/v1/models', expect.objectContaining({
+      headers: { 'User-Agent': 'pi-agent/1.0', authorization: 'Bearer secret' },
+    }));
+  });
+
+  it('does not let custom headers override the authorization/x-api-key credential', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 }));
+    const service = new ProviderService({ agentDir: 'C:/agent', fetch });
+
+    await service.fetchModels('https://provider.example', 'secret', 'openai-completions', { Authorization: 'Bearer spoofed' });
+    expect(fetch).toHaveBeenCalledWith('https://provider.example/v1/models', expect.objectContaining({
+      headers: { authorization: 'Bearer secret' },
+    }));
+  });
+
+  it('sends custom headers alongside x-api-key for anthropic-messages', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }), { status: 200 }));
+    const service = new ProviderService({ agentDir: 'C:/agent', fetch });
+
+    await service.fetchModels('https://provider.example', 'secret', 'anthropic-messages', { 'User-Agent': 'pi-agent/1.0' });
+    expect(fetch).toHaveBeenCalledWith('https://provider.example/v1/models', expect.objectContaining({
+      headers: { 'User-Agent': 'pi-agent/1.0', 'x-api-key': 'secret', 'anthropic-version': '2023-06-01' },
+    }));
+  });
+
   it('uses the active workspace model for Mermaid repair and streams diagnostics', async () => {
     const requests: Record<string, unknown>[] = [];
     const service = new ProviderService({

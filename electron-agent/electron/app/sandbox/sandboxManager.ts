@@ -12,7 +12,6 @@ export interface SandboxCapabilities {
 
 export interface SandboxManagerOptions {
   capabilities?: Partial<SandboxCapabilities>;
-  publish?: (event: { id: string; type: 'sandbox.degraded'; timestamp: number; data: unknown }) => void;
   now?: () => number;
 }
 
@@ -75,7 +74,6 @@ export class SandboxManager {
     const network = request.network ?? (request.needsNetwork ? 'full' : 'none');
     if (request.needsNetwork && network === 'none') throw new Error('network access is disabled');
     const degraded = !this.capabilities.osIsolation || (network !== 'none' && !this.capabilities.networkIsolation);
-    if (degraded) this.publishDegraded(profile, network);
 
     return { profile, cwd, env: filterEnvironment(request.env ?? process.env, profile), network, degraded };
   }
@@ -85,9 +83,6 @@ export class SandboxManager {
     await processLike.kill();
   }
 
-  private publishDegraded(profile: PermissionProfileName, network: SandboxNetwork): void {
-    this.options.publish?.({ id: randomUUID(), type: 'sandbox.degraded', timestamp: this.now(), data: { profile, network, capabilities: this.capabilities } });
-  }
 }
 
 function isWithin(root: string, target: string): boolean {

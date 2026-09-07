@@ -1,84 +1,72 @@
-import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search } from 'lucide-react';
-import { agentDataApi, type WikiOverview, type WikiSearchResult } from '../../lib/agentData';
-import { styles } from './agentDataStyles';
-import { useProjectOptions } from './useProjectOptions';
+import { useEffect, useRef, useState } from 'react';
+import type { ResourceNavigation } from '../../lib/agentData';
+import { useAgentDataTaskMonitor } from './AgentDataTaskProvider';
+import { WikiLibraryList } from './wiki/WikiLibraryList';
+import { WikiLibraryWorkspace, type WikiLibraryWorkspaceHandle } from './wiki/WikiLibraryWorkspace';
+import { WikiLibraryDialog } from './wiki/WikiLibraryDialog';
+import { wikiStyles } from './wiki/wikiStyles';
 
 interface WikiPanelProps {
-  /** 仅作为筛选器的初始值；用户手动切换后不再跟随其变化。 */
+  /** 保留一期调用兼容；知识库导航不跟随聊天项目。 */
   initialProject?: string;
-  onJobCreated?: () => void;
+  visible?: boolean;
+  navigation?: Extract<ResourceNavigation, { view: 'wiki' }>;
+  navigationRequest?: number;
+  onOpenTask?: (id: string) => void;
 }
 
-export function WikiPanel({ initialProject, onJobCreated }: WikiPanelProps) {
-  const projects = useProjectOptions();
-  const [project, setProject] = useState<string>(initialProject ?? '');
-  const [overview, setOverview] = useState<WikiOverview>();
-  const [results, setResults] = useState<WikiSearchResult[]>([]);
-  const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string>();
+export function WikiPanel({ visible = true, navigation, navigationRequest = 0, onOpenTask }: WikiPanelProps) {
+  const monitor = useAgentDataTaskMonitor();
+  const [selectedKbId, setSelectedKbId] = useState<string>();
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [createDialog, setCreateDialog] = useState(false);
+  const [pageNavigation, setPageNavigation] = useState<{ kbId: string; pageId?: string; mode?: 'read' | 'create'; request: number }>();
+  const workspace = useRef<WikiLibraryWorkspaceHandle>(null);
+  const navigationSequence = useRef(0);
+  const pageNavigationSequence = useRef(0);
+  const handledNavigation = useRef<string | undefined>(undefined);
+  const navigationKey = navigation ? JSON.stringify([navigation.kbId, navigation.pageId, navigation.mode, navigationRequest]) : '';
+  const current = useRef({ visible, navigationKey });
+  current.current = { visible, navigationKey };
+  const currentSelection = useRef(selectedKbId);
+  currentSelection.current = selectedKbId;
 
-  // 空字符串 = 全局：不传 workspace，让底层跨全部项目查询。
-  const scope = useMemo(() => (project ? project : undefined), [project]);
-  const nameOf = (workspace: string) => projects.find((option) => option.cwd === workspace)?.name ?? workspace;
-
+  const openLibrary = async (kbId: string) => {
+    const request = ++navigationSequence.current;
+    if (selectedKbId && selectedKbId !== kbId && !await workspace.current?.confirmLeave()) return;
+    if (request !== navigationSequence.current || !current.current.visible) return;
+    setSelectedKbId(kbId);
+    setShowWorkspace(true);
+  };
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void agentDataApi.wiki.overview(scope)
-      .then((value) => { if (!cancelled) setOverview(value); })
-      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [scope]);
-
-  useEffect(() => {
-    if (!query.trim()) { setResults([]); return; }
-    let cancelled = false;
-    void agentDataApi.wiki.search(scope, query.trim(), 50)
-      .then((value) => { if (!cancelled) setResults(value); })
-      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [scope, query]);
-
-  // 同步是"对一个项目扫描生成"，全局视图下没有明确目标，因此必须先选定项目。
-  const sync = async () => {
-    if (!project) return;
-    setSyncing(true);
-    try { await agentDataApi.jobs.create({ kind: 'wiki.sync', workspace: project }); onJobCreated?.(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setSyncing(false); }
+    if (!visible || !navigation || handledNavigation.current === navigationKey) return;
+    handledNavigation.current = navigationKey;
+    const request = ++navigationSequence.current;
+    if (createDialog) return;
+    let settled = false;
+    void (async () => {
+      const newLibrary = navigation.mode === 'create' && !navigation.kbId;
+      if ((newLibrary || navigation.kbId && selectedKbId !== navigation.kbId) && !await (workspace.current?.confirmLeave() ?? true)) return;
+      if (request !== navigationSequence.current || !current.current.visible || current.current.navigationKey !== navigationKey) return;
+      if (newLibrary) { setCreateDialog(true); return; }
+      if (!navigation.kbId) { setShowWorkspace(false); return; }
+      setSelectedKbId(navigation.kbId); setShowWorkspace(true);
+      setPageNavigation({ kbId: navigation.kbId, pageId: navigation.pageId, mode: navigation.mode, request: ++pageNavigationSequence.current });
+    })().finally(() => { settled = true; });
+    return () => {
+      navigationSequence.current++;
+      if (!settled && current.current.visible && handledNavigation.current === navigationKey) handledNavigation.current = undefined;
+    };
+  }, [navigationKey, visible]);
+  const libraryDeleted = (kbId: string) => {
+    if (currentSelection.current === kbId) { setSelectedKbId(undefined); setShowWorkspace(false); }
+    setRefreshVersion((value) => value + 1);
   };
 
-  return <section data-testid="wiki-panel">
-    <div className={styles.sectionHeading}><h3 className={styles.heading}>Wiki RAG</h3><span className={styles.hint}>{overview?.pages ?? '-'} 页 · {project ? nameOf(project) : '全部项目'}</span></div>
-    <div className={styles.toolbar}>
-      <div className={styles.input} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <Search size={13} />
-        <input aria-label="搜索 Wiki" placeholder="搜索 Wiki 页面" value={query} onChange={(event) => setQuery(event.target.value)} style={{ flex: 1, minWidth: 0, border: 0, outline: 0, background: 'transparent', color: 'inherit' }} />
-      </div>
-      <select className={styles.select} aria-label="项目范围" value={project} onChange={(event) => setProject(event.target.value)}>
-        <option value="">全部项目</option>
-        {projects.map((option) => <option key={option.cwd} value={option.cwd}>{option.name}</option>)}
-      </select>
-      <button type="button" className={styles.actionButton} onClick={() => void sync()} disabled={!project || syncing} title={project ? '扫描该项目的 Markdown 并生成页面' : '请先选择一个项目'}>
-        <RefreshCw size={12} />同步 Wiki
-      </button>
-    </div>
-    {error ? <div className={styles.error} role="alert">{error}</div> : null}
-    {loading ? <div className={styles.state}>正在加载 Wiki...</div>
-      : results.length === 0 ? <div className={styles.state}>{query ? '暂无匹配页面' : '输入关键词搜索 Wiki'}</div>
-      : <table className={styles.table}>
-        <thead><tr><th>页面</th><th>摘要</th><th>项目</th><th>来源</th><th>分块</th></tr></thead>
-        <tbody>{results.map((result) => <tr key={`${result.workspace}:${result.page}`}>
-          <td>{result.title}</td>
-          <td>{result.snippet}</td>
-          <td>{nameOf(result.workspace)}</td>
-          <td>{result.sourcePath}</td>
-          <td>{result.chunks} 个分块</td>
-        </tr>)}</tbody>
-      </table>}
+  return <section data-testid="wiki-panel" className={wikiStyles.root}>
+    <WikiLibraryList visible={visible && !showWorkspace} onOpen={(kbId) => void openLibrary(kbId)} refreshVersion={refreshVersion + monitor.watchedTaskVersion} onBeforeDelete={(kbId) => currentSelection.current === kbId ? workspace.current?.confirmLeave() ?? Promise.resolve(true) : Promise.resolve(true)} onDeleted={libraryDeleted} />
+    {selectedKbId ? <WikiLibraryWorkspace ref={workspace} key={selectedKbId} visible={visible && showWorkspace} confirmationVisible={visible} kbId={selectedKbId} navigationPageId={pageNavigation?.kbId === selectedKbId ? pageNavigation.pageId : undefined} navigationMode={pageNavigation?.kbId === selectedKbId ? pageNavigation.mode : undefined} navigationRequest={pageNavigation?.kbId === selectedKbId ? pageNavigation.request : undefined} onBack={() => { navigationSequence.current++; setShowWorkspace(false); setRefreshVersion((value) => value + 1); }} onViewTask={onOpenTask} onDeleted={libraryDeleted} /> : null}
+    <WikiLibraryDialog open={createDialog} visible={visible} onClose={() => setCreateDialog(false)} onSaved={(saved) => { setCreateDialog(false); setSelectedKbId(saved.kbId); setShowWorkspace(true); setPageNavigation(undefined); setRefreshVersion((value) => value + 1); }} />
   </section>;
 }

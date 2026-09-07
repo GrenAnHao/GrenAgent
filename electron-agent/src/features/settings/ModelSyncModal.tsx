@@ -77,6 +77,9 @@ interface ModelSyncModalProps {
   baseUrl: string;
   apiKey: string;
   api: string;
+  /** 供应商自定义请求头（含中性 User-Agent 兜底），需与真实对话请求保持一致，否则代理站 WAF
+   * 可能因探测请求「不像真实客户端」而拒绝，表现为看似密钥无效的 401。 */
+  headers?: Record<string, string>;
   /** 已在当前供应商模型列表中的 id：标记「已添加」且不可重复勾选。 */
   existingIds: string[];
   onClose: () => void;
@@ -92,6 +95,7 @@ export function ModelSyncModal({
   baseUrl,
   apiKey,
   api,
+  headers,
   existingIds,
   onClose,
   onConfirm,
@@ -113,7 +117,7 @@ export function ModelSyncModal({
     setSearch('');
     void (async () => {
       try {
-        const list = await pi.fetchProviderModels(baseUrl, apiKey, api);
+        const list = await pi.fetchProviderModels(baseUrl, apiKey, api, headers);
         if (alive) setIds(list);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
@@ -124,7 +128,10 @@ export function ModelSyncModal({
     return () => {
       alive = false;
     };
-  }, [open, baseUrl, apiKey, api]);
+    // headers 是每次渲染新建的对象（见 ProvidersSettings 的调用处），用其序列化值做依赖，
+    // 避免引用变化触发多余的重新拉取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, baseUrl, apiKey, api, JSON.stringify(headers)]);
 
   const existing = useMemo(() => new Set(existingIds), [existingIds]);
   const filtered = useMemo(() => {

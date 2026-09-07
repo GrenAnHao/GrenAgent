@@ -30,6 +30,10 @@ export function useProjectOptions(): ProjectOption[] {
     for (const cwd of candidates) {
       if (!unique.some((existing) => pathsEquivalent(existing, cwd))) unique.push(cwd);
     }
-    return unique.sort((a, b) => a.localeCompare(b)).map((cwd) => ({ cwd, name: basename(cwd) }));
+    return unique.sort((a, b) => a.localeCompare(b)).map((cwd) => {
+      const name = basename(cwd);
+      const duplicated = unique.some((other) => other !== cwd && basename(other).toLowerCase() === name.toLowerCase());
+      return { cwd, name: duplicated ? `${name} · ${cwd.replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]+$/, '')}` : name };
+    });
   }, [allSessions, registeredProjects, activeWorkspace, worksDir]);
 }

@@ -67,26 +67,31 @@ export class ProviderService {
     return output.models;
   }
 
-  async fetchModels(baseUrl: string, apiKey: string, api: string): Promise<string[]> {
+  async fetchModels(baseUrl: string, apiKey: string, api: string, headers?: Record<string, string>): Promise<string[]> {
     const base = baseUrl.trim().replace(/\/$/, '');
     const key = apiKey.trim();
     if (!base) throw new Error('Base URL is required');
     if (!key) throw new Error('API Key is required');
+    // 自定义供应商常见于二手代理站，其 WAF 会按请求头（尤其 UA）识别真实客户端；models.json 里配置的
+    // 自定义 headers（如中性 User-Agent）会应用到真实对话请求，这里的探测请求必须带上同一套 headers，
+    // 否则探测请求会因「看起来不像真实客户端」被拒（表现为供应商侧返回的 401/Invalid token，
+    // 密钥本身其实有效）。认证头（authorization/x-api-key）不可被自定义 headers 覆盖。
+    const extra = withoutAuthHeaders(headers);
     if (api === 'anthropic-messages') {
       const data = await this.getJson(`${base.endsWith('/v1') ? base : `${base}/v1`}/models`, {
-        'x-api-key': key, 'anthropic-version': '2023-06-01',
+        ...extra, 'x-api-key': key, 'anthropic-version': '2023-06-01',
       });
       return readModelIds(data);
     }
     if (api === 'google-generative-ai') {
-      const data = await this.getJson(`${base.endsWith('/v1beta') || base.endsWith('/v1') ? base : `${base}/v1beta`}/models?key=${encodeURIComponent(key)}`);
+      const data = await this.getJson(`${base.endsWith('/v1beta') || base.endsWith('/v1') ? base : `${base}/v1beta`}/models?key=${encodeURIComponent(key)}`, extra);
       if (!data || typeof data !== 'object' || !Array.isArray((data as Record<string, unknown>).models)) throw new Error('Provider response does not contain models');
       return (data as { models: Array<{ name?: unknown }> }).models.flatMap(({ name }) => typeof name === 'string' ? [name.replace(/^models\//, '')] : []);
     }
     const candidates = base.endsWith('/v1') ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`];
     let lastError: unknown;
     for (const url of candidates) {
-      try { return readModelIds(await this.getJson(url, { authorization: `Bearer ${key}` })); }
+      try { return readModelIds(await this.getJson(url, { ...extra, authorization: `Bearer ${key}` })); }
       catch (error) { lastError = error; }
     }
     throw lastError instanceof Error ? lastError : new Error('Provider model request failed');
@@ -152,6 +157,13 @@ function extractMermaid(content: string): string {
 
 function numberValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** 剔除认证类 header（大小写不敏感），确保用户自定义 headers 不会意外覆盖真正的鉴权凭据。 */
+function withoutAuthHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  if (!headers) return {};
+  const reserved = new Set(['authorization', 'x-api-key', 'x-goog-api-key']);
+  return Object.fromEntries(Object.entries(headers).filter(([k]) => !reserved.has(k.toLowerCase())));
 }
 
 function readModelIds(value: unknown): string[] {

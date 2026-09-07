@@ -31,6 +31,24 @@ describe('ProcessRegistry', () => {
     expect(execFileImpl).toHaveBeenCalledWith('taskkill', ['/pid', '4242', '/T', '/F']);
   });
 
+  it('propagates strict Windows kill failures and retains the live entry for retry', async () => {
+    const failure = new Error('fixture access denied');
+    const execFileImpl = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+    const registry = new ProcessRegistry({ platform: 'win32', execFileImpl });
+    registry.register(new FakeChild(4242), 'fixture');
+    await expect(registry.killTree(4242, { strict: true })).rejects.toBe(failure);
+    expect(registry.pids()).toEqual([{ pid: 4242, label: 'fixture' }]);
+    await expect(registry.killTree(4242, { strict: true })).resolves.toBeUndefined();
+    expect(registry.pids()).toEqual([]);
+  });
+
+  it('rejects a strict POSIX cancellation if no signal can be delivered to the still-live process', async () => {
+    const registry = new ProcessRegistry({ platform: 'linux', escalationDelayMs: 0, signalProcess: (_pid, signal) => signal === 0 });
+    registry.register(new FakeChild(4242), 'fixture');
+    await expect(registry.killTree(4242, { strict: true })).rejects.toThrow('process tree cancellation failed');
+    expect(registry.pids()).toEqual([{ pid: 4242, label: 'fixture' }]);
+  });
+
   it('terminates the process group on POSIX without escalation when the child exits', async () => {
     const signals: Array<[number, ProcessSignal]> = [];
     let alive = true;

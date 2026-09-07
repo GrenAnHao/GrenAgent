@@ -3,11 +3,11 @@ import { join } from 'node:path';
 
 export interface ProjectIndexState { workspace: string; indexed: boolean }
 
-/** 该工作区是否已建立 CodeGraph 索引（存在 .codegraph 目录）。 */
+/** Presence only; the SDK validates database contents when it opens an index. */
 export function isIndexed(workspace: string): boolean {
   if (!workspace.trim()) return false;
   try {
-    return statSync(join(workspace, '.codegraph')).isDirectory();
+    return statSync(join(workspace, '.codegraph', 'codegraph.db')).isFile();
   } catch {
     return false;
   }

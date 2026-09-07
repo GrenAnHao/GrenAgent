@@ -38,6 +38,7 @@ import resourceManager from "./resource-manager/index.js";
 import memory from "./memory/index.js";
 import codeRetrieval from "./code-retrieval/index.js";
 import wikiRag from "./wiki-rag/index.js";
+import { memoryManifest, wikiRagManifest, codeRetrievalManifest } from "./agent-data-manifests.js";
 
 export {
   safety,
@@ -168,6 +169,9 @@ const builtinManifests = new Map<string, ExtensionManifest>([
   [goalManifest.id, goalManifest],
   [webSearchManifest.id, webSearchManifest],
   [mcpManifest.id, mcpManifest],
+  [memoryManifest.id, memoryManifest],
+  [wikiRagManifest.id, wikiRagManifest],
+  [codeRetrievalManifest.id, codeRetrievalManifest],
 ]);
 
 // Adapter keeps the legacy static factory array intact while exposing lifecycle metadata.

@@ -1,8 +1,8 @@
 import { App } from 'antd';
 import { useEffect } from 'react';
-import { onPiUiRequest } from '../../lib/pi';
+import { onGoalStatus, onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
-import { useGoalStore, type GoalInfo } from '../../stores/goalStore';
+import { useGoalStore, type GoalSnapshot } from '../../stores/goalStore';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { isAgentMode, useModeStore } from '../../stores/modeStore';
 import { useUiPromptStore } from '../../stores/uiPromptStore';
@@ -15,22 +15,87 @@ import { useVisualStore } from '../../stores/visualStore';
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
-/** goal 状态由 sidecar 以 JSON 字符串经 setStatus 推送（condition + paused + react）。 */
-function parseGoalStatus(statusText: unknown): GoalInfo | undefined {
-  if (typeof statusText !== 'string' || !statusText) return undefined;
+interface ParsedGoalStatus {
+  sessionId: string;
+  snapshot?: GoalSnapshot;
+}
+
+const GOAL_STATUS_SCHEMA_VERSION = 1;
+
+/**
+ * Goal setStatus 是刷新提示的事件，不是 AgentData 权威状态。只接受带 sessionId 的 v1
+ * payload；旧版 {condition, paused, react} 不能覆盖当前会话投影。
+ */
+function parseGoalStatus(statusText: unknown, envelopeSessionId?: unknown, workspace?: string): ParsedGoalStatus | undefined {
   try {
-    const parsed = JSON.parse(statusText) as Partial<GoalInfo>;
-    if (parsed && typeof parsed.condition === 'string' && parsed.condition) {
-      return {
-        condition: parsed.condition,
-        paused: parsed.paused === true,
-        react: Number(parsed.react) || 0,
-      };
-    }
+    const parsed = typeof statusText === 'string'
+      ? (statusText ? JSON.parse(statusText) : undefined)
+      : statusText;
+    if (!isRecord(parsed)) return undefined;
+    if (!parsed || parsed.schemaVersion !== GOAL_STATUS_SCHEMA_VERSION) return undefined;
+    const candidate = parsed.snapshot === null
+      ? undefined
+      : (isRecord(parsed.snapshot) ? parsed.snapshot : parsed);
+    const sessionId = readNonEmptyString(candidate?.sessionId ?? parsed.sessionId ?? envelopeSessionId);
+    if (!sessionId) return undefined;
+    if (!candidate) return { sessionId };
+
+    const goalId = readNonEmptyString(candidate.goalId);
+    const condition = readNonEmptyString(candidate.condition);
+    const status = readGoalStatus(candidate.status);
+    const revision = readPositiveInteger(candidate.revision);
+    if (!goalId || !condition || !status || revision === undefined) return undefined;
+
+    const now = new Date().toISOString();
+    const snapshot: GoalSnapshot = {
+      goalId,
+      sessionId,
+      workspace: readNonEmptyString(candidate.workspace) ?? workspace ?? '',
+      revision,
+      condition,
+      status,
+      roundsUsed: readNonnegativeInteger(candidate.roundsUsed) ?? 0,
+      maxRounds: readPositiveInteger(candidate.maxRounds) ?? 256,
+      createdAt: readNonEmptyString(candidate.createdAt) ?? now,
+      updatedAt: readNonEmptyString(candidate.updatedAt) ?? now,
+      ...(isRecord(candidate.stopReason) ? { stopReason: candidate.stopReason as GoalSnapshot['stopReason'] } : {}),
+      ...(isRecord(candidate.judge) ? { judge: candidate.judge as GoalSnapshot['judge'] } : {}),
+      ...(isRecord(candidate.blockage) ? { blockage: candidate.blockage as GoalSnapshot['blockage'] } : {}),
+      ...(readNonEmptyString(candidate.sourceGoalId) ? { sourceGoalId: readNonEmptyString(candidate.sourceGoalId) } : {}),
+      ...(readNonEmptyString(candidate.sourceSessionId) ? { sourceSessionId: readNonEmptyString(candidate.sourceSessionId) } : {}),
+      ...(readNonEmptyString(candidate.clearedAt) ? { clearedAt: readNonEmptyString(candidate.clearedAt) } : {}),
+      ...(readGoalSource(candidate.source) ? { source: readGoalSource(candidate.source) } : {}),
+    };
+    return { sessionId, snapshot };
   } catch {
     return undefined;
   }
-  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function readNonnegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readGoalStatus(value: unknown): GoalSnapshot['status'] | undefined {
+  return value === 'active' || value === 'paused' || value === 'disarmed' || value === 'judging' || value === 'blocked' || value === 'complete' || value === 'error' || value === 'cleared'
+    ? value
+    : undefined;
+}
+
+function readGoalSource(value: unknown): GoalSnapshot['source'] | undefined {
+  return value === 'human' || value === 'legacy' || value === 'fork' ? value : undefined;
 }
 
 /** notify 文本字段名因 sidecar 而异，按优先级取第一个非空字符串。 */
@@ -65,8 +130,27 @@ export function ExtensionUiHost() {
   const { message } = App.useApp();
 
   useEffect(() => {
-    let un: undefined | (() => void);
-    void onPiUiRequest((e) => {
+    let disposed = false;
+    const unsubs: Array<() => void> = [];
+    const register = (subscription: Promise<() => void>) => {
+      void subscription.then((un) => {
+        if (disposed) un();
+        else unsubs.push(un);
+      });
+    };
+    const routeGoalStatus = (statusText: unknown, sessionId?: unknown, workspace?: string) => {
+      const parsed = parseGoalStatus(statusText, sessionId, workspace);
+      if (parsed) useGoalStore.getState().setSnapshot(parsed.sessionId, parsed.snapshot);
+    };
+
+    register(onGoalStatus((payload) => {
+      if (payload.schemaVersion !== GOAL_STATUS_SCHEMA_VERSION) return;
+      routeGoalStatus(payload, payload.sessionId, payload.workspace);
+    }));
+    register(onPiUiRequest((e) => {
+      // Goal workers are headless; their UI requests must never surface in the
+      // interactive session's prompt cards or modal flow.
+      if (e.source === 'goal') return;
       const method = e.request.method;
       if (method === 'setStatus') {
         const r = e.request as { statusKey?: unknown; statusText?: unknown };
@@ -77,7 +161,7 @@ export function ExtensionUiHost() {
         } else if (r.statusKey === 'plan-mode') {
           usePlanModeStore.getState().setStatus(text);
         } else if (r.statusKey === 'goal') {
-          useGoalStore.getState().setGoal(parseGoalStatus(r.statusText));
+          routeGoalStatus(r.statusText, e.sessionId, e.workspace);
         } else if (r.statusKey === 'mcp') {
           let servers: McpServerStatus[] = [];
           try {
@@ -145,10 +229,11 @@ export function ExtensionUiHost() {
       if (method === 'confirm' || method === 'select' || method === 'input') {
         useUiPromptStore.getState().setRequest({ workspace: e.workspace, request: e.request });
       }
-    }).then((fn) => {
-      un = fn;
-    });
-    return () => un?.();
+    }));
+    return () => {
+      disposed = true;
+      for (const un of unsubs.splice(0)) un();
+    };
   }, [message]);
 
   return null;

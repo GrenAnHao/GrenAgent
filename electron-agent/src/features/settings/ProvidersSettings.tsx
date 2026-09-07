@@ -5,7 +5,7 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { pi } from '../../lib/pi';
 import { invalidateAvailableModels } from './availableModelsCache';
-import { defaultThinkingLevelMap, loadState, serializeState, type UiModel, type UiProvider } from './providerConfigAdapter';
+import { defaultThinkingLevelMap, loadState, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
 import { invalidateProviderList } from './providerListCache';
 import { PROVIDER_PRESETS, type ApiType } from './providerPresets';
 import { ProviderDiagnostics } from './ProviderDiagnostics';
@@ -258,15 +258,20 @@ const nextRowUid = (prefix: string) => `${prefix}-${(rowUidSeq++).toString(36)}`
 const attachUid = (m: UiModel): EditModel => ({ ...m, _uid: nextRowUid('mk') });
 const toHeaderRows = (headers: Record<string, string> | undefined): HeaderRow[] =>
   Object.entries(headers ?? {}).map(([key, value]) => ({ key, value, _uid: nextRowUid('hk') }));
+/** 编辑态请求头数组 → Record（跳过空键；同名后者覆盖）。同步模型探测请求与保存落盘共用此规则。 */
+const headerRowsToRecord = (rows: HeaderRow[]): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  for (const h of rows) {
+    const key = h.key.trim();
+    if (key) headers[key] = h.value;
+  }
+  return headers;
+};
 const withModelUids = (ps: UiProvider[]): EditProvider[] =>
   ps.map((p) => ({ ...p, models: p.models.map(attachUid), headers: toHeaderRows(p.headers) }));
 const stripModelUids = (ps: EditProvider[]): UiProvider[] =>
   ps.map((p) => {
-    const headers: Record<string, string> = {};
-    for (const h of p.headers) {
-      const key = h.key.trim();
-      if (key) headers[key] = h.value; // 跳过空键；同名后者覆盖
-    }
+    const headers = headerRowsToRecord(p.headers);
     return {
       ...p,
       headers: Object.keys(headers).length > 0 ? headers : undefined,
@@ -757,6 +762,9 @@ export function ProvidersSettings() {
           baseUrl={active.baseUrl ?? ''}
           apiKey={active.apiKey ?? ''}
           api={active.api ?? 'openai-completions'}
+          // 同步模型是探测请求，需带上与真实对话请求一致的自定义 headers（含中性 User-Agent 兜底），
+          // 否则代理站 WAF 可能因请求「不像真实客户端」拒绝，表现为看似密钥无效的 401。
+          headers={withDefaultUserAgent(headerRowsToRecord(active.headers))}
           existingIds={models.map((m) => m.id).filter(Boolean)}
           onClose={() => setSyncOpen(false)}
           onConfirm={addSyncedModels}

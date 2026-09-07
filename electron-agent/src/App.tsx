@@ -29,6 +29,7 @@ import { readUiHistoryForSession, sessionKeyFromPath } from './lib/uiHistory';
 import { pickDirectory } from './lib/dialog';
 import { prewarmWorkspace } from './lib/prewarm';
 import { createStartupPerf } from './lib/startupPerf';
+import { IS_DEV } from './lib/devMode';
 import { pathsEquivalent } from './lib/pathUtils';
 import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
 import {
@@ -485,6 +486,11 @@ const Workspace = memo(function Workspace() {
     [store, setWorkspaceReady],
   );
 
+  const handleOpenSourceSession = useCallback(async (cwd: string, path: string) => {
+    useModuleStore.getState().setActiveModule('chat');
+    await handleOpenSession(cwd, path);
+  }, [handleOpenSession]);
+
   const handleDeleteSession = useCallback(async (cwd: string, path: string) => {
     const st = useSessionStore.getState();
     // 删除前判定是否为会话区正在显示的会话（pathsEquivalent 兜底分隔符/大小写差异）。
@@ -684,6 +690,20 @@ const Workspace = memo(function Workspace() {
     return () => window.removeEventListener('keydown', onKey);
   }, [handleNewConversation]);
 
+  // DEV 专属快捷键：Ctrl/Cmd + Shift + D 直达开发者工作台。生产构建里 IS_DEV 为 false，
+  // 监听器根本不注册（组件树里也没有这个模块）。
+  useEffect(() => {
+    if (!IS_DEV) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        useModuleStore.getState().setActiveModule('devWorkbench');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     let un: (() => void) | undefined;
     // 标题由 sidecar 内的 auto-title 扩展在 agent_end 时「进程内」生成并写回；写回时 pi
@@ -719,6 +739,7 @@ const Workspace = memo(function Workspace() {
         <ModuleRail />
         <Flexbox flex={1} style={{ minWidth: 0, height: '100%', background: 'var(--gren-content-bg, transparent)' }}>
           <ModuleContainer
+            onOpenSession={handleOpenSourceSession}
             chat={
               <ChatColumns
                 sidebar={

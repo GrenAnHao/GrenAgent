@@ -44,7 +44,11 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
   if (snapshot.status === "active" && event.type === "pause") status = "paused";
   else if (["paused", "blocked", "disarmed", "error"].includes(snapshot.status) && event.type === "resume") status = "active";
   else if (snapshot.status === "active" && event.type === "begin_judging") status = "judging";
-  else if (snapshot.status === "active" && event.type === "block") status = "blocked";
+  else if (snapshot.status === "active" && event.type === "block") {
+    const fingerprint = event.fingerprint ?? "";
+    const count = fingerprint && fingerprint === snapshot.blockage?.fingerprint ? (snapshot.blockage?.count ?? 0) + 1 : 1;
+    status = count >= 3 ? "blocked" : "active";
+  }
   else if ((snapshot.status === "active" || snapshot.status === "paused") && event.type === "disarm") status = "disarmed";
   else if (["active", "paused", "blocked", "disarmed", "error"].includes(snapshot.status) && event.type === "clear") status = "cleared";
   else if (snapshot.status === "judging" && event.type === "judge_pass") status = "complete";
@@ -57,7 +61,7 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     updatedAt: new Date().toISOString(),
     stopReason: snapshot.status === "active" && event.type === "pause"
       ? { kind: "user_pause", summary: event.reason ?? "user_pause", at: new Date().toISOString() }
-      : snapshot.status === "active" && event.type === "block"
+      : snapshot.status === "active" && event.type === "block" && status === "blocked"
         ? { kind: "blocked", summary: event.reason ?? "blocked", at: new Date().toISOString() }
       : snapshot.status === "judging" && event.type === "judge_fail"
         ? { kind: "judge_failed", summary: event.reason ?? "条件未满足", at: new Date().toISOString(), turnId: event.turnId }
@@ -68,9 +72,7 @@ export function transition(snapshot: GoalSnapshot, event: GoalTransition): GoalS
     blockage: snapshot.status === "active" && event.type === "block"
       ? {
           fingerprint: event.fingerprint ?? "",
-          count: event.fingerprint && event.fingerprint === snapshot.blockage?.fingerprint
-            ? (snapshot.blockage?.count ?? 0) + 1
-            : 1,
+          count: event.fingerprint && event.fingerprint === snapshot.blockage?.fingerprint ? (snapshot.blockage?.count ?? 0) + 1 : 1,
           summary: event.reason ?? "blocked",
           at: new Date().toISOString(),
         }
@@ -84,6 +86,34 @@ interface CustomEntryLike {
   type: string;
   customType?: string;
   data?: unknown;
+  timestamp?: string | number;
+}
+
+export interface LegacyGoalState extends GoalState {
+  legacyEntryTimestamp?: string | number;
+}
+
+/**
+ * Read only the pre-AgentData goal format. New snapshots carry a goalId (and
+ * are already authoritative), so they must never be imported a second time.
+ */
+export function restoreLegacyFromEntries(entries: CustomEntryLike[]): LegacyGoalState | undefined {
+  const entry = entries.filter((e) => e.type === "custom" && e.customType === "goal").pop();
+  const data = entry?.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const record = data as Record<string, unknown>;
+  if (typeof record.goalId === "string" || (record.snapshot && typeof record.snapshot === "object")) return undefined;
+  if (typeof record.condition !== "string" || !record.condition.trim()) return undefined;
+  const react = Number(record.react);
+  const normalizedReact = Number.isSafeInteger(react) && react >= 0 ? react : 0;
+  const timestamp = entry?.timestamp;
+  return {
+    condition: record.condition,
+    react: normalizedReact,
+    paused: record.paused === true,
+    ...(typeof timestamp === "string" && timestamp ? { legacyEntryTimestamp: timestamp } : {}),
+    ...(typeof timestamp === "number" && Number.isSafeInteger(timestamp) ? { legacyEntryTimestamp: timestamp } : {}),
+  };
 }
 
 /**

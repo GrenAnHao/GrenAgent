@@ -28,25 +28,21 @@ describe('SandboxManager', () => {
       .toThrow('network access is disabled');
   });
 
-  it('publishes degradation without changing the requested profile', () => {
-    const publish = vi.fn();
-    const manager = new SandboxManager({ capabilities: { osIsolation: false }, publish });
+  it('marks degradation without changing the requested profile', () => {
+    const manager = new SandboxManager({ capabilities: { osIsolation: false } });
     const launch = manager.run({ profile: 'workspace' }, (options) => options);
 
     expect(launch.profile).toBe('workspace');
     expect(launch.degraded).toBe(true);
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'sandbox.degraded', data: expect.objectContaining({ profile: 'workspace' }) }));
   });
 
   it('does not claim OS isolation when no platform backend is configured', () => {
-    const publish = vi.fn();
-    const manager = new SandboxManager({ publish });
+    const manager = new SandboxManager({});
 
     const launch = manager.prepare({ profile: 'workspace' });
 
+    // degraded = !osIsolation || (network !== 'none' && !networkIsolation)：默认无平台后端时
+    // osIsolation 为 false，degraded 即为「未声称 OS 隔离」的可观测表现。
     expect(launch.degraded).toBe(true);
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ capabilities: expect.objectContaining({ osIsolation: false }) }),
-    }));
   });
 });

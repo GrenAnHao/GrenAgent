@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentDataStorage } from '../../agentData/storage';
-import type { AppEvent, PermissionProfile } from '../appServer/types';
+import type { PermissionProfile } from '../appServer/types';
 
 export const PLUGIN_CAPABILITIES = ['agent', 'tool', 'mcp', 'provider', 'ui', 'event-subscriber'] as const;
 export type PluginCapability = (typeof PLUGIN_CAPABILITIES)[number];
@@ -49,7 +49,6 @@ export interface PluginStateRecord {
 export interface PluginManagerOptions {
   storage: Pick<AgentDataStorage, 'db'>;
   apiVersion: string;
-  publish?: (event: Omit<AppEvent, 'sequence'>) => void;
   now?: () => number;
 }
 
@@ -158,12 +157,6 @@ export class PluginManager {
     this.options.storage.db.prepare(`INSERT INTO plugin_state(id, state, payload, updated_at) VALUES(?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at`)
       .run(record.id, record.state, JSON.stringify(record), record.updatedAt);
-    this.options.publish?.({
-      id: randomUUID(),
-      type: 'plugin.state_changed',
-      timestamp: record.updatedAt,
-      data: copyState(record),
-    });
     return copyState(record);
   }
 

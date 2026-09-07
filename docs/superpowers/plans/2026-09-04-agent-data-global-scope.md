@@ -1,6 +1,6 @@
 # Agent 数据中心全局作用域重构 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **面向 AI 代理的工作者：** 必需子技能：使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 逐任务实现此计划。步骤使用复选框（`- [x]`）语法来跟踪进度。
 
 **目标：** 把"Agent 数据"面板从"跟随当前对话的 workspace 强制过滤"改造成真正的全局管理中心，同时给 `wiki.sync` / `codegraph.sync` 两个空转的 job 补上真实执行器。
 
@@ -104,7 +104,7 @@
 - 修改：`electron-agent/electron/app/memoryService.ts:44-49`
 - 测试：`electron-agent/electron/app/memoryService.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `memoryService.test.ts` 的 `describe('MemoryService', ...)` 内追加：
 
@@ -130,13 +130,13 @@
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/app/memoryService.test.ts -t "global scope"`
 
 预期：FAIL。L2/L3 的 `scope` 实际为 `'project'`，且跨项目搜索 `scenario` 返回空数组。
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 `memoryService.ts` 的 `completeExtraction()` 里，把 L2/L3 两行的 scope 换成显式 global（L1 那行不动）：
 
@@ -149,13 +149,13 @@
 
 `commitCapture` 仍用 `capture.scope`（游标是按 session 记的，与写入层级的作用域无关）。
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/memoryService.test.ts`
 
 预期：PASS，全部 5 个用例通过（原有 4 个 + 新增 1 个）。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/app/memoryService.ts electron-agent/electron/app/memoryService.test.ts
@@ -170,7 +170,7 @@ git commit -m "feat(memory): L2/L3 写入全局作用域，L1 保留项目归属
 - 修改：`electron-agent/electron/agentData/memoryStore.ts:104`
 - 测试：`electron-agent/electron/agentData/memoryStore.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `memoryStore.test.ts` 的 `describe('MemoryStore', ...)` 内追加：
 
@@ -199,13 +199,13 @@ git commit -m "feat(memory): L2/L3 写入全局作用域，L1 保留项目归属
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/memoryStore.test.ts -t "another project scope"`
 
 预期：FAIL。第一个用例断言 0 条却拿到 1 条（记录没被删掉）。
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 `memoryStore.ts` 的 `remove()` 换成：
 
@@ -217,13 +217,13 @@ git commit -m "feat(memory): L2/L3 写入全局作用域，L1 保留项目归属
   }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/memoryStore.test.ts`
 
 预期：PASS。注意 `stores project and global scope metadata` 这个既有用例偶发失败（同毫秒时间戳下 `ORDER BY updated_at DESC` 排序不稳定）与本改动无关，重跑即过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/agentData/memoryStore.ts electron-agent/electron/agentData/memoryStore.test.ts
@@ -238,7 +238,7 @@ git commit -m "fix(memory): 删除按用户判权，修复全局视图跨项目�
 - 修改：`electron-agent/electron/agentData/runtime.ts:161-168`（`memoryMethod` 的 overview/search 分支）与文件末尾的 `readScope` 附近
 - 测试：`electron-agent/electron/agentData/runtime.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `runtime.test.ts` 追加一个用例：
 
@@ -260,13 +260,13 @@ git commit -m "fix(memory): 删除按用户判权，修复全局视图跨项目�
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/runtime.test.ts -t "globally when no workspace"`
 
 预期：FAIL，抛 `INVALID_PARAMS`（`string parameter is required`）。
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 在 `runtime.ts` 的 `readScope` 旁边新增只读版本：
 
@@ -294,13 +294,13 @@ function readQueryScope(value: Record<string, unknown>): import('./memoryStore')
     if (name === 'memory.admin.overview') return (params) => this.memory!.overview(readQueryScope(params));
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/runtime.test.ts`
 
 预期：PASS，含既有的 `routes memory extraction through the configured system task executor` 等用例全部不回归。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/agentData/runtime.ts electron-agent/electron/agentData/runtime.test.ts
@@ -316,7 +316,7 @@ git commit -m "feat(memory): 只读 RPC 接受缺省 workspace 以支持全局�
 - 修改：`electron-agent/src/lib/agentData.ts:7`（`MemoryScope`）、`:9`（`MemoryRecord`）
 - 测试：`electron-agent/electron/ipc/register.test.ts`、`electron-agent/src/lib/agentData.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `register.test.ts` 的 `routes Agent Data module queries and job creation with explicit scope` 用例内追加：
 
@@ -336,13 +336,13 @@ git commit -m "feat(memory): 只读 RPC 接受缺省 workspace 以支持全局�
     expect(spy).toHaveBeenLastCalledWith('agentData_memory_overview', { userId: 'u', includeOtherProjects: true });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/ipc/register.test.ts src/lib/agentData.test.ts`
 
 预期：FAIL。IPC 侧抛 `workspace must be a non-empty string`；渲染层侧 TypeScript 报 `includeOtherProjects` 不在 `MemoryScope` 上。
 
-- [ ] **步骤 3：实现 IPC 转发**
+- [x] **步骤 3：实现 IPC 转发**
 
 `register.ts` 三个 memory 命令改成（`workspace` 可选、新增两个字段的条件转发）：
 
@@ -370,7 +370,7 @@ git commit -m "feat(memory): 只读 RPC 接受缺省 workspace 以支持全局�
 
 `agentData_memory_delete` 保持要求 `workspace`（`memory.delete` 走写入路径的 `readScope`），不改。
 
-- [ ] **步骤 4：实现渲染层类型**
+- [x] **步骤 4：实现渲染层类型**
 
 `src/lib/agentData.ts`：
 
@@ -385,13 +385,13 @@ export interface MemoryRecord { id: string; level: 0 | 1 | 2 | 3; content: strin
     delete: (scope: { userId: string; workspace: string }, id: string) => invoke<void>('agentData_memory_delete', { ...scope, id }),
 ```
 
-- [ ] **步骤 5：运行测试验证通过**
+- [x] **步骤 5：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/ipc/register.test.ts src/lib/agentData.test.ts electron/ipc/commandCoverage.test.ts`
 
 预期：PASS，命令覆盖测试不变（没有新增/删除命令名）。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add electron-agent/electron/ipc/register.ts electron-agent/electron/ipc/register.test.ts electron-agent/src/lib/agentData.ts electron-agent/src/lib/agentData.test.ts
@@ -406,7 +406,7 @@ git commit -m "feat(memory): IPC 与渲染层类型透出 projectId/includeOther
 - 创建：`electron-agent/src/features/agentData/useProjectOptions.ts`
 - 测试：`electron-agent/src/features/agentData/useProjectOptions.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `useProjectOptions.test.ts`：
 
@@ -449,13 +449,13 @@ describe('useProjectOptions', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/useProjectOptions.test.ts`
 
 预期：FAIL，模块 `./useProjectOptions` 不存在。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 创建 `electron-agent/src/features/agentData/useProjectOptions.ts`：
 
@@ -497,13 +497,13 @@ export function useProjectOptions(): ProjectOption[] {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/useProjectOptions.test.ts`
 
 预期：PASS，2 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/useProjectOptions.ts electron-agent/src/features/agentData/useProjectOptions.test.ts
@@ -518,7 +518,7 @@ git commit -m "feat(agent-data): 新增面板项目选项 hook"
 - 修改：`electron-agent/src/features/agentData/MemoryPanel.tsx`
 - 测试：`electron-agent/src/features/agentData/MemoryPanel.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 把 `MemoryPanel.test.tsx` 整体替换为：
 
@@ -573,13 +573,13 @@ describe('MemoryPanel', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/MemoryPanel.test.tsx`
 
 预期：FAIL。当前组件缺少 `workspace` 时不发请求，也没有"项目范围"下拉。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 把 `MemoryPanel.tsx` 替换为：
 
@@ -684,13 +684,13 @@ export function MemoryPanel({ userId, initialProject }: MemoryPanelProps) {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/MemoryPanel.test.tsx`
 
 预期：PASS，3 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/MemoryPanel.tsx electron-agent/src/features/agentData/MemoryPanel.test.tsx
@@ -709,7 +709,7 @@ git commit -m "feat(memory): 面板默认全局展示并新增项目筛选器"
 - 修改：`electron-agent/electron/agentData/wikiStore.ts:4`（`WikiScope`）、`:27`（`search`）、`:32`（`overview`）
 - 测试：`electron-agent/electron/agentData/wikiStore.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `wikiStore.test.ts` 的 `describe('WikiStore', ...)` 内追加：
 
@@ -737,13 +737,13 @@ git commit -m "feat(memory): 面板默认全局展示并新增项目筛选器"
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/wikiStore.test.ts`
 
 预期：FAIL。TypeScript 报 `{}` 不满足 `WikiScope`（缺 `workspace`）。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 `wikiStore.ts` 改三处。类型与返回值：
 
@@ -785,7 +785,7 @@ export interface WikiSearchHit { workspace: string; page: string; title: string;
   }
 ```
 
-- [ ] **步骤 4：更新 runtime 与 IPC 的 workspace 可选性**
+- [x] **步骤 4：更新 runtime 与 IPC 的 workspace 可选性**
 
 `runtime.ts` 的 `wikiMethod` 两个只读分支：
 
@@ -828,13 +828,13 @@ export interface WikiSearchResult { workspace: string; page: string; title: stri
   },
 ```
 
-- [ ] **步骤 5：运行测试验证通过**
+- [x] **步骤 5：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/wikiStore.test.ts electron/agentData/runtime.test.ts electron/ipc/register.test.ts src/lib/agentData.test.ts`
 
 预期：PASS。`runtime.test.ts` 里既有的 `wiki.admin.overview` 断言（带 workspace）仍成立；`agentData.test.ts` 里 `agentDataApi.wiki.overview('/w')` 的断言仍是 `{ workspace: '/w' }`。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add electron-agent/electron/agentData/wikiStore.ts electron-agent/electron/agentData/wikiStore.test.ts electron-agent/electron/agentData/runtime.ts electron-agent/electron/ipc/register.ts electron-agent/src/lib/agentData.ts
@@ -849,7 +849,7 @@ git commit -m "feat(wiki): 查询支持全局作用域并返回页面来源项�
 - 修改：`electron-agent/electron/agentData/jobStore.ts`
 - 测试：`electron-agent/electron/agentData/jobStore.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `jobStore.test.ts` 追加：
 
@@ -894,13 +894,13 @@ git commit -m "feat(wiki): 查询支持全局作用域并返回页面来源项�
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/jobStore.test.ts`
 
 预期：FAIL，`store.start is not a function`。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 在 `jobStore.ts` 的 `cancel()` 之后插入：
 
@@ -937,13 +937,13 @@ git commit -m "feat(wiki): 查询支持全局作用域并返回页面来源项�
   }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/jobStore.test.ts`
 
 预期：PASS，4 个用例（原有 1 个 + 新增 3 个）。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/agentData/jobStore.ts electron-agent/electron/agentData/jobStore.test.ts
@@ -958,7 +958,7 @@ git commit -m "feat(jobs): 新增 job 状态推进与并发查询方法"
 - 修改：`electron-agent/electron/pi/systemWorkerManager.ts`
 - 测试：`electron-agent/electron/pi/systemWorkerManager.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `systemWorkerManager.test.ts` 追加：
 
@@ -997,13 +997,13 @@ git commit -m "feat(jobs): 新增 job 状态推进与并发查询方法"
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/pi/systemWorkerManager.test.ts`
 
 预期：FAIL。`wiki_page_generate` 的结果被 `JSON.parse` 拒绝，抛 `system Pi returned invalid JSON`。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 `systemWorkerManager.ts` 顶部（`SystemWorkerTask` 之后）加一个 kind 白名单和 prompt 表：
 
@@ -1063,13 +1063,13 @@ function parseWorkerOutput(value: unknown, kind?: string): unknown {
       const value = parseWorkerOutput(event.messages, this.currentKind);
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/pi/systemWorkerManager.test.ts`
 
 预期：PASS，5 个用例（原有 3 个 + 新增 2 个）全部通过。
 
-- [ ] **步骤 5：注册任务定义**
+- [x] **步骤 5：注册任务定义**
 
 `electron/app/appServer/serviceTaskRegistry.ts` 的 `BUILTIN_SERVICE_TASKS` 追加一条（Wiki 页面生成可能比记忆抽取慢，超时给 60 秒）：
 
@@ -1079,13 +1079,13 @@ function parseWorkerOutput(value: unknown, kind?: string): unknown {
 
 注意 `outputSchema` 不能用 `anyObject`：这个 kind 的输出是字符串，`z.record` 会校验失败。
 
-- [ ] **步骤 6：运行测试验证注册表通过**
+- [x] **步骤 6：运行测试验证注册表通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/appServer/serviceTaskRegistry.test.ts electron/app/appServer/taskQueue.test.ts`
 
 预期：PASS，既有注册表测试不回归。
 
-- [ ] **步骤 7：Commit**
+- [x] **步骤 7：Commit**
 
 ```bash
 git add electron-agent/electron/pi/systemWorkerManager.ts electron-agent/electron/pi/systemWorkerManager.test.ts electron-agent/electron/app/appServer/serviceTaskRegistry.ts
@@ -1102,7 +1102,7 @@ git commit -m "feat(worker): 新增 wiki_page_generate 文本输出任务 kind"
 - 创建：`electron-agent/electron/app/wikiSyncService.ts`
 - 测试：`electron-agent/electron/app/wikiSyncService.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `electron-agent/electron/app/wikiSyncService.test.ts`：
 
@@ -1216,13 +1216,13 @@ describe('scanWorkspaceMarkdown', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/app/wikiSyncService.test.ts`
 
 预期：FAIL，模块 `./wikiSyncService` 不存在。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 创建 `electron-agent/electron/app/wikiSyncService.ts`：
 
@@ -1318,13 +1318,13 @@ function titleFromPage(page: string): string {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/wikiSyncService.test.ts`
 
 预期：PASS，5 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/app/wikiSyncService.ts electron-agent/electron/app/wikiSyncService.test.ts
@@ -1340,7 +1340,7 @@ git commit -m "feat(wiki): 新增同步编排器，逐页生成并推进 job"
 - 修改：`electron-agent/electron/main.ts`（装配）
 - 测试：`electron-agent/electron/agentData/runtime.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `runtime.test.ts` 追加：
 
@@ -1405,13 +1405,13 @@ git commit -m "feat(wiki): 新增同步编排器，逐页生成并推进 job"
 import { describe, expect, it, vi } from 'vitest';
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/runtime.test.ts -t "registered runner"`
 
 预期：FAIL。`jobRunners` 不是合法选项（TypeScript 报错），且 `started` 始终为空。
 
-- [ ] **步骤 3：实现 runtime 接线**
+- [x] **步骤 3：实现 runtime 接线**
 
 `runtime.ts` 的选项接口新增：
 
@@ -1458,13 +1458,13 @@ export interface AgentDataRuntimeOptions {
     };
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/runtime.test.ts`
 
 预期：PASS。既有 `filters admin jobs by requested state` 用例（`kind: 'wiki-sync'`，注意是连字符不是点号，不会命中 runner）不受影响。
 
-- [ ] **步骤 5：在 main.ts 装配**
+- [x] **步骤 5：在 main.ts 装配**
 
 `main.ts` 里 `agentData = new AgentDataService({...})` 之前先声明一个可变引用（因为编排器要用到 `agentData.request`，而 `agentData` 此时还没构造完，用惰性读取打破循环）：
 
@@ -1509,7 +1509,7 @@ import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./a
       },
 ```
 
-- [ ] **步骤 6：补 runtime 的 job 状态推进 RPC**
+- [x] **步骤 6：补 runtime 的 job 状态推进 RPC**
 
 上一步的编排器通过 RPC 推进 job 状态，需要在 `runtime.ts` 的 `adminMethod` 里暴露这四个方法：
 
@@ -1522,7 +1522,7 @@ import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./a
 
 这四个方法加上上一步的 `admin.jobs.markCancelled` 只在主进程内部使用，不注册对应的 Electron IPC 命令（渲染层不应该能直接改 job 状态）。
 
-- [ ] **步骤 7：运行测试与构建验证**
+- [x] **步骤 7：运行测试与构建验证**
 
 运行：
 
@@ -1534,7 +1534,7 @@ npm run build
 
 预期：测试全部 PASS；`npm run build`（`tsc -p tsconfig.json && electron-vite build`）退出码 0。第三方依赖的 `use client` 警告可以出现，但不能有 TypeScript 错误。
 
-- [ ] **步骤 8：Commit**
+- [x] **步骤 8：Commit**
 
 ```bash
 git add electron-agent/electron/agentData/runtime.ts electron-agent/electron/agentData/runtime.test.ts electron-agent/electron/main.ts
@@ -1547,7 +1547,7 @@ git commit -m "feat(wiki): 创建 wiki.sync job 即派发执行器"
 - 修改：`electron-agent/src/features/agentData/WikiPanel.tsx`
 - 测试：`electron-agent/src/features/agentData/WikiPanel.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 把 `WikiPanel.test.tsx` 整体替换为：
 
@@ -1603,13 +1603,13 @@ describe('WikiPanel', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/WikiPanel.test.tsx`
 
 预期：FAIL。当前组件缺 `workspace` 时显示"未绑定工作区"，也没有项目筛选器和来源列。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 把 `WikiPanel.tsx` 替换为：
 
@@ -1700,13 +1700,13 @@ export function WikiPanel({ initialProject, onJobCreated }: WikiPanelProps) {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/WikiPanel.test.tsx`
 
 预期：PASS，3 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/WikiPanel.tsx electron-agent/src/features/agentData/WikiPanel.test.tsx
@@ -1725,7 +1725,7 @@ git commit -m "feat(wiki): 面板默认全局展示并新增项目筛选器"
 - 创建：`electron-agent/electron/app/codeGraph/indexProbe.ts`
 - 测试：`electron-agent/electron/app/codeGraph/indexProbe.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `electron-agent/electron/app/codeGraph/indexProbe.test.ts`：
 
@@ -1768,13 +1768,13 @@ describe('CodeGraph index probe', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/indexProbe.test.ts`
 
 预期：FAIL，模块 `./indexProbe` 不存在。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 创建 `electron-agent/electron/app/codeGraph/indexProbe.ts`：
 
@@ -1802,13 +1802,13 @@ export function probeProjects(workspaces: string[]): ProjectIndexState[] {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/indexProbe.test.ts`
 
 预期：PASS，3 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/app/codeGraph/indexProbe.ts electron-agent/electron/app/codeGraph/indexProbe.test.ts
@@ -1823,7 +1823,7 @@ git commit -m "feat(codegraph): 新增索引状态探测"
 - 创建：`electron-agent/electron/app/codeGraph/syncRunner.ts`
 - 测试：`electron-agent/electron/app/codeGraph/syncRunner.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `electron-agent/electron/app/codeGraph/syncRunner.test.ts`：
 
@@ -1903,13 +1903,13 @@ describe('CodeGraphSyncRunner', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/syncRunner.test.ts`
 
 预期：FAIL，模块 `./syncRunner` 不存在。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 创建 `electron-agent/electron/app/codeGraph/syncRunner.ts`：
 
@@ -1986,13 +1986,13 @@ export class CodeGraphSyncRunner {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/syncRunner.test.ts`
 
 预期：PASS，5 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/electron/app/codeGraph/syncRunner.ts electron-agent/electron/app/codeGraph/syncRunner.test.ts
@@ -2010,7 +2010,7 @@ git commit -m "feat(codegraph): 新增同步执行器，支持 init/sync 与取�
 - 创建：`electron-agent/electron/app/codeGraph/instancePool.ts`
 - 测试：`electron-agent/electron/app/codeGraph/instancePool.test.ts`
 
-- [ ] **步骤 1：添加依赖**
+- [x] **步骤 1：添加依赖**
 
 运行：
 
@@ -2021,7 +2021,7 @@ npm install --save @modelcontextprotocol/sdk@^1.29.0
 
 预期：`package.json` 的 `dependencies` 新增 `"@modelcontextprotocol/sdk": "^1.29.0"`，安装成功退出码 0。
 
-- [ ] **步骤 2：编写失败的测试**
+- [x] **步骤 2：编写失败的测试**
 
 创建 `electron-agent/electron/app/codeGraph/instancePool.test.ts`（用注入的 connect 假实现，不真的 spawn）：
 
@@ -2113,13 +2113,13 @@ describe('CodeGraphInstancePool', () => {
 });
 ```
 
-- [ ] **步骤 3：运行测试验证失败**
+- [x] **步骤 3：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/instancePool.test.ts`
 
 预期：FAIL，模块 `./instancePool` 不存在。
 
-- [ ] **步骤 4：编写实现**
+- [x] **步骤 4：编写实现**
 
 创建 `electron-agent/electron/app/codeGraph/instancePool.ts`：
 
@@ -2228,13 +2228,13 @@ async function connectCodeGraphMcp(workspace: string): Promise<CodeGraphConnecti
 }
 ```
 
-- [ ] **步骤 5：运行测试验证通过**
+- [x] **步骤 5：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run electron/app/codeGraph/instancePool.test.ts`
 
 预期：PASS，6 个用例通过。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add electron-agent/package.json electron-agent/package-lock.json electron-agent/electron/app/codeGraph/instancePool.ts electron-agent/electron/app/codeGraph/instancePool.test.ts
@@ -2253,7 +2253,7 @@ git commit -m "feat(codegraph): 新增 MCP 实例池，惰性加载并空闲超�
 - 修改：`electron-agent/electron/main.ts`
 - 测试：`electron-agent/electron/agentData/runtime.test.ts`、`electron-agent/electron/ipc/register.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `runtime.test.ts` 追加：
 
@@ -2302,13 +2302,13 @@ git commit -m "feat(codegraph): 新增 MCP 实例池，惰性加载并空闲超�
 
 在 `commandCoverage.test.ts` 的 `expectedCommands` 数组里追加 `'agentData_code_projects'`。
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run electron/agentData/runtime.test.ts electron/ipc/register.test.ts electron/ipc/commandCoverage.test.ts`
 
 预期：FAIL。`codeRetrieval` 不是合法选项；`codeRetrieval.admin.projects` 与 `agentData_code_projects` 都不存在。
 
-- [ ] **步骤 3：实现 CodeGraphService**
+- [x] **步骤 3：实现 CodeGraphService**
 
 创建 `electron-agent/electron/app/codeGraph/codeGraphService.ts`：
 
@@ -2426,7 +2426,7 @@ function toHit(item: Record<string, unknown>): CodeSearchHit {
 }
 ```
 
-- [ ] **步骤 4：实现 runtime 接线**
+- [x] **步骤 4：实现 runtime 接线**
 
 `runtime.ts` 选项新增：
 
@@ -2457,7 +2457,7 @@ export interface AgentDataCodeRetrievalProvider {
     };
 ```
 
-- [ ] **步骤 5：实现 IPC 与渲染层 API**
+- [x] **步骤 5：实现 IPC 与渲染层 API**
 
 `register.ts` 新增命令：
 
@@ -2477,7 +2477,7 @@ export interface CodeGraphProject { workspace: string; indexed: boolean }
     projects: () => invoke<CodeGraphProject[]>('agentData_code_projects'),
 ```
 
-- [ ] **步骤 6：在 main.ts 装配**
+- [x] **步骤 6：在 main.ts 装配**
 
 `main.ts` 顶部 import：
 
@@ -2537,7 +2537,7 @@ import { CodeGraphService } from "./app/codeGraph/codeGraphService";
       void codeGraph.close();
 ```
 
-- [ ] **步骤 7：运行测试与构建验证**
+- [x] **步骤 7：运行测试与构建验证**
 
 运行：
 
@@ -2549,7 +2549,7 @@ npm run build
 
 预期：全部 PASS，构建退出码 0。
 
-- [ ] **步骤 8：Commit**
+- [x] **步骤 8：Commit**
 
 ```bash
 git add electron-agent/electron/app/codeGraph/codeGraphService.ts electron-agent/electron/agentData/runtime.ts electron-agent/electron/agentData/runtime.test.ts electron-agent/electron/ipc electron-agent/src/lib/agentData.ts electron-agent/electron/main.ts
@@ -2564,7 +2564,7 @@ git commit -m "feat(codegraph): 接入真实索引状态、检索与同步执行
 - 修改：`electron-agent/src/features/agentData/CodeRetrievalPanel.tsx`
 - 测试：`electron-agent/src/features/agentData/CodeRetrievalPanel.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 把 `CodeRetrievalPanel.test.tsx` 整体替换为：
 
@@ -2636,13 +2636,13 @@ describe('CodeRetrievalPanel', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/CodeRetrievalPanel.test.tsx`
 
 预期：FAIL。当前组件没有项目选择器，也没有 `code.projects` 调用。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 把 `CodeRetrievalPanel.tsx` 替换为：
 
@@ -2743,13 +2743,13 @@ export function CodeRetrievalPanel({ initialProject, onJobCreated }: CodeRetriev
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/CodeRetrievalPanel.test.tsx`
 
 预期：PASS，4 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/CodeRetrievalPanel.tsx electron-agent/src/features/agentData/CodeRetrievalPanel.test.tsx
@@ -2768,7 +2768,7 @@ git commit -m "feat(codegraph): 面板改为强制项目选择器并支持为未
 - 修改：`electron-agent/src/features/agentData/AgentDataCenter.tsx`
 - 测试：`electron-agent/src/features/agentData/AgentDataCenter.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 把 `AgentDataCenter.test.tsx` 整体替换为：
 
@@ -2837,13 +2837,13 @@ describe('AgentDataCenter', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/AgentDataCenter.test.tsx`
 
 预期：FAIL。当前组件缺 `workspace` 时把三个 overview 置为 null，且 `initialProject` 不是它的 prop。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 修改 `AgentDataCenter.tsx`。props 与状态：
 
@@ -2919,13 +2919,13 @@ function Overview({ status, jobs, memory, wiki }: { status: AgentDataStatus | nu
 
 同时移除文件顶部不再使用的 `CodeGraphStatus` 类型 import。
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/AgentDataCenter.test.tsx`
 
 预期：PASS，4 个用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/AgentDataCenter.tsx electron-agent/src/features/agentData/AgentDataCenter.test.tsx
@@ -2940,7 +2940,7 @@ git commit -m "feat(agent-data): 概览默认全局并与对话切换解耦"
 - 修改：`electron-agent/src/features/workspace/ModuleContainer.tsx:24`
 - 测试：`electron-agent/src/features/workspace/ModuleContainer.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 `ModuleContainer.test.tsx` 里把 mock 与断言换成新 prop 名：
 
@@ -2956,13 +2956,13 @@ vi.mock('../agentData/AgentDataCenter', () => ({ AgentDataCenter: ({ userId, ini
   });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/workspace/ModuleContainer.test.tsx`
 
 预期：FAIL，渲染出 `AGENT_DATA:local:`（`initialProject` 为 undefined，因为组件仍传 `workspace`）。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 `ModuleContainer.tsx` 的 `agentData` 分支：
 
@@ -2972,13 +2972,13 @@ vi.mock('../agentData/AgentDataCenter', () => ({ AgentDataCenter: ({ userId, ini
       return <AgentDataCenter userId="local" initialProject={workspace || undefined} />;
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/workspace/ModuleContainer.test.tsx`
 
 预期：PASS，全部用例通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/workspace/ModuleContainer.tsx electron-agent/src/features/workspace/ModuleContainer.test.tsx
@@ -2994,7 +2994,7 @@ git commit -m "refactor(agent-data): workspace 传参语义改为筛选器初始
 - 修改：`electron-agent/src/features/agentData/AgentDataCenter.tsx`（去掉 `onCreate`/`workspace` 传参）
 - 测试：`electron-agent/src/features/agentData/JobsPanel.test.tsx`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 把 `JobsPanel.test.tsx` 整体替换为：
 
@@ -3051,13 +3051,13 @@ describe('JobsPanel', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/JobsPanel.test.tsx`
 
 预期：FAIL。取消按钮的 accessible name 是 `取消`（含图标），`onCreate` 分支仍在类型里。
 
-- [ ] **步骤 3：编写实现**
+- [x] **步骤 3：编写实现**
 
 `JobsPanel.tsx` 的 props 去掉 `workspace` 与 `onCreate`：
 
@@ -3078,13 +3078,13 @@ export function JobsPanel({ jobs: inputJobs, onRefresh }: JobsPanelProps) {
         {tab === 'jobs' && !loading ? <JobsPanel jobs={jobs} onRefresh={refresh} /> : null}
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run src/features/agentData/JobsPanel.test.tsx src/features/agentData/AgentDataCenter.test.tsx`
 
 预期：PASS，两个测试文件全部通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add electron-agent/src/features/agentData/JobsPanel.tsx electron-agent/src/features/agentData/JobsPanel.test.tsx electron-agent/src/features/agentData/AgentDataCenter.tsx
@@ -3093,7 +3093,7 @@ git commit -m "refactor(jobs): 任务面板收敛为列表与取消，创建入�
 
 ### 任务 21：全量验证
 
-- [ ] **步骤 1：运行 electron-agent 全量测试**
+- [x] **步骤 1：运行 electron-agent 全量测试**
 
 运行：
 
@@ -3104,7 +3104,7 @@ npx vitest run
 
 预期：全部 PASS。已知例外：`electron/agentData/memoryStore.test.ts` 的 `stores project and global scope metadata and filters across projects` 用例是既有 flaky（同毫秒时间戳下 `ORDER BY updated_at DESC` 排序不稳定），与本次改动无关；若失败请重跑该文件确认，不要为它改生产代码。
 
-- [ ] **步骤 2：运行 extensions 测试确认未被波及**
+- [x] **步骤 2：运行 extensions 测试确认未被波及**
 
 运行：
 
@@ -3115,7 +3115,7 @@ npx vitest run
 
 预期：全部 PASS。本计划没有修改任何扩展代码（Wiki 同步走主进程编排器，不碰 `extensions/wiki-rag`），此步只为确认没有意外破坏。
 
-- [ ] **步骤 3：构建验证**
+- [x] **步骤 3：构建验证**
 
 运行：
 
@@ -3126,7 +3126,7 @@ npm run build
 
 预期：`tsc -p tsconfig.json` 与 `electron-vite build` 均退出码 0。第三方依赖的 `use client` 警告可以出现，但不能有 TypeScript 错误。
 
-- [ ] **步骤 4：人工验收清单**
+- [x] **步骤 4：人工验收清单**
 
 启动应用（`cd electron-agent; npm run dev`），逐项确认：
 
@@ -3137,7 +3137,7 @@ npm run build
 5. Code tab 不选项目时显示"请选择一个项目"；选一个未索引的项目显示"该项目尚未建立 CodeGraph 索引"并可点"同步索引"；同步完成后该项目变为可检索。
 6. 任务 tab 对一个 running 的 job 点"取消" → 状态变为已取消，且后台进程真的停止（同步不再继续推进进度）。
 
-- [ ] **步骤 5：Commit（若人工验收发现需要修补）**
+- [x] **步骤 5：Commit（若人工验收发现需要修补）**
 
 ```bash
 git add -A electron-agent

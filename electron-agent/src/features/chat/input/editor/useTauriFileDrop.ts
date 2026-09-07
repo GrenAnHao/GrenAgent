@@ -103,7 +103,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * 监听 Tauri 的原生文件拖放（默认 dragDropEnabled，给到的是绝对路径）。
+ * 监听 Electron preload 转发的拖放事件，文件以绝对路径传入。
  * 落在输入区内才处理：工作区内图片读成附件，文本文件读内容作为「文件块」chip（像粘贴长文本，
  * 发送时展开拼进消息），目录 / 工作区外 / 二进制 / 读失败回退为 `@` 引用 pill。
  * 应用内拖拽（从消息里拖选区文本 / 拖图片）也在此处理：dragstart 截存内容，drop 时插入。
@@ -111,17 +111,16 @@ function blobToBase64(blob: Blob): Promise<string> {
 export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPastedText }: Options) {
   const [dragOver, setDragOver] = useState(false);
   const [dragKind, setDragKind] = useState<DragKind>('file');
-  // 应用内拖拽的选区文本：原生 dragDrop 拦截了 OS 拖放、Windows 下 HTML5 drop 被抑制，且 Tauri 的
-  // drop 事件只回传文件路径不含文本。故在 dragstart 时把选区文本截存，Tauri 'drop' 落在输入区且
-  // 无文件路径时再插入——让「从消息里拖一段文字进输入框」可用。
+  // dragstart 暂存应用内选区，外部应用拖入的文本则由 preload 从 DataTransfer 读取。
   const dragTextRef = useRef('');
   // 应用内拖拽的图片（消息里的生成图等）：dragstart 截存其 src，drop 落在输入区且无文件路径时转成附件。
   const dragImageRef = useRef<{ src: string; name: string } | null>(null);
+  const dragFromEditorRef = useRef(false);
 
   useEffect(() => {
-    let clearTimer: ReturnType<typeof setTimeout> | undefined;
     const onDragStart = (e: DragEvent) => {
-      if (clearTimer) clearTimeout(clearTimer);
+      const root = editor.getLexicalEditor()?.getRootElement();
+      dragFromEditorRef.current = e.target instanceof Node && Boolean(root?.contains(e.target));
       const image = pickDraggedImage(e.target);
       if (image) {
         // 拖的是图片（如消息里的生成图）：优先按图片处理，忽略遗留选区。
@@ -132,24 +131,19 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
         dragTextRef.current = window.getSelection()?.toString() ?? '';
       }
     };
-    // DOM 的 dragend 与 Tauri 的 'drop' 是两条独立管道：松手时 dragend（同步）通常先于经 IPC
-    // 来的 Tauri drop 触发。若在此立即清空暂存内容，drop 读到的就是空、插不进输入框。
-    // 故延后清空，让 drop 先取走（drop 用完会自行清空）；拖拽取消（无 drop）时这里兜底清理。
+    // preload 同步转发 drop；dragend 到来时已处理完，可直接清除取消拖放留下的内容。
     const onDragEnd = () => {
-      if (clearTimer) clearTimeout(clearTimer);
-      clearTimer = setTimeout(() => {
-        dragTextRef.current = '';
-        dragImageRef.current = null;
-      }, 300);
+      dragTextRef.current = '';
+      dragImageRef.current = null;
+      dragFromEditorRef.current = false;
     };
     document.addEventListener('dragstart', onDragStart, true);
     document.addEventListener('dragend', onDragEnd, true);
     return () => {
-      if (clearTimer) clearTimeout(clearTimer);
       document.removeEventListener('dragstart', onDragStart, true);
       document.removeEventListener('dragend', onDragEnd, true);
     };
-  }, []);
+  }, [editor]);
 
   useEffect(() => {
     let active = true;
@@ -278,13 +272,17 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
+        if (!active) return false;
         const payload = event.payload;
         if (payload.type === 'over') {
-          const over = isOver(payload.position);
+          const hasFiles = payload.types?.includes('Files');
+          const hasText = dragTextRef.current || payload.types?.includes('text/plain');
+          const hasImage = dragImageRef.current;
+          const supported = hasFiles || hasText || hasImage || !payload.types;
+          const over = !dragFromEditorRef.current && Boolean(supported) && isOver(payload.position);
           setDragOver(over);
-          // dragstart 已截下选区文本 / 图片 → 据此切换提示文案。
-          if (over) setDragKind(dragTextRef.current ? 'text' : dragImageRef.current ? 'image' : 'file');
-          return;
+          if (over) setDragKind(hasFiles ? 'file' : hasImage ? 'image' : hasText ? 'text' : 'file');
+          return over;
         }
         if (payload.type === 'leave') {
           setDragOver(false);
@@ -293,18 +291,22 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
         if (payload.type === 'drop') {
           const over = isOver(payload.position);
           setDragOver(false);
-          const text = dragTextRef.current;
           const image = dragImageRef.current;
+          const text = dragTextRef.current || (image ? '' : payload.text ?? '');
+          const fromEditor = dragFromEditorRef.current;
           dragTextRef.current = '';
           dragImageRef.current = null;
-          if (!over) return;
+          dragFromEditorRef.current = false;
+          // 输入框内部的文字移动由编辑器按落点处理，不能当作外部内容再插入。
+          if (!over || fromEditor) return false;
           // 应用内拖拽：有选区文本插文本，有图片插图片；否则按文件拖放（含原生文件）处理。
           if (payload.paths.length === 0) {
             if (text) insertDroppedText(text);
             else if (image) void insertDroppedImage(image);
-            return;
+            return Boolean(text || image);
           }
           void handleDrop(payload.paths);
+          return true;
         }
       })
       .then((u) => {

@@ -39,3 +39,24 @@ test("Electron allowed ids only filter managed plugins", () => {
   ];
   assert.deepEqual(filterManagedExtensions(extensions, '["goal"]'), [extensions[0], extensions[1]]);
 });
+
+test("Electron allowed ids retain auto-title without enabling other unmanaged extensions", () => {
+  const extensions = [
+    { name: "safety" },
+    { name: "auto-title" },
+    { name: "goal", manifest: { id: "goal" } },
+    { name: "mcp", manifest: { id: "mcp" } },
+    { name: "code-exec" },
+  ];
+  assert.deepEqual(filterManagedExtensions(extensions, '["goal"]'), extensions.slice(0, 3));
+});
+
+test("Electron empty allowed ids retain only safety and auto-title", () => {
+  const extensions = [
+    { name: "safety" },
+    { name: "auto-title" },
+    { name: "goal", manifest: { id: "goal" } },
+    { name: "code-exec" },
+  ];
+  assert.deepEqual(filterManagedExtensions(extensions, '[]'), extensions.slice(0, 2));
+});

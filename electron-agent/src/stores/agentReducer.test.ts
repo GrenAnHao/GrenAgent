@@ -9,47 +9,12 @@ import {
   type ChatMessage,
 } from './agentReducer';
 import type { AgentEvent } from '../lib/pi';
-import type { AppEvent } from '../lib/pi';
 
 function text(msg: ChatMessage): string {
   return msg.kind === 'assistant' || msg.kind === 'user' ? msg.text : '';
 }
 
 describe('applyEvent', () => {
-  it('rebuilds assistant, tool and permission state from AppEvent items', () => {
-    const appEvent = (type: AppEvent['type'], data: unknown, itemId?: string): AppEvent => ({
-      id: `${type}-${itemId ?? 'turn'}`,
-      type,
-      sequence: 1,
-      timestamp: 1,
-      projectId: '.',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      itemId,
-      data,
-    });
-    let s = initialAgentState();
-    s = applyEvent(s, appEvent('turn.started', {}));
-    s = applyEvent(s, appEvent('item.created', { message: { id: 'assistant-1', role: 'assistant' } }, 'assistant-1'));
-    s = applyEvent(s, appEvent('item.delta', { assistantMessageEvent: { type: 'thinking_delta', delta: 'think' } }, 'assistant-1'));
-    s = applyEvent(s, appEvent('item.delta', { assistantMessageEvent: { type: 'text_delta', delta: 'hello' } }, 'assistant-1'));
-    s = applyEvent(s, appEvent('item.created', { toolCallId: 'tool-1', toolName: 'read', args: { path: 'a.ts' } }, 'tool-1'));
-    s = applyEvent(s, appEvent('item.updated', { toolCallId: 'tool-1', result: { ok: true }, isError: false }, 'tool-1'));
-    s = applyEvent(s, appEvent('permission.requested', { request: { id: 'permission-1', operation: { kind: 'process.exec', workspace: '.' }, profile: 'interactive', createdAt: 1, status: 'blocked' } }));
-
-    expect(s.isStreaming).toBe(true);
-    expect(s.messages).toEqual([
-      expect.objectContaining({ kind: 'assistant', id: 'assistant-1', text: 'hello', thinking: 'think', streaming: true }),
-      expect.objectContaining({ kind: 'tool', toolCallId: 'tool-1', status: 'done', result: { ok: true } }),
-    ]);
-    expect(s.pendingPermissions).toHaveProperty('permission-1');
-
-    s = applyEvent(s, appEvent('permission.resolved', { requestId: 'permission-1', resolution: 'allow' }));
-    s = applyEvent(s, appEvent('turn.completed', {}));
-    expect(s.pendingPermissions).not.toHaveProperty('permission-1');
-    expect(s.isStreaming).toBe(false);
-  });
-
   it('starts streaming assistant message on message_start', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
@@ -383,6 +348,32 @@ describe('applyEvent', () => {
     expect(last.kind === 'assistant' ? last.thinking : '').toBe('Let me think.');
     expect(text(last)).toBe('Hi');
     expect(last.kind === 'assistant' && last.streaming).toBe(false);
+  });
+
+  it('message_update 无 message 快照时按 delta 累积 thinking 与 text（pi 流式事件不带 message）', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);
+    // pi 真实的流式增量事件只带 assistantMessageEvent、不带 message 快照（实测 2532/2532 条
+    // message_update 均无 message 字段）。直接读 ev.message 会抛 TypeError：修复前会中断整个
+    // flush 批次（观感「卡在第一个字」），被 try/catch 兜住后又完全无法累积（观感「结果直出」）。
+    // 这里锁住「无快照也必须能逐 token 累积」这一行为。
+    for (const delta of ['The', ' user', ' asks.']) {
+      s = applyEvent(s, {
+        type: 'message_update',
+        assistantMessageEvent: { type: 'thinking_delta', delta },
+      } as AgentEvent);
+    }
+    const thinkingMsg = s.messages.at(-1)!;
+    expect(thinkingMsg.kind === 'assistant' ? thinkingMsg.thinking : '').toBe('The user asks.');
+
+    // 正文同样需要 text_delta 累积：快照缺失时 text 恒为空，否则正文也会「直出」
+    for (const delta of ['答案', '内容']) {
+      s = applyEvent(s, {
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta },
+      } as AgentEvent);
+    }
+    expect(text(s.messages.at(-1)!)).toBe('答案内容');
   });
 
   it('message_end finalizes streaming assistant text', () => {

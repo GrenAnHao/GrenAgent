@@ -32,7 +32,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 - **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。
 - **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）由主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`，统一 `gren:event:` 前缀）。
-- **执行**：主进程按工作区维持一个 sidecar 进程，以 RPC 模式（`--mode rpc`，stdio JSONL）驱动，sidecar 内运行 Pi Agent 与全部内置扩展。
+- **执行**：主进程按工作区维持一个 sidecar 进程，以 RPC 模式（`--mode rpc`，stdio JSONL）驱动。sidecar 按 profile 和 Electron 托管插件白名单加载内置扩展。
 - **隔离**：业务代码只依赖 `src/platform/runtime.ts` 定义的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时自动降级为浏览器预览实现。
 
 ## 模块职责
@@ -52,7 +52,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。权威清单是 `extensions/index.ts` 的 `allExtensions`，由 sidecar 的 `extensionFactories` 一并编译进 `binaries/pi`。`extensions/package.json` 的 `pi.extensions` 字段仅用于独立安装时的元数据，与 sidecar 实际加载列表可能不一致。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义编译进 sidecar 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。系统 worker 加载零扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -74,7 +74,9 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
 | `fable-behavior` | Fable 5 + coding-agent 行为层（Tier 注入 + 子 agent 种子 + `fable_behavior_ref`） | `fable_behavior_ref` |
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
-| `tencentdb-memory` | TencentDB 长期记忆与会话捕获，支持本机托管和远程 Gateway | `tdai_memory_search`、`tdai_conversation_search` |
+| `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
+| `wiki-rag` | Markdown Wiki 生成、读取与无模型索引重建 | `wiki_search`、`wiki_update`、`wiki_read`、`wiki_list`、`wiki_reindex` |
+| `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files` |
 | `session-memory` | 会话结构化工作状态，压缩后重锚 | `/session-state` |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms`、`fetch_html`、`fetch_markdown`、`fetch_txt`、`fetch_json` |
 | `web-search` | 多引擎联网搜索与站点 / GitHub 抓取 | `web_search`、`web_search_multi`、`fetch_web_content` |
@@ -120,12 +122,22 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。启动后在 `127.0.0.1` 随机端口提供 JSONL RPC（`randomBytes(32)` token 鉴权），数据落在 `<应用数据目录>/agent-data.db`（`node:sqlite`）：
 
-- `memoryStore`：L0-L3 分级记忆，fingerprint 去重与增量 capture / commit。
-- `wikiStore`：Markdown 按标题切块，`wiki_pages` 加 FTS5 `wiki_fts` 全文检索。
+- `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
+- `wikiStore` / `wikiFiles`：Markdown 文件保存正文及来源快照，`wiki_documents` 保存衍生元数据，`wiki_fts` 提供全文检索；原 `wiki_pages` 留作兼容迁移来源。读取正文走文件，重建索引不调用模型。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
-- 代码检索（CodeGraph）目前为占位实现，`codeRetrieval.status` 返回未连接。
+- 代码检索通过主进程 `CodeGraphService` / `CodeGraphEngine` 内置的 CodeGraph 1.6.0 SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。`codeRetrieval.call` 仅允许七种只读工具，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
+- `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立/同步才写索引，不启用 SDK watcher；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
+- SDK 是固定版本的应用依赖，保留 Rust 内核与 WASM 语法。`asarUnpack` 解出 SDK，`scripts/package-codegraph.cjs` 补齐平台包自带且被 builder 过滤的 `lib/node_modules`；加载器使用物理解包路径保证 worker、WASM 和原生模块可访问。没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
+
+#### 会话 Goal
+
+Goal 的实时归属键是 Pi 提供的真实 `sessionId`，不是工作区或前端标签页。`goal_snapshots`、`goal_events` 和轮次 lease 由 Agent Data Runtime 事务化保存，`goalId + revision` 是所有修改、续跑和裁判结果的 CAS 版本；渲染层与扩展只保存按会话索引的投影。`GoalCoordinator` 负责独立 Goal worker 的续跑和 `goal_judge` 验收，只有裁判明确通过才进入 `complete`，裁判不可用或结果无法持久化时保持未完成并记录停止原因。
+
+Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。重启、历史恢复和 fork 会保留快照与审计，但默认 `disarmed`，必须由用户显式恢复。旧 JSONL 中的 Goal custom entry 只读迁移为 `source=legacy` 的 `disarmed` 快照，追加 `legacy_goal_restored` 审计事件，不改写原始会话文件；当前分支以外的旧分支不会被迁移。
 
 运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入每个 pi 子进程，sidecar 可反向调用记忆与 Wiki 能力。
+
+记忆提炼与 Wiki 批量生成共用 `TaskQueue` 的系统任务通道。`SystemWorkerManager` 为每项任务重置会话，避免跨项目共享上下文。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
 部分命令直接读取本地数据，不经过 sidecar，例如 `usageService` 扫描会话 jsonl 聚合用量。
 
@@ -172,6 +184,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | --- | --- |
 | 会话记录 | `~/.pi/agent/sessions/*.jsonl` |
 | Agent Data（记忆 / Wiki / 任务与审计） | `<应用数据目录>/agent-data.db`（Electron 主进程托管） |
+| Wiki 正文与来源快照 | `<应用数据目录>/wiki/<工作区哈希>/wiki/` 与同级 `raw/sources/`，参见 [Wiki 使用说明](./agent-data-wiki.md) |
 | 生成的图片 | `<工作区>/.pi/images/` |
 | 合成的音频 | `<工作区>/.pi/audio/` |
 | TencentDB 本地运行时数据（历史） | `<应用数据目录>/tencentdb-memory/`（MemoryCore、MemoryKnowledge，Tauri 版） |

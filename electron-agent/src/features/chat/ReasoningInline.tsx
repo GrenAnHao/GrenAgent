@@ -67,8 +67,12 @@ function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlin
     if (!streaming) return;
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    const over = el.scrollHeight > el.clientHeight + 1;
+    // 先集中读取、再统一写入。写入 scrollTop 会让布局失效，之后再读 scrollHeight /
+    // clientHeight 就会触发强制同步布局（layout thrashing）；流式期间本 effect 每帧都跑，
+    // 读写交错会把它放大成持续开销。这里只读一次布局、只写一次，语义与原先等价。
+    const { scrollHeight, clientHeight } = el;
+    const over = scrollHeight > clientHeight + 1;
+    el.scrollTop = scrollHeight;
     setOverflowing((prev) => (prev === over ? prev : over));
   }, [streaming, text]);
 
@@ -86,9 +90,18 @@ function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlin
           className={styles.scroll}
           style={overflowing ? { maskImage: TOP_FADE, WebkitMaskImage: TOP_FADE } : undefined}
         >
-          <LazyMarkdown variant="chat" fontSize={13} animated>
+          {/*
+            流式期间用纯文本增量渲染，不走 Markdown / animated：
+            1) Markdown 解析是 O(n)，每个 delta 都重解析整段累积文本 → O(n²)，thinking 越长
+               帧率越低，观感就是「几秒不动然后突然全部出现」（结果直出）；
+            2) lobehub 的 animated 打字机会从当前位置追向 target，delta 快速涌入时直接跳到
+               最新文本，同样看不到逐字增长过程。
+            纯文本只更新一个文本节点（O(1)），能稳定逐字增长；流式结束后再走 Markdown
+            渲染完整格式（见下方 streaming=false 分支）。
+          */}
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} data-testid="reasoning-stream-text">
             {text}
-          </LazyMarkdown>
+          </div>
         </div>
       </div>
     );

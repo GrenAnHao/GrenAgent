@@ -5,6 +5,12 @@ type Schema = { safeParse: (value: unknown) => { success: boolean; data?: unknow
 type RegisteredDefinition = ServiceTaskDefinition & { inputSchema: Schema; outputSchema: Schema };
 
 const anyObject = z.record(z.string(), z.unknown());
+const goalJudgeOutput = z.object({
+  verdict: z.enum(['pass', 'fail']),
+  reason: z.string().min(1).max(4000),
+  missing: z.array(z.string().min(1).max(1000)),
+  blockageFingerprint: z.string().max(400).optional(),
+}).strict().refine((value) => value.verdict !== 'pass' || value.missing.length === 0, 'a passing judge cannot report missing items');
 
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
   { kind: 'memory_extract', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
@@ -13,6 +19,7 @@ export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'context_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'goal_judge', inputSchema: anyObject, outputSchema: goalJudgeOutput, timeoutMs: 60_000, maxAttempts: 1, capabilities: ['llm_completion'] },
   { kind: 'wiki_page_generate', inputSchema: anyObject, outputSchema: z.custom<unknown>(() => true), timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
 ];
 

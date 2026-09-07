@@ -20,7 +20,7 @@ const expectedCommands = [
   'agentData_memory_search', 'agentData_memory_delete', 'agentData_wiki_search',
   'agentData_code_search', 'agentData_code_projects',
   'agentData_goal_get', 'agentData_goal_create', 'agentData_goal_update', 'agentData_goal_history',
-  'agentData_goal_recordProgress', 'agentData_goal_requestCompletion', 'agentData_goal_judgeResult',
+  'agentData_goal_recordProgress', 'agentData_goal_requestCompletion',
   'agentData_code_call', 'agentData_memory_list', 'agentData_memory_read', 'agentData_memory_create', 'agentData_memory_update', 'agentData_memory_conversations_list', 'agentData_memory_conversations_read',
   'agentData_tasks_list', 'agentData_tasks_read', 'agentData_tasks_previewRetry', 'agentData_tasks_retry', 'agentData_audit_query', 'agentData_audit_export', 'agentData_diagnostics_check', 'agentData_diagnostics_open', 'agentData_overview',
   'agentData_wiki_libraries_list', 'agentData_wiki_libraries_read', 'agentData_wiki_libraries_create', 'agentData_wiki_libraries_update',
@@ -48,7 +48,6 @@ describe('Rust handler coverage', () => {
       goalHistory: vi.fn().mockResolvedValue([]),
       goalRecordProgress: vi.fn().mockResolvedValue({}),
       goalRequestCompletion: vi.fn().mockResolvedValue({}),
-      goalJudgeResult: vi.fn().mockResolvedValue({}),
     };
     registerIpcHandlers({ agentData } as any);
     const invoke = electron.ipcMain.handle.mock.calls.find(([channel]) => channel === IPC_CHANNELS.invoke)?.[1];
@@ -62,11 +61,8 @@ describe('Rust handler coverage', () => {
     expect(agentData.goalUpdate).toHaveBeenCalledWith({ sessionId: 's', goalId: 'g', revision: 1, action: 'pause', origin: 'human-ui' });
     await invoke({}, { command: 'agentData_goal_recordProgress', args: { sessionId: 's', goalId: 'g', revision: 1, action: 'pause', payload: { reason: 'progress' } } });
     expect(agentData.goalRecordProgress).toHaveBeenCalledWith({ sessionId: 's', goalId: 'g', revision: 1, action: 'pause', payload: { reason: 'progress' }, origin: 'human-ui' });
-    await invoke({}, { command: 'agentData_goal_judgeResult', args: { sessionId: 's', goalId: 'g', revision: 2, verdict: 'pass', reason: 'done', origin: 'system' } });
-    expect(agentData.goalJudgeResult).toHaveBeenCalledWith({ sessionId: 's', goalId: 'g', revision: 2, verdict: 'pass', reason: 'done' });
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: 'g', revision: 0, action: 'pause' } })).rejects.toThrow(/revision/);
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: 'g', revision: 1, action: 'invalid' } })).rejects.toThrow(/action/);
     await expect(invoke({}, { command: 'agentData_goal_update', args: { sessionId: 's', goalId: '', revision: 1, action: 'pause' } })).rejects.toThrow(/goalId/);
-    await expect(invoke({}, { command: 'agentData_goal_judgeResult', args: { sessionId: 's', goalId: 'g', revision: 2, verdict: 'unknown', reason: 'done' } })).rejects.toThrow(/verdict/);
   });
 });

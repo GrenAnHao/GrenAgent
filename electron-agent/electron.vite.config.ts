@@ -6,8 +6,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: resolve(__dirname, "electron/main.ts"),
-        // Keep node-pty external so its native DLLs stay next to the .node binary.
-        external: ["@homebridge/node-pty-prebuilt-multiarch"],
+        // Preserve native binaries and CodeGraph's relative worker/grammar paths.
+        external: ["@homebridge/node-pty-prebuilt-multiarch", "@colbymchenry/codegraph"],
       },
     },
   },

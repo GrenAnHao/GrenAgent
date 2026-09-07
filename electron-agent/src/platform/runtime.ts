@@ -15,13 +15,16 @@ export interface GrenWindowApi {
 }
 
 export interface GrenWebviewApi {
-  onDragDropEvent(handler: (event: RuntimeEvent<DragDropPayload>) => void): Promise<UnlistenFn>;
+  /** 返回 true 表示已接管拖放，preload 会阻止浏览器/编辑器的默认处理。 */
+  onDragDropEvent(handler: (event: RuntimeEvent<DragDropPayload>) => boolean | void): Promise<UnlistenFn>;
 }
 
 export interface DragDropPayload {
   type: 'over' | 'leave' | 'drop';
   position?: { x: number; y: number };
   paths: string[];
+  types?: string[];
+  text?: string;
 }
 
 export interface GrenRuntimeBridge {

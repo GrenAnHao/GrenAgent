@@ -30,7 +30,7 @@ import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type 
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from './codeRetrievalProtocol';
 import { RequestFrameDecoder } from './requestFrames';
 import { GoalStore } from './goalStore';
-import type { CreateGoalInput, GoalCasUpdate, JudgeResultInput } from './goalContracts';
+import type { CreateGoalInput, GoalCasUpdate, JudgeResultInput, RoundClaimInput, RoundSettlementInput, RoundCancelInput, GoalRuntimeErrorInput, GoalEvent, GoalSnapshot, GoalProgressInput, ForkGoalInput, RecoverLegacyGoalInput } from './goalContracts';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -81,6 +81,8 @@ export class AgentDataRuntime {
   private diagnosticReport?: DiagnosticReport;
   private readonly projectTokens = new Map<string, string>();
   private readonly projectGoalWorkspaces = new Map<string, string>();
+  /** Session capabilities explicitly bound by the trusted main process. */
+  private readonly goalSessionBindings = new Map<string, Map<string, 'interactive' | 'goal'>>();
   private readonly workspaceTokens = new Map<string, string>();
   private readonly closeWaiters: Array<() => void> = [];
   private jobs?: JobStore;
@@ -178,6 +180,14 @@ export class AgentDataRuntime {
   handleStdinEnd(): void { this.close(); }
   isClosed(): boolean { return this.closed; }
   getEndpoint(): AgentDataEndpoint | undefined { return this.endpoint; }
+
+  /** Subscribe to committed Goal events and replay events that were not acknowledged before restart. */
+  onGoalEvent(listener: (event: GoalEvent, snapshot: GoalSnapshot | undefined) => void | boolean | Promise<void | boolean>): () => void {
+    if (!this.goals) throw new Error('agent data runtime is not started');
+    const unsubscribe = this.goals.onPublish((event) => listener(event, this.goals!.getById(event.sessionId, event.goalId)));
+    this.goals.replay();
+    return unsubscribe;
+  }
 
   agentEndpoint(workspace: string): AgentDataEndpoint {
     if (!this.endpoint || this.closed) throw new Error('agent data runtime is not started');
@@ -362,7 +372,7 @@ export class AgentDataRuntime {
     this.server?.close();
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
-    this.projectTokens.clear(); this.projectGoalWorkspaces.clear(); this.workspaceTokens.clear();
+      this.projectTokens.clear(); this.projectGoalWorkspaces.clear(); this.goalSessionBindings.clear(); this.workspaceTokens.clear();
     this.endpoint = undefined;
     this.finishClose();
   }
@@ -423,7 +433,7 @@ export class AgentDataRuntime {
         const workspace = this.projectTokens.get(value.token);
         const projectJobs = workspace ? this.projectJobMethod(value.method, value.params) : undefined;
         const method = value.method.startsWith('goal.')
-          ? (workspace ? this.goalMethod(value.method, { kind: 'project', workspace, resolverWorkspace: this.projectGoalWorkspaces.get(value.token) ?? workspace }) : undefined)
+          ? (workspace ? this.goalMethod(value.method, { kind: 'project', workspace, resolverWorkspace: this.projectGoalWorkspaces.get(value.token) ?? workspace, token: value.token }) : undefined)
           : value.method.startsWith('admin.goal.')
             ? (workspace ? undefined : this.goalMethod(value.method, { kind: 'admin' }))
             : value.method.startsWith('wiki.') ? this.wikiMethod(value.method, this.wikiContext(value.token, value.params))
@@ -602,18 +612,39 @@ export class AgentDataRuntime {
     return undefined;
   }
 
-  private goalMethod(name: string, context: { kind: 'admin' } | { kind: 'project'; workspace: string; resolverWorkspace: string }): AgentDataMethod | undefined {
+  private goalMethod(name: string, context: { kind: 'admin' } | { kind: 'project'; workspace: string; resolverWorkspace: string; token: string }): AgentDataMethod | undefined {
     if (!this.goals) return undefined;
     const project = context.kind === 'project';
     if (project && !name.startsWith('goal.')) throw new RpcError('FORBIDDEN', 'admin Goal methods are application-only');
     if (!project && !name.startsWith('admin.goal.')) return undefined;
     const operation = project ? name.slice('goal.'.length) : name.slice('admin.goal.'.length);
+    if (!project && operation === 'session.bind') return async (p) => {
+      const workspace = readString(p.workspace), sessionId = readString(p.sessionId);
+      const source = p.source === undefined ? 'interactive' : readGoalSessionSource(p.source);
+      const endpoint = this.agentEndpoint(workspace);
+      const bindings = this.goalSessionBindings.get(endpoint.token) ?? new Map<string, 'interactive' | 'goal'>();
+      bindings.set(sessionId, source); this.goalSessionBindings.set(endpoint.token, bindings);
+      return { bound: true, workspace, sessionId, source };
+    };
+    if (!project && operation === 'session.unbind') return async (p) => {
+      const workspace = readString(p.workspace), sessionId = readString(p.sessionId);
+      const token = this.agentEndpoint(workspace).token;
+      const bindings = this.goalSessionBindings.get(token);
+      bindings?.delete(sessionId);
+      if (bindings && bindings.size === 0) this.goalSessionBindings.delete(token);
+      return { bound: false, workspace, sessionId };
+    };
+    if (project && operation === 'judgeResult') return async () => {
+      throw new RpcError('FORBIDDEN', 'judge results are application-only');
+    };
     const allowed = project
-      ? ['get', 'history', 'create', 'update', 'recordProgress', 'requestCompletion', 'judgeResult']
-      : ['get', 'history', 'create', 'update', 'judgeResult'];
+      ? ['get', 'history', 'create', 'update', 'recordProgress', 'requestCompletion']
+      : ['get', 'history', 'create', 'update', 'recoverLegacy', 'judgeResult', 'claimRound', 'settleRound', 'cancelRound', 'runtimeError', 'fork'];
     if (!allowed.includes(operation)) return undefined;
     const authorize = async (sessionId: string): Promise<void> => {
       if (!project) return;
+      const bound = this.goalSessionBindings.get(context.token);
+      if (!bound?.has(sessionId)) throw new RpcError('SESSION_NOT_BOUND', 'session is not bound to this worker');
       if (!this.options.resolveSession || !(await this.options.resolveSession(context.resolverWorkspace, sessionId))) throw new RpcError('FORBIDDEN', 'session is not owned by this workspace');
     };
     if (operation === 'get') return async (p) => {
@@ -624,8 +655,20 @@ export class AgentDataRuntime {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
       return this.goals!.history(sessionId, p.limit === undefined ? undefined : readGoalLimit(p.limit));
     };
+    if (!project && operation === 'recoverLegacy') return async (p) => {
+      const input: RecoverLegacyGoalInput = {
+        sessionId: readString(p.sessionId),
+        workspace: readString(p.workspace),
+        condition: readString(p.condition),
+        react: readLegacyReact(p.react),
+        paused: p.paused === true,
+        ...(p.legacyEntryTimestamp === undefined ? {} : { legacyEntryTimestamp: readLegacyTimestamp(p.legacyEntryTimestamp) }),
+      };
+      return this.goals!.recoverLegacy(input);
+    };
     if (operation === 'create') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
+      if (project && this.goalSessionBindings.get(context.token)?.get(sessionId) === 'goal') throw new RpcError('FORBIDDEN', 'Goal workers cannot create Goals');
       const continuousIntentEvidence = project ? readContinuousIntentEvidence(p.continuousIntentEvidence) : undefined;
       const input: CreateGoalInput = {
         sessionId,
@@ -646,19 +689,31 @@ export class AgentDataRuntime {
         origin: project ? 'human-agent' : readGoalOrigin(p.origin ?? 'system'),
         ...(p.payload === undefined ? {} : { payload: readRecord(p.payload) }),
       };
+      if (project && action === 'block') {
+        return this.goals!.recordProgress({
+          sessionId,
+          goalId: update.goalId,
+          revision: update.revision,
+          summary: typeof update.payload?.reason === 'string' ? update.payload.reason : undefined,
+          fingerprint: typeof update.payload?.fingerprint === 'string' ? update.payload.fingerprint : undefined,
+        } satisfies GoalProgressInput);
+      }
       return this.goals!.update(update);
     };
     if (operation === 'recordProgress') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
       if (readGoalAction(p.action) !== 'block') throw new RpcError('FORBIDDEN', 'project agents may only report progress with block');
-      return this.goals!.update({
-        sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision), action: 'block',
-        origin: 'human-agent', ...(p.payload === undefined ? {} : { payload: readRecord(p.payload) }),
+      return this.goals!.recordProgress({
+        sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision),
+        summary: readProgressSummary(p.payload), fingerprint: readProgressFingerprint(p.payload),
       });
     };
     if (operation === 'requestCompletion') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
-      return this.goals!.update({ sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision), action: 'begin_judging', origin: 'human-agent' });
+      return this.goals!.update({
+        sessionId, goalId: readString(p.goalId), revision: readGoalRevision(p.revision), action: 'begin_judging', origin: 'human-agent',
+        ...(p.payload === undefined ? {} : { payload: readRecord(p.payload) }),
+      });
     };
     if (operation === 'judgeResult') return async (p) => {
       const sessionId = readString(p.sessionId); await authorize(sessionId);
@@ -671,6 +726,49 @@ export class AgentDataRuntime {
         ...(p.model === undefined ? {} : { model: readString(p.model) }),
       };
       return this.goals!.recordJudge(result);
+    };
+    if (operation === 'claimRound') return async (p) => {
+        if (project) throw new RpcError('FORBIDDEN', 'round claims are application-only');
+        return this.goals!.claimRound({
+          sessionId: readString(p.sessionId), goalId: readString(p.goalId), revision: readGoalRevision(p.revision),
+          nextRound: readGoalRound(p.nextRound), idempotencyKey: readString(p.idempotencyKey),
+          ...(p.workspace === undefined ? {} : { workspace: readString(p.workspace) }),
+          ...(p.origin === undefined ? {} : { origin: readString(p.origin) }),
+          ...(p.promptDigest === undefined ? {} : { promptDigest: readString(p.promptDigest) }),
+          ...(p.continuousIntent === undefined ? {} : { continuousIntent: p.continuousIntent === true }),
+          ...(p.turnId === undefined ? {} : { turnId: readString(p.turnId) }),
+        } satisfies RoundClaimInput);
+    };
+    if (operation === 'settleRound') return async (p) => {
+        if (project) throw new RpcError('FORBIDDEN', 'round settlements are application-only');
+        return this.goals!.settleRound({
+          sessionId: readString(p.sessionId), goalId: readString(p.goalId), revision: readGoalRevision(p.revision),
+          idempotencyKey: readString(p.idempotencyKey), turnId: readString(p.turnId), summary: readBoundedText(p.summary, 4000),
+        } satisfies RoundSettlementInput);
+    };
+    if (operation === 'cancelRound') return async (p) => {
+        if (project) throw new RpcError('FORBIDDEN', 'round cancellations are application-only');
+        // A missing lease is a successful no-op; null keeps the RPC result explicit.
+        return this.goals!.cancelRound({
+          sessionId: readString(p.sessionId), goalId: readString(p.goalId), revision: readGoalRevision(p.revision),
+          idempotencyKey: readString(p.idempotencyKey), reason: readBoundedText(p.reason, 4000),
+          ...(p.turnId === undefined ? {} : { turnId: readString(p.turnId) }),
+        } satisfies RoundCancelInput) ?? null;
+    };
+    if (operation === 'runtimeError') return async (p) => {
+        if (project) throw new RpcError('FORBIDDEN', 'runtime errors are application-only');
+        return this.goals!.failRuntime({
+          sessionId: readString(p.sessionId), goalId: readString(p.goalId), revision: readGoalRevision(p.revision),
+          reason: readBoundedText(p.reason, 4000), ...(p.turnId === undefined ? {} : { turnId: readString(p.turnId) }),
+        } satisfies GoalRuntimeErrorInput);
+    };
+    if (operation === 'fork') return async (p) => {
+        if (project) throw new RpcError('FORBIDDEN', 'Goal forks are application-only');
+        return this.goals!.fork({
+          sourceSessionId: readString(p.sourceSessionId),
+          sourceGoalId: readString(p.sourceGoalId),
+          targetSessionId: readString(p.targetSessionId),
+        } satisfies ForkGoalInput);
     };
     return undefined;
   }
@@ -907,11 +1005,40 @@ function readWikiSource(value: Record<string, unknown>): WikiSourceInput {
 }
 function wikiLimit(value: unknown, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? Math.max(1, Math.min(100, Math.trunc(value))) : fallback; }
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
-function readGoalRevision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) throw new RpcError('INVALID_PARAMS', 'goal revision is required'); return Number(value); }
+function readGoalSessionSource(value: unknown): 'interactive' | 'goal' {
+  if (value === 'interactive' || value === 'goal') return value;
+  throw new RpcError('INVALID_PARAMS', 'invalid Goal session source');
+}
+function readLegacyReact(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new RpcError('INVALID_PARAMS', 'legacy Goal react must be a nonnegative integer');
+  return Number(value);
+}
+function readLegacyTimestamp(value: unknown): string | number {
+  if ((typeof value === 'string' && value.trim()) || (typeof value === 'number' && Number.isSafeInteger(value))) return value as string | number;
+  throw new RpcError('INVALID_PARAMS', 'legacy Goal timestamp is invalid');
+}
+  function readGoalRevision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) throw new RpcError('INVALID_PARAMS', 'goal revision is required'); return Number(value); }
+  function readGoalRound(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) throw new RpcError('INVALID_PARAMS', 'goal round is required'); return Number(value); }
+  function readBoundedText(value: unknown, max: number): string { if (typeof value !== 'string' || value.length > max) throw new RpcError('INVALID_PARAMS', 'text is invalid'); return value; }
 function readContinuousIntentEvidence(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 4000) throw new RpcError('INVALID_PARAMS', 'continuous intent evidence is required');
-  if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous)/i.test(value)) throw new RpcError('GOAL_CREATE_INTENT_REQUIRED', 'continuous intent evidence is not explicit');
+  if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous|\/goal\b)/i.test(value)) throw new RpcError('GOAL_CREATE_INTENT_REQUIRED', 'continuous intent evidence is not explicit');
   return value;
+}
+function readProgressSummary(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const payload = readRecord(value);
+  if (payload.reason === undefined && payload.summary === undefined) return undefined;
+  const summary = payload.reason ?? payload.summary;
+  if (typeof summary !== 'string' || summary.length > 4000) throw new RpcError('INVALID_PARAMS', 'progress summary is invalid');
+  return summary;
+}
+function readProgressFingerprint(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const payload = readRecord(value);
+  if (payload.fingerprint === undefined) return undefined;
+  if (typeof payload.fingerprint !== 'string' || payload.fingerprint.length > 400) throw new RpcError('INVALID_PARAMS', 'progress fingerprint is invalid');
+  return payload.fingerprint;
 }
 function readGoalLimit(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new RpcError('INVALID_PARAMS', 'goal limit must be a nonnegative integer'); return Number(value); }
 function readGoalOrigin(value: unknown): 'human-ui' | 'human-agent' | 'system' {

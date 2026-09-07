@@ -1,98 +1,216 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Search, Trash2 } from 'lucide-react';
-import { agentDataApi, type MemoryOverview, type MemoryRecord, type MemoryScope } from '../../lib/agentData';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { agentDataApi, type ManagedMemoryRecord, type MemoryFilter, type MemoryItem, type MemoryLevel, type MemoryOverview, type ResourceNavigation } from '../../lib/agentData';
+import { pathsEquivalent } from '../../lib/pathUtils';
 import { styles } from './agentDataStyles';
 import { useProjectOptions } from './useProjectOptions';
+import { useAgentDataTaskMonitor } from './AgentDataTaskProvider';
+import { useMemoryBrowser } from './useMemoryBrowser';
+import { MemoryDetail, type MemoryDetailProps } from './MemoryDetail';
+import { MemoryList } from './MemoryList';
+import { MemoryEditor, type MemoryEditorHandle } from './MemoryEditor';
+import { memoryLevelLabels } from './memoryPresentation';
+import { memoryStyles as m } from './memoryStyles';
 
 interface MemoryPanelProps {
   userId?: string;
-  /** 仅作为筛选器的初始值；用户手动切换后不再跟随其变化。 */
+  /** 仅用于首次打开；切换聊天不会重设筛选器。 */
   initialProject?: string;
+  visible?: boolean;
+  navigation?: Extract<ResourceNavigation, { view: 'memory' }>;
+  navigationRequest?: number;
+  onOpenSession?(cwd: string, path: string): void | Promise<void>;
 }
+interface Selection { userId: string; kind: MemoryItem['kind']; id: string; snippet?: string }
+interface DetailState { key: string; value?: MemoryDetailProps['value']; loading: boolean; error?: string }
+type FocusRequest = { kind: 'row'; id?: string } | { kind: 'edit' | 'new' | 'detail' };
+const selectionKey = (selection?: Selection) => selection ? JSON.stringify([selection.userId, selection.kind, selection.id]) : '';
 
-export function MemoryPanel({ userId, initialProject }: MemoryPanelProps) {
+export function MemoryPanel({ userId = 'local', initialProject, visible = true, navigation, navigationRequest = 0, onOpenSession }: MemoryPanelProps) {
   const projects = useProjectOptions();
-  const [project, setProject] = useState<string>(initialProject ?? '');
-  const [overview, setOverview] = useState<MemoryOverview>();
-  const [records, setRecords] = useState<MemoryRecord[]>([]);
+  const monitor = useAgentDataTaskMonitor();
+  const [project, setProject] = useState(() => {
+    const found = initialProject && projects.find((option) => pathsEquivalent(option.cwd, initialProject));
+    return found ? `project:${found.cwd}` : '';
+  });
+  const [kind, setKind] = useState<MemoryItem['kind']>('memory');
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState<'all' | '0' | '1' | '2' | '3'>('all');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
-
-  // project 为空 = 全局：用 includeOtherProjects 让底层放开项目边界。
-  const scope: MemoryScope | undefined = useMemo(
-    () => (userId ? (project ? { userId, projectId: project } : { userId, includeOtherProjects: true }) : undefined),
-    [userId, project],
-  );
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [overview, setOverview] = useState<{ userId: string; value?: MemoryOverview; error?: string }>({ userId });
+  const [selected, setSelected] = useState<Selection>();
+  const [detail, setDetail] = useState<DetailState>({ key: '', loading: false });
+  const [editor, setEditor] = useState<{ userId: string; record?: ManagedMemoryRecord; trigger: 'edit' | 'new'; unavailable?: boolean }>();
+  const [removed, setRemoved] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string>();
+  const [deleteError, setDeleteError] = useState<string>();
+  const [deleting, setDeleting] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest>();
+  const [navigationVersion, setNavigationVersion] = useState(0);
+  const [editorVersion, setEditorVersion] = useState(0);
+  const editorHandle = useRef<MemoryEditorHandle>(null);
+  const handledNavigation = useRef<string | undefined>(undefined);
+  const navigationKey = navigation ? JSON.stringify([userId, navigation.id, navigation.mode, navigationRequest]) : '';
+  const currentNavigation = useRef(navigationKey);
+  currentNavigation.current = navigationKey;
+  const root = useRef<HTMLElement>(null);
+  const activeSelection = selected?.userId === userId ? selected : undefined;
+  const key = selectionKey(activeSelection);
+  const current = useRef({ userId, visible, key, editing: !!editor, mounted: true });
+  current.current = { userId, visible, key, editing: !!editor, mounted: current.current.mounted };
+  const detailEpoch = useRef(0);
+  const deleteRuntime = useRef({ userId, epoch: 0, busy: false });
+  if (deleteRuntime.current.userId !== userId) deleteRuntime.current = { userId, epoch: deleteRuntime.current.epoch + 1, busy: false };
+  const filter = useMemo<MemoryFilter>(() => project === 'global' ? { scope: 'global' } : project.startsWith('project:') ? { scope: 'project', projectId: project.slice('project:'.length) } : { scope: 'all' }, [project]);
+  const reloadVersion = monitor.watchedTaskVersion + refreshVersion;
+  const browser = useMemoryBrowser({ userId, filter, query, kind, level: level === 'all' ? undefined : Number(level) as MemoryLevel, visible, reloadVersion });
+  const items = browser.items.filter((item) => item.kind !== 'memory' || !removed.includes(item.record.id));
+  const activeDetail = detail.key === key ? detail : undefined;
+  const locked = !!editor || deleting;
+  const refresh = () => setRefreshVersion((version) => version + 1);
 
   useEffect(() => {
-    if (!scope) { setLoading(false); return; }
+    current.current.mounted = true;
+    return () => { current.current.mounted = false; detailEpoch.current++; deleteRuntime.current.epoch++; };
+  }, []);
+  useEffect(() => { setRemoved([]); setNotice(undefined); setDeleteError(undefined); setDeleting(false); }, [userId]);
+  useEffect(() => {
+    if (!visible || !navigation || handledNavigation.current === navigationKey) return;
+    handledNavigation.current = navigationKey;
+    if ((!navigation.id && navigation.mode !== 'create') || deleteRuntime.current.busy) return;
+    if (navigation.id && editor?.userId === userId && editor.record?.id === navigation.id) return;
+    if (!(editorHandle.current?.confirmLeave() ?? true) || !current.current.visible || currentNavigation.current !== navigationKey) return;
+    detailEpoch.current++;
+    setKind('memory'); setNotice(undefined); setDeleteError(undefined);
+    if (navigation.mode === 'create' && !navigation.id) {
+      setSelected(undefined); setEditorVersion((value) => value + 1); setEditor({ userId, trigger: 'new' });
+    } else if (navigation.id) {
+      setEditor(undefined); setProject(''); setQuery(''); setLevel('all');
+      setSelected({ userId, kind: 'memory', id: navigation.id });
+      setNavigationVersion((value) => value + 1);
+    }
+    setFocusRequest({ kind: 'detail' });
+  }, [navigationKey, visible]);
+  useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
-    setLoading(true);
-    void agentDataApi.memory.overview(scope)
-      .then((value) => { if (!cancelled) setOverview(value); })
-      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    setOverview((previous) => previous.userId === userId ? { ...previous, error: undefined } : { userId });
+    void agentDataApi.memory.overview({ userId, includeOtherProjects: true }).then((value) => {
+      if (!cancelled && current.current.userId === userId && current.current.visible) setOverview({ userId, value });
+    }).catch((cause) => {
+      if (!cancelled && current.current.userId === userId && current.current.visible) setOverview((previous) => ({ ...previous, error: String(cause) }));
+    });
     return () => { cancelled = true; };
-  }, [scope]);
+  }, [userId, visible, reloadVersion]);
 
   useEffect(() => {
-    if (!scope || !query.trim()) { setRecords([]); return; }
-    let cancelled = false;
-    void agentDataApi.memory.search(scope, query.trim(), 50)
-      .then((value) => { if (!cancelled) setRecords(value); })
-      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [scope, query]);
+    const epoch = ++detailEpoch.current;
+    if (!visible || !activeSelection || deleteRuntime.current.busy) return;
+    const target = activeSelection;
+    const isCurrent = () => current.current.mounted && current.current.visible && current.current.key === key && detailEpoch.current === epoch && !deleteRuntime.current.busy;
+    setDetail((previous) => ({ key, value: previous.key === key ? previous.value : undefined, loading: true }));
+    const read = target.kind === 'memory' ? agentDataApi.memory.read({ userId, id: target.id }) : agentDataApi.memory.conversations.read({ userId, id: target.id });
+    void read.then((record) => {
+      if (!isCurrent()) return;
+      if (!record) throw new Error('NOT_FOUND: 记录不存在');
+      const value = target.kind === 'memory' ? { kind: 'memory' as const, record: record as ManagedMemoryRecord } : { kind: 'conversation' as const, record: { ...record as Extract<MemoryDetailProps['value'], { kind: 'conversation' }>['record'], ...(target.snippet === undefined ? {} : { snippet: target.snippet }) } };
+      setDetail({ key, value, loading: false });
+    }).catch((cause) => {
+      if (!isCurrent()) return;
+      const notFound = (typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'NOT_FOUND') || String(cause).includes('NOT_FOUND');
+      if (notFound) {
+        if (target.kind === 'memory') setRemoved((previous) => [...previous, target.id]);
+        setNotice('记录已被外部删除；未保存草稿仍保留。');
+        setSelected(undefined);
+        setEditor((previous) => previous?.userId === target.userId && previous.record?.id === target.id ? { ...previous, unavailable: true } : previous);
+        if (!current.current.editing) setFocusRequest({ kind: 'row' });
+      }
+      setDetail((previous) => ({ ...previous, key, loading: false, error: notFound ? '记录已被外部删除；未保存草稿仍保留。' : String(cause) }));
+    });
+    return () => { detailEpoch.current++; };
+  }, [key, visible, reloadVersion, navigationVersion]);
 
-  const visible = useMemo(() => records.filter((record) => level === 'all' || record.level === Number(level)), [records, level]);
+  useLayoutEffect(() => {
+    if (!visible || !focusRequest || !root.current) return;
+    const rows = Array.from(root.current.querySelectorAll<HTMLButtonElement>('[data-memory-row]'));
+    const target = focusRequest.kind === 'row'
+      ? rows.find((row) => row.dataset.memoryRow === focusRequest.id) ?? rows[0] ?? root.current.querySelector<HTMLButtonElement>('[data-memory-new]')
+      : root.current.querySelector<HTMLElement>(focusRequest.kind === 'edit' ? '[data-memory-edit]' : focusRequest.kind === 'new' ? '[data-memory-new]' : '[data-memory-back], [aria-label="记忆正文"]');
+    (target ?? rows[0] ?? root.current.querySelector<HTMLButtonElement>('[data-memory-new]'))?.focus();
+    setFocusRequest(undefined);
+  }, [focusRequest, visible, editor, key]);
 
-  const remove = async (record: MemoryRecord) => {
-    if (!userId || !window.confirm('确认删除这条记忆？')) return;
-    // 删除走写入路径，必须带 workspace：全局条目用 '.' 占位，项目条目用其来源项目。
-    const workspace = record.sourceProjectId ?? project ?? '.';
-    try {
-      await agentDataApi.memory.delete({ userId, workspace: workspace || '.' }, record.id);
-      setRecords((current) => current.filter((item) => item.id !== record.id));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  const choose = (item: MemoryItem) => {
+    if (editor || deleteRuntime.current.busy) return;
+    setSelected({ userId, kind: item.kind, id: item.record.id, ...(item.kind === 'conversation' ? { snippet: item.record.snippet } : {}) }); setDeleteError(undefined); setNotice(undefined); setFocusRequest({ kind: 'detail' });
   };
-
-  const scopeLabel = project ? projects.find((option) => option.cwd === project)?.name ?? project : '全部项目';
-
-  return <section data-testid="memory-panel">
-    <div className={styles.sectionHeading}><h3 className={styles.heading}>Memory L0-L3</h3><span className={styles.hint}>{overview?.total ?? '-'} 条 · {scopeLabel}</span></div>
-    <div className={styles.toolbar}>
-      <div className={styles.input} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <Search size={13} />
-        <input aria-label="搜索记忆" placeholder="搜索记忆内容" value={query} onChange={(event) => setQuery(event.target.value)} style={{ flex: 1, minWidth: 0, border: 0, outline: 0, background: 'transparent', color: 'inherit' }} />
-      </div>
-      <select className={styles.select} aria-label="项目范围" value={project} onChange={(event) => setProject(event.target.value)}>
-        <option value="">全部项目</option>
-        {projects.map((option) => <option key={option.cwd} value={option.cwd}>{option.name}</option>)}
-      </select>
-      <select className={styles.select} aria-label="记忆层级" value={level} onChange={(event) => setLevel(event.target.value as typeof level)}>
-        <option value="all">全部层级</option>
-        <option value="0">L0 对话</option>
-        <option value="1">L1 原子</option>
-        <option value="2">L2 场景</option>
-        <option value="3">L3 画像</option>
-      </select>
+  const closeDetail = () => {
+    if (deleteRuntime.current.busy) return;
+    setFocusRequest({ kind: 'row', id: activeSelection?.id }); setSelected(undefined); setDeleteError(undefined);
+  };
+  const clearSelection = () => { setSelected(undefined); setNotice(undefined); setDeleteError(undefined); };
+  const saved = (record: ManagedMemoryRecord) => {
+    const inScope = filter.scope === 'all' || (filter.scope === 'global' ? record.scope === 'global' : record.scope === 'project' && !!record.sourceProjectId && pathsEquivalent(record.sourceProjectId, filter.projectId));
+    const matches = inScope && (level === 'all' || Number(level) === record.level) && (!query.trim() || record.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+    setNotice(matches ? '记忆已保存。' : '已保存，但当前筛选不包含这条记忆。');
+    const next = { userId, kind: 'memory' as const, id: record.id };
+    setSelected(next); setDetail({ key: selectionKey(next), value: { kind: 'memory', record }, loading: false });
+    setFocusRequest({ kind: editor?.trigger ?? 'new' }); setEditor(undefined); refresh();
+  };
+  const remove = async () => {
+    const value = activeDetail?.value;
+    if (value?.kind !== 'memory' || deleteRuntime.current.busy || !window.confirm('确认删除这条记忆？来源对话记录不会被删除。')) return;
+    const target = { id: value.record.id, userId };
+    const state = deleteRuntime.current;
+    const epoch = ++state.epoch;
+    const isCurrent = () => current.current.mounted && deleteRuntime.current === state && state.epoch === epoch && current.current.key === key;
+    const index = items.findIndex((item) => item.record.id === target.id);
+    const nextId = items[index + 1]?.record.id ?? items[index - 1]?.record.id;
+    state.busy = true; setDeleting(true); setDeleteError(undefined);
+    try {
+      await agentDataApi.memory.delete({ userId: target.userId }, target.id);
+      if (!isCurrent()) return;
+      setRemoved((previous) => [...previous, target.id]); setSelected(undefined);
+      setNotice('记忆已删除；来源对话记录未改动。'); setFocusRequest({ kind: 'row', id: nextId }); refresh();
+    } catch (cause) { if (isCurrent()) setDeleteError(String(cause)); }
+    finally { if (deleteRuntime.current === state && state.epoch === epoch && current.current.mounted) { state.busy = false; setDeleting(false); } }
+  };
+  const overviewValue = overview.userId === userId ? overview : undefined;
+  const editorRecord = editor?.record && activeDetail?.value?.kind === 'memory' && editor.record.id === activeDetail.value.record.id ? activeDetail.value.record : editor?.record;
+  return <section ref={root} className={m.root} data-testid="memory-panel">
+    <div className={styles.sectionHeading}><h3 className={styles.heading}>Memory</h3><span className={styles.hint}>本用户记忆总数：{overviewValue?.value?.total ?? '—'}</span></div>
+    <div className={m.tabs} role="tablist" aria-label="Memory 类型">
+      {(['memory', 'conversation'] as const).map((tab) => <button key={tab} type="button" className={m.button} role="tab" aria-selected={kind === tab} disabled={locked} onClick={() => { setKind(tab); clearSelection(); }}>{tab === 'memory' ? '记忆' : '对话记录'}</button>)}
     </div>
-    {error ? <div className={styles.error} role="alert">{error}</div> : null}
-    {loading ? <div className={styles.state}>正在加载 Memory...</div>
-      : !userId ? <div className={styles.state}>未绑定用户</div>
-      : visible.length === 0 ? <div className={styles.state}>{query ? '暂无匹配记忆' : '输入关键词搜索记忆'}</div>
-      : <table className={styles.table}>
-        <thead><tr><th>层级</th><th>内容</th><th>来源</th><th>归属</th><th>更新时间</th><th>操作</th></tr></thead>
-        <tbody>{visible.map((record) => <tr key={record.id}>
-          <td>L{record.level}</td>
-          <td>{record.content}</td>
-          <td>{record.source ?? '未记录'}</td>
-          <td>{record.scope === 'global' ? '全局' : record.sourceProjectId ?? '未记录'}</td>
-          <td>{new Date(record.updatedAt).toLocaleString()}</td>
-          <td><button type="button" className={styles.actionButton} aria-label="删除" onClick={() => void remove(record)}><Trash2 size={12} />删除</button></td>
-        </tr>)}</tbody>
-      </table>}
+    <div className={styles.toolbar}>
+      <input className={styles.input} aria-label="搜索记忆" placeholder={kind === 'memory' ? '搜索记忆内容' : '搜索对话记录'} value={query} disabled={locked} onChange={(event) => { setQuery(event.target.value); clearSelection(); }} />
+      <select className={styles.select} aria-label="项目范围" value={project} disabled={locked} onChange={(event) => { setProject(event.target.value); clearSelection(); }}>
+        <option value="">全部项目</option><option value="global">全局</option>
+        {project.startsWith('project:') && !projects.some((option) => `project:${option.cwd}` === project) ? <option value={project} disabled>所选项目已不可用</option> : null}
+        {projects.map((option) => <option key={option.cwd} value={`project:${option.cwd}`}>{option.name}</option>)}
+      </select>
+      {kind === 'memory' ? <select className={styles.select} aria-label="记忆层级" value={level} disabled={locked} onChange={(event) => { setLevel(event.target.value as typeof level); clearSelection(); }}><option value="all">全部层级</option>{([1, 2, 3, 0] as const).map((value) => <option key={value} value={value}>{memoryLevelLabels[value]}</option>)}</select> : null}
+      <button type="button" className={m.button} aria-label="刷新 Memory" onClick={refresh} disabled={deleting || browser.refreshing || browser.loading}>刷新</button>
+      {kind === 'memory' ? <button type="button" data-memory-new className={`${m.button} ${m.primary}`} disabled={locked} onClick={() => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); setFocusRequest({ kind: 'detail' }); }}>新增记忆</button> : null}
+    </div>
+    {kind === 'conversation' ? <p className={styles.hint}>对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。</p> : null}
+    {monitor.error ? <p role="alert" className={styles.inlineError}>任务状态读取失败：{monitor.error}</p> : null}
+    {overviewValue?.error ? <p role="alert" className={styles.inlineError}>记忆总数：{overviewValue.error}</p> : null}
+    {notice ? <p role="status" className={m.notice}>{notice}</p> : null}
+    <div className={m.layout} data-detail-open={!!activeSelection || !!editor}>
+      <div data-memory-list-pane>
+        {browser.error ? <p role="alert" className={styles.inlineError}>{browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}{browser.error}</p> : null}
+        {browser.loading && !browser.loaded ? <p className={styles.state}>正在加载 Memory…</p> : !browser.loaded ? <p className={styles.state}>{kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'}</p> : items.length === 0 ? <p className={styles.state}>{query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'}</p> : null}
+        {browser.refreshing ? <p role="status" className={styles.hint}>正在刷新列表…</p> : null}
+        <MemoryList items={items} selectedId={activeSelection?.id} nextCursor={browser.nextCursor} refreshing={browser.refreshing} onSelect={choose} onLoadMore={browser.loadMore} />
+      </div>
+      <div className={m.detail} data-memory-detail-pane>
+        {editor ? <MemoryEditor ref={editorHandle} key={JSON.stringify([editor.userId, editor.record?.id, editorVersion])} userId={userId} record={editorRecord} projects={projects} unavailable={editor.userId === userId && editor.unavailable} onUnavailable={() => { setSelected(undefined); setEditor((previous) => previous ? { ...previous, unavailable: true } : undefined); }} onSaved={saved} onCancel={() => { setFocusRequest({ kind: editor.trigger }); setEditor(undefined); }} /> : activeSelection ? <>
+          <div className={m.toolbar}><button type="button" data-memory-back className={m.button} disabled={deleting} onClick={closeDetail}>返回记忆列表</button>{activeDetail?.error ? <button type="button" className={m.button} onClick={refresh}>重试详情</button> : null}{deleting ? <span role="status">正在删除…</span> : null}</div>
+          {deleteError ? <p role="alert" className={styles.inlineError}>{deleteError}</p> : null}
+          {activeDetail?.error ? <p role="alert" className={styles.inlineError}>{activeDetail.error}</p> : null}
+          {activeDetail?.value ? <MemoryDetail value={activeDetail.value} visible={visible} onEdit={deleting ? undefined : () => { if (activeDetail.value?.kind === 'memory') { setEditor({ userId, record: activeDetail.value.record, trigger: 'edit' }); setFocusRequest({ kind: 'detail' }); } }} onDelete={deleting ? undefined : () => void remove()} onOpenSession={onOpenSession} /> : <p className={styles.state}>{activeDetail?.loading ? '正在读取详情…' : '详情尚未读取成功'}</p>}
+        </> : <p className={styles.state}>选择一条记录查看全文和来源</p>}
+      </div>
+    </div>
   </section>;
 }

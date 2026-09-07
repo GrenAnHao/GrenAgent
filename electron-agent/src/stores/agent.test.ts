@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 捕获事件订阅 handler + pi 命令 mock。用 vi.hoisted 确保在 vi.mock 工厂（被提升到文件顶部）执行前已初始化。
-const { eventHandlers, appEventHandlers, piMock } = vi.hoisted(() => ({
-  eventHandlers: [] as Array<(e: { workspace: string; event: unknown }) => void>,
-  appEventHandlers: [] as Array<(e: { workspace: string; event: unknown }) => void>,
+const { eventHandlers, piMock } = vi.hoisted(() => ({
+  eventHandlers: [] as Array<(e: { workspace: string; event: unknown; source?: 'interactive' | 'goal' }) => void>,
   piMock: {
     excludeEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     restoreEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
@@ -12,17 +11,12 @@ const { eventHandlers, appEventHandlers, piMock } = vi.hoisted(() => ({
       (_ws: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] }),
     ),
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
-    replayAppEvents: vi.fn((_afterSequence = 0, _limit = 256): Promise<unknown[]> => Promise.resolve([])),
   },
 }));
 vi.mock('../lib/pi', () => ({
   pi: piMock,
-  onPiEvent: (h: (e: { workspace: string; event: unknown }) => void) => {
+  onPiEvent: (h: (e: { workspace: string; event: unknown; source?: 'interactive' | 'goal' }) => void) => {
     eventHandlers.push(h);
-    return Promise.resolve(() => {});
-  },
-  onAppEvent: (h: (e: { workspace: string; event: unknown }) => void) => {
-    appEventHandlers.push(h);
     return Promise.resolve(() => {});
   },
   onPiExit: () => Promise.resolve(() => {}),
@@ -31,12 +25,8 @@ vi.mock('../lib/pi', () => ({
 import { createAgentStore } from './agent';
 import { clearThinkingDurationsForTest } from '../lib/thinkingDurations';
 
-function emit(event: unknown) {
-  for (const h of eventHandlers) h({ workspace: '.', event });
-}
-
-function emitApp(event: unknown) {
-  for (const h of appEventHandlers) h({ workspace: '.', event });
+function emit(event: unknown, source?: 'interactive' | 'goal') {
+  for (const h of eventHandlers) h({ workspace: '.', event, source });
 }
 
 describe('createAgentStore', () => {
@@ -45,14 +35,12 @@ describe('createAgentStore', () => {
 
   beforeEach(() => {
     eventHandlers.length = 0;
-    appEventHandlers.length = 0;
     rafCallbacks = [];
     piMock.excludeEntry.mockReset().mockResolvedValue(undefined);
     piMock.restoreEntry.mockReset().mockResolvedValue(undefined);
     piMock.rewindTo.mockReset().mockResolvedValue(undefined);
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
-    piMock.replayAppEvents.mockReset().mockResolvedValue([]);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -124,32 +112,13 @@ describe('createAgentStore', () => {
     expect(m?.kind === 'assistant' ? m.thinking : '').toBe('推理中');
   });
 
-  it('prefers AppEvent projection and does not render its legacy Pi event twice', () => {
+  it('drops headless Goal worker events from the interactive message stream', () => {
     store = createAgentStore('.');
-    emitApp({ id: 'start', type: 'turn.started', sequence: 1, timestamp: 1, projectId: '.', threadId: 't', turnId: 'r', data: {} });
-    emitApp({ id: 'created', type: 'item.created', sequence: 2, timestamp: 2, projectId: '.', threadId: 't', turnId: 'r', itemId: 'assistant-1', data: { message: { id: 'assistant-1', role: 'assistant' } } });
-    emitApp({ id: 'delta', type: 'item.delta', sequence: 3, timestamp: 3, projectId: '.', threadId: 't', turnId: 'r', itemId: 'assistant-1', data: { assistantMessageEvent: { type: 'text_delta', delta: 'hello' } } });
-    emit({ type: 'message_update', message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'hello' }] }, assistantMessageEvent: { type: 'text_delta', delta: 'hello' } });
+    emit({ type: 'agent_start' }, 'goal');
+    emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 111 } }, 'goal');
     flushRAF();
-
-    const assistants = store.useStore.getState().messages.filter((message) => message.kind === 'assistant');
-    expect(assistants).toHaveLength(1);
-    expect(assistants[0]).toMatchObject({ text: 'hello' });
-  });
-
-  it('replays only events after the persisted workspace cursor', async () => {
-    localStorage.setItem('pi-app-event-cursor:.', '3');
-    piMock.replayAppEvents.mockResolvedValueOnce([
-      { id: 'old', type: 'turn.started', sequence: 2, timestamp: 2, projectId: '.', data: {} },
-      { id: 'new', type: 'turn.started', sequence: 4, timestamp: 4, projectId: '.', data: {} },
-    ]);
-    store = createAgentStore('.');
-    await Promise.resolve();
-    flushRAF();
-
-    expect(piMock.replayAppEvents).toHaveBeenCalledWith(3, 1024);
-    expect(store.useStore.getState().isStreaming).toBe(true);
-    expect(localStorage.getItem('pi-app-event-cursor:.')).toBe('4');
+    expect(store.useStore.getState().messages).toHaveLength(0);
+    expect(store.useStore.getState().isStreaming).toBe(false);
   });
 
   it('推理时长在 message_end 后持久化，切换会话恢复时按 timestamp 回填', () => {
@@ -258,6 +227,60 @@ describe('createAgentStore', () => {
     expect(msgs[0].kind === 'user' ? msgs[0].text : '').toBe('early');
   });
 
+  it('强制重载不会覆盖等待中的实时事件队列', () => {
+    store = createAgentStore('.');
+    store.loadMessages(
+      [
+        { role: 'user', content: 'previous' },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+      ] as never,
+      { force: true, sessionPath: '/s/live.jsonl' },
+    );
+    store.pushUserMessage('current');
+    store.useStore.setState({ awaitingResponse: true });
+
+    // 事件已从 sidecar 到达，但还没等到下一帧 flush；此时 App 的后台 getMessages
+    // 若强制重载，会在旧实现中 clearQueue 并把实时轮次整个抹掉。
+    emit({ type: 'agent_start' });
+    emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    emit({
+      type: 'tool_execution_start',
+      toolCallId: 'live-tool',
+      toolName: 'bash',
+      args: { command: 'echo live' },
+    });
+    store.loadMessages(
+      [
+        { role: 'user', content: 'previous' },
+        { role: 'assistant', content: [{ type: 'text', text: 'new snapshot' }] },
+      ] as never,
+      { force: true, sessionPath: '/s/live.jsonl' },
+    );
+    flushRAF();
+
+    const state = store.useStore.getState();
+    expect(state.isStreaming).toBe(true);
+    expect(state.messages.some((m) => m.kind === 'tool' && m.toolCallId === 'live-tool')).toBe(true);
+  });
+
+  it('强制切换到另一会话仍会加载目标快照', () => {
+    store = createAgentStore('.');
+    store.loadMessages(
+      [{ role: 'user', content: 'old session' }] as never,
+      { force: true, sessionPath: '/s/old.jsonl' },
+    );
+    store.useStore.setState({ isStreaming: true });
+
+    store.loadMessages(
+      [{ role: 'assistant', content: [{ type: 'text', text: 'other session' }] }] as never,
+      { force: true, sessionPath: '/s/other.jsonl' },
+    );
+
+    const state = store.useStore.getState();
+    expect(state.isStreaming).toBe(false);
+    expect(state.messages).toHaveLength(1);
+  });
+
   it('loadMessages 首次载入用后端起底并写 UI 历史', async () => {
     store = createAgentStore('.');
     store.loadMessages([{ role: 'user', content: 'hello', timestamp: 1 }] as never, {
@@ -311,6 +334,30 @@ describe('createAgentStore', () => {
 
     // setTimeout 到点后应用
     vi.advanceTimersByTime(80);
+    expect(store.useStore.getState().isStreaming).toBe(true);
+  });
+
+  it('active store 的 rAF 被暂停时 setTimeout 兜底唤醒（防 rAF 死锁：queue 不再无限堆积）', () => {
+    vi.useFakeTimers();
+    store = createAgentStore('.');
+    // active（默认）→ rAF + timeout 双保险排程。此处不调用 flushRAF，模拟窗口最小化后
+    // rAF 回调永不触发（rafId 永久非 null）的场景：修复前 queue 会无限堆积、UI 冻结。
+    emit({ type: 'agent_start' });
+    emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } });
+    // 后续事件在「rAF 已排程但未触发」时继续到达（scheduleFlush 被 rafId != null 挡住）
+    emit({
+      type: 'message_update',
+      message: { role: 'assistant', content: [{ type: 'text', text: '正文' }], timestamp: 1 },
+      assistantMessageEvent: { type: 'text_delta', delta: '正文' },
+    });
+    emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '正文' }], timestamp: 1 } });
+
+    // timeout 兜底到点 → flush 应用全部堆积事件
+    vi.advanceTimersByTime(80);
+    const msgs = store.useStore.getState().messages;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].kind).toBe('assistant');
+    expect((msgs[0] as { text: string }).text).toBe('正文');
     expect(store.useStore.getState().isStreaming).toBe(true);
   });
 

@@ -1,4 +1,5 @@
 export type GoalStatus = "active" | "paused" | "disarmed" | "judging" | "blocked" | "complete" | "error" | "cleared";
+export type GoalSource = "human" | "legacy" | "fork";
 export type GoalStopReasonKind = "user_pause" | "judge_failed" | "judge_unavailable" | "blocked" | "runtime_error" | "persistence_error" | "cleared" | "max_rounds";
 export interface GoalStopReason { kind: GoalStopReasonKind; summary: string; at: string; turnId?: string }
 export interface GoalJudgeRecord { model: string; verdict: "pass" | "fail" | "error"; reason: string; missing: string[]; revision: number; turnId?: string; at: string }
@@ -21,6 +22,7 @@ export interface GoalSnapshot {
   sourceGoalId?: string;
   sourceSessionId?: string;
   clearedAt?: string;
+  source?: GoalSource;
 }
 
 export interface GoalEvent {
@@ -28,7 +30,7 @@ export interface GoalEvent {
   goalId: string;
   sessionId: string;
   revision: number;
-  kind: "pause" | "resume" | "begin_judging" | "block" | "disarm" | "clear" | "judge_pass" | "judge_fail";
+  kind: "pause" | "resume" | "begin_judging" | "block" | "disarm" | "clear" | "judge_pass" | "judge_fail" | "legacy_goal_restored";
   payload: Record<string, unknown>;
   idempotencyKey?: string;
   createdAt: string;

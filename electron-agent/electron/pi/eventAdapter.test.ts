@@ -168,13 +168,17 @@ describe('adaptPiEvent', () => {
     expect(adaptPiEvent({ type: 'queue_update', steering: ['next'], followUp: [] })).toBeUndefined();
   });
 
-  it('assigns unique ids when Pi events do not provide an id', () => {
+  it('projects without any event identity fields', () => {
+    // 投影只服务于 threads/turns/items 持久化，不再对外广播、不再落 app_events 表，
+    // 因此不带 id / sequence。此前为了填 app_events.id 生成的模块级自增 id 会在主进程重启后
+    // 归零，导致跨重启主键冲突刷屏；这里锁住「不产出事件标识」以防回归。
     const first = adaptPiEvent({ type: 'agent_start' });
     const second = adaptPiEvent({ type: 'agent_start' });
 
-    expect(first?.id).toBeTruthy();
-    expect(second?.id).toBeTruthy();
-    expect(first?.id).not.toBe(second?.id);
+    expect(first).not.toHaveProperty('id');
+    expect(first).not.toHaveProperty('sequence');
+    // 同一输入的投影是确定性的（除 timestamp 兜底），不含随机字段。
+    expect(Object.keys(first ?? {}).sort()).toEqual(Object.keys(second ?? {}).sort());
   });
 
   it('projects compact data without retaining the full transcript', () => {

@@ -1,75 +1,81 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer, type Server, type Socket } from 'node:net';
 import { connectCodeGraph } from './mcpClient.js';
+import { __resetForTest } from '../_shared/runtime-config.js';
 
-const tempDirs: string[] = [];
+const servers: Server[] = [];
+const sockets = new Set<Socket>();
 
-function fixtureWorkspace(): string {
-  const workspace = mkdtempSync(join(tmpdir(), 'codegraph-mcp-'));
-  tempDirs.push(workspace);
-  mkdirSync(join(workspace, '.codegraph'));
-  return workspace;
-}
-
-function serverScript(body: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'codegraph-server-'));
-  tempDirs.push(dir);
-  const path = join(dir, 'server.mjs');
-  writeFileSync(path, body);
-  return path;
-}
-
-afterEach(() => {
-  delete process.env.GREN_CODEGRAPH_COMMAND;
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+beforeEach(() => {
+  vi.stubEnv('PI_RUNTIME_CONFIG', '');
+  vi.stubEnv('AGENT_DATA_ENDPOINT', '');
+  __resetForTest();
+});
+afterEach(async () => {
+  for (const socket of sockets) socket.destroy();
+  sockets.clear();
+  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  __resetForTest();
 });
 
-describe('CodeGraph MCP client', () => {
-  it('initializes a stdio server and forwards the real CodeGraph tool name', async () => {
-    const workspace = fixtureWorkspace();
-    const sdk = (relative: string) => pathToFileURL(join(process.cwd(), 'node_modules/@modelcontextprotocol/sdk/dist/esm', relative)).href;
-    const script = serverScript(`
-      import { Server } from '${sdk('server/index.js')}';
-      import { StdioServerTransport } from '${sdk('server/stdio.js')}';
-      import { ListToolsRequestSchema, CallToolRequestSchema } from '${sdk('types.js')}';
-      const server = new Server({ name: 'fake-codegraph', version: '1.0.0' }, { capabilities: { tools: {} } });
-      server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: 'codegraph_search', inputSchema: { type: 'object' } }] }));
-      server.setRequestHandler(CallToolRequestSchema, async request => ({ content: [{ type: 'text', text: JSON.stringify({ name: request.params.name, args: request.params.arguments }) }] }));
-      await server.connect(new StdioServerTransport());
-    `);
-    process.env.GREN_CODEGRAPH_COMMAND = `node ${script}`;
+async function fakeAgentData(reply?: Record<string, unknown>) {
+  const requests: Record<string, unknown>[] = [];
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString();
+      if (!buffer.includes('\n')) return;
+      const request = JSON.parse(buffer.split('\n')[0]) as Record<string, unknown>;
+      requests.push(request);
+      if (reply) socket.end(`${JSON.stringify({ id: request.id, ...reply })}\n`);
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('missing test server address');
+  vi.stubEnv('AGENT_DATA_ENDPOINT', JSON.stringify({ host: '127.0.0.1', port: address.port, token: 'test-only' }));
+  return requests;
+}
 
-    const client = await connectCodeGraph(workspace, 5_000);
+describe('CodeGraph AgentData client', () => {
+  it('forwards the raw tool call to AgentData without probing or starting a local index', async () => {
+    const raw = { content: [{ type: 'text', text: 'result' }], structuredContent: { nodes: [1] }, isError: false };
+    const requests = await fakeAgentData({ ok: true, result: raw });
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    const client = await connectCodeGraph('/workspace-without-an-index');
     try {
-      const result = await client.callTool('codegraph_search', { query: 'memory' }) as { content?: Array<{ text?: string }> };
-      expect(JSON.parse(result.content?.[0]?.text ?? '{}')).toEqual({
-        name: 'codegraph_search',
-        args: { query: 'memory' },
-      });
-    } finally {
-      await client.close();
-    }
+      await expect(client.callTool('codegraph_node', { file: 'src/a.ts', includeCode: true })).resolves.toEqual(raw);
+      expect(requests).toEqual([expect.objectContaining({
+        version: 1, token: 'test-only', method: 'codeRetrieval.call',
+        params: { workspace: '/workspace-without-an-index', tool: 'codegraph_node', args: { file: 'src/a.ts', includeCode: true } },
+      })]);
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 65_000);
+    } finally { await client.close(); }
   });
 
-  it('rejects when the MCP server does not initialize before the timeout', async () => {
-    const workspace = fixtureWorkspace();
-    const script = serverScript(`
-      process.stdin.on('end', () => process.exit(0));
-      setTimeout(() => {}, 60_000);
-    `);
-    process.env.GREN_CODEGRAPH_COMMAND = `node ${script}`;
-
-    await expect(connectCodeGraph(workspace, 20)).rejects.toThrow('timed out after 20ms');
+  it('surfaces runtime unavailability without starting a fallback process', async () => {
+    await fakeAgentData({ ok: false, error: { code: 'UNAVAILABLE', message: 'CodeGraph provider unavailable' } });
+    vi.stubEnv('GREN_CODEGRAPH_COMMAND', 'must-not-execute');
+    const client = await connectCodeGraph('/repo');
+    await expect(client.callTool('codegraph_search', { query: 'parse' })).rejects.toThrow('CodeGraph provider unavailable');
+    await client.close();
   });
 
-  it('surfaces an MCP server process that exits before initialization', async () => {
-    const workspace = fixtureWorkspace();
-    const script = serverScript('process.exit(1);');
-    process.env.GREN_CODEGRAPH_COMMAND = `node ${script}`;
+  it('rejects requests when AgentData is not configured', async () => {
+    const client = await connectCodeGraph('/repo');
+    await expect(client.callTool('codegraph_search', { query: 'parse' })).rejects.toThrow('agent data runtime is not configured');
+    await client.close();
+  });
 
-    await expect(connectCodeGraph(workspace, 5_000)).rejects.toThrow();
+  it('bounds each AgentData call by the configured timeout', async () => {
+    await fakeAgentData();
+    const client = await connectCodeGraph('/repo', 20);
+    await expect(client.callTool('codegraph_search', { query: 'parse' })).rejects.toThrow('agent data request timed out');
+    await client.close();
   });
 });

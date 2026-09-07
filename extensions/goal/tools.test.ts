@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { registerGoalTools } from "./tools.js";
+import { clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
 
 type Def = { name: string; execute: (...args: any[]) => Promise<any> };
 function setup(request: ReturnType<typeof vi.fn>) {
@@ -10,6 +10,7 @@ function setup(request: ReturnType<typeof vi.fn>) {
 }
 
 afterEach(() => {
+  clearGoalInputContext();
   delete process.env.PI_IS_SUBAGENT;
   delete process.env.PI_SYSTEM_WORKER;
   delete process.env.PI_GOAL_WORKER;
@@ -49,11 +50,36 @@ describe("goal tools", () => {
     expect(request).toHaveBeenCalledWith("goal.create", expect.objectContaining({ sessionId: "session-a", workspace: "/repo", continuousIntentEvidence: "直到完成" }));
   });
 
+  it("requires continuous intent in the direct input that started the turn", async () => {
+    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
+    setGoalInputContext("rpc", "please inspect this once");
+    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
+    const { defs, ctx } = setup(request);
+    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_INTENT_REQUIRED");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects extension-originated input even when it contains continuous intent", async () => {
+    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
+    setGoalInputContext("extension", "直到完成");
+    const request = vi.fn();
+    const { defs, ctx } = setup(request);
+    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("sends update CAS with current context scope and goal reference", async () => {
     const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 2 });
     const { defs, ctx } = setup(request);
     await defs[2].execute("id", { goalId: "g", revision: 1, action: "block", summary: "waiting" }, undefined, undefined, ctx);
     expect(request).toHaveBeenCalledWith("goal.update", expect.objectContaining({ sessionId: "session-a", workspace: "/repo", goalId: "g", revision: 1, action: "block" }));
+  });
+
+  it("accepts an unchanged revision for an in-flight blockage report", async () => {
+    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
+    const { defs, ctx } = setup(request);
+    await defs[2].execute("id", { goalId: "g", revision: 1, action: "block", summary: "waiting" }, undefined, undefined, ctx);
+    expect(request).toHaveBeenCalledWith("goal.update", expect.objectContaining({ revision: 1, action: "block" }));
   });
 
   it.each([

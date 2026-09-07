@@ -59,9 +59,9 @@ export class ProcessRegistry {
     return [...this.entries.entries()].map(([pid, label]) => ({ pid, label }));
   }
 
-  async killTree(pid: number): Promise<void> {
+  async killTree(pid: number, options: { strict?: boolean } = {}): Promise<void> {
     if (this.platform === 'win32') {
-      await this.execFileImpl('taskkill', ['/pid', String(pid), '/T', '/F']).catch(() => undefined);
+      await this.execFileImpl('taskkill', ['/pid', String(pid), '/T', '/F']).catch((error: unknown) => { if (options.strict) throw error; });
       this.entries.delete(pid);
       return;
     }
@@ -74,7 +74,8 @@ export class ProcessRegistry {
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    this.signalGroupOrProcess(pid, 'SIGKILL');
+    const delivered = this.signalGroupOrProcess(pid, 'SIGKILL');
+    if (options.strict && !delivered && this.signalProcess(pid, 0)) throw new Error('process tree cancellation failed');
     this.entries.delete(pid);
   }
 
@@ -82,12 +83,11 @@ export class ProcessRegistry {
     await Promise.all(this.pids().map(({ pid }) => this.killTree(pid)));
   }
 
-  private signalGroupOrProcess(pid: number, signal: NodeJS.Signals): void {
+  private signalGroupOrProcess(pid: number, signal: NodeJS.Signals): boolean {
     // Long-lived children are spawned with detached:true on POSIX, so the
     // negative pid reaches their whole process group; fall back to the
     // direct pid when the group does not exist.
-    if (this.signalProcess(-pid, signal)) return;
-    this.signalProcess(pid, signal);
+    return this.signalProcess(-pid, signal) || this.signalProcess(pid, signal);
   }
 }
 

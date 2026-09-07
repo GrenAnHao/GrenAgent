@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AgentDataStorage } from '../../agentData/storage';
-import { PluginManager, type PluginDefinition, type PluginStateName } from './pluginManager';
+import { PluginManager, type PluginDefinition } from './pluginManager';
 
 function definition(id: string, overrides: Partial<PluginDefinition> = {}): PluginDefinition {
   return {
@@ -18,22 +18,22 @@ function definition(id: string, overrides: Partial<PluginDefinition> = {}): Plug
 }
 
 describe('PluginManager', () => {
-  it('moves a plugin through the complete lifecycle and publishes every state', async () => {
+  it('moves a plugin through the complete lifecycle', async () => {
     const storage = new AgentDataStorage(':memory:');
     storage.migrate();
-    const states: PluginStateName[] = [];
-    const manager = new PluginManager({
-      storage,
-      apiVersion: '1',
-      now: () => states.length + 1,
-      publish: (event) => states.push((event.data as { state: PluginStateName }).state),
-    });
+    let tick = 0;
+    const manager = new PluginManager({ storage, apiVersion: '1', now: () => ++tick });
 
+    // 按阶段断言公开可观测状态。内部微状态（loaded/started/stopping）此前靠 publish 回调观测，
+    // 该回调是 AppEvent 的注入口、已随之移除；这里改为校验每个阶段结束后的对外状态。
     manager.discover([definition('goal')]);
-    await manager.start('goal');
-    await manager.stop('goal');
+    expect(manager.get('goal')).toMatchObject({ id: 'goal', state: 'validated' });
 
-    expect(states).toEqual(['discovered', 'validated', 'loaded', 'started', 'ready', 'stopping', 'stopped']);
+    await manager.start('goal');
+    expect(manager.get('goal')).toMatchObject({ state: 'ready' });
+    expect(manager.allowedPluginIds()).toEqual(['goal']);
+
+    await manager.stop('goal');
     expect(manager.list()).toEqual([expect.objectContaining({ id: 'goal', state: 'stopped' })]);
     expect(manager.get('goal')).not.toHaveProperty('error');
     storage.close();
@@ -57,12 +57,7 @@ describe('PluginManager', () => {
   it('isolates startup failures, persists faults, and only allows ready plugins', async () => {
     const storage = new AgentDataStorage(':memory:');
     storage.migrate();
-    const events: string[] = [];
-    const manager = new PluginManager({
-      storage,
-      apiVersion: '1',
-      publish: (event) => events.push(`${(event.data as { id: string }).id}:${(event.data as { state: string }).state}`),
-    });
+    const manager = new PluginManager({ storage, apiVersion: '1' });
     manager.discover([
       definition('broken', { load: async () => ({ start: async () => { throw new Error('startup exploded'); } }) }),
       definition('healthy'),
@@ -73,7 +68,6 @@ describe('PluginManager', () => {
     expect(manager.get('broken')).toMatchObject({ state: 'start_failed', error: 'startup exploded' });
     expect(manager.get('healthy')).toMatchObject({ state: 'ready' });
     expect(manager.allowedPluginIds()).toEqual(['healthy']);
-    expect(events).toContain('broken:start_failed');
 
     const restored = new PluginManager({ storage, apiVersion: '1' });
     expect(restored.get('broken')).toMatchObject({ state: 'start_failed', error: 'startup exploded' });

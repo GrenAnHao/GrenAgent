@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { isIndexed, probeProjects } from './indexProbe';
 
 describe('CodeGraph index probe', () => {
-  it('detects an initialized workspace by its .codegraph directory', () => {
+  it('requires a database file, not just a .codegraph directory', () => {
     const root = mkdtempSync(join(tmpdir(), 'cg-probe-'));
     expect(isIndexed(root)).toBe(false);
     mkdirSync(join(root, '.codegraph'));
+    expect(isIndexed(root)).toBe(false);
+    writeFileSync(join(root, '.codegraph', 'codegraph.db'), 'database presence only; SDK validates contents');
     expect(isIndexed(root)).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
@@ -24,6 +26,7 @@ describe('CodeGraph index probe', () => {
     const indexed = mkdtempSync(join(tmpdir(), 'cg-probe-a-'));
     const bare = mkdtempSync(join(tmpdir(), 'cg-probe-b-'));
     mkdirSync(join(indexed, '.codegraph'));
+    writeFileSync(join(indexed, '.codegraph', 'codegraph.db'), 'database');
 
     expect(probeProjects([indexed, bare, '  '])).toEqual([
       { workspace: indexed, indexed: true },

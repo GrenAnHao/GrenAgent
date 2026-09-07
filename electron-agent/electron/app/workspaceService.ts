@@ -137,12 +137,25 @@ async function collectJsonlFiles(directory: string): Promise<string[]> {
 }
 
 async function readSession(path: string): Promise<SessionInfo | null> {
-  const firstLine = (await readFile(path, 'utf8')).split(/\r?\n/, 1)[0];
+  const lines = (await readFile(path, 'utf8')).split(/\r?\n/);
   let header: Record<string, unknown> | undefined;
   try {
-    header = JSON.parse(firstLine) as Record<string, unknown>;
+    header = JSON.parse(lines[0]) as Record<string, unknown>;
   } catch {
     /* not JSON — fall through to path-based inference */
+  }
+
+  let name: string | null = null;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const entry = JSON.parse(lines[i]) as Record<string, unknown> | null;
+      if (entry?.type === 'session_info' && typeof entry.name === 'string' && entry.name.trim()) {
+        name = entry.name.trim();
+        break;
+      }
+    } catch {
+      /* Ignore malformed entries, including a partially written last line. */
+    }
   }
 
   if (header?.type === 'session') {
@@ -151,7 +164,7 @@ async function readSession(path: string): Promise<SessionInfo | null> {
       path,
       cwd: typeof header.cwd === 'string' ? header.cwd : null,
       timestamp: typeof header.timestamp === 'string' ? header.timestamp : null,
-      name: null,
+      name,
     };
   }
 
@@ -160,7 +173,7 @@ async function readSession(path: string): Promise<SessionInfo | null> {
   if (!cwd) return null;
   const timestamp = inferTimestampFromFilename(path);
   const id = inferIdFromFilename(path);
-  return { id, path, cwd, timestamp, name: null };
+  return { id, path, cwd, timestamp, name };
 }
 
 /** Session files live at `<sessionsDir>/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.

@@ -1,6 +1,23 @@
-import type { AppEvent, AppEventType } from '../app/appServer/types';
+/** 投影器实际会产出的语义类型（pi 原始事件 → turn/item 生命周期）。 */
+export type PiProjectionType =
+  | 'turn.started' | 'turn.completed' | 'turn.failed' | 'turn.cancelled'
+  | 'item.created' | 'item.delta' | 'item.updated';
 
-export type AppEventInput = Omit<AppEvent, 'sequence'>;
+/**
+ * pi 原始事件的内部归一形状，仅供 PiRuntimeService 的 threads/turns/items 持久化分支使用。
+ * 不含 id / sequence：这份投影不再对外广播、也不再落 app_events 表（AppEvent 系统已移除），
+ * 因此不需要事件标识。此前为了填 app_events.id 用模块级自增计数器拼 id，主进程重启后归零，
+ * 导致跨重启主键冲突刷屏 "UNIQUE constraint failed: app_events.id"。
+ */
+export interface PiProjection {
+  type: PiProjectionType;
+  timestamp: number;
+  projectId?: string;
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  data: unknown;
+}
 
 export interface PiEventContext {
   projectId?: string;
@@ -8,7 +25,7 @@ export interface PiEventContext {
   turnId?: string;
 }
 
-const eventTypeMap: Record<string, AppEventType> = {
+const eventTypeMap: Record<string, PiProjectionType> = {
   agent_start: 'turn.started',
   message_start: 'item.created',
   message_update: 'item.delta',
@@ -18,9 +35,7 @@ const eventTypeMap: Record<string, AppEventType> = {
   tool_execution_end: 'item.updated',
 };
 
-let fallbackEventId = 0;
-
-export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventContext = {}): AppEventInput | undefined {
+export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventContext = {}): PiProjection | undefined {
   const rawType = typeof raw.type === 'string' ? raw.type : undefined;
   if (!rawType) return undefined;
   if (rawType === 'agent_end' && raw.willRetry === true) return undefined;
@@ -34,10 +49,8 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
     (message && typeof message.id === 'string' && message.id) ||
     undefined;
   const timestamp = typeof raw.timestamp === 'number' ? raw.timestamp : Date.now();
-  const id = typeof raw.id === 'string' ? raw.id : `${rawType}:${++fallbackEventId}`;
 
   return {
-    id,
     type,
     timestamp,
     ...context,
@@ -46,7 +59,7 @@ export function adaptPiEvent(raw: Record<string, unknown>, context: PiEventConte
   };
 }
 
-function agentEndType(raw: Record<string, unknown>): AppEventType {
+function agentEndType(raw: Record<string, unknown>): PiProjectionType {
   const messages = Array.isArray(raw.messages) ? raw.messages : [];
   const lastAssistant = [...messages].reverse().find((message) => isRecord(message) && message.role === 'assistant');
   if (lastAssistant?.stopReason === 'aborted') return 'turn.cancelled';
