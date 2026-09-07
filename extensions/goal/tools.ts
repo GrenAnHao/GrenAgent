@@ -53,6 +53,8 @@ export function registerGoalTools(pi: ExtensionAPI, client = new MemoryClient())
     parameters: Type.Object({ condition, continuousIntentEvidence: Type.String({ minLength: 1, maxLength: 4000 }), maxRounds: Type.Optional(revision) }),
     async execute(_id, params, _signal, _update, ctx) {
       userTurnRequired();
+      if (typeof params.condition !== 'string' || params.condition.length === 0 || params.condition.length > 4000) throw new Error('INVALID_PARAMS');
+      if (typeof params.continuousIntentEvidence !== 'string' || params.continuousIntentEvidence.length === 0 || params.continuousIntentEvidence.length > 4000) throw new Error('INVALID_PARAMS');
       if (!/(持续|直到完成|完成后再停止|keep going|until complete|continuous)/i.test(params.continuousIntentEvidence)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
       const ref = session(ctx);
       const value = await client.request('goal.create', { ...ref, condition: params.condition, continuousIntentEvidence: params.continuousIntentEvidence, ...(params.maxRounds === undefined ? {} : { maxRounds: params.maxRounds }) });
