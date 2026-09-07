@@ -40,7 +40,9 @@ const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
 export function matchBuiltinRules(call: ToolCallFacts): BuiltinRule | undefined {
   // preset 由 sidecar 经 TCP 传来，版本漂移或将来新增档位都可能给到表外的值。
   // 收敛到最严的 ask 档：直接索引会抛 TypeError，兜底成空集则等同 full，是最宽松的一侧。
-  const rules = BUILTIN_RULES[call.preset] ?? BUILTIN_RULES.ask;
+  // 用 hasOwn 而非 ?? ：preset 取到 toString 等原型链键时会拿到继承来的函数，非 nullish，
+  // ?? 不触发而 for...of 照样抛错。与 rules.ts 里 EFFECT_RANK 的守卫同源。
+  const rules = Object.hasOwn(BUILTIN_RULES, call.preset) ? BUILTIN_RULES[call.preset] : BUILTIN_RULES.ask;
   let best: BuiltinRule | undefined;
   for (const rule of rules) {
     if (!rule.match(call)) continue;

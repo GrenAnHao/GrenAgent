@@ -52,10 +52,15 @@ describe('matchBuiltinRules', () => {
   });
 
   it('collapses an unrecognised preset to the strictest tier instead of throwing', () => {
-    const unknown = 'nope' as ApprovalPreset;
-    expect(matchBuiltinRules(facts(unknown, { dangerousCommand: true }))?.id).toBe('builtin.dangerous-command');
-    // builtin.mcp 只在 ask 档存在，命中它才证明兜底到的是最严档而非 auto。
-    expect(matchBuiltinRules(facts(unknown, { mcp: true }))?.id).toBe('builtin.mcp');
+    // 普通未知值与 Object.prototype 上的键都要收敛，后者用 ?? 兜不住：
+    // BUILTIN_RULES['toString'] 拿到的是继承来的函数，非 nullish。
+    // 断言逐个元素做：整个数组 as ApprovalPreset[] 会被 TS2352 拒绝（元素类型无重叠）。
+    for (const raw of ['nope', 'toString', 'constructor', '__proto__']) {
+      const unknown = raw as ApprovalPreset;
+      expect(matchBuiltinRules(facts(unknown, { dangerousCommand: true }))?.id).toBe('builtin.dangerous-command');
+      // builtin.mcp 只在 ask 档存在，命中它才证明兜底到的是最严档而非 auto。
+      expect(matchBuiltinRules(facts(unknown, { mcp: true }))?.id).toBe('builtin.mcp');
+    }
   });
 
   it('deny outranks ask when both match', () => {
