@@ -77,6 +77,10 @@ describe('matchUserRules', () => {
     expect(matchUserRules([rule({ scope: 'workspace', scopeKey: 'D:/other' })], facts(), NOW)).toBeUndefined();
   });
 
+  it('applies a workspace rule whose scope key carries a trailing separator', () => {
+    expect(matchUserRules([rule({ scope: 'workspace', scopeKey: 'D:/repo/' })], facts(), NOW)?.id).toBe('r1');
+  });
+
   it('ignores expired rules', () => {
     expect(matchUserRules([rule({ expiresAt: NOW - 1 })], facts(), NOW)).toBeUndefined();
     expect(matchUserRules([rule({ expiresAt: NOW + 1 })], facts(), NOW)?.id).toBe('r1');
@@ -131,6 +135,25 @@ describe('matchUserRules', () => {
     expect(matchUserRules(r, writeCall('D:/repo/public/k.txt'), NOW)).toBeUndefined();
   });
 
+  // 下面两条锁的是「不会指数级回溯」，不是精确耗时：阈值给得很宽，
+  // 未折叠时实测分别约 1900ms 与 1300ms，折叠后都在 1ms 量级。
+  it('consecutive stars in one segment behave as a single star without backtracking', () => {
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/*****z' })];
+    expect(matchUserRules(r, writeCall('D:/repo/aaaz'), NOW)?.id).toBe('r1');
+    const started = performance.now();
+    expect(matchUserRules(r, writeCall(`D:/repo/${'a'.repeat(120)}`), NOW)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('consecutive ** segments behave as a single ** without backtracking', () => {
+    const matcher = `D:/repo/${'**/'.repeat(9)}z`;
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher })];
+    expect(matchUserRules(r, writeCall('D:/repo/a/b/z'), NOW)?.id).toBe('r1');
+    const started = performance.now();
+    expect(matchUserRules(r, writeCall(`D:/repo/${'a/'.repeat(24)}b.ts`), NOW)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
   it('path_glob is case-insensitive and separator-insensitive', () => {
     const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/src/**' })];
     const call = facts({ tool: 'write', command: undefined, path: 'd:\\repo\\SRC\\a.ts' });
@@ -149,14 +172,15 @@ describe('matchUserRules', () => {
   });
 
   // 规则来自 SQLite，判别字段可能是类型标注之外的脏数据（版本回退、手改库）。
-  // 这类规则必须整条落空，而不是掉进某个具体分支被误判。
+  // 这类规则必须整条落空，而不是掉进某个具体分支被误判——下面两条都刻意构造成
+  // 「若靠排除法兜底就会误命中」的形状。
   it('ignores a rule whose matcher kind is not recognized', () => {
-    const r = [rule({ matcherKind: 'regex' as never, matcher: 'npm' })];
-    expect(matchUserRules(r, facts(), NOW)).toBeUndefined();
+    const r = [rule({ tool: 'mcp__npm__install', matcherKind: 'regex' as never, matcher: 'npm' })];
+    expect(matchUserRules(r, facts({ tool: 'mcp__npm__install' }), NOW)).toBeUndefined();
   });
 
   it('ignores a rule whose scope is not recognized', () => {
-    const r = [rule({ scope: 'thread' as never, scopeKey: 's1' })];
+    const r = [rule({ scope: 'thread' as never, scopeKey: 'D:/repo' })];
     expect(matchUserRules(r, facts(), NOW)).toBeUndefined();
   });
 
