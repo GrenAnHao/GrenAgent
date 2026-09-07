@@ -4,6 +4,7 @@ import { useSessionStore } from '../../store/session';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from './groupMessages';
 import { ChatMessageItems } from './ChatMessageItems';
+import { ChatMiniMap } from '../ChatMiniMap';
 import { computeSubAgentUnits, computeAnsweredQuestions } from './messagePrecompute';
 import { PreparingIndicator } from './PreparingIndicator';
 
@@ -35,6 +36,7 @@ export function ChatListView() {
       unitsByMessage={unitsByMessage}
       answeredQuestions={answeredQuestions}
       footer={showPreparing ? <PreparingIndicator /> : undefined}
+      overlay={(viewport) => <ChatMiniMap messages={display} viewport={viewport} />}
       fill="absolute"
       paddingInline={24}
       resetKey={sessionPath}

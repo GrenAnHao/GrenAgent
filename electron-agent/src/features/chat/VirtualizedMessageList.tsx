@@ -3,7 +3,26 @@ import { VList, type VListHandle } from 'virtua';
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDown } from 'lucide-react';
+import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import type { DisplayMessage } from './groupMessages';
+
+/**
+ * 叠加层用的视口把手：让浮层（如 ChatMiniMap）能跳转、并跟随视口位置。
+ * 位置走「订阅」而非 state：滚动时只有浮层自己响应，
+ * 不会带着整列重型 Markdown 消息一起重渲染。
+ */
+export interface MessageListViewport {
+  /** 平滑滚动到指定条目，使其对齐视口顶部。 */
+  scrollToIndex: (index: number) => void;
+  /** 视口顶部条目的下标。 */
+  getTopIndex: () => number;
+  /** 当前滚动偏移（px）。与 getItemOffset 配合，浮层可按像素比例平滑跟随而不是逐条跳。 */
+  getScrollOffset: () => number;
+  /** 指定条目的起始偏移（px）；尚未测量的条目为估算值。 */
+  getItemOffset: (index: number) => number;
+  /** 订阅视口位置变化（滚动的每一帧），返回取消订阅函数。 */
+  subscribe: (listener: () => void) => () => void;
+}
 
 interface VirtualizedMessageListProps {
   display: DisplayMessage[];
@@ -11,6 +30,8 @@ interface VirtualizedMessageListProps {
   renderItem: (msg: DisplayMessage) => ReactNode;
   /** 列表末尾附加元素（如「准备响应中」占位），作为最后一个虚拟条目。 */
   footer?: ReactNode;
+  /** 覆盖在列表之上的浮层（如 ChatMiniMap），拿到视口把手以跳转与高亮。 */
+  overlay?: (viewport: MessageListViewport) => ReactNode;
   /** 填充方式：主对话父容器是 position:relative → 'absolute'；子代理面板是 flex 子项 → 'flex'（默认）。 */
   fill?: 'absolute' | 'flex';
   /** 每条消息左右内边距（主对话 24，子代理 16）。 */
@@ -76,6 +97,7 @@ export function VirtualizedMessageList({
   display,
   renderItem,
   footer,
+  overlay,
   fill = 'flex',
   paddingInline = 24,
   resetKey,
@@ -89,9 +111,40 @@ export function VirtualizedMessageList({
   // 不贴底时 resize 的稳定锚点：顶部可见条目索引 + 该条目已滚过视口顶的像素。
   const anchorIndexRef = useRef(0);
   const anchorWithinRef = useRef(0);
+  // 浮层的视口订阅者：每次滚动（anchor 更新后）通知一次，读数直接走 handle 与 anchor ref。
+  const viewportListenersRef = useRef(new Set<() => void>());
   const [showJump, setShowJump] = useState(false);
 
-  const itemStyle: CSSProperties = { paddingInline, paddingBlock: 4 };
+  // 视口把手对象保持恒等，避免浮层因 props 变化反复重建订阅。
+  const viewport = useMemo<MessageListViewport>(
+    () => ({
+      scrollToIndex: (index) => ref.current?.scrollToIndex(index, { align: 'start', smooth: true }),
+      getTopIndex: () => anchorIndexRef.current,
+      getScrollOffset: () => ref.current?.scrollOffset ?? 0,
+      getItemOffset: (index) => ref.current?.getItemOffset(index) ?? 0,
+      subscribe: (listener) => {
+        viewportListenersRef.current.add(listener);
+        return () => {
+          viewportListenersRef.current.delete(listener);
+        };
+      },
+    }),
+    [],
+  );
+
+  const notifyViewport = () => {
+    for (const listener of viewportListenersRef.current) listener();
+  };
+
+  // 内容列限宽并水平居中：paddingInline 留在限宽之内（box-sizing 全局 border-box），
+  // 于是窄容器退回 100% 时它继续充当左右留白，宽容器下则与输入区的内边距一起对齐同一条列边。
+  // 浮层（ChatMiniMap / 回到底部）挂在最外层 wrapper 上，仍贴滚动区两侧边缘，不随内容列收窄。
+  const itemStyle: CSSProperties = {
+    width: CHAT_CONTENT_WIDTH,
+    marginInline: 'auto',
+    paddingInline,
+    paddingBlock: 4,
+  };
   // 只把数据交给 virtua，元素由渲染函数按需创建：children 数组形态下，每次重渲染都要为全部消息
   // 创建元素、再被 virtua 整体摊平一遍，而流式期间列表每 100ms 就重渲一次，长会话下这笔开销很可观。
   const hasFooter = Boolean(footer);
@@ -128,6 +181,7 @@ export function VirtualizedMessageList({
     atBottomRef.current = true;
     anchorIndexRef.current = 0;
     anchorWithinRef.current = 0;
+    notifyViewport();
     setShowJump(false);
     const toBottom = () => {
       const h = ref.current;
@@ -215,6 +269,7 @@ export function VirtualizedMessageList({
             // 记录当前顶部可见条目作为锚点，供 resize 期间钉回阅读位置。
             anchorIndexRef.current = h.findItemIndex(h.scrollOffset);
             anchorWithinRef.current = h.scrollOffset - h.getItemOffset(anchorIndexRef.current);
+            notifyViewport();
           }}
         >
           {(row: Row) =>
@@ -230,6 +285,7 @@ export function VirtualizedMessageList({
           }
         </VList>
       </div>
+      {overlay?.(viewport)}
       {showJump ? (
         <button
           type="button"

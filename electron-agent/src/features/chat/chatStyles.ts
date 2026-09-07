@@ -1,5 +1,17 @@
 import { createStaticStyles, cssVar } from 'antd-style';
 
+/**
+ * 对话内容列的「黄金宽度」：会话区是可调面板，宽度 ≠ 视口宽度，所以按容器百分比伸缩而不用 vw；
+ * 纯 CSS 表达即可跟随容器，不必再上 ResizeObserver。三段取值的意图：
+ *   - 61.8%（1/φ）：主体比例，会话区变宽时正文同步变宽，两侧留白始终占黄金分割的另一半；
+ *   - 下限 620px：会话区约 1000px 以内时 61.8% 会把正文压得比这更窄，改走固定下限，
+ *     免得中等宽度下留白比正文还抢眼；
+ *   - 上限 960px：再宽行长就超出舒适阅读区间，超宽屏只增加留白而不继续拉长文本行；
+ *   - min 里的 100%：会话区比下限还窄时（子代理面板、极窄窗口）退回铺满，不倒过来挤压正文。
+ * 消息列与输入区共用同一表达式，两者左右边缘才能对齐成同一条内容列。
+ */
+export const CHAT_CONTENT_WIDTH = 'min(100%, 960px, max(620px, 61.8%))';
+
 /** 共享的 ChatItem 外壳 / 气泡 / ContentBlock 样式（对齐 lobehub 间距，无头像）。 */
 export const chatStyles = createStaticStyles(({ css }) => ({
   item: css`

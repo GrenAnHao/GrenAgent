@@ -7,7 +7,7 @@ import { AnswerCard } from './AnswerCard';
 import { PlanCard } from './PlanCard';
 import { QuestionsCard } from './QuestionsCard';
 import { VisualCard } from '../visual/VisualCard';
-import { VirtualizedMessageList } from './VirtualizedMessageList';
+import { VirtualizedMessageList, type MessageListViewport } from './VirtualizedMessageList';
 import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
@@ -20,6 +20,8 @@ interface ChatMessageItemsProps {
   answeredQuestions: Set<string>;
   /** 列表末尾附加元素（如「准备响应中」占位）。 */
   footer?: ReactNode;
+  /** 覆盖在列表之上的浮层（如 ChatMiniMap），透传给 VirtualizedMessageList。 */
+  overlay?: (viewport: MessageListViewport) => ReactNode;
   /** 填充方式：主对话父容器 position:relative → 'absolute'；子代理面板 flex 子项 → 'flex'（默认）。 */
   fill?: 'absolute' | 'flex';
   /** 每条消息左右内边距（主对话 24，子代理 16）。 */
@@ -94,6 +96,7 @@ export function ChatMessageItems({
   unitsByMessage,
   answeredQuestions,
   footer,
+  overlay,
   fill,
   paddingInline,
   resetKey,
@@ -103,6 +106,7 @@ export function ChatMessageItems({
     <VirtualizedMessageList
       display={messages}
       footer={footer}
+      overlay={overlay}
       fill={fill}
       paddingInline={paddingInline}
       resetKey={resetKey}

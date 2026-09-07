@@ -7,6 +7,7 @@ import { App } from 'antd';
 import { ChatListView } from './ChatListView';
 import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
+import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { PromptImage } from './input/ChatInputContext';
 import { isExecutiveCommandMessage } from './input/commandClassification';
@@ -33,10 +34,15 @@ const composeTransition = {
 // 而 B 的消息/骨架异步加载会打断形变，表现为「卡一下再瞬间到底」）。
 const composeShellLayoutId = (workspace: string) => `chat-compose-shell-${workspace}`;
 
-// 输入区「黄金宽度」：空对话居中，宽度取内容区的黄金比例 1/φ≈0.618，但不窄于 600px（窄窗也保持舒展
-// 不再缩成细条）、不宽于 1080px（防超宽屏拉太长）；当窗口收窄到连 600px 都放不下时退为 100% 贴边铺满，
-// 而不是压缩输入框。发出首条后随 layoutId 形变非线性展开铺满并滑到底部。
-const EMPTY_COMPOSE_WIDTH = 'min(100%, 1080px, max(600px, 61.8%))';
+// 输入区与消息列共用 CHAT_CONTENT_WIDTH，空/非空两态都取同一条内容列，边缘才对得齐；
+// 这也让 layoutId 形变退化成纯竖向滑动（不再「展开铺满」），发出首条时输入框宽度不跳。
+// paddingInline 8：MessageEditor 自带 16px 外边距，8+16 正好补齐消息条目的 paddingInline=24，
+// 于是输入框边框与气泡左右缘落在同一条竖线上。
+const COMPOSE_COLUMN: CSSProperties = {
+  width: CHAT_CONTENT_WIDTH,
+  marginInline: 'auto',
+  paddingInline: 8,
+};
 
 const errorBannerStyle: CSSProperties = {
   display: 'flex',
@@ -370,10 +376,7 @@ export function ChatView() {
               layout
               layoutId={composeShellLayoutId(workspace)}
               transition={composeTransition}
-              style={{
-                width: EMPTY_COMPOSE_WIDTH,
-                marginInline: 'auto',
-              }}
+              style={COMPOSE_COLUMN}
               data-testid="chat-input-region"
             >
               <AnimatePresence>
@@ -398,21 +401,23 @@ export function ChatView() {
             <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
               {workspaceReady ? <ChatListView /> : <ChatListSkeleton />}
             </div>
-            {/* 重试 / 错误条放在 layout 形变容器「外面」：放进去时它一出现就撑高容器，触发 layoutId
-                形变动画把输入框弹动一下。作为兄弟节点插在输入框上方，高度变化由上方 flex:1 的消息区吸收，
-                输入框位置不动、不再弹动。 */}
-            {retryIndicator}
-            {compactingIndicator}
-            {errorBanner}
-            <motion.div
-              layout
-              layoutId={composeShellLayoutId(workspace)}
-              transition={composeTransition}
-              style={{ flex: 'none', width: '100%' }}
-              data-testid="chat-input-region"
-            >
-              <ChatInput onSend={handleSend} onAbort={handleAbort} />
-            </motion.div>
+            {/* 限宽列包住「提示条 + 输入框」：两者一起居中，才不会出现输入框收窄而错误条仍然通栏。
+                提示条仍作为 layout 形变容器的兄弟节点（而非放进去）：放进去时它一出现就撑高容器，
+                触发 layoutId 形变把输入框弹动一下；在外面则由上方 flex:1 的消息区吸收高度变化。 */}
+            <div style={{ flex: 'none', ...COMPOSE_COLUMN }}>
+              {retryIndicator}
+              {compactingIndicator}
+              {errorBanner}
+              <motion.div
+                layout
+                layoutId={composeShellLayoutId(workspace)}
+                transition={composeTransition}
+                style={{ width: '100%' }}
+                data-testid="chat-input-region"
+              >
+                <ChatInput onSend={handleSend} onAbort={handleAbort} />
+              </motion.div>
+            </div>
           </>
         )}
       </div>
