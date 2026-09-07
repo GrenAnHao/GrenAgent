@@ -50,6 +50,7 @@ export interface CreateGoalInput {
   condition: string;
   origin: "human-ui" | "human-agent";
   maxRounds?: number;
+  continuousIntentEvidence?: string;
 }
 
 export interface GoalCasUpdate {
