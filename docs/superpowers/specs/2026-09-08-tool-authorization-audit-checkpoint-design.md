@@ -170,9 +170,11 @@ blob 按内容哈希落 `userData/checkpoints/blobs/<hash 前两位>/<hash>`，�
 
 建立完整的拦截、决策、审计链路，UI 复用现有 `PromptRequestCard`，不做新组件。
 
-改动现有文件：`extensions/safety/index.ts`（钩子插入快问，②③④ 层替换）、`extensions/_shared/desktop-control.ts`（新增三个 RPC 方法）、`electron/agentData/runtime.ts`（注册 RPC）、`electron/app/permissionManager.ts`（加规则 provider，激活 ask 挂起）、`electron/agentData/storage.ts`（建表升版本）、`src/features/chat/input/PromptRequestCard.tsx`（识别哨兵）。
+改动现有文件：`extensions/safety/index.ts`（钩子插入快问，②③④ 层替换）、`extensions/_shared/desktop-control.ts`（新增 RPC 客户端方法）、`electron/main.ts`（在 `methods` 中注册 RPC）、`electron/agentData/storage.ts`（建表升版本）、`src/features/extensionUi/ExtensionUiHost.tsx` 与 `src/features/chat/input/PromptRequestCard.tsx`（识别 `__approval` 哨兵）。
 
-新建：规则存储、审计存储、决策服务三个主进程模块。
+新建六个主进程模块：规则匹配纯函数、内置规则常量、规则存储、审计存储、参数摘要、决策服务。
+
+`PermissionManager` 保持原样，不加 provider 也不启用其挂起分支。审批的等待发生在 sidecar 的 `ctx.ui.input` 上，主进程只做规则查询后立即返回，用不到主进程侧的挂起 Promise，也用不到 `permission_resolve`。`PermissionManager` 继续负责 `mcp.call`、`network.request` 这类 operation 的 profile 级硬限，与工具授权链路职责不重叠。第 2 节列出的三处死代码中，本设计只激活「渲染层识别结构化 UI 请求」这一处；另外两处（`PermissionManager` 的 ask 挂起、`PromptRequestCard` 的 `source: 'permission'` 分支）仍然是死代码，本设计不删除也不使用它们。
 
 ### 5.2 S2 审批队列与批量授权
 
