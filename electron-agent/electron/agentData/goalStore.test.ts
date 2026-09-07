@@ -424,6 +424,6 @@ describe('GoalStore', () => {
     expect(threadCols.some((c) => c.name === 'session_id')).toBe(true); expect(turnCols.some((c) => c.name === 'session_id')).toBe(true);
     const leaseCols = storage.db.prepare('PRAGMA table_info(goal_turn_leases)').all() as Array<{ name: string }>;
     expect(leaseCols.map((c) => c.name)).toEqual(expect.arrayContaining(['turn_id', 'session_id', 'workspace', 'origin', 'prompt_digest', 'continuous_intent', 'blockage_fingerprint', 'blockage_summary']));
-    expect(storage.schemaVersion()).toBe(3); storage.close();
+    expect(storage.schemaVersion()).toBe(4); storage.close();
   });
 });

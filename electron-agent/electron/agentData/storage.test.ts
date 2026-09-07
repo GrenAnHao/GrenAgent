@@ -9,10 +9,10 @@ describe('AgentDataStorage', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-data-'));
     const file = join(dir, 'data.db');
     const first = new AgentDataStorage(file); first.migrate(); first.migrate();
-    expect(first.schemaVersion()).toBe(3);
+    expect(first.schemaVersion()).toBe(4);
     first.close();
     const second = new AgentDataStorage(file); second.migrate();
-    expect(second.schemaVersion()).toBe(3); second.close();
+    expect(second.schemaVersion()).toBe(4); second.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -50,7 +50,7 @@ describe('AgentDataStorage', () => {
     `);
     storage.migrate();
 
-    expect(storage.schemaVersion()).toBe(3);
+    expect(storage.schemaVersion()).toBe(4);
     expect(storage.db.prepare('SELECT id,session_id FROM threads').get()).toMatchObject({ id: 'legacy-thread', session_id: null });
     expect(storage.db.prepare('SELECT id,session_id FROM turns').get()).toMatchObject({ id: 'legacy-turn', session_id: null });
     expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('goal_snapshots','goal_events','goal_turn_leases') ORDER BY name").all()).toHaveLength(3);
