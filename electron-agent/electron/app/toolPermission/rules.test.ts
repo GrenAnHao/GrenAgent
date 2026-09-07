@@ -28,6 +28,11 @@ function rule(over: Partial<ToolRule> = {}): ToolRule {
   };
 }
 
+/** 一次 write 调用：带目标路径、不带命令。 */
+function writeCall(path: string): ToolCallFacts {
+  return facts({ tool: 'write', command: undefined, path });
+}
+
 describe('matchUserRules', () => {
   it('returns undefined when nothing matches', () => {
     expect(matchUserRules([rule({ tool: 'write' })], facts(), NOW)).toBeUndefined();
@@ -94,11 +99,36 @@ describe('matchUserRules', () => {
     expect(matchUserRules(r, facts({ command: '  npm run build' }), NOW)?.id).toBe('r1');
   });
 
-  it('path_glob matches with ** and * segments', () => {
+  it('a trailing ** matches everything below the directory', () => {
     const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/src/**' })];
-    const call = (path: string) => facts({ tool: 'write', command: undefined, path });
-    expect(matchUserRules(r, call('D:/repo/src/a/b.ts'), NOW)?.id).toBe('r1');
-    expect(matchUserRules(r, call('D:/repo/docs/a.md'), NOW)).toBeUndefined();
+    expect(matchUserRules(r, writeCall('D:/repo/src/a/b.ts'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/docs/a.md'), NOW)).toBeUndefined();
+  });
+
+  it('a single * stays within one path segment', () => {
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/*.ts' })];
+    expect(matchUserRules(r, writeCall('D:/repo/a.ts'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/a/b.ts'), NOW)).toBeUndefined();
+  });
+
+  it('path_glob escapes regex metacharacters instead of interpreting them', () => {
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/a.ts' })];
+    expect(matchUserRules(r, writeCall('D:/repo/a.ts'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/axts'), NOW)).toBeUndefined();
+  });
+
+  it('** matches zero directory segments', () => {
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/**/.env' })];
+    expect(matchUserRules(r, writeCall('D:/repo/.env'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/a/.env'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/a/b/.env'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/other/.env'), NOW)).toBeUndefined();
+  });
+
+  it('path_glob folds .. so traversal cannot dodge a rule', () => {
+    const r = [rule({ tool: 'write', matcherKind: 'path_glob', matcher: 'D:/repo/secret/**' })];
+    expect(matchUserRules(r, writeCall('D:/repo/src/../secret/k.txt'), NOW)?.id).toBe('r1');
+    expect(matchUserRules(r, writeCall('D:/repo/public/k.txt'), NOW)).toBeUndefined();
   });
 
   it('path_glob is case-insensitive and separator-insensitive', () => {
@@ -116,5 +146,22 @@ describe('matchUserRules', () => {
   it('a matcher requiring a field that the call lacks does not match', () => {
     const r = [rule({ matcherKind: 'command_prefix', matcher: 'npm' })];
     expect(matchUserRules(r, facts({ command: undefined }), NOW)).toBeUndefined();
+  });
+
+  // 规则来自 SQLite，判别字段可能是类型标注之外的脏数据（版本回退、手改库）。
+  // 这类规则必须整条落空，而不是掉进某个具体分支被误判。
+  it('ignores a rule whose matcher kind is not recognized', () => {
+    const r = [rule({ matcherKind: 'regex' as never, matcher: 'npm' })];
+    expect(matchUserRules(r, facts(), NOW)).toBeUndefined();
+  });
+
+  it('ignores a rule whose scope is not recognized', () => {
+    const r = [rule({ scope: 'thread' as never, scopeKey: 's1' })];
+    expect(matchUserRules(r, facts(), NOW)).toBeUndefined();
+  });
+
+  it('ignores a rule whose effect is not recognized', () => {
+    const r = [rule({ effect: 'confirm' as never })];
+    expect(matchUserRules(r, facts(), NOW)).toBeUndefined();
   });
 });

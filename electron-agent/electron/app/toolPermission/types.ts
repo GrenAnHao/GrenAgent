@@ -52,9 +52,14 @@ export interface ToolCallFacts {
 export interface ToolRule {
   id: string;
   scope: RuleScope;
+  /** 随 scope 取值：session 存 sessionId，workspace 存工作区路径，global 固定为空串。 */
   scopeKey: string;
   tool: string;
   matcherKind: MatcherKind;
+  /**
+   * 随 matcherKind 取值：command_prefix 存命令前缀，path_glob 存路径 glob，
+   * mcp_server 存裸服务名（不含 mcp__ 前缀与末尾分隔符），any 不使用（空串）。
+   */
   matcher: string;
   effect: ToolEffect;
   createdAt: number;
@@ -64,9 +69,11 @@ export interface ToolRule {
 /** 新增规则时的输入，id 与 createdAt 由 store 生成。 */
 export interface ToolRuleInput {
   scope: RuleScope;
+  /** 同 ToolRule.scopeKey：session 存 sessionId，workspace 存工作区路径，global 固定为空串。 */
   scopeKey: string;
   tool: string;
   matcherKind: MatcherKind;
+  /** 同 ToolRule.matcher：随 matcherKind 取命令前缀 / 路径 glob / 裸服务名，any 为空串。 */
   matcher: string;
   effect: ToolEffect;
   expiresAt?: number;
