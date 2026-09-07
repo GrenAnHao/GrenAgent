@@ -37,7 +37,7 @@ export interface GoalCompletionRequest {
 
 export interface GoalDataPort {
   get(sessionId: string): Promise<GoalSnapshot | undefined> | GoalSnapshot | undefined;
-  update(input: { sessionId: string; goalId: string; revision: number; action: 'resume' | 'begin_judging'; origin: 'system'; payload?: Record<string, unknown> }): Promise<GoalSnapshot> | GoalSnapshot;
+  update(input: { sessionId: string; goalId: string; revision: number; action: 'resume' | 'begin_judging'; origin: 'human-ui' | 'system'; payload?: Record<string, unknown> }): Promise<GoalSnapshot> | GoalSnapshot;
   claimRound(input: RoundClaimInput): Promise<GoalDispatch> | GoalDispatch;
   settleRound(input: RoundSettlementInput): Promise<{ snapshot: GoalSnapshot; dispatch: GoalDispatch }> | { snapshot: GoalSnapshot; dispatch: GoalDispatch };
   judgeResult(input: JudgeResultInput): Promise<GoalSnapshot> | GoalSnapshot;
@@ -147,7 +147,7 @@ export class GoalCoordinator {
   }
 
   async resume(input: { sessionId: string; goalId: string; revision: number }): Promise<GoalSnapshot> {
-    const snapshot = await this.options.data.update({ ...input, action: 'resume', origin: 'system' });
+    const snapshot = await this.options.data.update({ ...input, action: 'resume', origin: 'human-ui' });
     this.options.onGoalChanged?.(snapshot);
     return snapshot;
   }
