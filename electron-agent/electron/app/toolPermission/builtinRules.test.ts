@@ -19,7 +19,7 @@ describe('matchBuiltinRules', () => {
     // 现状：extensions/safety/index.ts 第 53-55 行在 full 档直接 return undefined，
     // 危险命令与受保护路径在 full 下同样不拦。改变这个行为属于回归。
     expect(matchBuiltinRules(facts('full', { dangerousCommand: true }))).toBeUndefined();
-    expect(matchBuiltinRules(facts('full', { protectedPath: true }))).toBeUndefined();
+    expect(matchBuiltinRules(facts('full', { protectedPath: true, write: true }))).toBeUndefined();
   });
 
   it('auto denies protected paths', () => {
@@ -49,6 +49,13 @@ describe('matchBuiltinRules', () => {
 
   it('ask allows an in-workspace write', () => {
     expect(matchBuiltinRules(facts('ask', { write: true }))).toBeUndefined();
+  });
+
+  it('collapses an unrecognised preset to the strictest tier instead of throwing', () => {
+    const unknown = 'nope' as ApprovalPreset;
+    expect(matchBuiltinRules(facts(unknown, { dangerousCommand: true }))?.id).toBe('builtin.dangerous-command');
+    // builtin.mcp 只在 ask 档存在，命中它才证明兜底到的是最严档而非 auto。
+    expect(matchBuiltinRules(facts(unknown, { mcp: true }))?.id).toBe('builtin.mcp');
   });
 
   it('deny outranks ask when both match', () => {

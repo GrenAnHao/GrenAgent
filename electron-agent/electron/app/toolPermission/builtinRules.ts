@@ -38,8 +38,11 @@ const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
 
 /** 选出当前档位下命中的最强内置规则；无命中返回 undefined。 */
 export function matchBuiltinRules(call: ToolCallFacts): BuiltinRule | undefined {
+  // preset 由 sidecar 经 TCP 传来，版本漂移或将来新增档位都可能给到表外的值。
+  // 收敛到最严的 ask 档：直接索引会抛 TypeError，兜底成空集则等同 full，是最宽松的一侧。
+  const rules = BUILTIN_RULES[call.preset] ?? BUILTIN_RULES.ask;
   let best: BuiltinRule | undefined;
-  for (const rule of BUILTIN_RULES[call.preset]) {
+  for (const rule of rules) {
     if (!rule.match(call)) continue;
     if (!best || EFFECT_RANK[rule.effect] > EFFECT_RANK[best.effect]) best = rule;
   }

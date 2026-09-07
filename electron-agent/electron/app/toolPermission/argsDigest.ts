@@ -17,6 +17,9 @@ function stringify(value: unknown): string {
  *
  * bash 保留完整命令——审计的主要价值就在于此。写类工具只留路径。
  * 其余工具整体序列化后按长度截断，避免个别工具的大参数撑爆表。
+ *
+ * 返回值不保证是合法 JSON：截断发生在字符层面，尾部会留下半截字面量（以 … 标记）。
+ * tool_audit.args 是给人看的取证字符串，只作展示，不要 JSON.parse 它。
  */
 export function digestArgs(tool: string, args: Record<string, unknown> | undefined): string {
   if (!args) return '{}';
