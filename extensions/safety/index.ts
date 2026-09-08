@@ -7,6 +7,10 @@ import {
   NET_TOOLS as NET_TOOL_NAMES,
   WRITE_TOOLS,
 } from "../_shared/tool-groups.js";
+import {
+  desktopControl, evaluateToolCall, rememberToolRule, resolveToolOrigin, settleToolCall,
+  type ToolCallFacts, type ToolRuleDraft,
+} from "../_shared/desktop-control.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
 // 工具分组取自单一真相源（_shared/tool-groups），避免与 capability 能力闸各维护一份而漂移失配。
@@ -14,6 +18,65 @@ const NET_TOOLS = new Set<string>(NET_TOOL_NAMES);
 const WRITE_BYPASS_TOOLS = new Set<string>(WRITE_TOOLS);
 // 代码执行工具（py_run/js_run/dap_*）一律在宿主进程执行（node:vm 可逃逸 / python 子进程 / 调试器）。
 const CODE_EXEC = new Set<string>(CODE_EXEC_TOOLS);
+
+/**
+ * 把一次调用压成主进程需要的事实特征。判定逻辑留在 sidecar，主进程只消费布尔量。
+ *
+ * 参数类型刻意声明得比 SDK 的 ToolCallEvent / Context 宽松：结构化类型让实参
+ * 兼容，同时这个函数在单测里可以用普通对象调用，不必构造完整的 SDK 上下文。
+ */
+function collectFacts(
+  event: { toolName: string; toolCallId?: string; input?: unknown },
+  ctx: { cwd: string; sessionManager?: { getSessionId?: () => string | undefined } },
+  preset: "ask" | "auto" | "full",
+): ToolCallFacts {
+  const input = (event.input ?? {}) as Record<string, unknown>;
+  const command = typeof input.command === "string" ? input.command : undefined;
+  const isWrite = event.toolName === "write" || event.toolName === "edit" || WRITE_BYPASS_TOOLS.has(event.toolName);
+  const path = isWrite ? extractPath(input) : undefined;
+  // SAFETY_BASH_CONFIRM / SAFETY_PROTECT_PATHS 是既有的用户开关（原第 92-93 行）。
+  // 内置规则不可编辑，所以关闭护栏的能力必须留在这里：开关关掉时干脆不上报该特征，
+  // 主进程也就无从匹配对应的内置规则。去掉这两个判断会让现有配置静默失效。
+  const guardBash = !off(getConfig("SAFETY_BASH_CONFIRM"));
+  const guardPaths = !off(getConfig("SAFETY_PROTECT_PATHS"));
+  return {
+    tool: event.toolName,
+    workspace: ctx.cwd,
+    origin: resolveToolOrigin(),
+    preset,
+    flags: {
+      dangerousCommand: guardBash && command !== undefined && isDangerousBash(command),
+      mutatingCommand: command !== undefined && isMutatingBash(command),
+      protectedPath: guardPaths && path !== undefined && matchProtectedPath(path),
+      outsideWorkspace: path !== undefined && !isUnderCwd(path, ctx.cwd),
+      network: NET_TOOLS.has(event.toolName),
+      mcp: event.toolName.startsWith("mcp__"),
+      codeExec: CODE_EXEC.has(event.toolName),
+      write: isWrite,
+    },
+    ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+    ...(ctx.sessionManager?.getSessionId?.() === undefined
+      ? {}
+      : { sessionId: ctx.sessionManager.getSessionId() as string }),
+    ...(command === undefined ? {} : { command }),
+    ...(path === undefined ? {} : { path }),
+    rawArgs: input,
+  };
+}
+
+/** 「总是允许」写成尽可能窄的规则：bash 按命令前缀，写类工具按目录，其余按工具名。 */
+function draftRule(facts: ToolCallFacts): ToolRuleDraft {
+  const base = { scope: "workspace" as const, scopeKey: facts.workspace, tool: facts.tool, effect: "allow" as const };
+  if (facts.command !== undefined) {
+    const head = facts.command.trimStart().split(/\s+/).slice(0, 2).join(" ");
+    return { ...base, matcherKind: "command_prefix", matcher: head };
+  }
+  if (facts.path !== undefined) {
+    const dir = facts.path.replace(/\\/g, "/").replace(/\/[^/]*$/, "");
+    return { ...base, matcherKind: "path_glob", matcher: `${dir}/**` };
+  }
+  return { ...base, matcherKind: "any", matcher: "" };
+}
 
 export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
@@ -50,61 +113,39 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ② owner 审批策略：full 跳过余下「面向用户的确认/保护」（能力硬限已在 ① 强制）。
+    // ②③④ 授权决策统一交给主进程：规则匹配、内置护栏与审计都在那边，
+    // 这里只负责提取事实与执行结果。第 ① 层的能力硬限已在上方强制，不受此影响。
     const policy = getApprovalPolicy();
-    if (policy === "full") return undefined;
+    const preset = policy === "full" ? "full" : policy === "ask" ? "ask" : "auto";
+    const control = desktopControl();
+    const facts = collectFacts(event, ctx, preset);
+    const verdict = await evaluateToolCall(control, facts);
 
-    // ③ 请求批准（ask）：仅在有 UI 时逐次确认；headless（子代理）无法确认 → 降级为 auto 行为
-    //    （不阻断，避免继承 ask 的子代理被全拦），仍受 ④ 危险命令/受保护路径门控。
-    if (policy === "ask" && ctx.hasUI) {
-      // 外部 MCP 工具（名为 mcp__server__tool，含 fetch 等）与内置联网工具 → 逐次确认。
-      const isMcp = event.toolName.startsWith("mcp__");
-      if (isMcp || NET_TOOLS.has(event.toolName)) {
-        const choice = await ctx.ui.select(
-          `请求批准：允许使用${isMcp ? "外部 MCP" : "联网"}工具？\n\n  ${event.toolName}`,
-          ["允许", "拒绝"],
-        );
-        if (choice !== "允许") return { block: true, reason: `用户拒绝使用工具：${event.toolName}` };
-      }
-      if (event.toolName === "write" || event.toolName === "edit") {
-        const p = extractPath((event.input ?? {}) as Record<string, unknown>);
-        if (p && !isUnderCwd(p, ctx.cwd)) {
-          const choice = await ctx.ui.select(`请求批准：允许写工作区外文件？\n\n  ${p}`, ["允许", "拒绝"]);
-          if (choice !== "允许") return { block: true, reason: "用户拒绝越界写" };
-        }
-      }
-      // shell 会改动文件的命令需确认。
-      if (event.toolName === "bash" && isMutatingBash(String(event.input?.command ?? ""))) {
-        const choice = await ctx.ui.select(
-          `请求批准：允许执行会改动文件的命令？\n\n  ${String(event.input?.command ?? "")}`,
-          ["允许", "拒绝"],
-        );
-        if (choice !== "允许") return { block: true, reason: "用户拒绝改动文件的命令" };
-      }
-      // 宿主代码执行（py_run/js_run 走常驻内核、dap_* 启动/求值被调试程序，均可逃逸到宿主）：ask 下单独确认。
-      if (CODE_EXEC.has(event.toolName)) {
-        const choice = await ctx.ui.select(`请求批准：允许在宿主执行代码？\n\n  ${event.toolName}`, ["允许", "拒绝"]);
-        if (choice !== "允许") return { block: true, reason: `用户拒绝在宿主执行代码：${event.toolName}` };
-      }
+    if (verdict.decision === "allow") return undefined;
+    if (verdict.decision === "deny") {
+      return { block: true, reason: `已被授权规则拒绝：${event.toolName}` };
     }
 
-    // ④ 既有：危险命令确认 + 受保护路径拦写（auto 与 ask 共用）。
-    const guardBash = !off(getConfig("SAFETY_BASH_CONFIRM"));
-    const guardPaths = !off(getConfig("SAFETY_PROTECT_PATHS"));
-    if (guardBash && event.toolName === "bash") {
-      const command = String(event.input?.command ?? "");
-      if (isDangerousBash(command)) {
-        if (!ctx.hasUI) return { block: true, reason: "Dangerous command blocked (no UI)" };
-        const choice = await ctx.ui.select(`危险命令：\n\n  ${command}\n\n是否允许？`, ["允许", "拒绝"]);
-        if (choice !== "允许") return { block: true, reason: "用户拒绝执行" };
-      }
+    // ask：无 UI 时不能就地询问，审计行保持 queued 等人处理。
+    if (!ctx.hasUI) {
+      return { block: true, reason: `已攒起等待授权：${event.toolName}` };
     }
-    if (guardPaths && (event.toolName === "write" || event.toolName === "edit")) {
-      const p = extractPath((event.input ?? {}) as Record<string, unknown>);
-      if (p && matchProtectedPath(p)) {
-        return { block: true, reason: `受保护路径，已阻止写入：${p}` };
-      }
+
+    const detail = facts.command ?? facts.path ?? event.toolName;
+    let choice: string;
+    try {
+      choice = await ctx.ui.select(`请求批准：\n\n  ${detail}`, ["允许本次", "总是允许", "拒绝"]);
+    } catch {
+      await settleToolCall(control, verdict.auditId, "aborted");
+      return { block: true, reason: "授权请求已取消" };
     }
+
+    if (choice === "拒绝") {
+      await settleToolCall(control, verdict.auditId, "user_deny");
+      return { block: true, reason: `用户拒绝：${event.toolName}` };
+    }
+    if (choice === "总是允许") await rememberToolRule(control, draftRule(facts));
+    await settleToolCall(control, verdict.auditId, "user_allow");
     return undefined;
   });
 
