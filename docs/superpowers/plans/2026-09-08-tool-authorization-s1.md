@@ -12,6 +12,18 @@
 
 ---
 
+## 已完成任务的偏离记录
+
+任务 1 至 5 已实现并通过双阶段审查，**这些任务的代码以分支 `feat/tool-authorization-s1` 上的提交为准，下方对应的代码块是初稿、不再是真相源**。审查过程中改动如下，都是审查发现的实际缺陷，不要照旧稿回退：
+
+| 提交 | 改了什么 | 为什么 |
+| --- | --- | --- |
+| `b47ffc0` | `normalizePath` 改用 `posix.normalize` 折叠 `..`；`globToRegExp` 改为按路径段构建，`**` 可匹配零层目录；`scopeApplies` / `matcherApplies` 显式列分支并以 `return false` 收尾 | `d:/repo/secret/**` 原先不匹配 `d:/repo/src/../secret/k.txt`，deny 规则可被路径穿越绕过；`**` 原先不匹配零层目录，与主流 glob 约定相反，同样导致 deny 失效 |
+| `0d91587` | `escapeSegment` 的 `/\*/g` 改为 `/\*+/g`，并跳过相邻的重复 `**` 段；`in` 换成 `Object.hasOwn`；`normalizePath` 剥尾部分隔符 | 上一次修复引入 ReDoS，`d:/repo/*****z` 对 120 字符输入实测 1890ms、足以冻住主进程，改后 0.027ms |
+| `6d50b01`、`9ca7a8e` | `matchBuiltinRules` 的未知 preset 用 `Object.hasOwn` 收敛到最严的 `ask` 档 | 直接索引会抛 TypeError；兜底成空集等同 `full`，是最宽松的一侧，安全方向反了 |
+
+另外三处修正已直接写进下方正文，无需另查：类型检查命令（根 tsconfig 是 `files: []` 的 solution 配置、检查 0 个文件，原命令恒真无意义）、任务 9 `readFlags` 的缺失特征必填校验、以及 `EFFECT_RANK` 抽成 `effectRank.ts` 单一真相源。
+
 ## 关键约束（动工前必读）
 
 **两个包不能互相引用。** `electron-agent/electron/**`（主进程）与 `extensions/**`（sidecar 扩展）是独立的包，生产代码不得跨包 import，理由见 `electron-agent/electron/app/wikiSyncService.ts:37` 的注释。因此 `isDangerousBash`、`matchProtectedPath` 这些判定函数留在 sidecar 侧，主进程只接收布尔特征。
@@ -51,6 +63,7 @@ cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "
 | 文件 | 职责 |
 | --- | --- |
 | `types.ts` | 跨模块共享类型：`ToolCallFacts`、`ToolRule`、`ToolDecision`、`ToolOrigin` |
+| `effectRank.ts` | `EFFECT_RANK` 的单一真相源，被 `rules` / `builtinRules` / `toolDecisionService` 三处共用 |
 | `rules.ts` | 纯函数 `matchUserRules`，无 I/O，可完全单测 |
 | `builtinRules.ts` | 三档预设的内置规则常量，基于特征谓词 |
 | `argsDigest.ts` | 纯函数，按工具名裁剪参数为审计摘要 |
@@ -68,6 +81,8 @@ cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "
 | `extensions/safety/index.ts` | 钩子的 ②③④ 层替换为快问主进程 |
 
 拆分理由：`rules.ts`、`builtinRules.ts`、`argsDigest.ts` 是纯函数，与数据库和网络隔离，测试不需要任何 fixture；`ruleStore` 与 `auditStore` 各管一张表；`toolDecisionService` 只做编排，不含判定逻辑。这样每个文件都能一次读完，决策逻辑的测试也不必搭数据库。
+
+`effectRank.ts` 只有一张三行的常量表，单独成文件的理由不是省代码行数：`rules`、`builtinRules`、`toolDecisionService` 三处都要按同一顺序比较 effect 强度，一旦某处漏改（例如将来新增一档 effect），`EFFECT_RANK[effect]` 得到 `undefined`、比较恒为假，会静默选出错误的规则而不报任何错——「冲突时取最强」这条不变量就失真了。让三处 import 同一张表，漂移在编译期就暴露。
 
 ---
 
@@ -456,9 +471,9 @@ describe('matchUserRules', () => {
 创建 `electron-agent/electron/app/toolPermission/rules.ts`：
 
 ```typescript
-import type { ToolCallFacts, ToolEffect, ToolRule } from './types';
+import { EFFECT_RANK } from './effectRank';
+import type { ToolCallFacts, ToolRule } from './types';
 
-const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
 const SCOPE_RANK = { session: 3, workspace: 2, global: 1 } as const;
 
 /** 路径比较统一为小写正斜杠，Windows 上 D:\repo 与 d:/repo 视作同一路径。 */
@@ -633,6 +648,7 @@ describe('matchBuiltinRules', () => {
 创建 `electron-agent/electron/app/toolPermission/builtinRules.ts`：
 
 ```typescript
+import { EFFECT_RANK } from './effectRank';
 import type { ApprovalPreset, ToolCallFacts, ToolEffect } from './types';
 
 export interface BuiltinRule {
@@ -669,18 +685,23 @@ export const BUILTIN_RULES: Record<ApprovalPreset, readonly BuiltinRule[]> = {
   ask: [...GUARDS, ...ASK_EXTRA],
 };
 
-const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
-
 /** 选出当前档位下命中的最强内置规则；无命中返回 undefined。 */
 export function matchBuiltinRules(call: ToolCallFacts): BuiltinRule | undefined {
+  // preset 由 sidecar 经 TCP 传来，版本漂移或将来新增档位都可能给到表外的值。
+  // 收敛到最严的 ask 档：直接索引会抛 TypeError，兜底成空集则等同 full，是最宽松的一侧。
+  // 用 hasOwn 而非 ?? ：preset 取到 toString 等原型链键时会拿到继承来的函数，非 nullish，
+  // ?? 不触发而 for...of 照样抛错。与 rules.ts 里 EFFECT_RANK 的守卫同源。
+  const rules = Object.hasOwn(BUILTIN_RULES, call.preset) ? BUILTIN_RULES[call.preset] : BUILTIN_RULES.ask;
   let best: BuiltinRule | undefined;
-  for (const rule of BUILTIN_RULES[call.preset]) {
+  for (const rule of rules) {
     if (!rule.match(call)) continue;
     if (!best || EFFECT_RANK[rule.effect] > EFFECT_RANK[best.effect]) best = rule;
   }
   return best;
 }
 ```
+
+未知 `preset` 在任务 9 的 RPC 边界会被 `readCall` 直接拒收，这里的兜底是纵深防御的第二层，两处方向必须一致：都偏严。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -756,15 +777,42 @@ describe('digestArgs', () => {
 /** 单条审计参数的字符上限，超出截断。 */
 export const MAX_DIGEST_LENGTH = 4_000;
 
-/** 只保留路径、丢弃正文的工具：内容已在 file_checkpoints 的 blob 中（S3），审计里再存一份是浪费。 */
-const PATH_ONLY_TOOLS = new Set(['write', 'edit', 'ast_edit', 'hl_edit', 'search_replace', 'str_replace']);
+/** bash 命令是审计的主要取证对象，给它单独的宽松上限，但不能完全不设——tool_audit 每次调用都写一行。 */
+export const MAX_COMMAND_LENGTH = 12_000;
+
+/**
+ * 只保留路径、丢弃正文的工具：内容已在 file_checkpoints 的 blob 中（S3），审计里再存一份是浪费。
+ *
+ * 只有 write 与 edit 够格。ast_edit 与 hl_edit 虽然也是写盘工具，但**刻意不列入**：
+ * 它们的参数里没有任何路径键（ast_edit 是 `paths` 复数数组，hl_edit 只有 `patch`、
+ * 路径嵌在补丁文本的 [PATH#TAG] 段里），列进来只会让审计写下 {"path":""}，
+ * 而这两个恰是 extensions/safety/index.ts:38-40 点名的「绕过写白名单的写盘工具」，
+ * 最需要留证。落到下面的通用序列化分支才能把 paths / ops / patch 记进台账。
+ */
+const PATH_ONLY_TOOLS = new Set(['write', 'edit']);
 
 function stringify(value: unknown): string {
   try {
+    // ?? '{}' 防的是顶层 undefined / 函数 / symbol：三个调用点都传对象，实际触发不到，
+    // 留着是为了让返回类型是 string 而不是 string | undefined。
     return JSON.stringify(value) ?? '{}';
   } catch {
     return '{"_unserializable":true}';
   }
+}
+
+/**
+ * 按字符上限截断，并保证不切出半个代理对。
+ *
+ * slice 操作的是 UTF-16 码元，正好切在代理对中间会留下孤立高位代理项。
+ * 实测 node:sqlite 不会因此报错，但写入时该码元被替换成 U+FFFD，读回来与原值不一致。
+ */
+function truncate(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  let cut = value.slice(0, limit - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return `${cut}…`;
 }
 
 /**
@@ -775,15 +823,16 @@ function stringify(value: unknown): string {
  */
 export function digestArgs(tool: string, args: Record<string, unknown> | undefined): string {
   if (!args) return '{}';
+  // shell 不是 pi 的注册工具名，作为 bash 的别名兜底，防 agent 侧改名。
   if (tool === 'bash' || tool === 'shell') {
-    return stringify({ command: typeof args.command === 'string' ? args.command : '' });
+    const command = typeof args.command === 'string' ? args.command : '';
+    return truncate(stringify({ command }), MAX_COMMAND_LENGTH);
   }
   if (PATH_ONLY_TOOLS.has(tool)) {
     const path = args.path ?? args.file_path ?? args.filePath ?? args.target_file;
     return stringify({ path: typeof path === 'string' ? path : '' });
   }
-  const serialised = stringify(args);
-  return serialised.length > MAX_DIGEST_LENGTH ? `${serialised.slice(0, MAX_DIGEST_LENGTH - 1)}…` : serialised;
+  return truncate(stringify(args), MAX_DIGEST_LENGTH);
 }
 ```
 
@@ -1344,10 +1393,9 @@ import { digestArgs } from './argsDigest';
 import { matchBuiltinRules } from './builtinRules';
 import { matchUserRules } from './rules';
 import type { AuditResolution, ToolAuditStore } from './auditStore';
+import { EFFECT_RANK } from './effectRank';
 import type { ToolRuleStore } from './ruleStore';
 import type { ToolCallFacts, ToolDecision, ToolEffect, ToolRule, ToolRuleInput } from './types';
-
-const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
 
 /** goal / subagent 没有交互 UI，ask 只能攒进队列等人处理。 */
 function isHeadless(call: ToolCallFacts): boolean {
@@ -1520,12 +1568,15 @@ describe('toolPermissionMethods', () => {
     await expect(methods['permission.tool.evaluate']({ call: { ...CALL, origin: 'nope' } })).rejects.toThrow('invalid tool call');
   });
 
-  it('coerces missing flags to false rather than failing', async () => {
+  it('rejects a call whose flags are incomplete rather than defaulting them to false', async () => {
     const { methods } = await fixture();
-    const result = await methods['permission.tool.evaluate']({
-      call: { ...CALL, preset: 'auto', flags: { dangerousCommand: true } },
-    });
-    expect(result).toMatchObject({ decision: 'ask', ruleId: 'builtin.dangerous-command' });
+    // 缺失的特征若当成 false，等于静默宣称「这不是危险命令」，方向与 fail-closed 相反。
+    await expect(methods['permission.tool.evaluate']({
+      call: { ...CALL, flags: { dangerousCommand: true } },
+    })).rejects.toThrow('invalid tool call: flags.mutatingCommand');
+    await expect(methods['permission.tool.evaluate']({
+      call: { ...CALL, flags: { ...CALL.flags, network: 'yes' } },
+    })).rejects.toThrow('invalid tool call: flags.network');
   });
 
   it('overrides the caller-supplied workspace with the token owner', async () => {
@@ -1624,11 +1675,21 @@ function optionalString(value: unknown, field: string): string | undefined {
   return value;
 }
 
-/** 缺失的 flag 视为 false：sidecar 只发它判定为真的项，少发不算错。 */
+/**
+ * 八个特征必须全部到齐，缺一个就拒收整个请求。
+ *
+ * 不要把缺失项当作 false：那等于静默宣称「这不是危险命令」，与整条链路
+ * fail-closed 的方向相反，而且不留痕迹。缺失只可能来自 sidecar 与主进程
+ * 版本不一致，属于契约违约，应当显式失败——调用方 evaluateToolCall 的
+ * catch 会把它转成 deny，用户能看到拒绝理由，不会被无声放行。
+ */
 function readFlags(value: unknown): ToolCallFlags {
   if (!isRecord(value)) throw new Error('invalid tool call: flags');
   const flags = {} as ToolCallFlags;
-  for (const key of FLAG_KEYS) flags[key] = value[key] === true;
+  for (const key of FLAG_KEYS) {
+    if (typeof value[key] !== 'boolean') throw new Error(`invalid tool call: flags.${key}`);
+    flags[key] = value[key] as boolean;
+  }
   return flags;
 }
 
