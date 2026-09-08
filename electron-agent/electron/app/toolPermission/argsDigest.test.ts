@@ -19,7 +19,14 @@ describe('digestArgs', () => {
   it('falls back to the alternative path keys', () => {
     expect(digestArgs('write', { file_path: 'D:/repo/a.ts' })).toBe('{"path":"D:/repo/a.ts"}');
     expect(digestArgs('write', { filePath: 'D:/repo/a.ts' })).toBe('{"path":"D:/repo/a.ts"}');
-    expect(digestArgs('write', { target_file: 'D:/repo/a.ts' })).toBe('{"path":"D:/repo/a.ts"}');
+  });
+
+  it('ignores path keys that extractPath does not recognise', () => {
+    // 负向断言，守护一条约束而非记录待修的缺陷：键清单必须与 extensions/safety/rules.ts 的
+    // extractPath（path / file_path / filePath）严格一致，否则「判的」与「记的」会指向不同
+    // 的东西。谁给 digestArgs 加了键却没同步 extractPath，这条就会失败并把人引向那里。
+    // target_file 是 Cursor edit_file 的参数名，pi 侧没有工具用它。
+    expect(digestArgs('write', { target_file: 'D:/repo/a.ts' })).toBe('{"path":""}');
   });
 
   it('serialises ast_edit whole because its parameters carry no path key', () => {

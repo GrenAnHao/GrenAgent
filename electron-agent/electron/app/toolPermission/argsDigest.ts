@@ -61,7 +61,11 @@ export function digestArgs(tool: string, args: Record<string, unknown> | undefin
     return truncate(stringify({ command }), MAX_COMMAND_LENGTH);
   }
   if (PATH_ONLY_TOOLS.has(tool)) {
-    const path = args.path ?? args.file_path ?? args.filePath ?? args.target_file;
+    // 键的清单必须与 extensions/safety/rules.ts 的 extractPath 严格一致（path / file_path /
+    // filePath）。多认一个键会让「判的」与「记的」指向不同的东西：flags.protectedPath、
+    // flags.outsideWorkspace 与 ToolCallFacts.path 都由 extractPath 算出，而审计的用途
+    // 恰恰是复盘当时依据什么作了判断。两侧要扩展就一起扩展。
+    const path = args.path ?? args.file_path ?? args.filePath;
     return stringify({ path: typeof path === 'string' ? path : '' });
   }
   return truncate(stringify(args), MAX_DIGEST_LENGTH);
