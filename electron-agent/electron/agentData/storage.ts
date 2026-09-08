@@ -82,7 +82,36 @@ export class AgentDataStorage {
       ['error', 'TEXT'], ['claimed_at', 'TEXT'], ['blockage_fingerprint', 'TEXT'], ['blockage_summary', 'TEXT'],
     ] as const) this.ensureColumn('goal_turn_leases', column, definition);
     this.ensureColumn('goal_snapshots', 'source', 'TEXT');
-    if (this.schemaVersion() < 3) this.db.prepare('UPDATE schema_version SET version = ?').run(3);
+    // 工具授权：tool_audit 的 thread_id 与 turn_id 当前恒为 NULL，留给后续阶段填充。
+    this.db.exec(`CREATE TABLE IF NOT EXISTS permission_rules (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      scope_key TEXT NOT NULL DEFAULT '',
+      tool TEXT NOT NULL,
+      matcher_kind TEXT NOT NULL,
+      matcher TEXT NOT NULL DEFAULT '',
+      effect TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS permission_rules_lookup ON permission_rules(scope, scope_key, tool);
+    CREATE TABLE IF NOT EXISTS tool_audit (
+      id TEXT PRIMARY KEY,
+      workspace TEXT NOT NULL,
+      session_id TEXT, thread_id TEXT, turn_id TEXT, tool_call_id TEXT,
+      origin TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      args TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      resolution TEXT NOT NULL,
+      rule_id TEXT,
+      queue_payload TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS tool_audit_session ON tool_audit(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS tool_audit_pending ON tool_audit(resolution, created_at) WHERE resolution = 'queued';`);
+    if (this.schemaVersion() < 4) this.db.prepare('UPDATE schema_version SET version = ?').run(4);
   }
 
   schemaVersion(): number {
