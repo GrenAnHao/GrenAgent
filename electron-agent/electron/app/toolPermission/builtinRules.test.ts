@@ -63,6 +63,11 @@ describe('matchBuiltinRules', () => {
     }
   });
 
+  it('prefers the earliest declared rule when two of the same tier match', () => {
+    // 同档取声明顺序最前者。这个 id 会进 ToolDecision.ruleId 与审计行，是对外契约。
+    expect(matchBuiltinRules(facts('ask', { mcp: true, network: true }))?.id).toBe('builtin.mcp');
+  });
+
   it('deny outranks ask when both match', () => {
     expect(matchBuiltinRules(facts('ask', { protectedPath: true, write: true, outsideWorkspace: true })))
       .toMatchObject({ effect: 'deny' });

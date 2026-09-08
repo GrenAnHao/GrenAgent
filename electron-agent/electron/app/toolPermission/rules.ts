@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
-import type { RuleScope, ToolCallFacts, ToolEffect, ToolRule } from './types';
+import { EFFECT_RANK } from './effectRank';
+import type { RuleScope, ToolCallFacts, ToolRule } from './types';
 
-const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
 const SCOPE_RANK: Record<RuleScope, number> = { session: 3, workspace: 2, global: 1 };
 
 /**

@@ -1,3 +1,4 @@
+import { EFFECT_RANK } from './effectRank';
 import type { ApprovalPreset, ToolCallFacts, ToolEffect } from './types';
 
 export interface BuiltinRule {
@@ -7,6 +8,8 @@ export interface BuiltinRule {
 }
 
 /**
+ * auto 与 ask 共用的第 ④ 层门控，对应现有 safety 钩子的 extensions/safety/index.ts:91。
+ *
  * 受保护路径写入：任何档位都不许做（full 除外，见下）。
  * 危险命令：必须逐次确认，用户规则无法降级为静默放行。
  */
@@ -34,9 +37,12 @@ export const BUILTIN_RULES: Record<ApprovalPreset, readonly BuiltinRule[]> = {
   ask: [...GUARDS, ...ASK_EXTRA],
 };
 
-const EFFECT_RANK: Record<ToolEffect, number> = { deny: 3, ask: 2, allow: 1 };
-
-/** 选出当前档位下命中的最强内置规则；无命中返回 undefined。 */
+/**
+ * 选出当前档位下命中的最强内置规则；无命中返回 undefined。
+ *
+ * 同档并列时取声明顺序最前者（ask 档下 mcp 与 network 同时为真返回 builtin.mcp）：
+ * 这个 id 会进 ToolDecision.ruleId 与审计行，是对外契约。
+ */
 export function matchBuiltinRules(call: ToolCallFacts): BuiltinRule | undefined {
   // preset 由 sidecar 经 TCP 传来，版本漂移或将来新增档位都可能给到表外的值。
   // 收敛到最严的 ask 档：直接索引会抛 TypeError，兜底成空集则等同 full，是最宽松的一侧。
