@@ -66,7 +66,7 @@ export function digestArgs(tool: string, args: Record<string, unknown> | undefin
     // flags.outsideWorkspace 与 ToolCallFacts.path 都由 extractPath 算出，而审计的用途
     // 恰恰是复盘当时依据什么作了判断。两侧要扩展就一起扩展。
     const path = args.path ?? args.file_path ?? args.filePath;
-    return stringify({ path: typeof path === 'string' ? path : '' });
+    return truncate(stringify({ path: typeof path === 'string' ? path : '' }), MAX_DIGEST_LENGTH);
   }
   return truncate(stringify(args), MAX_DIGEST_LENGTH);
 }

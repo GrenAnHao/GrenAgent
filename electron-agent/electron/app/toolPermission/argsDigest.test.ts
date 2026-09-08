@@ -29,6 +29,14 @@ describe('digestArgs', () => {
     expect(digestArgs('write', { target_file: 'D:/repo/a.ts' })).toBe('{"path":""}');
   });
 
+  it('truncates an oversized path', () => {
+    // path 完全来自模型生成的参数，仓内注册的工具也没有统一的 maxLength；审计行在决策后
+    // 即写，路径荒唐导致调用失败也照样留一行，所以这条返回路径同样要有上限。
+    const digest = digestArgs('write', { path: 'p'.repeat(200_000) });
+    expect(digest.length).toBeLessThanOrEqual(MAX_DIGEST_LENGTH);
+    expect(digest.endsWith('…')).toBe(true);
+  });
+
   it('serialises ast_edit whole because its parameters carry no path key', () => {
     // ast_edit 的参数是 { ops, paths, dryRun, maxFiles }：paths 是复数数组，
     // 四个候选路径键一个都命中不了，列入 PATH_ONLY_TOOLS 只会写下 {"path":""}。
