@@ -31,6 +31,10 @@ import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalToo
 import { RequestFrameDecoder } from './requestFrames';
 import { GoalStore } from './goalStore';
 import type { CreateGoalInput, GoalCasUpdate, JudgeResultInput, RoundClaimInput, RoundSettlementInput, RoundCancelInput, GoalRuntimeErrorInput, GoalEvent, GoalSnapshot, GoalProgressInput, ForkGoalInput, RecoverLegacyGoalInput } from './goalContracts';
+import { ToolAuditStore } from '../app/toolPermission/auditStore';
+import { ToolRuleStore } from '../app/toolPermission/ruleStore';
+import { ToolDecisionService } from '../app/toolPermission/toolDecisionService';
+import { toolPermissionMethods } from '../app/toolPermission/rpc';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -91,6 +95,7 @@ export class AgentDataRuntime {
   private taskQueue?: TaskQueue;
   private temporaryWikiRoot?: string;
   private goals?: GoalStore;
+  private toolPermission?: ToolDecisionService;
 
   constructor(private readonly options: AgentDataRuntimeOptions) {}
 
@@ -99,6 +104,10 @@ export class AgentDataRuntime {
     this.storage = new AgentDataStorage(this.options.dataPath);
     this.storage.migrate();
     this.goals = new GoalStore(this.storage.db);
+    this.toolPermission = new ToolDecisionService(
+      new ToolRuleStore(this.storage.db),
+      new ToolAuditStore(this.storage.db),
+    );
     // Old Wiki calls have no live publisher after a process restart. Keep their
     // history but require explicit ingest/retry instead of replaying a model.
     this.storage.db.prepare("UPDATE service_tasks SET status='failed',error='WIKI_TASK_INTERRUPTED: runtime restarted',updated_at=? WHERE kind='wiki_page_generate' AND status IN ('queued','running')").run(Date.now());
@@ -380,6 +389,7 @@ export class AgentDataRuntime {
   private finishClose(): void {
     if (!this.closed || this.inFlight !== 0 || (this.taskQueue && !this.taskQueue.isIdle())) return;
     this.storage?.close(); this.storage = undefined;
+    this.toolPermission = undefined;
     if (this.temporaryWikiRoot) {
       rmSync(this.temporaryWikiRoot, { recursive: true, force: true });
       this.temporaryWikiRoot = undefined;
@@ -437,7 +447,7 @@ export class AgentDataRuntime {
           : value.method.startsWith('admin.goal.')
             ? (workspace ? undefined : this.goalMethod(value.method, { kind: 'admin' }))
             : value.method.startsWith('wiki.') ? this.wikiMethod(value.method, this.wikiContext(value.token, value.params))
-              : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.threadMethod(value.method);
+              : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
       }
@@ -448,6 +458,12 @@ export class AgentDataRuntime {
     if (!socket.destroyed) socket.write(`${JSON.stringify(response)}\n`, () => { if (shutdown) this.close(); });
     this.inFlight -= 1;
     this.finishClose();
+  }
+
+  /** 工具授权 RPC。workspace 由 token 决定，调用方自报的值一律被覆盖。 */
+  private toolPermissionMethod(name: string, workspace: string | undefined): AgentDataMethod | undefined {
+    if (!this.toolPermission) return undefined;
+    return toolPermissionMethods(this.toolPermission, workspace)[name];
   }
 
   private wikiMethod(name: string, context: WikiRequestContext): AgentDataMethod | undefined {
