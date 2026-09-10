@@ -5,8 +5,16 @@
 //   - 压缩接管（session_before_compact 预览/取消，默认关，fail-open）
 // 纯扩展。删段经 /ctx-exclude /ctx-restore slash 命令驱动（不进 LLM 对话），会话内 appendEntry 持久 + 分支安全。
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getConfig } from "../_shared/runtime-config.js";
-import { buildExclusionSet, type ExclusionOp, filterExcludedByTs } from "./exclusion.js";
+import { getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
+import { currentCwd } from "../_shared/workspace-context.js";
+import {
+  buildExclusionSet,
+  contextExclusionConfigKey,
+  type ExclusionOp,
+  filterExcludedByTs,
+  parseContextExclusionPulse,
+  shouldApplyContextExclusionPulse,
+} from "./exclusion.js";
 import { classify } from "./pressure.js";
 import { pruneMessages } from "./prune.js";
 
@@ -30,17 +38,39 @@ export default function (pi: ExtensionAPI) {
   // 用户驱动的上下文排除集（按消息 timestamp）。来源：会话内 context_exclusion 自定义条目（分支安全），
   // session_start 回放重建。AgentMessage 无稳定 id 但有 timestamp，故按 timestamp 关联。
   let excluded = new Set<number>();
+  let lastPulseRev = 0;
+  let workspaceCwd: string | undefined;
+
+  const applyOp = (op: ExclusionOp) => {
+    if (op.op === "add") excluded.add(op.ts);
+    else excluded.delete(op.ts);
+    pi.appendEntry("context_exclusion", op);
+  };
+
+  const consumeDesktopPulse = () => {
+    refreshConfig();
+    const pulse = parseContextExclusionPulse(getConfig(contextExclusionConfigKey(workspaceCwd ?? currentCwd())));
+    if (!pulse) return;
+    const decision = shouldApplyContextExclusionPulse(pulse, lastPulseRev, excluded);
+    lastPulseRev = decision.nextRev;
+    if (decision.apply) applyOp({ op: pulse.op, ts: pulse.ts });
+  };
+
+  watchConfig(() => consumeDesktopPulse());
 
   pi.on("session_start", async (_event, ctx) => {
+    workspaceCwd = ctx.cwd;
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const ops = entries
       .filter((e) => e.type === "custom" && e.customType === "context_exclusion")
       .map((e) => e.data as ExclusionOp);
     excluded = buildExclusionSet(ops);
+    consumeDesktopPulse();
   });
 
   // context 钩子：先按排除集过滤（删任意段），再 prune（裁旧工具输出）。两者独立、可叠加。
   pi.on("context", async (event) => {
+    consumeDesktopPulse();
     let msgs = event.messages;
     if (excluded.size > 0) {
       msgs = filterExcludedByTs(msgs as Array<{ timestamp?: number }>, excluded) as typeof msgs;
@@ -54,11 +84,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 删任意段：桌面经 /ctx-exclude <ts> / /ctx-restore <ts> 驱动（slash 命令被扩展拦截执行，不进 LLM 对话）。
-  const applyOp = (op: ExclusionOp) => {
-    if (op.op === "add") excluded.add(op.ts);
-    else excluded.delete(op.ts);
-    pi.appendEntry("context_exclusion", op);
-  };
   pi.registerCommand("ctx-exclude", {
     description: "把某条消息移出上下文（参数：消息 timestamp）",
     handler: async (args, ctx) => {

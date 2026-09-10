@@ -8,6 +8,37 @@ export interface ExclusionOp {
   ts: number;
 }
 
+export interface ContextExclusionPulse extends ExclusionOp {
+  rev: number;
+}
+
+export function contextExclusionConfigKey(workspace: string): string {
+  return `CONTEXT_EXCLUSION_OP:${workspace.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()}`;
+}
+
+export function parseContextExclusionPulse(raw: string | undefined): ContextExclusionPulse | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { op?: unknown; ts?: unknown; rev?: unknown };
+    if (parsed.op !== "add" && parsed.op !== "remove") return undefined;
+    if (typeof parsed.ts !== "number" || !Number.isFinite(parsed.ts)) return undefined;
+    if (typeof parsed.rev !== "number" || !Number.isFinite(parsed.rev)) return undefined;
+    return { op: parsed.op, ts: parsed.ts, rev: parsed.rev };
+  } catch {
+    return undefined;
+  }
+}
+
+export function shouldApplyContextExclusionPulse(
+  pulse: ContextExclusionPulse,
+  lastRev: number,
+  excluded: Set<number>,
+): { apply: boolean; nextRev: number } {
+  if (pulse.rev <= lastRev) return { apply: false, nextRev: lastRev };
+  const alreadyApplied = pulse.op === "add" ? excluded.has(pulse.ts) : !excluded.has(pulse.ts);
+  return { apply: !alreadyApplied, nextRev: pulse.rev };
+}
+
 export function buildExclusionSet(ops: ExclusionOp[]): Set<number> {
   const set = new Set<number>();
   for (const o of ops) {
