@@ -32,6 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getApprovalPolicy } from "../_shared/approval.js";
+import { claimImBinding } from "../_shared/im-binding.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { CODE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
 import { spawnPiAgent } from "../multi-agent/runner.js";
@@ -111,7 +112,7 @@ function imState(): ImState {
   const g = globalThis as { __grenImState?: ImState };
   return (g.__grenImState ??= {
     watching: false,
-    cwd: process.cwd(),
+    cwd: "",
     queues: new Map(),
     rate: new Map(),
     status: { enabled: false, loggedIn: false, status: "idle" },
@@ -544,6 +545,19 @@ export default function (pi: ExtensionAPI) {
   hookExitRelease();
 
   pi.on("session_start", (_event, ctx) => {
+    const workspace = typeof ctx.cwd === "string" ? ctx.cwd : "";
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? "";
+    const claim = claimImBinding(workspace, sessionId);
+    if (!claim.claimed) {
+      if (ctx.hasUI) {
+        try {
+          ctx.ui.notify(`IM 已绑定到 ${claim.owner.workspace}`, "warning");
+        } catch {
+          /* best-effort */
+        }
+      }
+      return;
+    }
     const st = imState();
     st.cwd = ctx.cwd || st.cwd;
     st.notify = (msg, level) => {

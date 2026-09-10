@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn(), watchConfig: vi.fn() }));
 vi.mock("./gateway.js", () => ({ startGateway: vi.fn(), postReply: vi.fn() }));
 
+import { __resetImBindingForTest } from "../_shared/im-binding.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { type GatewayHandle, postReply, startGateway } from "./gateway.js";
 import imgateway from "./index.js";
@@ -27,6 +28,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   vi.resetAllMocks();
+  __resetImBindingForTest();
   (globalThis as { __grenImGateway?: unknown }).__grenImGateway = undefined;
   vi.mocked(startGateway).mockResolvedValue({ port: 8765, close: vi.fn() } as unknown as GatewayHandle);
   vi.mocked(postReply).mockResolvedValue(undefined);
@@ -72,5 +74,24 @@ describe("im-gateway reply correlation (M4)", () => {
     await flush();
     await handlers.message_end?.({ message: { role: "user", content: "x" } });
     expect(postReply).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImBinding", () => {
+  it("第二 workspace 不重绑网关且通知 owner", async () => {
+    const handlers = load({ IM_GATEWAY: "1" });
+    await handlers.session_start?.(
+      {},
+      { hasUI: true, cwd: "D:/a", sessionManager: { getSessionId: () => "s-a" }, ui: { notify: vi.fn() } },
+    );
+    await flush();
+    expect(startGateway).toHaveBeenCalledTimes(1);
+    const notify = vi.fn();
+    await handlers.session_start?.(
+      {},
+      { hasUI: true, cwd: "D:/b", sessionManager: { getSessionId: () => "s-b" }, ui: { notify } },
+    );
+    expect(notify).toHaveBeenCalledWith("IM 已绑定到 D:/a", "warning");
+    expect(startGateway).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,6 +9,7 @@
 // without restarting the sidecar. Off by default (it opens a port).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { claimImBinding } from "../_shared/im-binding.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { type GatewayHandle, postReply, startGateway } from "./gateway.js";
 
@@ -116,6 +117,19 @@ export default function (pi: ExtensionAPI) {
   if (bool(getConfig("PI_IS_SUBAGENT"))) return;
 
   pi.on("session_start", (_event, ctx) => {
+    const workspace = typeof ctx.cwd === "string" ? ctx.cwd : "";
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? "";
+    const claim = claimImBinding(workspace, sessionId);
+    if (!claim.claimed) {
+      if (ctx.hasUI) {
+        try {
+          ctx.ui.notify(`IM 已绑定到 ${claim.owner.workspace}`, "warning");
+        } catch {
+          /* best-effort */
+        }
+      }
+      return;
+    }
     const st = gwState();
     st.sendUserMessage = (text, opts) => pi.sendUserMessage(text, opts);
     st.notify = (msg, level) => {
