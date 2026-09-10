@@ -200,4 +200,30 @@ describe("getMcpManager 分键", () => {
     fire();
     expect(seen.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("closeAll 拆除 watch，不再收到后续变更", async () => {
+    let fire = () => {};
+    let stopped = false;
+    const reads: string[] = [];
+    const mgr = createManager({
+      connect: async () => fakeClient([]),
+      readServers: () => {
+        reads.push("read");
+        return [srv("s")];
+      },
+      watch: (cb) => {
+        fire = cb;
+        return () => {
+          stopped = true;
+        };
+      },
+      writeCache: () => {},
+    });
+    mgr.init();
+    expect(reads.length).toBe(1);
+    mgr.closeAll();
+    expect(stopped).toBe(true);
+    fire();
+    expect(reads.length).toBe(1);
+  });
 });

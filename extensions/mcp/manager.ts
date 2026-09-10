@@ -146,6 +146,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   const listeners = new Set<(snap: McpSnapshot) => void>();
   let current: McpServerConfig[] = [];
   let started = false;
+  let unwatch: (() => void) | undefined;
 
   const snapshot = (): McpSnapshot => ({
     servers: new Map(
@@ -199,6 +200,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   };
 
   const onConfigChange = (): void => {
+    if (!started) return;
     void (async () => {
       const desired = readServers();
       const { added, removed, changed } = diffServers(current, desired);
@@ -215,7 +217,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       started = true;
       current = readServers();
       void Promise.all(current.map(connectServer));
-      watch(onConfigChange);
+      unwatch = watch(onConfigChange);
     },
     snapshot,
     async callTool(server, tool, args) {
@@ -235,6 +237,9 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       return () => listeners.delete(listener);
     },
     closeAll() {
+      started = false;
+      unwatch?.();
+      unwatch = undefined;
       for (const c of clients.values()) void c.close().catch(() => {});
       clients.clear();
     },
