@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
-import { evaluateToolCall, rememberToolRule, settleToolCall } from './desktop-control.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { evaluateToolCall, rememberToolRule, resolveToolOrigin, settleToolCall } from './desktop-control.js';
+import { runInWorkspace } from './workspace-context.js';
 import type { ToolCallFacts } from './desktop-control.js';
 
 const CALL: ToolCallFacts = {
@@ -58,5 +59,48 @@ describe('settleToolCall', () => {
     const client = port({ updated: true });
     await settleToolCall(client, undefined, 'user_allow');
     expect(client.request).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveToolOrigin', () => {
+  const prevGoal = process.env.PI_GOAL_WORKER;
+  const prevSub = process.env.PI_IS_SUBAGENT;
+  const prevSys = process.env.PI_SYSTEM_WORKER;
+
+  afterEach(() => {
+    if (prevGoal === undefined) delete process.env.PI_GOAL_WORKER;
+    else process.env.PI_GOAL_WORKER = prevGoal;
+    if (prevSub === undefined) delete process.env.PI_IS_SUBAGENT;
+    else process.env.PI_IS_SUBAGENT = prevSub;
+    if (prevSys === undefined) delete process.env.PI_SYSTEM_WORKER;
+    else process.env.PI_SYSTEM_WORKER = prevSys;
+  });
+
+  it('ALS origin 优先于 env', async () => {
+    process.env.PI_GOAL_WORKER = '1';
+    await runInWorkspace(
+      { origin: 'main', workspace: 'D:/a', cwd: 'D:/a', config: {} },
+      async () => {
+        expect(resolveToolOrigin()).toBe('main');
+      },
+    );
+    await runInWorkspace(
+      { origin: 'goal', workspace: 'D:/a', cwd: 'D:/a', config: {} },
+      async () => {
+        expect(resolveToolOrigin()).toBe('goal');
+      },
+    );
+  });
+
+  it('无 ALS 时 PI_IS_SUBAGENT=1 → subagent', () => {
+    process.env.PI_IS_SUBAGENT = '1';
+    delete process.env.PI_GOAL_WORKER;
+    expect(resolveToolOrigin()).toBe('subagent');
+  });
+
+  it('无 ALS 时 PI_GOAL_WORKER=1 → goal（sidecar 回退）', () => {
+    delete process.env.PI_IS_SUBAGENT;
+    process.env.PI_GOAL_WORKER = '1';
+    expect(resolveToolOrigin()).toBe('goal');
   });
 });

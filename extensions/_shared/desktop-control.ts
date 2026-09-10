@@ -1,4 +1,5 @@
 import { getConfig } from './runtime-config.js';
+import { currentWorkspaceContext } from './workspace-context.js';
 import { MemoryClient } from '../memory/client.js';
 
 export interface DesktopControlPort {
@@ -70,8 +71,10 @@ export interface ToolDecisionResult {
   ruleId?: string;
 }
 
-/** 判定本进程身份，与 extensions/goal/tools.ts 的 automaticTurn 同源。 */
+/** 判定本进程 / 本回合身份。ALS 优先；无 ALS 时回退子进程 env（fork 与尚未删除的 sidecar）。 */
 export function resolveToolOrigin(): ToolOrigin {
+  const ctx = currentWorkspaceContext();
+  if (ctx) return ctx.origin;
   if (process.env.PI_IS_SUBAGENT === '1') return 'subagent';
   if (process.env.PI_GOAL_WORKER === '1' || process.env.PI_SYSTEM_WORKER === '1') return 'goal';
   return 'main';
