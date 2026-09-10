@@ -12,7 +12,12 @@ function makeSession(id: string) {
       mode: string;
       uiContext: unknown;
       onError: (err: { extensionPath: string; event: string; error: string }) => void;
-      commandContextActions: { newSession: unknown };
+      commandContextActions: {
+        newSession: (options?: unknown) => Promise<{ cancelled: boolean }>;
+        fork: unknown;
+        switchSession: unknown;
+        reload: () => Promise<void>;
+      };
     }) => {}),
     prompt: vi.fn(async () => {}) as any,
     abort: vi.fn(async () => {}),
@@ -136,7 +141,8 @@ describe('WorkspaceHandle', () => {
     first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void }) => { opts.preflightResult?.(false); throw new Error('preflight denied'); });
     const { handle } = makeHandle(runtime);
     await handle.start();
-    await expect(handle.prompt('x', {}, 'main')).rejects.toThrow('preflight denied');
+    await expect(handle.prompt('x', {}, 'goal')).rejects.toThrow('preflight denied');
+    expect(handle.currentTurnOrigin).toBe('main');
   });
 
   it('prompt：preflight 成功后回合内错误被吞（不 reject 不致命）', async () => {
@@ -171,13 +177,41 @@ describe('WorkspaceHandle', () => {
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'extension_error', extensionPath: '/ext', error: 'boom' }), expect.anything());
   });
 
-  it('switchSession 构造失败 → onFatal 并 rethrow', async () => {
+  it('switchSession 失败且 session 未换 → 不 onFatal，仍 rethrow', async () => {
     const { runtime } = makeRuntime();
     (runtime as { switchSession: ReturnType<typeof vi.fn> }).switchSession = vi.fn(async () => { throw new Error('create failed'); });
     const { handle, onFatal } = makeHandle(runtime);
     await handle.start();
     await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed');
+    expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it('switchSession 失败且 session 已换 → onFatal 并 rethrow', async () => {
+    const { runtime } = makeRuntime();
+    (runtime as { switchSession: ReturnType<typeof vi.fn>; session: unknown }).switchSession = vi.fn(async () => {
+      (runtime as { session: unknown }).session = { sessionId: 'broken' };
+      throw new Error('create failed after teardown');
+    });
+    const { handle, onFatal } = makeHandle(runtime);
+    await handle.start();
+    await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed after teardown');
     expect(onFatal).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('commandContextActions.newSession 走宿主 replace：单次 rebind、main ALS、取消挂起 confirm', async () => {
+    const { runtime, first, second } = makeRuntime();
+    const seen: Array<string | undefined> = [];
+    second.bindExtensions = vi.fn(async () => {
+      seen.push(currentWorkspaceContext()?.origin);
+    });
+    const { handle } = makeHandle(runtime);
+    await handle.start();
+    const pending = handle.ui.context.confirm('一', '');
+    const bindings = first.bindExtensions.mock.calls[0][0];
+    await bindings.commandContextActions.newSession();
+    expect(second.bindExtensions).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual(['main']);
+    await expect(pending).resolves.toBe(false);
   });
 
   it('session 替换前取消挂起 UI', async () => {

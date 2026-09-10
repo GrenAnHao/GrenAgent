@@ -66,20 +66,23 @@ export class WorkspaceHandle {
         preflightResult: (ok: boolean) => { if (ok) { settled = true; resolve(); } },
       } as PromptOptions).catch((error: unknown) => {
         // preflight 前失败 → reject；preflight 成功后的回合内错误由事件流上报，吞掉。
-        if (!settled) reject(error);
+        if (!settled) {
+          this.turnOrigin = 'main';
+          reject(error);
+        }
       });
     }));
   }
 
-  async newSession(): Promise<{ cancelled: boolean }> {
-    return this.replace(() => this.options.runtime.newSession());
+  async newSession(options?: Parameters<AgentSessionRuntime['newSession']>[0]): Promise<{ cancelled: boolean }> {
+    return this.replace(() => this.options.runtime.newSession(options));
   }
 
-  async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-    return this.replace(() => this.options.runtime.switchSession(sessionPath));
+  async switchSession(sessionPath: string, options?: Parameters<AgentSessionRuntime['switchSession']>[1]): Promise<{ cancelled: boolean }> {
+    return this.replace(() => this.options.runtime.switchSession(sessionPath, options));
   }
 
-  async fork(entryId: string, options?: { position?: 'before' | 'at' }): Promise<{ cancelled: boolean; selectedText?: string }> {
+  async fork(entryId: string, options?: Parameters<AgentSessionRuntime['fork']>[1]): Promise<{ cancelled: boolean; selectedText?: string }> {
     return this.replace(() => this.options.runtime.fork(entryId, options));
   }
 
@@ -134,11 +137,13 @@ export class WorkspaceHandle {
 
   private async replace<T>(action: () => Promise<T>): Promise<T> {
     this.ui.cancelAll();
+    const previous = this.options.runtime.session;
     try {
       return await this.runMain(action);
     } catch (error) {
-      // 构造失败：旧 session 已 teardown，runtime 处于损坏态。上报致命，交 AgentHost evict。
-      this.options.onFatal(error);
+      const current = this.options.runtime.session;
+      // 仅旧 session 已 teardown（引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
+      if (current !== previous || current == null) this.options.onFatal(error);
       throw error;
     }
   }
@@ -156,17 +161,16 @@ export class WorkspaceHandle {
   }
 
   private async bindAndSubscribe(): Promise<void> {
-    const runtime = this.options.runtime;
     await this.session.bindExtensions({
       uiContext: this.ui.context,
       mode: 'rpc',
       commandContextActions: {
         waitForIdle: () => this.session.waitForIdle(),
-        newSession: (options) => runtime.newSession(options),
-        fork: async (entryId, forkOptions) => ({ cancelled: (await runtime.fork(entryId, forkOptions)).cancelled }),
+        newSession: (options) => this.newSession(options),
+        fork: async (entryId, forkOptions) => ({ cancelled: (await this.fork(entryId, forkOptions)).cancelled }),
         navigateTree: (targetId, options) => this.session.navigateTree(targetId, options),
-        switchSession: (sessionPath, options) => runtime.switchSession(sessionPath, options),
-        reload: async () => { await this.session.reload(); },
+        switchSession: (sessionPath, options) => this.switchSession(sessionPath, options),
+        reload: () => this.reload(),
       },
       shutdownHandler: () => {},
       onError: (err) => {
