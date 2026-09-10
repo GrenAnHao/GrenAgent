@@ -2348,41 +2348,34 @@ git commit -m "feat(electron): route interactive commands through AgentHost hand
 
 ## 任务 11：本份收尾验证
 
-- [ ] **步骤 1：三包测试全绿**
+- [x] **步骤 1：三包测试全绿**
+
+实测（2026-09-10，Windows）：
+- `cli`：`node --import tsx --test "src/**/*.test.ts"` → 24 pass
+- `extensions`：`npx vitest run` → 765 pass / 2 skipped
+- `electron-agent`：按 INDEX 用 `npx vitest run --project main`（计划原文的无 project 全量会把 renderer 和 main 打满，出现大量 5s 超时）。903 pass；`tencentdb/runtime.test.ts` 缺 `./runtime` 是基线；`tencentdbRemoval.test.ts` 在全量并行下曾 5s 超时，单独重跑通过
 
 ```bash
 cd cli && node --import tsx --test "src/**/*.test.ts"
-cd ../electron-agent && npx vitest run
+cd ../electron-agent && npx vitest run --project main
 cd ../extensions && npx vitest run
 ```
 
-- [ ] **步骤 2：类型检查不超基线，触及文件零错误**
+- [x] **步骤 2：类型检查不超基线，触及文件零错误**
 
-```bash
-cd electron-agent && npx tsc -p tsconfig.node.json --noEmit 2>&1 | grep -c "error TS"   # ≤ BASELINE
-cd cli && npx tsc --noEmit
-```
+`tsc -p tsconfig.node.json --noEmit`：**72** = BASELINE。门槛文件（`electron/agent/**`、`pi-sdk`/`json-event`/`gren-runtime`、`workspace-context`、`piRuntimeService`）零错误。`main.ts:156` 与 `settingsService.ts:139` 是任务 1 起就有的基线。`cli` 的 `tsc --noEmit` 因 include `../extensions` 带出既有 extensions 错误；`cli/src` 本身零错误。
 
-- [ ] **步骤 3：确认降级层与「先广播后落盘」接上**
+- [x] **步骤 3：确认降级层与「先广播后落盘」接上**
 
-```bash
-cd electron-agent && grep -n "toJsonEvent" electron/agent/workspaceHandle.ts   # 仅 subscribe 回调内一处
-grep -n "broadcastPiEvent('pi://event'" electron/main.ts                        # 在 handlePiEvent 之前
-```
+`toJsonEvent` 仅 `workspaceHandle.ts` subscribe 回调一处。`main.ts` 两处 `broadcastPiEvent('pi://event', envelope)` 都在 `handlePiEvent` 之前。
 
-- [ ] **步骤 4：确认 Electron 侧无裸 SDK import（单副本规则）**
+- [x] **步骤 4：确认 Electron 侧无裸 SDK import（单副本规则）**
 
-```bash
-cd electron-agent && grep -rn "@earendil-works/" electron --include=*.ts | grep -v "cli/src/pi-sdk"
-```
-预期：**空**。任何命中都要改成从 `../../../cli/src/pi-sdk.js` import。
+`electron-agent` 内无 `from '@earendil-works/...'`。SDK 只经 `cli/src/pi-sdk.js`。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
-```bash
-git add -A
-git commit -m "chore: verify plan 1 foundation green across cli/electron/extensions"
-```
+不 `git add -A`（会带上未跟踪的 `electron-agent/package-lock.json`）。本步只提交本验证记录。
 
 ---
 
