@@ -79,10 +79,11 @@ function validateSnapshot(
 ): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_GOAL_RESPONSE');
   const snapshot = value as { sessionId?: unknown; workspace?: unknown; goalId?: unknown; revision?: unknown };
+  const revision = snapshot.revision;
   if (snapshot.sessionId !== scopeRef.sessionId || snapshot.workspace !== scopeRef.workspace) throw new Error('GOAL_SCOPE_MISMATCH');
-  if (typeof snapshot.goalId !== 'string' || !snapshot.goalId.trim() || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 1) throw new Error('INVALID_GOAL_RESPONSE');
-  if (options.initialRevision && snapshot.revision !== 1) throw new Error('INVALID_GOAL_RESPONSE');
-  if (expected && (snapshot.goalId !== expected.goalId || (options.allowSameRevision ? ![expected.revision, expected.revision + 1].includes(snapshot.revision as number) : snapshot.revision !== expected.revision + 1))) throw new Error('VERSION_CONFLICT');
+  if (typeof snapshot.goalId !== 'string' || !snapshot.goalId.trim() || typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1) throw new Error('INVALID_GOAL_RESPONSE');
+  if (options.initialRevision && revision !== 1) throw new Error('INVALID_GOAL_RESPONSE');
+  if (expected && (snapshot.goalId !== expected.goalId || (options.allowSameRevision ? ![expected.revision, expected.revision + 1].includes(revision) : revision !== expected.revision + 1))) throw new Error('VERSION_CONFLICT');
   return value;
 }
 

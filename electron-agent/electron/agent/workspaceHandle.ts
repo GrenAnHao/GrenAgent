@@ -18,6 +18,8 @@ export interface WorkspaceHandleOptions {
   onEvent: (event: Record<string, unknown>, meta: HandleEventMeta) => void;
   /** 构造失败使 handle 损坏时调用（AgentHost 负责 evict + 广播 pi://exit）。 */
   onFatal: (error: unknown) => void;
+  /** 关项目：MCP / IM（第 4 份再接 killSubagentsFor）。 */
+  onDispose?: (workspace: string, cwd: string) => void | Promise<void>;
 }
 
 /**
@@ -136,6 +138,7 @@ export class WorkspaceHandle {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     try { await this.options.runtime.dispose(); } catch { /* 同上 */ }
+    try { await this.options.onDispose?.(this.options.workspace, this.options.cwd); } catch { /* 同上 */ }
   }
 
   private async replace<T>(action: () => Promise<T>): Promise<T> {

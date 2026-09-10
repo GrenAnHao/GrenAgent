@@ -269,6 +269,26 @@ describe('WorkspaceHandle', () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
+  it('dispose 调用 onDispose(workspace, cwd)', async () => {
+    const onDispose = vi.fn();
+    const { handle } = makeHandle(makeRuntime().runtime, { cwd: 'D:/resolved', onDispose });
+    await handle.dispose();
+    expect(onDispose).toHaveBeenCalledWith('D:/proj', 'D:/resolved');
+  });
+
+  it('prompt 的 ALS cwd 是 options.cwd', async () => {
+    const seen: string[] = [];
+    const { runtime, first } = makeRuntime();
+    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (ok: boolean) => void }) => {
+      seen.push(currentWorkspaceContext()?.cwd ?? '');
+      opts.preflightResult?.(true);
+    });
+    const { handle } = makeHandle(runtime, { cwd: 'D:/resolved' });
+    await handle.start();
+    await handle.prompt('hi', {}, 'main');
+    expect(seen).toEqual(['D:/resolved']);
+  });
+
   it('reload：先 waitForIdle 再 reload，在 runInWorkspace 内', async () => {
     const { runtime, first } = makeRuntime();
     const { handle } = makeHandle(runtime);

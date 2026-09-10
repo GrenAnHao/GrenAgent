@@ -1,6 +1,8 @@
 import { createAgentSessionRuntime, getAgentDir, SessionManager, type ModelRuntime } from '../../../cli/src/pi-sdk.js';
 import { makeGrenRuntimeFactory } from '../../../cli/src/gren-runtime.js';
+import { releaseImBinding } from '../../../extensions/_shared/im-binding.js';
 import { runInWorkspace } from '../../../extensions/_shared/workspace-context.js';
+import { disposeMcpManager } from '../../../extensions/mcp/manager.js';
 import { WorkspaceHandle, type WorkspaceHandleOptions } from './workspaceHandle.js';
 
 export interface CreateWorkspaceHandleInput {
@@ -32,6 +34,12 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
     emitUiRequest: input.emitUiRequest,
     onEvent: input.onEvent,
     onFatal: input.onFatal,
+    onDispose: async (workspace, cwd) => {
+      disposeMcpManager(workspace);
+      // IM 在 session_start 用 ctx.cwd 声明；workspace ≠ resolved 时两键都释放。
+      releaseImBinding(workspace);
+      if (cwd !== workspace) releaseImBinding(cwd);
+    },
   });
   try {
     await handle.start();
