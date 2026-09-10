@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn() }));
+vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn(), refreshConfig: vi.fn() }));
 
-import { getApprovalPolicy, setApprovalPolicy } from "../_shared/approval.js";
+import {
+  approvalPolicyConfigKey,
+  getApprovalPolicy,
+  __resetApprovalForTest,
+} from "../_shared/approval.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import approval from "./index.js";
 
@@ -35,7 +39,7 @@ const ctx = (entries: SessionEntry[] = []) => ({
 
 beforeEach(() => {
   vi.resetAllMocks();
-  setApprovalPolicy("auto"); // 复位进程内单例
+  __resetApprovalForTest();
 });
 
 describe("approval extension", () => {
@@ -58,8 +62,18 @@ describe("approval policy inheritance on session_start", () => {
     expect(getApprovalPolicy()).toBe("full");
   });
 
-  it("session entry wins over inherited APPROVAL_POLICY", async () => {
-    vi.mocked(getConfig).mockReturnValue("full");
+  it("prefers workspace-scoped live config over a stale session entry", async () => {
+    const key = approvalPolicyConfigKey(process.cwd());
+    vi.mocked(getConfig).mockImplementation((name: string) => (name === key ? "full" : undefined));
+    await loadSessionStart()(
+      {},
+      ctx([{ type: "custom", customType: "approval", data: { policy: "ask" } }]),
+    );
+    expect(getApprovalPolicy()).toBe("full");
+  });
+
+  it("uses a session entry only when no live runtime config exists", async () => {
+    vi.mocked(getConfig).mockReturnValue(undefined);
     await loadSessionStart()(
       {},
       ctx([{ type: "custom", customType: "approval", data: { policy: "ask" } }]),
