@@ -9,13 +9,12 @@ function makeSession(id: string) {
     sessionId: id,
     subscribe: vi.fn((cb: (e: unknown) => void) => { subs.push(cb); return () => { const i = subs.indexOf(cb); if (i >= 0) subs.splice(i, 1); }; }),
     bindExtensions: vi.fn(async (_bindings: {
-      mode?: string;
-      uiContext?: unknown;
-      onError?: (err: { extensionPath: string; event: string; error: string }) => void;
-      commandContextActions?: { newSession?: unknown };
+      mode: string;
+      uiContext: unknown;
+      onError: (err: { extensionPath: string; event: string; error: string }) => void;
+      commandContextActions: { newSession: unknown };
     }) => {}),
-    // 宽类型：各用例会换成带 preflightResult 的实现，对齐真实 session.prompt 形状。
-    prompt: vi.fn(async () => {}) as ReturnType<typeof vi.fn<(text: string, opts?: { preflightResult?: (ok: boolean) => void; source?: string }) => Promise<void>>>,
+    prompt: vi.fn(async () => {}) as any,
     abort: vi.fn(async () => {}),
     waitForIdle: vi.fn(async () => {}),
     reload: vi.fn(async () => {}),
