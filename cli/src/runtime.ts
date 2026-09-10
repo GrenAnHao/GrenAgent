@@ -1,17 +1,14 @@
 import {
-  type CreateAgentSessionRuntimeFactory,
-  createAgentSessionFromServices,
   createAgentSessionRuntime,
-  createAgentSessionServices,
   getAgentDir,
   main,
   runRpcMode,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { allExtensions, manifestExtensions, safety } from "../../extensions/index.js";
+import { allExtensions, safety } from "../../extensions/index.js";
 import { getConfig, watchConfig } from "../../extensions/_shared/runtime-config.js";
 import { onResourceReloadRequested } from "../../extensions/_shared/resource-reload.js";
-import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
+import { makeGrenRuntimeFactory } from "./gren-runtime.js";
 
 function emitReadyBanner(): void {
   const safetyOn = allExtensions.includes(safety);
@@ -30,50 +27,6 @@ function isRpcMode(argv: string[]): boolean {
   const i = argv.indexOf("--mode");
   return i >= 0 && argv[i + 1] === "rpc";
 }
-
-function bareSkillName(name: string): string {
-  return name.startsWith("skill:") ? name.slice(6) : name;
-}
-
-/** Native Skill toggle. Read on every reload so the UI does not need a restart. */
-function disabledSkills(): Set<string> {
-  return new Set(
-    (getConfig("SKILLS_DISABLED") ?? "")
-      .split(",")
-      .map((name) => bareSkillName(name.trim()))
-      .filter(Boolean),
-  );
-}
-
-const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-  const services = await createAgentSessionServices({
-    cwd,
-    agentDir,
-    resourceLoaderOptions: {
-      // 按 EXTENSIONS_PROFILE 过滤：真对话模式（chat）裁掉重代码智能扩展以加速冷启动；默认 project 全载。
-      // safety 永不剔除（见 filterExtensionsByProfile）。
-      extensionFactories: getConfig('PI_SYSTEM_WORKER') === '1' ? [] : filterManagedExtensions(filterExtensionsByProfile(
-        manifestExtensions,
-        (getConfig("EXTENSIONS_PROFILE") as ExtensionProfile) ?? "project",
-      ), getConfig('PI_ALLOWED_EXTENSIONS')).map((x) => x.factory),
-      noContextFiles: getConfig('PI_DISABLE_PROJECT_CONTEXT') === '1',
-      skillsOverride: (base) => {
-        const disabled = disabledSkills();
-        if (disabled.size === 0) return base;
-        return {
-          skills: base.skills.filter((skill) => !disabled.has(bareSkillName(skill.name))),
-          diagnostics: base.diagnostics,
-        };
-      },
-    },
-  });
-
-  return {
-    ...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),
-    services,
-    diagnostics: services.diagnostics,
-  };
-};
 
 export async function run(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -104,11 +57,10 @@ export async function run(): Promise<void> {
     process.stdin.on("close", exitOnParentGone);
 
     const cwd = process.cwd();
-    const runtime = await createAgentSessionRuntime(createRuntime, {
-      cwd,
-      agentDir: getAgentDir(),
-      sessionManager: SessionManager.create(cwd),
-    });
+    const runtime = await createAgentSessionRuntime(
+      makeGrenRuntimeFactory({ allowedExtensionsJson: getConfig("PI_ALLOWED_EXTENSIONS") }),
+      { cwd, agentDir: getAgentDir(), sessionManager: SessionManager.create(cwd) },
+    );
 
     let lastReloadRev = getConfig("PI_RELOAD_REV") ?? "";
     let reloadTimer: ReturnType<typeof setTimeout> | undefined;
