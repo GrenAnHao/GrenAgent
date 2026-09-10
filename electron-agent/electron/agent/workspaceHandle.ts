@@ -29,6 +29,7 @@ export class WorkspaceHandle {
   readonly ui: SessionUiAdapter;
   private unsubscribe: (() => void) | undefined;
   private disposed = false;
+  private sessionInvalidated = false;
   private turnOrigin: TurnOrigin = 'main';
 
   constructor(private readonly options: WorkspaceHandleOptions) {
@@ -51,6 +52,7 @@ export class WorkspaceHandle {
   async start(): Promise<void> {
     // finishSessionReplacement 会 await 这个回调；直接 bindAndSubscribe，不要再包一层同步 rebind。
     this.options.runtime.setRebindSession(async () => { await this.bindAndSubscribe(); });
+    this.options.runtime.setBeforeSessionInvalidate(() => { this.sessionInvalidated = true; });
     await this.runMain(async () => { await this.bindAndSubscribe(); });
   }
 
@@ -139,11 +141,13 @@ export class WorkspaceHandle {
     this.ui.cancelAll();
     const previous = this.options.runtime.session;
     try {
-      return await this.runMain(action);
+      const result = await this.runMain(action);
+      this.sessionInvalidated = false;
+      return result;
     } catch (error) {
       const current = this.options.runtime.session;
-      // 仅旧 session 已 teardown（引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
-      if (current !== previous || current == null) this.options.onFatal(error);
+      // 旧 session 已 teardown（原地 invalidate、引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
+      if (this.sessionInvalidated || current !== previous || current == null) this.options.onFatal(error);
       throw error;
     }
   }

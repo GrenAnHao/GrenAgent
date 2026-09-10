@@ -32,16 +32,18 @@ function makeRuntime() {
   const first = makeSession('s1');
   const second = makeSession('s2');
   let rebindCb: ((s: unknown) => Promise<void>) | undefined;
+  let invalidateCb: (() => void) | undefined;
   const runtime = {
     session: first as unknown,
     setRebindSession: vi.fn((cb: (s: unknown) => Promise<void>) => { rebindCb = cb; }),
+    setBeforeSessionInvalidate: vi.fn((cb?: () => void) => { invalidateCb = cb; }),
     // 真 finishSessionReplacement 在 apply 新 session 后调 rebindSession——mock 如实模拟
     switchSession: vi.fn(async () => { runtime.session = second; await rebindCb?.(second); return { cancelled: false }; }),
     newSession: vi.fn(async () => { runtime.session = second; await rebindCb?.(second); return { cancelled: false }; }),
     fork: vi.fn(async () => { runtime.session = second; await rebindCb?.(second); return { cancelled: false, selectedText: 'x' }; }),
     dispose: vi.fn(async () => {}),
   };
-  return { runtime, first, second };
+  return { runtime, first, second, invalidate: () => { invalidateCb?.(); } };
 }
 
 function makeHandle(runtime: unknown, over: Record<string, unknown> = {}) {
@@ -66,6 +68,7 @@ describe('WorkspaceHandle', () => {
     const { handle } = makeHandle(runtime);
     await handle.start();
     expect(runtime.setRebindSession).toHaveBeenCalledTimes(1);
+    expect(runtime.setBeforeSessionInvalidate).toHaveBeenCalledTimes(1);
     expect(first.bindExtensions).toHaveBeenCalledTimes(1);
     const bindings = first.bindExtensions.mock.calls[0][0];
     expect(bindings.mode).toBe('rpc');
@@ -184,6 +187,18 @@ describe('WorkspaceHandle', () => {
     await handle.start();
     await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed');
     expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it('switchSession：已 invalidate 但 session 引用未换 → onFatal 并 rethrow', async () => {
+    const { runtime, invalidate } = makeRuntime();
+    (runtime as { switchSession: ReturnType<typeof vi.fn> }).switchSession = vi.fn(async () => {
+      invalidate();
+      throw new Error('create failed after invalidate');
+    });
+    const { handle, onFatal } = makeHandle(runtime);
+    await handle.start();
+    await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed after invalidate');
+    expect(onFatal).toHaveBeenCalledWith(expect.any(Error));
   });
 
   it('switchSession 失败且 session 已换 → onFatal 并 rethrow', async () => {
