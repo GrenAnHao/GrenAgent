@@ -2,6 +2,7 @@
 // 进程内单例 + 内部 fs.watch 维护缓存，因此 getConfig 总读到最新值。
 
 import { readFileSync, watch } from "node:fs";
+import { currentWorkspaceContext } from "./workspace-context.js";
 
 let cache: Record<string, string> | null = null;
 let started = false;
@@ -59,7 +60,7 @@ function ensureStarted(): void {
 export function getConfig(key: string): string | undefined {
   ensureStarted();
   if (/^TDAI_|^TENCENTDB_/i.test(key)) return undefined;
-  return cache?.[key] ?? process.env[key];
+  return currentWorkspaceContext()?.config[key] ?? cache?.[key] ?? process.env[key];
 }
 
 export function getAllConfig(): Record<string, string> {
@@ -67,6 +68,7 @@ export function getAllConfig(): Record<string, string> {
   return withoutSensitiveProcessConfig({
     ...(process.env as Record<string, string>),
     ...(cache ?? {}),
+    ...(currentWorkspaceContext()?.config ?? {}),
   });
 }
 
