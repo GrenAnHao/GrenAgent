@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { sanitize } from "./config.js";
 import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
+import { currentCwd } from "../_shared/workspace-context.js";
 
 export const pluginManifest = {
   id: "mcp",
@@ -52,11 +53,11 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
         label: `${server}: ${t.name}`,
         description: t.description ?? `MCP tool "${t.name}" from server "${server}".`,
         parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
-        async execute(_toolCallId, params): Promise<AgentToolResult<McpToolDetails>> {
+        async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
           if (control) {
             const authorization = await authorizeDesktopOperation(control, {
               kind: 'mcp.call',
-              workspace: process.cwd(),
+              workspace: typeof ctx?.cwd === 'string' ? ctx.cwd : currentCwd(),
               server,
               toolName: t.name,
               args: params ?? {},
@@ -93,7 +94,7 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
       if (!alive) return;
       project(pi, snap, mgr, control);
       void control.request('mcp.state.publish', {
-        workspace: typeof ctx.cwd === 'string' ? ctx.cwd : process.cwd(),
+        workspace: typeof ctx.cwd === 'string' ? ctx.cwd : currentCwd(),
         servers: summary(snap),
       }).catch(() => {});
     };

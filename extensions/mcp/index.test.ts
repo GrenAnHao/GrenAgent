@@ -72,6 +72,22 @@ describe("project", () => {
     expect(manager.callTool).not.toHaveBeenCalled();
     expect(result.details.error).toBe('denied');
   });
+
+  it("authorize 上报 ctx.cwd 而不是 process.cwd()", async () => {
+    const pi = fakeProjectPi();
+    const manager = { callTool: vi.fn(async () => ({ text: "x" })) };
+    const control = { request: vi.fn(async () => ({ status: "allowed" })) };
+    const definitions: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
+    pi.registerTool = (tool: any) => definitions.push(tool);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x"] } }), manager as never, control as never);
+
+    await definitions[0].execute("call", {}, undefined, undefined, { cwd: "D:/proj-a" });
+
+    expect(control.request).toHaveBeenCalledWith(
+      "permission.authorize",
+      expect.objectContaining({ operation: expect.objectContaining({ workspace: "D:/proj-a" }) }),
+    );
+  });
 });
 
 function fakePiWithOn() {

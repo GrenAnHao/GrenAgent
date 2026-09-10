@@ -36,6 +36,11 @@ import {
 import { executeMultiEngineSearch, type SearchEngineExecutor } from "./searchService.js";
 import { getConfig, getAllConfig } from "../_shared/runtime-config.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
+import { currentCwd } from "../_shared/workspace-context.js";
+
+function toolCwd(ctx: { cwd?: unknown } | undefined): string {
+  return typeof ctx?.cwd === "string" && ctx.cwd ? ctx.cwd : currentCwd();
+}
 
 const TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? "15000") || 15000;
 const FETCH_BODY_MAX = 4000;
@@ -290,8 +295,8 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       maxResults: Type.Optional(Type.Number({ description: "Max results (default 5, max 10)" })),
       fetchTop: Type.Optional(Type.Number({ description: "Also fetch the body of the top N results as markdown (default 0, max 3)" })),
     }),
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'web_search');
+    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'web_search', toolCwd(ctx));
       if (denied) return denied;
       const choice = resolveProvider(getAllConfig());
       if (!choice.ok) {
@@ -357,8 +362,8 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
         }),
       ),
     }),
-    async execute(_toolCallId, params, signal) {
-      const denied = await requireNetwork(control, 'web_search_multi');
+    async execute(_toolCallId, params, signal, _update, ctx) {
+      const denied = await requireNetwork(control, 'web_search_multi', toolCwd(ctx));
       if (denied) return denied;
       const query = params.query.trim();
       const limit = Math.max(1, Math.min(params.limit ?? 10, 50));
@@ -398,8 +403,8 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       description,
       promptSnippet: description,
       parameters: Type.Object({ url: Type.String({ description: "Article URL" }) }),
-      async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
-        const denied = await requireNetwork(control, name, params.url);
+      async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+        const denied = await requireNetwork(control, name, toolCwd(ctx), params.url);
         if (denied) return denied;
         const url = params.url.trim();
         if (!isSafeUrl(url).ok || !validate(url)) {
@@ -455,8 +460,8 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     description: "Fetch README content from a GitHub repository URL",
     promptSnippet: "Fetch GitHub repo README.",
     parameters: Type.Object({ url: Type.String({ description: "GitHub repository URL" }) }),
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'fetch_github_readme', params.url);
+    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'fetch_github_readme', toolCwd(ctx), params.url);
       if (denied) return denied;
       const url = params.url.trim();
       if (!extractGithubRepo(url)) {
@@ -488,8 +493,8 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       url: Type.String({ description: "Public HTTP(S) URL" }),
       maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 200000)" })),
     }),
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'fetch_web_content', params.url);
+    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denied = await requireNetwork(control, 'fetch_web_content', toolCwd(ctx), params.url);
       if (denied) return denied;
       const url = params.url.trim();
       const safe = isSafeUrl(url);
@@ -520,11 +525,12 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
 async function requireNetwork(
   control: DesktopControlPort,
   toolName: string,
+  cwd: string,
   url?: string,
 ): Promise<AgentToolResult<Record<string, unknown>> | undefined> {
   const authorization = await authorizeDesktopOperation(control, {
     kind: 'network.request',
-    workspace: process.cwd(),
+    workspace: cwd,
     toolName,
     ...(url ? { url } : {}),
   });
