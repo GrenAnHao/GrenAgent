@@ -1,5 +1,25 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+
+function workspaceConfigSuffix(workspace: string): string {
+  return workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** 与 sidecar `extensions/_shared/approval.ts` 的键规则保持一致。 */
+export function approvalPolicyConfigKey(workspace: string): string {
+  return `APPROVAL_POLICY:${workspaceConfigSuffix(workspace)}`;
+}
+
+/** 与 sidecar `extensions/compaction-policy/exclusion.ts` 的键规则保持一致。 */
+export function contextExclusionConfigKey(workspace: string): string {
+  return `CONTEXT_EXCLUSION_OP:${workspaceConfigSuffix(workspace)}`;
+}
+
+export async function mergeRuntimeSettingsFile(path: string, patch: Record<string, string>): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const current = await readSettingsFile(path);
+  await writeJsonAtomically(path, { ...current, ...runtimeSettings(patch) });
+}
 
 export class SettingsService {
   private readonly settingsPath: string;

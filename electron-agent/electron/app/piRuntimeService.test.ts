@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
@@ -870,24 +870,66 @@ describe('PiRuntimeService', () => {
     }
   });
 
-  it('routes extension-backed mode and approval changes through prompt commands', async () => {
+  it('routes extension-backed mode through the handle and writes approval settings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-runtime-settings-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
     const { host, handle } = fakeAgentHost();
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = { get: vi.fn(() => client), open: vi.fn(), close: vi.fn() } as any;
     const service = new PiRuntimeService({
-      manager: { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any,
+      manager,
       processCommand: { command: 'pi', args: [] },
       agentDir: 'C:/agent',
       agentHost: host,
       modelRuntimeHost: noopModelHost,
+      runtimeConfigPath,
     });
 
-    await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
-    expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
+    try {
+      await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
+      expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
 
-    handle.prompt.mockClear();
-    await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toBeUndefined();
-    await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toBeUndefined();
-    await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toBeUndefined();
-    expect(handle.prompt).not.toHaveBeenCalled();
+      handle.prompt.mockClear();
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toEqual({ ok: true, level: 'full' });
+      await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toEqual({ ok: true, op: 'add', timestamp: 101 });
+      await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toEqual({ ok: true, op: 'remove', timestamp: 101 });
+      expect(handle.prompt).not.toHaveBeenCalled();
+      expect(client.send).not.toHaveBeenCalled();
+
+      const written = JSON.parse(await readFile(runtimeConfigPath, 'utf8')) as Record<string, string>;
+      expect(written['APPROVAL_POLICY:c:/work']).toBe('full');
+      expect(JSON.parse(written['CONTEXT_EXCLUSION_OP:c:/work'])).toMatchObject({ op: 'remove', ts: 101 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('sends Goal mode changes as a slash prompt to the sidecar', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-goal-mode-'));
+    const sessionPath = join(root, 'session.jsonl');
+    await writeFile(sessionPath, `${JSON.stringify({ type: 'session', id: 'session-a', cwd: 'C:/work' })}\n`);
+    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
+    const manager = {
+      get: vi.fn(() => client),
+      open: vi.fn(() => client),
+      openGoalWorker: vi.fn(() => client),
+      close: vi.fn(),
+    } as any;
+    const { host, handle } = fakeAgentHost();
+    const service = new PiRuntimeService({
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      agentHost: host, modelRuntimeHost: noopModelHost,
+    });
+    try {
+      await service.send('C:/work', 'agent_set_mode', {
+        mode: 'plan', source: 'goal', sessionId: 'session-a', sessionPath,
+      });
+      expect(client.send).toHaveBeenCalledWith({ type: 'prompt', message: '/mode plan' });
+      expect(handle.prompt).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('rewinds by resolving the message timestamp to an entry id before forking', async () => {

@@ -10,6 +10,7 @@ import type { Thread, Turn } from './appServer/types';
 import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { readSessionIdentity } from './sessionIdentity';
+import { approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -176,6 +177,7 @@ export class PiRuntimeService {
   private readonly legacyMigrationInFlight = new Map<string, Promise<void>>();
   private readonly pendingSessionForks = new Map<string, { sourceSessionId: string; targetSessionId: string }>();
   private readonly sessionForkSyncInFlight = new Map<string, Promise<boolean>>();
+  private exclusionPulseRev = 0;
   constructor(private readonly options: PiRuntimeOptions) {}
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null; sessionId?: string | null }> {
@@ -280,6 +282,12 @@ export class PiRuntimeService {
     const authorization = await this.authorize(workspace, command, args);
     if (authorization.status === 'denied') throw new Error(`Pi operation denied: ${command}`);
     if (authorization.status === 'blocked') return authorization;
+    if (command === 'agent_set_approval') {
+      return this.writeApprovalPolicy(workspace, args.level);
+    }
+    if (command === 'agent_exclude_entry' || command === 'agent_restore_entry') {
+      return this.writeContextExclusion(workspace, command === 'agent_exclude_entry' ? 'add' : 'remove', args.timestamp);
+    }
     if (SESSION_REPLACING_COMMANDS.includes(command) && this.hasInteractiveTurn(workspace)) {
       throw new Error('SESSION_BUSY');
     }
@@ -303,24 +311,6 @@ export class PiRuntimeService {
     const rpcArgs = command === 'agent_switch_session' && typeof args.sessionPath === 'string'
       ? { ...stripSessionArgs(args), sessionPath: args.sessionPath }
       : stripSessionArgs(args);
-    if (command === 'agent_set_approval') {
-      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
-        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/approval ${String(args.level ?? '')}` });
-      }
-      return undefined;
-    }
-    if (command === 'agent_exclude_entry') {
-      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
-        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/ctx-exclude ${String(args.timestamp ?? '')}` });
-      }
-      return undefined;
-    }
-    if (command === 'agent_restore_entry') {
-      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
-        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/ctx-restore ${String(args.timestamp ?? '')}` });
-      }
-      return undefined;
-    }
     if (command === 'agent_rewind_to') {
       const state = await ops.getState();
       const sessionFile = state.sessionFile;
@@ -669,6 +659,38 @@ export class PiRuntimeService {
     delete env.PI_GOAL_WORKER;
     delete env.PI_ALLOWED_EXTENSIONS;
     return env;
+  }
+
+  private async writeContextExclusion(
+    workspace: string,
+    op: 'add' | 'remove',
+    rawTimestamp: unknown,
+  ): Promise<{ ok: true; op: 'add' | 'remove'; timestamp: number }> {
+    const timestamp = typeof rawTimestamp === 'number' ? rawTimestamp : Number(rawTimestamp);
+    if (!Number.isFinite(timestamp)) throw new Error('INVALID_CONTEXT_EXCLUSION_TIMESTAMP');
+    const path = this.options.runtimeConfigPath;
+    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    this.exclusionPulseRev = Math.max(Date.now(), this.exclusionPulseRev + 1);
+    const pulse = JSON.stringify({ op, ts: timestamp, rev: this.exclusionPulseRev });
+    await mergeRuntimeSettingsFile(path, {
+      [contextExclusionConfigKey(workspace)]: pulse,
+      [contextExclusionConfigKey(resolved)]: pulse,
+    });
+    return { ok: true, op, timestamp };
+  }
+
+  private async writeApprovalPolicy(workspace: string, rawLevel: unknown): Promise<{ ok: true; level: 'ask' | 'auto' | 'full' }> {
+    const level = String(rawLevel ?? '').trim().toLowerCase();
+    if (level !== 'ask' && level !== 'auto' && level !== 'full') throw new Error('INVALID_APPROVAL_POLICY');
+    const path = this.options.runtimeConfigPath;
+    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    await mergeRuntimeSettingsFile(path, {
+      [approvalPolicyConfigKey(workspace)]: level,
+      [approvalPolicyConfigKey(resolved)]: level,
+    });
+    return { ok: true, level };
   }
 
   private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>): Promise<unknown> {
@@ -1183,7 +1205,9 @@ function readInput(args: Record<string, unknown>): string {
 function clientOps(client: PiClientPort): SessionOps {
   return {
     getState: () => client.send<Record<string, unknown>>({ type: 'get_state' }),
-    run: (command, args) => client.send({ type: commandTypes[command], ...args }),
+    run: (command, args) => command === 'agent_set_mode'
+      ? client.send({ type: 'prompt', message: `/mode ${String(args.mode ?? '')}` })
+      : client.send({ type: commandTypes[command], ...args }),
     setSessionIdentity: (id, path) => client.setSessionIdentity?.(id, path),
   };
 }
