@@ -1,23 +1,47 @@
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { MemoryClient } from '../memory/client.js';
+import { currentWorkspaceContext, resolveToolOrigin } from '../_shared/workspace-context.js';
+import { getConfig } from '../_shared/runtime-config.js';
 
 interface GoalInputContext {
   source: 'interactive' | 'rpc' | 'extension';
   text: string;
 }
 
-// A Pi sidecar serves one session, so this process-local context is sufficient
-// to bind a create request to the input that started the current agent turn.
-// It is deliberately not accepted from tool arguments or the AgentData RPC.
-let currentInput: GoalInputContext | undefined;
+const inputs = new Map<string, GoalInputContext>();
+
+function inputKey(): string {
+  return currentWorkspaceContext()?.workspace ?? process.cwd();
+}
 
 export function setGoalInputContext(source: GoalInputContext['source'], text: string): void {
-  currentInput = { source, text };
+  inputs.set(inputKey(), { source, text });
 }
 
 export function clearGoalInputContext(): void {
-  currentInput = undefined;
+  inputs.delete(inputKey());
+}
+
+/** 仅测试：清空全部分键，避免 afterEach 依赖当前 ALS。 */
+export function __resetGoalInputForTest(): void {
+  inputs.clear();
+}
+
+function currentInput(): GoalInputContext | undefined {
+  return inputs.get(inputKey());
+}
+
+function automaticTurn(): boolean {
+  const origin = resolveToolOrigin();
+  if (origin === 'goal' || origin === 'subagent') return true;
+  // sidecar 双栈回退：第 3/5 份删 Goal sidecar 与 system worker 之前，worker 仍靠 env。
+  return process.env.PI_GOAL_WORKER === '1' || process.env.PI_SYSTEM_WORKER === '1';
+}
+
+function trustedHumanOrigin(): boolean {
+  const origin = process.env.PI_TURN_ORIGIN ?? process.env.PI_INPUT_ORIGIN ?? process.env.PI_GOAL_ORIGIN;
+  return origin === 'human' || origin === 'human-ui' || getConfig('PI_HUMAN_ORIGIN_TOKEN') === '1';
 }
 
 const condition = Type.String({ minLength: 1, maxLength: 4000 });
@@ -30,24 +54,16 @@ function session(ctx: ExtensionContext): { sessionId: string; workspace: string 
   return { sessionId, workspace: ctx.cwd };
 }
 
-function automaticTurn(): boolean {
-  return process.env.PI_IS_SUBAGENT === '1' || process.env.PI_SYSTEM_WORKER === '1' || process.env.PI_GOAL_WORKER === '1';
-}
-
-function trustedHumanOrigin(): boolean {
-  const origin = process.env.PI_TURN_ORIGIN ?? process.env.PI_INPUT_ORIGIN ?? process.env.PI_GOAL_ORIGIN;
-  return origin === 'human' || origin === 'human-ui' || process.env.PI_HUMAN_ORIGIN_TOKEN === '1';
-}
-
 function hasContinuousIntent(text: string): boolean {
   return /(?:持续|直到完成|完成后再停止|keep going|until complete|continuous|\/goal\b)/i.test(text);
 }
 
 function userTurnRequired(): void {
   if (automaticTurn() || !trustedHumanOrigin()) throw new Error('GOAL_CREATE_FORBIDDEN');
-  if (currentInput) {
-    if (currentInput.source === 'extension') throw new Error('GOAL_CREATE_FORBIDDEN');
-    if (!hasContinuousIntent(currentInput.text)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
+  const input = currentInput();
+  if (input) {
+    if (input.source === 'extension') throw new Error('GOAL_CREATE_FORBIDDEN');
+    if (!hasContinuousIntent(input.text)) throw new Error('GOAL_CREATE_INTENT_REQUIRED');
   }
 }
 

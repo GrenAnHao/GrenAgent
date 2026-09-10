@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
+import { runInWorkspace } from "../_shared/workspace-context.js";
+import { __resetGoalInputForTest, clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
 
 type Def = { name: string; execute: (...args: any[]) => Promise<any> };
 function setup(request: ReturnType<typeof vi.fn>) {
@@ -10,7 +11,7 @@ function setup(request: ReturnType<typeof vi.fn>) {
 }
 
 afterEach(() => {
-  clearGoalInputContext();
+  __resetGoalInputForTest();
   delete process.env.PI_IS_SUBAGENT;
   delete process.env.PI_SYSTEM_WORKER;
   delete process.env.PI_GOAL_WORKER;
@@ -113,5 +114,95 @@ describe("goal tools", () => {
     const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 2 });
     const { defs, ctx } = setup(request);
     await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("INVALID_GOAL_RESPONSE");
+  });
+});
+
+describe("Goal 创建权限（ALS）", () => {
+  it("goal 上下文 token=0 时即使全局 env=1 也禁止 create", async () => {
+    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
+    const request = vi.fn();
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "goal", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "0" } },
+      async () => {
+        await expect(
+          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
+        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
+      },
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("main 上下文 token=1 时允许 create（不依赖 process.env）", async () => {
+    delete process.env.PI_HUMAN_ORIGIN_TOKEN;
+    delete process.env.PI_TURN_ORIGIN;
+    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "main", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
+      },
+    );
+    expect(request).toHaveBeenCalledWith("goal.create", expect.objectContaining({ sessionId: "session-a" }));
+  });
+
+  it("ALS origin=goal 视为 automatic，禁止 create", async () => {
+    const request = vi.fn();
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "goal", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        await expect(
+          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
+        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
+      },
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("A 的 currentInput 不被 B 的 agent 回合看见", async () => {
+    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
+    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        setGoalInputContext("rpc", "please inspect this once");
+      },
+    );
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
+      },
+    );
+    expect(request).toHaveBeenCalled();
+  });
+
+  it("A 的 agent_end 不清空 B 的 currentInput", async () => {
+    const request = vi.fn();
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        setGoalInputContext("rpc", "please inspect this once");
+      },
+    );
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        clearGoalInputContext();
+      },
+    );
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
+      async () => {
+        await expect(
+          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
+        ).rejects.toThrow("GOAL_CREATE_INTENT_REQUIRED");
+      },
+    );
+    expect(request).not.toHaveBeenCalled();
   });
 });
