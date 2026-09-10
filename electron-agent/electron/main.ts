@@ -45,7 +45,7 @@ import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
 import { AgentHost } from "./agent/agentHost";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
-import { ModelRuntime } from "../../cli/src/pi-sdk.js";
+import { getAgentDir, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -171,6 +171,10 @@ if (!process.env.VITEST) {
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
     const modelRuntimeHost = new ModelRuntimeHost({
       create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
+      resolveSettings: async () => {
+        const settings = SettingsManager.create(app.getPath('userData'), getAgentDir());
+        return { provider: settings.getDefaultProvider() ?? '', modelId: settings.getDefaultModel() ?? '' };
+      },
     });
     const agentHost = new AgentHost({
       createHandle: async (workspace, cwd) => createWorkspaceHandle({

@@ -10,6 +10,8 @@
 export {
   ModelRuntime,
   SessionManager,
+  SettingsManager,
+  ModelRegistry,
   createAgentSessionRuntime,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";

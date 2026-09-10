@@ -54,3 +54,77 @@ describe('ModelRuntimeHost', () => {
     expect(runtime.refresh).toHaveBeenCalledTimes(1);
   });
 });
+
+const model = { provider: 'openai', id: 'gpt-x', name: 'GPT-X' } as never;
+
+describe('ModelRuntimeHost 短调用', () => {
+  it('completeSimple 传 Model 对象与 messages，文本取 content[]', async () => {
+    const completeSimple = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '模型回答' }],
+    });
+    const create = vi.fn().mockResolvedValue({
+      completeSimple,
+      getAvailableSnapshot: () => [model],
+      getModel: () => model,
+      hasConfiguredAuth: () => true,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await expect(host.completeSimple({ user: '问题' })).resolves.toBe('模型回答');
+    expect(completeSimple).toHaveBeenCalledWith(
+      model,
+      expect.objectContaining({
+        messages: [expect.objectContaining({ role: 'user', content: '问题' })],
+      }),
+      expect.objectContaining({ signal: undefined }),
+    );
+  });
+
+  it('completeSimple 把 signal 透传到第三参', async () => {
+    const signal = new AbortController().signal;
+    const completeSimple = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'x' }] });
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel: () => model, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await host.completeSimple({ user: 'q', signal });
+    expect(completeSimple.mock.calls[0][2]).toEqual({ signal });
+  });
+
+  it('describeModel 返回 provider/id，不是 displayName', async () => {
+    const create = vi.fn().mockResolvedValue({
+      completeSimple: vi.fn(),
+      getAvailableSnapshot: () => [model],
+      getModel: () => model,
+      hasConfiguredAuth: () => true,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await expect(host.describeModel()).resolves.toBe('openai/gpt-x');
+  });
+
+  it('settings 模型无鉴权时回退快照第一项', async () => {
+    const fallback = { provider: 'anthropic', id: 'claude', name: 'Claude' } as never;
+    const create = vi.fn().mockResolvedValue({
+      completeSimple: vi.fn(),
+      getAvailableSnapshot: () => [fallback],
+      getModel: () => undefined,
+      hasConfiguredAuth: () => false,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'missing' }) });
+    await expect(host.describeModel()).resolves.toBe('anthropic/claude');
+  });
+
+  it('没有任何模型时 describeModel 抛 MODEL_UNAVAILABLE', async () => {
+    const create = vi.fn().mockResolvedValue({
+      completeSimple: vi.fn(),
+      getAvailableSnapshot: () => [],
+      getModel: () => undefined,
+      hasConfiguredAuth: () => false,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'x', modelId: 'y' }) });
+    await expect(host.describeModel()).rejects.toThrow('MODEL_UNAVAILABLE');
+  });
+});
