@@ -2,9 +2,47 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
-import { PiRuntimeService } from './piRuntimeService';
+import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
 import { AgentDataStorage } from '../agentData/storage';
 import { GoalStore } from '../agentData/goalStore';
+
+function fakeHandle(session: Record<string, unknown> = {}) {
+  return {
+    session: { steer: vi.fn(), followUp: vi.fn(), abort: vi.fn(), setModel: vi.fn(), cycleModel: vi.fn(), setThinkingLevel: vi.fn(), cycleThinkingLevel: vi.fn(), compact: vi.fn(), setAutoCompactionEnabled: vi.fn(), abortRetry: vi.fn(), getSessionStats: vi.fn(() => ({})), getUserMessagesForForking: vi.fn(() => []), setSessionName: vi.fn(), messages: [], modelRuntime: { getAvailableSnapshot: () => [] }, sessionManager: { getLeafId: () => 'leaf' }, ...session },
+    prompt: vi.fn(async () => {}),
+    getState: vi.fn(() => ({ sessionFile: 'C:/sessions/a.jsonl', sessionId: 'session-a' })),
+    getCommands: vi.fn(() => ({ commands: [] })),
+    newSession: vi.fn(async () => ({ cancelled: false })),
+    switchSession: vi.fn(async () => ({ cancelled: false })),
+    fork: vi.fn(async () => ({ cancelled: false })),
+    ui: { respond: vi.fn() },
+  } as any;
+}
+function fakeAgentHost(handle = fakeHandle()) {
+  return { host: { open: vi.fn(async () => handle), get: vi.fn(() => handle), close: vi.fn(async () => {}) } as AgentHostPort, handle };
+}
+const noopModelHost = { refresh: vi.fn(async () => {}), workspaces: () => [] };
+
+function hostForSession(sessionFile: string) {
+  const handle = fakeHandle();
+  handle.getState = vi.fn(() => ({ sessionFile }));
+  return fakeAgentHost(handle);
+}
+
+function hostSwitchingSession(sourceFile: string, targetFile: string) {
+  let activeFile = sourceFile;
+  const handle = fakeHandle();
+  handle.getState = vi.fn(() => ({ sessionFile: activeFile }));
+  handle.fork = vi.fn(async () => {
+    activeFile = targetFile;
+    return { cancelled: false };
+  });
+  handle.switchSession = vi.fn(async (sessionPath: string) => {
+    activeFile = sessionPath;
+    return { cancelled: false };
+  });
+  return fakeAgentHost(handle);
+}
 
 describe('PiRuntimeService', () => {
   it('keeps turns and late lifecycle events isolated for two sessions in one workspace', async () => {
@@ -15,7 +53,7 @@ describe('PiRuntimeService', () => {
       createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
       updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
     };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
 
     await service.send('C:/work', 'agent_prompt', { message: 'A', sessionId: 'session-a' });
     await service.send('C:/work', 'agent_prompt', { message: 'B', sessionId: 'session-b' });
@@ -41,7 +79,7 @@ describe('PiRuntimeService', () => {
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
     const thread = { createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })), createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })), updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })) };
     const onEvent = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onEvent });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, threadStore: thread as any, onEvent });
 
     await service.send('C:/work', 'agent_prompt', {
       message: 'hello', sessionId: 'session-a', source: 'goal', goalId: 'goal-a', revision: 1,
@@ -54,39 +92,50 @@ describe('PiRuntimeService', () => {
   it('rejects a Goal turn without its revision and idempotency metadata', async () => {
     const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost });
     await expect(service.send('C:/work', 'agent_prompt', { message: 'goal turn', source: 'goal', sessionId: 'session-a' })).rejects.toThrow('INVALID_GOAL_TURN');
     expect(client.send).not.toHaveBeenCalled();
   });
 
-  it('issues the Agent Data endpoint for the resolved project cwd', async () => {
-    const client = { send: async <T>() => ({} as T), respondUi: vi.fn() };
-    const manager = { get: vi.fn(), open: vi.fn(() => client), close: vi.fn() };
+  it('turnConfig exposes the Agent Data endpoint without process-level keys', async () => {
+    const { host } = fakeAgentHost();
     const endpoint = vi.fn(() => 'project-endpoint');
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
-      resolveWorkspace: async () => 'D:/resolved-project', agentDataEndpoint: endpoint });
-    await service.openWorkspace('alias');
+    const service = new PiRuntimeService({
+      manager: { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any,
+      processCommand: { command: 'pi', args: [] },
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+      runtimeConfigPath: 'C:/runtime.json',
+      allowedPluginIds: () => ['approval'],
+      agentDataEndpoint: endpoint,
+      resolveWorkspace: async () => 'D:/resolved-project',
+    });
+    const env = await service.turnConfig('alias', 'D:/resolved-project', 'main');
     expect(endpoint).toHaveBeenCalledWith('D:/resolved-project');
-    expect(manager.open).toHaveBeenCalledWith('alias', 'D:/resolved-project', expect.objectContaining({ AGENT_DATA_ENDPOINT: 'project-endpoint' }));
+    expect(env).toEqual(expect.objectContaining({
+      AGENT_DATA_ENDPOINT: 'project-endpoint',
+      PI_PERMISSION_PROFILE: 'workspace',
+      PI_HUMAN_ORIGIN_TOKEN: '1',
+    }));
+    expect(env).not.toHaveProperty('PI_PACKAGE_DIR');
+    expect(env).not.toHaveProperty('PI_RUNTIME_CONFIG');
+    expect(env).not.toHaveProperty('PI_GOAL_WORKER');
+    expect(env).not.toHaveProperty('PI_ALLOWED_EXTENSIONS');
+    await service.openWorkspace('alias');
+    expect(host.open).toHaveBeenCalledWith('alias', 'D:/resolved-project');
   });
 
   it('opens a workspace and forwards agent commands to its Pi client', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => ({ sessionFile: 'C:/sessions/a.jsonl', command })), respondUi: vi.fn() };
-    let activeClient: typeof client | undefined;
-    const manager = {
-      get: vi.fn(() => activeClient),
-      open: vi.fn(() => {
-        activeClient = client;
-        return client;
-      }),
-      close: vi.fn(async () => {}),
-    } as any;
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: ['--mode', 'rpc'] }, agentDir: 'C:/agent' });
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile: 'C:/sessions/a.jsonl' }));
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: ['--mode', 'rpc'] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost });
 
-    await expect(service.openWorkspace('C:/work')).resolves.toEqual({ restoredSession: null, sessionFile: 'C:/sessions/a.jsonl' });
-    await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ sessionFile: 'C:/sessions/a.jsonl', command: { type: 'get_state' } });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace', PI_HUMAN_ORIGIN_TOKEN: '1' });
-    expect(client.send).toHaveBeenLastCalledWith({ type: 'get_state' });
+    await expect(service.openWorkspace('C:/work')).resolves.toMatchObject({ restoredSession: null, sessionFile: 'C:/sessions/a.jsonl' });
+    await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toMatchObject({ sessionFile: 'C:/sessions/a.jsonl' });
+    expect(host.open).toHaveBeenCalledWith('C:/work', 'C:/work');
+    expect(handle.getState).toHaveBeenCalled();
   });
 
   it('migrates the latest legacy Goal entry once when opening a session', async () => {
@@ -96,10 +145,10 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
       JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'root', customType: 'goal', timestamp: '2026-09-07T00:00:00.000Z', data: { condition: 'finish migration', react: 2, paused: true } }),
     ].join('\n'));
-    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostForSession(sessionFile);
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
     const migrateLegacyGoal = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
     try {
       await service.openWorkspace('C:/work');
       await service.openWorkspace('C:/work');
@@ -128,7 +177,7 @@ describe('PiRuntimeService', () => {
       signalStarted();
       await gate;
     });
-    const service = new PiRuntimeService({ manager: {} as any, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager: {} as any, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
     const identity = { sessionId: 'legacy-session', sessionPath: sessionFile, source: 'interactive' as const };
     try {
       const first = (service as any).migrateLegacyGoal('C:/work', identity) as Promise<void>;
@@ -151,10 +200,10 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'session', id: 'legacy-session', cwd: 'C:/work' }),
       '{"type":"custom","customType":"goal"',
     ].join('\n'));
-    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostForSession(sessionFile);
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
     const migrateLegacyGoal = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
     try {
       await service.openWorkspace('C:/work');
       expect(migrateLegacyGoal).not.toHaveBeenCalled();
@@ -178,27 +227,21 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
       JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'target-session', customType: 'goal', data: { condition: 'restore this goal', react: 1 } }),
     ].join('\n'));
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: targetFile };
-        return { type: rpc.type };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host, handle } = hostSwitchingSession(sourceFile, targetFile);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const order: string[] = [];
     const service = new PiRuntimeService({
       manager,
       processCommand: { command: 'pi', args: [] },
-      agentDir: 'C:/agent',
+      agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost,
       onSessionForked: vi.fn(async () => { order.push('forked'); }),
       migrateLegacyGoal: vi.fn(async () => { order.push('migrated'); }),
     });
     try {
-      await expect(service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ type: command === 'agent_fork' ? 'fork' : 'clone' });
+      await expect(service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ cancelled: false });
       expect(order).toEqual(['forked', 'migrated']);
-      expect(client.setSessionIdentity).toHaveBeenCalledWith('target-session', targetFile);
+      expect(handle.fork).toHaveBeenCalled();
+      expect(handle.getState).toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -208,19 +251,19 @@ describe('PiRuntimeService', () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-session-fork-cancelled-'));
     const sourceFile = join(root, 'source.jsonl');
     await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => rpc.type === 'get_state' ? { sessionFile: sourceFile } : { cancelled: true }),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const handle = fakeHandle();
+    handle.getState = vi.fn(() => ({ sessionFile: sourceFile }));
+    handle.fork = vi.fn(async () => ({ cancelled: true }));
+    const { host } = fakeAgentHost(handle);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const onSessionForked = vi.fn();
     const migrateLegacyGoal = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', onSessionForked, migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, onSessionForked, migrateLegacyGoal });
     try {
       await expect(service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ cancelled: true });
       expect(onSessionForked).not.toHaveBeenCalled();
       expect(migrateLegacyGoal).not.toHaveBeenCalled();
-      expect(client.send).toHaveBeenCalledTimes(1);
+      expect(handle.fork).toHaveBeenCalledTimes(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -235,27 +278,15 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
       JSON.stringify({ type: 'custom', id: 'goal-1', parentId: 'target-session', customType: 'goal', data: { condition: 'legacy target goal' } }),
     ].join('\n'));
-    let activeFile = sourceFile;
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: activeFile };
-        if (rpc.type === 'fork') {
-          activeFile = targetFile;
-          return { cancelled: false };
-        }
-        return { ok: true };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostSwitchingSession(sourceFile, targetFile);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     let forkAttempts = 0;
     const onSessionForked = vi.fn(async () => {
       forkAttempts += 1;
       if (forkAttempts === 1) throw new Error('temporary AgentData outage');
     });
     const migrateLegacyGoal = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', onSessionForked, migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, onSessionForked, migrateLegacyGoal });
     try {
       await expect(service.send('C:/work', 'agent_fork', { sessionId: 'source-session', sessionPath: sourceFile })).resolves.toEqual({ cancelled: false });
       expect(onSessionForked).toHaveBeenCalledOnce();
@@ -275,30 +306,17 @@ describe('PiRuntimeService', () => {
     const targetFile = join(root, 'target.jsonl');
     await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
     await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
-    let activeFile = sourceFile;
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: activeFile };
-        if (rpc.type === 'switch_session') {
-          expect(rpc).toEqual({ type: 'switch_session', sessionPath: targetFile });
-          activeFile = targetFile;
-          return { cancelled: false };
-        }
-        return { ok: true };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host, handle } = hostSwitchingSession(sourceFile, targetFile);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const bindGoalSession = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, bindGoalSession });
     try {
       await service.openWorkspace('C:/work');
       bindGoalSession.mockClear();
       await service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile });
+      expect(handle.switchSession).toHaveBeenCalledWith(targetFile);
       expect(bindGoalSession).toHaveBeenCalledWith('C:/work', 'target-session', 'interactive');
       expect(bindGoalSession).not.toHaveBeenCalledWith('C:/work', 'source-session', 'interactive');
-      expect(client.setSessionIdentity).toHaveBeenCalledWith('target-session', targetFile);
       await expect(service.ownsSession('C:/work', 'target-session')).resolves.toBe(true);
       await expect(service.ownsSession('C:/work', 'source-session')).resolves.toBe(false);
     } finally {
@@ -312,22 +330,19 @@ describe('PiRuntimeService', () => {
     const targetFile = join(root, 'target.jsonl');
     await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
     await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => rpc.type === 'get_state' ? { sessionFile: sourceFile } : { cancelled: true }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const handle = fakeHandle();
+    handle.getState = vi.fn(() => ({ sessionFile: sourceFile }));
+    handle.switchSession = vi.fn(async () => ({ cancelled: true }));
+    const { host } = fakeAgentHost(handle);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const bindGoalSession = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, bindGoalSession });
     try {
       await service.openWorkspace('C:/work');
       bindGoalSession.mockClear();
-      client.setSessionIdentity.mockClear();
       await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile })).resolves.toEqual({ cancelled: true });
-      expect(client.send).toHaveBeenCalledTimes(2);
+      expect(handle.switchSession).toHaveBeenCalledTimes(1);
       expect(bindGoalSession).not.toHaveBeenCalled();
-      expect(client.setSessionIdentity).not.toHaveBeenCalled();
       await expect(service.ownsSession('C:/work', 'source-session')).resolves.toBe(true);
       await expect(service.ownsSession('C:/work', 'target-session')).resolves.toBe(false);
     } finally {
@@ -341,22 +356,13 @@ describe('PiRuntimeService', () => {
     const targetFile = join(root, 'target.jsonl');
     await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
     await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
-    let activeFile = sourceFile;
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: activeFile };
-        activeFile = targetFile;
-        return { cancelled: false };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostSwitchingSession(sourceFile, targetFile);
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const unbindGoalSession = vi.fn();
     const bindGoalSession = vi.fn((_workspace: string, sessionId: string) => {
       if (sessionId === 'target-session') throw new Error('target binding failed');
     });
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession, unbindGoalSession });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, bindGoalSession, unbindGoalSession });
     try {
       await service.openWorkspace('C:/work');
       await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile })).rejects.toThrow('target binding failed');
@@ -374,10 +380,10 @@ describe('PiRuntimeService', () => {
     const makeService = async (name: string, entries: Record<string, unknown>[]) => {
       const sessionFile = join(root, name);
       await writeFile(sessionFile, [JSON.stringify({ type: 'session', id: name, cwd: 'C:/work' }), ...entries.map((entry) => JSON.stringify(entry))].join('\n'));
-      const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
-      const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+      const { host } = hostForSession(sessionFile);
+      const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
       const migrateLegacyGoal = vi.fn(async () => {});
-      const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+      const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
       await service.openWorkspace('C:/work');
       return migrateLegacyGoal;
     };
@@ -404,10 +410,10 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'custom', id: 'goal-a', parentId: 'root', customType: 'goal', data: { condition: 'abandoned', react: 1 } }),
       JSON.stringify({ type: 'message', id: 'branch-b', parentId: 'root', message: { role: 'user', content: 'new branch' } }),
     ].join('\n'));
-    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostForSession(sessionFile);
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
     const migrateLegacyGoal = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
     try {
       await service.openWorkspace('C:/work');
       expect(migrateLegacyGoal).not.toHaveBeenCalled();
@@ -424,10 +430,10 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'custom', id: 'goal-a', parentId: 'ancestor-session', customType: 'goal', data: { condition: 'inherited goal', react: 2 } }),
       JSON.stringify({ type: 'message', id: 'active-child', parentId: 'goal-a', message: { role: 'user', content: 'continue' } }),
     ].join('\n'));
-    const client = { send: vi.fn(async () => ({ sessionFile })), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostForSession(sessionFile);
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
     const migrateLegacyGoal = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', migrateLegacyGoal });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, migrateLegacyGoal });
     try {
       await service.openWorkspace('C:/work');
       expect(migrateLegacyGoal).toHaveBeenCalledWith(expect.objectContaining({ condition: 'inherited goal', react: 2 }));
@@ -438,25 +444,26 @@ describe('PiRuntimeService', () => {
 
   it('rejects commands that do not map to a Pi RPC operation', async () => {
     const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost });
 
     await expect(service.send('C:/work', 'agent_not_real', {})).rejects.toThrow('Unsupported Pi command');
   });
 
   it('opens a workspace on the first agent command when warm_workspace has not run yet', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => undefined), open: vi.fn(() => client), close: vi.fn() } as any;
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    const { host, handle } = fakeAgentHost();
+    const manager = { get: vi.fn(() => undefined), open: vi.fn(), close: vi.fn() } as any;
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost });
 
-    await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toEqual({ type: 'get_state' });
-    expect(manager.open).toHaveBeenCalledWith('C:/work', 'C:/work', { PI_PACKAGE_DIR: 'C:/agent', PI_PERMISSION_PROFILE: 'workspace', PI_HUMAN_ORIGIN_TOKEN: '1' });
+    await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toMatchObject({ sessionFile: 'C:/sessions/a.jsonl' });
+    expect(host.open).toHaveBeenCalledWith('C:/work', 'C:/work');
+    expect(handle.getState).toHaveBeenCalled();
   });
 
   it('keeps a prompt queued until Pi lifecycle events persist its items and complete it', async () => {
     const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
     const thread = { createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })), createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })), updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })), upsertItem: vi.fn(async (item) => item) };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
 
     await service.send('C:/work', 'agent_prompt', { prompt: 'hello' });
 
@@ -484,53 +491,54 @@ describe('PiRuntimeService', () => {
   });
 
   it('does not create a turn for extension slash commands', async () => {
-    const client = { send: vi.fn(async () => ({ ok: true })), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host, handle } = fakeAgentHost();
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const thread = { createThread: vi.fn(), createTurn: vi.fn(), updateTurn: vi.fn() };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
 
     await service.send('C:/work', 'agent_prompt', { message: '/goal write tests' });
 
-    expect(client.send).toHaveBeenCalledWith({ type: 'prompt', message: '/goal write tests' });
+    expect(handle.prompt).toHaveBeenCalledWith('/goal write tests', { images: undefined }, 'main');
     expect(thread.createThread).not.toHaveBeenCalled();
     expect(thread.createTurn).not.toHaveBeenCalled();
   });
 
   it('steers the active Turn and queues follow-up prompts without replacing it', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host, handle } = fakeAgentHost();
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const thread = {
       createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
       createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
       updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
     };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
 
     await service.send('C:/work', 'agent_prompt', { message: 'first' });
-    await expect(service.send('C:/work', 'agent_prompt', { message: 'steer now', streamingBehavior: 'steer' })).resolves.toMatchObject({ type: 'prompt', message: 'steer now', streamingBehavior: 'steer' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'steer now', streamingBehavior: 'steer' })).resolves.toBeUndefined();
     await expect(service.send('C:/work', 'agent_prompt', { message: 'after this', streamingBehavior: 'followUp' })).resolves.toMatchObject({ status: 'queued', position: 1 });
 
     expect(thread.createTurn).toHaveBeenCalledOnce();
-    expect(client.send).toHaveBeenCalledTimes(2);
+    expect(handle.prompt).toHaveBeenCalledTimes(2);
+    expect(handle.prompt).toHaveBeenNthCalledWith(2, 'steer now', { images: undefined, streamingBehavior: 'steer' }, 'main');
   });
 
   it('drains a queued follow-up when the terminal callback rejects', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host, handle } = fakeAgentHost();
+    const manager = { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any;
     const thread = {
       createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
       createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
       updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
     };
     const onTurnSettled = vi.fn(async () => { throw new Error('settled hook failed'); });
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any, onTurnSettled });
 
     await service.send('C:/work', 'agent_prompt', { message: 'first', sessionId: 'session-a' });
     await expect(service.send('C:/work', 'agent_prompt', { message: 'after this', streamingBehavior: 'followUp', sessionId: 'session-a' }))
       .resolves.toMatchObject({ status: 'queued', position: 1 });
 
     await expect(service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a')).rejects.toThrow('settled hook failed');
-    expect(client.send).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'follow_up', message: 'after this' }));
+    expect(handle.session.followUp).toHaveBeenCalledWith('after this', undefined);
     expect(thread.createTurn).toHaveBeenCalledTimes(2);
     expect(onTurnSettled).toHaveBeenCalledOnce();
   });
@@ -560,7 +568,7 @@ describe('PiRuntimeService', () => {
     } as any;
     const bindGoalSession = vi.fn();
     const unbindGoalSession = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', bindGoalSession, unbindGoalSession });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, bindGoalSession, unbindGoalSession });
 
     try {
       await service.openGoalWorker('same-session', 'C:/one', pathOne);
@@ -598,7 +606,7 @@ describe('PiRuntimeService', () => {
       updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
     };
     const onTurnSettled = vi.fn(async () => {});
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, threadStore: thread as any, onTurnSettled });
     try {
       await service.send('C:/work', 'agent_prompt', {
         message: 'continue goal', source: 'goal', sessionId: 'session-a', sessionPath,
@@ -629,13 +637,14 @@ describe('PiRuntimeService', () => {
       close,
     } as any;
     const unbindGoalSession = vi.fn();
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', unbindGoalSession });
+    const { host } = fakeAgentHost();
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, unbindGoalSession });
 
     try {
       await service.openGoalWorker('session-a', 'C:/work', sessionPath);
       await expect(service.closeWorkspace('C:/work')).rejects.toThrow('goal worker close failed');
-      expect(close).toHaveBeenNthCalledWith(1, goalKey);
-      expect(close).toHaveBeenNthCalledWith(2, 'C:/work');
+      expect(close).toHaveBeenCalledWith(goalKey);
+      expect(host.close).toHaveBeenCalledWith('C:/work');
       expect(unbindGoalSession).toHaveBeenCalledWith('C:/work', 'session-a');
       await expect(service.enqueueGoalTurn({
         workspace: 'C:/work', sessionId: 'session-a', turnId: 'after-close',
@@ -667,7 +676,8 @@ describe('PiRuntimeService', () => {
       createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
       updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
     };
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any });
+    const { host } = hostForSession(visiblePath);
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
     try {
       await service.openWorkspace('C:/work');
       await service.openGoalWorker('goal-session', 'C:/work', goalPath);
@@ -708,7 +718,7 @@ describe('PiRuntimeService', () => {
     const onTurnSettled = vi.fn(async (result: { turnId: string }) => {
       if (result.turnId === 'turn-2') throw new Error('coordinator offline');
     });
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any, onTurnSettled });
+    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: fakeAgentHost().host, modelRuntimeHost: noopModelHost, threadStore: thread as any, onTurnSettled });
     try {
       for (const [index, turnId] of ['turn-1', 'turn-2', 'turn-3'].entries()) {
         const revision = index * 2 + 1;
@@ -772,8 +782,9 @@ describe('PiRuntimeService', () => {
       respondUi: vi.fn(),
     };
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostSwitchingSession(sourceFile, targetFile);
     const service = new PiRuntimeService({
-      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost,
       // Mirrors main.ts: a cleared source is forked as a tombstone instead of
       // being skipped, so the copied legacy entry has nothing left to restore.
       onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
@@ -831,8 +842,9 @@ describe('PiRuntimeService', () => {
       respondUi: vi.fn(),
     };
     const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
+    const { host } = hostSwitchingSession(sourceFile, targetFile);
     const service = new PiRuntimeService({
-      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost,
       onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
         const source = store.get(sourceSessionId);
         if (!source) return;
@@ -859,26 +871,23 @@ describe('PiRuntimeService', () => {
   });
 
   it('routes extension-backed mode and approval changes through prompt commands', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
-    const manager = { get: vi.fn(() => client), open: vi.fn(), close: vi.fn() } as any;
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    const { host, handle } = fakeAgentHost();
+    const service = new PiRuntimeService({
+      manager: { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any,
+      processCommand: { command: 'pi', args: [] },
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
 
-    await expect(service.send('C:/work', 'agent_set_mode', { mode: 'plan' })).resolves.toEqual({
-      type: 'prompt',
-      message: '/mode plan',
-    });
-    await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toEqual({
-      type: 'prompt',
-      message: '/approval full',
-    });
-    await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toEqual({
-      type: 'prompt',
-      message: '/ctx-exclude 101',
-    });
-    await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toEqual({
-      type: 'prompt',
-      message: '/ctx-restore 101',
-    });
+    await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
+    expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
+
+    handle.prompt.mockClear();
+    await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toBeUndefined();
+    await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toBeUndefined();
+    await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toBeUndefined();
+    expect(handle.prompt).not.toHaveBeenCalled();
   });
 
   it('rewinds by resolving the message timestamp to an entry id before forking', async () => {
@@ -889,23 +898,53 @@ describe('PiRuntimeService', () => {
       JSON.stringify({ type: 'message', id: 'entry-1', message: { role: 'user', timestamp: 100 } }),
       JSON.stringify({ type: 'message', id: 'entry-2', message: { role: 'user', timestamp: 200 } }),
     ].join('\n'));
-    const client = {
-      send: vi.fn(async (command: Record<string, unknown>) => {
-        if (command.type === 'get_state') return { sessionFile };
-        return command;
-      }),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(), close: vi.fn() } as any;
-    const service = new PiRuntimeService({ manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent' });
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    const service = new PiRuntimeService({
+      manager: { get: vi.fn(), open: vi.fn(), close: vi.fn() } as any,
+      processCommand: { command: 'pi', args: [] },
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
 
     try {
-      await expect(service.send('C:/work', 'agent_rewind_to', { timestamp: 200 })).resolves.toEqual({
-        type: 'fork',
-        entryId: 'entry-2',
-      });
+      await expect(service.send('C:/work', 'agent_rewind_to', { timestamp: 200 })).resolves.toEqual({ cancelled: false });
+      expect(handle.fork).toHaveBeenCalledWith('entry-2');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('进程内宿主交互路径', () => {
+  it('agent_prompt 在 preflight 后立即返回', async () => {
+    const { host, handle } = fakeAgentHost();
+    handle.prompt = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager: {} as never, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await expect(service.send('C:/work', 'agent_prompt', { message: '你好' })).resolves.toBeUndefined();
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('agent_prompt 活跃时 session 替换命令抛 SESSION_BUSY', async () => {
+    const { host, handle } = fakeAgentHost();
+    handle.prompt = vi.fn(async () => {});
+    const service = new PiRuntimeService({ manager: {} as never, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: { createThread: async (i: never) => i, createTurn: async (i: never) => i, updateTurn: async (i: never) => i } as never });
+    await service.send('C:/work', 'agent_prompt', { message: 'x' });
+    await expect(service.send('C:/work', 'agent_new_session', {})).rejects.toThrow('SESSION_BUSY');
+  });
+
+  it('agent_set_mode 走 handle.prompt 的斜杠命令', async () => {
+    const { host, handle } = fakeAgentHost();
+    const service = new PiRuntimeService({ manager: {} as never, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
+    expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
+  });
+
+  it('agent_abort 调 session.abort', async () => {
+    const { host, handle } = fakeAgentHost();
+    const service = new PiRuntimeService({ manager: {} as never, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await service.send('C:/work', 'agent_abort', {});
+    expect(handle.session.abort).toHaveBeenCalledTimes(1);
   });
 });

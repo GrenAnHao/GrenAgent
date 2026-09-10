@@ -222,7 +222,10 @@ describe('GoalCoordinator', () => {
     };
     let coordinator: GoalCoordinator;
     const pi = new PiRuntimeService({
-      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent', threadStore: thread as any,
+      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      agentHost: { open: async () => ({}) as never, get: () => undefined, close: async () => {} },
+      modelRuntimeHost: { refresh: async () => {} },
+      threadStore: thread as any,
       onTurnSettled: (result) => {
         if (!result.goal || !result.sessionId) return;
         return coordinator.onTurnCompleted({

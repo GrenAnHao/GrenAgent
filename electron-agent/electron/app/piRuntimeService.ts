@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { piGoalWorkerKey, type PiManager, type PiProcessCommand } from '../pi/manager';
+import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
+import type { WorkspaceHandle } from '../agent/workspaceHandle.js';
 import type { PiClientMetadata } from '../pi/client';
 import type { Thread, Turn } from './appServer/types';
 import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
@@ -10,6 +12,7 @@ import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { readSessionIdentity } from './sessionIdentity';
 
 type PiCommand = keyof typeof commandTypes;
+type ImageContent = NonNullable<PromptOptions['images']>[number];
 
 const commandTypes = {
   agent_prompt: 'prompt',
@@ -40,6 +43,24 @@ const commandTypes = {
   agent_get_fork_messages: 'get_fork_messages',
   agent_set_session_name: 'set_session_name',
 } as const;
+
+export interface AgentHostPort {
+  open(workspace: string, cwd: string): Promise<WorkspaceHandlePort>;
+  get(workspace: string): WorkspaceHandlePort | undefined;
+  close(workspace: string): Promise<void>;
+}
+export type WorkspaceHandlePort = Pick<WorkspaceHandle,
+  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'ui'>;
+
+/** 交互路径会话操作的过渡接缝。第 3 份 Goal 接 handle 后 clientOps 删除，run 收敛为 runOnHandle。 */
+interface SessionOps {
+  getState(): Promise<Record<string, unknown>>;
+  run(command: PiCommand, args: Record<string, unknown>): Promise<unknown>;
+  setSessionIdentity?(sessionId: string, sessionPath?: string): void;
+}
+
+interface PiEventMeta { sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal' }
+type EventMeta = string | PiEventMeta | PiClientMetadata;
 
 interface PiClientPort {
   send<T>(command: Record<string, unknown>): Promise<T>;
@@ -132,6 +153,8 @@ export interface PiRuntimeOptions {
   permissionManager?: Pick<PermissionManager, 'authorize'>;
   mcpConfig?: McpConfigPort;
   allowedPluginIds?: () => string[];
+  agentHost: AgentHostPort;
+  modelRuntimeHost: { refresh(): Promise<void>; workspaces?(): string[] };
 }
 
 export class PiRuntimeService {
@@ -156,13 +179,13 @@ export class PiRuntimeService {
   constructor(private readonly options: PiRuntimeOptions) {}
 
   async openWorkspace(workspace: string): Promise<{ restoredSession: null; sessionFile: string | null; sessionId?: string | null }> {
-    const client = await this.openClient(workspace);
-    const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
+    const ops = this.handleOps(await this.openInteractive(workspace));
+    const state = await ops.getState();
     const sessionFile = typeof state.sessionFile === 'string' ? state.sessionFile : null;
     const identity = await this.readCurrentIdentity(workspace, sessionFile, typeof state.sessionId === 'string' ? state.sessionId : undefined);
     if (identity) {
       await this.replaceCurrentSession(workspace, identity);
-      if (identity.sessionId) client.setSessionIdentity?.(identity.sessionId, identity.sessionPath);
+      if (identity.sessionId) ops.setSessionIdentity?.(identity.sessionId, identity.sessionPath);
     }
     return {
       restoredSession: null,
@@ -172,8 +195,7 @@ export class PiRuntimeService {
   }
 
   async warmWorkspace(workspace: string): Promise<void> {
-    const client = await this.openClient(workspace);
-    await client.send({ type: 'get_state' });
+    await this.openInteractive(workspace);
   }
 
   async closeWorkspace(workspace: string): Promise<void> {
@@ -231,7 +253,7 @@ export class PiRuntimeService {
     try {
       // Closing the visible worker must be attempted even when a headless
       // Goal worker has already exited or failed to close.
-      await this.options.manager.close(workspace);
+      await this.options.agentHost.close(workspace);
     } catch (error) {
       if (!hasFailure) { failure = error; hasFailure = true; }
     }
@@ -274,35 +296,41 @@ export class PiRuntimeService {
       const input = typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
       return this.enqueueTurn(workspace, input, typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace', session);
     }
-    const client = session.source === 'goal' && session.sessionId && session.sessionPath
-      ? await this.openGoalClient(session.sessionId, workspace, session.sessionPath)
-      : await this.openClient(workspace);
-    if (session.source !== 'goal' && session.sessionId && command !== 'agent_switch_session') client.setSessionIdentity?.(session.sessionId, session.sessionPath);
+    const ops: SessionOps = session.source === 'goal' && session.sessionId && session.sessionPath
+      ? clientOps(await this.openGoalClient(session.sessionId, workspace, session.sessionPath))
+      : this.handleOps(await this.openInteractive(workspace));
+    if (session.source !== 'goal' && session.sessionId && command !== 'agent_switch_session') ops.setSessionIdentity?.(session.sessionId, session.sessionPath);
     const rpcArgs = command === 'agent_switch_session' && typeof args.sessionPath === 'string'
       ? { ...stripSessionArgs(args), sessionPath: args.sessionPath }
       : stripSessionArgs(args);
-    if (command === 'agent_set_mode') {
-      return client.send({ type: 'prompt', message: `/mode ${String(args.mode ?? '')}` });
-    }
     if (command === 'agent_set_approval') {
-      return client.send({ type: 'prompt', message: `/approval ${String(args.level ?? '')}` });
+      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
+        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/approval ${String(args.level ?? '')}` });
+      }
+      return undefined;
     }
     if (command === 'agent_exclude_entry') {
-      return client.send({ type: 'prompt', message: `/ctx-exclude ${String(args.timestamp ?? '')}` });
+      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
+        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/ctx-exclude ${String(args.timestamp ?? '')}` });
+      }
+      return undefined;
     }
     if (command === 'agent_restore_entry') {
-      return client.send({ type: 'prompt', message: `/ctx-restore ${String(args.timestamp ?? '')}` });
+      if (session.source === 'goal' && session.sessionId && session.sessionPath) {
+        return (await this.openGoalClient(session.sessionId, workspace, session.sessionPath)).send({ type: 'prompt', message: `/ctx-restore ${String(args.timestamp ?? '')}` });
+      }
+      return undefined;
     }
     if (command === 'agent_rewind_to') {
-      const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
+      const state = await ops.getState();
       const sessionFile = state.sessionFile;
       if (typeof sessionFile !== 'string' || !sessionFile) throw new Error('no active session file');
       const entryId = await findEntryIdByTimestamp(sessionFile, args.timestamp);
       if (!entryId) throw new Error(`no message with timestamp ${String(args.timestamp)} in session`);
-      const result = await client.send({ type: 'fork', entryId });
+      const result = await ops.run('agent_rewind_to', { entryId });
       if (isCancelledResult(result)) return result;
-      const targetIdentity = await this.refreshCurrentSession(workspace, client, false);
-      if (targetIdentity?.sessionId) client.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
+      const targetIdentity = await this.refreshCurrentSession(workspace, ops, false);
+      if (targetIdentity?.sessionId) ops.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
       const targetSessionId = targetIdentity?.sessionId ?? this.currentSessionByWorkspace.get(workspace)?.sessionId;
       const forkReady = sourceSessionId && targetSessionId && sourceSessionId !== targetSessionId
         ? await this.syncSessionFork(workspace, sourceSessionId, targetSessionId)
@@ -322,10 +350,10 @@ export class PiRuntimeService {
       ? await this.prepareTurn(workspace, command, args, session)
       : undefined;
     try {
-      const result = await client.send({ type, ...rpcArgs });
+      const result = await ops.run(command as PiCommand, rpcArgs);
       // Only an interactive command may move the visible session pointer. A
       // Goal worker polling its own state must stay invisible to the UI.
-      if (command === 'agent_get_state' && session.source !== 'goal') await this.refreshCurrentSession(workspace, client);
+      if (command === 'agent_get_state' && session.source !== 'goal') await this.refreshCurrentSession(workspace, ops);
       if (command === 'agent_new_session' || command === 'agent_switch_session' || command === 'agent_fork' || command === 'agent_clone') {
         if (isCancelledResult(result)) return result;
         this.workspaceThreads.delete(stateKey);
@@ -334,10 +362,10 @@ export class PiRuntimeService {
         }
         const isSessionFork = command === 'agent_fork' || command === 'agent_clone';
         const targetIdentity = isSessionFork
-          ? await this.refreshCurrentSession(workspace, client, false)
-          : await this.refreshCurrentSession(workspace, client);
+          ? await this.refreshCurrentSession(workspace, ops, false)
+          : await this.refreshCurrentSession(workspace, ops);
         if (targetIdentity?.sessionId) {
-          client.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
+          ops.setSessionIdentity?.(targetIdentity.sessionId, targetIdentity.sessionPath);
         }
         if (isSessionFork && sourceSessionId) {
           const targetSessionId = targetIdentity?.sessionId ?? this.currentSessionByWorkspace.get(workspace)?.sessionId;
@@ -358,7 +386,7 @@ export class PiRuntimeService {
     }
   }
 
-  async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: string | PiClientMetadata, source?: 'interactive' | 'goal'): Promise<void> {
+  async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: EventMeta, source?: 'interactive' | 'goal'): Promise<void> {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId ?? readOptionalString(raw.sessionId);
     const eventSource = source ?? (typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined);
     const stateKey = this.findEventKey(workspace, eventSessionId);
@@ -418,7 +446,7 @@ export class PiRuntimeService {
   }
 
   /** Convert an unexpected Pi process exit into a terminal turn result. */
-  async handlePiExit(workspace: string, code: number | null, sessionOrMetadata?: string | PiClientMetadata): Promise<void> {
+  async handlePiExit(workspace: string, code: number | null, sessionOrMetadata?: EventMeta): Promise<void> {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId;
     const eventSource = typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined;
     const summary = `Pi exited unexpectedly${code === null ? '' : ` (${code})`}`;
@@ -499,18 +527,23 @@ export class PiRuntimeService {
   }
 
   async respondUi(workspace: string, response: Record<string, unknown>): Promise<void> {
-    const client = await this.openClient(workspace);
-    await client.respondUi(response);
+    const handle = this.options.agentHost.get(workspace);
+    if (!handle) return;
+    handle.ui.respond(readOptionalString(response.id) ?? '', response);
   }
 
   /** Reject a UI request from a headless Goal worker without routing it to the visible worker. */
-  async rejectUiRequest(workspace: string, metadata: PiClientMetadata | undefined, requestId: string): Promise<void> {
+  async rejectUiRequest(workspace: string, metadata: EventMeta | undefined, requestId: string): Promise<void> {
     if (!requestId.trim()) return;
-    const client = metadata?.source === 'goal' && metadata.sessionId
-      ? this.options.manager.get(piGoalWorkerKey(workspace, metadata.sessionId))
-      : await this.openClient(workspace);
-    if (!client) return;
-    await client.respondUi({ type: 'extension_ui_response', id: requestId, cancelled: true });
+    const meta = typeof metadata === 'string' ? { sessionId: metadata } : metadata;
+    if (meta?.source === 'goal' && meta.sessionId) {
+      const client = this.options.manager.get(piGoalWorkerKey(workspace, meta.sessionId));
+      if (!client) return;
+      await client.respondUi({ type: 'extension_ui_response', id: requestId, cancelled: true });
+      return;
+    }
+    const handle = this.options.agentHost.get(workspace);
+    handle?.ui.respond(requestId, { cancelled: true });
   }
 
   permissionProfile(workspace: string, sessionId?: string): string | undefined {
@@ -518,7 +551,11 @@ export class PiRuntimeService {
   }
 
   async refreshModelRegistry(): Promise<{ refreshed: string[]; failed: Array<{ workspace: string; error: string }> }> {
+    await this.options.modelRuntimeHost.refresh();
     const result = { refreshed: [] as string[], failed: [] as Array<{ workspace: string; error: string }> };
+    for (const workspace of this.options.modelRuntimeHost.workspaces?.() ?? []) {
+      result.refreshed.push(workspace);
+    }
     for (const [workspace, client] of this.options.manager.all?.() ?? []) {
       try {
         const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
@@ -611,17 +648,88 @@ export class PiRuntimeService {
     }
   }
 
-  eventEnvelope(workspace: string, raw: Record<string, unknown>, metadata?: PiClientMetadata): PiRuntimeEventEnvelope {
-    const sessionId = metadata?.sessionId ?? readOptionalString(raw.sessionId);
+  eventEnvelope(workspace: string, raw: Record<string, unknown>, metadata?: EventMeta): PiRuntimeEventEnvelope {
+    const sessionId = (typeof metadata === 'string' ? metadata : metadata?.sessionId) ?? readOptionalString(raw.sessionId);
     const stateKey = this.findEventKey(workspace, sessionId);
     const active = stateKey ? this.activeTurns.get(stateKey) : undefined;
-    const source = metadata?.source ?? active?.source ?? 'interactive';
+    const source = (typeof metadata === 'object' ? metadata?.source : undefined) ?? active?.source ?? 'interactive';
     return {
       workspace,
       event: raw,
       source,
       ...(sessionId ?? active?.sessionId ? { sessionId: sessionId ?? active?.sessionId } : {}),
     };
+  }
+
+  /** per-(workspace, source) 配置进 ALS（去掉 PI_PACKAGE_DIR/PI_RUNTIME_CONFIG/PI_GOAL_WORKER/PI_ALLOWED_EXTENSIONS 进程级键）。 */
+  async turnConfig(workspace: string, cwd: string, origin: 'main' | 'goal'): Promise<Record<string, string>> {
+    const env = await this.workerEnv(workspace, cwd, origin === 'goal' ? 'goal' : 'interactive');
+    delete env.PI_PACKAGE_DIR;
+    delete env.PI_RUNTIME_CONFIG;
+    delete env.PI_GOAL_WORKER;
+    delete env.PI_ALLOWED_EXTENSIONS;
+    return env;
+  }
+
+  private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>): Promise<unknown> {
+    const s = handle.session;
+    const images = Array.isArray(args.images) ? (args.images as ImageContent[]) : undefined;
+    switch (command) {
+      case 'agent_prompt':
+        return handle.prompt(readInput(args), { images, ...(args.streamingBehavior ? { streamingBehavior: args.streamingBehavior as 'steer' | 'followUp' } : {}) }, 'main');
+      case 'agent_set_mode':
+        return handle.prompt(`/mode ${String(args.mode ?? '')}`, {}, 'main');
+      case 'agent_steer': await s.steer(readInput(args), images); return undefined;
+      case 'agent_follow_up': await s.followUp(readInput(args), images); return undefined;
+      case 'agent_abort': await s.abort(); return undefined;
+      case 'agent_set_model': {
+        const model = s.modelRuntime.getAvailableSnapshot().find((m) => m.provider === args.provider && m.id === args.modelId);
+        if (!model) throw new Error(`Model not found: ${String(args.provider)}/${String(args.modelId)}`);
+        await s.setModel(model);
+        return model;
+      }
+      case 'agent_cycle_model': return (await s.cycleModel()) ?? null;
+      case 'agent_get_available_models': return { models: s.modelRuntime.getAvailableSnapshot() };
+      case 'agent_set_thinking_level': s.setThinkingLevel(args.level as Parameters<AgentSession['setThinkingLevel']>[0]); return undefined;
+      case 'agent_cycle_thinking_level': { const level = s.cycleThinkingLevel(); return level ? { level } : null; }
+      case 'agent_compact': return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
+      case 'agent_set_auto_compaction': s.setAutoCompactionEnabled(args.enabled === true); return undefined;
+      case 'agent_abort_retry': s.abortRetry(); return undefined;
+      case 'agent_get_session_stats': return s.getSessionStats();
+      case 'agent_get_state': return handle.getState();
+      case 'agent_get_messages': return { messages: s.messages };
+      case 'agent_get_commands': return handle.getCommands();
+      case 'agent_get_fork_messages': return { messages: s.getUserMessagesForForking() };
+      case 'agent_set_session_name': {
+        const name = String(args.name ?? '').trim();
+        if (!name) throw new Error('Session name cannot be empty');
+        s.setSessionName(name);
+        return undefined;
+      }
+      case 'agent_new_session': return handle.newSession();
+      case 'agent_switch_session': return handle.switchSession(String(args.sessionPath ?? ''));
+      case 'agent_fork': return { ...(await handle.fork(String(args.entryId ?? ''))), };
+      case 'agent_clone': {
+        const leafId = s.sessionManager.getLeafId();
+        if (!leafId) throw new Error('Cannot clone session: no current entry selected');
+        return { cancelled: (await handle.fork(leafId, { position: 'at' })).cancelled };
+      }
+      case 'agent_rewind_to': return handle.fork(String(args.entryId ?? ''));
+      default: throw new Error(`Unsupported handle command: ${command}`);
+    }
+  }
+
+  private handleOps(handle: WorkspaceHandlePort): SessionOps {
+    return {
+      getState: async () => handle.getState(),
+      run: (command, args) => this.runOnHandle(handle, command, args),
+      // 进程内 session 自知身份，无需回写。
+    };
+  }
+
+  private async openInteractive(workspace: string): Promise<WorkspaceHandlePort> {
+    const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    return this.options.agentHost.open(workspace, cwd);
   }
 
   private async openClient(workspace: string): Promise<PiClientPort> {
@@ -876,12 +984,12 @@ export class PiRuntimeService {
     }
   }
 
-  private async refreshCurrentSession(workspace: string, client: PiClientPort, migrateLegacy = true): Promise<SessionContext | undefined> {
-    const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
+  private async refreshCurrentSession(workspace: string, ops: SessionOps, migrateLegacy = true): Promise<SessionContext | undefined> {
+    const state = await ops.getState();
     const identity = await this.readCurrentIdentity(workspace, typeof state.sessionFile === 'string' ? state.sessionFile : null, typeof state.sessionId === 'string' ? state.sessionId : undefined);
     if (identity) {
       await this.replaceCurrentSession(workspace, identity, migrateLegacy);
-      if (identity.sessionId) client.setSessionIdentity?.(identity.sessionId, identity.sessionPath);
+      if (identity.sessionId) ops.setSessionIdentity?.(identity.sessionId, identity.sessionPath);
     }
     return identity;
   }
@@ -1066,6 +1174,18 @@ function isCancelledResult(value: unknown): value is Record<string, unknown> {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
+}
+
+function readInput(args: Record<string, unknown>): string {
+  return typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
+}
+
+function clientOps(client: PiClientPort): SessionOps {
+  return {
+    getState: () => client.send<Record<string, unknown>>({ type: 'get_state' }),
+    run: (command, args) => client.send({ type: commandTypes[command], ...args }),
+    setSessionIdentity: (id, path) => client.setSessionIdentity?.(id, path),
+  };
 }
 
 function normalizeSessionPath(value: string): string {

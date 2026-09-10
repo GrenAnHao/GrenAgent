@@ -41,6 +41,11 @@ import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
 import { GoalCoordinator } from "./app/goalCoordinator";
 import { judgeGoal } from "./app/goalJudge";
+import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
+import { AgentHost } from "./agent/agentHost";
+import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
+import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
+import { ModelRuntime } from "../../cli/src/pi-sdk.js";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -78,6 +83,8 @@ if (!process.env.VITEST) {
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const worksDir = await workspace.getWorksDir();
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
+    const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
+    bootstrapRuntimeConfig(runtimeConfigPath);
     const systemWorker = new SystemWorkerManager({
       processCommand: piProcess,
       cwd: app.getPath('userData'),
@@ -85,7 +92,7 @@ if (!process.env.VITEST) {
       sandbox,
       env: {
         PI_PACKAGE_DIR: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
-        PI_RUNTIME_CONFIG: join(app.getPath('userData'), 'runtime-settings.json'),
+        PI_RUNTIME_CONFIG: runtimeConfigPath,
       },
     });
     const knownWorkspaces = new Set<string>();
@@ -161,6 +168,43 @@ if (!process.env.VITEST) {
     const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1' });
     plugins.discover(builtinPluginDefinitions());
     await plugins.startAll();
+    const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
+    const modelRuntimeHost = new ModelRuntimeHost({
+      create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
+    });
+    const agentHost = new AgentHost({
+      createHandle: async (workspace, cwd) => createWorkspaceHandle({
+        workspace,
+        cwd,
+        modelRuntime: await modelRuntimeHost.ensure(),
+        allowedExtensionsJson: JSON.stringify(plugins.allowedPluginIds()),
+        resolveConfig: (origin) => piRuntime!.turnConfig(workspace, cwd, origin),
+        emitUiRequest: (envelope) => {
+          broadcastPiEvent('pi://ui-request', {
+            workspace: envelope.workspace,
+            request: envelope.request,
+            ...(envelope.sessionId ? { sessionId: envelope.sessionId } : {}),
+            source: envelope.source,
+          });
+        },
+        onEvent: (event, meta) => {
+          const envelope = piRuntime?.eventEnvelope(workspace, event, meta) ?? {
+            workspace,
+            event,
+            source: meta.source,
+            ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+          };
+          broadcastPiEvent('pi://event', envelope);
+          void piRuntime?.handlePiEvent(workspace, event, meta).catch((error) => console.error('Pi event handling failed', error));
+        },
+        onFatal: (error) => {
+          console.error('WorkspaceHandle fatal', error);
+          void agentHost.close(workspace).catch(() => {});
+          broadcastPiEvent('pi://exit', { workspace, code: 1 });
+          void piRuntime?.handlePiExit(workspace, 1).catch(() => {});
+        },
+      }),
+    });
     const pi = new PiManager(
       piProcess,
       {
@@ -222,7 +266,9 @@ if (!process.env.VITEST) {
         manager: pi,
         processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
-        runtimeConfigPath: join(app.getPath('userData'), 'runtime-settings.json'),
+        runtimeConfigPath,
+        agentHost,
+        modelRuntimeHost,
         agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
         migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused, legacyEntryTimestamp }) => agentData.requestAdmin('admin.goal.recoverLegacy', {
           workspace,
@@ -275,16 +321,12 @@ if (!process.env.VITEST) {
           const { stdout } = await promisify(execFile)(piProcess.command, probeArgs, { windowsHide: true });
           return stdout;
         },
-        refresh: () => new PiRuntimeService({ manager: pi, processCommand: piProcess, agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }) }).refreshModelRegistry(),
+        refresh: () => piRuntime!.refreshModelRegistry(),
         activeModel: async (workspace) => {
-          const client = pi.get(workspace);
-          if (!client) throw new Error(`workspace not open: ${workspace}`);
-          const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
-          const model = state.model;
-          if (!model || typeof model !== 'object') throw new Error('workspace has no active model');
-          const value = model as Record<string, unknown>;
-          if (typeof value.provider !== 'string' || typeof value.id !== 'string') throw new Error('workspace active model is invalid');
-          return { provider: value.provider, modelId: value.id };
+          const handle = agentHost.get(workspace);
+          const model = handle?.session.model;
+          if (!model) throw new Error(`workspace has no active model: ${workspace}`);
+          return { provider: model.provider, modelId: model.id };
         },
         oneshot: (request, onLine) => runPiOneshot(piProcess, resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }), request, onLine),
       }),
@@ -351,6 +393,7 @@ if (!process.env.VITEST) {
         await goalCoordinator?.stop();
         await Promise.allSettled([pi.closeAll(), codeGraphJobs.close()]);
         systemWorker.close();
+        await agentHost.closeAll();
         await agentData.stop();
         pluginStorage.close();
       })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {
