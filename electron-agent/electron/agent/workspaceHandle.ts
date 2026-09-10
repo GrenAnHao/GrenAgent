@@ -10,6 +10,7 @@ export interface HandleEventMeta { sessionId?: string; source: 'interactive' | '
 
 export interface WorkspaceHandleOptions {
   workspace: string;
+  cwd: string;
   runtime: AgentSessionRuntime;
   /** 解析该 origin 的 per-(workspace, source) 配置进 ALS（第 2 份消费）。 */
   resolveConfig: (origin: TurnOrigin) => Promise<Readonly<Record<string, string>>>;
@@ -161,7 +162,7 @@ export class WorkspaceHandle {
   }
 
   private ctx(origin: TurnOrigin, config: Readonly<Record<string, string>>): WorkspaceContext {
-    return { origin, workspace: this.options.workspace, cwd: this.options.workspace, config };
+    return { origin, workspace: this.options.workspace, cwd: this.options.cwd, config };
   }
 
   private async bindAndSubscribe(): Promise<void> {

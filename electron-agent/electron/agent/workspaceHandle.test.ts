@@ -52,6 +52,7 @@ function makeHandle(runtime: unknown, over: Record<string, unknown> = {}) {
   const emit = vi.fn();
   const handle = new WorkspaceHandle({
     workspace: 'D:/proj',
+    cwd: 'D:/proj',
     runtime: runtime as never,
     resolveConfig: async () => ({}),
     emitUiRequest: emit,
@@ -91,6 +92,22 @@ describe('WorkspaceHandle', () => {
     await handle.start();
     await handle.switchSession('/x/other.jsonl');
     expect(seen).toEqual(['main']);
+  });
+
+  it('ctx 使用 options.cwd 而非 workspace', async () => {
+    const { runtime } = makeRuntime();
+    const seen: Array<string | undefined> = [];
+    const { handle } = makeHandle(runtime, {
+      workspace: 'D:/ws',
+      cwd: 'D:/resolved',
+    });
+    (runtime as { switchSession: ReturnType<typeof vi.fn> }).switchSession = vi.fn(async () => {
+      seen.push(currentWorkspaceContext()?.cwd);
+      return { cancelled: false };
+    });
+    await handle.start();
+    await handle.switchSession('/x/other.jsonl');
+    expect(seen).toEqual(['D:/resolved']);
   });
 
   it('message_update 经降级层剥掉 message', async () => {

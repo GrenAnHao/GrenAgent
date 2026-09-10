@@ -26,12 +26,18 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
   );
   const handle = new WorkspaceHandle({
     workspace: input.workspace,
+    cwd: input.cwd,
     runtime,
     resolveConfig: input.resolveConfig,
     emitUiRequest: input.emitUiRequest,
     onEvent: input.onEvent,
     onFatal: input.onFatal,
   });
-  await handle.start();
-  return handle;
+  try {
+    await handle.start();
+    return handle;
+  } catch (error) {
+    await handle.dispose();
+    throw error;
+  }
 }
