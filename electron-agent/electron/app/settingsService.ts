@@ -5,20 +5,43 @@ function workspaceConfigSuffix(workspace: string): string {
   return workspace.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-/** 与 sidecar `extensions/_shared/approval.ts` 的键规则保持一致。 */
 export function approvalPolicyConfigKey(workspace: string): string {
   return `APPROVAL_POLICY:${workspaceConfigSuffix(workspace)}`;
 }
 
-/** 与 sidecar `extensions/compaction-policy/exclusion.ts` 的键规则保持一致。 */
+export function isApprovalPolicyConfigKey(key: string): boolean {
+  return key === 'APPROVAL_POLICY' || key.startsWith('APPROVAL_POLICY:');
+}
+
 export function contextExclusionConfigKey(workspace: string): string {
   return `CONTEXT_EXCLUSION_OP:${workspaceConfigSuffix(workspace)}`;
 }
 
+export function isContextExclusionConfigKey(key: string): boolean {
+  return key.startsWith('CONTEXT_EXCLUSION_OP:');
+}
+
+export function isPreservedRuntimeConfigKey(key: string): boolean {
+  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key);
+}
+
+const runtimeFileWrites = new Map<string, Promise<void>>();
+
+function withRuntimeFileLock(path: string, write: () => Promise<void>): Promise<void> {
+  const previous = runtimeFileWrites.get(path) ?? Promise.resolve();
+  const current = previous.then(write, write);
+  runtimeFileWrites.set(path, current);
+  return current.finally(() => {
+    if (runtimeFileWrites.get(path) === current) runtimeFileWrites.delete(path);
+  });
+}
+
 export async function mergeRuntimeSettingsFile(path: string, patch: Record<string, string>): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const current = await readSettingsFile(path);
-  await writeJsonAtomically(path, { ...current, ...runtimeSettings(patch) });
+  await withRuntimeFileLock(path, async () => {
+    await mkdir(dirname(path), { recursive: true });
+    const current = await readSettingsFile(path);
+    await writeJsonAtomically(path, { ...current, ...runtimeSettings(patch) });
+  });
 }
 
 export class SettingsService {
@@ -46,7 +69,13 @@ export class SettingsService {
     await mkdir(this.dataDir, { recursive: true });
     await writeAppStateSettings(this.appStatePath, settings);
     await writeJsonAtomically(this.settingsPath, settings);
-    await writeJsonAtomically(this.runtimePath, runtimeSettings(settings));
+    await withRuntimeFileLock(this.runtimePath, async () => {
+      const existingRuntime = await readSettingsFile(this.runtimePath);
+      const preservedLive = Object.fromEntries(
+        Object.entries(existingRuntime).filter(([key]) => isPreservedRuntimeConfigKey(key)),
+      );
+      await writeJsonAtomically(this.runtimePath, { ...runtimeSettings(settings), ...preservedLive });
+    });
   }
 }
 
