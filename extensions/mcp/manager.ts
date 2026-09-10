@@ -1,9 +1,10 @@
 // 进程级 MCP 连接管理器：跨会话存活，绝不引用 pi/ctx。
-// 一个 workspace 一个 pi 进程，故 globalThis 单例即「workspace 共享一套」。
+// 按 workspace 分 Map，同一 workspace 共享一套 manager。
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { getAllConfig, getConfig, watchConfig } from "../_shared/runtime-config.js";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { expandServerVars, injectDefaultServers, type McpServerConfig, parseMcpServers, sanitize } from "./config.js";
 import { diffServers } from "./diff.js";
 import type { ProbeResult } from "./probe.js";
@@ -35,6 +36,7 @@ export interface McpClient {
 }
 
 export interface ManagerDeps {
+  workspace?: string;
   connect?: (s: McpServerConfig) => Promise<McpClient>;
   readServers?: () => McpServerConfig[];
   watch?: (cb: () => void) => () => void;
@@ -83,16 +85,28 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
   };
 }
 
-function defaultReadServers(): McpServerConfig[] {
-  const managed = managedServers(getConfig('PI_MCP_CONFIG'));
+const managers = new Map<string, McpManager>();
+const alsConfigByWorkspace = new Map<string, Readonly<Record<string, string>>>();
+
+function rememberAlsConfig(workspace: string): void {
+  const als = currentWorkspaceContext();
+  if (als) alsConfigByWorkspace.set(workspace, als.config);
+}
+
+function defaultReadServers(workspace: string): McpServerConfig[] {
+  rememberAlsConfig(workspace);
+  const captured = alsConfigByWorkspace.get(workspace);
+  const raw = currentWorkspaceContext()?.config.PI_MCP_CONFIG ?? captured?.PI_MCP_CONFIG ?? getConfig("PI_MCP_CONFIG");
+  const all = { ...getAllConfig(), ...captured, ...currentWorkspaceContext()?.config };
+  const managed = managedServers(raw);
   const servers = injectDefaultServers(
-    managed ?? readLayeredMcpServersSync(process.cwd(), getConfig("MCP_SERVERS") ?? ""),
-    getAllConfig(),
+    managed ?? readLayeredMcpServersSync(workspace, getConfig("MCP_SERVERS") ?? ""),
+    all,
     process.platform,
     readToolsCache(),
     process.arch,
   );
-  return expandServerVars(servers, process.cwd());
+  return expandServerVars(servers, workspace);
 }
 
 export function managedServers(raw: string | undefined): McpServerConfig[] | undefined {
@@ -112,13 +126,19 @@ export function managedServers(raw: string | undefined): McpServerConfig[] | und
 }
 
 export function createManager(deps: ManagerDeps = {}): McpManager {
+  const workspace = deps.workspace ?? currentWorkspaceContext()?.workspace ?? process.cwd();
   const connect = deps.connect ?? realConnect;
-  const readServers = deps.readServers ?? defaultReadServers;
-  const watch = deps.watch ?? ((cb: () => void) => {
-    const offConfig = watchConfig(() => cb());
-    const offFiles = watchMcpConfigFiles(process.cwd(), cb);
-    return () => { offConfig(); offFiles(); };
-  });
+  const readServers = deps.readServers ?? (() => defaultReadServers(workspace));
+  const watch =
+    deps.watch ??
+    ((cb: () => void) => {
+      const offConfig = watchConfig(() => cb());
+      const offFiles = watchMcpConfigFiles(workspace, cb);
+      return () => {
+        offConfig();
+        offFiles();
+      };
+    });
   const writeCache = deps.writeCache ?? writeToolsCacheEntry;
 
   const clients = new Map<string, McpClient>();
@@ -222,14 +242,25 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
 }
 
 export function getMcpManager(): McpManager {
-  const g = globalThis as { __grenMcpManager?: McpManager; __grenMcpExitHooked?: boolean };
-  const mgr = (g.__grenMcpManager ??= createManager());
-  if (!g.__grenMcpExitHooked) {
-    g.__grenMcpExitHooked = true;
-    const close = () => mgr.closeAll();
-    process.on("exit", close);
-    process.on("SIGTERM", close);
-    process.on("SIGINT", close);
+  const workspace = currentWorkspaceContext()?.workspace ?? process.cwd();
+  let mgr = managers.get(workspace);
+  if (!mgr) {
+    mgr = createManager({ workspace });
+    managers.set(workspace, mgr);
   }
   return mgr;
+}
+
+export function disposeMcpManager(workspace: string): void {
+  const mgr = managers.get(workspace);
+  if (!mgr) return;
+  mgr.closeAll();
+  managers.delete(workspace);
+  alsConfigByWorkspace.delete(workspace);
+}
+
+export function __resetMcpManagersForTest(): void {
+  for (const mgr of managers.values()) mgr.closeAll();
+  managers.clear();
+  alsConfigByWorkspace.clear();
 }

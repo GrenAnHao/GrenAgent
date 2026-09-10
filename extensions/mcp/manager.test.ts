@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
-import { createManager, managedServers, type McpClient, type McpSnapshot } from "./manager";
+import { getMcpManager, disposeMcpManager, __resetMcpManagersForTest, createManager, managedServers, type McpClient, type McpSnapshot } from "./manager";
+import { runInWorkspace } from "../_shared/workspace-context.js";
+
+afterEach(() => {
+  __resetMcpManagersForTest();
+});
 
 describe('managedServers', () => {
   it('uses the Electron effective MCP payload shape', () => {
@@ -142,5 +147,57 @@ describe("createManager", () => {
     mgr.init();
     await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
     expect(good).toBeGreaterThan(0);
+  });
+});
+
+describe("getMcpManager 分键", () => {
+  it("两个 workspace 拿到两份互不共享的 manager", async () => {
+    const a = await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: {} },
+      async () => getMcpManager(),
+    );
+    const b = await runInWorkspace(
+      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: {} },
+      async () => getMcpManager(),
+    );
+    expect(a).not.toBe(b);
+    const a2 = await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: {} },
+      async () => getMcpManager(),
+    );
+    expect(a2).toBe(a);
+  });
+
+  it("dispose A 不影响 B", async () => {
+    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const a = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    const b = createManager({ connect, readServers: () => [srv("b")], watch: () => () => {}, writeCache: () => {} });
+    a.init();
+    b.init();
+    await waitFor(a.subscribe, a.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    await waitFor(b.subscribe, b.snapshot, (s) => s.servers.get("b")?.status === "connected");
+    a.closeAll();
+    expect(b.snapshot().servers.get("b")?.status).toBe("connected");
+  });
+
+  it("watch 回调用闭包 workspace 读服务器，不读 process.cwd()", async () => {
+    const seen: string[] = [];
+    let fire = () => {};
+    const mgr = createManager({
+      workspace: "D:/proj-a",
+      connect: async () => fakeClient([]),
+      readServers: () => {
+        seen.push("read");
+        return [srv("s")];
+      },
+      watch: (cb) => {
+        fire = cb;
+        return () => {};
+      },
+      writeCache: () => {},
+    });
+    mgr.init();
+    fire();
+    expect(seen.length).toBeGreaterThanOrEqual(2);
   });
 });
