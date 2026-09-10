@@ -57,6 +57,12 @@ function ensureStarted(): void {
   }
 }
 
+/** 立刻重读盘上的 runtime 文件，绕过 watch 的 150ms 防抖。审批档位每次现读。 */
+export function refreshConfig(): void {
+  ensureStarted();
+  cache = read();
+}
+
 export function getConfig(key: string): string | undefined {
   ensureStarted();
   if (/^TDAI_|^TENCENTDB_/i.test(key)) return undefined;
