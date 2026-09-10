@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "composite": true,
+    "rootDir": "..",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -11,6 +12,10 @@
   "include": [
     "electron.vite.config.ts",
     "vite.config.ts",
-    "electron/**/*.ts"
-  ]
+    "electron/**/*.ts",
+    "src/lib/usageReport.ts",
+    "../extensions/**/*.ts",
+    "../cli/src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "../extensions/node_modules", "../cli/node_modules"]
 }
