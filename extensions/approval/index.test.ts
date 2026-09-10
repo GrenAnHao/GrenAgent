@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn(), refreshConfig: vi.fn() }));
+vi.mock("../_shared/runtime-config.js", () => ({
+  getConfig: vi.fn(),
+  refreshConfig: vi.fn(),
+  setRuntimeConfig: vi.fn(),
+  watchConfig: vi.fn(() => () => {}),
+}));
 
 import {
   approvalPolicyConfigKey,
   getApprovalPolicy,
   __resetApprovalForTest,
 } from "../_shared/approval.js";
-import { getConfig } from "../_shared/runtime-config.js";
+import { getConfig, setRuntimeConfig, watchConfig } from "../_shared/runtime-config.js";
 import approval from "./index.js";
 
 type SessionStart = (event: unknown, ctx: unknown) => Promise<void>;
@@ -32,9 +37,10 @@ function loadSessionStart(): SessionStart {
   return handler!;
 }
 
-const ctx = (entries: SessionEntry[] = []) => ({
+const ctx = (entries: SessionEntry[] = [], cwd?: string) => ({
   sessionManager: { getEntries: () => entries },
-  ui: { setStatus: vi.fn() },
+  ui: { setStatus: vi.fn(), notify: vi.fn() },
+  ...(cwd ? { cwd } : {}),
 });
 
 beforeEach(() => {
@@ -91,5 +97,42 @@ describe("approval policy inheritance on session_start", () => {
     vi.mocked(getConfig).mockReturnValue("garbage");
     await loadSessionStart()({}, ctx([]));
     expect(getApprovalPolicy()).toBe("auto");
+  });
+});
+
+describe("approval cwd binding", () => {
+  it("watchConfig 在 session_start 之后按 ctx.cwd 读键，不读 process.cwd()", async () => {
+    const subscribers: Array<(next: Record<string, string>) => void> = [];
+    vi.mocked(watchConfig).mockImplementation((cb) => {
+      subscribers.push(cb);
+      return () => {};
+    });
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    approval({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx: unknown) => unknown) => {
+        handlers[ev] = h;
+      },
+      appendEntry: () => {},
+    } as never);
+    await handlers.session_start?.({}, ctx([], "D:/proj-a"));
+    const key = approvalPolicyConfigKey("D:/proj-a");
+    for (const cb of subscribers) cb({ [key]: "ask" });
+    expect(getApprovalPolicy("D:/proj-a")).toBe("ask");
+    expect(getApprovalPolicy("D:/other")).toBe("auto");
+  });
+
+  it("/approval 把档位写到 ctx.cwd 键", async () => {
+    let handler: ((args: string, ctx: { cwd: string; ui: { notify: ReturnType<typeof vi.fn>; setStatus: ReturnType<typeof vi.fn> } }) => Promise<void>) | undefined;
+    approval({
+      registerCommand: (_n: string, spec: { handler: typeof handler }) => {
+        handler = spec.handler;
+      },
+      on: () => {},
+      appendEntry: () => {},
+    } as never);
+    const ui = { notify: vi.fn(), setStatus: vi.fn() };
+    await handler!("full", { cwd: "D:/proj-a", ui });
+    expect(setRuntimeConfig).toHaveBeenCalledWith(approvalPolicyConfigKey("D:/proj-a"), "full");
   });
 });

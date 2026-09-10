@@ -1,7 +1,7 @@
 // 运行时配置：优先读 PI_RUNTIME_CONFIG 指向的 JSON（热更新源），回退 process.env。
 // 进程内单例 + 内部 fs.watch 维护缓存，因此 getConfig 总读到最新值。
 
-import { readFileSync, watch } from "node:fs";
+import { readFileSync, watch, writeFileSync } from "node:fs";
 import { currentWorkspaceContext } from "./workspace-context.js";
 
 let cache: Record<string, string> | null = null;
@@ -61,6 +61,20 @@ function ensureStarted(): void {
 export function refreshConfig(): void {
   ensureStarted();
   cache = read();
+}
+
+export function setRuntimeConfig(key: string, value: string): void {
+  if (/^TDAI_|^TENCENTDB_/i.test(key)) return;
+  refreshConfig();
+  const next = { ...(cache ?? {}), [key]: value };
+  cache = next;
+  const path = configPath();
+  if (!path) return;
+  try {
+    writeFileSync(path, JSON.stringify(next));
+  } catch {
+    /* 内存已更新；盘上失败由下次 refresh 回读 */
+  }
 }
 
 export function getConfig(key: string): string | undefined {

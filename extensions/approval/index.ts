@@ -5,30 +5,42 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   type ApprovalPolicy,
   APPROVAL_LABELS,
+  approvalPolicyConfigKey,
   getApprovalPolicy,
   parseApproval,
   setApprovalPolicy,
 } from "../_shared/approval.js";
-import { getConfig } from "../_shared/runtime-config.js";
+import { getConfig, setRuntimeConfig, watchConfig } from "../_shared/runtime-config.js";
+import { currentCwd } from "../_shared/workspace-context.js";
 
 interface PersistedState {
   policy?: ApprovalPolicy;
 }
 
 export default function (pi: ExtensionAPI) {
+  let workspaceCwd: string | undefined;
+  const cwd = (): string => workspaceCwd ?? currentCwd();
+
   const persist = () =>
-    pi.appendEntry("approval", { policy: getApprovalPolicy() } satisfies PersistedState);
-  const push = (ctx: ExtensionContext) => ctx.ui.setStatus("approval-policy", getApprovalPolicy());
+    pi.appendEntry("approval", { policy: getApprovalPolicy(workspaceCwd) } satisfies PersistedState);
+  const push = (ctx: ExtensionContext) => ctx.ui.setStatus("approval-policy", getApprovalPolicy(workspaceCwd));
+
+  watchConfig((next) => {
+    const nextPolicy = parseApproval(next[approvalPolicyConfigKey(cwd())]);
+    if (!nextPolicy || nextPolicy === getApprovalPolicy(cwd())) return;
+    setApprovalPolicy(nextPolicy, cwd());
+  });
 
   pi.registerCommand("approval", {
     description: "切换审批策略：/approval ask|auto|full",
     handler: async (args, ctx) => {
       const next = parseApproval(args);
       if (!next) {
-        ctx.ui.notify(`用法：/approval ask|auto|full（当前：${getApprovalPolicy()}）`, "warning");
+        ctx.ui.notify(`用法：/approval ask|auto|full（当前：${getApprovalPolicy(ctx.cwd)}）`, "warning");
         return;
       }
-      setApprovalPolicy(next);
+      setApprovalPolicy(next, ctx.cwd);
+      setRuntimeConfig(approvalPolicyConfigKey(ctx.cwd), next);
       persist();
       push(ctx);
       ctx.ui.notify(`审批策略：${APPROVAL_LABELS[next]}`, "info");
@@ -36,6 +48,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    workspaceCwd = ctx.cwd;
     const entries = ctx.sessionManager.getEntries() as Array<{
       type: string;
       customType?: string;
@@ -43,8 +56,13 @@ export default function (pi: ExtensionAPI) {
     }>;
     const entry = entries.filter((e) => e.type === "custom" && e.customType === "approval").pop();
     const data = entry?.data as PersistedState | undefined;
-    // 优先 session entry；否则 APPROVAL_POLICY（子代理由父进程注入，实现策略继承）；再否则 auto。
-    setApprovalPolicy(parseApproval(data?.policy) ?? parseApproval(getConfig("APPROVAL_POLICY")) ?? "auto");
+    setApprovalPolicy(
+      parseApproval(getConfig(approvalPolicyConfigKey(cwd()))) ??
+        parseApproval(getConfig("APPROVAL_POLICY")) ??
+        parseApproval(data?.policy) ??
+        "auto",
+      ctx.cwd,
+    );
     push(ctx);
   });
 }
