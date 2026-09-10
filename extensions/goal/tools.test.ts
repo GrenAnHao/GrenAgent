@@ -205,4 +205,19 @@ describe("Goal 创建权限（ALS）", () => {
     );
     expect(request).not.toHaveBeenCalled();
   });
+
+  it("main 上下文 ALS token=0 压过全局 env=1", async () => {
+    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
+    const request = vi.fn();
+    const { defs, ctx } = setup(request);
+    await runInWorkspace(
+      { origin: "main", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "0" } },
+      async () => {
+        await expect(
+          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
+        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
+      },
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
 });
