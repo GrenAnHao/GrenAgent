@@ -76,6 +76,18 @@ export function watchConfig(onChange: (next: Record<string, string>) => void): (
   return () => subscribers.delete(onChange);
 }
 
+/**
+ * 宿主启动期在设好 process.env.PI_RUNTIME_CONFIG 之后调用：丢弃可能在 env 设置前建立的
+ * watcher（否则 started=true 使其永不重建），保留已注册 subscribers，按新路径重新 ensureStarted。
+ */
+export function restartRuntimeConfig(): void {
+  watcher?.close();
+  watcher = undefined;
+  cache = null;
+  started = false;
+  ensureStarted();
+}
+
 /** 仅测试用：重置单例状态。 */
 export function __resetForTest(): void {
   watcher?.close();
