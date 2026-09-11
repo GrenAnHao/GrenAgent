@@ -7,7 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { resolveMcpServers } from "./capability.js";
+import { killProcessTree, registerSubagentProcess } from "./subagentProcessRegistry.js";
 
 export interface AgentResult {
   ok: boolean;
@@ -44,11 +46,11 @@ export function resolveSubagentModel(): string | undefined {
 }
 
 export function resolvePiCommand(): { cmd: string; baseArgs: string[] } {
-  // PI_BIN explicitly overrides; otherwise reuse the current executable (the
-  // sidecar binary itself under bun --compile) so desktop needs no global `pi`.
-  const piBin = getConfig("PI_BIN");
-  if (piBin) return { cmd: piBin, baseArgs: [] };
-  return { cmd: process.execPath, baseArgs: [] };
+  const entry = process.env.PI_WORKER_ENTRY?.trim();
+  if (!entry) {
+    throw new Error("PI_WORKER_ENTRY is not set; the Electron host must assign the worker entry at startup");
+  }
+  return { cmd: process.execPath, baseArgs: [entry] };
 }
 
 export function buildSubagentSkillArgs(root: string | undefined): string[] {
@@ -177,22 +179,30 @@ export function buildSubagentRuntimeConfig(
   };
 }
 
-export async function spawnPiAgent(
+type SpawnPiAgentOpts = {
+  model?: string;
+  signal?: AbortSignal;
+  onUpdate?: (update: AgentUpdate) => void;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  mcp?: boolean | string[];
+  /** Named-agent system prompt → written to a temp file and passed via --append-system-prompt. */
+  systemPrompt?: string;
+  /** Named-agent tool allowlist → passed via --tools. */
+  tools?: string[];
+};
+
+export function buildSubagentLaunch(
   cwd: string,
   task: string,
-  opts: {
-    model?: string;
-    signal?: AbortSignal;
-    onUpdate?: (update: AgentUpdate) => void;
-    env?: Record<string, string>;
-    timeoutMs?: number;
-    mcp?: boolean | string[];
-    /** Named-agent system prompt → written to a temp file and passed via --append-system-prompt. */
-    systemPrompt?: string;
-    /** Named-agent tool allowlist → passed via --tools. */
-    tools?: string[];
-  } = {},
-): Promise<AgentResult> {
+  opts: SpawnPiAgentOpts = {},
+): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  spawnOptions: { cwd: string; stdio: ["ignore", "pipe", "pipe"]; detached?: boolean };
+  cleanup: () => void;
+} {
   const { cmd, baseArgs } = resolvePiCommand();
   // --no-approve: sub-agents are isolated one-shot runs that must NOT load
   // project-local .pi resources (extensions / MCP / skills / SYSTEM.md). Pinning
@@ -211,10 +221,8 @@ export async function spawnPiAgent(
   const model = opts.model ?? resolveSubagentModel();
   if (model) args.push("--model", model);
   if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
-  // Named-agent system prompt: write to a temp .md, append via --append-system-prompt,
-  // and clean it up when the run finishes (cleanupPrompt in finish below).
   let promptFile: string | undefined;
-  if (opts.systemPrompt && opts.systemPrompt.trim()) {
+  if (opts.systemPrompt?.trim()) {
     promptFile = join(tmpdir(), `pi-subagent-sp-${randomBytes(4).toString("hex")}.md`);
     try {
       writeFileSync(promptFile, opts.systemPrompt, { encoding: "utf8", mode: 0o600 });
@@ -225,17 +233,44 @@ export async function spawnPiAgent(
   }
   args.push(task);
 
+  const rc = buildSubagentRuntimeConfig(opts.mcp, opts.env);
+  const als = currentWorkspaceContext()?.config ?? {};
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    ...als,
+    ...rc.env,
+    ...(rc.path ? { PI_RUNTIME_CONFIG: rc.path } : {}),
+    NODE_NO_WARNINGS: "1",
+    ELECTRON_RUN_AS_NODE: "1",
+    PI_IS_SUBAGENT: "1",
+  };
+  const cleanup = (): void => {
+    rc.cleanup();
+    if (promptFile) {
+      try { rmSync(promptFile, { force: true }); } catch { /* gone */ }
+    }
+  };
+  return {
+    command: cmd,
+    args,
+    env,
+    spawnOptions: {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(process.platform !== "win32" ? { detached: true } : {}),
+    },
+    cleanup,
+  };
+}
+
+export async function spawnPiAgent(
+  cwd: string,
+  task: string,
+  opts: SpawnPiAgentOpts = {},
+): Promise<AgentResult> {
+  const launch = buildSubagentLaunch(cwd, task, opts);
+
   return new Promise<AgentResult>((resolve) => {
-    const rc = buildSubagentRuntimeConfig(opts.mcp, opts.env);
-    const cleanupPrompt = (): void => {
-      if (!promptFile) return;
-      try {
-        rmSync(promptFile, { force: true });
-      } catch {
-        /* already gone */
-      }
-      promptFile = undefined;
-    };
     let settled = false;
     let sawOutput = false; // 是否已收到子进程首个 stdout 字节（用于首字节/启动宽限）
     let inTool = false; // 是否在工具执行中（tool_execution_start..end 之间）：quiet 完成兜底据此防误判
@@ -258,32 +293,16 @@ export async function spawnPiAgent(
       if (hardTimer) clearTimeout(hardTimer);
       if (postExitTimer) clearTimeout(postExitTimer);
       if (emitTimer) clearTimeout(emitTimer);
-      rc.cleanup();
-      cleanupPrompt();
+      unregister();
+      launch.cleanup();
       resolve(r);
     };
 
-    const child = spawn(cmd, args, {
-      cwd,
-      // print mode reads piped stdin; without "ignore" the child blocks waiting
-      // for stdin EOF and never runs the task → sub-agent appears to "time out".
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        // rc.env = profile env (fs/net/tools) + memory-off + the resolved
-        // MCP_SERVERS (on-demand per profile.mcp). Applied BOTH as env and inside
-        // the derived runtime-config file (rc.path) below — getConfig reads the
-        // file first, so env alone can't undo a value already in PI_RUNTIME_CONFIG.
-        ...rc.env,
-        // Point the child at the derived sub-agent config so the overrides also
-        // win at the file level. Omitted when there is no parent config file —
-        // then the env above is already authoritative.
-        ...(rc.path ? { PI_RUNTIME_CONFIG: rc.path } : {}),
-        // Tag every spawned child as a sub-agent so it refuses to spawn its own
-        // sub-agents (recursion guard). Set last so callers can't override it.
-        PI_IS_SUBAGENT: "1",
-      },
+    const child = spawn(launch.command, launch.args, {
+      ...launch.spawnOptions,
+      env: launch.env,
     });
+    const unregister = registerSubagentProcess(cwd, child);
     let stdout = "";
     let stderr = "";
     let doneSeen = false; // 已从事件流解析到 agent_end（logical 完成）
@@ -329,26 +348,7 @@ export async function spawnPiAgent(
       }
     };
 
-    // Kill the child AND its descendants. A one-shot sub-agent may have spawned
-    // MCP stdio servers (or other helpers) whose open pipes keep the process tree
-    // alive; child.kill() alone leaves them orphaned, so on Windows use taskkill
-    // /T to take down the whole tree.
-    const killTree = (): void => {
-      const pid = child.pid;
-      if (pid && process.platform === "win32") {
-        try {
-          spawn("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
-          return;
-        } catch {
-          /* fall through to child.kill */
-        }
-      }
-      try {
-        child.kill();
-      } catch {
-        /* already gone */
-      }
-    };
+    const killTree = (): void => killProcessTree(child);
 
     // 由累计 buffer 构造终态结果：见到 agent_end（logical 完成）则记 ok，即使随后 killTree 触发非 0
     // 退出码也算成功；否则按退出码判定。

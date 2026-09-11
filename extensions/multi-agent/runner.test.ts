@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runInWorkspace } from "../_shared/workspace-context.js";
 import { profileToEnv, resolveProfile } from "./capability.js";
 import {
+  buildSubagentLaunch,
   buildSubagentRuntimeConfig,
   buildSubagentSkillArgs,
   extractFinalText,
@@ -13,11 +15,17 @@ import {
 } from "./runner.js";
 
 const origPiBin = process.env.PI_BIN;
+const origWorkerEntry = process.env.PI_WORKER_ENTRY;
 const origSubagentModel = process.env.SUBAGENT_MODEL;
 const origRuntimeConfig = process.env.PI_RUNTIME_CONFIG;
+beforeEach(() => {
+  process.env.PI_WORKER_ENTRY = origWorkerEntry ?? "C:/app/out/main/pi-worker.js";
+});
 afterEach(() => {
   if (origPiBin === undefined) delete process.env.PI_BIN;
   else process.env.PI_BIN = origPiBin;
+  if (origWorkerEntry === undefined) delete process.env.PI_WORKER_ENTRY;
+  else process.env.PI_WORKER_ENTRY = origWorkerEntry;
   if (origSubagentModel === undefined) delete process.env.SUBAGENT_MODEL;
   else process.env.SUBAGENT_MODEL = origSubagentModel;
   if (origRuntimeConfig === undefined) delete process.env.PI_RUNTIME_CONFIG;
@@ -25,13 +33,75 @@ afterEach(() => {
 });
 
 describe("resolvePiCommand", () => {
-  it("prefers PI_BIN when set", () => {
-    process.env.PI_BIN = "/custom/pi";
-    expect(resolvePiCommand().cmd).toBe("/custom/pi");
+  it("reads PI_WORKER_ENTRY from process.env, not getConfig", () => {
+    process.env.PI_WORKER_ENTRY = "C:/app/out/main/pi-worker.js";
+    expect(resolvePiCommand()).toEqual({
+      cmd: process.execPath,
+      baseArgs: ["C:/app/out/main/pi-worker.js"],
+    });
   });
-  it("falls back to the current executable (sidecar self), not bare 'pi'", () => {
-    delete process.env.PI_BIN;
+
+  it("throws when PI_WORKER_ENTRY is missing", () => {
+    delete process.env.PI_WORKER_ENTRY;
+    expect(() => resolvePiCommand()).toThrow(/PI_WORKER_ENTRY/);
+  });
+
+  it("ignores PI_BIN (deleted override)", () => {
+    process.env.PI_BIN = "/custom/pi";
+    process.env.PI_WORKER_ENTRY = "C:/app/pi-worker.js";
     expect(resolvePiCommand().cmd).toBe(process.execPath);
+    expect(resolvePiCommand().baseArgs).toEqual(["C:/app/pi-worker.js"]);
+  });
+});
+
+describe("buildSubagentLaunch", () => {
+  beforeEach(() => {
+    process.env.PI_WORKER_ENTRY = "C:/app/out/main/pi-worker.js";
+  });
+
+  it("command 是 process.execPath，args[0] 是 worker，task 末位，--skill 在 --mode 前", () => {
+    const launch = buildSubagentLaunch("D:/proj", "do the work", {});
+    expect(launch.command).toBe(process.execPath);
+    expect(launch.args[0]).toBe("C:/app/out/main/pi-worker.js");
+    expect(launch.args[launch.args.length - 1]).toBe("do the work");
+    const mode = launch.args.indexOf("--mode");
+    expect(launch.args[mode + 1]).toBe("json");
+    const skill = launch.args.indexOf("--skill");
+    if (skill >= 0) expect(skill).toBeLessThan(mode);
+    expect(launch.args.join(" ")).not.toMatch(/pi\.exe/);
+    launch.cleanup();
+  });
+
+  it("env 顺序：ALS config 进入，PI_IS_SUBAGENT 末位不可覆盖，含 ELECTRON_RUN_AS_NODE 与 NODE_NO_WARNINGS", () => {
+    const launch = runInWorkspace(
+      {
+        origin: "main",
+        workspace: "D:/a",
+        cwd: "D:/a",
+        config: { AGENT_DATA_ENDPOINT: "token-a", PI_IS_SUBAGENT: "0" },
+      },
+      () => buildSubagentLaunch("D:/a", "t", { env: { PI_IS_SUBAGENT: "0" } }),
+    );
+    expect(launch.env.AGENT_DATA_ENDPOINT).toBe("token-a");
+    expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    expect(launch.env.NODE_NO_WARNINGS).toBe("1");
+    expect(launch.env.PI_IS_SUBAGENT).toBe("1");
+    launch.cleanup();
+  });
+
+  it("stdio 为 ignore/pipe/pipe，无 windowsHide；POSIX 设 detached", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", {});
+    expect(launch.spawnOptions.stdio).toEqual(["ignore", "pipe", "pipe"]);
+    expect(launch.spawnOptions).not.toHaveProperty("windowsHide");
+    if (process.platform !== "win32") expect(launch.spawnOptions.detached).toBe(true);
+    launch.cleanup();
+  });
+
+  it("deny 列表含 spawn_agent 与 explore_context", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", {});
+    const deny = launch.env.SAFETY_DENY_TOOLS ?? "";
+    expect(deny.split(",")).toEqual(expect.arrayContaining(["spawn_agent", "explore_context"]));
+    launch.cleanup();
   });
 });
 
