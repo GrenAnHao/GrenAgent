@@ -1,274 +1,246 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SystemWorkerManager } from './systemWorkerManager';
-import type { PiProcessOptions } from './manager';
 
-function fakeClient() {
-  return { send: vi.fn(async (_command: Record<string, unknown>) => ({ result: 'ok' })), respondUi: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+type CompleteInput = { user: string; systemPrompt?: string; signal?: AbortSignal };
+
+function hangUntilAbort(error = 'aborted') {
+  return ({ signal }: CompleteInput) => new Promise<string>((_resolve, reject) => {
+    const fail = () => reject(new Error(error));
+    if (signal?.aborted) fail();
+    else signal?.addEventListener('abort', fail, { once: true });
+  });
 }
 
 describe('SystemWorkerManager', () => {
-  it('describes the actual configured model without creating a session or prompting and releases the idle client', async () => {
+  it('describeModel 返回 provider/id', async () => {
+    const manager = new SystemWorkerManager({ describeModel: async () => 'test-provider/test-model', complete: async () => '' });
+    await expect(manager.describeModel()).resolves.toBe('test-provider/test-model');
+  });
+
+  it('describeModel 失败统一成 MODEL_UNAVAILABLE', async () => {
+    const manager = new SystemWorkerManager({ describeModel: async () => { throw new Error('nope'); }, complete: async () => '' });
+    await expect(manager.describeModel()).rejects.toThrow('MODEL_UNAVAILABLE');
+  });
+
+  it('describeModel 超时后队列仍可用', async () => {
     vi.useFakeTimers();
-    const client = { ...fakeClient(), send: vi.fn(async () => ({ model: { provider: 'test-provider', id: 'test-model' } })) };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, idleTimeoutMs: 100, createClient: () => client as never });
     try {
-      await expect(manager.describeModel()).resolves.toBe('test-provider/test-model');
-      expect(client.send.mock.calls).toEqual([[{ type: 'get_state' }]]);
-      await vi.advanceTimersByTimeAsync(100);
-      expect(client.close).toHaveBeenCalledOnce();
-    } finally { manager.close(); vi.useRealTimers(); }
-  });
-
-  it.each([undefined, {}, { model: { id: 'missing-provider' } }])('rejects unavailable model state %j without prompting', async (state) => {
-    const client = { ...fakeClient(), send: vi.fn(async () => state) };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    try {
-      await expect(manager.describeModel()).rejects.toThrow('MODEL_UNAVAILABLE');
-      expect(client.send.mock.calls).toEqual([[{ type: 'get_state' }]]);
-    } finally { manager.close(); }
-  });
-
-  it('maps model state RPC errors to MODEL_UNAVAILABLE', async () => {
-    const client = { ...fakeClient(), send: vi.fn(async () => { throw new Error('not configured'); }) };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    try { await expect(manager.describeModel()).rejects.toThrow('MODEL_UNAVAILABLE'); }
-    finally { manager.close(); }
-  });
-
-  it('rechecks the model after session reset and refuses changed models before prompt', async () => {
-    const client = { ...fakeClient(), send: vi.fn(async (command: Record<string, unknown>) => command.type === 'get_state' ? { model: { provider: 'test', id: 'changed' } } : {}) };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    try {
-      await expect(manager.run({ id: 'wiki-model-change', kind: 'wiki_page_generate', input: { expectedModel: 'test/confirmed' } })).rejects.toThrow('MODEL_CHANGED');
-      expect(client.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session', 'get_state']);
-    } finally { manager.close(); }
-  });
-
-  it('bounds a model description that never returns and keeps the worker queue usable', async () => {
-    vi.useFakeTimers();
-    const stuck = { ...fakeClient(), send: vi.fn(() => new Promise(() => {})) };
-    const fresh = fakeClient();
-    const create = vi.fn().mockReturnValueOnce(stuck).mockReturnValue(fresh);
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, taskTimeoutMs: 50, createClient: create });
-    try {
+      const manager = new SystemWorkerManager({
+        describeModel: () => new Promise(() => {}),
+        complete: async () => '{"ok":true}',
+        taskTimeoutMs: 50,
+      });
       const model = manager.describeModel();
-      let failure = ''; void model.catch((error: Error) => { failure = error.message; });
+      let failure = '';
+      void model.catch((error: Error) => { failure = error.message; });
       await vi.advanceTimersByTimeAsync(51);
       expect(failure).toBe('MODEL_UNAVAILABLE');
-      expect(stuck.close).toHaveBeenCalledOnce();
-      await expect(manager.run({ id: 'after-model-timeout', kind: 'memory_extract', input: {} })).resolves.toEqual({ result: 'ok' });
-    } finally { manager.close(); vi.useRealTimers(); }
-  });
-
-  it('prompts only when the post-reset model matches the confirmed Wiki model', async () => {
-    const client = { ...fakeClient(), send: vi.fn(async (command: Record<string, unknown>) => command.type === 'get_state' ? { model: { provider: 'test', id: 'confirmed' } } : command.type === 'prompt' ? '# Generated' : {}) };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    try {
-      await expect(manager.run({ id: 'confirmed-wiki', kind: 'wiki_page_generate', input: { expectedModel: 'test/confirmed' } })).resolves.toBe('# Generated');
-      expect(client.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session', 'get_state', 'prompt']);
-    } finally { manager.close(); }
-  });
-
-  it('starts on demand, reuses the worker, and closes after idle timeout', async () => {
-    vi.useFakeTimers(); const clients = [fakeClient()]; const open = vi.fn(() => clients[0] as never);
-    const manager = new SystemWorkerManager({ processCommand: { command: 'pi', args: ['agent'] }, idleTimeoutMs: 100, createClient: open });
-    await manager.run({ id: 'a', kind: 'memory_extract', input: { text: 'a' } });
-    await manager.run({ id: 'b', kind: 'memory_extract', input: { text: 'b' } });
-    expect(open).toHaveBeenCalledOnce();
-    expect(open).toHaveBeenCalledWith('__system__', expect.anything(), expect.objectContaining({ profile: 'automation' }));
-    vi.advanceTimersByTime(100); await Promise.resolve();
-    expect(clients[0].close).toHaveBeenCalledOnce(); vi.useRealTimers();
-  });
-
-  it('requeues a crashed task until max attempts then fails', async () => {
-    const manager = new SystemWorkerManager({ processCommand: { command: 'pi', args: [] }, createClient: vi.fn(() => { throw new Error('spawn failed'); }), maxAttempts: 2 });
-    await expect(manager.run({ id: 'a', kind: 'memory_extract', input: {} })).rejects.toThrow('spawn failed');
-    expect(manager.taskState('a')).toMatchObject({ status: 'failed', attempts: 2 });
-  });
-
-  it('extracts structured output from the system Pi terminal event', async () => {
-    let handlers: PiProcessOptions | undefined;
-    const client = { send: vi.fn(async (_command: Record<string, unknown>) => undefined), respondUi: vi.fn(), close: vi.fn() };
-    const manager = new SystemWorkerManager({
-      processCommand: { command: 'pi', args: ['--mode', 'rpc'] },
-      createClient: vi.fn((_key, _command, options) => { handlers = options; return client as never; }),
-    });
-
-    const running = manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'remember dark mode' } });
-    await vi.waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt' })));
-    handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '{"l1":{"theme":"dark"}}' }] }] });
-
-    await expect(running).resolves.toEqual({ l1: { theme: 'dark' } });
-    expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt', message: expect.stringContaining('memory_extract') }));
-  });
-
-  it('asks for markdown and returns raw text for wiki page generation', async () => {
-    let handlers: PiProcessOptions | undefined;
-    const client = { send: vi.fn(async (_command: Record<string, unknown>) => undefined), respondUi: vi.fn(), close: vi.fn() };
-    const manager = new SystemWorkerManager({
-      processCommand: { command: 'pi', args: ['--mode', 'rpc'] },
-      createClient: vi.fn((_key, _command, options) => { handlers = options; return client as never; }),
-    });
-
-    const running = manager.run({ id: 'wiki', kind: 'wiki_page_generate', input: { sourcePath: 'README.md', source: '# Source' } });
-    await vi.waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt' })));
-    handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '# Generated\n\nBody' }] }] });
-
-    await expect(running).resolves.toBe('# Generated\n\nBody');
-    const prompt = String(client.send.mock.calls.find(([command]) => command.type === 'prompt')![0].message);
-    expect(prompt).toContain('Markdown');
-    expect(prompt).not.toContain('JSON only');
-  });
-
-  it('still parses JSON for memory extraction after adding text kinds', async () => {
-    let handlers: PiProcessOptions | undefined;
-    const client = { send: vi.fn(async (_command: Record<string, unknown>) => undefined), respondUi: vi.fn(), close: vi.fn() };
-    const manager = new SystemWorkerManager({
-      processCommand: { command: 'pi', args: ['--mode', 'rpc'] },
-      createClient: vi.fn((_key, _command, options) => { handlers = options; return client as never; }),
-    });
-
-    const running = manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'x' } });
-    await vi.waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt' })));
-    handlers?.onEvent?.('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '{"l1":{"a":1}}' }] }] });
-
-    await expect(running).resolves.toEqual({ l1: { a: 1 } });
-    const prompt = String(client.send.mock.calls.find(([command]) => command.type === 'prompt')![0].message);
-    expect(prompt).toContain('JSON only');
-  });
-
-  it('uses a 60s timeout for wiki_page_generate and 30s for memory_extract', async () => {
-    vi.useFakeTimers();
-    try {
-      const wikiClient = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
-      const wikiManager = new SystemWorkerManager({
-        processCommand: { command: 'pi', args: [] },
-        createClient: vi.fn(() => wikiClient as never),
-      });
-      const wikiRunning = wikiManager.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
-      let wikiSettled = false;
-      void wikiRunning.then(() => { wikiSettled = true; }, () => { wikiSettled = true; });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(wikiClient.send).toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(wikiSettled).toBe(false);
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      await expect(wikiRunning).rejects.toThrow('system Pi task timed out');
-
-      const memClient = { send: vi.fn(async () => undefined), respondUi: vi.fn(), close: vi.fn() };
-      const memManager = new SystemWorkerManager({
-        processCommand: { command: 'pi', args: [] },
-        createClient: vi.fn(() => memClient as never),
-      });
-      const memRunning = memManager.run({ id: 'mem', kind: 'memory_extract', input: {} });
-      const memExpect = expect(memRunning).rejects.toThrow('system Pi task timed out');
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(memClient.send).toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      await memExpect;
+      await expect(manager.run({ id: 'after-model-timeout', kind: 'memory_extract', input: {} })).resolves.toEqual({ ok: true });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('starts a fresh session for each reused worker task', async () => {
-    const client = fakeClient();
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    await manager.run({ id: 'a', kind: 'memory_extract', input: { delta: 'project A' } });
-    await manager.run({ id: 'b', kind: 'memory_extract', input: { delta: 'project B' } });
-    expect(client.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session', 'prompt', 'new_session', 'prompt']);
-    manager.close();
+  it('wiki_page_generate 在执行前比对 expectedModel', async () => {
+    const complete = vi.fn(async () => '# page');
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'openai/gpt-x',
+      complete,
+    });
+    await expect(manager.run({ id: '1', kind: 'wiki_page_generate', input: { expectedModel: 'anthropic/other' } })).rejects.toThrow('MODEL_CHANGED');
+    expect(complete).not.toHaveBeenCalled();
   });
 
-  it('serializes mixed task kinds so one terminal event cannot complete another task', async () => {
-    let handlers: PiProcessOptions | undefined;
-    const client = { send: vi.fn(async (_command: Record<string, unknown>) => undefined), close: vi.fn(async () => {}), respondUi: vi.fn() };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: (_key, _command, options) => { handlers = options; return client as never; } });
-    const memory = manager.run({ id: 'memory', kind: 'memory_extract', input: {} });
-    const wiki = manager.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
-    void memory.catch(() => {}); void wiki.catch(() => {});
-    await vi.waitFor(() => expect(client.send.mock.calls.filter(([command]) => command.type === 'prompt')).toHaveLength(1));
-    handlers!.onEvent!('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '{"l1":{"fact":"memory"}}' }] }] });
-    await expect(memory).resolves.toEqual({ l1: { fact: 'memory' } });
-    await vi.waitFor(() => expect(client.send.mock.calls.filter(([command]) => command.type === 'prompt')).toHaveLength(2));
-    handlers!.onEvent!('__system__', { type: 'agent_end', messages: [{ role: 'assistant', content: [{ type: 'text', text: '# Wiki' }] }] });
-    await expect(wiki).resolves.toBe('# Wiki');
-    manager.close();
+  it('expectedModel 一致时才调用 complete，并返回 Markdown 原文', async () => {
+    const complete = vi.fn(async (_input: CompleteInput) => '# Generated\n\nBody');
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'test/confirmed',
+      complete,
+    });
+    await expect(manager.run({ id: 'confirmed-wiki', kind: 'wiki_page_generate', input: { expectedModel: 'test/confirmed' } })).resolves.toBe('# Generated\n\nBody');
+    expect(complete).toHaveBeenCalledOnce();
+    const prompt = String(complete.mock.calls[0]![0].user);
+    expect(prompt).toContain('Markdown');
+    expect(prompt).not.toContain('JSON only');
   });
 
-  it('gives a repeated task id a new attempt budget after a queue retry', async () => {
-    const create = vi.fn().mockImplementationOnce(() => { throw new Error('temporary failure'); }).mockImplementation(() => fakeClient());
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: create });
-    const task = { id: 'same-id', kind: 'memory_extract', input: {} };
-    await expect(manager.run(task)).rejects.toThrow('temporary failure');
-    await expect(manager.run(task)).resolves.toEqual({ result: 'ok' });
-    expect(create).toHaveBeenCalledTimes(2);
-    manager.close();
-  });
-
-  it('times out session initialization even when new_session never responds', async () => {
+  it('goal_judge 超时 abort', async () => {
     vi.useFakeTimers();
     try {
-      const client = { send: vi.fn(() => new Promise(() => {})), close: vi.fn(async () => {}), respondUi: vi.fn() };
-      const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, taskTimeoutMs: 50, createClient: () => client as never });
-      const running = manager.run({ id: 'stuck-reset', kind: 'memory_extract', input: {} });
-      let failure: string | undefined;
-      void running.catch((error: Error) => { failure = error.message; });
-      await vi.advanceTimersByTimeAsync(51);
-      expect(failure).toBe('system Pi task timed out');
-      expect(client.close).toHaveBeenCalledOnce();
-      manager.close();
-    } finally { vi.useRealTimers(); }
+      const manager = new SystemWorkerManager({
+        describeModel: async () => 'x/y',
+        complete: hangUntilAbort(),
+        taskTimeoutMs: 20,
+      });
+      const pending = manager.run({ id: '1', kind: 'goal_judge', input: {} });
+      let settled = false;
+      void pending.then(() => { settled = true; }, () => { settled = true; });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(20);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(pending).rejects.toThrow('aborted');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('does not reopen the worker for queued tasks after close', async () => {
-    const client = { send: vi.fn(async () => undefined), close: vi.fn(async () => {}), respondUi: vi.fn() };
-    const create = vi.fn(() => client as never);
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: create });
-    const first = manager.run({ id: 'a', kind: 'memory_extract', input: {} });
-    const second = manager.run({ id: 'b', kind: 'memory_extract', input: {} });
-    const outcomes = Promise.allSettled([first, second]);
-    await vi.waitFor(() => expect(client.send).toHaveBeenCalled());
-    manager.close();
-    expect((await outcomes).map((result) => result.status)).toEqual(['rejected', 'rejected']);
-    expect(create).toHaveBeenCalledOnce();
+  it('wiki_page_generate 用 60s，memory_extract 用 30s', async () => {
+    vi.useFakeTimers();
+    try {
+      const wiki = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
+      const wikiRun = wiki.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
+      let wikiSettled = false;
+      void wikiRun.then(() => { wikiSettled = true; }, () => { wikiSettled = true; });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(wikiSettled).toBe(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(wikiRun).rejects.toThrow('aborted');
+
+      const mem = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
+      const memRun = mem.run({ id: 'mem', kind: 'memory_extract', input: {} });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(memRun).rejects.toThrow('aborted');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it.each(['error', 'aborted', 'length'])('rejects assistant output that ended with %s even when it contains valid JSON', async (stopReason) => {
-    let handlers: PiProcessOptions | undefined;
-    const client = { send: vi.fn(async (_command: Record<string, unknown>) => undefined), close: vi.fn(async () => {}), respondUi: vi.fn() };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: (_key, _command, options) => { handlers = options; return client as never; } });
-    const running = manager.run({ id: 'failed-output', kind: 'memory_extract', input: {} });
-    void running.catch(() => {});
-    await vi.waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'prompt' })));
-    handlers!.onEvent!('__system__', { type: 'agent_end', messages: [{ role: 'assistant', stopReason, content: [{ type: 'text', text: '{"l1":{"partial":true}}' }] }] });
-    await expect(running).rejects.toThrow(`system Pi output ended with ${stopReason}`);
-    manager.close();
+  it('任务串行：第二个 complete 在第一个结束后才调用', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'x/y',
+      complete: async ({ user }) => {
+        if (user.includes('first')) {
+          order.push('first');
+          await new Promise<void>((r) => { release = r; });
+          return '{"ok":true}';
+        }
+        order.push('second');
+        return '{"ok":true}';
+      },
+    });
+    const a = manager.run({ id: 'a', kind: 'memory_extract', input: { tag: 'first' } });
+    const b = manager.run({ id: 'b', kind: 'memory_extract', input: { tag: 'second' } });
+    await Promise.resolve();
+    expect(order).toEqual(['first']);
+    release();
+    await a;
+    await b;
+    expect(order).toEqual(['first', 'second']);
   });
 
-  it('rejects a cancelled new_session without sending the task into the old session', async () => {
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command.type === 'new_session' ? { cancelled: true } : { l1: { stale: true } }), close: vi.fn(async () => {}), respondUi: vi.fn() };
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: () => client as never });
-    await expect(manager.run({ id: 'cancelled-reset', kind: 'memory_extract', input: {} })).rejects.toThrow('system Pi new session was cancelled');
-    expect(client.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session']);
-    expect(client.close).toHaveBeenCalledOnce();
-    manager.close();
+  it('describeModel 与 run 共享同一条队列', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const manager = new SystemWorkerManager({
+      describeModel: async () => {
+        order.push('describe');
+        await new Promise<void>((r) => { release = r; });
+        return 'x/y';
+      },
+      complete: async () => {
+        order.push('complete');
+        return '{"ok":true}';
+      },
+    });
+    const model = manager.describeModel();
+    const task = manager.run({ id: 'after-describe', kind: 'memory_extract', input: {} });
+    await Promise.resolve();
+    expect(order).toEqual(['describe']);
+    release();
+    await expect(model).resolves.toBe('x/y');
+    await expect(task).resolves.toEqual({ ok: true });
+    expect(order).toEqual(['describe', 'complete']);
   });
 
-  it('recreates the client within the retry budget after a cancelled session reset', async () => {
-    const stale = { send: vi.fn(async (command: Record<string, unknown>) => command.type === 'new_session' ? { cancelled: true } : { l1: { stale: true } }), close: vi.fn(async () => {}), respondUi: vi.fn() };
-    const fresh = fakeClient();
-    const create = vi.fn().mockReturnValueOnce(stale).mockReturnValue(fresh);
-    const manager = new SystemWorkerManager({ processCommand: { command: 'fake', args: [] }, createClient: create });
-    await expect(manager.run({ id: 'cancelled-retry', kind: 'memory_extract', input: {}, maxAttempts: 2 })).resolves.toEqual({ result: 'ok' });
-    expect(stale.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session']);
-    expect(stale.close).toHaveBeenCalledOnce();
-    expect(fresh.send.mock.calls.map(([command]) => command.type)).toEqual(['new_session', 'prompt']);
+  it('混合 kind 串行，前一个结果不能完成后一个任务', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'x/y',
+      complete: async ({ user }) => {
+        if (user.includes('memory_extract')) {
+          order.push('memory');
+          await new Promise<void>((r) => { release = r; });
+          return '{"l1":{"fact":"memory"}}';
+        }
+        order.push('wiki');
+        return '# Wiki';
+      },
+    });
+    const memory = manager.run({ id: 'memory', kind: 'memory_extract', input: {} });
+    const wiki = manager.run({ id: 'wiki', kind: 'wiki_page_generate', input: {} });
+    await Promise.resolve();
+    expect(order).toEqual(['memory']);
+    release();
+    await expect(memory).resolves.toEqual({ l1: { fact: 'memory' } });
+    await expect(wiki).resolves.toBe('# Wiki');
+    expect(order).toEqual(['memory', 'wiki']);
+  });
+
+  it('从 complete 文本解析 memory_extract 的 JSON，prompt 含 JSON only', async () => {
+    const complete = vi.fn(async (_input: CompleteInput) => '```json\n{"l1":{"theme":"dark"}}\n```');
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    await expect(manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'remember dark mode' } })).resolves.toEqual({ l1: { theme: 'dark' } });
+    expect(String(complete.mock.calls[0]![0].user)).toContain('JSON only');
+    expect(String(complete.mock.calls[0]![0].user)).toContain('memory_extract');
+  });
+
+  it('非法 JSON 失败，可按 maxAttempts 重试', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce('not-json')
+      .mockResolvedValueOnce('{"ok":true}');
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete, maxAttempts: 2 });
+    await expect(manager.run({ id: 'a', kind: 'memory_extract', input: {} })).resolves.toEqual({ ok: true });
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(manager.taskState('a')).toMatchObject({ status: 'completed', attempts: 2 });
+  });
+
+  it('超过 maxAttempts 后标记 failed', async () => {
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'x/y',
+      complete: async () => { throw new Error('boom'); },
+      maxAttempts: 2,
+    });
+    await expect(manager.run({ id: 'a', kind: 'memory_extract', input: {} })).rejects.toThrow('boom');
+    expect(manager.taskState('a')).toMatchObject({ status: 'failed', attempts: 2 });
+  });
+
+  it('同一 task id 再次 run 会重新获得一轮 attempt 预算', async () => {
+    const complete = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValue('{"ok":true}');
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    const task = { id: 'same-id', kind: 'memory_extract', input: {} };
+    await expect(manager.run(task)).rejects.toThrow('temporary failure');
+    await expect(manager.run(task)).resolves.toEqual({ ok: true });
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it('close 后进行中与排队任务都失败，且不再调用 complete', async () => {
+    const complete = vi.fn(() => new Promise<string>(() => {}));
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    const first = manager.run({ id: 'a', kind: 'memory_extract', input: { tag: 'a' } });
+    const second = manager.run({ id: 'b', kind: 'memory_extract', input: { tag: 'b' } });
+    await Promise.resolve();
     manager.close();
+    await expect(first).rejects.toThrow('system worker is closed');
+    await expect(second).rejects.toThrow('system worker is closed');
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it('close 会中断进行中的 complete', async () => {
+    const manager = new SystemWorkerManager({
+      describeModel: async () => 'x/y',
+      complete: hangUntilAbort('system worker is closed'),
+    });
+    const running = manager.run({ id: 'a', kind: 'memory_extract', input: {} });
+    await Promise.resolve();
+    manager.close();
+    await expect(running).rejects.toThrow('system worker is closed');
   });
 });

@@ -87,15 +87,17 @@ if (!process.env.VITEST) {
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
     bootstrapRuntimeConfig(runtimeConfigPath);
-    const systemWorker = new SystemWorkerManager({
-      processCommand: piProcess,
-      cwd: app.getPath('userData'),
-      idleTimeoutMs: 60_000,
-      sandbox,
-      env: {
-        PI_PACKAGE_DIR: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
-        PI_RUNTIME_CONFIG: runtimeConfigPath,
+    const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
+    const modelRuntimeHost = new ModelRuntimeHost({
+      create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
+      resolveSettings: async () => {
+        const defaults = SettingsManager.create(app.getPath('userData'), getAgentDir());
+        return { provider: defaults.getDefaultProvider() ?? '', modelId: defaults.getDefaultModel() ?? '' };
       },
+    });
+    const systemWorker = new SystemWorkerManager({
+      describeModel: () => modelRuntimeHost.describeModel(),
+      complete: (input) => modelRuntimeHost.completeSimple(input),
     });
     const knownWorkspaces = new Set<string>();
     const codeGraph = new CodeGraphService({ listWorkspaces: () => [...knownWorkspaces] });
@@ -170,14 +172,6 @@ if (!process.env.VITEST) {
     const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1' });
     plugins.discover(builtinPluginDefinitions());
     await plugins.startAll();
-    const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
-    const modelRuntimeHost = new ModelRuntimeHost({
-      create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
-      resolveSettings: async () => {
-        const settings = SettingsManager.create(app.getPath('userData'), getAgentDir());
-        return { provider: settings.getDefaultProvider() ?? '', modelId: settings.getDefaultModel() ?? '' };
-      },
-    });
     const agentHost = new AgentHost({
       createHandle: async (workspace, cwd) => createWorkspaceHandle({
         workspace,
