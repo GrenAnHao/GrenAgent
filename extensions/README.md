@@ -15,7 +15,7 @@
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
 | [`im-gateway`](./im-gateway) | `/imgateway` + webhook | 否 | HTTP 网关,接入 IM 平台 |
 
-合计 **当前 sidecar 中的全部扩展**，长期记忆与知识检索由本地 `memory`、`wiki-rag` 与 `code-retrieval` 提供。
+合计 **当前桌面端打进主进程 / worker 的全部扩展**，长期记忆与知识检索由本地 `memory`、`wiki-rag` 与 `code-retrieval` 提供。
 
 ## 一键加载全部
 
@@ -36,7 +36,7 @@ cp -r extensions/* ~/.pi/agent/extensions/
 
 ## 统一配置
 
-桌面端由 Electron 托管本地 Agent Data Runtime；sidecar 通过受保护的 loopback endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
+桌面端由 Electron 托管本地 Agent Data Runtime；扩展通过受保护的 loopback endpoint 访问数据。其他需要外部服务的扩展仍按各自 README 配置。
 
 ## 技术共性
 
@@ -51,4 +51,4 @@ cp -r extensions/* ~/.pi/agent/extensions/
 ## 注意
 
 - 包名:按官方新名 `@earendil-works/*` + `typebox`(实测该 Pi 版本 bundle 的是 `typebox`,不是 `@sinclair/typebox`)。
-- Agent Data Runtime 使用应用数据目录保存 Memory/Wiki 数据；sidecar 不直接管理 SQLite 文件。
+- Agent Data Runtime 使用应用数据目录保存 Memory/Wiki 数据；扩展不直接管理 SQLite 文件。

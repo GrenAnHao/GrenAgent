@@ -4,7 +4,7 @@
  * - search registry Machine+User PATH when locating git/bash
  * - derive Git Bash from `where git.exe` for non-default install paths
  *
- * Run after npm install / before build:sidecar.
+ * Run after npm install.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

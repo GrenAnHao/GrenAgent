@@ -8,9 +8,10 @@ GrenAgent 桌面应用（当前主线）：React 19 + TypeScript + Vite 渲染�
 
 ```bash
 bun install
-bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
 bun run dev
 ```
+
+`cli/` 与 `extensions/` 变更后执行 `bun run build`，由 electron-vite 打进 `out/main/`。不再编译独立 `pi.exe`。
 
 ## 常用命令
 
@@ -18,7 +19,6 @@ bun run dev
 | --- | --- |
 | `bun run dev` | 启动桌面端（electron-vite 同时拉起主进程与渲染层） |
 | `bun run build` | 类型检查后构建（产物 `out/`，渲染层 `dist/`） |
-| `bun run build:sidecar` | 用 Bun 把 `cli/` 编译为 `resources/pi/pi(.exe)` |
 | `bun run test` | 运行测试（`vitest run`） |
 | `bun run package` | electron-builder 打包，产物 `release/` |
 
@@ -26,9 +26,9 @@ bun run dev
 
 ```
 src/          # 渲染层：features / stores / lib / platform / components / theme
-electron/     # 主进程：main.ts 入口，app（服务层）、agentData（数据运行时）、pi、ipc、preload
+electron/     # 主进程：main.ts 入口，app（服务层）、agentData（数据运行时）、agent、pi、ipc、preload
 docs/         # 桌面端文档（含 Tauri 能力迁移清单 tauri-api-inventory.md）
-scripts/      # 构建脚本（build-sidecar.mjs）
+scripts/      # 构建脚本（package-codegraph.cjs 等）
 ```
 
 ## 约定

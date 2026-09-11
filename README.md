@@ -71,20 +71,20 @@ GrenAgent 由以下部分组成：
 
 | 模块 | 包名 | 职责 |
 | --- | --- | --- |
-| `cli/` | `grenagent-agent-sidecar` | Agent sidecar。把 Pi 运行时与内置扩展编译成单个二进制（`resources/pi`），由 Electron 主进程以 `--mode rpc` 拉起。 |
-| `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总，随 sidecar 一并编译，无需全局安装。 |
-| `electron-agent/` | `electron-agent` | **当前桌面应用**。React 19 + TypeScript + Vite 渲染层，Electron 主进程（TypeScript 服务层）与自研 Agent Data Runtime。 |
+| `cli/` | `grenagent-agent-sidecar` | 内嵌 SDK 装配与 `pi-worker` 入口。源码由 electron-vite 打进主进程 / worker，不再产出独立 `pi.exe`。 |
+| `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总，打进主进程与 worker。 |
+| `electron-agent/` | `electron-agent` | **当前桌面应用**。React 19 + TypeScript + Vite 渲染层，Electron 主进程（内嵌 Pi SDK）与自研 Agent Data Runtime。 |
 | `tauri-agent/` | `grenagent-app` | **已过时（冻结）**。历史桌面应用，Tauri 2 / Rust 后端。不再维护，仅作迁移参考。 |
 | `embedding/` | `embedding` | 独立本地向量服务（实验）。CPU 跑 `Xenova/all-MiniLM-L6-v2`，`POST /embed` 返回 384 维向量；尚未集成进主应用。 |
 
-渲染层只通过 `window.gren` 与主进程通信（单业务通道 `gren:invoke` + `gren:event:` 事件广播），主进程以 stdio JSONL RPC 驱动 sidecar；Agent 的流式输出由主进程转发回渲染层。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
+渲染层只通过 `window.gren` 与主进程通信（单业务通道 `gren:invoke` + `gren:event:` 事件广播），主进程内嵌 Pi SDK 跑交互 / Goal / 短调用；子代理 `spawn(process.execPath, [PI_WORKER_ENTRY])`。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js >= 22.19（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.19.0`）
-- Bun（`electron-agent/` 的包管理与 sidecar 编译，详见 [开发指南](./docs/development.md)）
+- Node.js >= 22.19（`cli/package.json` 声明 `engines.node >= 22.19.0`）
+- Bun（`electron-agent/` 的包管理，详见 [开发指南](./docs/development.md)）
 - Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，日常开发不再需要
 
 ### 启动桌面端
@@ -92,7 +92,6 @@ GrenAgent 由以下部分组成：
 ```bash
 cd electron-agent
 bun install
-bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
 bun run dev
 ```
 
@@ -112,7 +111,7 @@ bun run package        # electron-builder，产物在 release/
 
 ## 内置扩展
 
-Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`safety` 最先加载以尽早拦截）。扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令；纯策略类扩展只挂 hook，无显式工具。
+主进程与 `pi-worker` 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`safety` 最先加载以尽早拦截）。扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令；纯策略类扩展只挂 hook，无显式工具。
 
 按职责大致分为：
 
@@ -141,11 +140,11 @@ Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`s
 
 ```
 .
-├── cli/             # Agent sidecar（grenagent-agent-sidecar），汇总扩展编译为 resources/pi
-├── extensions/      # 内置扩展集合，由 extensions/index.ts 的 allExtensions 编入 sidecar
+├── cli/             # 内嵌 SDK 装配与 pi-worker 入口
+├── extensions/      # 内置扩展集合，由 extensions/index.ts 的 allExtensions 打进主进程 / worker
 ├── electron-agent/  # 桌面应用（electron-agent），当前主线
 │   ├── src/         # React 渲染层：features / stores / lib / platform / components / theme
-│   └── electron/    # Electron 主进程：app / agentData / pi / tencentdb，及 ipc 与 preload
+│   └── electron/    # Electron 主进程：app / agent / agentData / pi，及 ipc 与 preload
 ├── tauri-agent/     # 历史桌面应用（grenagent-app），已过时并冻结
 │   ├── src/         # React 前端快照（仅供迁移对照）
 │   └── src-tauri/   # Tauri / Rust 后端快照
@@ -163,4 +162,4 @@ Sidecar 通过 `extensions/index.ts` 的 `allExtensions` 编入内置扩展（`s
 
 ## 命名说明
 
-产品名为 GrenAgent。底层 Agent 运行时为 Pi（`pi-coding-agent`），sidecar 二进制名为 `pi`。内部 CSS 设计变量 `--gren-*` 与若干 localStorage 持久化键属于实现细节，不对外作为品牌。
+产品名为 GrenAgent。底层 Agent 运行时为 Pi（`pi-coding-agent`），由 Electron 主进程内嵌。内部 CSS 设计变量 `--gren-*` 与若干 localStorage 持久化键属于实现细节，不对外作为品牌。

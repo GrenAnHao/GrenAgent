@@ -6,8 +6,8 @@
 
 ## 环境要求
 
-- Node.js >= 22.19（sidecar 在 `cli/package.json` 中声明 `engines.node >= 22.19.0`）
-- Bun：`electron-agent/` 与 `tauri-agent/` 均用 Bun 管理依赖，sidecar 也由 Bun 编译
+- Node.js >= 22.19（`cli/package.json` 声明 `engines.node >= 22.19.0`）
+- Bun：`electron-agent/` 与历史 `tauri-agent/` 均可用 Bun 管理依赖
 - `curl` 与 `tar`：仅在构建历史 Tauri 版的 TencentDB 运行时时需要，用于下载和解包上游源码、Node.js 运行时
 - Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，参见 Tauri 官方环境要求
 
@@ -16,10 +16,9 @@
 ```bash
 cd electron-agent
 bun install
-bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
 ```
 
-`cli/` 与 `extensions/` 各自维护依赖，按需在对应目录执行 `npm install`。
+`cli/` 与 `extensions/` 各自维护依赖，按需在对应目录执行 `npm install`。变更后在 `electron-agent/` 执行 `bun run build`，由 electron-vite 打进 `out/main/`。
 
 ## 常用命令
 
@@ -29,20 +28,18 @@ bun run build:sidecar   # 首次拉取，或 cli/、extensions/ 变更后
 | --- | --- |
 | `bun run dev` | 启动桌面端（electron-vite 同时拉起主进程与渲染层，支持热更新） |
 | `bun run build` | `tsc -p tsconfig.json` 类型检查后执行 `electron-vite build` |
-| `bun run build:sidecar` | 用 Bun 把 `cli` 编译为 sidecar 单文件（`resources/pi/pi(.exe)`） |
 | `bun run test` | 运行测试（`vitest run`） |
 | `bun run package` | electron-builder 打包，产物在 `release/` |
-| `bunx tsc --noEmit` | 类型检查 |
+| `npx tsc -p tsconfig.node.json --noEmit` | 主进程 / 宿主类型检查 |
 
 历史命令（仅 `tauri-agent/`，已过时）：`bun run dev`（Vite 前端）、`bun run tauri dev`（Tauri + Rust 桌面端）、`bun run build:tencentdb-memory`（构建随包分发的 TencentDB 运行时）。
 
-sidecar（`cli/`）的相关命令：
+`cli/` 相关命令（源码仍给 worker / 测试用，不再产出桌面 `pi.exe`）：
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run dev` | 以 `--mode rpc` 直接运行 sidecar（`tsx`） |
 | `npm run typecheck` | 类型检查（`tsc --noEmit`） |
-| `npm run build` | 用 esbuild 打包为单文件 |
+| `npm test` | 跑 `src/**/*.test.ts` |
 
 ## 验证
 
@@ -77,7 +74,7 @@ bunx vitest run src/features/sessions/SessionItem.test.tsx
 
 ## 扩展开发
 
-内置扩展位于 `extensions/`，由 `extensions/index.ts` 的 `allExtensions` 汇总后编入 sidecar（当前 36 个）。`extensions/package.json` 的 `pi.extensions` 字段仅用于独立安装时的元数据，新增扩展时需同时改 `index.ts` 的 import 与 `allExtensions` 数组。
+内置扩展位于 `extensions/`，由 `extensions/index.ts` 的 `allExtensions` 汇总后打进主进程与 `pi-worker`。`extensions/package.json` 的 `pi.extensions` 字段仅用于独立安装时的元数据，新增扩展时需同时改 `index.ts` 的 import 与 `allExtensions` 数组。
 
 一个扩展通常这样注册能力：
 
@@ -107,7 +104,9 @@ export default function (pi: ExtensionAPI) {
 
 当前（Electron）：
 
-- `resources/pi/pi(.exe)`：sidecar 单文件可执行，由 `bun run build:sidecar`（Bun 编译 `cli/`）生成，打包时作为 `extraResources` 分发到 `resources/pi`。
+- `out/main/main.js`：主进程（内嵌 Pi SDK）。
+- `out/main/pi-worker.js`：子代理入口，打包后解包到 `app.asar.unpacked`。
+- `out/main/runner.py`、`runner.mjs`、`prompts/`：`import.meta.url` 相邻资源。
 - `out/`：`electron-vite build` 的主进程与 preload 产物（其中 `dist/` 为渲染层产物）。
 - `release/`：electron-builder 打包产物（nsis / dmg / AppImage）。
 
@@ -118,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 
 ## 本地向量服务（embedding，独立模块）
 
-`embedding/` 是一个独立的本地向量服务，目前尚未集成进 sidecar 或桌面应用，可单独构建与运行。它在本地 CPU 上用 `@huggingface/transformers` 跑 `Xenova/bge-small-zh-v1.5`，对外暴露 OpenAI 兼容 `POST /v1/embeddings`（512 维），并可用 Node.js SEA 打成单文件可执行程序。
+`embedding/` 是一个独立的本地向量服务，目前尚未集成进桌面应用，可单独构建与运行。它在本地 CPU 上用 `@huggingface/transformers` 跑 `Xenova/bge-small-zh-v1.5`，对外暴露 OpenAI 兼容 `POST /v1/embeddings`（512 维），并可用 Node.js SEA 打成单文件可执行程序。
 
 以下命令在 `embedding/` 目录执行：
 
@@ -139,4 +138,4 @@ export default function (pi: ExtensionAPI) {
 ## 提交与分支
 
 - commit message 遵循约定式提交（Conventional Commits），用中文描述，例如 `fix(sessions): 修复项目在资源管理器中打开无效`。
-- 不要提交 `node_modules`、`out/`、`dist/`、`release/`、`resources/pi` 等构建产物（已在 gitignore 中）。
+- 不要提交 `node_modules`、`out/`、`dist/`、`release/` 等构建产物（已在 gitignore 中）。

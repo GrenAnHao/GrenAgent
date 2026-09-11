@@ -46,13 +46,13 @@ export function resolveInstalledPiPackageDir(): string | undefined {
 }
 
 /**
- * Electron/Tauri set PI_PACKAGE_DIR to the GrenAgent sidecar root (`cli/` in
- * bun-dev, `resources/pi` when packaged). Official `main()` then treats that as
- * the pi-coding-agent package and looks for themes at `src/modes/interactive/theme`
- * because `cli/src` exists — which throws ENOENT on dark.json.
+ * `PI_PACKAGE_DIR` used to point at a compiled host root (`cli/` in bun-dev).
+ * Official `main()` then treats that as the pi-coding-agent package and looks
+ * for themes at `src/modes/interactive/theme` because `cli/src` exists — which
+ * throws ENOENT on dark.json.
  *
- * Keep the env dir when it already has themes (packaged `theme/` next to the
- * binary). Otherwise retarget to the installed npm package.
+ * Keep the env dir when it already has themes. Otherwise retarget to the
+ * installed npm package.
  */
 export function resolveOfficialMainPackageDir(
   envDir: string | undefined,

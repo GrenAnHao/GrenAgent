@@ -19,40 +19,31 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 │  ┌───────▼───────────────────────────────────▼───────┐  │
 │  │ Agent Data Runtime（127.0.0.1 随机端口 JSONL RPC）   │  │
 │  │ 记忆 L0-L3 / Wiki FTS5 / 任务与审计（node:sqlite）    │  │
-│  └───────────────────────┬───────────────────────────┘  │
-└──────────────────────────┼──────────────────────────────┘
-                           │ stdio JSONL RPC（--mode rpc）
-                 ┌─────────▼─────────┐
-                 │ cli（sidecar）     │
-                 │ Pi runtime +      │
-                 │ extensions        │
-                 │  → resources/pi   │
-                 └───────────────────┘
+│  └───────────────────────────────────────────────────┘  │
+│                                                          │
+│  主进程内嵌 Pi SDK                                        │
+│    → AgentSessionRuntime / ModelRuntime（交互、Goal、短调用）│
+│    → spawn(process.execPath, [PI_WORKER_ENTRY])          │
+│      + ELECTRON_RUN_AS_NODE（子代理）                      │
+└────────────────────────────────────────────────────────┘
 ```
 
 - **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。
 - **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）由主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`，统一 `gren:event:` 前缀）。
-- **执行**：主进程按工作区维持一个 sidecar 进程，以 RPC 模式（`--mode rpc`，stdio JSONL）驱动。sidecar 按 profile 和 Electron 托管插件白名单加载内置扩展。
+- **执行**：主进程内嵌 Pi SDK。交互与 Goal 走 `AgentSessionRuntime`；短调用走 `ModelRuntime.completeSimple`；子代理 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。
 - **隔离**：业务代码只依赖 `src/platform/runtime.ts` 定义的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时自动降级为浏览器预览实现。
 
 ## 模块职责
 
-### cli —— Agent sidecar
+### cli —— 内嵌 SDK 与 worker 入口
 
-包名 `grenagent-agent-sidecar`，入口 `cli/src/main.ts`。它把 Pi 运行时与内置扩展编译成单个二进制 `resources/pi`（`electron-agent/scripts/build-sidecar.mjs` 用 `bun build --compile` 产出，随安装包分发），无需全局安装 `pi`，也无需 `-e` 注入扩展。
+源码仍在 `cli/`（`gren-runtime` / `pi-sdk` / `pi-worker` / `json-event`），由 electron-vite 打进 `out/main/`，不再产出 `pi.exe`。`pi-worker` 只跑官方 `main()` 的 `--mode json` / print 路径；启动期主进程把 `PI_WORKER_ENTRY` 设为 worker chunk 路径，子代理直读该环境变量。
 
-采用混合运行时（hybrid runtime）：
-
-- `--mode rpc`：由 Electron 主进程拉起（历史版本由 Tauri 后端拉起）。保留 Pi 原生 Skill 扫描，并追加当前 Agent 的托管 Skill 根目录；同名时本机原生 Skill 优先。
-- 其他模式（子代理等一次性任务，走 `--mode json -p`）：复用官方 `main()`，由其处理 print 模式。
-
-主进程解析 sidecar 的顺序为：环境变量 `GREN_PI_COMMAND` → 打包态 `resources/pi/pi(.exe)` → 开发态用 Bun 直接跑 `cli/src/main.ts`（`electron/runtimePaths.ts`）。
-
-进程退出时，父进程（Electron 主进程）会关闭 stdio / RPC 管道，在途写入随后以 `EPIPE` 失败。sidecar 在模块加载阶段就注册 `EPIPE` 处理：一旦命中即干净退出，避免对死管道反复写入导致 stderr 刷屏。
+进程退出时，worker 在模块加载阶段注册 `EPIPE` 处理：一旦命中即干净退出，避免对死管道反复写入导致 stderr 刷屏。
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义编译进 sidecar 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。系统 worker 加载零扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进主进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -110,13 +101,14 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **主进程（`electron-agent/electron`）：**
 
-- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造全部服务与 `PiManager` 并启动 Agent Data Runtime，`before-quit` 关闭 sidecar 与运行时。
-- `app/`：服务层，取代原 Tauri command 实现——`piRuntimeService`（25 个 `agent_*` 命令到 pi RPC 的映射，含 `/mode`、`/approval` 等伪命令与 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力；`processRegistry` / `shutdown` 负责进程树回收与优雅退出。
-- `pi/`：sidecar 客户端与进程管理，按工作区一个进程，stdio JSONL 通信，退出时先 `stdin.end()` 再 `killTree()`。另有 oneshot 与 `probe-models` 等短命调用。
+- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `GoalHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
+- `app/`：服务层——`piRuntimeService`（`agent_*` 命令到进程内 `WorkspaceHandle` 的映射，含 `/mode`、`/approval` 等伪命令与 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。
+- `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
+- `agent/`：`WorkspaceHandle`、`AgentHost`、`GoalHost`、`ModelRuntimeHost`、`SessionUiAdapter`。
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
-- `runtimePaths.ts`：sidecar 与运行时路径解析（顺序见 cli 章节）。
+- `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY`。
 
 **Agent Data Runtime（`electron-agent/electron/agentData`）：**
 
@@ -135,11 +127,11 @@ Goal 的实时归属键是 Pi 提供的真实 `sessionId`，不是工作区或�
 
 Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。重启、历史恢复和 fork 会保留快照与审计，但默认 `disarmed`，必须由用户显式恢复。旧 JSONL 中的 Goal custom entry 只读迁移为 `source=legacy` 的 `disarmed` 快照，追加 `legacy_goal_restored` 审计事件，不改写原始会话文件；当前分支以外的旧分支不会被迁移。
 
-运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入每个 pi 子进程，sidecar 可反向调用记忆与 Wiki 能力。
+运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用记忆与 Wiki 能力。
 
-记忆提炼与 Wiki 批量生成共用 `TaskQueue` 的系统任务通道。`SystemWorkerManager` 为每项任务重置会话，避免跨项目共享上下文。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
+记忆提炼与 Wiki 批量生成共用 `TaskQueue` 的系统任务通道。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
-部分命令直接读取本地数据，不经过 sidecar，例如 `usageService` 扫描会话 jsonl 聚合用量。
+部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。
 
 ### tauri-agent —— 桌面应用（已过时 · 冻结）
 
@@ -167,14 +159,14 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 `im-platforms` 扩展把 Pi Agent 接到微信（官方 ilink / clawbot AI-bot 接口），实现单一主人的远程遥控：在手机微信里给 bot 发消息即可驱动 Agent。
 
-- 扫码登录、长轮询收发，无需公网；启用开关与网络配置均热更新（写盘后 sidecar 重连，无需重启）。
-- 运行状态经 `setStatus("wechat", ...)`、会话镜像经 `setStatus("wechat-messages", ...)` 从 sidecar 推送到前端。
+- 扫码登录、长轮询收发，无需公网；启用开关与网络配置均热更新（写盘后运行时重连，无需重启）。
+- 运行状态经 `setStatus("wechat", ...)`、会话镜像经 `setStatus("wechat-messages", ...)` 从主进程扩展状态推送到前端。
 - 前端 `ExtensionUiHost`（`electron-agent/src/features/extensionUi`）接收后写入 `wechatStatusStore` / `imMessagesStore`，由「连接」面板 `ConnectionsPanel` 展示登录二维码、状态与只读会话镜像。
 - 主人自己的交互式会话与微信流量隔离，因此桌面 UI 的「微信会话记录」是唯一能看到微信聊了什么的地方。
 
 ## 记忆与知识运行时
 
-当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随主进程启动，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 L0-L3 分级记忆与 Wiki FTS5 检索；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入每个 pi 子进程，扩展可反向调用。
+当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随主进程启动，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 L0-L3 分级记忆与 Wiki FTS5 检索；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS 与子代理环境，扩展可反向调用。
 
 > **历史（Tauri 版，已过时）**：桌面端通过 Tauri 生命周期托管随安装包分发的 Node.js、MemoryCore 和 MemoryKnowledge。`local` 模式在应用启动时启动两个回环服务并等待 `/health`，自动初始化固定的单用户身份 `local / personal-local / pi-personal`，退出时由进程守卫回收；`remote` 模式不创建本机子进程，只连接配置的 HTTPS Gateway，并允许使用服务端已有 Team、Agent 和 User 身份。远程 Gateway API Key 与 User Key 分别保存在系统凭据库。Pi sidecar 启动后立即把两项 TencentDB 密钥移入模块私有内存并从工具子进程环境删除；知识工具通过仅获得专用 token 的 MemoryKnowledge MCP 注入。
 
@@ -197,6 +189,6 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 ## 独立模块：本地向量服务（embedding）
 
-`embedding/` 是一个独立的本地向量服务，当前尚未集成进 sidecar 或桌面应用。它在本地 CPU 上用 `@huggingface/transformers` 运行 `Xenova/all-MiniLM-L6-v2`，通过 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
+`embedding/` 是一个独立的本地向量服务，当前尚未集成进桌面应用。它在本地 CPU 上用 `@huggingface/transformers` 运行 `Xenova/all-MiniLM-L6-v2`，通过 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
 
 它面向独立的本地向量实验，不属于桌面端记忆链路；桌面端的长期记忆和知识检索由自研 Agent Data Runtime 负责。实现细节见 `embedding/README.md`。
