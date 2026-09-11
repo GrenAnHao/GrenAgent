@@ -10,18 +10,26 @@
 // 工具 gate 走两道：setActiveTools 限制 LLM 可见工具（主） + tool_call hook 兜底拦截
 // （防止动态注册的工具绕过）。当前模式经 ctx.ui.setStatus("agent-mode", <mode>) 推到前端，
 // 前端据此渲染模式选择器并在切会话/刷新后回读，状态本身持久化到 session entry。
+// 桌面切换走宿主 agent_set_mode：先写 live 再落盘。门闩现读 live；
+// 工具集在下一轮 before_agent_start 对齐。不再注册 /mode、/plan。
+// /plan-build 与 /brainstorm-deliver 仍由卡片 / 模型触发，经 applyMode 写 live。
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import {
   type AgentMode,
   DEFAULT_MODE,
   activeToolsFor,
+  agentModeConfigKey,
   gateToolCall,
+  getAgentMode,
+  hasAgentMode,
   isAgentMode,
   modeLabel,
   parseModeArg,
+  setAgentMode,
   toolWhitelist,
 } from "./modes.js";
 import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
@@ -49,6 +57,7 @@ interface PersistedState {
 export default function (pi: ExtensionAPI) {
   console.error("[agent-mode] extension loaded");
 
+  let sessionCtx: ExtensionContext | undefined;
   let currentMode: AgentMode = DEFAULT_MODE;
   // 进入受限模式（ask/plan）前的完整工具集，退出时还原（避免丢失动态扩展工具）。
   let savedTools: string[] | undefined;
@@ -82,13 +91,14 @@ export default function (pi: ExtensionAPI) {
 
   // 应用模式：按需抓取/还原完整工具集，设置受限工具集，推状态并持久化。
   // 不触碰 plan 子状态（todoItems/executionMode）——那由调用方按场景决定。
-  const applyMode = (next: AgentMode, ctx: ExtensionContext, opts?: { silent?: boolean }) => {
+  const applyMode = (next: AgentMode, ctx: ExtensionContext, opts?: { silent?: boolean; persist?: boolean }) => {
     const wasRestricted = toolWhitelist(currentMode) !== undefined;
     const willRestrict = toolWhitelist(next) !== undefined;
     // 仅在「当前非受限」时抓取 savedTools，避免把已受限的集合误当成完整集合存下来。
     if (willRestrict && !wasRestricted) savedTools = pi.getActiveTools();
 
     currentMode = next;
+    setAgentMode(next, ctx.cwd);
 
     if (willRestrict) {
       pi.setActiveTools(activeToolsFor(next, savedTools ?? pi.getActiveTools()) ?? []);
@@ -97,7 +107,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     pushStatus(ctx);
-    persistState();
+    if (opts?.persist !== false) persistState();
     if (!opts?.silent) ctx.ui.notify(`已切换到 ${modeLabel(next)} 模式`, "info");
   };
 
@@ -110,28 +120,11 @@ export default function (pi: ExtensionAPI) {
     applyMode(next, ctx);
   };
 
-  pi.registerCommand("mode", {
-    description: "切换模式：/mode agent | ask | debug | plan",
-    handler: async (args, ctx) => {
-      const next = parseModeArg(args);
-      if (!next) {
-        ctx.ui.notify(`用法：/mode agent|ask|debug|plan（当前：${currentMode}）`, "warning");
-        return;
-      }
-      if (next === currentMode) {
-        ctx.ui.notify(`已是 ${modeLabel(next)} 模式`, "info");
-        return;
-      }
-      switchMode(next, ctx);
-    },
-  });
-
-  // 兼容旧 /plan：在 plan 与 agent 间切换。
-  pi.registerCommand("plan", {
-    description: "切换规划模式（等价 /mode plan）",
-    handler: async (_args, ctx) => {
-      switchMode(currentMode === "plan" ? "agent" : "plan", ctx);
-    },
+  watchConfig((next) => {
+    if (!sessionCtx) return;
+    const parsed = parseModeArg(next[agentModeConfigKey(sessionCtx.cwd)] ?? "");
+    if (!parsed || parsed === getAgentMode(sessionCtx.cwd)) return;
+    switchMode(parsed, sessionCtx);
   });
 
   // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
@@ -139,7 +132,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("brainstorm-deliver", {
     description: "从头脑风暴切换到 Agent 模式并开始实施（由 AI 在交付阶段调用）",
     handler: async (args, ctx) => {
-      if (currentMode !== "brainstorm") {
+      if (getAgentMode(ctx.cwd) !== "brainstorm") {
         ctx.ui.notify("当前不在头脑风暴模式，无需切换。", "info");
         return;
       }
@@ -273,9 +266,21 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("tool_call", async (event) => gateToolCall(currentMode, event.toolName, event.input));
+  pi.on("tool_call", async (event, ctx) =>
+    gateToolCall(getAgentMode(ctx?.cwd ?? sessionCtx?.cwd), event.toolName, event.input),
+  );
 
   pi.on("before_agent_start", async () => {
+    if (sessionCtx) {
+      const live = getAgentMode(sessionCtx.cwd);
+      if (live !== currentMode) {
+        if (currentMode === "plan" && live !== "plan") {
+          todoItems = [];
+          executionMode = false;
+        }
+        applyMode(live, sessionCtx, { silent: true });
+      }
+    }
     // 执行阶段（currentMode 已切回 agent，但仍带着待办步骤）：注入剩余步骤。
     // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，
     // 此处不再注入中文模式 prompt，避免双份重复占用 token。
@@ -351,6 +356,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionCtx = ctx;
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
     const data = entry?.data as PersistedState | undefined;
@@ -367,9 +373,27 @@ export default function (pi: ExtensionAPI) {
       savedTools = undefined;
       planId = undefined;
     }
-    // 恢复受限模式的工具集（agent/debug 无需限制）。
+    if (!hasAgentMode(ctx.cwd)) {
+      const fromFile = parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "");
+      const fromEntry = isAgentMode(data?.mode) ? data.mode : undefined;
+      const next = fromFile ?? fromEntry ?? DEFAULT_MODE;
+      if (fromFile && fromFile !== currentMode && fromFile !== "plan") {
+        todoItems = [];
+        executionMode = false;
+      }
+      applyMode(next, ctx, { silent: true, persist: false });
+      return;
+    }
+
+    const live = getAgentMode(ctx.cwd);
+    if (live !== currentMode) {
+      applyMode(live, ctx, { silent: true });
+      return;
+    }
     if (toolWhitelist(currentMode)) {
       pi.setActiveTools(activeToolsFor(currentMode, savedTools ?? pi.getActiveTools()) ?? []);
+    } else if (savedTools) {
+      pi.setActiveTools(savedTools);
     }
     pushStatus(ctx);
   });
