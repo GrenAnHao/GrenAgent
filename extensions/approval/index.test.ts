@@ -10,6 +10,7 @@ vi.mock("../_shared/runtime-config.js", () => ({
 import {
   approvalPolicyConfigKey,
   getApprovalPolicy,
+  setApprovalPolicy,
   __resetApprovalForTest,
 } from "../_shared/approval.js";
 import { getConfig, setRuntimeConfig, watchConfig } from "../_shared/runtime-config.js";
@@ -49,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("approval extension", () => {
-  it("registers the approval command", () => {
+  it("does not register a slash command; desktop writes runtime config", () => {
     const cmds: string[] = [];
     const pi = {
       registerCommand: (n: string) => cmds.push(n),
@@ -57,7 +58,7 @@ describe("approval extension", () => {
       appendEntry: () => {},
     };
     approval(pi as unknown as Parameters<typeof approval>[0]);
-    expect(cmds).toEqual(["approval"]);
+    expect(cmds).toEqual([]);
   });
 });
 
@@ -98,6 +99,16 @@ describe("approval policy inheritance on session_start", () => {
     await loadSessionStart()({}, ctx([]));
     expect(getApprovalPolicy()).toBe("auto");
   });
+
+  it("session_start 不覆盖该 cwd 已写入的 live", async () => {
+    setApprovalPolicy("full", "D:/proj-a");
+    vi.mocked(getConfig).mockReturnValue("ask");
+    await loadSessionStart()(
+      {},
+      ctx([{ type: "custom", customType: "approval", data: { policy: "ask" } }], "D:/proj-a"),
+    );
+    expect(getApprovalPolicy("D:/proj-a")).toBe("full");
+  });
 });
 
 describe("approval cwd binding", () => {
@@ -122,17 +133,12 @@ describe("approval cwd binding", () => {
     expect(getApprovalPolicy("D:/other")).toBe("auto");
   });
 
-  it("/approval 把档位写到 ctx.cwd 键", async () => {
-    let handler: ((args: string, ctx: { cwd: string; ui: { notify: ReturnType<typeof vi.fn>; setStatus: ReturnType<typeof vi.fn> } }) => Promise<void>) | undefined;
+  it("activate 不写 runtime：档位只由宿主 agent_set_approval 写入", async () => {
     approval({
-      registerCommand: (_n: string, spec: { handler: typeof handler }) => {
-        handler = spec.handler;
-      },
+      registerCommand: () => {},
       on: () => {},
       appendEntry: () => {},
     } as never);
-    const ui = { notify: vi.fn(), setStatus: vi.fn() };
-    await handler!("full", { cwd: "D:/proj-a", ui });
-    expect(setRuntimeConfig).toHaveBeenCalledWith(approvalPolicyConfigKey("D:/proj-a"), "full");
+    expect(setRuntimeConfig).not.toHaveBeenCalled();
   });
 });
