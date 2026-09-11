@@ -27,6 +27,35 @@ describe('WorkspaceService', () => {
     await expect(service.getWorksDir()).resolves.toBe(worksDir);
   });
 
+  it('hides memory_extract system-worker sessions from the sidebar', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const prompt = [
+      'Extract durable memory as strict JSON. Return JSON only.',
+      'Task kind: memory_extract',
+      'Input: {"delta":"user: 你是什么模型?"}',
+    ].join('\n');
+    await writeFile(
+      join(sessionsDir, 'extract.jsonl'),
+      [
+        JSON.stringify({ type: 'session', id: 'extract', cwd: 'C:/work', timestamp: '2026-09-08T00:00:00Z' }),
+        JSON.stringify({
+          type: 'message',
+          message: { role: 'user', content: [{ type: 'text', text: prompt }] },
+        }),
+      ].join('\n'),
+    );
+    await writeFile(
+      join(sessionsDir, 'kept.jsonl'),
+      '{"type":"session","id":"one","cwd":"C:/work","timestamp":"2026-08-30T00:00:00Z"}\n',
+    );
+
+    await expect(service.listAllSessions()).resolves.toEqual([
+      { id: 'one', path: join(sessionsDir, 'kept.jsonl'), cwd: 'C:/work', timestamp: '2026-08-30T00:00:00Z', name: null },
+    ]);
+  });
+
   it('lists only session JSONL files with a workspace cwd', async () => {
     const { service, agentDir } = await createService();
     const sessionsDir = join(agentDir, 'sessions', 'hash');

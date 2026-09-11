@@ -13,6 +13,7 @@ import { pi, onPiEvent, onPiExit, type AgentEvent, type AgentMessage } from '../
 import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurations';
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
 import { sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
+import { expandSystemWorkerChat } from '../lib/systemWorkerChat';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -211,7 +212,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // UI 完整历史优先：pi auto-compaction 会让后端历史变短，前端持久化的完整历史（uiHistory）更长时用它，
     // 避免压缩后的短历史盖掉完整对话（rewind 等需要后端权威时调用方不传 uiHistory，自然走后端）。
     const uiHistory = options?.uiHistory;
-    const processed = uiHistory && uiHistory.length > backend.length ? uiHistory : backend;
+    const processed = expandSystemWorkerChat(
+      uiHistory && uiHistory.length > backend.length ? uiHistory : backend,
+    );
     const sig = sessionSignature(processed);
     // 后台刷新命中「同一会话 + 内容未变」→ 跳过 setState：缓存已秒显，无谓重渲染会让整列闪一下。
     if (sessionPath != null && sessionPath === loadedSessionPath && sig === currentSig) {

@@ -210,6 +210,25 @@ describe('createAgentStore', () => {
     expect(store.getLoadedSessionPath()).toBeUndefined();
   });
 
+  it('loadMessages 把 memory_extract 会话展开成原对话气泡', () => {
+    store = createAgentStore('.');
+    const prompt = [
+      'Extract durable memory as strict JSON with optional keys l1 (object), l2 (string), and l3 (string). Return JSON only.',
+      'Task kind: memory_extract',
+      'Input: {"delta":"user: 你是什么模型?\\nassistant: 我是 Claude。"}',
+    ].join('\n');
+    store.loadMessages(
+      [
+        { role: 'user', content: [{ type: 'text', text: prompt }] },
+        { role: 'assistant', content: [{ type: 'text', text: '{"l2":"用户询问模型身份"}' }] },
+      ] as never,
+      { force: true, sessionPath: '/sessions/extract.jsonl' },
+    );
+    const msgs = store.useStore.getState().messages;
+    expect(msgs[0]).toMatchObject({ kind: 'user', text: '你是什么模型?' });
+    expect(msgs[1]).toMatchObject({ kind: 'assistant', text: '我是 Claude。' });
+  });
+
   it('loadMessages 在 uiHistory 比后端更长时使用 UI 完整历史', () => {
     store = createAgentStore('.');
     const uiHistory = [

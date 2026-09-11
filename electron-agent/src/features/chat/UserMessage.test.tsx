@@ -32,6 +32,19 @@ describe('UserMessage', () => {
     expect(screen.getByText('hello world')).toBeTruthy();
   });
 
+  it('memory_extract 提示走预格式化，JSON 键单独成行', () => {
+    const text = [
+      'Extract durable memory as strict JSON. Return JSON only.',
+      'Task kind: memory_extract',
+      'Input: {"delta":"user: 你是什么模型?"}',
+    ].join('\n');
+    renderMsg(text);
+    const pre = screen.getByTestId('structured-pre');
+    expect(pre.textContent).toContain('Task kind: memory_extract');
+    expect(pre.textContent).toContain('"delta"');
+    expect(pre.textContent).toContain('你是什么模型?');
+  });
+
   it('有文本时渲染复制按钮与更多菜单', () => {
     render(
       <App>

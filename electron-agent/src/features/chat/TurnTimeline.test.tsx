@@ -44,4 +44,18 @@ describe('TurnTimeline 助手复制', () => {
     const { container } = wrap(toolOnly);
     expect(container.querySelector('.chat-actions')).toBeNull();
   });
+
+  it('整段 JSON 助手回复走预格式化，不被 Markdown 收成一行', () => {
+    wrap([
+      {
+        kind: 'text',
+        id: 'json',
+        content: '{"l1":{"PI_MODEL":"claude-opus-5"},"l2":"用户询问模型身份"}',
+        streaming: false,
+      },
+    ]);
+    const pre = screen.getByTestId('structured-pre');
+    expect(pre.textContent).toContain('"l1"');
+    expect(pre.textContent).toContain('claude-opus-5');
+  });
 });

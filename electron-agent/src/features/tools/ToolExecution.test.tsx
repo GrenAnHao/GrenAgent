@@ -55,6 +55,32 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
     expect(document.body.textContent).toContain('hi there');
     expect(document.body.textContent).toContain('bash');
   });
+
+  it('保留 ls -a 的 --- / . / ..，不当成 Markdown 吃掉', () => {
+    const text = [
+      '/c/Users/rxstudio/.pi/agent/works/bfe8e88c-7c78-42db-a5c6-945a84c229bc',
+      '---',
+      '.',
+      '..',
+      '.pi',
+      '---',
+      'Wed Sep  9 14:57:20     2026',
+    ].join('\n');
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'pwd && echo "---" && ls -a && echo "---" && date' }}
+        result={{ content: [{ type: 'text', text }] }}
+        status="done"
+      />,
+    );
+    fireEvent.click(screen.getByText('bash'));
+    const body = document.body.textContent ?? '';
+    expect(body).toContain('---');
+    expect(body).toMatch(/(^|\n)\.(?:\n|$)/);
+    expect(body).toContain('..');
+    expect(body).toContain('.pi');
+  });
 });
 
 describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {

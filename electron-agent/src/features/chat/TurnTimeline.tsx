@@ -7,6 +7,8 @@ import { MessageActionBar } from './messageActions/MessageActionBar';
 import type { MessageActionContext } from './messageActions/types';
 import { ReasoningInline } from './ReasoningInline';
 import { LazyMarkdown } from './LazyMarkdown';
+import { formatStructuredMessageText } from './structuredMessageText';
+import { StructuredMessageBody } from './StructuredMessageBody';
 import { ToolExecution } from '../tools/ToolExecution';
 import { ContextToolGroup } from '../tools/ContextToolGroup';
 import type { TimelineSegment } from './groupMessages';
@@ -42,9 +44,14 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
       );
     case 'text':
       return (
-        <LazyMarkdown variant="chat" fontSize={14} animated={segment.streaming}>
-          {segment.content}
-        </LazyMarkdown>
+        <StructuredMessageBody
+          formatted={formatStructuredMessageText(segment.content)}
+          fallback={
+            <LazyMarkdown variant="chat" fontSize={14} animated={segment.streaming}>
+              {segment.content}
+            </LazyMarkdown>
+          }
+        />
       );
     case 'tool':
       return (

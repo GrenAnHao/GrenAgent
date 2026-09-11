@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isSystemWorkerSessionLines } from './systemWorkerSession.js';
 
 export interface SessionInfo {
   id: string;
@@ -157,6 +158,8 @@ async function readSession(path: string): Promise<SessionInfo | null> {
       /* Ignore malformed entries, including a partially written last line. */
     }
   }
+
+  if (isSystemWorkerSessionLines(lines)) return null;
 
   if (header?.type === 'session') {
     return {

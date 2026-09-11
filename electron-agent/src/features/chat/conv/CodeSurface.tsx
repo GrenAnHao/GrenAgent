@@ -10,9 +10,9 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorFillQuaternary};
     font-family: ${cssVar.fontFamilyCode};
-    font-size: 12px;
-    line-height: 1.65;
-    color: ${cssVar.colorTextSecondary};
+    font-size: 13px;
+    line-height: 1.7;
+    color: ${cssVar.colorText};
     white-space: pre-wrap;
     word-break: break-word;
   `,

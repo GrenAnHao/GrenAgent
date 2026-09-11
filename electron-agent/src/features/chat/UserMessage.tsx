@@ -12,6 +12,8 @@ import { AttachmentCard } from './AttachmentCard';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
 import type { UserImage } from '../../stores/agentReducer';
+import { formatStructuredMessageText } from './structuredMessageText';
+import { StructuredMessageBody } from './StructuredMessageBody';
 
 interface UserMessageProps {
   text: string;
@@ -100,7 +102,10 @@ function renderUserMessage(
               </Image.PreviewGroup>
             ) : null}
             {bodyText ? (
-              <span style={{ whiteSpace: 'pre-wrap' }}>{renderMessageTags(bodyText)}</span>
+              <StructuredMessageBody
+                formatted={formatStructuredMessageText(bodyText)}
+                fallback={<span style={{ whiteSpace: 'pre-wrap' }}>{renderMessageTags(bodyText)}</span>}
+              />
             ) : null}
           </div>
         ) : null}
