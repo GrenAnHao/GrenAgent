@@ -32,4 +32,8 @@ describe("attributeRun", () => {
   it("allows signature fallback only when exit is nonzero and not a runner failure", () => {
     expect(attributeRun({ exitCode: 1, stderr: "Read-only file system\n" }, confined).kind).toBe("denial");
   });
+  it("does not treat null exit without spawnError as denial", () => {
+    expect(attributeRun({ exitCode: null, stderr: "Read-only file system\n" }, confined).kind)
+      .toBe("command");
+  });
 });

@@ -7,7 +7,8 @@ export function attributeRun(
   confined: Pick<ConfinedArgv, "denialExitCodes" | "denialSignatures" | "runnerFailureRules">,
 ): { kind: RunKind } {
   if (result.spawnError) return { kind: "runner-failure" };
-  const code = result.exitCode ?? 1;
+  if (result.exitCode == null) return { kind: "command" };
+  const code = result.exitCode;
   const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.toLowerCase();
   const stderr = (result.stderr ?? "").toLowerCase();
   for (const rule of confined.runnerFailureRules) {
