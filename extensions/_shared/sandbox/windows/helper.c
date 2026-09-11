@@ -17,8 +17,9 @@
  * Without these ACEs, WRITE_RESTRICTED denies writes even inside the workspace.
  *
  * TokenDefaultDacl (SetTokenInformation):
- *   read-only — Everyone; workspace-write — workspace + temp capability SIDs.
- *   So pipes and grandchild-created objects stay writable.
+ *   GetTokenInformation(TokenDefaultDacl) then GRANT_ACCESS merge — keep
+ *   User/SYSTEM, add capability SIDs (workspace-write) or Everyone (read-only).
+ *   Do not rebuild from an empty ACL. Pipes and grandchild objects stay writable.
  *
  * Exit:
  *   162  ONLY when the child exit code is 5 (ERROR_ACCESS_DENIED) or
@@ -222,31 +223,56 @@ static void grantInheritableModify(LPCWSTR path, PSID trustee) {
 }
 
 static void setTokenDefaultDacl(HANDLE token, PSID *sids, DWORD count) {
+    DWORD needed = 0;
+    PTOKEN_DEFAULT_DACL existing = NULL;
+    PACL oldDacl = NULL;
     EXPLICIT_ACCESS_W eas[MAX_RESTRICTING_SIDS];
     PACL dacl = NULL;
     TOKEN_DEFAULT_DACL info;
     DWORD i;
     DWORD err;
 
+    GetTokenInformation(token, TokenDefaultDacl, NULL, 0, &needed);
+    if (needed > 0) {
+        existing = (PTOKEN_DEFAULT_DACL)LocalAlloc(LMEM_FIXED | LMEM_ZEROINIT, needed);
+        if (!existing) {
+            fail("LocalAlloc");
+        }
+        if (!GetTokenInformation(token, TokenDefaultDacl, existing, needed, &needed)) {
+            LocalFree(existing);
+            fail("GetTokenInformation");
+        }
+        oldDacl = existing->DefaultDacl;
+    }
+
     ZeroMemory(eas, sizeof(eas));
     for (i = 0; i < count; i++) {
         eas[i].grfAccessPermissions = GENERIC_READ | GENERIC_WRITE | DELETE;
-        eas[i].grfAccessMode = SET_ACCESS;
+        eas[i].grfAccessMode = GRANT_ACCESS;
         eas[i].grfInheritance = 0;
         eas[i].Trustee.TrusteeForm = TRUSTEE_IS_SID;
         eas[i].Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
         eas[i].Trustee.ptstrName = (LPWSTR)sids[i];
     }
-    err = SetEntriesInAclW(count, eas, NULL, &dacl);
+    err = SetEntriesInAclW(count, eas, oldDacl, &dacl);
     if (err != ERROR_SUCCESS) {
+        if (existing) {
+            LocalFree(existing);
+        }
         failWin("SetEntriesInAclW", err);
     }
     info.DefaultDacl = dacl;
     if (!SetTokenInformation(token, TokenDefaultDacl, &info, sizeof(info))) {
         LocalFree(dacl);
+        if (existing) {
+            LocalFree(existing);
+        }
         fail("SetTokenInformation");
     }
     LocalFree(dacl);
+    if (existing) {
+        LocalFree(existing);
+    }
 }
 
 static size_t quoteArg(const wchar_t *arg, wchar_t *out, size_t cap) {
@@ -494,24 +520,29 @@ static int run(int argc, wchar_t **argv) {
     addInheritHandle(inherit, &inheritCount, GetStdHandle(STD_OUTPUT_HANDLE));
     addInheritHandle(inherit, &inheritCount, GetStdHandle(STD_ERROR_HANDLE));
 
-    siex.StartupInfo.cb = sizeof(siex);
     siex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     siex.StartupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     siex.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     siex.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
-    InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
-    siex.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
-        GetProcessHeap(),
-        HEAP_ZERO_MEMORY,
-        attrSize);
-    if (!siex.lpAttributeList) {
-        fail("HeapAlloc");
-    }
-    if (!InitializeProcThreadAttributeList(siex.lpAttributeList, 1, 0, &attrSize)) {
-        fail("InitializeProcThreadAttributeList");
-    }
+    /*
+     * inheritCount > 0: TRUE + HANDLE_LIST whitelist.
+     * inheritCount == 0: FALSE and no HANDLE_LIST (TRUE without a list
+     * would inherit every inheritable handle).
+     */
     if (inheritCount > 0) {
+        siex.StartupInfo.cb = sizeof(siex);
+        InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
+        siex.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
+            GetProcessHeap(),
+            HEAP_ZERO_MEMORY,
+            attrSize);
+        if (!siex.lpAttributeList) {
+            fail("HeapAlloc");
+        }
+        if (!InitializeProcThreadAttributeList(siex.lpAttributeList, 1, 0, &attrSize)) {
+            fail("InitializeProcThreadAttributeList");
+        }
         if (!UpdateProcThreadAttribute(
                 siex.lpAttributeList,
                 0,
@@ -522,20 +553,18 @@ static int run(int argc, wchar_t **argv) {
                 NULL)) {
             fail("UpdateProcThreadAttribute");
         }
+    } else {
+        siex.StartupInfo.cb = sizeof(STARTUPINFOW);
     }
 
-    /*
-     * bInheritHandles must be TRUE when HANDLE_LIST is set; the attribute
-     * whitelist is what prevents inheriting every inheritable handle.
-     */
     if (!CreateProcessAsUserW(
             primary,
             NULL,
             commandLine,
             NULL,
             NULL,
-            TRUE,
-            EXTENDED_STARTUPINFO_PRESENT,
+            inheritCount > 0,
+            inheritCount > 0 ? EXTENDED_STARTUPINFO_PRESENT : 0,
             NULL,
             NULL,
             &siex.StartupInfo,
@@ -543,8 +572,10 @@ static int run(int argc, wchar_t **argv) {
         fail("CreateProcessAsUserW");
     }
 
-    DeleteProcThreadAttributeList(siex.lpAttributeList);
-    HeapFree(GetProcessHeap(), 0, siex.lpAttributeList);
+    if (siex.lpAttributeList) {
+        DeleteProcThreadAttributeList(siex.lpAttributeList);
+        HeapFree(GetProcessHeap(), 0, siex.lpAttributeList);
+    }
     HeapFree(GetProcessHeap(), 0, commandLine);
     CloseHandle(pi.hThread);
 
