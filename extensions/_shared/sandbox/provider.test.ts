@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createSandboxProvider } from "./provider.js";
 import type { ConfinedArgv } from "./types.js";
@@ -74,12 +75,25 @@ describe("createSandboxProvider", () => {
     ]);
   });
 
-  it("throws SANDBOX_UNAVAILABLE when darwin runner is not wired", async () => {
-    const provider = createSandboxProvider({ platform: "darwin" });
-    await expect(provider.confine(caller, policy)).rejects.toMatchObject({
-      code: "SANDBOX_UNAVAILABLE",
-      message: expect.stringContaining("darwin runner not wired"),
+  it.skipIf(existsSync("/usr/bin/sandbox-exec"))(
+    "throws SANDBOX_UNAVAILABLE when darwin sandbox-exec is missing",
+    async () => {
+      const provider = createSandboxProvider({ platform: "darwin" });
+      await expect(provider.confine(caller, policy)).rejects.toMatchObject({
+        code: "SANDBOX_UNAVAILABLE",
+      });
+    },
+  );
+
+  it("uses full darwin confinement when probe succeeds and build is not injected", async () => {
+    const provider = createSandboxProvider({
+      platform: "darwin",
+      probe: async () => ({ ok: true }),
+      tempDir: "/tmp/pi-sandbox-s1",
     });
+    const out = await provider.confine(caller, policy);
+    expect(out.argv[0]).toBe("sandbox-exec");
+    expect(out.enforcement).toBe("full");
   });
 
   it("throws SANDBOX_UNAVAILABLE when win32 runner is not wired", async () => {

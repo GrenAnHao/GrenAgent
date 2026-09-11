@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
+import { seatbeltArgv } from "./darwin/seatbelt.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { bwrapArgv } from "./linux/bwrap.js";
 import type { ConfinedArgv, SandboxPolicy, SandboxProvider } from "./types.js";
@@ -56,6 +58,25 @@ function linuxConfined(argv: string[], policy: SandboxPolicy, tempDir: string): 
   };
 }
 
+function probeSeatbelt(): SandboxProbeResult {
+  if (existsSync("/usr/bin/sandbox-exec")) return { ok: true };
+  return { ok: false, reason: "sandbox-exec not found at /usr/bin/sandbox-exec" };
+}
+
+function darwinConfined(argv: string[], policy: SandboxPolicy, tempDir: string): ConfinedArgv {
+  return {
+    argv: seatbeltArgv(policy, argv, tempDir),
+    enforcement: "full",
+    denialExitCodes: [SANDBOX_DENIAL_EXIT],
+    denialSignatures: ["operation not permitted", "read-only file system"],
+    runnerFailureRules: [{
+      kind: "runner-missing",
+      exitCodes: [127],
+      signatures: ["sandbox-exec: command not found"],
+    }],
+  };
+}
+
 function sameArgv(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, i) => value === right[i]);
 }
@@ -72,6 +93,7 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
 
   async function defaultProbe(): Promise<SandboxProbeResult> {
     if (platform === "linux") return probeBwrap();
+    if (platform === "darwin") return probeSeatbelt();
     return { ok: false, reason: unwiredReason(platform) };
   }
 
@@ -91,6 +113,8 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
         confined = deps.build(argv, policy);
       } else if (platform === "linux") {
         confined = linuxConfined(argv, policy, tempDir);
+      } else if (platform === "darwin") {
+        confined = darwinConfined(argv, policy, tempDir);
       } else {
         throw new SandboxUnavailableError(unwiredReason(platform));
       }
