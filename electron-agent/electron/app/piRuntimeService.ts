@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { piGoalWorkerKey, type PiManager, type PiProcessCommand } from '../pi/manager';
+import { type PiProcessCommand } from '../pi/manager';
 import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
 import type { WorkspaceHandle } from '../agent/workspaceHandle.js';
 import type { PiClientMetadata } from '../pi/client';
@@ -51,9 +51,17 @@ export interface AgentHostPort {
   close(workspace: string): Promise<void>;
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
-  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'ui'>;
+  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
 
-/** 交互路径会话操作的过渡接缝。第 3 份 Goal 接 handle 后 clientOps 删除，run 收敛为 runOnHandle。 */
+export interface GoalHostPort {
+  open(workspace: string, sessionId: string, sessionPath: string): Promise<WorkspaceHandlePort>;
+  get(workspace: string, sessionId: string): WorkspaceHandlePort | undefined;
+  findBySessionPath(sessionPath: string): { workspace: string; sessionId: string; handle: WorkspaceHandlePort } | undefined;
+  dispose(workspace: string, sessionId: string): Promise<void>;
+  disposeAllForWorkspace(workspace: string): Promise<void>;
+}
+
+/** 第 3 份已删除 client 接缝：会话操作一律走 runOnHandle。 */
 interface SessionOps {
   getState(): Promise<Record<string, unknown>>;
   run(command: PiCommand, args: Record<string, unknown>): Promise<unknown>;
@@ -155,6 +163,7 @@ export interface PiRuntimeOptions {
   mcpConfig?: McpConfigPort;
   allowedPluginIds?: () => string[];
   agentHost: AgentHostPort;
+  goalHost: GoalHostPort;
   modelRuntimeHost: { refresh(): Promise<void>; workspaces?(): string[] };
 }
 
@@ -304,9 +313,12 @@ export class PiRuntimeService {
       const input = typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
       return this.enqueueTurn(workspace, input, typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace', session);
     }
-    const ops: SessionOps = session.source === 'goal' && session.sessionId && session.sessionPath
-      ? clientOps(await this.openGoalClient(session.sessionId, workspace, session.sessionPath))
-      : this.handleOps(await this.openInteractive(workspace));
+    if (session.source !== 'goal') {
+      await this.preemptGoalTurn(workspace, command, args);
+    }
+    const handle = await this.resolveHandle(workspace, session);
+    const origin = session.source === 'goal' ? 'goal' : 'main';
+    const ops: SessionOps = this.handleOps(handle, origin);
     if (session.source !== 'goal' && session.sessionId && command !== 'agent_switch_session') ops.setSessionIdentity?.(session.sessionId, session.sessionPath);
     const rpcArgs = command === 'agent_switch_session' && typeof args.sessionPath === 'string'
       ? { ...stripSessionArgs(args), sessionPath: args.sessionPath }
@@ -526,13 +538,9 @@ export class PiRuntimeService {
   async rejectUiRequest(workspace: string, metadata: EventMeta | undefined, requestId: string): Promise<void> {
     if (!requestId.trim()) return;
     const meta = typeof metadata === 'string' ? { sessionId: metadata } : metadata;
-    if (meta?.source === 'goal' && meta.sessionId) {
-      const client = this.options.manager.get(piGoalWorkerKey(workspace, meta.sessionId));
-      if (!client) return;
-      await client.respondUi({ type: 'extension_ui_response', id: requestId, cancelled: true });
-      return;
-    }
-    const handle = this.options.agentHost.get(workspace);
+    const handle = meta?.source === 'goal' && meta.sessionId
+      ? this.options.goalHost.get(workspace, meta.sessionId) ?? this.options.agentHost.get(workspace)
+      : this.options.agentHost.get(workspace);
     handle?.ui.respond(requestId, { cancelled: true });
   }
 
@@ -546,42 +554,29 @@ export class PiRuntimeService {
     for (const workspace of this.options.modelRuntimeHost.workspaces?.() ?? []) {
       result.refreshed.push(workspace);
     }
-    for (const [workspace, client] of this.options.manager.all?.() ?? []) {
-      try {
-        const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
-        if (typeof state.sessionFile === 'string') await client.send({ type: 'switch_session', sessionPath: state.sessionFile });
-        result.refreshed.push(workspace);
-      } catch (error) {
-        result.failed.push({ workspace, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
     return result;
   }
 
-  async openGoalWorker(sessionId: string, workspace: string, sessionPath: string): Promise<PiClientPort> {
+  async openGoalWorker(sessionId: string, workspace: string, sessionPath: string): Promise<WorkspaceHandlePort> {
     if (!sessionId.trim() || !sessionPath.trim()) throw new Error('INVALID_SESSION_IDENTITY');
     const identity = await readSessionIdentity(sessionPath, workspace);
     if (identity.sessionId !== sessionId) throw new Error('SESSION_ID_MISMATCH');
     await this.bindSession(workspace, { ...identity, source: 'goal' });
     const stateKey = this.sessionKey(workspace, sessionId);
     this.sessionPaths.set(stateKey, { workspace, sessionPath });
-    const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
-    const env = await this.workerEnv(workspace, cwd, 'goal');
-    const client = this.options.manager.openGoalWorker
-      ? this.options.manager.openGoalWorker(sessionId, workspace, sessionPath, cwd, env)
-      : this.options.manager.open({ key: piGoalWorkerKey(workspace, sessionId), cwd, logicalWorkspace: workspace, sessionId, sessionPath, source: 'goal', env });
+    const existing = this.options.goalHost.get(workspace, sessionId);
+    const handle = existing ?? await this.options.goalHost.open(workspace, sessionId, sessionPath);
     try {
-      const state = await client.send<Record<string, unknown>>({ type: 'get_state' });
-      const stateSessionId = readOptionalString(state.sessionId);
+      const stateSessionId = handle.session.sessionId;
       if (stateSessionId && stateSessionId !== sessionId) throw new Error('GOAL_WORKER_SESSION_MISMATCH');
-      const statePath = readOptionalString(state.sessionFile);
+      const statePath = typeof handle.session.sessionFile === 'string' ? handle.session.sessionFile : undefined;
       if (statePath && normalizeSessionPath(statePath) !== normalizeSessionPath(sessionPath)) throw new Error('GOAL_WORKER_SESSION_MISMATCH');
     } catch (error) {
       await this.closeGoalWorker(sessionId, workspace).catch(() => {});
       throw error;
     }
     this.goalWorkers.set(stateKey, workspace);
-    return client;
+    return handle;
   }
 
   async closeGoalWorker(sessionId: string, workspace?: string): Promise<void> {
@@ -589,11 +584,10 @@ export class PiRuntimeService {
     const owner = stateKey ? this.goalWorkers.get(stateKey) ?? this.sessionPaths.get(stateKey)?.workspace : workspace;
     if (stateKey) this.goalWorkers.delete(stateKey);
     try {
-      if (this.options.manager.closeGoalWorker) await this.options.manager.closeGoalWorker(sessionId, owner);
-      else await this.options.manager.close(owner === undefined ? `__goal__:${sessionId}` : piGoalWorkerKey(owner, sessionId));
+      if (owner !== undefined) await this.options.goalHost.dispose(owner, sessionId);
     } finally {
       // Always release the path and restore the interactive binding, even if
-      // the child process already exited or manager.close rejects.
+      // dispose rejects.
       if (stateKey) this.sessionPaths.delete(stateKey);
       if (owner !== undefined) {
         try {
@@ -693,14 +687,14 @@ export class PiRuntimeService {
     return { ok: true, level };
   }
 
-  private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>): Promise<unknown> {
+  private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>, origin: 'main' | 'goal'): Promise<unknown> {
     const s = handle.session;
     const images = Array.isArray(args.images) ? (args.images as ImageContent[]) : undefined;
     switch (command) {
       case 'agent_prompt':
-        return handle.prompt(readInput(args), { images, ...(args.streamingBehavior ? { streamingBehavior: args.streamingBehavior as 'steer' | 'followUp' } : {}) }, 'main');
+        return handle.prompt(readInput(args), { images, ...(args.streamingBehavior ? { streamingBehavior: args.streamingBehavior as 'steer' | 'followUp' } : {}) }, origin);
       case 'agent_set_mode':
-        return handle.prompt(`/mode ${String(args.mode ?? '')}`, {}, 'main');
+        return handle.prompt(`/mode ${String(args.mode ?? '')}`, {}, origin);
       case 'agent_steer': await s.steer(readInput(args), images); return undefined;
       case 'agent_follow_up': await s.followUp(readInput(args), images); return undefined;
       case 'agent_abort': await s.abort(); return undefined;
@@ -741,10 +735,10 @@ export class PiRuntimeService {
     }
   }
 
-  private handleOps(handle: WorkspaceHandlePort): SessionOps {
+  private handleOps(handle: WorkspaceHandlePort, origin: 'main' | 'goal' = 'main'): SessionOps {
     return {
       getState: async () => handle.getState(),
-      run: (command, args) => this.runOnHandle(handle, command, args),
+      run: (command, args) => this.runOnHandle(handle, command, args, origin),
       // 进程内 session 自知身份，无需回写。
     };
   }
@@ -754,18 +748,29 @@ export class PiRuntimeService {
     return this.options.agentHost.open(workspace, cwd);
   }
 
-  private async openClient(workspace: string): Promise<PiClientPort> {
-    const existing = this.options.manager.get(workspace);
-    if (existing) return existing;
-    const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
-    const env = await this.workerEnv(workspace, cwd, 'interactive');
-    return this.options.manager.open(workspace, cwd, env);
+  private async resolveHandle(workspace: string, session: SessionContext): Promise<WorkspaceHandlePort> {
+    const interactive = this.options.agentHost.get(workspace) ?? await this.openInteractive(workspace);
+    if (session.source !== 'goal') return interactive;
+    if (!session.sessionId) throw new Error('INVALID_SESSION_IDENTITY');
+    const visibleId = interactive.session?.sessionId;
+    if (visibleId && visibleId === session.sessionId) return interactive;
+    if (!session.sessionPath) throw new Error('INVALID_SESSION_IDENTITY');
+    return this.openGoalWorker(session.sessionId, workspace, session.sessionPath);
   }
 
-  private async openGoalClient(sessionId: string, workspace: string, sessionPath: string): Promise<PiClientPort> {
-    const existing = this.options.manager.get(piGoalWorkerKey(workspace, sessionId));
-    if (existing) return existing;
-    return this.openGoalWorker(sessionId, workspace, sessionPath);
+  private async preemptGoalTurn(workspace: string, command: string, args: Record<string, unknown>): Promise<void> {
+    const interactive = this.options.agentHost.get(workspace);
+    if (interactive && (command === 'agent_prompt' || SESSION_REPLACING_COMMANDS.includes(command)) && interactive.currentTurnOrigin === 'goal') {
+      await interactive.session.abort();
+      await interactive.session.waitForIdle();
+    }
+    if (!SESSION_REPLACING_COMMANDS.includes(command)) return;
+    const target = command === 'agent_switch_session' && typeof args.sessionPath === 'string'
+      ? args.sessionPath
+      : undefined;
+    if (!target) return;
+    const held = this.options.goalHost.findBySessionPath(target);
+    if (held) await this.options.goalHost.dispose(held.workspace, held.sessionId);
   }
 
   private async workerEnv(workspace: string, cwd: string, source: 'interactive' | 'goal'): Promise<Record<string, string>> {
@@ -1019,6 +1024,7 @@ export class PiRuntimeService {
   /** Used by AgentData project authorization for the currently open session. */
   async ownsSession(workspace: string, sessionId: string): Promise<boolean> {
     return this.currentSessionByWorkspace.get(workspace)?.sessionId === sessionId
+      || this.options.goalHost.get(workspace, sessionId) !== undefined
       || this.goalWorkers.get(this.sessionKey(workspace, sessionId)) === workspace;
   }
 
@@ -1200,16 +1206,6 @@ function readOptionalString(value: unknown): string | undefined {
 
 function readInput(args: Record<string, unknown>): string {
   return typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
-}
-
-function clientOps(client: PiClientPort): SessionOps {
-  return {
-    getState: () => client.send<Record<string, unknown>>({ type: 'get_state' }),
-    run: (command, args) => command === 'agent_set_mode'
-      ? client.send({ type: 'prompt', message: `/mode ${String(args.mode ?? '')}` })
-      : client.send({ type: commandTypes[command], ...args }),
-    setSessionIdentity: (id, path) => client.setSessionIdentity?.(id, path),
-  };
 }
 
 function normalizeSessionPath(value: string): string {

@@ -221,9 +221,21 @@ describe('GoalCoordinator', () => {
       updateTurn: vi.fn(async (id: string, patch: any) => ({ id, ...patch })),
     };
     let coordinator: GoalCoordinator;
+    const disposeGoal = vi.fn(async () => {});
     const pi = new PiRuntimeService({
       manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
-      agentHost: { open: async () => ({}) as never, get: () => undefined, close: async () => {} },
+      agentHost: {
+        open: async () => ({ session: { sessionId: 'session-a', sessionFile: sessionPath }, prompt: async () => {}, getState: () => ({ sessionId: 'session-a', sessionFile: sessionPath }), dispose: async () => {} }) as never,
+        get: () => undefined,
+        close: async () => {},
+      },
+      goalHost: {
+        open: async () => ({ session: { sessionId: 'session-a', sessionFile: sessionPath }, prompt: async () => {}, getState: () => ({ sessionId: 'session-a', sessionFile: sessionPath }), dispose: async () => {} }) as never,
+        get: () => undefined,
+        findBySessionPath: () => undefined,
+        dispose: disposeGoal,
+        disposeAllForWorkspace: async () => {},
+      },
       modelRuntimeHost: { refresh: async () => {} },
       threadStore: thread as any,
       onTurnSettled: (result) => {
@@ -275,7 +287,7 @@ describe('GoalCoordinator', () => {
         { idempotency_key: queuedKey, status: 'failed' },
       ]);
       expect(store.get('session-a')).toMatchObject({ status: 'error', stopReason: { kind: 'runtime_error' } });
-      expect(manager.closeGoalWorker).toHaveBeenCalledWith('session-a', 'C:/work');
+      expect(disposeGoal).toHaveBeenCalledWith('C:/work', 'session-a');
       await coordinator.stop();
     } finally {
       storage.close();

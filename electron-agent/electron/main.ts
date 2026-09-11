@@ -43,7 +43,9 @@ import { GoalCoordinator } from "./app/goalCoordinator";
 import { judgeGoal } from "./app/goalJudge";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
 import { AgentHost } from "./agent/agentHost";
+import { createGoalHandle } from "./agent/createGoalHandle";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
+import { GoalHost } from "./agent/goalHost";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { getAgentDir, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 
@@ -209,6 +211,28 @@ if (!process.env.VITEST) {
         },
       }),
     });
+    const goalHost = new GoalHost({
+      create: async (workspace, sessionId, sessionPath) => createGoalHandle({
+        workspace,
+        cwd: workspace,
+        sessionId,
+        sessionPath,
+        modelRuntime: await modelRuntimeHost.ensure(),
+        allowedExtensionsJson: JSON.stringify(plugins.allowedPluginIds()),
+        resolveConfig: (origin) => piRuntime!.turnConfig(workspace, workspace, origin),
+        onEvent: (event, meta) => {
+          const envelope = piRuntime!.eventEnvelope(workspace, event, meta);
+          broadcastPiEvent('pi://event', envelope);
+          void piRuntime!.handlePiEvent(workspace, event, meta).catch((error) => console.error('Goal event handling failed', error));
+        },
+        onFatal: (error) => {
+          console.error('GoalHandle fatal', error);
+          void goalHost.dispose(workspace, sessionId).catch(() => {});
+          broadcastPiEvent('pi://exit', { workspace, code: 1, sessionId, source: 'goal' });
+          void piRuntime!.handlePiExit(workspace, 1, { sessionId, source: 'goal' }).catch((err) => console.error('Goal exit handling failed', err));
+        },
+      }),
+    });
     const pi = new PiManager(
       piProcess,
       {
@@ -272,6 +296,7 @@ if (!process.env.VITEST) {
         agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         runtimeConfigPath,
         agentHost,
+        goalHost,
         modelRuntimeHost,
         agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
         migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused, legacyEntryTimestamp }) => agentData.requestAdmin('admin.goal.recoverLegacy', {
