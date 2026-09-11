@@ -50,6 +50,7 @@ test("resolveOfficialMainPackageDir retargets cli/ to the installed pi-coding-ag
 
 test("resolveInstalledPiPackageDir points at a package that actually has themes", () => {
   const installed = resolveInstalledPiPackageDir();
+  assert.ok(installed);
   assert.match(installed.replaceAll("\\", "/"), /@earendil-works\/pi-coding-agent$/);
   assert.equal(hasPiThemes(installed), true);
 });

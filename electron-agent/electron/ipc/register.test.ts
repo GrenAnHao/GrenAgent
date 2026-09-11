@@ -4,6 +4,9 @@ const electron = vi.hoisted(() => ({
   ipcMain: { handle: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
+  BrowserWindow: {
+    fromWebContents: (sender: { getOwnerBrowserWindow?: () => unknown }) => sender.getOwnerBrowserWindow?.(),
+  },
 }));
 
 vi.mock('electron', () => electron);

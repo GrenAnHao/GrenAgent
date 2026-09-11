@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { SettingsService } from '../app/settingsService';
 import type { McpPolicyService } from '../app/mcpPolicyService';
@@ -80,14 +80,14 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   });
   ipcMain.handle(IPC_CHANNELS.revealItem, (_event, path: string) => shell.showItemInFolder(path));
 
-  ipcMain.handle(IPC_CHANNELS.windowMinimize, (event) => event.sender.getOwnerBrowserWindow()?.minimize());
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, (event) => {
-    const window = event.sender.getOwnerBrowserWindow();
+    const window = BrowserWindow.fromWebContents(event.sender);
     if (window?.isMaximized()) window.unmaximize();
     else window?.maximize();
   });
-  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event) => event.sender.getOwnerBrowserWindow()?.isMaximized() ?? false);
-  ipcMain.handle(IPC_CHANNELS.windowClose, (event) => event.sender.getOwnerBrowserWindow()?.close());
+  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
+  ipcMain.handle(IPC_CHANNELS.windowClose, (event) => BrowserWindow.fromWebContents(event.sender)?.close());
 
   if (services.settings) registerSettingsCommands(services.settings);
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
@@ -250,9 +250,13 @@ function registerMcpConfigCommands(service: McpConfigService): void {
 }
 
 function registerPermissionCommands(service: PermissionManager): void {
-  registerCommand('permission_evaluate', (_event, args) => service.authorize(
-    readRecord(args, 'operation'), readString(args, 'profile'),
-  ));
+  registerCommand('permission_evaluate', (_event, args) => {
+    const operation = readRecord(args, 'operation');
+    return service.authorize(
+      { ...operation, kind: typeof operation.kind === 'string' ? operation.kind : 'unknown' },
+      readString(args, 'profile'),
+    );
+  });
   registerCommand('permission_resolve', (_event, args) => service.resolve(
     readString(args, 'requestId'), args.resolution === 'allow' ? 'allow' : 'deny',
   ));
