@@ -590,7 +590,13 @@ cd extensions; npx vitest run _shared/sandbox/darwin/seatbelt.test.ts
 (allow sysctl-read)
 (allow signal (target same-sandbox))
 (allow mach-lookup (global-name "com.apple.system.logger"))
+(allow network-outbound)
+(allow network-inbound)
+(allow system-socket)
+(allow file-write* (literal "/dev/null"))
 ```
+
+规格 1 的 `network` 恒为 `enabled`：`(deny default)` 若不放行网络，macOS 会真断网，且 `operation not permitted` 会被误判成拒写。不要把网络隔离留给规格 5 却在本 profile 里默默生效。
 
 `workspace-write` 追加 `(allow file-write* (subpath "ROOT"))` 与临时目录的同样一条。路径用绝对 POSIX 形式。探测：`/usr/bin/sandbox-exec` 存在。
 

@@ -14,6 +14,10 @@ const REQUIRED = [
   "(allow sysctl-read)",
   "(allow signal (target same-sandbox))",
   '(allow mach-lookup (global-name "com.apple.system.logger"))',
+  "(allow network-outbound)",
+  "(allow network-inbound)",
+  "(allow system-socket)",
+  '(allow file-write* (literal "/dev/null"))',
 ];
 
 function writeAllow(root: string): string {

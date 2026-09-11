@@ -16,6 +16,10 @@ export function seatbeltProfile(
     "(allow sysctl-read)",
     "(allow signal (target same-sandbox))",
     '(allow mach-lookup (global-name "com.apple.system.logger"))',
+    "(allow network-outbound)",
+    "(allow network-inbound)",
+    "(allow system-socket)",
+    '(allow file-write* (literal "/dev/null"))',
     `(allow file-write* (subpath "${temp}"))`,
   ];
   if (policy.mode === "workspace-write") {
