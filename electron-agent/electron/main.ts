@@ -23,8 +23,6 @@ import { PermissionManager } from "./app/permissionManager";
 import { DevService } from "./app/devService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
-import { PiManager } from "./pi/manager";
-import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
@@ -86,7 +84,6 @@ if (!process.env.VITEST) {
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const worksDir = await workspace.getWorksDir();
-    const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
     bootstrapRuntimeConfig(runtimeConfigPath);
     process.env.PI_WORKER_ENTRY = resolveWorkerEntry({
@@ -237,51 +234,6 @@ if (!process.env.VITEST) {
         },
       }),
     });
-    const pi = new PiManager(
-      piProcess,
-      {
-        onEvent: (workspace, event, metadata) => {
-          // 先转发渲染层、后落盘：流式 UI 的实时性优先于持久化。
-          // handlePiEvent 内部会走 node:sqlite 的同步写，若放在前面会阻塞主进程事件循环，
-          // 把本帧的 webContents.send 延后，表现为思考/正文「卡住直到整段返回才突然出现」。
-          const envelope = piRuntime?.eventEnvelope(workspace, event, metadata) ?? {
-            workspace,
-            event,
-            ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
-            source: metadata?.source ?? 'interactive',
-          };
-          broadcastPiEvent('pi://event', envelope);
-          void piRuntime?.handlePiEvent(workspace, event, metadata).catch((error) => console.error('Pi event handling failed', error));
-        },
-        onUiRequest: (workspace, request, metadata) => {
-          // Automatic Goal workers must never surface interactive prompts in
-          // the visible session; their turn will fail closed if they cannot
-          // proceed without user input.
-          if (metadata?.source === 'goal') {
-            const requestId = typeof request.id === 'string' ? request.id : '';
-            void piRuntime?.rejectUiRequest(workspace, metadata, requestId).catch((error) => console.error('Goal UI rejection failed', error));
-            return;
-          }
-          broadcastPiEvent('pi://ui-request', {
-          workspace,
-          request,
-          ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
-          ...(metadata?.source ? { source: metadata.source } : {}),
-          });
-        },
-        onExit: (workspace, code, metadata) => {
-          broadcastPiEvent('pi://exit', {
-            workspace,
-            code,
-            ...(metadata?.sessionId ? { sessionId: metadata.sessionId } : {}),
-            ...(metadata?.source ? { source: metadata.source } : {}),
-          });
-          void piRuntime?.handlePiExit(workspace, code, metadata).catch((error) => console.error('Pi exit handling failed', error));
-        },
-        onLog: (message) => console.error(message),
-      },
-      { sandbox },
-    );
     registerIpcHandlers({
       settings,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
@@ -293,9 +245,7 @@ if (!process.env.VITEST) {
       skills: new SkillService(app.getPath('home')),
       usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
       pi: piRuntime = new PiRuntimeService({
-        manager: pi,
-        processCommand: resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
-        agentDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
+        agentDir,
         runtimeConfigPath,
         agentHost,
         goalHost,
@@ -423,7 +373,7 @@ if (!process.env.VITEST) {
       shutdownStarted = true;
       void (async () => {
         await goalCoordinator?.stop();
-        await Promise.allSettled([pi.closeAll(), codeGraphJobs.close()]);
+        await Promise.allSettled([codeGraphJobs.close()]);
         systemWorker.close();
         await agentHost.closeAll();
         killAllSubagents();

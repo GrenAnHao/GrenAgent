@@ -223,7 +223,7 @@ describe('GoalCoordinator', () => {
     let coordinator: GoalCoordinator;
     const disposeGoal = vi.fn(async () => {});
     const pi = new PiRuntimeService({
-      manager, processCommand: { command: 'pi', args: [] }, agentDir: 'C:/agent',
+      agentDir: 'C:/agent',
       agentHost: {
         open: async () => ({ session: { sessionId: 'session-a', sessionFile: sessionPath }, prompt: async () => {}, getState: () => ({ sessionId: 'session-a', sessionFile: sessionPath }), dispose: async () => {} }) as never,
         get: () => undefined,

@@ -2,10 +2,9 @@ import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { type PiProcessCommand } from '../pi/manager';
 import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
 import type { WorkspaceHandle } from '../agent/workspaceHandle.js';
-import type { PiClientMetadata } from '../pi/client';
+import type { SessionEventMeta } from '../pi/eventAdapter';
 import type { Thread, Turn } from './appServer/types';
 import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
@@ -69,23 +68,7 @@ interface SessionOps {
 }
 
 interface PiEventMeta { sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal' }
-type EventMeta = string | PiEventMeta | PiClientMetadata;
-
-interface PiClientPort {
-  send<T>(command: Record<string, unknown>): Promise<T>;
-  respondUi(response: Record<string, unknown>): Promise<void>;
-  setSessionIdentity?(sessionId: string, sessionPath?: string): void;
-}
-
-interface PiManagerPort {
-  get(workspace: string): PiClientPort | undefined;
-  open(workspace: string, cwd: string, env?: Record<string, string>): PiClientPort;
-  open(options: { key: string; cwd: string; logicalWorkspace: string; sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal'; env?: Record<string, string> }): PiClientPort;
-  openGoalWorker?(sessionId: string, workspace: string, sessionPath: string, cwd?: string, env?: Record<string, string>): PiClientPort;
-  closeGoalWorker?(sessionId: string, workspace?: string): Promise<void>;
-  close(workspace: string): Promise<void>;
-  all?: () => Array<[string, PiClientPort]>;
-}
+type EventMeta = string | PiEventMeta | SessionEventMeta;
 
 interface ThreadStorePort {
   createThread(input: { id: string; projectId: string; workspace: string; title?: string; sessionId?: string }): Promise<Thread> | Thread;
@@ -137,8 +120,6 @@ interface ActiveTurn {
 }
 
 export interface PiRuntimeOptions {
-  manager: PiManagerPort;
-  processCommand: PiProcessCommand;
   agentDir: string;
   runtimeConfigPath?: string;
   agentDataEndpoint?: (workspace: string) => string | undefined;

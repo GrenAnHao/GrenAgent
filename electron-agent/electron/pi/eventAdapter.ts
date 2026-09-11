@@ -19,6 +19,14 @@ export interface PiProjection {
   data: unknown;
 }
 
+export interface SessionEventMeta {
+  sessionId?: string;
+  sessionPath?: string;
+  source?: 'interactive' | 'goal';
+  key?: string;
+  logicalWorkspace?: string;
+}
+
 export interface PiEventContext {
   projectId?: string;
   threadId?: string;
