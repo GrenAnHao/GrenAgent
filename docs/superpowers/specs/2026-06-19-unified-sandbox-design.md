@@ -1,7 +1,7 @@
 # 统一沙箱层（Unified Sandbox · WSL2 + sandbox-runtime）设计
 
 - 日期：2026-06-19
-- 状态：设计已评审（待用户最终确认 → writing-plans）
+- 状态：已废弃（2026-09-12 起以 `2026-09-12-os-sandbox-design.md` 为准；不再走 WSL2 + srt，不可用时不再降级宿主）
 - 主题：把 `extensions/safety/sandbox.ts` 的 `SandboxAdapter` 桩落地为一个**统一沙箱层**，给「代码/命令执行」提供真隔离的执行环境，被 code-exec、im-platforms、multi-agent、safety 四处复用。Windows 优先，后端走 WSL2 内的 `@anthropic-ai/sandbox-runtime`。
 
 ## 1. 背景与目标
