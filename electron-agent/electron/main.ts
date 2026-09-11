@@ -25,7 +25,7 @@ import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
 import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
@@ -48,6 +48,7 @@ import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
 import { GoalHost } from "./agent/goalHost";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { getAgentDir, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
+import { runOneshotWithRuntime, type OneshotRequest } from "../../extensions/_shared/oneshot.js";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -346,12 +347,14 @@ if (!process.env.VITEST) {
         },
         refresh: () => piRuntime!.refreshModelRegistry(),
         activeModel: async (workspace) => {
-          const handle = agentHost.get(workspace);
-          const model = handle?.session.model;
-          if (!model) throw new Error(`workspace has no active model: ${workspace}`);
+          const model = agentHost.get(workspace)?.session.model;
+          if (!model) throw new Error(`workspace not open: ${workspace}`);
           return { provider: model.provider, modelId: model.id };
         },
-        oneshot: (request, onLine) => runPiOneshot(piProcess, resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }), request, onLine),
+        oneshot: async (request, onLine) => {
+          const runtime = await modelRuntimeHost.ensure();
+          await runOneshotWithRuntime(runtime, request as unknown as OneshotRequest, (obj) => onLine?.(JSON.stringify(obj)));
+        },
       }),
       workspace,
       uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
@@ -427,32 +430,6 @@ if (!process.env.VITEST) {
     createWindow();
   });
   app.on("window-all-closed", () => app.quit());
-}
-
-function runPiOneshot(
-  processCommand: ReturnType<typeof resolvePiProcess>, packageDir: string, request: Record<string, unknown>, onLine?: (line: string) => void,
-): Promise<void> {
-  const entry = processCommand.args[0];
-  const args = entry?.endsWith('.ts') ? [entry, 'oneshot'] : ['oneshot'];
-  return new Promise((resolve, reject) => {
-    const child = spawn(processCommand.command, args, {
-      env: { ...process.env, PI_PACKAGE_DIR: packageDir, ONESHOT_REQUEST: JSON.stringify(request) },
-      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-    });
-    let buffered = ''; let stderr = '';
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      buffered += chunk;
-      const lines = buffered.split(/\r?\n/); buffered = lines.pop() ?? '';
-      lines.map((line) => line.trim()).filter(Boolean).forEach((line) => onLine?.(line));
-    });
-    child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk: string) => { stderr += chunk; });
-    child.once('error', (error) => reject(error));
-    child.once('close', (code) => {
-      if (buffered.trim()) onLine?.(buffered.trim());
-      if (code === 0) resolve(); else reject(new Error(`pi oneshot exited (${code}): ${stderr.trim()}`));
-    });
-  });
 }
 
 function broadcastPiEvent(event: string, payload: unknown): void {

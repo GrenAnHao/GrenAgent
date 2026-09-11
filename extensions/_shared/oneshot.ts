@@ -3,6 +3,8 @@
 // 放在 _shared（而非 cli/）是因为 pi-ai 是 extensions 的依赖、能在此解析；cli 仅经 main.ts dispatch，
 // 与既有 probe-mcp（逻辑在 extensions/mcp/probe.ts、cli 转发）同构。鉴权范式对齐 _shared/summarize.ts。
 
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+
 export interface OneshotRequest {
   provider: string;
   modelId: string;
@@ -46,6 +48,38 @@ export function formatNonStream(
   return { ok: true, content: text, usage: msg.usage };
 }
 
+export type OneshotRuntime = {
+  getModel(provider: string, modelId: string): unknown;
+  completeSimple: ModelRuntime["completeSimple"];
+  streamSimple: ModelRuntime["streamSimple"];
+};
+
+export async function runOneshotWithRuntime(
+  runtime: OneshotRuntime,
+  req: OneshotRequest,
+  emit: (obj: unknown) => void,
+): Promise<void> {
+  const model = runtime.getModel(req.provider, req.modelId);
+  if (!model) {
+    emit({ ok: false, error: `model not found: ${req.provider}/${req.modelId}` });
+    return;
+  }
+  const context = {
+    systemPrompt: req.system,
+    messages: [{ role: "user", content: req.user, timestamp: Date.now() }],
+  } as Parameters<typeof runtime.completeSimple>[1];
+  if (req.stream) {
+    for await (const ev of runtime.streamSimple(model as never, context)) {
+      if (ev.type === "text_delta" && ev.delta) emit({ type: "delta", text: ev.delta });
+      else if (ev.type === "done") emit({ type: "done", usage: ev.message.usage });
+      else if (ev.type === "error") emit({ type: "error", usage: ev.error.usage, error: ev.error.errorMessage });
+    }
+    return;
+  }
+  const msg = await runtime.completeSimple(model as never, context);
+  emit(formatNonStream(msg as AssistantLike));
+}
+
 const emit = (obj: unknown) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
 export async function runOneshot(): Promise<void> {
@@ -54,35 +88,10 @@ export async function runOneshot(): Promise<void> {
     emit({ ok: false, error: parsed.error });
     return;
   }
-  const { req } = parsed;
   try {
     const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
     const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
-    const model = modelRuntime.getModel(req.provider, req.modelId);
-    if (!model) {
-      emit({ ok: false, error: `model not found: ${req.provider}/${req.modelId}` });
-      return;
-    }
-    const context = {
-      systemPrompt: req.system,
-      messages: [{ role: "user", content: req.user, timestamp: Date.now() }],
-    } as Parameters<typeof modelRuntime.completeSimple>[1];
-
-    if (req.stream) {
-      // 精简 JSONL：仅吐 delta + 末尾 done/error(usage)，避免每事件夹带整个 partial 消息。
-      for await (const ev of modelRuntime.streamSimple(model, context)) {
-        if (ev.type === "text_delta" && ev.delta) {
-          emit({ type: "delta", text: ev.delta });
-        } else if (ev.type === "done") {
-          emit({ type: "done", usage: ev.message.usage });
-        } else if (ev.type === "error") {
-          emit({ type: "error", usage: ev.error.usage, error: ev.error.errorMessage });
-        }
-      }
-      return;
-    }
-    const msg = await modelRuntime.completeSimple(model, context);
-    emit(formatNonStream(msg as AssistantLike));
+    await runOneshotWithRuntime(modelRuntime, parsed.req, emit);
   } catch (e) {
     emit({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
