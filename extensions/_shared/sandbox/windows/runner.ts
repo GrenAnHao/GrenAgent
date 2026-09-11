@@ -21,11 +21,17 @@ export function windowsHelperArgv(
   const prefix = [helperPath];
   if (policy.mode === "workspace-write") {
     prefix.push(
+      "--workspace",
+      policy.workspaceRoot,
       "--workspace-sid",
       capabilitySid("workspace", policy.workspaceRoot),
+      "--temp",
+      tempDir,
       "--temp-sid",
       capabilitySid("temp", tempDir),
     );
+  } else {
+    prefix.push("--temp", tempDir);
   }
   return [...prefix, "--", ...argv];
 }

@@ -23,3 +23,34 @@ export function assertWritableRootsDisjoint(workspace: string, temp: string): vo
     throw new Error(`writable roots must be disjoint: ${workspace} vs ${temp}`);
   }
 }
+
+export type WindowsAclTrustee = "workspace" | "temp" | "everyone";
+
+export interface WindowsAclStamp {
+  path: string;
+  trustee: WindowsAclTrustee;
+  sid: string;
+}
+
+/** Plan only — helper.c stamps these ACEs (OI|CI Modify) before CreateProcess. */
+export function windowsAclStamps(
+  policy: { mode: "read-only" | "workspace-write"; workspaceRoot: string },
+  tempDir: string,
+): WindowsAclStamp[] {
+  assertWritableRootsDisjoint(policy.workspaceRoot, tempDir);
+  if (policy.mode === "read-only") {
+    return [{ path: tempDir, trustee: "everyone", sid: "S-1-1-0" }];
+  }
+  return [
+    {
+      path: policy.workspaceRoot,
+      trustee: "workspace",
+      sid: capabilitySid("workspace", policy.workspaceRoot),
+    },
+    {
+      path: tempDir,
+      trustee: "temp",
+      sid: capabilitySid("temp", tempDir),
+    },
+  ];
+}

@@ -2,36 +2,60 @@
  * pi-sandbox-win — write-restricted token helper.
  *
  * Usage:
- *   pi-sandbox-win.exe [--workspace-sid SID] [--temp-sid SID] -- command [args...]
+ *   pi-sandbox-win.exe [--workspace DIR --workspace-sid SID]
+ *                      --temp DIR [--temp-sid SID] -- command [args...]
  *
- * workspace-write passes both capability SIDs. read-only omits them; the
- * restricting SID set is then logon SID + Everyone only.
+ * workspace-write: both capability SIDs plus directory paths.
+ * read-only: --temp only (no workspace path / capability SIDs). Restricting
+ * SIDs are then logon SID + Everyone. Do not add capability SIDs to TokenGroups.
+ *
+ * ACL contract (before CreateProcess):
+ *   workspace-write — SetNamedSecurityInfoW on workspace and temp, GRANT
+ *     inheritable (OI|CI / SUB_CONTAINERS_AND_OBJECTS_INHERIT) Modify
+ *     (GENERIC_READ|GENERIC_WRITE|DELETE) to the matching capability SID.
+ *   read-only — stamp temp with Everyone the same way; do not stamp workspace.
+ * Without these ACEs, WRITE_RESTRICTED denies writes even inside the workspace.
+ *
+ * TokenDefaultDacl (SetTokenInformation):
+ *   read-only — Everyone; workspace-write — workspace + temp capability SIDs.
+ *   So pipes and grandchild-created objects stay writable.
  *
  * Exit:
- *   162  child ended with a write / access denial
- *   163  helper API or argv failure (stderr: "pi-sandbox-win: <Api> failed")
+ *   162  ONLY when the child exit code is 5 (ERROR_ACCESS_DENIED) or
+ *        STATUS_ACCESS_DENIED (0xC0000022). bash write denials usually exit 1;
+ *        those are classified via denialSignatures ("access is denied" / 拒绝访问).
+ *   163  helper API or argv failure
+ *        (stderr: "pi-sandbox-win: <Api> failed <GetLastError decimal>")
  *   else child's exit code
  *
- * Build later (task 13), do not check in the exe:
+ * Build (do not check in the exe):
  *   cl /O2 /Fe:bin\pi-sandbox-win.exe helper.c advapi32.lib shell32.lib
  *   gcc -O2 -o bin/pi-sandbox-win.exe helper.c -ladvapi32 -lshell32
  */
 
-#define WIN32_LEAN_AND_MEAN
-#define UNICODE
-#define _UNICODE
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
 #endif
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
+
+#define WIN32_LEAN_AND_MEAN
+#define UNICODE
+#define _UNICODE
 
 #include <windows.h>
+#include <shellapi.h>
 #include <sddl.h>
+#include <aclapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
+#endif
 
 #ifndef DISABLE_MAX_PRIVILEGE
 #define DISABLE_MAX_PRIVILEGE 0x1
@@ -43,8 +67,19 @@
 #define WRITE_RESTRICTED 0x8
 #endif
 
-#ifndef SECURITY_MAX_SID_SIZE
-#define SECURITY_MAX_SID_SIZE 68
+#ifndef EXTENDED_STARTUPINFO_PRESENT
+#define EXTENDED_STARTUPINFO_PRESENT 0x00080000
+#endif
+
+#ifndef PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+#define PROC_THREAD_ATTRIBUTE_NUMBER 0x0000FFFF
+#define PROC_THREAD_ATTRIBUTE_INPUT 0x00020000
+#define PROC_THREAD_ATTRIBUTE_HANDLE_LIST \
+    ((2 & PROC_THREAD_ATTRIBUTE_NUMBER) | PROC_THREAD_ATTRIBUTE_INPUT)
+#endif
+
+#ifndef SUB_CONTAINERS_AND_OBJECTS_INHERIT
+#define SUB_CONTAINERS_AND_OBJECTS_INHERIT 0x3
 #endif
 
 #define DENIAL_EXIT 162
@@ -53,8 +88,14 @@
 #define NTSTATUS_ACCESS_DENIED 0xC0000022u
 
 static void fail(const char *api) {
-    fprintf(stderr, "pi-sandbox-win: %s failed\n", api);
+    DWORD err = GetLastError();
+    fprintf(stderr, "pi-sandbox-win: %s failed %lu\n", api, (unsigned long)err);
     ExitProcess(HELPER_FAIL_EXIT);
+}
+
+static void failWin(const char *api, DWORD err) {
+    SetLastError(err);
+    fail(api);
 }
 
 static void enablePrivilege(HANDLE token, LPCWSTR name) {
@@ -124,6 +165,88 @@ static PSID logonSidFromToken(HANDLE token) {
         fail("TokenLogonSid");
     }
     return found;
+}
+
+/*
+ * GRANT inheritable (OI|CI) Modify to trustee on an existing directory.
+ * Capability SIDs stay out of TokenGroups; the ACE on disk is what
+ * WRITE_RESTRICTED consults.
+ */
+static void grantInheritableModify(LPCWSTR path, PSID trustee) {
+    PACL oldDacl = NULL;
+    PACL newDacl = NULL;
+    PSECURITY_DESCRIPTOR sd = NULL;
+    EXPLICIT_ACCESS_W ea;
+    DWORD err;
+
+    ZeroMemory(&ea, sizeof(ea));
+    ea.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE | DELETE;
+    ea.grfAccessMode = GRANT_ACCESS;
+    ea.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+    ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    ea.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+    ea.Trustee.ptstrName = (LPWSTR)trustee;
+
+    err = GetNamedSecurityInfoW(
+        path,
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION,
+        NULL,
+        NULL,
+        &oldDacl,
+        NULL,
+        &sd);
+    if (err != ERROR_SUCCESS) {
+        failWin("GetNamedSecurityInfoW", err);
+    }
+
+    err = SetEntriesInAclW(1, &ea, oldDacl, &newDacl);
+    if (err != ERROR_SUCCESS) {
+        LocalFree(sd);
+        failWin("SetEntriesInAclW", err);
+    }
+
+    err = SetNamedSecurityInfoW(
+        (LPWSTR)path,
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION,
+        NULL,
+        NULL,
+        newDacl,
+        NULL);
+    LocalFree(newDacl);
+    LocalFree(sd);
+    if (err != ERROR_SUCCESS) {
+        failWin("SetNamedSecurityInfoW", err);
+    }
+}
+
+static void setTokenDefaultDacl(HANDLE token, PSID *sids, DWORD count) {
+    EXPLICIT_ACCESS_W eas[MAX_RESTRICTING_SIDS];
+    PACL dacl = NULL;
+    TOKEN_DEFAULT_DACL info;
+    DWORD i;
+    DWORD err;
+
+    ZeroMemory(eas, sizeof(eas));
+    for (i = 0; i < count; i++) {
+        eas[i].grfAccessPermissions = GENERIC_READ | GENERIC_WRITE | DELETE;
+        eas[i].grfAccessMode = SET_ACCESS;
+        eas[i].grfInheritance = 0;
+        eas[i].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        eas[i].Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+        eas[i].Trustee.ptstrName = (LPWSTR)sids[i];
+    }
+    err = SetEntriesInAclW(count, eas, NULL, &dacl);
+    if (err != ERROR_SUCCESS) {
+        failWin("SetEntriesInAclW", err);
+    }
+    info.DefaultDacl = dacl;
+    if (!SetTokenInformation(token, TokenDefaultDacl, &info, sizeof(info))) {
+        LocalFree(dacl);
+        fail("SetTokenInformation");
+    }
+    LocalFree(dacl);
 }
 
 static size_t quoteArg(const wchar_t *arg, wchar_t *out, size_t cap) {
@@ -204,17 +327,25 @@ static wchar_t *buildCommandLine(int argc, wchar_t **argv) {
     return buf;
 }
 
-static void inheritStdHandle(DWORD which, HANDLE *out) {
-    HANDLE h = GetStdHandle(which);
-    *out = h;
-    if (h && h != INVALID_HANDLE_VALUE) {
-        SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+static void addInheritHandle(HANDLE *list, DWORD *n, HANDLE h) {
+    DWORD i;
+    if (!h || h == INVALID_HANDLE_VALUE) {
+        return;
     }
+    for (i = 0; i < *n; i++) {
+        if (list[i] == h) {
+            return;
+        }
+    }
+    list[(*n)++] = h;
+    SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
 }
 
 static int run(int argc, wchar_t **argv) {
-    LPCWSTR workspaceSid = NULL;
-    LPCWSTR tempSid = NULL;
+    LPCWSTR workspacePath = NULL;
+    LPCWSTR workspaceSidText = NULL;
+    LPCWSTR tempPath = NULL;
+    LPCWSTR tempSidText = NULL;
     int commandIndex = -1;
     int i;
     HANDLE processToken = NULL;
@@ -222,40 +353,70 @@ static int run(int argc, wchar_t **argv) {
     HANDLE primary = NULL;
     PSID restrictingSids[MAX_RESTRICTING_SIDS];
     SID_AND_ATTRIBUTES sidAttrs[MAX_RESTRICTING_SIDS];
+    PSID everyoneSid = NULL;
+    PSID workspaceSid = NULL;
+    PSID tempSid = NULL;
+    PSID defaultDaclSids[2];
+    DWORD defaultDaclCount = 0;
     DWORD sidCount = 0;
     DWORD flags;
     wchar_t *commandLine;
-    STARTUPINFOW si;
+    STARTUPINFOEXW siex;
+    SIZE_T attrSize = 0;
+    HANDLE inherit[3];
+    DWORD inheritCount = 0;
     PROCESS_INFORMATION pi;
     DWORD wait;
     DWORD exitCode;
 
     ZeroMemory(restrictingSids, sizeof(restrictingSids));
     ZeroMemory(sidAttrs, sizeof(sidAttrs));
+    ZeroMemory(&siex, sizeof(siex));
+    ZeroMemory(&pi, sizeof(pi));
 
     for (i = 1; i < argc; i++) {
         if (wcscmp(argv[i], L"--") == 0) {
             commandIndex = i + 1;
             break;
         }
+        if (wcscmp(argv[i], L"--workspace") == 0) {
+            if (i + 1 >= argc) {
+                fail("argv");
+            }
+            workspacePath = argv[++i];
+            continue;
+        }
         if (wcscmp(argv[i], L"--workspace-sid") == 0) {
             if (i + 1 >= argc) {
                 fail("argv");
             }
-            workspaceSid = argv[++i];
+            workspaceSidText = argv[++i];
+            continue;
+        }
+        if (wcscmp(argv[i], L"--temp") == 0) {
+            if (i + 1 >= argc) {
+                fail("argv");
+            }
+            tempPath = argv[++i];
             continue;
         }
         if (wcscmp(argv[i], L"--temp-sid") == 0) {
             if (i + 1 >= argc) {
                 fail("argv");
             }
-            tempSid = argv[++i];
+            tempSidText = argv[++i];
             continue;
         }
         fail("argv");
     }
 
     if (commandIndex < 0 || commandIndex >= argc) {
+        fail("argv");
+    }
+    if (!tempPath) {
+        fail("argv");
+    }
+    if ((workspacePath == NULL) != (workspaceSidText == NULL)) {
         fail("argv");
     }
 
@@ -269,13 +430,16 @@ static int run(int argc, wchar_t **argv) {
     enablePrivilege(processToken, SE_INCREASE_QUOTA_NAME);
     enablePrivilege(processToken, SE_ASSIGNPRIMARYTOKEN_NAME);
 
+    everyoneSid = sidFromString(L"S-1-1-0", "ConvertStringSidToSid");
     restrictingSids[sidCount++] = logonSidFromToken(processToken);
-    restrictingSids[sidCount++] = sidFromString(L"S-1-1-0", "ConvertStringSidToSid");
-    if (workspaceSid) {
-        restrictingSids[sidCount++] = sidFromString(workspaceSid, "ConvertStringSidToSid");
+    restrictingSids[sidCount++] = copySid(everyoneSid);
+    if (workspaceSidText) {
+        workspaceSid = sidFromString(workspaceSidText, "ConvertStringSidToSid");
+        restrictingSids[sidCount++] = copySid(workspaceSid);
     }
-    if (tempSid) {
-        restrictingSids[sidCount++] = sidFromString(tempSid, "ConvertStringSidToSid");
+    if (tempSidText) {
+        tempSid = sidFromString(tempSidText, "ConvertStringSidToSid");
+        restrictingSids[sidCount++] = copySid(tempSid);
     }
 
     for (i = 0; i < (int)sidCount; i++) {
@@ -308,16 +472,62 @@ static int run(int argc, wchar_t **argv) {
         fail("DuplicateTokenEx");
     }
 
+    /* Directory ACL stamp — never add capability SIDs to TokenGroups. */
+    if (workspacePath && workspaceSid) {
+        grantInheritableModify(workspacePath, workspaceSid);
+    }
+    if (tempPath) {
+        grantInheritableModify(tempPath, tempSid ? tempSid : everyoneSid);
+    }
+
+    if (workspaceSid && tempSid) {
+        defaultDaclSids[defaultDaclCount++] = workspaceSid;
+        defaultDaclSids[defaultDaclCount++] = tempSid;
+    } else {
+        defaultDaclSids[defaultDaclCount++] = everyoneSid;
+    }
+    setTokenDefaultDacl(primary, defaultDaclSids, defaultDaclCount);
+
     commandLine = buildCommandLine(argc - commandIndex, argv + commandIndex);
 
-    ZeroMemory(&si, sizeof(si));
-    ZeroMemory(&pi, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    inheritStdHandle(STD_INPUT_HANDLE, &si.hStdInput);
-    inheritStdHandle(STD_OUTPUT_HANDLE, &si.hStdOutput);
-    inheritStdHandle(STD_ERROR_HANDLE, &si.hStdError);
+    addInheritHandle(inherit, &inheritCount, GetStdHandle(STD_INPUT_HANDLE));
+    addInheritHandle(inherit, &inheritCount, GetStdHandle(STD_OUTPUT_HANDLE));
+    addInheritHandle(inherit, &inheritCount, GetStdHandle(STD_ERROR_HANDLE));
 
+    siex.StartupInfo.cb = sizeof(siex);
+    siex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    siex.StartupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    siex.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    siex.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
+    siex.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
+        GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        attrSize);
+    if (!siex.lpAttributeList) {
+        fail("HeapAlloc");
+    }
+    if (!InitializeProcThreadAttributeList(siex.lpAttributeList, 1, 0, &attrSize)) {
+        fail("InitializeProcThreadAttributeList");
+    }
+    if (inheritCount > 0) {
+        if (!UpdateProcThreadAttribute(
+                siex.lpAttributeList,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                inherit,
+                inheritCount * sizeof(HANDLE),
+                NULL,
+                NULL)) {
+            fail("UpdateProcThreadAttribute");
+        }
+    }
+
+    /*
+     * bInheritHandles must be TRUE when HANDLE_LIST is set; the attribute
+     * whitelist is what prevents inheriting every inheritable handle.
+     */
     if (!CreateProcessAsUserW(
             primary,
             NULL,
@@ -325,14 +535,16 @@ static int run(int argc, wchar_t **argv) {
             NULL,
             NULL,
             TRUE,
-            0,
+            EXTENDED_STARTUPINFO_PRESENT,
             NULL,
             NULL,
-            &si,
+            &siex.StartupInfo,
             &pi)) {
         fail("CreateProcessAsUserW");
     }
 
+    DeleteProcThreadAttributeList(siex.lpAttributeList);
+    HeapFree(GetProcessHeap(), 0, siex.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, commandLine);
     CloseHandle(pi.hThread);
 
@@ -351,7 +563,17 @@ static int run(int argc, wchar_t **argv) {
     for (i = 0; i < (int)sidCount; i++) {
         LocalFree(restrictingSids[i]);
     }
+    if (workspaceSid) {
+        LocalFree(workspaceSid);
+    }
+    if (tempSid) {
+        LocalFree(tempSid);
+    }
+    if (everyoneSid) {
+        LocalFree(everyoneSid);
+    }
 
+    /* 162 maps only these two child codes; bash exit 1 uses denialSignatures. */
     if (exitCode == ERROR_ACCESS_DENIED || exitCode == NTSTATUS_ACCESS_DENIED) {
         return DENIAL_EXIT;
     }

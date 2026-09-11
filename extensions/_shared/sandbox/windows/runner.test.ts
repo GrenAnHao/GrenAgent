@@ -17,7 +17,9 @@ describe("windowsHelperArgv", () => {
     const policy = { mode: "workspace-write" as const, workspaceRoot };
     const argv = windowsHelperArgv(policy, caller, helperPath, tempDir);
     expect(argv[0]).toBe(helperPath);
+    expect(hasSeq(argv, ["--workspace", workspaceRoot])).toBe(true);
     expect(hasSeq(argv, ["--workspace-sid", capabilitySid("workspace", workspaceRoot)])).toBe(true);
+    expect(hasSeq(argv, ["--temp", tempDir])).toBe(true);
     expect(hasSeq(argv, ["--temp-sid", capabilitySid("temp", tempDir)])).toBe(true);
     const sep = argv.indexOf("--");
     expect(sep).toBeGreaterThan(0);
@@ -48,7 +50,9 @@ describe("windowsHelperArgv", () => {
     const policy = { mode: "read-only" as const, workspaceRoot };
     const argv = windowsHelperArgv(policy, caller, helperPath, tempDir);
     expect(argv[0]).toBe(helperPath);
+    expect(argv).not.toContain("--workspace");
     expect(argv).not.toContain("--workspace-sid");
+    expect(hasSeq(argv, ["--temp", tempDir])).toBe(true);
     expect(argv).not.toContain("--temp-sid");
     const sep = argv.indexOf("--");
     expect(sep).toBeGreaterThan(0);
