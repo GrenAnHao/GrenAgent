@@ -14,6 +14,8 @@ describe("bwrapArgv", () => {
     const argv = bwrapArgv({ mode: "read-only", workspaceRoot }, caller, tempDir);
     expect(argv[0]).toBe("bwrap");
     expect(hasSeq(argv, ["--ro-bind", "/", "/"])).toBe(true);
+    expect(argv.indexOf("--ro-bind")).toBeLessThan(argv.indexOf("--proc"));
+    expect(argv.indexOf("--ro-bind")).toBeLessThan(argv.indexOf("--dev"));
     expect(argv).toContain("--die-with-parent");
     expect(argv).toContain("--unshare-pid");
     expect(hasSeq(argv, ["--bind", tempDir, tempDir])).toBe(true);

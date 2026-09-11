@@ -7,9 +7,9 @@ export function bwrapArgv(
     "bwrap",
     "--die-with-parent",
     "--unshare-pid",
+    "--ro-bind", "/", "/",
     "--proc", "/proc",
     "--dev", "/dev",
-    "--ro-bind", "/", "/",
   ];
   prefix.push("--bind", tempDir, tempDir);
   if (policy.mode === "workspace-write") {
