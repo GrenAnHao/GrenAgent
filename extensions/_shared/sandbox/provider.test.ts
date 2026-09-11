@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createSandboxProvider } from "./provider.js";
 import type { ConfinedArgv } from "./types.js";
@@ -96,11 +97,40 @@ describe("createSandboxProvider", () => {
     expect(out.enforcement).toBe("full");
   });
 
-  it("throws SANDBOX_UNAVAILABLE when win32 runner is not wired", async () => {
-    const provider = createSandboxProvider({ platform: "win32" });
+  it("throws SANDBOX_UNAVAILABLE when the windows helper file is missing", async () => {
+    const provider = createSandboxProvider({
+      platform: "win32",
+      helperPath: "Z:/missing/pi-sandbox-win.exe",
+    });
     await expect(provider.confine(caller, policy)).rejects.toMatchObject({
       code: "SANDBOX_UNAVAILABLE",
-      message: expect.stringContaining("win32 runner not wired"),
+      message: expect.stringMatching(/helper|pi-sandbox-win/i),
     });
+  });
+
+  it("uses partial windows confinement when the helper file exists", async () => {
+    const helperPath = fileURLToPath(import.meta.url);
+    const provider = createSandboxProvider({
+      platform: "win32",
+      helperPath,
+      tempDir: "C:/tmp/pi-sandbox-s1",
+    });
+    const out = await provider.confine(caller, {
+      mode: "workspace-write",
+      network: "enabled",
+      workspaceRoot: "C:/work/repo",
+    });
+    expect(out.argv[0]).toBe(helperPath);
+    expect(out.argv).toContain("--workspace-sid");
+    expect(out.argv).toContain("--temp-sid");
+    expect(out.enforcement).toBe("partial");
+    expect(out.denialExitCodes).toEqual([SANDBOX_DENIAL_EXIT]);
+    expect(out.runnerFailureRules).toEqual([
+      {
+        kind: "runner-launch-failed",
+        exitCodes: [163],
+        signatures: ["pi-sandbox-win:"],
+      },
+    ]);
   });
 });

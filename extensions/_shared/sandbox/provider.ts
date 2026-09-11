@@ -1,14 +1,22 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { seatbeltArgv } from "./darwin/seatbelt.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { bwrapArgv } from "./linux/bwrap.js";
 import type { ConfinedArgv, SandboxPolicy, SandboxProvider } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
+import { windowsConfined } from "./windows/runner.js";
+import { assertWritableRootsDisjoint } from "./windows/sids.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TEMP_DIR = "/tmp/pi-sandbox";
+const DEFAULT_WIN_HELPER = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "windows/bin/pi-sandbox-win.exe",
+);
 
 export interface SandboxProbeResult {
   ok: boolean;
@@ -20,6 +28,7 @@ export interface SandboxProviderDeps {
   probe?: () => Promise<SandboxProbeResult>;
   build?: (argv: string[], policy: SandboxPolicy) => ConfinedArgv;
   tempDir?: string;
+  helperPath?: string;
 }
 
 /** Record Landlock ABI when present. Missing Landlock does not change enforcement. */
@@ -81,19 +90,25 @@ function sameArgv(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, i) => value === right[i]);
 }
 
+function probeWinHelper(helperPath: string): SandboxProbeResult {
+  if (existsSync(helperPath)) return { ok: true };
+  return { ok: false, reason: `windows helper not found at ${helperPath}` };
+}
+
 function unwiredReason(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "darwin runner not wired";
-  if (platform === "win32") return "win32 runner not wired";
   return `${platform} runner not wired`;
 }
 
 export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxProvider {
   const platform = deps.platform ?? process.platform;
   const tempDir = deps.tempDir ?? DEFAULT_TEMP_DIR;
+  const helperPath = deps.helperPath ?? DEFAULT_WIN_HELPER;
 
   async function defaultProbe(): Promise<SandboxProbeResult> {
     if (platform === "linux") return probeBwrap();
     if (platform === "darwin") return probeSeatbelt();
+    if (platform === "win32") return probeWinHelper(helperPath);
     return { ok: false, reason: unwiredReason(platform) };
   }
 
@@ -108,6 +123,10 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
         await probeLandlockAbi();
       }
 
+      if (platform === "win32") {
+        assertWritableRootsDisjoint(policy.workspaceRoot, tempDir);
+      }
+
       let confined: ConfinedArgv;
       if (deps.build) {
         confined = deps.build(argv, policy);
@@ -115,6 +134,8 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
         confined = linuxConfined(argv, policy, tempDir);
       } else if (platform === "darwin") {
         confined = darwinConfined(argv, policy, tempDir);
+      } else if (platform === "win32") {
+        confined = windowsConfined(policy, argv, helperPath, tempDir);
       } else {
         throw new SandboxUnavailableError(unwiredReason(platform));
       }
