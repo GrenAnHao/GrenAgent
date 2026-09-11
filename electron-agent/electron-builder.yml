@@ -11,6 +11,7 @@ asarUnpack:
   - node_modules/@colbymchenry/**
   - node_modules/@ast-grep/**
   - out/main/pi-worker.js
+  - out/main/chunks/**
   - out/main/runner.py
   - out/main/runner.mjs
   - out/main/prompts/**

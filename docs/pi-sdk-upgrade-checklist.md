@@ -23,7 +23,9 @@
 
 5. **原生模块与相邻资源** —— 升级后重跑打包冒烟：
    `@ast-grep/napi`、`node:sqlite`、`runner.py` / `prompts/`、
-   `asarUnpack` 仍含 `@colbymchenry/**`。
+   `asarUnpack` 仍含 `@colbymchenry/**` 与 `out/main/chunks/**`。
+   扩展打进 `chunks/` 后 `import.meta.url` 指向 chunk，相邻资源须同时在
+   `out/main/` 与 `out/main/chunks/`。
 
 6. **两套副本** —— `electron-agent` 的 `resolve.dedupe` 三包必须仍生效；
    `require.resolve('@earendil-works/pi-ai')` 在主进程与 worker 解析到同一份。
