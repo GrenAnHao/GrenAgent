@@ -1,5 +1,6 @@
 // 模式定义与纯逻辑：工具白名单、工具调用 gate、命令参数解析、徽章/标签。
-// 无 I/O，便于单测。状态机与副作用（setActiveTools/setStatus/persist）在 index.ts。
+// 无磁盘 I/O；live 表只碰内存。状态机与副作用（setActiveTools/setStatus/persist）在 index.ts。
+import { currentCwd } from "../_shared/workspace-context.js";
 import { isSafeCommand } from "./utils.js";
 
 export type AgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
@@ -10,6 +11,38 @@ export const DEFAULT_MODE: AgentMode = "agent";
 
 export function isAgentMode(v: unknown): v is AgentMode {
   return typeof v === "string" && (AGENT_MODES as readonly string[]).includes(v);
+}
+
+function normalizeCwd(workspace: string): string {
+  return workspace.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/** 与主进程 agentModeConfigKey 保持一致：工作区路径规范化后作为热更新键。 */
+export function agentModeConfigKey(workspace: string): string {
+  return `AGENT_MODE:${normalizeCwd(workspace)}`;
+}
+
+const byCwd = new Map<string, AgentMode>();
+
+function resolveCwd(cwd?: string): string {
+  return normalizeCwd(cwd ?? currentCwd());
+}
+
+export function getAgentMode(cwd?: string): AgentMode {
+  return byCwd.get(resolveCwd(cwd)) ?? DEFAULT_MODE;
+}
+
+export function setAgentMode(mode: AgentMode, cwd?: string): void {
+  byCwd.set(resolveCwd(cwd), mode);
+}
+
+export function hasAgentMode(cwd?: string): boolean {
+  return byCwd.has(resolveCwd(cwd));
+}
+
+/** 仅测试。 */
+export function __resetAgentModeForTest(): void {
+  byCwd.clear();
 }
 
 // ask：纯只读问答。白名单为经核实存在的只读工具（工具名取自各扩展的 registerTool）：

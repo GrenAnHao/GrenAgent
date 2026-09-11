@@ -1,14 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import { runInWorkspace } from "../_shared/workspace-context.js";
 import {
   activeToolsFor,
+  agentModeConfigKey,
   type AgentMode,
   gateToolCall,
+  getAgentMode,
+  hasAgentMode,
   isAgentMode,
   modeBadge,
   modeLabel,
   parseModeArg,
+  setAgentMode,
   toolWhitelist,
+  __resetAgentModeForTest,
 } from "./modes.js";
+
+beforeEach(() => __resetAgentModeForTest());
 
 describe("isAgentMode / parseModeArg", () => {
   it("recognizes the four valid modes", () => {
@@ -26,6 +37,13 @@ describe("isAgentMode / parseModeArg", () => {
     expect(parseModeArg("Debug")).toBe("debug");
     expect(parseModeArg("")).toBeUndefined();
     expect(parseModeArg("nope")).toBeUndefined();
+  });
+});
+
+describe("agentModeConfigKey", () => {
+  it("normalizes workspace path like approval keys", () => {
+    expect(agentModeConfigKey("D:/Proj-A/")).toBe("AGENT_MODE:d:/proj-a");
+    expect(agentModeConfigKey("D:\\Proj-A")).toBe("AGENT_MODE:d:/proj-a");
   });
 });
 
@@ -199,5 +217,41 @@ describe("brainstorm mode", () => {
 
   it("modeLabel returns 头脑风暴", () => {
     expect(modeLabel("brainstorm")).toBe("头脑风暴");
+  });
+});
+
+describe("agent mode live 表", () => {
+  it("未写入时 get 回退 agent，has 为 false", () => {
+    expect(hasAgentMode("D:/a")).toBe(false);
+    expect(getAgentMode("D:/a")).toBe("agent");
+  });
+
+  it("set 之后立刻 get 为新值，随后改盘也盖不过", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-mode-live-"));
+    const runtime = join(directory, "runtime-settings.json");
+    process.env.PI_RUNTIME_CONFIG = runtime;
+    setAgentMode("ask", "D:/a");
+    await writeFile(runtime, JSON.stringify({ [agentModeConfigKey("D:/a")]: "plan" }));
+    expect(getAgentMode("D:/a")).toBe("ask");
+    expect(getAgentMode("D:/b")).toBe("agent");
+    expect(hasAgentMode("D:/a")).toBe(true);
+    delete process.env.PI_RUNTIME_CONFIG;
+  });
+
+  it("无参时读 ALS cwd", async () => {
+    setAgentMode("plan", "D:/a");
+    setAgentMode("debug", "D:/b");
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: {} },
+      async () => {
+        expect(getAgentMode()).toBe("plan");
+      },
+    );
+  });
+
+  it("显式写成 agent 之后 has 为 true", () => {
+    setAgentMode("agent", "D:/a");
+    expect(hasAgentMode("D:/a")).toBe(true);
+    expect(getAgentMode("D:/a")).toBe("agent");
   });
 });
