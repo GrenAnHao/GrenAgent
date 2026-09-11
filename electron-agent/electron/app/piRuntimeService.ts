@@ -10,7 +10,8 @@ import type { PermissionAuthorization, PermissionManager, PermissionProfileName 
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { readSessionIdentity } from './sessionIdentity';
 import { setApprovalPolicy } from '../../../extensions/_shared/approval.js';
-import { approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
+import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
+import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -273,6 +274,9 @@ export class PiRuntimeService {
     const authorization = await this.authorize(workspace, command, args);
     if (authorization.status === 'denied') throw new Error(`Pi operation denied: ${command}`);
     if (authorization.status === 'blocked') return authorization;
+    if (command === 'agent_set_mode') {
+      return this.writeAgentMode(workspace, args.mode);
+    }
     if (command === 'agent_set_approval') {
       return this.writeApprovalPolicy(workspace, args.level);
     }
@@ -671,14 +675,27 @@ export class PiRuntimeService {
     return { ok: true, level };
   }
 
+  private async writeAgentMode(workspace: string, rawMode: unknown): Promise<{ ok: true; mode: string }> {
+    const mode = String(rawMode ?? '').trim().toLowerCase();
+    if (!isAgentMode(mode)) throw new Error('INVALID_AGENT_MODE');
+    setAgentMode(mode, workspace);
+    const path = this.options.runtimeConfigPath;
+    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    setAgentMode(mode, resolved);
+    await mergeRuntimeSettingsFile(path, {
+      [agentModeConfigKey(workspace)]: mode,
+      [agentModeConfigKey(resolved)]: mode,
+    });
+    return { ok: true, mode };
+  }
+
   private async runOnHandle(handle: WorkspaceHandlePort, command: PiCommand, args: Record<string, unknown>, origin: 'main' | 'goal'): Promise<unknown> {
     const s = handle.session;
     const images = Array.isArray(args.images) ? (args.images as ImageContent[]) : undefined;
     switch (command) {
       case 'agent_prompt':
         return handle.prompt(readInput(args), { images, ...(args.streamingBehavior ? { streamingBehavior: args.streamingBehavior as 'steer' | 'followUp' } : {}) }, origin);
-      case 'agent_set_mode':
-        return handle.prompt(`/mode ${String(args.mode ?? '')}`, {}, origin);
       case 'agent_steer': await s.steer(readInput(args), images); return undefined;
       case 'agent_follow_up': await s.followUp(readInput(args), images); return undefined;
       case 'agent_abort': await s.abort(); return undefined;

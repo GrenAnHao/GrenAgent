@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
+import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { PiRuntimeService, type AgentHostPort, type GoalHostPort, type WorkspaceHandlePort } from './piRuntimeService';
 import { AgentDataStorage } from '../agentData/storage';
 import { GoalStore } from '../agentData/goalStore';
@@ -934,7 +935,7 @@ agentDir: 'C:/agent',
     }
   });
 
-  it('routes extension-backed mode through the handle and writes approval settings', async () => {
+  it('writes mode/approval/exclusion to runtime settings without slash prompts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-runtime-settings-'));
     const runtimeConfigPath = join(root, 'runtime-settings.json');
     await writeFile(runtimeConfigPath, '{}');
@@ -949,10 +950,7 @@ agentDir: 'C:/agent',
     });
 
     try {
-      await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
-      expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
-
-      handle.prompt.mockClear();
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'plan' })).resolves.toEqual({ ok: true, mode: 'plan' });
       await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toEqual({ ok: true, level: 'full' });
       await expect(service.send('C:/work', 'agent_exclude_entry', { timestamp: 101 })).resolves.toEqual({ ok: true, op: 'add', timestamp: 101 });
       await expect(service.send('C:/work', 'agent_restore_entry', { timestamp: 101 })).resolves.toEqual({ ok: true, op: 'remove', timestamp: 101 });
@@ -960,6 +958,7 @@ agentDir: 'C:/agent',
       expect(client.send).not.toHaveBeenCalled();
 
       const written = JSON.parse(await readFile(runtimeConfigPath, 'utf8')) as Record<string, string>;
+      expect(written['AGENT_MODE:c:/work']).toBe('plan');
       expect(written['APPROVAL_POLICY:c:/work']).toBe('full');
       expect(JSON.parse(written['CONTEXT_EXCLUSION_OP:c:/work'])).toMatchObject({ op: 'remove', ts: 101 });
       expect(getApprovalPolicy('C:/work')).toBe('full');
@@ -1030,27 +1029,112 @@ agentDir: 'C:/agent',
     }
   });
 
-  it('sends Goal mode changes as a slash prompt to the sidecar', async () => {
+  it('对话中切模式立刻打进内存，不跟盘上旧值', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-mode-live-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, JSON.stringify({ 'AGENT_MODE:c:/work': 'agent' }));
+    __resetAgentModeForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'ask' })).resolves.toEqual({ ok: true, mode: 'ask' });
+      await writeFile(runtimeConfigPath, JSON.stringify({ 'AGENT_MODE:c:/work': 'agent' }));
+      expect(getAgentMode('C:/work')).toBe('ask');
+    } finally {
+      __resetAgentModeForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('writeAgentMode 同时写入 resolved 键', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-mode-resolved-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
+    __resetAgentModeForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+      resolveWorkspace: async () => 'D:/resolved-project',
+    });
+    try {
+      await expect(service.send('alias', 'agent_set_mode', { mode: 'debug' })).resolves.toEqual({ ok: true, mode: 'debug' });
+      expect(getAgentMode('alias')).toBe('debug');
+      expect(getAgentMode('D:/resolved-project')).toBe('debug');
+      const written = JSON.parse(await readFile(runtimeConfigPath, 'utf8')) as Record<string, string>;
+      expect(written['AGENT_MODE:alias']).toBe('debug');
+      expect(written['AGENT_MODE:d:/resolved-project']).toBe('debug');
+    } finally {
+      __resetAgentModeForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('非法模式不写内存也不落盘', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-mode-invalid-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, JSON.stringify({ 'AGENT_MODE:c:/work': 'agent' }));
+    __resetAgentModeForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'nope' })).rejects.toThrow('INVALID_AGENT_MODE');
+      expect(getAgentMode('C:/work')).toBe('agent');
+      expect(hasAgentMode('C:/work')).toBe(false);
+      expect(JSON.parse(await readFile(runtimeConfigPath, 'utf8'))['AGENT_MODE:c:/work']).toBe('agent');
+    } finally {
+      __resetAgentModeForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('无 runtimeConfigPath 时模式内存已改再抛', async () => {
+    __resetAgentModeForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'plan' })).rejects.toThrow('RUNTIME_CONFIG_UNAVAILABLE');
+      expect(getAgentMode('C:/work')).toBe('plan');
+    } finally {
+      __resetAgentModeForTest();
+    }
+  });
+
+  it('writes Goal mode changes to runtime config instead of a slash prompt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-goal-mode-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
     const sessionPath = join(root, 'session.jsonl');
+    await writeFile(runtimeConfigPath, '{}');
     await writeFile(sessionPath, `${JSON.stringify({ type: 'session', id: 'session-a', cwd: 'C:/work' })}\n`);
-    const client = { send: vi.fn(async (command: Record<string, unknown>) => command), respondUi: vi.fn() };
-    const manager = {
-      get: vi.fn(() => client),
-      open: vi.fn(() => client),
-      openGoalWorker: vi.fn(() => client),
-      close: vi.fn(),
-    } as any;
     const { host, handle } = fakeAgentHost();
     const service = new PiRuntimeService({
       agentDir: 'C:/agent',
       agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost(),
+      runtimeConfigPath,
     });
     try {
-      await service.send('C:/work', 'agent_set_mode', {
+      await expect(service.send('C:/work', 'agent_set_mode', {
         mode: 'plan', source: 'goal', sessionId: 'session-a', sessionPath,
-      });
-      expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'goal');
+      })).resolves.toEqual({ ok: true, mode: 'plan' });
+      expect(handle.prompt).not.toHaveBeenCalled();
+      const written = JSON.parse(await readFile(runtimeConfigPath, 'utf8')) as Record<string, string>;
+      expect(written['AGENT_MODE:c:/work']).toBe('plan');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1098,11 +1182,24 @@ describe('进程内宿主交互路径', () => {
     await expect(service.send('C:/work', 'agent_new_session', {})).rejects.toThrow('SESSION_BUSY');
   });
 
-  it('agent_set_mode 走 handle.prompt 的斜杠命令', async () => {
+  it('agent_set_mode 写 runtime config，不发斜杠 prompt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-set-mode-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
     const { host, handle } = fakeAgentHost();
-    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost() });
-    await service.send('C:/work', 'agent_set_mode', { mode: 'plan' });
-    expect(handle.prompt).toHaveBeenCalledWith('/mode plan', {}, 'main');
+    const service = new PiRuntimeService({
+      agentDir: 'C:/a',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'plan' })).resolves.toEqual({ ok: true, mode: 'plan' });
+      expect(handle.prompt).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('agent_abort 调 session.abort', async () => {
