@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
+import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { PiRuntimeService, type AgentHostPort, type GoalHostPort, type WorkspaceHandlePort } from './piRuntimeService';
 import { AgentDataStorage } from '../agentData/storage';
 import { GoalStore } from '../agentData/goalStore';
@@ -961,8 +962,71 @@ agentDir: 'C:/agent',
       const written = JSON.parse(await readFile(runtimeConfigPath, 'utf8')) as Record<string, string>;
       expect(written['APPROVAL_POLICY:c:/work']).toBe('full');
       expect(JSON.parse(written['CONTEXT_EXCLUSION_OP:c:/work'])).toMatchObject({ op: 'remove', ts: 101 });
+      expect(getApprovalPolicy('C:/work')).toBe('full');
     } finally {
+      __resetApprovalForTest();
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('对话中切审批档立刻打进内存，不跟盘上旧值', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-approval-live-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, JSON.stringify({ 'APPROVAL_POLICY:c:/work': 'ask' }));
+    __resetApprovalForTest();
+    const { host } = fakeAgentHost();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).resolves.toEqual({ ok: true, level: 'full' });
+      await writeFile(runtimeConfigPath, JSON.stringify({ 'APPROVAL_POLICY:c:/work': 'ask' }));
+      expect(getApprovalPolicy('C:/work')).toBe('full');
+    } finally {
+      __resetApprovalForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('非法审批档不写内存也不落盘', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-approval-invalid-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, JSON.stringify({ 'APPROVAL_POLICY:c:/work': 'ask' }));
+    __resetApprovalForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'nope' })).rejects.toThrow('INVALID_APPROVAL_POLICY');
+      expect(getApprovalPolicy('C:/work')).toBe('auto');
+      expect(JSON.parse(await readFile(runtimeConfigPath, 'utf8'))['APPROVAL_POLICY:c:/work']).toBe('ask');
+    } finally {
+      __resetApprovalForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('无 runtimeConfigPath 时审批内存已改再抛', async () => {
+    __resetApprovalForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'full' })).rejects.toThrow('RUNTIME_CONFIG_UNAVAILABLE');
+      expect(getApprovalPolicy('C:/work')).toBe('full');
+    } finally {
+      __resetApprovalForTest();
     }
   });
 

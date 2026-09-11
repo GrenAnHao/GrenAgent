@@ -9,6 +9,7 @@ import type { Thread, Turn } from './appServer/types';
 import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { readSessionIdentity } from './sessionIdentity';
+import { setApprovalPolicy } from '../../../extensions/_shared/approval.js';
 import { approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 
 type PiCommand = keyof typeof commandTypes;
@@ -658,9 +659,11 @@ export class PiRuntimeService {
   private async writeApprovalPolicy(workspace: string, rawLevel: unknown): Promise<{ ok: true; level: 'ask' | 'auto' | 'full' }> {
     const level = String(rawLevel ?? '').trim().toLowerCase();
     if (level !== 'ask' && level !== 'auto' && level !== 'full') throw new Error('INVALID_APPROVAL_POLICY');
+    setApprovalPolicy(level, workspace);
     const path = this.options.runtimeConfigPath;
     if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    setApprovalPolicy(level, resolved);
     await mergeRuntimeSettingsFile(path, {
       [approvalPolicyConfigKey(workspace)]: level,
       [approvalPolicyConfigKey(resolved)]: level,

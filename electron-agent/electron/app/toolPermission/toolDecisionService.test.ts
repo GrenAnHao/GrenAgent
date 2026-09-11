@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDataStorage } from '../../agentData/storage';
+import { __resetApprovalForTest, setApprovalPolicy } from '../../../../extensions/_shared/approval.js';
 import { ToolAuditStore } from './auditStore';
 import { ToolRuleStore } from './ruleStore';
 import { ToolDecisionService } from './toolDecisionService';
@@ -12,6 +13,7 @@ const directories: string[] = [];
 const stores: AgentDataStorage[] = [];
 
 afterEach(async () => {
+  __resetApprovalForTest();
   for (const store of stores.splice(0)) store.close();
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -113,6 +115,32 @@ describe('ToolDecisionService.evaluate', () => {
       flags: { ...NO_FLAGS, write: true },
     }));
     expect(audit.get(decision.auditId)?.args).toBe('{"path":"D:/repo/a.ts"}');
+  });
+});
+
+describe('ToolDecisionService live approval preset', () => {
+  it('uses a mid-turn full switch even when the sidecar still sent auto', async () => {
+    const { service } = await fixture();
+    setApprovalPolicy('full', 'D:/repo');
+    const decision = service.evaluate(facts({ flags: { ...NO_FLAGS, dangerousCommand: true } }));
+    expect(decision.decision).toBe('allow');
+    expect(decision.ruleId).toBeUndefined();
+  });
+
+  it('uses a mid-turn ask switch even when the sidecar still sent auto', async () => {
+    const { service } = await fixture();
+    setApprovalPolicy('ask', 'D:/repo');
+    const decision = service.evaluate(facts({ flags: { ...NO_FLAGS, mutatingCommand: true } }));
+    expect(decision).toMatchObject({ decision: 'ask', ruleId: 'builtin.mutating-command' });
+  });
+
+  it('空表时忽略 facts.preset=full，按 auto 拦危险命令', async () => {
+    const { service } = await fixture();
+    const decision = service.evaluate(facts({
+      preset: 'full',
+      flags: { ...NO_FLAGS, dangerousCommand: true },
+    }));
+    expect(decision).toMatchObject({ decision: 'ask', ruleId: 'builtin.dangerous-command' });
   });
 });
 

@@ -1,4 +1,5 @@
 import { digestArgs } from './argsDigest';
+import { getApprovalPolicy } from '../../../../extensions/_shared/approval.js';
 import { matchBuiltinRules } from './builtinRules';
 import { matchUserRules } from './rules';
 import type { AuditResolution, ToolAuditStore } from './auditStore';
@@ -25,7 +26,10 @@ export class ToolDecisionService {
    * 内置 deny，也降不掉内置 ask。规则查询失败时降级为 ask 而非放行。
    */
   evaluate(call: ToolCallFacts): ToolDecision {
-    const builtin = matchBuiltinRules(call);
+    // 对话中切档写进 live 表。这里现读，覆盖 sidecar 可能过期的 facts.preset。
+    const live = getApprovalPolicy(call.workspace);
+    const facts = live !== call.preset ? { ...call, preset: live } : call;
+    const builtin = matchBuiltinRules(facts);
     let user: ToolRule | undefined;
     let lookupFailed = false;
     try {
