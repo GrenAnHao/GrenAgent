@@ -40,6 +40,7 @@ import { validateProject } from "./app/validateProject";
 import { GoalCoordinator } from "./app/goalCoordinator";
 import { judgeGoal } from "./app/goalJudge";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
+import { resolveWorkerEntry } from "./agent/workerEntry";
 import { AgentHost } from "./agent/agentHost";
 import { createGoalHandle } from "./agent/createGoalHandle";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
@@ -48,6 +49,7 @@ import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 import { collectModels } from "../../cli/src/probe-models.js";
 import { runOneshotWithRuntime, type OneshotRequest } from "../../extensions/_shared/oneshot.js";
+import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -87,6 +89,11 @@ if (!process.env.VITEST) {
     const piProcess = resolvePiProcess({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
     bootstrapRuntimeConfig(runtimeConfigPath);
+    process.env.PI_WORKER_ENTRY = resolveWorkerEntry({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      mainDir: __dirname,
+    });
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
     const modelRuntimeHost = new ModelRuntimeHost({
       create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
@@ -419,6 +426,7 @@ if (!process.env.VITEST) {
         await Promise.allSettled([pi.closeAll(), codeGraphJobs.close()]);
         systemWorker.close();
         await agentHost.closeAll();
+        killAllSubagents();
         await agentData.stop();
         pluginStorage.close();
       })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {

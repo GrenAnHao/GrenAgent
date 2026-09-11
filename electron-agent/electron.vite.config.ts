@@ -5,7 +5,10 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: resolve(__dirname, "electron/main.ts"),
+        input: {
+          main: resolve(__dirname, "electron/main.ts"),
+          "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
+        },
         // Preserve native binaries and CodeGraph's relative worker/grammar paths.
         external: ["@homebridge/node-pty-prebuilt-multiarch", "@colbymchenry/codegraph"],
       },
