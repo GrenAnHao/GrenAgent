@@ -1,6 +1,6 @@
-// 进程内共享的审批策略（多扩展读同一份）。live 源是 runtime 配置文件，
-// 对话中切档立刻现读，不跟 session 开场绑定。默认 auto（替我审批）。
-import { getConfig, refreshConfig } from "./runtime-config.js";
+// 进程内共享的审批策略（多扩展读同一份）。运行时只读内存；
+// 对话中切档走 setApprovalPolicy，下一刀工具调用立刻看到。
+// 文件只给 session_start / watchConfig 灌内存，以及重启后恢复。默认 auto。
 import { currentCwd } from "./workspace-context.js";
 
 export type ApprovalPolicy = "ask" | "auto" | "full";
@@ -16,16 +16,15 @@ function resolveCwd(cwd?: string): string {
 }
 
 export function getApprovalPolicy(cwd?: string): ApprovalPolicy {
-  refreshConfig();
-  const key = resolveCwd(cwd);
-  const live =
-    parseApproval(getConfig(approvalPolicyConfigKey(key))) ??
-    parseApproval(getConfig("APPROVAL_POLICY"));
-  return live ?? byCwd.get(key) ?? "auto";
+  return byCwd.get(resolveCwd(cwd)) ?? "auto";
 }
 
 export function setApprovalPolicy(p: ApprovalPolicy, cwd?: string): void {
   byCwd.set(resolveCwd(cwd), p);
+}
+
+export function hasApprovalPolicy(cwd?: string): boolean {
+  return byCwd.has(resolveCwd(cwd));
 }
 
 /** 与主进程 approvalPolicyConfigKey 保持一致：工作区路径规范化后作为热更新键。 */

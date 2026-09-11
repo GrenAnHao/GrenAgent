@@ -7,6 +7,7 @@ import {
   APPROVAL_LABELS,
   approvalPolicyConfigKey,
   getApprovalPolicy,
+  hasApprovalPolicy,
   parseApproval,
   setApprovalPolicy,
   __resetApprovalForTest,
@@ -65,7 +66,7 @@ describe("getApprovalPolicy 分键", () => {
     );
   });
 
-  it("live 文件键按传入 cwd 匹配，不读 process.cwd()", async () => {
+  it("运行时只读内存：盘上的 live 键盖不过 setApprovalPolicy", async () => {
     const directory = await mkdtemp(join(tmpdir(), "approval-cwd-"));
     directories.push(directory);
     const runtime = join(directory, "runtime-settings.json");
@@ -74,7 +75,15 @@ describe("getApprovalPolicy 分键", () => {
     await writeFile(runtime, JSON.stringify({ [approvalPolicyConfigKey(target)]: "full" }));
     __resetForTest();
     setApprovalPolicy("ask", target);
-    expect(getApprovalPolicy(target)).toBe("full");
-    expect(getApprovalPolicy("D:/other")).not.toBe("full");
+    expect(getApprovalPolicy(target)).toBe("ask");
+    expect(getApprovalPolicy("D:/other")).toBe("auto");
+  });
+
+  it("hasApprovalPolicy 区分未写入与显式默认档", () => {
+    expect(hasApprovalPolicy("D:/a")).toBe(false);
+    expect(getApprovalPolicy("D:/a")).toBe("auto");
+    setApprovalPolicy("auto", "D:/a");
+    expect(hasApprovalPolicy("D:/a")).toBe(true);
+    expect(hasApprovalPolicy("D:/b")).toBe(false);
   });
 });
