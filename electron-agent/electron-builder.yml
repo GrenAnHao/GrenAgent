@@ -9,10 +9,12 @@ files:
 asar: true
 asarUnpack:
   - node_modules/@colbymchenry/**
+  - node_modules/@ast-grep/**
+  - out/main/pi-worker.js
+  - out/main/runner.py
+  - out/main/runner.mjs
+  - out/main/prompts/**
 afterPack: ./scripts/package-codegraph.cjs
-extraResources:
-  - from: resources/pi
-    to: pi
 win:
   target:
     - nsis
