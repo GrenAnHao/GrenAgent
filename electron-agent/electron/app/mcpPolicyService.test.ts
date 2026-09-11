@@ -34,47 +34,36 @@ describe('McpPolicyService', () => {
     await expect(service.readToolsCache()).resolves.toBe('{"server":{}}');
   });
 
-  it('passes the exact MCP config to the Pi probe command and returns stdout', async () => {
-    const received: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
-    const service = new McpPolicyService('C:/home', {
-      piCommand: { command: 'C:/bin/pi.exe', args: ['--mode', 'rpc'] },
-      piPackageDir: 'C:/agent',
-      run: async (command, args, options) => {
-        received.push({ command, args, env: options.env });
-        return { stdout: '{"ok":true}', stderr: '' };
-      },
-    });
-
-    await expect(service.probe('{"command":"npx"}')).resolves.toBe('{"ok":true}');
-    expect(received).toEqual([{
-      command: 'C:/bin/pi.exe',
-      args: ['probe-mcp'],
-      env: { PI_PACKAGE_DIR: 'C:/agent', MCP_PROBE_CONFIG: '{"command":"npx"}' },
-    }]);
+  it('probe 调用 probeServer 并写缓存，不 spawn', async () => {
+    const probeServer = vi.fn(async () => ({ ok: true, toolNames: ['mcp__s__t'] }));
+    const writeCache = vi.fn();
+    const spawn = vi.fn();
+    const service = new McpPolicyService('C:/home', { probeServer, writeToolsCacheEntry: writeCache, run: spawn } as never);
+    const out = await service.probe(JSON.stringify({ name: 's', transport: 'stdio', command: 'x', args: [] }));
+    expect(JSON.parse(out)).toEqual({ ok: true, toolNames: ['mcp__s__t'] });
+    expect(writeCache).toHaveBeenCalledWith('s', { ok: true, toolNames: ['mcp__s__t'] });
+    expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('includes Pi stderr when the probe command fails', async () => {
-    const service = new McpPolicyService('C:/home', {
-      piCommand: { command: 'pi', args: [] },
-      piPackageDir: 'C:/agent',
-      run: async () => {
-        throw Object.assign(new Error('exit 1'), { stderr: 'bad MCP config' });
-      },
-    });
-
-    await expect(service.probe('{}')).rejects.toThrow('bad MCP config');
+  it('非法 JSON 返回 ok:false，不调用 probeServer', async () => {
+    const probeServer = vi.fn();
+    const service = new McpPolicyService('C:/home', { probeServer });
+    await expect(service.probe('not-json')).resolves.toBe(JSON.stringify({
+      ok: false,
+      toolNames: [],
+      error: 'invalid MCP_PROBE_CONFIG',
+    }));
+    expect(probeServer).not.toHaveBeenCalled();
   });
 
-  it('wraps probe timeouts without stderr into a readable error', async () => {
+  it('写缓存失败不影响 probe 返回值', async () => {
     const service = new McpPolicyService('C:/home', {
-      piCommand: { command: 'pi', args: [] },
-      piPackageDir: 'C:/agent',
-      run: async () => {
-        throw Object.assign(new Error('kill ETIMEDOUT'), { code: 'ERR_CHILD_PROCESS_TIMEOUT' });
-      },
+      probeServer: async () => ({ ok: true, toolNames: ['mcp__s__t'] }),
+      writeToolsCacheEntry: () => { throw new Error('disk full'); },
     });
-
-    await expect(service.probe('{}')).rejects.toThrow('MCP probe failed: kill ETIMEDOUT');
+    await expect(service.probe(JSON.stringify({ name: 's', transport: 'stdio', command: 'x' }))).resolves.toBe(
+      JSON.stringify({ ok: true, toolNames: ['mcp__s__t'] }),
+    );
   });
 
   it('audits policy changes and calls through PermissionManager', async () => {

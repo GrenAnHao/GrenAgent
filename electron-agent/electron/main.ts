@@ -25,8 +25,6 @@ import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { PiManager } from "./pi/manager";
 import { resolvePiPackageDir, resolvePiProcess } from "./runtimePaths";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { attachWebviewSecurity } from "./webviewSecurity";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
@@ -47,7 +45,8 @@ import { createGoalHandle } from "./agent/createGoalHandle";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
 import { GoalHost } from "./agent/goalHost";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
-import { getAgentDir, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
+import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
+import { collectModels } from "../../cli/src/probe-models.js";
 import { runOneshotWithRuntime, type OneshotRequest } from "../../extensions/_shared/oneshot.js";
 
 export function createWindow() {
@@ -157,10 +156,13 @@ if (!process.env.VITEST) {
             ...(params.source === 'goal' ? { source: 'goal' as const } : { source: 'interactive' as const }),
           },
         ),
-        'permission.authorize': (params) => permissions.authorize(
-          isRecord(params.operation) ? params.operation : {},
-          typeof params.profile === 'string' ? params.profile : 'workspace',
-        ),
+        'permission.authorize': (params) => {
+          const operation = isRecord(params.operation) ? params.operation : {};
+          return permissions.authorize(
+            { ...operation, kind: typeof operation.kind === 'string' ? operation.kind : 'unknown' },
+            typeof params.profile === 'string' ? params.profile : 'workspace',
+          );
+        },
         // pi 子进程会主动调这个 RPC 推送 MCP 连接状态。AppEvent 已移除，此处不再转发；
         // UI 的 MCP 状态由 pi://ui-request 的 setStatus 分支填充（见 ExtensionUiHost）。
         // 保留方法本身（返回 null）以免 pi 侧收到 "unknown method" 错误。
@@ -276,8 +278,6 @@ if (!process.env.VITEST) {
     registerIpcHandlers({
       settings,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
-        piCommand: piProcess,
-        piPackageDir: resolvePiPackageDir({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, isPackaged: app.isPackaged }),
         permissionManager: permissions,
       }),
       mcpConfig,
@@ -341,9 +341,8 @@ if (!process.env.VITEST) {
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
         probeModels: async () => {
-          const probeArgs = piProcess.args[0]?.endsWith('.ts') ? [piProcess.args[0], 'probe-models'] : ['probe-models'];
-          const { stdout } = await promisify(execFile)(piProcess.command, probeArgs, { windowsHide: true });
-          return stdout;
+          const runtime = await modelRuntimeHost.ensure();
+          return JSON.stringify({ ok: true, models: collectModels(new ModelRegistry(runtime) as never) });
         },
         refresh: () => piRuntime!.refreshModelRegistry(),
         activeModel: async (workspace) => {

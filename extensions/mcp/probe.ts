@@ -13,11 +13,37 @@ export interface ProbeResult {
 
 const PROBE_TIMEOUT_MS = Number(process.env.MCP_PROBE_TIMEOUT_MS ?? "30000") || 30000;
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
-  ]);
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`timeout after ${ms}ms`));
+    }, ms);
+    p.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+function readTransportPid(transport: unknown): number | undefined {
+  if (!transport || typeof transport !== "object") return undefined;
+  const rec = transport as { pid?: unknown; _process?: { pid?: unknown }; process?: { pid?: unknown } };
+  const candidates = [rec.pid, rec._process?.pid, rec.process?.pid];
+  for (const pid of candidates) {
+    if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) return pid;
+  }
+  return undefined;
+}
+
+/** POSIX 进程组语义的完整版是第 4 份的 killTree。未暴露 pid 时无法 killTree。 */
+export function killProbeChild(pid: number): void {
+  try {
+    if (process.platform === "win32") process.kill(pid);
+    else process.kill(-pid, "SIGKILL");
+  } catch {
+    try { process.kill(pid, "SIGKILL"); } catch { /* 已退 */ }
+  }
 }
 
 export async function probeServer(s: McpServerConfig, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
@@ -31,15 +57,22 @@ export async function probeServer(s: McpServerConfig, timeoutMs = PROBE_TIMEOUT_
           ...(s.cwd ? { cwd: s.cwd } : {}),
           env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
         });
+  let timedOut = false;
+  const markTimeout = () => { timedOut = true; };
   try {
-    await withTimeout(client.connect(transport), timeoutMs);
-    const { tools } = await withTimeout(client.listTools(), timeoutMs);
+    await withTimeout(client.connect(transport), timeoutMs, markTimeout);
+    const { tools } = await withTimeout(client.listTools(), timeoutMs, markTimeout);
     const toolNames = tools.map((t) => `mcp__${sanitize(s.name)}__${sanitize(t.name)}`);
     return { ok: true, toolNames };
   } catch (e) {
     return { ok: false, toolNames: [], error: e instanceof Error ? e.message : String(e) };
   } finally {
     await client.close().catch(() => {});
+    // 未暴露 pid 时无法 killTree，只能依赖 client.close()。
+    if (timedOut) {
+      const pid = readTransportPid(transport);
+      if (pid !== undefined) killProbeChild(pid);
+    }
   }
 }
 

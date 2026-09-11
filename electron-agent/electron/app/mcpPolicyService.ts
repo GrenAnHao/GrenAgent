@@ -1,21 +1,12 @@
-import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
-import type { PiProcessCommand } from '../pi/manager';
-import type { PermissionManager, PermissionAuthorization, PermissionProfileName } from './permissionManager';
-
-interface ProbeOptions {
-  env: Record<string, string>;
-}
-
-type ProbeRunner = (command: string, args: string[], options: ProbeOptions) => Promise<{ stdout: string; stderr: string }>;
+import type { McpServerConfig } from '../../../extensions/mcp/config.js';
+import type { ProbeResult } from '../../../extensions/mcp/probe.js';
+import type { PermissionManager, PermissionAuthorization, PermissionOperation, PermissionProfileName } from './permissionManager';
 
 export interface McpPolicyServiceOptions {
-  piCommand?: PiProcessCommand;
-  piPackageDir?: string;
-  run?: ProbeRunner;
+  probeServer?: (cfg: McpServerConfig) => Promise<ProbeResult>;
+  writeToolsCacheEntry?: (name: string, result: ProbeResult) => void;
   permissionManager?: Pick<PermissionManager, 'authorize'>;
 }
 
@@ -53,20 +44,14 @@ export class McpPolicyService {
   }
 
   async probe(configJson: string): Promise<string> {
-    const command = this.options.piCommand;
-    const piPackageDir = this.options.piPackageDir;
-    if (!command || !piPackageDir) throw new Error('Pi runtime is not configured for MCP probing');
-    try {
-      const result = await (this.options.run ?? runProbe)(command.command, probeArgs(command), {
-        env: { PI_PACKAGE_DIR: piPackageDir, MCP_PROBE_CONFIG: configJson },
-      });
-      return result.stdout.trim();
-    } catch (error) {
-      const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
-        ? (error as { stderr: string }).stderr.trim()
-        : '';
-      throw new Error(stderr || `MCP probe failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    let cfg: McpServerConfig;
+    try { cfg = JSON.parse(configJson) as McpServerConfig; }
+    catch { return JSON.stringify({ ok: false, toolNames: [], error: 'invalid MCP_PROBE_CONFIG' }); }
+    const probe = this.options.probeServer ?? (await import('../../../extensions/mcp/probe.js')).probeServer;
+    const write = this.options.writeToolsCacheEntry ?? (await import('../../../extensions/mcp/toolsCache.js')).writeToolsCacheEntry;
+    const result = await probe(cfg);
+    try { write(cfg.name, result); } catch { /* 与 runProbeCli 一致：缓存失败打不得倒 stdout */ }
+    return JSON.stringify(result);
   }
 
   private async readOptional(filename: string): Promise<string> {
@@ -78,23 +63,7 @@ export class McpPolicyService {
     }
   }
 
-  private authorize(operation: Record<string, unknown>, profile: PermissionProfileName): Promise<PermissionAuthorization> {
+  private authorize(operation: PermissionOperation, profile: PermissionProfileName): Promise<PermissionAuthorization> {
     return this.options.permissionManager?.authorize(operation, profile) ?? Promise.resolve({ status: 'allowed', decision: 'allow' });
   }
-
-}
-
-function probeArgs(command: PiProcessCommand): string[] {
-  return command.args[0]?.startsWith('--') ? ['probe-mcp'] : [command.args[0], 'probe-mcp'];
-}
-
-const execFileAsync = promisify(execFile);
-
-async function runProbe(command: string, args: string[], options: ProbeOptions): Promise<{ stdout: string; stderr: string }> {
-  const result = await execFileAsync(command, args, {
-    env: { ...process.env, ...options.env },
-    windowsHide: true,
-    timeout: 30_000,
-  });
-  return { stdout: String(result.stdout), stderr: String(result.stderr) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { probeServer } from "./probe";
+import { killProbeChild, probeServer } from "./probe";
 
 describe("probeServer", () => {
   it("returns ok:false for an unspawnable stdio command", async () => {
@@ -11,4 +11,8 @@ describe("probeServer", () => {
     expect(r.toolNames).toEqual([]);
     expect(typeof r.error).toBe("string");
   }, 15000);
+
+  it("killProbeChild 对已退出 pid 不抛", () => {
+    expect(() => killProbeChild(2_147_000_000)).not.toThrow();
+  });
 });
