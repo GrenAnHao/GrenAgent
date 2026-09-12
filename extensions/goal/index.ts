@@ -1,6 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { setGoalHumanInput } from "./auth.js";
-import { onAgentSettled, recordRunStopReasons } from "./continue.js";
+import {
+  decideGoalContinuation,
+  notifyMaxRoundsReached,
+  onAgentSettled,
+  recordRunStopReasons,
+  reenterGoalRound,
+  wasMaxRoundsNotified,
+} from "./continue.js";
 import { parseGoalArgs } from "./parse.js";
 import { formatGoalReceipt } from "./receipt.js";
 import {
@@ -8,9 +15,11 @@ import {
   createGoal,
   currentStatusSnapshot,
   editGoal,
+  getActivation,
   onSessionStart,
   pauseGoal,
   pushStatus,
+  readSnapshot,
   resumeGoal,
   sessionIdOf,
 } from "./session.js";
@@ -105,6 +114,24 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     onSessionStart(ctx);
+    const snapshot = readSnapshot(ctx);
+    const sessionId = sessionIdOf(ctx);
+    if (getActivation(sessionId) !== "armed" || snapshot?.status !== "active") {
+      return;
+    }
+    const decision = decideGoalContinuation({
+      snapshot,
+      activation: "armed",
+      assistantStops: [],
+      alreadyNotifiedMaxRounds: wasMaxRoundsNotified(sessionId, snapshot),
+    });
+    if (decision.action === "max-rounds") {
+      notifyMaxRoundsReached(ctx, snapshot);
+      return;
+    }
+    if (decision.action === "reenter") {
+      await reenterGoalRound(pi, ctx, snapshot);
+    }
   });
 
   pi.on("agent_end", async (event, ctx) => {

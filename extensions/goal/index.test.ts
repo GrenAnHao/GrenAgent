@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { __resetForTest } from "../_shared/runtime-config.js";
 import { hasGoalRound, setGoalRoundPending, __resetGoalAuthForTest } from "./auth.js";
 import { __resetGoalContinueForTest } from "./continue.js";
 import { foldGoal } from "./fold.js";
@@ -87,9 +88,10 @@ function goalEvents(entries: GoalEntry[]) {
 }
 
 afterEach(() => {
-  delete process.env["goal.autoContinueOnOpen"];
+  __resetForTest();
   __resetGoalContinueForTest();
   __resetGoalAuthForTest();
+  delete process.env["goal.autoContinueOnOpen"];
 });
 
 describe("goal extension factory", () => {
@@ -397,6 +399,99 @@ describe("goal extension factory", () => {
 
     expect(calls.send).toEqual([]);
     expect(hasGoalRound("session-a", oldRef)).toBe(false);
+  });
+
+  it("disarms on session_start by default and does not reenter", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
+    expect(calls.send).toEqual([]);
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+  });
+
+  it("arms and reenters on session_start when autoContinueOnOpen is true", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    process.env["goal.autoContinueOnOpen"] = "true";
+
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
+    expect(calls.send).toHaveLength(1);
+    const [message, options] = calls.send[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(message.customType).toBe("goal-round");
+    expect(message.display).toBe(false);
+    expect(options).toEqual({ triggerTurn: true });
+  });
+
+  it("treats autoContinueOnOpen=1 like the default and does not reenter", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    process.env["goal.autoContinueOnOpen"] = "1";
+
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
+    expect(calls.send).toEqual([]);
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+  });
+
+  it("does not arm or reenter a paused goal even when autoContinueOnOpen is true", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    await handler("pause", ctx);
+    process.env["goal.autoContinueOnOpen"] = "true";
+
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "paused", activation: "disarmed" });
+    expect(calls.send).toEqual([]);
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+  });
+
+  it("notifies max rounds on open without writing a new round", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    const created = goalEvents(entries)[0];
+    entries.push({
+      type: "custom",
+      customType: "goal",
+      data: {
+        kind: "round",
+        goalId: created.goalId,
+        revision: 2,
+        at: "2026-09-13T00:00:00.000Z",
+        payload: { round: DEFAULT_MAX_ROUNDS },
+      },
+    });
+    process.env["goal.autoContinueOnOpen"] = "true";
+
+    const before = calls.notify.length;
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(calls.send).toEqual([]);
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(1);
+    const opened = calls.notify.slice(before) as [string, string][];
+    expect(opened.some(([text, level]) => text.includes("已达轮次上限") && (level === "warning" || level === "info"))).toBe(true);
+  });
+
+  it("reenters on open even if a leftover aborted stop is still captured", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
+    process.env["goal.autoContinueOnOpen"] = "true";
+
+    await handlers.session_start?.({}, ctx);
+
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
+    expect(calls.send).toHaveLength(1);
   });
 });
 

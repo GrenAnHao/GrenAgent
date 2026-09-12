@@ -63,6 +63,15 @@ export function __resetGoalContinueForTest(): void {
   notifiedMaxRounds.clear();
 }
 
+export function wasMaxRoundsNotified(sessionId: string, snapshot: GoalSnapshot): boolean {
+  return notifiedMaxRounds.has(maxRoundsKey(sessionId, snapshot));
+}
+
+export function notifyMaxRoundsReached(ctx: ExtensionContext, snapshot: GoalSnapshot): void {
+  notifiedMaxRounds.add(maxRoundsKey(sessionIdOf(ctx), snapshot));
+  ctx.ui.notify("已达轮次上限", "warning");
+}
+
 export async function onAgentSettled(
   _event: AgentSettledEvent,
   ctx: ExtensionContext,
@@ -81,26 +90,33 @@ export async function onAgentSettled(
   });
 
   if (decision.action === "max-rounds" && snapshot) {
-    notifiedMaxRounds.add(maxRoundsKey(sessionId, snapshot));
-    ctx.ui.notify("已达轮次上限", "warning");
+    notifyMaxRoundsReached(ctx, snapshot);
   }
 
   clearGoalTurnMarks(sessionId);
 
-  if (decision.action !== "reenter" || decision.nextRound === undefined || !snapshot) {
+  if (decision.action !== "reenter" || !snapshot) {
     return;
   }
 
+  await reenterGoalRound(pi, ctx, snapshot);
+}
+
+export async function reenterGoalRound(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  snapshot: GoalSnapshot,
+): Promise<void> {
   const folded = writeEvent(pi, ctx, {
     kind: "round",
     goalId: snapshot.goalId,
     revision: nextRevision(snapshot),
     at: new Date().toISOString(),
-    payload: { round: decision.nextRound },
+    payload: { round: snapshot.roundsStarted + 1 },
   });
   if (!folded) return;
 
-  setGoalRoundPending(sessionId, {
+  setGoalRoundPending(sessionIdOf(ctx), {
     goalId: folded.goalId,
     revision: folded.revision,
     round: folded.roundsStarted,
