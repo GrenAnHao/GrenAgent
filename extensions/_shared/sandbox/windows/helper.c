@@ -29,9 +29,10 @@
  *        (stderr: "pi-sandbox-win: <Api> failed <GetLastError decimal>")
  *   else child's exit code
  *
- * Build (do not check in the exe):
- *   cl /O2 /Fe:bin\pi-sandbox-win.exe helper.c advapi32.lib shell32.lib
+ * 选 A（预编译入仓）：产出 bin/pi-sandbox-win.exe 并提交，免 CI 装 MSVC。
+ * 复现：node scripts/build-sandbox-helper.mjs
  *   gcc -O2 -o bin/pi-sandbox-win.exe helper.c -ladvapi32 -lshell32
+ *   cl /O2 /Fe:bin\pi-sandbox-win.exe helper.c advapi32.lib shell32.lib
  */
 
 #ifndef _WIN32_WINNT

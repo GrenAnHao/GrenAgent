@@ -60,8 +60,15 @@ describe.skipIf(!live)("live OS isolation", () => {
       };
 
       if (process.platform === "win32") {
+        const isolated = join(tmpdir(), "pi-sandbox-missing");
         const provider = createSandboxProvider({
-          helperPath: join(tmpdir(), "pi-sandbox-missing", "pi-sandbox-win.exe"),
+          helperPath: join(isolated, "pi-sandbox-win.exe"),
+          helperLookup: {
+            envHelper: undefined,
+            moduleDir: isolated,
+            resourcesPath: isolated,
+            cwd: isolated,
+          },
         });
         await expect(provider.confine([shell, "-c", "true"], policy)).rejects.toMatchObject({
           code: "SANDBOX_UNAVAILABLE",

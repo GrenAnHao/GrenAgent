@@ -1,8 +1,13 @@
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { createSandboxProvider } from "./provider.js";
+import {
+  createSandboxProvider,
+  resolveWinHelperPath,
+  winHelperCandidates,
+} from "./provider.js";
 import type { ConfinedArgv } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
 
@@ -98,14 +103,68 @@ describe("createSandboxProvider", () => {
     expect(out.enforcement).toBe("full");
   });
 
+  it("lists Windows helper probe paths in the documented order", () => {
+    expect(winHelperCandidates({
+      helperPath: "H:/injected/pi-sandbox-win.exe",
+      envHelper: "E:/env/pi-sandbox-win.exe",
+      moduleDir: "M:/sandbox",
+      resourcesPath: "R:/resources",
+      cwd: "C:/electron-agent",
+    })).toEqual([
+      "H:/injected/pi-sandbox-win.exe",
+      "E:/env/pi-sandbox-win.exe",
+      join("M:/sandbox", "windows", "bin", "pi-sandbox-win.exe"),
+      join("R:/resources", "app.asar.unpacked", "out", "main", "pi-sandbox-win.exe"),
+      join("R:/resources", "app.asar.unpacked", "out", "main", "chunks", "pi-sandbox-win.exe"),
+      join("M:/sandbox", "pi-sandbox-win.exe"),
+      join("M:/sandbox", "..", "pi-sandbox-win.exe"),
+      join("C:/electron-agent", "out", "main", "pi-sandbox-win.exe"),
+    ]);
+  });
+
+  it("uses the injected helper path when that file exists", () => {
+    const injected = "H:/injected/pi-sandbox-win.exe";
+    expect(resolveWinHelperPath({
+      helperPath: injected,
+      envHelper: "E:/env/pi-sandbox-win.exe",
+      moduleDir: "M:/sandbox",
+      resourcesPath: "R:/resources",
+      cwd: "C:/electron-agent",
+      exists: (path) => path === injected,
+    })).toBe(injected);
+  });
+
   it("throws SANDBOX_UNAVAILABLE when the windows helper file is missing", async () => {
     const provider = createSandboxProvider({
       platform: "win32",
       helperPath: "Z:/missing/pi-sandbox-win.exe",
+      helperLookup: { exists: () => false },
     });
     await expect(provider.confine(caller, policy)).rejects.toMatchObject({
       code: "SANDBOX_UNAVAILABLE",
       message: expect.stringMatching(/helper|pi-sandbox-win/i),
+    });
+  });
+
+  it("throws SANDBOX_UNAVAILABLE when every helper candidate is missing", async () => {
+    expect(resolveWinHelperPath({
+      moduleDir: "Z:/missing-module",
+      resourcesPath: "Z:/missing-res",
+      cwd: "Z:/missing-cwd",
+      exists: () => false,
+    })).toBeUndefined();
+    const provider = createSandboxProvider({
+      platform: "win32",
+      helperLookup: {
+        moduleDir: "Z:/missing-module",
+        resourcesPath: "Z:/missing-res",
+        cwd: "Z:/missing-cwd",
+        envHelper: undefined,
+        exists: () => false,
+      },
+    });
+    await expect(provider.confine(caller, policy)).rejects.toMatchObject({
+      code: "SANDBOX_UNAVAILABLE",
     });
   });
 
