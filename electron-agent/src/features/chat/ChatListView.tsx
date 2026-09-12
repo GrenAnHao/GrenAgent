@@ -27,15 +27,17 @@ export function ChatListView() {
   // streaming 中 100ms 节流，避免每 token 触发整列重算（详见 useThrottledValue 契约）。
   const throttledMessages = useThrottledValue(messages, 100, { enabled: isStreaming });
   // command-input 不进 groupMessages（输入仍是 ChatMessage[]），按当前会话 path 拼在分组后。
+  // 准备态只看 grouped 末项：本地 /goal 行永远在 display 末尾，不能据此判断「有没有助手 turn」。
+  const grouped = useMemo(() => groupMessages(throttledMessages), [throttledMessages]);
   const display = useMemo(
-    () => (sessionPath ? [...groupMessages(throttledMessages), ...commandInputs] : groupMessages(throttledMessages)),
-    [throttledMessages, sessionPath, commandInputs],
+    () => (sessionPath ? [...grouped, ...commandInputs] : grouped),
+    [grouped, sessionPath, commandInputs],
   );
   const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
 
   // 等待占位：仅在「还没有助手 turn」时用独立占位。一旦存在 turn/tool，由其它组件接管。
-  const last = display[display.length - 1];
+  const last = grouped[grouped.length - 1];
   const lastIsSteer = last?.kind === 'user' && last.steering === true;
   const showPreparing =
     Boolean(waitingLabel) ||

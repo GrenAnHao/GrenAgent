@@ -180,5 +180,23 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(scroll!.textContent).toContain('写完');
     expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
   });
+
+  it('末尾有本地 command-input 时，已有助手正文仍不显示准备态', () => {
+    useSessionStore.getState().setActiveSession('/tmp/s.json');
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
+    mockState.isStreaming = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '回答中', thinking: '', streaming: true } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByText('准备响应中…')).toBeNull();
+    expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
+  });
 });
 
