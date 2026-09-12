@@ -1,97 +1,283 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import factory from "./index.js";
 
 type Handler = (args: string, ctx: unknown) => Promise<void>;
 
-function setup(client: { request: (...args: unknown[]) => Promise<unknown> } = { request: async () => undefined }) {
+interface GoalEntry {
+  type: string;
+  customType: string;
+  data: {
+    kind: string;
+    goalId?: string;
+    revision?: number;
+    at?: string;
+    payload?: Record<string, unknown>;
+  };
+}
+
+function setup() {
+  const entries: GoalEntry[] = [];
   const calls = {
     status: [] as unknown[][],
     notify: [] as unknown[][],
-    entries: [] as unknown[][],
+    send: [] as unknown[][],
   };
   const commands: string[] = [];
-  const events: string[] = [];
+  const handlers: Record<string, Function> = {};
   let handler: Handler | undefined;
+  let description = "";
+
   factory({
-    registerCommand: (n: string, def: { handler: Handler }) => {
-      commands.push(n);
-      if (n === "goal") handler = def.handler;
+    appendEntry: (t: string, d: unknown) => {
+      entries.push({ type: "custom", customType: t, data: d as GoalEntry["data"] });
     },
-    on: (e: string) => events.push(e),
-    appendEntry: (t: string, d: unknown) => calls.entries.push([t, d]),
-  } as never, client as never);
+    sendMessage: (...a: unknown[]) => {
+      calls.send.push(a);
+    },
+    on: (e: string, h: Function) => {
+      handlers[e] = h;
+    },
+    registerCommand: (n: string, def: { handler: Handler; description?: string }) => {
+      commands.push(n);
+      if (n === "goal") {
+        handler = def.handler;
+        description = def.description ?? "";
+      }
+    },
+  } as never);
+
   const ctx = {
-    cwd: 'C:/work',
+    cwd: "/repo",
     ui: {
       notify: (...a: unknown[]) => calls.notify.push(a),
       setStatus: (...a: unknown[]) => calls.status.push(a),
     },
-    model: undefined,
-    modelRegistry: { find: () => undefined },
-    sessionManager: { getSessionId: () => 'session-a' },
+    sessionManager: {
+      getEntries: () => entries,
+      getSessionId: () => "session-a",
+    },
   };
-  return { handler: handler as Handler, ctx, calls, commands, events };
+
+  return { handler: handler as Handler, ctx, calls, commands, handlers, description, entries };
 }
 
-const lastStatus = (calls: { status: unknown[][] }) => calls.status.at(-1) as [string, string | undefined];
+function lastNotify(calls: { notify: unknown[][] }): [string, string] {
+  return calls.notify.at(-1) as [string, string];
+}
+
+function lastEnvelope(calls: { status: unknown[][] }) {
+  const pair = calls.status.at(-1) as [string, string];
+  expect(pair[0]).toBe("goal");
+  return JSON.parse(pair[1]) as {
+    schemaVersion: number;
+    sessionId: string;
+    workspace?: string;
+    snapshot: { status?: string; activation?: string; goalId?: string; revision?: number; condition?: string } | null;
+    history: unknown[];
+  };
+}
+
+function goalEvents(entries: GoalEntry[]) {
+  return entries.filter((entry) => entry.customType === "goal").map((entry) => entry.data);
+}
+
+afterEach(() => {
+  delete process.env["goal.autoContinueOnOpen"];
+});
 
 describe("goal extension factory", () => {
-  it("registers /goal command and session_start/agent_end hooks", () => {
-    const { commands, events } = setup();
+  it("registers goal plus session_start, input, agent_end, and agent_settled", async () => {
+    const { commands, handlers, calls, ctx } = setup();
     expect(commands).toContain("goal");
-    expect(events).toEqual(expect.arrayContaining(["session_start", "agent_end"]));
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining(["session_start", "input", "agent_end", "agent_settled"]),
+    );
+
+    await handlers.agent_end?.(
+      { messages: [{ role: "assistant", stopReason: "aborted" }, { role: "user", stopReason: "error" }] },
+      ctx,
+    );
+    expect(calls.send).toEqual([]);
+
+    await handlers.agent_settled?.({}, ctx);
+    expect(calls.send).toEqual([]);
   });
 
-  it("setting a goal persists through the current session RPC", async () => {
-    const client = { request: async (method: string, params: Record<string, unknown>) => method === 'goal.get'
-      ? undefined
-      : { goalId: 'g', sessionId: params.sessionId, workspace: params.workspace, revision: 1, condition: params.condition, status: 'active', roundsUsed: 0, maxRounds: 256 } };
-    const { handler, ctx, calls } = setup(client);
-    await handler("写完并通过测试", ctx);
-    const [key, text] = lastStatus(calls);
-    expect(key).toBe("goal");
-    expect(JSON.parse(text as string)).toMatchObject({ condition: "写完并通过测试", status: 'active' });
+  it("describes a query-first bare command, not /goal 清除", () => {
+    const { description } = setup();
+    expect(description).toContain("查询");
+    expect(description).not.toMatch(/\/goal\s*清除/);
   });
 
-  it("queues a desktop-managed Turn when the Electron control plane is available", async () => {
-    const calls: string[] = [];
-    const client = { request: async (method: string) => { calls.push(method); return undefined; } };
-    const { handler, ctx } = setup(client);
-    await handler("完成统一事件迁移", ctx);
-    expect(calls).toEqual(['goal.get', 'goal.create']);
+  it("warns on a bare query when no goal is active", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("", ctx);
+    expect(lastNotify(calls)).toEqual(["当前没有生效的目标。", "warning"]);
+    expect(entries).toEqual([]);
   });
 
-  it("pause then resume toggles the pushed paused flag", async () => {
-    let snapshot: any = undefined;
-    const client = { request: async (method: string, params: Record<string, unknown>) => {
-      if (method === 'goal.get') return snapshot;
-      snapshot = { goalId: 'g', sessionId: 'session-a', workspace: 'C:/work', revision: (snapshot?.revision ?? 0) + 1, condition: '目标X', status: params.action === 'pause' ? 'paused' : 'active', roundsUsed: 0, maxRounds: 256 };
-      return snapshot;
-    } };
-    const { handler, ctx, calls } = setup(client);
-    await handler("目标X", ctx);
+  it("creates a goal event, arms status, and notifies an in-progress receipt", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("写完", ctx);
+
+    expect(goalEvents(entries)).toEqual([
+      expect.objectContaining({
+        kind: "create",
+        revision: 1,
+        payload: { condition: "写完" },
+      }),
+    ]);
+
+    const envelope = lastEnvelope(calls);
+    expect(envelope).toMatchObject({
+      schemaVersion: 1,
+      sessionId: "session-a",
+      workspace: "/repo",
+      history: [],
+    });
+    expect(envelope.snapshot).toMatchObject({ status: "active", activation: "armed", condition: "写完" });
+
+    const [text, level] = lastNotify(calls);
+    expect(level).toBe("info");
+    expect(text).toContain("执行中的目标");
+    expect(text).not.toContain("goalId");
+    expect(text).not.toContain("revision");
+  });
+
+  it("refuses a second create while an incomplete goal exists", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("写完", ctx);
+    const before = entries.length;
+    await handler("另一条", ctx);
+    expect(entries.length).toBe(before);
+    expect(goalEvents(entries).every((event) => event.kind === "create")).toBe(true);
+    const [text, level] = lastNotify(calls);
+    expect(level).toBe("error");
+    expect(text).toMatch(/edit|clear/i);
+  });
+
+  it("allows create after a complete event without clear, new goalId at revision 1", async () => {
+    const { handler, ctx, entries } = setup();
+    await handler("旧目标", ctx);
+    const created = goalEvents(entries)[0];
+    entries.push({
+      type: "custom",
+      customType: "goal",
+      data: {
+        kind: "complete",
+        goalId: created.goalId,
+        revision: 2,
+        at: "2026-09-13T00:00:00.000Z",
+        payload: {},
+      },
+    });
+
+    await handler("新目标", ctx);
+    const events = goalEvents(entries);
+    const next = events.at(-1);
+    expect(next).toMatchObject({
+      kind: "create",
+      revision: 1,
+      payload: { condition: "新目标" },
+    });
+    expect(next?.goalId).toBeTruthy();
+    expect(next?.goalId).not.toBe(created.goalId);
+  });
+
+  it("creates when the text is pause after verify", async () => {
+    const { handler, ctx, entries } = setup();
+    await handler("pause after verify", ctx);
+    expect(goalEvents(entries)[0]).toMatchObject({
+      kind: "create",
+      revision: 1,
+      payload: { condition: "pause after verify" },
+    });
+  });
+
+  it("pauses to a disarmed projection", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("写完", ctx);
     await handler("pause", ctx);
-    expect(JSON.parse(lastStatus(calls)[1] as string)).toMatchObject({ status: 'paused' });
+    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "pause" });
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "paused", activation: "disarmed" });
+    expect(lastNotify(calls)[1]).toBe("info");
+  });
+
+  it("resumes a paused goal by writing resume and arming", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("写完", ctx);
+    await handler("pause", ctx);
     await handler("resume", ctx);
-    expect(JSON.parse(lastStatus(calls)[1] as string)).toMatchObject({ status: 'active' });
+    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "resume" });
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(lastNotify(calls)[1]).toBe("info");
   });
 
-  it("clear removes the goal (status pushed undefined)", async () => {
-    let snapshot: any;
-    const client = { request: async (method: string, params: Record<string, unknown>) => {
-      if (method === 'goal.get') return snapshot;
-      if (params.action === 'clear') return snapshot = { ...snapshot, status: 'cleared', revision: snapshot.revision + 1 };
-      return snapshot = { goalId: 'g', sessionId: 'session-a', workspace: 'C:/work', revision: 1, condition: '目标X', status: 'active', roundsUsed: 0, maxRounds: 256 };
-    } };
-    const { handler, ctx, calls } = setup(client);
-    await handler("目标X", ctx);
+  it("re-arms an active disarmed goal on resume without writing a resume event", async () => {
+    const { handler, ctx, calls, handlers, entries } = setup();
+    await handler("写完", ctx);
+    const kindsBefore = goalEvents(entries).map((event) => event.kind);
+    await handlers.session_start?.({}, ctx);
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
+
+    await handler("resume", ctx);
+    expect(goalEvents(entries).map((event) => event.kind)).toEqual(kindsBefore);
+    expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(false);
+    expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+  });
+
+  it("clears the goal and pushes a null snapshot", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("写完", ctx);
     await handler("clear", ctx);
-    expect(JSON.parse(lastStatus(calls)[1] as string)).toMatchObject({ status: 'cleared' });
+    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "clear" });
+    const envelope = lastEnvelope(calls);
+    expect(envelope.snapshot).toBeNull();
+    expect(envelope.history).toEqual([]);
+    expect(lastNotify(calls)[1]).toBe("info");
   });
 
-  it("pause without an active goal warns and drives nothing", async () => {
+  it("rejects bare edit as a missing-condition error", async () => {
     const { handler, ctx, calls } = setup();
+    await handler("edit", ctx);
+    const [text, level] = lastNotify(calls);
+    expect(level).toBe("error");
+    expect(text).toMatch(/缺少|条件/);
+  });
+
+  it("rejects edit when no goal is active", async () => {
+    const { handler, ctx, calls, entries } = setup();
+    await handler("edit 新", ctx);
+    expect(entries).toEqual([]);
+    expect(lastNotify(calls)).toEqual(["当前没有生效的目标。", "error"]);
+  });
+
+  it("uses info for success, error for failure, and warning when no goal", async () => {
+    const { handler, ctx, calls } = setup();
+    await handler("", ctx);
+    expect(lastNotify(calls)[1]).toBe("warning");
+    await handler("写完", ctx);
+    expect(lastNotify(calls)[1]).toBe("info");
+    await handler("另一条", ctx);
+    expect(lastNotify(calls)[1]).toBe("error");
+    await handler("edit", ctx);
+    expect(lastNotify(calls)[1]).toBe("error");
+  });
+
+  it("keeps goalId and revision out of notify text", async () => {
+    const { handler, ctx, calls } = setup();
+    await handler("写完", ctx);
     await handler("pause", ctx);
-    expect(calls.notify.at(-1)).toEqual(["当前没有生效的目标。", "warning"]);
+    await handler("resume", ctx);
+    await handler("", ctx);
+    await handler("另一条", ctx);
+    await handler("clear", ctx);
+    await handler("edit", ctx);
+    await handler("edit 新", ctx);
+
+    for (const [text] of calls.notify as [string, string][]) {
+      expect(text).not.toContain("goalId");
+      expect(text).not.toContain("revision");
+    }
   });
 });

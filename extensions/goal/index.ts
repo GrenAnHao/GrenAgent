@@ -1,7 +1,18 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MemoryClient } from "../memory/client.js";
-import { clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
-import type { GoalSnapshot } from "./contracts.js";
+import { clearGoalTurnMarks, setGoalHumanInput } from "./auth.js";
+import { parseGoalArgs } from "./parse.js";
+import { formatGoalReceipt } from "./receipt.js";
+import {
+  clearGoal,
+  createGoal,
+  currentStatusSnapshot,
+  editGoal,
+  onSessionStart,
+  pauseGoal,
+  pushStatus,
+  resumeGoal,
+} from "./session.js";
+import type { GoalSnapshot } from "./types.js";
 
 export const pluginManifest = {
   id: "goal",
@@ -11,121 +22,103 @@ export const pluginManifest = {
   permissions: { interaction: "auto" },
 } as const;
 
-type GoalPort = Pick<MemoryClient, "request">;
+const NO_GOAL = "当前没有生效的目标。";
+const MISSING_CONDITION = "缺少新的目标条件。";
+const INVALID_PARAMS = "目标条件无效。";
+const ALREADY_ACTIVE = "已有未完成的目标，请先 edit 或 clear。";
 
-function scope(ctx: ExtensionContext): { sessionId: string; workspace: string } {
-  const sessionId = ctx.sessionManager.getSessionId();
-  if (!sessionId) throw new Error("SESSION_NOT_BOUND");
-  return { sessionId, workspace: ctx.cwd };
+// 任务 6 从 agent_end 读取；此处不发消息、不重入。
+let lastAssistantStopReason: unknown;
+
+function receiptOf(ctx: ExtensionContext, snapshot: GoalSnapshot): string {
+  return formatGoalReceipt({
+    ...snapshot,
+    activation: currentStatusSnapshot(ctx)?.activation ?? "disarmed",
+  });
 }
 
-function notifyError(ctx: ExtensionContext, error: unknown): void {
-  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
-  ctx.ui.notify(code || (error instanceof Error ? error.message : "Goal 请求失败"), "warning");
+function notifyMissing(ctx: ExtensionContext, level: "warning" | "error"): void {
+  ctx.ui.notify(NO_GOAL, level);
 }
 
-function checkedSnapshot(value: GoalSnapshot, requestScope: { sessionId: string; workspace: string }, expected?: { goalId: string; revision: number }): GoalSnapshot {
-  if (value.sessionId !== requestScope.sessionId || value.workspace !== requestScope.workspace) throw new Error("GOAL_SCOPE_MISMATCH");
-  if (expected && (value.goalId !== expected.goalId || value.revision !== expected.revision + 1)) throw new Error("VERSION_CONFLICT");
-  return value;
-}
-
-export default function (pi: ExtensionAPI, clientOrControl?: unknown, injectedClient?: GoalPort) {
-  // The second argument was historically a desktop control port. Accept a
-  // request-capable object there as a test/embedding injection point while
-  // keeping that legacy call shape source-compatible.
-  const client: GoalPort = injectedClient
-    ?? (clientOrControl && typeof (clientOrControl as { request?: unknown }).request === "function"
-      ? clientOrControl as GoalPort
-      : new MemoryClient());
-  registerGoalTools(pi, client);
-  let cached: GoalSnapshot | undefined;
-
-  const pushStatus = (ctx: ExtensionContext) => {
-    const snapshot = cached;
-    ctx.ui.setStatus(
-      "goal",
-      snapshot
-        ? JSON.stringify({
-          schemaVersion: 1,
-          sessionId: snapshot.sessionId,
-          workspace: snapshot.workspace,
-          snapshot,
-          // Keep the legacy flat fields for older sidecars; the renderer uses
-          // the nested, revisioned snapshot above.
-          condition: snapshot.condition,
-          paused: snapshot.status === "paused",
-          status: snapshot.status,
-          revision: snapshot.revision,
-          goalId: snapshot.goalId,
-        })
-        : undefined,
-    );
-  };
-
-  const read = async (ctx: ExtensionContext): Promise<GoalSnapshot | undefined> => {
-    const requestScope = scope(ctx);
-    const value = await client.request<GoalSnapshot | undefined>("goal.get", requestScope);
-    if (value && (value.sessionId !== requestScope.sessionId || value.workspace !== requestScope.workspace)) throw new Error("GOAL_SCOPE_MISMATCH");
-    cached = value;
-    pushStatus(ctx);
-    return value;
-  };
-
+export default function (pi: ExtensionAPI) {
   pi.registerCommand("goal", {
-    description: "设定会话目标：/goal <条件> | /goal pause | /goal resume | /goal clear",
+    description: "查询或管理会话目标。空参数查询；/goal <条件> 创建；/goal edit <条件> 编辑；/goal pause | resume | clear",
     handler: async (args, ctx) => {
-      const text = args.trim();
+      const parsed = parseGoalArgs(args);
       try {
-        const current = await read(ctx);
-        if (text === "" || text === "clear" || text === "reset") {
-          if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
-          const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: "clear" }), requestScope, current);
-          pushStatus(ctx);
-          ctx.ui.notify("已清除目标。", "info");
+        if (parsed.type === "error") {
+          ctx.ui.notify(parsed.code === "MISSING_CONDITION" ? MISSING_CONDITION : INVALID_PARAMS, "error");
           return;
         }
-        if (text === "pause" || text === "resume") {
-          if (!current) { ctx.ui.notify("当前没有生效的目标。", "warning"); return; }
-          const requestScope = scope(ctx);
-          cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.update", { ...requestScope, goalId: current.goalId, revision: current.revision, action: text }), requestScope, current);
+        if (parsed.type === "query") {
+          const snapshot = currentStatusSnapshot(ctx);
+          if (!snapshot) {
+            notifyMissing(ctx, "warning");
+            return;
+          }
           pushStatus(ctx);
-          ctx.ui.notify(text === "pause" ? "目标已暂停。" : "目标已恢复。", "info");
+          ctx.ui.notify(formatGoalReceipt(snapshot), "info");
           return;
         }
-        if (text.length > 4000) throw new Error("INVALID_PARAMS");
-        const requestScope = scope(ctx);
-        cached = checkedSnapshot(await client.request<GoalSnapshot>("goal.create", {
-          ...requestScope,
-          condition: text,
-          // The explicit slash command is itself a durable human-intent
-          // signal; keep it in the audit payload without changing the goal.
-          continuousIntentEvidence: `/goal ${text}`,
-        }), requestScope);
-        pushStatus(ctx);
-        ctx.ui.notify(`已设定目标：${text}`, "info");
+        if (parsed.type === "create") {
+          ctx.ui.notify(receiptOf(ctx, createGoal(pi, ctx, parsed.condition)), "info");
+          return;
+        }
+        if (parsed.type === "edit") {
+          ctx.ui.notify(receiptOf(ctx, editGoal(pi, ctx, parsed.condition)), "info");
+          return;
+        }
+        if (parsed.type === "pause") {
+          ctx.ui.notify(receiptOf(ctx, pauseGoal(pi, ctx)), "info");
+          return;
+        }
+        if (parsed.type === "resume") {
+          ctx.ui.notify(receiptOf(ctx, resumeGoal(pi, ctx)), "info");
+          return;
+        }
+        clearGoal(pi, ctx);
+        ctx.ui.notify("已清除目标。", "info");
       } catch (error) {
-        notifyError(ctx, error);
+        const code = error instanceof Error ? error.message : "";
+        if (code === "GOAL_MISSING") {
+          notifyMissing(ctx, parsed.type === "edit" ? "error" : "warning");
+          return;
+        }
+        if (code === "GOAL_ALREADY_ACTIVE") {
+          ctx.ui.notify(ALREADY_ACTIVE, "error");
+          return;
+        }
+        ctx.ui.notify(code || "Goal 请求失败", "error");
       }
     },
   });
 
-  // Pi exposes the provenance of the input that starts an agent run. Keep it
-  // outside the tool schema so a model cannot self-assert human authority.
   pi.on("input", async (event) => {
-    setGoalInputContext(event.source, event.text);
+    if (event.source === "interactive" || event.source === "rpc") {
+      setGoalHumanInput();
+    }
     return { action: "continue" as const };
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    try { await read(ctx); } catch { cached = undefined; pushStatus(ctx); }
+    onSessionStart(ctx);
   });
 
-  // GoalCoordinator owns judging, retries, and turn scheduling. The extension
-  // deliberately performs no recursive sendMessage/turn.start work here.
-  pi.on("agent_end", async () => {
-    clearGoalInputContext();
-    return undefined;
+  pi.on("agent_end", async (event) => {
+    const messages = Array.isArray((event as { messages?: unknown }).messages)
+      ? (event as { messages: Array<{ role?: unknown; stopReason?: unknown }> }).messages
+      : [];
+    for (const message of messages) {
+      if (message?.role === "assistant") {
+        lastAssistantStopReason = message.stopReason;
+      }
+    }
+  });
+
+  pi.on("agent_settled", async () => {
+    clearGoalTurnMarks();
   });
 }
+
+void lastAssistantStopReason;
