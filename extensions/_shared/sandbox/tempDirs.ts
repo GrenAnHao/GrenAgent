@@ -64,6 +64,10 @@ export function acquireTempDir(sessionId: string, workspaceRoot: string): string
 export function dispose(sessionId: string): void {
   const dir = dirs.get(sessionId);
   if (!dir) return;
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // leftover handles or races; still drop the session mapping
+  }
   dirs.delete(sessionId);
 }

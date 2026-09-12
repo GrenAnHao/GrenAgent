@@ -1,5 +1,20 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+let failRm = false;
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    rmSync: (path: Parameters<typeof actual.rmSync>[0], options?: Parameters<typeof actual.rmSync>[1]) => {
+      if (failRm) throw new Error("busy");
+      return actual.rmSync(path, options);
+    },
+  };
+});
+
+import * as fs from "node:fs";
 import { existsSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
 import { acquireTempDir, dispose } from "./tempDirs.js";
 
 const workspace = "D:/work/repo";
@@ -12,6 +27,7 @@ function sid(label: string): string {
 }
 
 afterEach(async () => {
+  failRm = false;
   await Promise.all(sessions.splice(0).map((id) => dispose(id)));
 });
 
@@ -36,5 +52,16 @@ describe("acquireTempDir", () => {
     const sessionId = sid("overlap");
     const dir = acquireTempDir(sessionId, workspace);
     expect(() => acquireTempDir(sessionId, dir)).toThrow();
+  });
+
+  it("forgets the session even if removing the directory fails", () => {
+    const sessionId = sid("rm-fail");
+    const dir = acquireTempDir(sessionId, workspace);
+    failRm = true;
+    expect(() => dispose(sessionId)).not.toThrow();
+    failRm = false;
+    const again = acquireTempDir(sessionId, workspace);
+    expect(again).toBe(dir);
+    expect(existsSync(dir)).toBe(true);
   });
 });

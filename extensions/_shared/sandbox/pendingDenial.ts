@@ -19,6 +19,7 @@ export function rememberPendingDenial(
   pending.set(denialKey(workspace, command, sessionId), { mode });
 }
 
+/** consume 必须带与 remember 相同的 sessionId。 */
 export function consumePendingDenial(
   workspace: string,
   command: string,

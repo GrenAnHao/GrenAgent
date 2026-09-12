@@ -40,7 +40,11 @@ export interface SandboxedBashOperationsDeps {
 interface RunResult {
   exitCode: number | null;
   spawnError?: unknown;
+  stdout?: string;
+  stderr?: string;
 }
+
+const RUNNER_FAILED = "[sandbox: runner failed] The command never started.\n";
 
 export function createSandboxedBashOperations(
   deps: SandboxedBashOperationsDeps,
@@ -53,15 +57,27 @@ export function createSandboxedBashOperations(
   });
 
   function run(argv: string[], cwd: string, options: ExecOptions): Promise<RunResult> {
-    return new Promise((resolve) => {
+    if (options.signal?.aborted) {
+      return Promise.reject(new Error("aborted"));
+    }
+
+    return new Promise((resolve, reject) => {
       let settled = false;
       let spawnError: unknown;
+      let stdout = "";
+      let stderr = "";
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let child: ReturnType<SpawnImpl>;
+      let child: ReturnType<SpawnImpl> | undefined;
+      let pendingAbort = false;
+      let timedOut = false;
+      let aborted = false;
 
       const terminate = () => {
         const pid = child?.pid;
-        if (pid == null) return;
+        if (pid == null) {
+          pendingAbort = true;
+          return;
+        }
         if (platform === "win32") {
           spawnImpl("taskkill", ["/pid", String(pid), "/t", "/f"]);
           return;
@@ -76,9 +92,28 @@ export function createSandboxedBashOperations(
       const finish = (exitCode: number | null) => {
         if (settled) return;
         settled = true;
-        options.signal?.removeEventListener("abort", terminate);
+        options.signal?.removeEventListener("abort", onAbort);
         if (timer) clearTimeout(timer);
-        resolve({ exitCode: spawnError ? null : exitCode, spawnError });
+        if (timedOut) {
+          reject(new Error(`timeout:${options.timeout}`));
+          return;
+        }
+        if (aborted) {
+          reject(new Error("aborted"));
+          return;
+        }
+        resolve({
+          exitCode: spawnError ? null : exitCode,
+          spawnError,
+          stdout,
+          stderr,
+        });
+      };
+
+      const onAbort = () => {
+        aborted = true;
+        terminate();
+        if (!pendingAbort) finish(null);
       };
 
       child = spawnImpl(argv[0] ?? "", argv.slice(1), {
@@ -92,17 +127,32 @@ export function createSandboxedBashOperations(
         spawnError = err.code ?? err.message;
         finish(null);
       });
-      child.stdout?.on("data", (data: Buffer) => options.onData?.(data));
-      child.stderr?.on("data", (data: Buffer) => options.onData?.(data));
+      child.stdout?.on("data", (data: Buffer) => {
+        stdout += data.toString();
+        options.onData?.(data);
+      });
+      child.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+        options.onData?.(data);
+      });
       child.on("close", (code) => {
         finish(typeof code === "number" ? code : null);
       });
+      child.on("spawn", () => {
+        if (!pendingAbort) return;
+        pendingAbort = false;
+        terminate();
+        if (aborted || timedOut) finish(null);
+      });
 
-      if (options.signal?.aborted) terminate();
-      else options.signal?.addEventListener("abort", terminate);
+      options.signal?.addEventListener("abort", onAbort);
 
       if (options.timeout != null && options.timeout > 0) {
-        timer = setTimeout(terminate, options.timeout);
+        timer = setTimeout(() => {
+          timedOut = true;
+          terminate();
+          if (!pendingAbort) finish(null);
+        }, options.timeout * 1000);
       }
     });
   }
@@ -110,20 +160,23 @@ export function createSandboxedBashOperations(
   return {
     async exec(command, cwd, options) {
       const policy = { ...deps.getPolicy() };
-      const env = options.env ?? { ...process.env };
+      const env = { ...(options.env ?? process.env) };
       const once = env.PI_SANDBOX_MODE_ONCE;
       if (
         (once === "workspace-write" || once === "danger-full-access")
         && isStrictWidening(policy.mode, once)
       ) {
         policy.mode = once;
-        delete env.PI_SANDBOX_MODE_ONCE;
       }
+      delete env.PI_SANDBOX_MODE_ONCE;
 
       const shell = await (deps.resolveShell ?? resolveShellPath)();
       const base = [shell, "-c", command];
       if (!isConfined(policy.mode)) {
         const result = await run(base, cwd, { ...options, env });
+        if (result.spawnError) {
+          options.onData?.(Buffer.from(RUNNER_FAILED));
+        }
         return { exitCode: result.exitCode };
       }
 
@@ -149,7 +202,7 @@ export function createSandboxedBashOperations(
         ));
       }
       if (kind.kind === "runner-failure") {
-        options.onData?.(Buffer.from("[sandbox: runner failed] The command never started.\n"));
+        options.onData?.(Buffer.from(RUNNER_FAILED));
       }
       return { exitCode: result.exitCode };
     },
