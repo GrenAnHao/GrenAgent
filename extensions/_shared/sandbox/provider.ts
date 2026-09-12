@@ -8,11 +8,11 @@ import { SandboxUnavailableError } from "./errors.js";
 import { bwrapArgv } from "./linux/bwrap.js";
 import type { ConfinedArgv, SandboxPolicy, SandboxProvider } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
+import { acquireTempDir, dispose as disposeTempDir } from "./tempDirs.js";
 import { windowsConfined } from "./windows/runner.js";
 import { assertWritableRootsDisjoint } from "./windows/sids.js";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_TEMP_DIR = "/tmp/pi-sandbox";
 const DEFAULT_WIN_HELPER = join(
   dirname(fileURLToPath(import.meta.url)),
   "windows/bin/pi-sandbox-win.exe",
@@ -102,8 +102,11 @@ function unwiredReason(platform: NodeJS.Platform): string {
 
 export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxProvider {
   const platform = deps.platform ?? process.platform;
-  const tempDir = deps.tempDir ?? DEFAULT_TEMP_DIR;
   const helperPath = deps.helperPath ?? DEFAULT_WIN_HELPER;
+
+  function tempDirFor(policy: SandboxPolicy): string {
+    return deps.tempDir ?? acquireTempDir(policy.sessionId ?? "default", policy.workspaceRoot);
+  }
 
   async function defaultProbe(): Promise<SandboxProbeResult> {
     if (platform === "linux") return probeBwrap();
@@ -118,6 +121,8 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
       if (!result.ok) {
         throw new SandboxUnavailableError(result.reason ?? "sandbox unavailable");
       }
+
+      const tempDir = tempDirFor(policy);
 
       if (platform === "linux") {
         await probeLandlockAbi();
@@ -145,8 +150,8 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
       }
       return confined;
     },
-    async dispose(_sessionId) {
-      // Task 7 will release per-session temp dirs.
+    async dispose(sessionId) {
+      disposeTempDir(sessionId);
     },
   };
 }

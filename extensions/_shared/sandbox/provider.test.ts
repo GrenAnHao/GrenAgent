@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createSandboxProvider } from "./provider.js";
@@ -132,5 +133,30 @@ describe("createSandboxProvider", () => {
         signatures: ["pi-sandbox-win:"],
       },
     ]);
+  });
+
+  it("uses acquireTempDir on win32 and releases it on dispose", async () => {
+    const helperPath = fileURLToPath(import.meta.url);
+    const sessionId = `win-temp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const provider = createSandboxProvider({
+      platform: "win32",
+      helperPath,
+    });
+    const out = await provider.confine(caller, {
+      mode: "workspace-write",
+      network: "enabled",
+      workspaceRoot: "C:/work/repo",
+      sessionId,
+    });
+    const tempFlag = out.argv.indexOf("--temp");
+    expect(tempFlag).toBeGreaterThan(-1);
+    const acquired = out.argv[tempFlag + 1] ?? "";
+    expect(acquired.replace(/\\/g, "/")).not.toMatch(/\/tmp\/pi-sandbox/);
+    expect(acquired.toLowerCase().replace(/\\/g, "/")).toContain(
+      tmpdir().toLowerCase().replace(/\\/g, "/"),
+    );
+    expect(existsSync(acquired)).toBe(true);
+    await provider.dispose?.(sessionId);
+    expect(existsSync(acquired)).toBe(false);
   });
 });
