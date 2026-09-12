@@ -1,5 +1,7 @@
 # Electron 内嵌 Pi SDK 宿主
 
+> Goal 路由、`GoalHost`、`GoalCoordinator` 与独立 Goal worker 已被 [Goal 回到 Pi 会话](./2026-09-13-goal-on-session-design.md) 取代。下文其余宿主边界仍有效。
+
 ## 已确认边界
 
 2026-09-09 对话确认；同日晚经 4 个只读子代理分域审查（`2026-09-09-electron-pi-sdk-host-design-review.md`）后按第五节决策修订。以下全部以代码为依据，行号已核实。

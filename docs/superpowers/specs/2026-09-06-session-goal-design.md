@@ -1,5 +1,7 @@
 # Pi 会话 Goal 设计
 
+> **已被取代。** 权威源与调度以 [Goal 回到 Pi 会话](./2026-09-13-goal-on-session-design.md) 为准。下文为 2026-09-06 历史正文，不再作为实现依据。
+
 日期：2026-09-06
 状态：设计已确认，待用户审阅书面规格
 适用范围：Pi Electron 版；Goal 扩展、AgentData 持久化、Electron 会话 UI 与续跑调度

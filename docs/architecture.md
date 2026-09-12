@@ -101,10 +101,10 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **主进程（`electron-agent/electron`）：**
 
-- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `GoalHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
+- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
 - `app/`：服务层——`piRuntimeService`（`agent_*` 命令到进程内 `WorkspaceHandle` 的映射，含 `/mode`、`/approval` 等伪命令与 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
-- `agent/`：`WorkspaceHandle`、`AgentHost`、`GoalHost`、`ModelRuntimeHost`、`SessionUiAdapter`。
+- `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`。
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
@@ -123,9 +123,9 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 #### 会话 Goal
 
-Goal 的实时归属键是 Pi 提供的真实 `sessionId`，不是工作区或前端标签页。`goal_snapshots`、`goal_events` 和轮次 lease 由 Agent Data Runtime 事务化保存，`goalId + revision` 是所有修改、续跑和裁判结果的 CAS 版本；渲染层与扩展只保存按会话索引的投影。`GoalCoordinator` 负责独立 Goal worker 的续跑和 `goal_judge` 验收，只有裁判明确通过才进入 `complete`，裁判不可用或结果无法持久化时保持未完成并记录停止原因。
+Goal 绑在当前 Pi 会话。权威源是会话 JSONL 里 `customType: "goal"` 且带 `kind` 的事件，由 `extensions/goal` 折叠为快照；续跑正文走 `customType: "goal-round"`。完成由本会话工作模型通过 `update_goal(complete|blocked)` 自报，没有独立裁判，也没有 AgentData Goal 表、Coordinator 或 Goal worker。重开默认 `disarmed`；仅当应用设置 `goal.autoContinueOnOpen === "true"` 且阶段为 `active` 时武装。旧 AgentData Goal 不迁移。详见 [Goal 回到 Pi 会话](./superpowers/specs/2026-09-13-goal-on-session-design.md)。
 
-Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。重启、历史恢复和 fork 会保留快照与审计，但默认 `disarmed`，必须由用户显式恢复。旧 JSONL 中的 Goal custom entry 只读迁移为 `source=legacy` 的 `disarmed` 快照，追加 `legacy_goal_restored` 审计事件，不改写原始会话文件；当前分支以外的旧分支不会被迁移。
+Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话的 live Goal 页面。
 
 运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用记忆与 Wiki 能力。
 
