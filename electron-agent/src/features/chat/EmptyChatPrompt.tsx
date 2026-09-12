@@ -1,5 +1,9 @@
 import { createStaticStyles, cssVar } from 'antd-style';
+import { PiBrandLogo } from '../../components/PiBrandLogo';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
+
+export const EMPTY_CHAT_BRAND_SIZE = 23;
+export const EMPTY_CHAT_BRAND_GAP = 9;
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
@@ -9,6 +13,17 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 24px;
     padding: 0 32px 16px;
     text-align: center;
+  `,
+  lockup: css`
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: ${EMPTY_CHAT_BRAND_GAP}px;
+  `,
+  logo: css`
+    flex: 0 0 auto;
+    color: ${cssVar.colorText};
+    line-height: 1;
   `,
   title: css`
     margin: 0;
@@ -39,7 +54,12 @@ export function EmptyChatPrompt({ workspace, isConversation }: EmptyChatPromptPr
 
   return (
     <div className={styles.wrap} data-testid="empty-chat-prompt">
-      <h1 className={styles.title}>{title}</h1>
+      <div className={styles.lockup} data-testid="empty-chat-lockup" style={{ gap: EMPTY_CHAT_BRAND_GAP }}>
+        <span className={styles.logo}>
+          <PiBrandLogo size={EMPTY_CHAT_BRAND_SIZE} tight data-testid="empty-chat-brand" />
+        </span>
+        <h1 className={styles.title}>{title}</h1>
+      </div>
     </div>
   );
 }
