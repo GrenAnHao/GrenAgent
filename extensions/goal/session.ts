@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readAutoContinueOnOpen } from "./config.js";
 import { foldGoal } from "./fold.js";
+import { listGoalHistory } from "./history.js";
 import type { GoalActivation, GoalEvent, GoalSnapshot } from "./types.js";
 
 const activations = new Map<string, GoalActivation>();
@@ -59,7 +60,7 @@ export function pushStatus(ctx: ExtensionContext): void {
     sessionId: sessionIdOf(ctx),
     workspace: ctx.cwd,
     snapshot: currentStatusSnapshot(ctx),
-    history: [],
+    history: listGoalHistory(sessionManager(ctx).getEntries?.() ?? []),
   }));
 }
 

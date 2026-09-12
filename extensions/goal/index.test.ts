@@ -142,8 +142,10 @@ describe("goal extension factory", () => {
       schemaVersion: 1,
       sessionId: "session-a",
       workspace: "/repo",
-      history: [],
     });
+    expect(envelope.history).toEqual([
+      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
+    ]);
     expect(envelope.snapshot).toMatchObject({ status: "active", activation: "armed", condition: "写完" });
 
     const [text, level] = lastNotify(calls);
@@ -242,7 +244,10 @@ describe("goal extension factory", () => {
     expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "clear" });
     const envelope = lastEnvelope(calls);
     expect(envelope.snapshot).toBeNull();
-    expect(envelope.history).toEqual([]);
+    expect(envelope.history).toEqual([
+      expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
+      expect.objectContaining({ source: "event", kind: "clear" }),
+    ]);
     expect(lastNotify(calls)[1]).toBe("info");
   });
 
