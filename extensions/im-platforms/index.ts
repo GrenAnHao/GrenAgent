@@ -275,11 +275,12 @@ async function processTurn(fromUser: string): Promise<void> {
   const env: Record<string, string> = { GOAL_ENABLED: "0", LOOP_GUARD: "1" };
   if (restricted) {
     env.SAFETY_READONLY = "1"; // 宿主 write/edit 锁
-    // 受限访客会话绝不继承 owner 的「完全访问」：full 会让 safety ② 直接放行（跳过 ③④），且
-    // headless 子进程无法做 ask 的 UI 确认。把 full 降到 auto（与 multi-agent 自主子代理一致），
-    // 保证 ④ 危险命令/受保护路径等门控仍生效；能力硬限（① deny/readonly）本就不受策略影响。
+    // 受限访客会话绝不继承 owner 的「完全访问 / 工作区编辑」：full 会让 safety ② 直接放行
+    // （跳过 ③④），workspace 也不问危险命令。headless 子进程无法做 ask 的 UI 确认。
+    // 把 full / workspace 降到 auto（与 multi-agent 自主子代理一致），保证 ④ 危险命令 /
+    // 受保护路径等门控仍生效；能力硬限（① deny/readonly）本就不受策略影响。
     const ownerPolicy = getApprovalPolicy();
-    env.APPROVAL_POLICY = ownerPolicy === "full" ? "auto" : ownerPolicy;
+    env.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
     env.SAFETY_DENY_TOOLS = restrictedDenyTools().join(",");
   }
   const result = await spawnPiAgent(st.cwd, renderPrompt(history), {

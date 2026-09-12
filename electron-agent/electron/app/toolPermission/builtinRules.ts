@@ -8,10 +8,10 @@ export interface BuiltinRule {
 }
 
 /**
- * auto 与 ask 共用的第 ④ 层门控，对应现有 safety 钩子的 extensions/safety/index.ts:91。
+ * auto / ask / readonly 共用的第 ④ 层门控，对应现有 safety 钩子的 extensions/safety/index.ts:91。
  *
- * 受保护路径写入：任何档位都不许做（full 除外，见下）。
- * 危险命令：必须逐次确认，用户规则无法降级为静默放行。
+ * 受保护路径写入：full 以外都拦；workspace 只挂这一条。
+ * 危险命令：仅挂在 auto / ask / readonly，必须逐次确认，用户规则无法降级为静默放行。
  */
 const PROTECTED_PATH: BuiltinRule = {
   id: 'builtin.protected-path', effect: 'deny', match: (c) => c.flags.write && c.flags.protectedPath,
