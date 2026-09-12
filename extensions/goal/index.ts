@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { clearGoalTurnMarks, setGoalHumanInput } from "./auth.js";
+import { setGoalHumanInput } from "./auth.js";
+import { onAgentSettled, recordRunStopReasons } from "./continue.js";
 import { parseGoalArgs } from "./parse.js";
 import { formatGoalReceipt } from "./receipt.js";
 import {
@@ -28,9 +29,6 @@ const NO_GOAL = "当前没有生效的目标。";
 const MISSING_CONDITION = "缺少新的目标条件。";
 const INVALID_PARAMS = "目标条件无效。";
 const ALREADY_ACTIVE = "已有未完成的目标，请先 edit 或 clear。";
-
-// 任务 6 从 agent_end 读取；此处不发消息、不重入。
-let lastAssistantStopReason: unknown;
 
 function receiptOf(ctx: ExtensionContext, snapshot: GoalSnapshot): string {
   return formatGoalReceipt({
@@ -109,20 +107,11 @@ export default function (pi: ExtensionAPI) {
     onSessionStart(ctx);
   });
 
-  pi.on("agent_end", async (event) => {
-    const messages = Array.isArray((event as { messages?: unknown }).messages)
-      ? (event as { messages: Array<{ role?: unknown; stopReason?: unknown }> }).messages
-      : [];
-    for (const message of messages) {
-      if (message?.role === "assistant") {
-        lastAssistantStopReason = message.stopReason;
-      }
-    }
+  pi.on("agent_end", async (event, ctx) => {
+    recordRunStopReasons(sessionIdOf(ctx), event.messages);
   });
 
-  pi.on("agent_settled", async (_event, ctx) => {
-    clearGoalTurnMarks(sessionIdOf(ctx));
+  pi.on("agent_settled", async (event, ctx) => {
+    await onAgentSettled(event, ctx, pi);
   });
 }
-
-void lastAssistantStopReason;

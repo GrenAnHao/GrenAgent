@@ -1,7 +1,7 @@
 {
   "name": "pi-goal",
   "version": "0.1.0",
-  "description": "Goal stop-condition + independent judge for the Pi coding agent (prevents optimistic early stop).",
+  "description": "当前 Pi 会话上的 Goal 完成条件与本会话续跑。",
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "goal"],
