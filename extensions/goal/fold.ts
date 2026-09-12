@@ -130,9 +130,11 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
   }
 }
 
-function applyEpoch(snapshot: GoalSnapshot | undefined, epoch: GoalEvent[]): GoalSnapshot | undefined {
+function applyEpoch(epoch: GoalEvent[]): GoalSnapshot | undefined {
+  // Per-epoch revision sort only: clear/complete reset the lifecycle so revision may
+  // restart at 1; a global sort would mis-order create-after-complete vs complete.
   const sorted = [...epoch].sort((a, b) => a.revision - b.revision);
-  let next = snapshot;
+  let next: GoalSnapshot | undefined;
   for (const event of sorted) {
     if (event.kind === "clear") {
       next = undefined;
@@ -143,6 +145,30 @@ function applyEpoch(snapshot: GoalSnapshot | undefined, epoch: GoalEvent[]): Goa
   return next;
 }
 
+function endsEpoch(event: GoalEvent): boolean {
+  return event.kind === "clear" || event.kind === "complete";
+}
+
+function foldEpochResults(epochs: GoalEvent[][]): GoalSnapshot | undefined {
+  let snapshot: GoalSnapshot | undefined;
+  for (const epoch of epochs) {
+    const folded = applyEpoch(epoch);
+    if (folded !== undefined) {
+      snapshot = folded;
+      continue;
+    }
+    if (epoch.some((event) => event.kind === "clear")) {
+      snapshot = undefined;
+      continue;
+    }
+    if (!epoch.some((event) => event.kind === "create")) {
+      continue;
+    }
+    snapshot = undefined;
+  }
+  return snapshot;
+}
+
 export function foldGoal(entries: unknown[]): GoalSnapshot | undefined {
   const events: GoalEvent[] = [];
   for (const entry of entries) {
@@ -150,17 +176,17 @@ export function foldGoal(entries: unknown[]): GoalSnapshot | undefined {
     if (event) events.push(event);
   }
 
-  let snapshot: GoalSnapshot | undefined;
+  const epochs: GoalEvent[][] = [];
   let epoch: GoalEvent[] = [];
   for (const event of events) {
     epoch.push(event);
-    if (event.kind === "clear") {
-      snapshot = applyEpoch(snapshot, epoch);
+    if (endsEpoch(event)) {
+      epochs.push(epoch);
       epoch = [];
     }
   }
   if (epoch.length > 0) {
-    snapshot = applyEpoch(snapshot, epoch);
+    epochs.push(epoch);
   }
-  return snapshot;
+  return foldEpochResults(epochs);
 }

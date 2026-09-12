@@ -74,4 +74,20 @@ describe("foldGoal", () => {
     ]);
     expect(snapshot).toMatchObject({ status: "complete", revision: 2 });
   });
+
+  it("allows create after complete without clear, new goalId at revision 1", () => {
+    const snapshot = foldGoal([
+      ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "旧" } }),
+      ev({ kind: "complete", goalId: "g1", revision: 2, at, payload: {} }),
+      ev({ kind: "create", goalId: "g2", revision: 1, at, payload: { condition: "新" } }),
+    ]);
+    expect(snapshot).toMatchObject({
+      goalId: "g2",
+      revision: 1,
+      condition: "新",
+      status: "active",
+      roundsStarted: 0,
+      maxRounds: 256,
+    });
+  });
 });
