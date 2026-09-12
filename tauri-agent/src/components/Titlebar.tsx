@@ -76,7 +76,7 @@ export function Titlebar() {
   return (
     <div data-tauri-drag-region className={styles.bar}>
       <span data-tauri-drag-region className={styles.title}>
-        <GrenAgentBrand size={16} />
+        <GrenAgentBrand />
       </span>
       <div className={styles.controls}>
         <ActionIcon
