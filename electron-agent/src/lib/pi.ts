@@ -1,5 +1,4 @@
 import { Channel, invoke, listen, type UnlistenFn } from '../platform/runtime';
-import type { GoalSnapshot } from '../stores/goalStore';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
 import type { UsageReport } from './usageReport';
@@ -16,12 +15,6 @@ export interface PiUiRequestEnvelope {
   sessionId?: string;
   source?: 'interactive' | 'goal';
   request: ExtensionUiRequest;
-}
-export interface GoalStatusEnvelope {
-  schemaVersion: 1;
-  workspace: string;
-  sessionId: string;
-  snapshot: GoalSnapshot | null;
 }
 export interface PiExitEnvelope {
   workspace: string;
@@ -213,6 +206,8 @@ export const pi = {
   listAllSessions: () => invoke<SessionInfo[]>('list_all_sessions'),
   setSessionName: (workspace: string, name: string) =>
     invoke<unknown>('agent_set_session_name', { workspace, name }),
+  setSessionDisplayName: (sessionPath: string, name: string) =>
+    invoke<void>('set_session_display_name', { sessionPath, name }),
   deleteSession: (workspace: string, sessionPath: string) =>
     invoke<void>('delete_pi_session', { workspace, sessionPath }),
   createConversation: () => invoke<{ cwd: string }>('create_conversation'),
@@ -311,9 +306,6 @@ export function onPiEvent(handler: (e: PiEventEnvelope) => void): Promise<Unlist
 }
 export function onPiUiRequest(handler: (e: PiUiRequestEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiUiRequestEnvelope>('pi://ui-request', (e) => handler(e.payload));
-}
-export function onGoalStatus(handler: (e: GoalStatusEnvelope) => void): Promise<UnlistenFn> {
-  return listen<GoalStatusEnvelope>('goal://status', (e) => handler(e.payload));
 }
 export function onPiExit(handler: (e: PiExitEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiExitEnvelope>('pi://exit', (e) => handler(e.payload));

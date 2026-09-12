@@ -1,6 +1,6 @@
 import { App } from 'antd';
 import { useEffect } from 'react';
-import { onGoalStatus, onPiUiRequest } from '../../lib/pi';
+import { onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../stores/goalStore';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
@@ -12,6 +12,8 @@ import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
 import { useVisualStore } from '../../stores/visualStore';
+import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
+import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -141,10 +143,6 @@ export function ExtensionUiHost() {
       if (parsed) useGoalStore.getState().setSnapshot(parsed.sessionId, parsed.snapshot);
     };
 
-    register(onGoalStatus((payload) => {
-      if (payload.schemaVersion !== GOAL_STATUS_SCHEMA_VERSION) return;
-      routeGoalStatus(payload, payload.sessionId);
-    }));
     register(onPiUiRequest((e) => {
       // Goal workers are headless; their UI requests must never surface in the
       // interactive session's prompt cards or modal flow.
@@ -189,6 +187,10 @@ export function ExtensionUiHost() {
           }
         } else if (r.statusKey === 'approval-policy') {
           if (isApprovalPolicy(r.statusText)) useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+        } else if (r.statusKey === 'ui-prompt') {
+          agentStoreRegistry.get(e.workspace)?.useStore.setState({
+            waitingUiPrompt: parseWaitingUiPrompt(r.statusText),
+          });
         } else if (r.statusKey === 'visual') {
           try {
             const d = typeof r.statusText === 'string' ? JSON.parse(r.statusText) : null;

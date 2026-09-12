@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
-import { browserWindowOptions } from "./mainConfig";
+import { browserWindowOptions, resolveRendererHtml } from "./mainConfig";
 import { SettingsService } from "./app/settingsService";
 import { McpPolicyService } from "./app/mcpPolicyService";
 import { McpConfigService } from "./app/mcpConfigService";
@@ -35,19 +35,16 @@ import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./a
 import { CodeGraphService } from "./app/codeGraph/codeGraphService";
 import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
-import { GoalCoordinator } from "./app/goalCoordinator";
-import { judgeGoal } from "./app/goalJudge";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
 import { resolveWorkerEntry } from "./agent/workerEntry";
 import { AgentHost } from "./agent/agentHost";
-import { createGoalHandle } from "./agent/createGoalHandle";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
-import { GoalHost } from "./agent/goalHost";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 import { collectModels } from "../../cli/src/probe-models.js";
 import { runOneshotWithRuntime, type OneshotRequest } from "../../extensions/_shared/oneshot.js";
 import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
+import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
 
 export function createWindow() {
   const window = new BrowserWindow(browserWindowOptions);
@@ -58,7 +55,7 @@ export function createWindow() {
   if (rendererUrl) {
     void window.loadURL(rendererUrl);
   } else {
-    void window.loadFile(join(__dirname, "../dist/index.html"));
+    void window.loadFile(resolveRendererHtml(app.getAppPath()));
   }
 }
 
@@ -71,14 +68,12 @@ if (!process.env.VITEST) {
     ].filter((dir) => dir !== app.getPath('userData')));
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
     let piRuntime: PiRuntimeService | undefined;
-    let goalCoordinator: GoalCoordinator | undefined;
     let agentData: AgentDataService;
     const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
       const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
       const args = isRecord(operation.args) ? operation.args : undefined;
       const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : undefined;
-      const source = args?.source === 'goal' ? 'goal' : 'interactive';
-      return workspace && source !== 'goal' ? (piRuntime?.permissionProfile(workspace, sessionId) ?? requested) : requested;
+      return workspace ? (piRuntime?.permissionProfile(workspace, sessionId) ?? requested) : requested;
     } });
     const sandbox = new SandboxManager({});
     const mcpConfig = new McpConfigService(app.getPath('home'), settings);
@@ -212,28 +207,6 @@ if (!process.env.VITEST) {
         },
       }),
     });
-    const goalHost = new GoalHost({
-      create: async (workspace, sessionId, sessionPath) => createGoalHandle({
-        workspace,
-        cwd: workspace,
-        sessionId,
-        sessionPath,
-        modelRuntime: await modelRuntimeHost.ensure(),
-        allowedExtensionsJson: JSON.stringify(plugins.allowedPluginIds()),
-        resolveConfig: (origin) => piRuntime!.turnConfig(workspace, workspace, origin),
-        onEvent: (event, meta) => {
-          const envelope = piRuntime!.eventEnvelope(workspace, event, meta);
-          broadcastPiEvent('pi://event', envelope);
-          void piRuntime!.handlePiEvent(workspace, event, meta).catch((error) => console.error('Goal event handling failed', error));
-        },
-        onFatal: (error) => {
-          console.error('GoalHandle fatal', error);
-          void goalHost.dispose(workspace, sessionId).catch(() => {});
-          broadcastPiEvent('pi://exit', { workspace, code: 1, sessionId, source: 'goal' });
-          void piRuntime!.handlePiExit(workspace, 1, { sessionId, source: 'goal' }).catch((err) => console.error('Goal exit handling failed', err));
-        },
-      }),
-    });
     registerIpcHandlers({
       settings,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
@@ -248,17 +221,8 @@ if (!process.env.VITEST) {
         agentDir,
         runtimeConfigPath,
         agentHost,
-        goalHost,
         modelRuntimeHost,
         agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
-        migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused, legacyEntryTimestamp }) => agentData.requestAdmin('admin.goal.recoverLegacy', {
-          workspace,
-          sessionId,
-          condition,
-          react,
-          paused,
-          ...(legacyEntryTimestamp === undefined ? {} : { legacyEntryTimestamp }),
-        }).then(() => undefined),
         resolveWorkspace: async (path) => {
           const resolved = await workspace.ensureWorkspace(path);
           knownWorkspaces.add(resolved);
@@ -268,32 +232,6 @@ if (!process.env.VITEST) {
         mcpConfig,
         allowedPluginIds: () => plugins.allowedPluginIds(),
         threadStore: agentData,
-        onTurnSettled: (result) => {
-          if (!result.goal || !result.sessionId) return;
-          return goalCoordinator?.onTurnCompleted({
-            workspace: result.workspace,
-            sessionId: result.sessionId,
-            ...(result.sessionPath ? { sessionPath: result.sessionPath } : {}),
-            turnId: result.turnId,
-            status: result.status,
-            summary: result.summary,
-            goal: result.goal,
-          });
-        },
-        bindGoalSession: (project, sessionId, source) => agentData.bindGoalSession(project, sessionId, source).then(() => undefined),
-        unbindGoalSession: (project, sessionId) => agentData.unbindGoalSession(project, sessionId).then(() => undefined),
-        onSessionForked: async ({ workspace, sourceSessionId, targetSessionId }) => {
-          const source = await agentData.goalGet(sourceSessionId, workspace);
-          if (!source) return;
-          // A cleared source is forked as a tombstone rather than skipped: the
-          // copied JSONL still carries the old legacy Goal entry, and without a
-          // tombstone the later legacy migration would resurrect it.
-          await agentData.requestAdmin('admin.goal.fork', {
-            sourceSessionId,
-            sourceGoalId: source.goalId,
-            targetSessionId,
-          });
-        },
       }),
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
@@ -331,38 +269,9 @@ if (!process.env.VITEST) {
       // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。
       dev: app.isPackaged ? undefined : new DevService(),
     });
-    goalCoordinator = new GoalCoordinator({
-      data: {
-        get: (sessionId) => agentData.goalGet(sessionId, ''),
-        update: (input) => agentData.requestAdmin('admin.goal.update', input),
-        claimRound: (input) => agentData.goalClaimRound(input),
-        settleRound: (input) => agentData.goalSettleRound(input),
-        cancelRound: (input) => agentData.goalCancelRound(input),
-        judgeResult: (input) => agentData.requestAdmin('admin.goal.judgeResult', { ...input, origin: 'system' }),
-        runtimeError: (input) => agentData.goalRuntimeError(input),
-      },
-      worker: {
-        enqueueGoalTurn: (input) => piRuntime!.enqueueGoalTurn(input),
-        closeGoalWorker: (sessionId, workspace) => piRuntime!.closeGoalWorker(sessionId, workspace),
-      },
-      judge: {
-        judge: (input) => judgeGoal({
-          run: (task) => agentData.runServiceTask({ id: task.id, kind: task.kind, input: task.input, capabilities: ['llm_completion'] }),
-        }, input),
-      },
-      onGoalChanged: (snapshot) => broadcastPiEvent('goal://status', {
-        schemaVersion: 1,
-        workspace: snapshot.workspace,
-        sessionId: snapshot.sessionId,
-        snapshot,
-      }),
-    });
-    agentData.onGoalEvent((event, snapshot) => {
-      if (snapshot) return goalCoordinator?.onGoalChanged(snapshot, event);
-    });
     workspace.setWorkspaceCloser(async (project) => {
-      await goalCoordinator?.onWorkspaceDeleted(project);
       await piRuntime?.closeWorkspace(project);
+      releaseSubagentControlPlane(project);
     });
     let shutdownStarted = false;
     let shutdownDone = false;
@@ -372,7 +281,6 @@ if (!process.env.VITEST) {
       if (shutdownStarted) return;
       shutdownStarted = true;
       void (async () => {
-        await goalCoordinator?.stop();
         await Promise.allSettled([codeGraphJobs.close()]);
         systemWorker.close();
         await agentHost.closeAll();

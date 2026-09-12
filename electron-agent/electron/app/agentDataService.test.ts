@@ -122,17 +122,4 @@ describe('AgentDataService', () => {
       await service.stop();
     }
   });
-
-  it('keeps Goal session bind and event subscribe as no-ops', async () => {
-    const service = new AgentDataService({ dataPath: ':memory:' });
-    await service.start();
-    try {
-      await expect(service.bindGoalSession('/repo', 's', 'interactive')).resolves.toEqual({ bound: false, workspace: '/repo', sessionId: 's', source: 'interactive' });
-      await expect(service.unbindGoalSession('/repo', 's')).resolves.toEqual({ bound: false, workspace: '/repo', sessionId: 's' });
-      await expect(service.goalGet('s', '/repo')).resolves.toBeUndefined();
-      expect(service.onGoalEvent(() => {})).toEqual(expect.any(Function));
-    } finally {
-      await service.stop();
-    }
-  });
 });

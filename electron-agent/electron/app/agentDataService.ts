@@ -5,26 +5,6 @@ import type { Item, Thread, Turn } from './appServer/types';
 import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
 import type { QueueTaskInput } from './appServer/taskQueue';
 import type { WikiSyncSkipInput } from './wikiSyncService';
-import type {
-  GoalDispatch,
-  GoalEvent,
-  GoalRuntimeErrorInput,
-  GoalSnapshot,
-  RoundCancelInput,
-  RoundClaimInput,
-  RoundSettlementInput,
-} from './goalCoordinator';
-
-/** Task 14/15 boundary: Coordinator still calls these until it is removed. */
-type GoalSessionSource = 'interactive' | 'goal';
-const emptyGoalSnapshot = (): GoalSnapshot => ({
-  goalId: '', sessionId: '', workspace: '', revision: 0, condition: '', status: 'cleared',
-  roundsUsed: 0, maxRounds: 0, createdAt: '', updatedAt: '',
-});
-const emptyGoalDispatch = (): GoalDispatch => ({
-  idempotencyKey: '', goalId: '', revision: 0, nextRound: 0, status: 'failed',
-});
-
 // CodeGraph calls may cold-load the embedded SDK and its index. Keep this aligned with
 // extensions/code-retrieval's 65s client timeout instead of AgentDataClient's
 // short default used by lightweight callers.
@@ -72,30 +52,6 @@ export class AgentDataService {
   requestAdmin<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));
     return this.runtime.requestAdmin<T>(method, params);
-  }
-  goalGet(_sessionId: string, _workspace: string): Promise<GoalSnapshot | undefined> {
-    return Promise.resolve(undefined);
-  }
-  goalClaimRound(_input: RoundClaimInput): Promise<GoalDispatch> {
-    return Promise.resolve(emptyGoalDispatch());
-  }
-  goalSettleRound(_input: RoundSettlementInput): Promise<{ snapshot: GoalSnapshot; dispatch: GoalDispatch }> {
-    return Promise.resolve({ snapshot: emptyGoalSnapshot(), dispatch: emptyGoalDispatch() });
-  }
-  goalCancelRound(_input: RoundCancelInput): Promise<GoalDispatch | null> {
-    return Promise.resolve(null);
-  }
-  goalRuntimeError(_input: GoalRuntimeErrorInput): Promise<GoalSnapshot> {
-    return Promise.resolve(emptyGoalSnapshot());
-  }
-  onGoalEvent(_listener: (event: GoalEvent, snapshot: GoalSnapshot | undefined) => void | boolean | Promise<void | boolean>): () => void {
-    return () => {};
-  }
-  bindGoalSession(workspace: string, sessionId: string, source: GoalSessionSource = 'interactive'): Promise<{ bound: boolean; workspace: string; sessionId: string; source: GoalSessionSource }> {
-    return Promise.resolve({ bound: false, workspace, sessionId, source });
-  }
-  unbindGoalSession(workspace: string, sessionId: string): Promise<{ bound: boolean; workspace: string; sessionId: string }> {
-    return Promise.resolve({ bound: false, workspace, sessionId });
   }
   resolveDiagnosticPath(id: string): Promise<string> {
     if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));
