@@ -28,6 +28,19 @@ describe('PiBrandLogo', () => {
     const { container } = render(<PiBrandLogo className="lobe-brand-loading" />);
     expect(container.querySelector('svg.lobe-brand-loading')).toBeTruthy();
   });
+
+  it('uses the full viewBox by default', () => {
+    const { container } = render(<PiBrandLogo />);
+    expect(container.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 240 220');
+  });
+
+  it('crops to the glyph when tight', () => {
+    const { container } = render(<PiBrandLogo size={23} tight />);
+    const svg = container.querySelector('svg');
+    expect(svg?.getAttribute('viewBox')).toBe('40 56 160 134');
+    expect(svg?.getAttribute('height')).toBe('23');
+    expect(svg?.hasAttribute('tight')).toBe(false);
+  });
 });
 
 describe('FullscreenLoading', () => {

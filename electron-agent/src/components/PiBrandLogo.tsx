@@ -2,21 +2,17 @@ import type { FC, SVGProps } from 'react';
 
 interface PiBrandLogoProps extends Omit<SVGProps<SVGSVGElement>, 'size'> {
   size?: number | string;
+  /** 按路径真实轮廓裁切，去掉 240×220 上下留白。启动页动画必须保持默认 viewBox。 */
+  tight?: boolean;
 }
 
-/**
- * GrenAgent 品牌字标（π 几何造型）。
- * 作为 @lobehub/ui BrandLoading 的 text 组件使用：BrandLoading 会把
- * className="lobe-brand-loading" 透传到此 <svg>，全局样式据此对内部 <path>
- * 施加描边(draw)+ 填充(fill)动画，因此这里只需提供闭合 path 即可。
- */
-export const PiBrandLogo: FC<PiBrandLogoProps> = ({ size = '1em', style, ...rest }) => (
+export const PiBrandLogo: FC<PiBrandLogoProps> = ({ size = '1em', style, tight = false, ...rest }) => (
   <svg
     fill="currentColor"
     fillRule="evenodd"
     height={size}
     style={{ flex: 'none', lineHeight: 1, ...style }}
-    viewBox="0 0 240 220"
+    viewBox={tight ? '40 56 160 134' : '0 0 240 220'}
     xmlns="http://www.w3.org/2000/svg"
     {...rest}
   >
