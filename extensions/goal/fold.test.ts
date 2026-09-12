@@ -99,4 +99,28 @@ describe("foldGoal", () => {
     ]);
     expect(snapshot).toMatchObject({ goalId: "g1", revision: 2, status: "complete" });
   });
+
+  it("edits condition after complete without reactivating", () => {
+    const snapshot = foldGoal([
+      ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "旧" } }),
+      ev({ kind: "complete", goalId: "g1", revision: 2, at, payload: {} }),
+      ev({ kind: "edit", goalId: "g1", revision: 3, at, payload: { condition: "改文案" } }),
+    ]);
+    expect(snapshot).toMatchObject({
+      goalId: "g1",
+      revision: 3,
+      condition: "改文案",
+      status: "complete",
+    });
+  });
+
+  it("does not let create after an illegal complete replace a paused goal", () => {
+    const snapshot = foldGoal([
+      ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "旧" } }),
+      ev({ kind: "pause", goalId: "g1", revision: 2, at, payload: {} }),
+      ev({ kind: "complete", goalId: "g1", revision: 3, at, payload: {} }),
+      ev({ kind: "create", goalId: "g2", revision: 1, at, payload: { condition: "不该出现" } }),
+    ]);
+    expect(snapshot).toMatchObject({ goalId: "g1", status: "paused", condition: "旧" });
+  });
 });

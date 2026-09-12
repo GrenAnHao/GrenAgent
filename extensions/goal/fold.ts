@@ -47,7 +47,7 @@ function parseCondition(value: unknown): string | undefined {
 function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalSnapshot | undefined {
   switch (event.kind) {
     case "create": {
-      if (snapshot !== undefined) return snapshot;
+      if (snapshot !== undefined && snapshot.status !== "complete") return snapshot;
       const condition = parseCondition(event.payload.condition);
       if (!condition) return snapshot;
       return {
@@ -130,11 +130,11 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
   }
 }
 
-function applyEpoch(epoch: GoalEvent[]): GoalSnapshot | undefined {
+function applyEpoch(epoch: GoalEvent[], seed: GoalSnapshot | undefined): GoalSnapshot | undefined {
   // Per-epoch revision sort only: clear/complete reset the lifecycle so revision may
   // restart at 1; a global sort would mis-order create-after-complete vs complete.
   const sorted = [...epoch].sort((a, b) => a.revision - b.revision);
-  let next: GoalSnapshot | undefined;
+  let next = seed;
   for (const event of sorted) {
     if (event.kind === "clear") {
       next = undefined;
@@ -152,7 +152,7 @@ function endsEpoch(event: GoalEvent): boolean {
 function foldEpochResults(epochs: GoalEvent[][]): GoalSnapshot | undefined {
   let snapshot: GoalSnapshot | undefined;
   for (const epoch of epochs) {
-    const folded = applyEpoch(epoch);
+    const folded = applyEpoch(epoch, snapshot);
     if (folded !== undefined) {
       snapshot = folded;
       continue;
