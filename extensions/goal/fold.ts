@@ -159,12 +159,7 @@ function foldEpochResults(epochs: GoalEvent[][]): GoalSnapshot | undefined {
     }
     if (epoch.some((event) => event.kind === "clear")) {
       snapshot = undefined;
-      continue;
     }
-    if (!epoch.some((event) => event.kind === "create")) {
-      continue;
-    }
-    snapshot = undefined;
   }
   return snapshot;
 }

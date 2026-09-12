@@ -90,4 +90,13 @@ describe("foldGoal", () => {
       maxRounds: 256,
     });
   });
+
+  it("keeps complete when a later create is skipped for empty condition", () => {
+    const snapshot = foldGoal([
+      ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "旧" } }),
+      ev({ kind: "complete", goalId: "g1", revision: 2, at, payload: {} }),
+      ev({ kind: "create", goalId: "g2", revision: 1, at, payload: { condition: "   " } }),
+    ]);
+    expect(snapshot).toMatchObject({ goalId: "g1", revision: 2, status: "complete" });
+  });
 });
