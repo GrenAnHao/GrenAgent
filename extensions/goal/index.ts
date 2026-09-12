@@ -11,6 +11,7 @@ import {
   pauseGoal,
   pushStatus,
   resumeGoal,
+  sessionIdOf,
 } from "./session.js";
 import { registerGoalTools } from "./tools.js";
 import type { GoalSnapshot } from "./types.js";
@@ -97,9 +98,9 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("input", async (event) => {
+  pi.on("input", async (event, ctx) => {
     if (event.source === "interactive" || event.source === "rpc") {
-      setGoalHumanInput();
+      setGoalHumanInput(sessionIdOf(ctx));
     }
     return { action: "continue" as const };
   });
@@ -119,8 +120,8 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("agent_settled", async () => {
-    clearGoalTurnMarks();
+  pi.on("agent_settled", async (_event, ctx) => {
+    clearGoalTurnMarks(sessionIdOf(ctx));
   });
 }
 

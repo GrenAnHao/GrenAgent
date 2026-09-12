@@ -9,8 +9,8 @@ export interface GoalRoundRef {
 const humanMarks = new Map<string, true>();
 const pendingRounds = new Map<string, GoalRoundRef>();
 
-function authKey(): string {
-  return process.cwd();
+function authKey(sessionId: string): string {
+  return sessionId;
 }
 
 export function __resetGoalAuthForTest(): void {
@@ -18,26 +18,26 @@ export function __resetGoalAuthForTest(): void {
   pendingRounds.clear();
 }
 
-export function setGoalHumanInput(): void {
-  humanMarks.set(authKey(), true);
+export function setGoalHumanInput(sessionId: string): void {
+  humanMarks.set(authKey(sessionId), true);
 }
 
-export function setGoalRoundPending(ref: GoalRoundRef): void {
-  pendingRounds.set(authKey(), { ...ref });
+export function setGoalRoundPending(sessionId: string, ref: GoalRoundRef): void {
+  pendingRounds.set(authKey(sessionId), { ...ref });
 }
 
-export function clearGoalTurnMarks(): void {
-  const key = authKey();
+export function clearGoalTurnMarks(sessionId: string): void {
+  const key = authKey(sessionId);
   humanMarks.delete(key);
   pendingRounds.delete(key);
 }
 
-export function hasHumanInput(): boolean {
-  return humanMarks.has(authKey());
+export function hasHumanInput(sessionId: string): boolean {
+  return humanMarks.has(authKey(sessionId));
 }
 
-export function hasGoalRound(ref: GoalRoundRef): boolean {
-  const pending = pendingRounds.get(authKey());
+export function hasGoalRound(sessionId: string, ref: GoalRoundRef): boolean {
+  const pending = pendingRounds.get(authKey(sessionId));
   return !!pending
     && pending.goalId === ref.goalId
     && pending.revision === ref.revision

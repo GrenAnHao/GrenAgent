@@ -10,6 +10,7 @@ import {
   pauseGoal,
   readSnapshot,
   resumeGoal,
+  sessionIdOf,
 } from "./session.js";
 import { GOAL_BLOCKED_MIN_ROUNDS } from "./types.js";
 
@@ -23,16 +24,17 @@ function result(value: unknown) {
   };
 }
 
-function requireHuman(): void {
-  if (!hasHumanInput()) throw new Error("GOAL_TOOL_HUMAN");
+function requireHuman(ctx: ExtensionContext): void {
+  if (!hasHumanInput(sessionIdOf(ctx))) throw new Error("GOAL_TOOL_HUMAN");
 }
 
 function requireRoundOrHuman(ctx: ExtensionContext): void {
-  if (hasHumanInput()) return;
+  const sessionId = sessionIdOf(ctx);
+  if (hasHumanInput(sessionId)) return;
   const snapshot = readSnapshot(ctx);
   if (
     snapshot
-    && hasGoalRound({ goalId: snapshot.goalId, revision: snapshot.revision, round: snapshot.roundsStarted })
+    && hasGoalRound(sessionId, { goalId: snapshot.goalId, revision: snapshot.revision, round: snapshot.roundsStarted })
   ) {
     return;
   }
@@ -70,7 +72,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     }),
     async execute(_id, params, _signal, _update, ctx) {
       assertToolCaller();
-      requireHuman();
+      requireHuman(ctx);
       if (typeof params.condition !== "string" || params.condition.length === 0 || params.condition.length > 4000) {
         throw new Error("INVALID_PARAMS");
       }
@@ -102,7 +104,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       assertToolCaller();
       const action = params.action;
       if (action === "edit" || action === "pause" || action === "resume") {
-        requireHuman();
+        requireHuman(ctx);
       }
       if (action === "complete" || action === "blocked") {
         requireRoundOrHuman(ctx);
