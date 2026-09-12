@@ -180,8 +180,6 @@ const SidebarPanel = memo(function SidebarPanel({
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
 }) {
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
-
   return (
     <SidebarShell>
       <Sidebar
@@ -194,7 +192,6 @@ const SidebarPanel = memo(function SidebarPanel({
         onDeleteConversation={onDeleteConversation}
         onRemoveProject={onRemoveProject}
         onSubmitRename={onSubmitRename}
-        onToggleSidebar={toggleSidebar}
       />
     </SidebarShell>
   );

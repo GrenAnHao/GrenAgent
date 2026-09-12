@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
 import { Dropdown } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { FolderPlus, MessageSquarePlus, PanelLeftClose } from 'lucide-react';
+import { FolderPlus, MessageSquarePlus } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { VList } from 'virtua';
-import { PanelHeader } from '../../components/PanelHeader';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
 import { prewarmRecent, prewarmWorkspace } from '../../lib/prewarm';
@@ -83,7 +82,6 @@ export interface SidebarProps {
   onDeleteConversation: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
-  onToggleSidebar: () => void;
 }
 
 export const Sidebar = memo(function Sidebar(props: SidebarProps) {
@@ -263,9 +261,6 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
 
   return (
     <Flexbox height="100%" style={{ minHeight: 0, background: 'var(--gren-sidebar-bg, transparent)' }}>
-      <PanelHeader
-        actions={<ActionIcon icon={PanelLeftClose} size="small" title="收起" onClick={props.onToggleSidebar} />}
-      />
       <SidebarActions />
       <div className={styles.listWrap}>
         {showLoading ? (
