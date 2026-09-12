@@ -1,223 +1,242 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { runInWorkspace } from "../_shared/workspace-context.js";
-import { __resetGoalInputForTest, clearGoalInputContext, registerGoalTools, setGoalInputContext } from "./tools.js";
+import {
+  __resetGoalAuthForTest,
+  clearGoalTurnMarks,
+  setGoalHumanInput,
+  setGoalRoundPending,
+} from "./auth.js";
+import { readSnapshot, writeEvent } from "./session.js";
+import { registerGoalTools } from "./tools.js";
 
-type Def = { name: string; execute: (...args: any[]) => Promise<any> };
-function setup(request: ReturnType<typeof vi.fn>) {
+type Def = { name: string; execute: (...args: unknown[]) => Promise<{ details?: unknown }> };
+
+interface GoalEntry {
+  type: string;
+  customType: string;
+  data: {
+    kind: string;
+    goalId?: string;
+    revision?: number;
+    at?: string;
+    payload?: Record<string, unknown>;
+  };
+}
+
+const ws = { origin: "main" as const, workspace: "/repo", cwd: "/repo", config: {} };
+
+function setup() {
+  const entries: GoalEntry[] = [];
   const defs: Def[] = [];
-  registerGoalTools({ registerTool: (d: Def) => defs.push(d) } as never, { request } as never);
-  const ctx = { cwd: "/repo", sessionManager: { getSessionId: () => "session-a" } } as any;
-  return { defs, ctx };
+  const pi = {
+    appendEntry: (t: string, d: unknown) => {
+      entries.push({ type: "custom", customType: t, data: d as GoalEntry["data"] });
+    },
+    registerTool: (d: Def) => {
+      defs.push(d);
+    },
+  };
+  registerGoalTools(pi as never);
+  const ctx = {
+    cwd: "/repo",
+    ui: {
+      notify: () => {},
+      setStatus: () => {},
+    },
+    sessionManager: {
+      getEntries: () => entries,
+      getSessionId: () => "session-a",
+    },
+  };
+  const byName = Object.fromEntries(defs.map((d) => [d.name, d])) as Record<string, Def>;
+  return { defs, ctx, entries, pi, byName };
+}
+
+function exec(def: Def, ctx: unknown, params: Record<string, unknown> = {}) {
+  return def.execute("id", params, undefined, undefined, ctx);
 }
 
 afterEach(() => {
-  __resetGoalInputForTest();
-  delete process.env.PI_IS_SUBAGENT;
-  delete process.env.PI_SYSTEM_WORKER;
+  __resetGoalAuthForTest();
   delete process.env.PI_GOAL_WORKER;
-  delete process.env.PI_TURN_ORIGIN;
-  delete process.env.PI_INPUT_ORIGIN;
-  delete process.env.PI_GOAL_ORIGIN;
-  delete process.env.PI_HUMAN_ORIGIN_TOKEN;
+  delete process.env.PI_IS_SUBAGENT;
 });
 
 describe("goal tools", () => {
-  it("registers the four AgentData-backed tools", () => {
-    const { defs } = setup(vi.fn());
-    expect(defs.map((d) => d.name)).toEqual(["get_goal", "create_goal", "update_goal", "request_goal_completion"]);
+  it("registers exactly get_goal, create_goal, and update_goal", () => {
+    const { defs } = setup();
+    expect(defs.map((d) => d.name)).toEqual(["get_goal", "create_goal", "update_goal"]);
   });
 
-  it("injects session and workspace from context, ignoring model scope fields", async () => {
-    const request = vi.fn().mockResolvedValue(undefined);
-    const { defs, ctx } = setup(request);
-    await defs[0].execute("id", { sessionId: "forged", workspace: "/evil" }, undefined, undefined, ctx);
-    expect(request).toHaveBeenCalledWith("goal.get", { sessionId: "session-a", workspace: "/repo" });
+  it("rejects create and human-gated updates without a human mark", async () => {
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      await expect(exec(byName.create_goal, ctx, { condition: "x" })).rejects.toThrow("GOAL_TOOL_HUMAN");
+      await expect(exec(byName.update_goal, ctx, { goalId: "g", revision: 1, action: "edit", condition: "y" })).rejects.toThrow(
+        "GOAL_TOOL_HUMAN",
+      );
+      await expect(exec(byName.update_goal, ctx, { goalId: "g", revision: 1, action: "pause" })).rejects.toThrow("GOAL_TOOL_HUMAN");
+      await expect(exec(byName.update_goal, ctx, { goalId: "g", revision: 1, action: "resume" })).rejects.toThrow("GOAL_TOOL_HUMAN");
+    });
   });
 
-  it("forbids create from automatic workers", async () => {
+  it("creates a goal after setGoalHumanInput and returns goalId, revision, activation", async () => {
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const result = await exec(byName.create_goal, ctx, { condition: "x" });
+      expect(result.details).toMatchObject({
+        goalId: expect.any(String),
+        revision: 1,
+        activation: "armed",
+      });
+    });
+  });
+
+  it("rejects model resume on a paused goal even with a human mark", async () => {
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const created = await exec(byName.create_goal, ctx, { condition: "x" });
+      const details = created.details as { goalId: string; revision: number };
+      const paused = await exec(byName.update_goal, ctx, { goalId: details.goalId, revision: details.revision, action: "pause" });
+      const pausedDetails = paused.details as { goalId: string; revision: number };
+      await expect(
+        exec(byName.update_goal, ctx, { goalId: pausedDetails.goalId, revision: pausedDetails.revision, action: "resume" }),
+      ).rejects.toThrow("GOAL_TOOL_RESUME_PAUSED");
+    });
+  });
+
+  it("allows complete only when a matching Goal Round is pending", async () => {
+    const { byName, ctx, pi } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const created = await exec(byName.create_goal, ctx, { condition: "x" });
+      const createdDetails = created.details as { goalId: string; revision: number };
+      clearGoalTurnMarks();
+
+      await expect(
+        exec(byName.update_goal, ctx, { goalId: createdDetails.goalId, revision: createdDetails.revision, action: "complete" }),
+      ).rejects.toThrow("GOAL_TOOL_ROUND");
+
+      writeEvent(pi as never, ctx as never, {
+        kind: "round",
+        goalId: createdDetails.goalId,
+        revision: createdDetails.revision + 1,
+        at: "2026-09-13T00:00:00.000Z",
+        payload: { round: 1 },
+      });
+      const snapshot = readSnapshot(ctx as never);
+      expect(snapshot?.roundsStarted).toBe(1);
+      setGoalRoundPending({ goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
+      const completed = await exec(byName.update_goal, ctx, {
+        goalId: snapshot!.goalId,
+        revision: snapshot!.revision,
+        action: "complete",
+      });
+      expect(completed.details).toMatchObject({ status: "complete", revision: snapshot!.revision + 1 });
+    });
+  });
+
+  it("rejects complete and blocked after clearGoalTurnMarks drops the old round", async () => {
+    const { byName, ctx, pi } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const created = await exec(byName.create_goal, ctx, { condition: "x" });
+      const createdDetails = created.details as { goalId: string; revision: number };
+      writeEvent(pi as never, ctx as never, {
+        kind: "round",
+        goalId: createdDetails.goalId,
+        revision: createdDetails.revision + 1,
+        at: "2026-09-13T00:00:00.000Z",
+        payload: { round: 3 },
+      });
+      const snapshot = readSnapshot(ctx as never);
+      setGoalRoundPending({ goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
+      clearGoalTurnMarks();
+      await expect(
+        exec(byName.update_goal, ctx, { goalId: snapshot!.goalId, revision: snapshot!.revision, action: "complete" }),
+      ).rejects.toThrow("GOAL_TOOL_ROUND");
+      await expect(
+        exec(byName.update_goal, ctx, {
+          goalId: snapshot!.goalId,
+          revision: snapshot!.revision,
+          action: "blocked",
+          blockedReason: { message: "缺密钥" },
+        }),
+      ).rejects.toThrow("GOAL_TOOL_ROUND");
+    });
+  });
+
+  it("rejects blocked below the round threshold and accepts a nonempty blockedReason at or above it", async () => {
+    const { byName, ctx, pi } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const created = await exec(byName.create_goal, ctx, { condition: "x" });
+      const createdDetails = created.details as { goalId: string; revision: number };
+      await expect(
+        exec(byName.update_goal, ctx, {
+          goalId: createdDetails.goalId,
+          revision: createdDetails.revision,
+          action: "blocked",
+          blockedReason: { message: "太早" },
+        }),
+      ).rejects.toThrow("GOAL_TOOL_BLOCKED");
+
+      writeEvent(pi as never, ctx as never, {
+        kind: "round",
+        goalId: createdDetails.goalId,
+        revision: createdDetails.revision + 1,
+        at: "2026-09-13T00:00:00.000Z",
+        payload: { round: 3 },
+      });
+      const snapshot = readSnapshot(ctx as never);
+      expect(snapshot?.roundsStarted).toBe(3);
+      setGoalRoundPending({ goalId: snapshot!.goalId, revision: snapshot!.revision, round: snapshot!.roundsStarted });
+      await expect(
+        exec(byName.update_goal, ctx, {
+          goalId: snapshot!.goalId,
+          revision: snapshot!.revision,
+          action: "blocked",
+          blockedReason: { message: "" },
+        }),
+      ).rejects.toThrow("GOAL_TOOL_BLOCKED");
+      const blocked = await exec(byName.update_goal, ctx, {
+        goalId: snapshot!.goalId,
+        revision: snapshot!.revision,
+        action: "blocked",
+        blockedReason: { message: "缺密钥" },
+      });
+      expect(blocked.details).toMatchObject({
+        status: "blocked",
+        blockedReason: { code: "model-reported", message: "缺密钥" },
+      });
+    });
+  });
+
+  it("returns null details from get_goal when no goal exists", async () => {
+    const { byName, ctx } = setup();
+    const result = await exec(byName.get_goal, ctx);
+    expect(result.details).toBeNull();
+  });
+
+  it("does not let PI_GOAL_WORKER authorize create", async () => {
     process.env.PI_GOAL_WORKER = "1";
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-    expect(request).not.toHaveBeenCalled();
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      await expect(exec(byName.create_goal, ctx, { condition: "x" })).rejects.toThrow("GOAL_TOOL_HUMAN");
+    });
   });
 
-  it("requires a trusted human origin token for create", async () => {
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-    process.env.PI_TURN_ORIGIN = "human";
-    await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
-    expect(request).toHaveBeenCalledWith("goal.create", expect.objectContaining({ sessionId: "session-a", workspace: "/repo", continuousIntentEvidence: "直到完成" }));
-  });
-
-  it("requires continuous intent in the direct input that started the turn", async () => {
-    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
-    setGoalInputContext("rpc", "please inspect this once");
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_INTENT_REQUIRED");
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("rejects extension-originated input even when it contains continuous intent", async () => {
-    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
-    setGoalInputContext("extension", "直到完成");
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("sends update CAS with current context scope and goal reference", async () => {
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 2 });
-    const { defs, ctx } = setup(request);
-    await defs[2].execute("id", { goalId: "g", revision: 1, action: "block", summary: "waiting" }, undefined, undefined, ctx);
-    expect(request).toHaveBeenCalledWith("goal.update", expect.objectContaining({ sessionId: "session-a", workspace: "/repo", goalId: "g", revision: 1, action: "block" }));
-  });
-
-  it("accepts an unchanged revision for an in-flight blockage report", async () => {
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
-    const { defs, ctx } = setup(request);
-    await defs[2].execute("id", { goalId: "g", revision: 1, action: "block", summary: "waiting" }, undefined, undefined, ctx);
-    expect(request).toHaveBeenCalledWith("goal.update", expect.objectContaining({ revision: 1, action: "block" }));
-  });
-
-  it.each([
-    ["missing goalId", { sessionId: "session-a", workspace: "/repo", revision: 1 }],
-    ["empty goalId", { goalId: "", sessionId: "session-a", workspace: "/repo", revision: 1 }],
-    ["blank goalId", { goalId: "   ", sessionId: "session-a", workspace: "/repo", revision: 1 }],
-    ["missing revision", { goalId: "g", sessionId: "session-a", workspace: "/repo" }],
-    ["zero revision", { goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 0 }],
-    ["fractional revision", { goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1.5 }],
-    ["string revision", { goalId: "g", sessionId: "session-a", workspace: "/repo", revision: "1" }],
-  ])("rejects malformed non-empty get response: %s", async (_name, snapshot) => {
-    const request = vi.fn().mockResolvedValue(snapshot);
-    const { defs, ctx } = setup(request);
-    await expect(defs[0].execute("id", {}, undefined, undefined, ctx)).rejects.toThrow("INVALID_GOAL_RESPONSE");
-  });
-
-  it.each([
-    ["missing goalId", { sessionId: "session-a", workspace: "/repo", revision: 1 }],
-    ["blank goalId", { goalId: "   ", sessionId: "session-a", workspace: "/repo", revision: 1 }],
-    ["missing revision", { goalId: "g", sessionId: "session-a", workspace: "/repo" }],
-    ["zero revision", { goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 0 }],
-  ])("rejects malformed create response: %s", async (_name, snapshot) => {
-    process.env.PI_TURN_ORIGIN = "human";
-    const request = vi.fn().mockResolvedValue(snapshot);
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("INVALID_GOAL_RESPONSE");
-  });
-
-  it("rejects a create response whose initial revision is not one", async () => {
-    process.env.PI_TURN_ORIGIN = "human";
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 2 });
-    const { defs, ctx } = setup(request);
-    await expect(defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx)).rejects.toThrow("INVALID_GOAL_RESPONSE");
-  });
-});
-
-describe("Goal 创建权限（ALS）", () => {
-  it("goal 上下文 token=0 时即使全局 env=1 也禁止 create", async () => {
-    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "goal", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "0" } },
-      async () => {
-        await expect(
-          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
-        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-      },
-    );
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("main 上下文 token=1 时允许 create（不依赖 process.env）", async () => {
-    delete process.env.PI_HUMAN_ORIGIN_TOKEN;
-    delete process.env.PI_TURN_ORIGIN;
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "main", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
-      },
-    );
-    expect(request).toHaveBeenCalledWith("goal.create", expect.objectContaining({ sessionId: "session-a" }));
-  });
-
-  it("ALS origin=goal 视为 automatic，禁止 create", async () => {
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "goal", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        await expect(
-          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
-        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-      },
-    );
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("A 的 currentInput 不被 B 的 agent 回合看见", async () => {
-    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
-    const request = vi.fn().mockResolvedValue({ goalId: "g", sessionId: "session-a", workspace: "/repo", revision: 1 });
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        setGoalInputContext("rpc", "please inspect this once");
-      },
-    );
-    await runInWorkspace(
-      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        await defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx);
-      },
-    );
-    expect(request).toHaveBeenCalled();
-  });
-
-  it("A 的 agent_end 不清空 B 的 currentInput", async () => {
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        setGoalInputContext("rpc", "please inspect this once");
-      },
-    );
-    await runInWorkspace(
-      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        clearGoalInputContext();
-      },
-    );
-    await runInWorkspace(
-      { origin: "main", workspace: "D:/b", cwd: "D:/b", config: { PI_HUMAN_ORIGIN_TOKEN: "1" } },
-      async () => {
-        await expect(
-          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
-        ).rejects.toThrow("GOAL_CREATE_INTENT_REQUIRED");
-      },
-    );
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("main 上下文 ALS token=0 压过全局 env=1", async () => {
-    process.env.PI_HUMAN_ORIGIN_TOKEN = "1";
-    const request = vi.fn();
-    const { defs, ctx } = setup(request);
-    await runInWorkspace(
-      { origin: "main", workspace: "/repo", cwd: "/repo", config: { PI_HUMAN_ORIGIN_TOKEN: "0" } },
-      async () => {
-        await expect(
-          defs[1].execute("id", { condition: "x", continuousIntentEvidence: "直到完成" }, undefined, undefined, ctx),
-        ).rejects.toThrow("GOAL_CREATE_FORBIDDEN");
-      },
-    );
-    expect(request).not.toHaveBeenCalled();
+  it("rejects update_goal when revision does not match the current snapshot", async () => {
+    const { byName, ctx } = setup();
+    await runInWorkspace(ws, async () => {
+      setGoalHumanInput();
+      const created = await exec(byName.create_goal, ctx, { condition: "x" });
+      const details = created.details as { goalId: string };
+      await expect(
+        exec(byName.update_goal, ctx, { goalId: details.goalId, revision: 99, action: "edit", condition: "y" }),
+      ).rejects.toThrow("VERSION_CONFLICT");
+    });
   });
 });

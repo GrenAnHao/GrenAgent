@@ -83,7 +83,7 @@ function writeKind(
   });
 }
 
-export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string): GoalSnapshot {
+export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: string, maxRounds?: number): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (current && current.status !== "complete") {
     throw new Error("GOAL_ALREADY_ACTIVE");
@@ -93,7 +93,7 @@ export function createGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: s
     goalId: newGoalId(),
     revision: 1,
     at: eventAt(),
-    payload: { condition },
+    payload: maxRounds === undefined ? { condition } : { condition, maxRounds },
   });
   setActivation(sessionIdOf(ctx), "armed");
   const snapshot = readSnapshot(ctx);
@@ -115,7 +115,9 @@ export function editGoal(pi: ExtensionAPI, ctx: ExtensionContext, condition: str
 export function pauseGoal(pi: ExtensionAPI, ctx: ExtensionContext): GoalSnapshot {
   const current = readSnapshot(ctx);
   if (!current) throw new Error("GOAL_MISSING");
-  writeKind(pi, ctx, "pause", current);
+  if (current.status === "active") {
+    writeKind(pi, ctx, "pause", current);
+  }
   setActivation(sessionIdOf(ctx), "disarmed");
   const snapshot = readSnapshot(ctx);
   if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
@@ -141,6 +143,26 @@ export function clearGoal(pi: ExtensionAPI, ctx: ExtensionContext): void {
   if (!current) throw new Error("GOAL_MISSING");
   writeKind(pi, ctx, "clear", current);
   pushStatus(ctx);
+}
+
+export function completeGoal(pi: ExtensionAPI, ctx: ExtensionContext, summary?: string): GoalSnapshot {
+  const current = readSnapshot(ctx);
+  if (!current) throw new Error("GOAL_MISSING");
+  writeKind(pi, ctx, "complete", current, summary === undefined ? {} : { summary });
+  const snapshot = readSnapshot(ctx);
+  if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
+  pushStatus(ctx);
+  return snapshot;
+}
+
+export function blockGoal(pi: ExtensionAPI, ctx: ExtensionContext, message: string): GoalSnapshot {
+  const current = readSnapshot(ctx);
+  if (!current) throw new Error("GOAL_MISSING");
+  writeKind(pi, ctx, "blocked", current, { message });
+  const snapshot = readSnapshot(ctx);
+  if (!snapshot) throw new Error("GOAL_WRITE_FAILED");
+  pushStatus(ctx);
+  return snapshot;
 }
 
 export function onSessionStart(ctx: ExtensionContext): void {

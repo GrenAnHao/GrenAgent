@@ -12,6 +12,7 @@ import {
   pushStatus,
   resumeGoal,
 } from "./session.js";
+import { registerGoalTools } from "./tools.js";
 import type { GoalSnapshot } from "./types.js";
 
 export const pluginManifest = {
@@ -42,6 +43,8 @@ function notifyMissing(ctx: ExtensionContext, level: "warning" | "error"): void 
 }
 
 export default function (pi: ExtensionAPI) {
+  registerGoalTools(pi);
+
   pi.registerCommand("goal", {
     description: "查询或管理会话目标。空参数查询；/goal <条件> 创建；/goal edit <条件> 编辑；/goal pause | resume | clear",
     handler: async (args, ctx) => {
