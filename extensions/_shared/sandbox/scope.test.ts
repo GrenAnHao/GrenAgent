@@ -4,7 +4,15 @@ import { resolvePreset } from "./resolvePreset.js";
 describe("sandbox public surface", () => {
   it("index.ts 不导出 runner 内部符号", async () => {
     const mod = await import("./index.js");
-    for (const internal of ["bwrapArgv", "seatbeltProfile", "windowsHelperArgv", "makeSid"]) {
+    for (const internal of [
+      "bwrapArgv",
+      "seatbeltProfile",
+      "seatbeltArgv",
+      "windowsHelperArgv",
+      "windowsConfined",
+      "capabilitySid",
+      "windowsAclStamps",
+    ]) {
       expect(Object.keys(mod)).not.toContain(internal);
     }
   });
