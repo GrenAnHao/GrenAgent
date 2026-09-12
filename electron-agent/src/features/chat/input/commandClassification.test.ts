@@ -16,6 +16,12 @@ describe('isExecutiveCommand', () => {
     expect(isExecutiveCommand('dream')).toBe(false);
     expect(isExecutiveCommand('distill')).toBe(false);
   });
+
+  it('goal 是执行性命令（skill:goal 仍为假）', () => {
+    expect(isExecutiveCommand('goal')).toBe(true);
+    expect(isExecutiveCommand('GOAL')).toBe(true);
+    expect(isExecutiveCommand('skill:goal')).toBe(false);
+  });
 });
 
 describe('isExecutiveCommandMessage', () => {
@@ -25,5 +31,7 @@ describe('isExecutiveCommandMessage', () => {
     expect(isExecutiveCommandMessage('/skill:tdd')).toBe(false);
     expect(isExecutiveCommandMessage('hello /dream')).toBe(false);
     expect(isExecutiveCommandMessage('please run dream')).toBe(false);
+    expect(isExecutiveCommandMessage('/goal 写完')).toBe(true);
+    expect(isExecutiveCommandMessage('/skill:goal')).toBe(false);
   });
 });

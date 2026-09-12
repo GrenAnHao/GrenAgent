@@ -2,7 +2,8 @@ import { parseCommandToken } from './editor/commandPaste';
 
 /**
  * 「执行性命令」白名单（保守）：发出后不产生对话轮次的纯动作命令。键统一小写。
- * 仅放确定项；不确定者（init/review/goal/deep-research 等）不放 → 默认保留气泡。
+ * 仅放确定项；不确定者（init/review/deep-research 等）不放 → 默认保留气泡。
+ * `goal` 是桌面控制面：不进模型轮次，对话里只留本地 command-input 行。
  */
 export const EXECUTIVE_COMMANDS = new Set<string>([
   'compact', 'newsession', 'new',
@@ -10,6 +11,7 @@ export const EXECUTIVE_COMMANDS = new Set<string>([
   'model', 'models', 'theme', 'themes',
   'agent', 'agents', 'editor', 'mcp',
   'session', 'sessions', 'help', 'exit', 'quit',
+  'goal',
 ]);
 
 /** 命令名是否属于执行性命令（小写比较）。skill: 前缀命令必展开成提示词轮次，永不执行性。 */

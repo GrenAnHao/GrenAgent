@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { createStaticStyles, cssVar } from 'antd-style';
 import type { DisplayMessage } from './groupMessages';
 import { UserMessage } from './UserMessage';
 import { TurnTimeline } from './TurnTimeline';
@@ -12,6 +13,21 @@ import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
 import { subAgentMode, taskLabel } from '../panels/subagentUtils';
+import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
+
+const commandInputStyles = createStaticStyles(({ css }) => ({
+  row: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    padding-inline-start: 36px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: ${cssVar.colorText};
+  `,
+}));
 
 interface ChatMessageItemsProps {
   messages: DisplayMessage[];
@@ -85,6 +101,17 @@ export function renderMessageBody(
       }
       if (msg.customType === 'visual-inline') return <VisualCard content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
+    case 'command-input':
+      return (
+        <div data-testid="command-input" className={commandInputStyles.row}>
+          <ChatTagView
+            category="command"
+            label={msg.command}
+            value={msg.command.replace(/^\//, '')}
+          />
+          {msg.rest ? <span>{msg.rest}</span> : null}
+        </div>
+      );
     default:
       return null;
   }

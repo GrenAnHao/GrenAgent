@@ -11,6 +11,8 @@ import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { PromptImage } from './input/ChatInputContext';
 import { isExecutiveCommandMessage } from './input/commandClassification';
+import { parseCommandToken } from './input/editor/commandPaste';
+import { useCommandInputStore } from '../../stores/commandInputStore';
 import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
@@ -138,6 +140,14 @@ export function ChatView() {
       try {
         await pi.prompt(workspace, text, undefined, images);
         messageApi.info(`已执行 ${cmd}`);
+        const sessionPath = useSessionStore.getState().activeSessionPath;
+        if (sessionPath) {
+          const parsed = parseCommandToken(text);
+          useCommandInputStore.getState().append(sessionPath, {
+            command: cmd,
+            rest: parsed?.rest ?? text.slice(cmd.length).trim(),
+          });
+        }
       } catch (e) {
         messageApi.error(`${cmd} 执行失败：${e instanceof Error ? e.message : String(e)}`);
       }
@@ -200,7 +210,17 @@ export function ChatView() {
         sendPerf.end('newSession');
       }
       sendPerf.start('getState');
-      const state = (await pi.getState(workspace)) as { sessionFile?: string };
+      let state: { sessionFile?: string };
+      try {
+        state = (await pi.getState(workspace)) as { sessionFile?: string };
+      } catch (error) {
+        // 草稿 worker 仍可能短暂带着外工作区 last_session；归属失败时新建本对话会话再读一次。
+        if (!String(error).includes('SESSION_WORKSPACE_MISMATCH')) throw error;
+        sendPerf.start('newSession');
+        await pi.newSession(workspace);
+        sendPerf.end('newSession');
+        state = (await pi.getState(workspace)) as { sessionFile?: string };
+      }
       sendPerf.end('getState');
       const path = state.sessionFile ?? openResult.sessionFile;
       if (path) {

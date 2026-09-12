@@ -23,7 +23,12 @@ vi.mock('virtua', async () => {
 });
 
 // AgentStoreContext mock：直通假 useAgentStore（zustand-like 选择器）。excluded 供气泡上下文控制动作订阅。
-const mockState: { messages: ChatMessage[]; isStreaming: boolean; excluded: Set<number> } = {
+const mockState: {
+  messages: ChatMessage[];
+  isStreaming: boolean;
+  excluded: Set<number>;
+  waitingUiPrompt?: { kind: 'select' | 'confirm' | 'input' | 'editor' | 'custom'; title?: string };
+} = {
   messages: [],
   isStreaming: false,
   excluded: new Set(),
@@ -39,12 +44,17 @@ vi.mock('../../stores/AgentStoreContext', () => {
 });
 
 import { ChatListView } from './ChatListView';
+import { useSessionStore } from '../../store/session';
+import { useCommandInputStore } from '../../stores/commandInputStore';
 
 afterEach(() => {
   cleanup();
   mockState.messages = [];
   mockState.isStreaming = false;
   mockState.excluded = new Set();
+  delete mockState.waitingUiPrompt;
+  useSessionStore.setState({ activeSessionPath: null });
+  useCommandInputStore.setState({ bySession: {} });
 });
 
 function setMessages(msgs: ChatMessage[]) {
@@ -126,4 +136,49 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     );
     expect(screen.queryByText('准备响应中…')).toBeNull();
   });
+
+  it('等待批准时显示「等待批准…」而不是「准备响应中…」', () => {
+    mockState.isStreaming = true;
+    mockState.waitingUiPrompt = { kind: 'select', title: '请求批准' };
+    setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('等待批准…')).toBeTruthy();
+    expect(screen.queryByText('准备响应中…')).toBeNull();
+  });
+
+  it('已有工具卡片时仍显示等待批准脚注', () => {
+    mockState.isStreaming = true;
+    mockState.waitingUiPrompt = { kind: 'select' };
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'tool', id: 't1', toolCallId: 'tc1', toolName: 'bash', args: {}, result: {}, status: 'running' } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('等待批准…')).toBeTruthy();
+  });
+
+  it('本地 command-input 行出现在列表中', () => {
+    useSessionStore.getState().setActiveSession('/tmp/s.json');
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+
+    const scroll = document.querySelector('[data-testid="chat-scroll"]');
+    expect(scroll).not.toBeNull();
+    expect(scroll!.textContent).toContain('/goal');
+    expect(scroll!.textContent).toContain('写完');
+    expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
+  });
 });
+

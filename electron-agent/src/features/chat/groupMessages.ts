@@ -32,7 +32,10 @@ export type DisplayMessage =
   | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; timestamp?: number }
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
   | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error' }
-  | { kind: 'notice'; id: string; customType: string; content: string };
+  | { kind: 'notice'; id: string; customType: string; content: string }
+  | { kind: 'command-input'; id: string; command: string; rest: string };
+
+export type CommandInputMessage = Extract<DisplayMessage, { kind: 'command-input' }>;
 
 /**
  * Flatten ChatMessage[] → DisplayMessage[].
