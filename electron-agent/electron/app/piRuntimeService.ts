@@ -9,9 +9,9 @@ import type { Thread, Turn } from './appServer/types';
 import type { PermissionAuthorization, PermissionManager, PermissionProfileName } from './permissionManager';
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { readSessionIdentity } from './sessionIdentity';
-import { setApprovalPolicy } from '../../../extensions/_shared/approval.js';
-import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
-import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
+import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
+import { agentModeConfigKey, isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
+import { approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -660,9 +660,9 @@ export class PiRuntimeService {
     return { ok: true, op, timestamp };
   }
 
-  private async writeApprovalPolicy(workspace: string, rawLevel: unknown): Promise<{ ok: true; level: 'ask' | 'auto' | 'full' }> {
-    const level = String(rawLevel ?? '').trim().toLowerCase();
-    if (level !== 'ask' && level !== 'auto' && level !== 'full') throw new Error('INVALID_APPROVAL_POLICY');
+  private async writeApprovalPolicy(workspace: string, rawLevel: unknown): Promise<{ ok: true; level: ApprovalPolicy }> {
+    const level = parseApproval(typeof rawLevel === 'string' ? rawLevel : String(rawLevel ?? ''));
+    if (!level) throw new Error('INVALID_APPROVAL_POLICY');
     setApprovalPolicy(level, workspace);
     const path = this.options.runtimeConfigPath;
     if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');

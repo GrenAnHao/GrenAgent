@@ -72,4 +72,12 @@ describe('matchBuiltinRules', () => {
     expect(matchBuiltinRules(facts('ask', { protectedPath: true, write: true, outsideWorkspace: true })))
       .toMatchObject({ effect: 'deny' });
   });
+
+  it('readonly asks for network like ask', () => {
+    expect(matchBuiltinRules(facts('readonly', { network: true }))?.id).toBe('builtin.network');
+  });
+  it('workspace denies protected paths but does not ask for dangerous commands', () => {
+    expect(matchBuiltinRules(facts('workspace', { protectedPath: true, write: true }))?.effect).toBe('deny');
+    expect(matchBuiltinRules(facts('workspace', { dangerousCommand: true }))).toBeUndefined();
+  });
 });

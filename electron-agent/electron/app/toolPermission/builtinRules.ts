@@ -13,10 +13,13 @@ export interface BuiltinRule {
  * 受保护路径写入：任何档位都不许做（full 除外，见下）。
  * 危险命令：必须逐次确认，用户规则无法降级为静默放行。
  */
-const GUARDS: BuiltinRule[] = [
-  { id: 'builtin.protected-path', effect: 'deny', match: (c) => c.flags.write && c.flags.protectedPath },
-  { id: 'builtin.dangerous-command', effect: 'ask', match: (c) => c.flags.dangerousCommand },
-];
+const PROTECTED_PATH: BuiltinRule = {
+  id: 'builtin.protected-path', effect: 'deny', match: (c) => c.flags.write && c.flags.protectedPath,
+};
+const DANGEROUS_COMMAND: BuiltinRule = {
+  id: 'builtin.dangerous-command', effect: 'ask', match: (c) => c.flags.dangerousCommand,
+};
+const GUARDS: BuiltinRule[] = [PROTECTED_PATH, DANGEROUS_COMMAND];
 
 /** ask 档额外逐次确认的动作，对应现有 safety 钩子的第 ③ 层。 */
 const ASK_EXTRA: BuiltinRule[] = [
@@ -33,8 +36,10 @@ const ASK_EXTRA: BuiltinRule[] = [
  */
 export const BUILTIN_RULES: Record<ApprovalPreset, readonly BuiltinRule[]> = {
   full: [],
+  workspace: [PROTECTED_PATH],
   auto: GUARDS,
   ask: [...GUARDS, ...ASK_EXTRA],
+  readonly: [...GUARDS, ...ASK_EXTRA],
 };
 
 /**
