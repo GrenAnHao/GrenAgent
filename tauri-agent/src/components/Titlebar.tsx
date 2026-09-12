@@ -90,7 +90,7 @@ export function Titlebar() {
 
   return (
     <div data-tauri-drag-region className={styles.bar}>
-      <div className={styles.brandRow}>
+      <div data-tauri-drag-region className={styles.brandRow}>
         <ActionIcon
           icon={sidebarVisible ? PanelLeftClose : PanelLeftOpen}
           size={{ blockSize: 28, size: 14 }}

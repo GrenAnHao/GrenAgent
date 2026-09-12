@@ -61,4 +61,13 @@ describe('Titlebar sidebar toggle', () => {
     expect(container.querySelector('svg[viewBox="40 56 160 134"]')).toBeNull();
     expect(screen.getByText('Gren')).toBeTruthy();
   });
+
+  it('lets brand text clicks land on a drag region without tagging the toggle', () => {
+    render(<Titlebar />);
+    const brand = screen.getByText('Gren');
+    const title = brand.closest('[data-tauri-drag-region]');
+    expect(title).toBeTruthy();
+    expect(title!.parentElement?.hasAttribute('data-tauri-drag-region')).toBe(true);
+    expect(screen.getByTestId('sidebar-toggle').hasAttribute('data-tauri-drag-region')).toBe(false);
+  });
 });
