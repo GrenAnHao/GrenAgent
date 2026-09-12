@@ -123,33 +123,16 @@ describe('AgentDataService', () => {
     }
   });
 
-  it('exposes session-scoped goal methods through the admin RPC with a fixed UI origin', async () => {
+  it('keeps Goal session bind and event subscribe as no-ops', async () => {
     const service = new AgentDataService({ dataPath: ':memory:' });
     await service.start();
     try {
-      const created = await service.goalCreate({ sessionId: 'session-1', workspace: '/repo', condition: 'ship it', origin: 'human-agent' });
-      expect(created).toMatchObject({ sessionId: 'session-1', workspace: '/repo', condition: 'ship it' });
-      await expect(service.goalGet('session-1', '/repo')).resolves.toMatchObject({ goalId: created.goalId });
-      const paused = await service.goalUpdate({ sessionId: 'session-1', goalId: created.goalId, revision: created.revision, action: 'pause', origin: 'system' });
-      expect(paused.status).toBe('paused');
-      await expect(service.goalHistory('session-1')).resolves.toEqual(expect.arrayContaining([
-        expect.objectContaining({ kind: 'create', payload: { origin: 'human-ui' } }),
-        expect.objectContaining({ kind: 'pause' }),
-      ]));
+      await expect(service.bindGoalSession('/repo', 's', 'interactive')).resolves.toEqual({ bound: false, workspace: '/repo', sessionId: 's', source: 'interactive' });
+      await expect(service.unbindGoalSession('/repo', 's')).resolves.toEqual({ bound: false, workspace: '/repo', sessionId: 's' });
+      await expect(service.goalGet('s', '/repo')).resolves.toBeUndefined();
+      expect(service.onGoalEvent(() => {})).toEqual(expect.any(Function));
     } finally {
       await service.stop();
     }
-  });
-
-  it('provides progress and completion helpers as fixed-origin goal updates', async () => {
-    const service = Object.create(AgentDataService.prototype) as AgentDataService;
-    const requestAdmin = vi.spyOn(service, 'requestAdmin').mockResolvedValue({} as never);
-    const input = { sessionId: 's', goalId: 'g', revision: 2, action: 'pause' as const, payload: { reason: 'progress' }, origin: 'system' as const };
-    await service.goalRecordProgress(input);
-    await service.goalRequestCompletion({ ...input, action: 'begin_judging' });
-    expect(requestAdmin.mock.calls).toEqual([
-      ['admin.goal.update', { ...input, action: 'block', origin: 'human-ui' }],
-      ['admin.goal.update', { ...input, action: 'begin_judging', origin: 'human-ui' }],
-    ]);
   });
 });

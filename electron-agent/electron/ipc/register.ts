@@ -18,7 +18,6 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
-import type { GoalUpdateInput } from '../agentData/goalContracts';
 import type { WikiVersion, WikiSourceInput, WikiSourceRef } from '../agentData/wikiContracts';
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
@@ -118,18 +117,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_audit_export', (_event, args) => services.agentData!.requestAdmin('admin.audit.export', args));
     registerCommand('agentData_diagnostics_check', () => services.agentData!.requestAdmin('admin.diagnostics.check', {}));
     registerCommand('agentData_overview', (_event, args) => services.agentData!.requestAdmin('admin.overview', { userId: readString(args, 'userId') }));
-    registerCommand('agentData_goal_get', (_event, args) => services.agentData!.goalGet(readString(args, 'sessionId'), readString(args, 'workspace')));
-    registerCommand('agentData_goal_create', (_event, args) => services.agentData!.goalCreate({
-      sessionId: readString(args, 'sessionId'), workspace: readString(args, 'workspace'), condition: readText(args, 'condition'),
-      ...(args.maxRounds === undefined ? {} : { maxRounds: readPositiveInteger(args, 'maxRounds', 1) }), origin: 'human-ui',
-    }));
-    registerCommand('agentData_goal_update', (_event, args) => services.agentData!.goalUpdate(readGoalUpdate(args)));
-    registerCommand('agentData_goal_history', (_event, args) => {
-      const sessionId = readString(args, 'sessionId');
-      return args.limit === undefined ? services.agentData!.goalHistory(sessionId) : services.agentData!.goalHistory(sessionId, readNonnegativeInteger(args, 'limit'));
-    });
-    registerCommand('agentData_goal_recordProgress', (_event, args) => services.agentData!.goalRecordProgress(readGoalUpdate(args)));
-    registerCommand('agentData_goal_requestCompletion', (_event, args) => services.agentData!.goalRequestCompletion(readGoalUpdate(args)));
     registerCommand('agentData_diagnostics_open', async (_event, args) => {
       const path = await services.agentData!.resolveDiagnosticPath(readString(args, 'id'));
       const error = await shell.openPath(path);
@@ -345,6 +332,9 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
   });
   registerCommand('list_all_sessions', () => service.listAllSessions());
   registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
+  registerCommand('set_session_display_name', (_event, args) =>
+    service.setSessionDisplayName(readString(args, 'sessionPath'), readText(args, 'name')),
+  );
   registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
   registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
   registerCommand('remove_project', (_event, args) => service.removeProject(readString(args, 'workspace')));
@@ -510,33 +500,6 @@ function readPositiveInteger(args: Record<string, unknown>, key: string, fallbac
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`);
   return value;
 }
-function readNonnegativeInteger(args: Record<string, unknown>, key: string): number {
-  const value = args[key];
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) throw new Error(`${key} must be a nonnegative integer`);
-  return value;
-}
-
-function readGoalAction(value: unknown): GoalUpdateInput['action'] {
-  if (value === 'pause' || value === 'resume' || value === 'begin_judging' || value === 'block' || value === 'disarm' || value === 'clear' || value === 'judge_pass' || value === 'judge_fail') return value;
-  throw new Error('action must be a valid goal action');
-}
-
-function readGoalUpdate(args: Record<string, unknown>): GoalUpdateInput {
-  return {
-    sessionId: readString(args, 'sessionId'),
-    goalId: readString(args, 'goalId'),
-    revision: readGoalRevision(args, 'revision'),
-    action: readGoalAction(args.action),
-    ...(args.payload === undefined ? {} : { payload: readRecord(args, 'payload') }),
-    origin: 'human-ui' as const,
-  };
-}
-
-function readGoalRevision(args: Record<string, unknown>, key: string): number {
-  if (!Number.isSafeInteger(args[key]) || Number(args[key]) < 1) throw new Error(`${key} must be a positive integer`);
-  return Number(args[key]);
-}
-
 function readRecord(args: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = args[key];
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${key} must be an object`);

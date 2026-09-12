@@ -1,15 +1,27 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  GoalDispatch,
-  GoalEvent,
-  GoalRuntimeErrorInput,
-  GoalSnapshot,
-  JudgeResultInput,
-  RoundCancelInput,
-  RoundClaimInput,
-  RoundSettlementInput,
-} from '../agentData/goalContracts';
 import type { GoalJudgeInput, GoalJudgeVerdict } from './goalJudge';
+
+/** Task 14/15 boundary: local stubs after AgentData Goal contracts were removed. */
+export type GoalStatus = 'active' | 'paused' | 'disarmed' | 'judging' | 'blocked' | 'complete' | 'error' | 'cleared';
+export interface GoalSnapshot {
+  goalId: string; sessionId: string; workspace: string; revision: number; condition: string; status: GoalStatus;
+  roundsUsed: number; maxRounds: number; createdAt: string; updatedAt: string;
+}
+export interface GoalEvent {
+  id?: string; goalId: string; sessionId: string; revision: number; kind: string; payload: Record<string, unknown>;
+}
+export interface GoalDispatch {
+  idempotencyKey: string; goalId: string; revision: number; nextRound: number;
+  status: 'claimed' | 'queued' | 'settled' | 'failed'; turnId?: string;
+}
+export interface RoundClaimInput {
+  sessionId: string; goalId: string; revision: number; nextRound: number; idempotencyKey: string;
+  workspace?: string; origin?: string; promptDigest?: string; continuousIntent?: boolean; turnId?: string;
+}
+export interface RoundSettlementInput { sessionId: string; goalId: string; revision: number; idempotencyKey: string; turnId: string; summary: string }
+export interface RoundCancelInput { sessionId: string; goalId: string; revision: number; idempotencyKey: string; turnId?: string; reason: string }
+export interface JudgeResultInput { sessionId: string; goalId: string; revision: number; verdict: 'pass' | 'fail' | 'error'; reason: string; missing?: string[]; fingerprint?: string; turnId?: string; model?: string }
+export interface GoalRuntimeErrorInput { sessionId: string; goalId: string; revision: number; reason: string; turnId?: string }
 
 export interface GoalTurnMeta {
   goalId: string;

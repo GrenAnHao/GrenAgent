@@ -5,8 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { PiRuntimeService, type AgentHostPort, type GoalHostPort, type WorkspaceHandlePort } from './piRuntimeService';
-import { AgentDataStorage } from '../agentData/storage';
-import { GoalStore } from '../agentData/goalStore';
 
 function fakeHandle(session: Record<string, unknown> = {}) {
   const sessionId = typeof session.sessionId === 'string' ? session.sessionId : 'session-a';
@@ -202,6 +200,25 @@ agentDir: 'C:/agent',
     expect(host.open).toHaveBeenCalledWith('alias', 'D:/resolved-project');
   });
 
+  it('does not bind a foreign last_session onto a draft workspace; newSession still works', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-foreign-session-'));
+    const foreign = join(root, 'foreign.jsonl');
+    await writeFile(foreign, `${JSON.stringify({ type: 'session', id: 'foreign-session', cwd: 'C:/other-project' })}\n`);
+    const handle = fakeHandle({ sessionId: 'foreign-session', sessionFile: foreign });
+    handle.getState = vi.fn(() => ({ sessionFile: foreign, sessionId: 'foreign-session' }));
+    const { host } = fakeAgentHost(handle);
+    const draft = 'C:/Users/me/.pi/agent/works/3778c198-1830-4aa9-a0eb-78549e8c4456';
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost() });
+    try {
+      await expect(service.openWorkspace(draft)).resolves.toMatchObject({ sessionFile: null });
+      await expect(service.send(draft, 'agent_get_state', {})).resolves.toMatchObject({ sessionFile: null });
+      await expect(service.send(draft, 'agent_new_session', {})).resolves.toEqual({ cancelled: false });
+      expect(handle.newSession).toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('opens a workspace and forwards agent commands to its Pi client', async () => {
     const { host, handle } = fakeAgentHost();
     handle.getState = vi.fn(() => ({ sessionFile: 'C:/sessions/a.jsonl' }));
@@ -212,6 +229,32 @@ agentDir: 'C:/agent',
     await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toMatchObject({ sessionFile: 'C:/sessions/a.jsonl' });
     expect(host.open).toHaveBeenCalledWith('C:/work', 'C:/work');
     expect(handle.getState).toHaveBeenCalled();
+  });
+
+  it('get_available_models 把 thinkingLevelMap getter 拍成可 IPC 的纯对象', async () => {
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile: 'C:/sessions/a.jsonl' }));
+    handle.session.modelRuntime = {
+      getAvailableSnapshot: () => [{
+        get id() { return 'flash'; },
+        get provider() { return 'deepseek'; },
+        get api() { return 'openai-completions'; },
+        get reasoning() { return true; },
+        get thinkingLevelMap() { return { low: 'low', high: 'high' }; },
+        think() { return 'side-effect'; },
+      }],
+    };
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost() });
+    await service.openWorkspace('C:/work');
+    await expect(service.send('C:/work', 'agent_get_available_models', {})).resolves.toEqual({
+      models: [{
+        id: 'flash',
+        provider: 'deepseek',
+        api: 'openai-completions',
+        reasoning: true,
+        thinkingLevelMap: { low: 'low', high: 'high' },
+      }],
+    });
   });
 
   it('migrates the latest legacy Goal entry once when opening a session', async () => {
@@ -818,121 +861,12 @@ agentDir: 'C:/agent',
     }
   });
 
-  it.each(['agent_fork', 'agent_clone'] as const)('does not resurrect a cleared Goal through the %s legacy entry', async (command) => {
-    const root = await mkdtemp(join(tmpdir(), 'pi-cleared-fork-'));
-    const sourceFile = join(root, 'source.jsonl');
-    const targetFile = join(root, 'target.jsonl');
-    const legacyGoal = { type: 'custom', id: 'goal-1', customType: 'goal', data: { condition: 'legacy goal', react: 2 } };
-    await writeFile(sourceFile, [
-      JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }),
-      JSON.stringify({ ...legacyGoal, parentId: 'source-session' }),
-    ].join('\n'));
-    // Pi copies the session log when it forks, so the target still carries the
-    // same legacy Goal entry.
-    await writeFile(targetFile, [
-      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
-      JSON.stringify({ ...legacyGoal, parentId: 'target-session' }),
-    ].join('\n'));
-    const storage = new AgentDataStorage(':memory:');
-    storage.migrate();
-    const store = new GoalStore(storage.db);
-    let activeFile = sourceFile;
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: activeFile };
-        activeFile = targetFile;
-        return { cancelled: false };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
-    const { host } = hostSwitchingSession(sourceFile, targetFile);
-    const service = new PiRuntimeService({
-      agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost(),
-      // Mirrors main.ts: a cleared source is forked as a tombstone instead of
-      // being skipped, so the copied legacy entry has nothing left to restore.
-      onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
-        const source = store.get(sourceSessionId);
-        if (!source) return;
-        store.fork({ sourceSessionId, sourceGoalId: source.goalId, targetSessionId });
-      },
-      migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused }) => {
-        store.recoverLegacy({ workspace, sessionId, condition, react, paused });
-      },
-    });
-    try {
-      await service.openWorkspace('C:/work');
-      const legacy = store.get('source-session');
-      expect(legacy).toMatchObject({ status: 'disarmed', source: 'legacy', condition: 'legacy goal' });
-      store.clear({ sessionId: 'source-session', goalId: legacy!.goalId, revision: legacy!.revision, action: 'clear', origin: 'human-ui' });
-
-      await service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile });
-
-      expect(store.getLive('target-session')).toBeUndefined();
-      expect(store.get('target-session')).toMatchObject({
-        status: 'cleared', source: 'fork', sourceGoalId: legacy!.goalId, sourceSessionId: 'source-session',
-      });
-      expect(store.history('target-session').map((event) => event.kind)).toEqual(['fork']);
-    } finally {
-      storage.close();
-      await rm(root, { recursive: true, force: true });
-    }
+  it.skip('does not resurrect a cleared Goal through the agent_fork legacy entry', () => {
+    // Task 14 removed GoalStore; this case is deleted in task 15.
   });
 
-  it.each(['agent_fork', 'agent_clone'] as const)('forks a live legacy Goal into one disarmed copy for %s', async (command) => {
-    const root = await mkdtemp(join(tmpdir(), 'pi-live-fork-'));
-    const sourceFile = join(root, 'source.jsonl');
-    const targetFile = join(root, 'target.jsonl');
-    const legacyGoal = { type: 'custom', id: 'goal-1', customType: 'goal', data: { condition: 'legacy goal', react: 2 } };
-    await writeFile(sourceFile, [
-      JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }),
-      JSON.stringify({ ...legacyGoal, parentId: 'source-session' }),
-    ].join('\n'));
-    await writeFile(targetFile, [
-      JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }),
-      JSON.stringify({ ...legacyGoal, parentId: 'target-session' }),
-    ].join('\n'));
-    const storage = new AgentDataStorage(':memory:');
-    storage.migrate();
-    const store = new GoalStore(storage.db);
-    let activeFile = sourceFile;
-    const client = {
-      send: vi.fn(async (rpc: Record<string, unknown>) => {
-        if (rpc.type === 'get_state') return { sessionFile: activeFile };
-        activeFile = targetFile;
-        return { cancelled: false };
-      }),
-      setSessionIdentity: vi.fn(),
-      respondUi: vi.fn(),
-    };
-    const manager = { get: vi.fn(() => client), open: vi.fn(() => client), close: vi.fn() } as any;
-    const { host } = hostSwitchingSession(sourceFile, targetFile);
-    const service = new PiRuntimeService({
-      agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, goalHost: emptyGoalHost(),
-      onSessionForked: async ({ sourceSessionId, targetSessionId }) => {
-        const source = store.get(sourceSessionId);
-        if (!source) return;
-        store.fork({ sourceSessionId, sourceGoalId: source.goalId, targetSessionId });
-      },
-      migrateLegacyGoal: ({ workspace, sessionId, condition, react, paused }) => {
-        store.recoverLegacy({ workspace, sessionId, condition, react, paused });
-      },
-    });
-    try {
-      await service.openWorkspace('C:/work');
-      const legacy = store.get('source-session');
-
-      await service.send('C:/work', command, { sessionId: 'source-session', sessionPath: sourceFile });
-
-      expect(store.get('target-session')).toMatchObject({
-        status: 'disarmed', source: 'fork', condition: 'legacy goal', sourceGoalId: legacy!.goalId,
-      });
-      expect(store.history('target-session').map((event) => event.kind)).toEqual(['fork']);
-    } finally {
-      storage.close();
-      await rm(root, { recursive: true, force: true });
-    }
+  it.skip('forks a live legacy Goal into one disarmed copy', () => {
+    // Task 14 removed GoalStore; this case is deleted in task 15.
   });
 
   it('writes mode/approval/exclusion to runtime settings without slash prompts', async () => {

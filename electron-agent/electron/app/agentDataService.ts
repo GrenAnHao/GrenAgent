@@ -5,7 +5,25 @@ import type { Item, Thread, Turn } from './appServer/types';
 import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
 import type { QueueTaskInput } from './appServer/taskQueue';
 import type { WikiSyncSkipInput } from './wikiSyncService';
-import type { CreateGoalInput, GoalUpdateInput, GoalEvent, GoalSnapshot, GoalDispatch, RoundClaimInput, RoundSettlementInput, RoundCancelInput, GoalRuntimeErrorInput } from '../agentData/goalContracts';
+import type {
+  GoalDispatch,
+  GoalEvent,
+  GoalRuntimeErrorInput,
+  GoalSnapshot,
+  RoundCancelInput,
+  RoundClaimInput,
+  RoundSettlementInput,
+} from './goalCoordinator';
+
+/** Task 14/15 boundary: Coordinator still calls these until it is removed. */
+type GoalSessionSource = 'interactive' | 'goal';
+const emptyGoalSnapshot = (): GoalSnapshot => ({
+  goalId: '', sessionId: '', workspace: '', revision: 0, condition: '', status: 'cleared',
+  roundsUsed: 0, maxRounds: 0, createdAt: '', updatedAt: '',
+});
+const emptyGoalDispatch = (): GoalDispatch => ({
+  idempotencyKey: '', goalId: '', revision: 0, nextRound: 0, status: 'failed',
+});
 
 // CodeGraph calls may cold-load the embedded SDK and its index. Keep this aligned with
 // extensions/code-retrieval's 65s client timeout instead of AgentDataClient's
@@ -55,47 +73,29 @@ export class AgentDataService {
     if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));
     return this.runtime.requestAdmin<T>(method, params);
   }
-  goalGet(sessionId: string, _workspace: string): Promise<GoalSnapshot | undefined> {
-    return this.requestAdmin<GoalSnapshot | undefined>('admin.goal.get', { sessionId });
+  goalGet(_sessionId: string, _workspace: string): Promise<GoalSnapshot | undefined> {
+    return Promise.resolve(undefined);
   }
-  goalCreate(input: Omit<CreateGoalInput, 'origin'> | CreateGoalInput): Promise<GoalSnapshot> {
-    const { origin: _origin, ...params } = input as CreateGoalInput;
-    return this.requestAdmin<GoalSnapshot>('admin.goal.create', { ...params, origin: 'human-ui' });
+  goalClaimRound(_input: RoundClaimInput): Promise<GoalDispatch> {
+    return Promise.resolve(emptyGoalDispatch());
   }
-  goalUpdate(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
-    const { origin: _origin, ...params } = input as GoalUpdateInput;
-    return this.requestAdmin<GoalSnapshot>('admin.goal.update', { ...params, origin: 'human-ui' });
+  goalSettleRound(_input: RoundSettlementInput): Promise<{ snapshot: GoalSnapshot; dispatch: GoalDispatch }> {
+    return Promise.resolve({ snapshot: emptyGoalSnapshot(), dispatch: emptyGoalDispatch() });
   }
-  goalRecordProgress(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
-    return this.goalUpdate({ ...input, action: 'block' });
+  goalCancelRound(_input: RoundCancelInput): Promise<GoalDispatch | null> {
+    return Promise.resolve(null);
   }
-  goalRequestCompletion(input: Omit<GoalUpdateInput, 'origin'> | GoalUpdateInput): Promise<GoalSnapshot> {
-    return this.goalUpdate({ ...input, action: 'begin_judging' });
+  goalRuntimeError(_input: GoalRuntimeErrorInput): Promise<GoalSnapshot> {
+    return Promise.resolve(emptyGoalSnapshot());
   }
-  goalHistory(sessionId: string, limit?: number): Promise<GoalEvent[]> {
-    return this.requestAdmin<GoalEvent[]>('admin.goal.history', { sessionId, ...(limit === undefined ? {} : { limit }) });
+  onGoalEvent(_listener: (event: GoalEvent, snapshot: GoalSnapshot | undefined) => void | boolean | Promise<void | boolean>): () => void {
+    return () => {};
   }
-  goalClaimRound(input: RoundClaimInput): Promise<GoalDispatch> {
-    return this.requestAdmin<GoalDispatch>('admin.goal.claimRound', input as unknown as Record<string, unknown>);
-  }
-  goalSettleRound(input: RoundSettlementInput): Promise<{ snapshot: GoalSnapshot; dispatch: GoalDispatch }> {
-    return this.requestAdmin<{ snapshot: GoalSnapshot; dispatch: GoalDispatch }>('admin.goal.settleRound', input as unknown as Record<string, unknown>);
-  }
-  goalCancelRound(input: RoundCancelInput): Promise<GoalDispatch | null> {
-    return this.requestAdmin<GoalDispatch | null>('admin.goal.cancelRound', input as unknown as Record<string, unknown>);
-  }
-  goalRuntimeError(input: GoalRuntimeErrorInput): Promise<GoalSnapshot> {
-    return this.requestAdmin<GoalSnapshot>('admin.goal.runtimeError', input as unknown as Record<string, unknown>);
-  }
-  onGoalEvent(listener: (event: GoalEvent, snapshot: GoalSnapshot | undefined) => void | boolean | Promise<void | boolean>): () => void {
-    if (!this.runtime) throw new Error('agent data runtime is not started');
-    return this.runtime.onGoalEvent(listener);
-  }
-  bindGoalSession(workspace: string, sessionId: string, source: 'interactive' | 'goal' = 'interactive'): Promise<{ bound: boolean; workspace: string; sessionId: string; source: 'interactive' | 'goal' }> {
-    return this.requestAdmin('admin.goal.session.bind', { workspace, sessionId, source });
+  bindGoalSession(workspace: string, sessionId: string, source: GoalSessionSource = 'interactive'): Promise<{ bound: boolean; workspace: string; sessionId: string; source: GoalSessionSource }> {
+    return Promise.resolve({ bound: false, workspace, sessionId, source });
   }
   unbindGoalSession(workspace: string, sessionId: string): Promise<{ bound: boolean; workspace: string; sessionId: string }> {
-    return this.requestAdmin('admin.goal.session.unbind', { workspace, sessionId });
+    return Promise.resolve({ bound: false, workspace, sessionId });
   }
   resolveDiagnosticPath(id: string): Promise<string> {
     if (!this.runtime) return Promise.reject(new Error('agent data runtime is not started'));

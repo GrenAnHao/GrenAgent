@@ -10,9 +10,12 @@ describe('AgentDataStorage', () => {
     const file = join(dir, 'data.db');
     const first = new AgentDataStorage(file); first.migrate(); first.migrate();
     expect(first.schemaVersion()).toBe(4);
+    expect(first.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
     first.close();
     const second = new AgentDataStorage(file); second.migrate();
-    expect(second.schemaVersion()).toBe(4); second.close();
+    expect(second.schemaVersion()).toBe(4);
+    expect(second.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
+    second.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -26,7 +29,9 @@ describe('AgentDataStorage', () => {
     const tables = storage.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
     expect(tables.map((table) => table.name)).toEqual(expect.arrayContaining([
       'threads', 'turns', 'items', 'app_events', 'service_tasks', 'plugin_state',
+      'permission_rules', 'tool_audit',
     ]));
+    expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
     storage.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -53,8 +58,8 @@ describe('AgentDataStorage', () => {
     expect(storage.schemaVersion()).toBe(4);
     expect(storage.db.prepare('SELECT id,session_id FROM threads').get()).toMatchObject({ id: 'legacy-thread', session_id: null });
     expect(storage.db.prepare('SELECT id,session_id FROM turns').get()).toMatchObject({ id: 'legacy-turn', session_id: null });
-    expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('goal_snapshots','goal_events','goal_turn_leases') ORDER BY name").all()).toHaveLength(3);
-    expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('goal_snapshots_live_session','goal_events_goal_idempotency','goal_turn_leases_round')").all()).toHaveLength(3);
+    expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'goal_%'").all()).toHaveLength(0);
+    expect(storage.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('permission_rules','tool_audit')").all()).toHaveLength(2);
     storage.close();
   });
 });

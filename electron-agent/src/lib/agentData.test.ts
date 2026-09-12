@@ -93,23 +93,7 @@ describe('agentDataApi', () => {
     spy.mockRestore();
   });
 
-  it('exposes session-scoped typed Goal operations without accepting renderer origins', async () => {
-    const spy = vi.spyOn(runtime, 'invoke').mockResolvedValue({});
-    try {
-      await agentDataApi.goals.get('session-1', '/repo');
-      await agentDataApi.goals.create({ sessionId: 'session-1', workspace: '/repo', condition: 'ship it' });
-      await agentDataApi.goals.update({ sessionId: 'session-1', goalId: 'goal-1', revision: 2, action: 'pause' });
-      await agentDataApi.goals.recordProgress({ sessionId: 'session-1', goalId: 'goal-1', revision: 3, action: 'block', payload: { reason: 'waiting' } });
-      await agentDataApi.goals.requestCompletion({ sessionId: 'session-1', goalId: 'goal-1', revision: 4, action: 'pause' });
-      await agentDataApi.goals.history('session-1');
-      expect(spy.mock.calls).toEqual([
-        ['agentData_goal_get', { sessionId: 'session-1', workspace: '/repo' }],
-        ['agentData_goal_create', { sessionId: 'session-1', workspace: '/repo', condition: 'ship it' }],
-        ['agentData_goal_update', { sessionId: 'session-1', goalId: 'goal-1', revision: 2, action: 'pause' }],
-        ['agentData_goal_recordProgress', { sessionId: 'session-1', goalId: 'goal-1', revision: 3, action: 'block', payload: { reason: 'waiting' } }],
-        ['agentData_goal_requestCompletion', { sessionId: 'session-1', goalId: 'goal-1', revision: 4, action: 'begin_judging' }],
-        ['agentData_goal_history', { sessionId: 'session-1' }],
-      ]);
-    } finally { spy.mockRestore(); }
+  it('does not expose Goal RPC on the renderer API', () => {
+    expect(agentDataApi.goals).toBeUndefined();
   });
 });
