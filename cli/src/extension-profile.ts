@@ -22,6 +22,9 @@ export function filterExtensionsByProfile<T extends { name: string }>(
   return exts.filter((e) => e.name === "safety" || !CHAT_EXCLUDED.has(e.name));
 }
 
+/** Electron 产品常驻：无 manifest 也要加载。 */
+export const CORE_ALWAYS_ON = new Set<string>(["safety", "auto-title", "sandbox"]);
+
 export function filterManagedExtensions<T extends { name: string; manifest?: { id: string } }>(
   extensions: T[],
   raw: string | undefined,
@@ -37,5 +40,5 @@ export function filterManagedExtensions<T extends { name: string; manifest?: { i
     return extensions.filter((entry) => !entry.manifest);
   }
   const allowed = new Set(ids as string[]);
-  return extensions.filter((entry) => entry.name === 'safety' || entry.name === 'auto-title' || (entry.manifest !== undefined && allowed.has(entry.manifest.id)));
+  return extensions.filter((entry) => CORE_ALWAYS_ON.has(entry.name) || (entry.manifest !== undefined && allowed.has(entry.manifest.id)));
 }

@@ -29,6 +29,7 @@ import fableBehavior from "./fable-behavior/index.js";
 import diagramHint from "./diagram-hint/index.js";
 import safety from "./safety/index.js";
 import approval from "./approval/index.js";
+import sandbox from "./sandbox/index.js";
 import todo from "./todo/index.js";
 import tts from "./tts/index.js";
 import visualCompanion from "./visual-companion/index.js";
@@ -43,6 +44,7 @@ import { memoryManifest, wikiRagManifest, codeRetrievalManifest } from "./agent-
 export {
   safety,
   approval,
+  sandbox,
   loopGuard,
   rulebook,
   compactionPolicy,
@@ -81,6 +83,7 @@ export {
 export const allExtensions = [
   safety,
   approval,
+  sandbox,
   loopGuard,
   rulebook,
   compactionPolicy,
@@ -120,6 +123,7 @@ export const allExtensions = [
 export const namedExtensions: Array<{ name: string; factory: (typeof allExtensions)[number] }> = [
   { name: "safety", factory: safety },
   { name: "approval", factory: approval },
+  { name: "sandbox", factory: sandbox },
   { name: "loop-guard", factory: loopGuard },
   { name: "rulebook", factory: rulebook },
   { name: "compaction-policy", factory: compactionPolicy },
