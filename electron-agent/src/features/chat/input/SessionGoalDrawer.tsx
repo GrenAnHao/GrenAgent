@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Drawer, Input } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Icon } from '@lobehub/ui';
@@ -123,6 +123,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
   const [mutating, setMutating] = useState(false);
   const [savingCondition, setSavingCondition] = useState(false);
   const [conditionDraft, setConditionDraft] = useState(currentSnapshot?.condition ?? '');
+  const inflight = useRef(false);
   const valid = !!currentSnapshot && currentSnapshot.sessionId === sessionId;
   const history = currentSnapshot?.history ?? [];
 
@@ -134,12 +135,18 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
   const canEditCondition = !!currentSnapshot && editableStatuses.includes(currentSnapshot.status);
 
   const runCommand = async (message: string) => {
-    if (!workspace) return;
-    await pi.prompt(workspace, message);
+    if (!workspace || inflight.current) return;
+    inflight.current = true;
+    try {
+      await pi.prompt(workspace, message);
+    } finally {
+      inflight.current = false;
+    }
   };
 
   const clearGoal = async () => {
-    if (!currentSnapshot || !clearable || mutating || savingCondition || !window.confirm('清除当前目标？')) return;
+    if (!currentSnapshot || !clearable || mutating || savingCondition || inflight.current) return;
+    if (!window.confirm('清除当前目标？')) return;
     setMutating(true);
     try {
       await runCommand('/goal clear');

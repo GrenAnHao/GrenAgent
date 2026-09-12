@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
 import { Check, Maximize2, Pause, PencilLine, Play, Trash2, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
+import { pathsEquivalent } from '../../../lib/pathUtils';
 import { pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useSessionStore } from '../../../store/session';
@@ -80,6 +81,12 @@ function readSessionId(state: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function readSessionFile(state: unknown): string | undefined {
+  if (!state || typeof state !== 'object') return undefined;
+  const value = (state as { sessionFile?: unknown }).sessionFile;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function statusSentence(snapshot: GoalSnapshot): string {
   if (snapshot.status === 'active') {
     return snapshot.activation === 'armed' ? '执行中的目标' : '未运行的目标';
@@ -142,6 +149,8 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
       .getState(workspace)
       .then((state) => {
         if (request !== epoch.current) return;
+        const stateSessionFile = readSessionFile(state);
+        if (stateSessionFile && (!activeSessionPath || !pathsEquivalent(stateSessionFile, activeSessionPath))) return;
         const nextSessionId = readSessionId(state);
         if (nextSessionId) setSessionId(nextSessionId);
       })

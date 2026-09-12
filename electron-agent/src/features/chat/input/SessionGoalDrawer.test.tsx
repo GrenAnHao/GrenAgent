@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoalSnapshot } from '../../../stores/goalStore';
 
@@ -100,6 +100,37 @@ describe('SessionGoalDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
     expect(confirm).toHaveBeenCalledWith('清除当前目标？');
     await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear'));
+    confirm.mockRestore();
+  });
+
+  it('sends only one edit prompt when save is clicked twice', async () => {
+    prompt.mockImplementation(() => new Promise(() => {}));
+    render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={activeSnapshot} />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '新条件' } });
+    const save = screen.getByRole('button', { name: '保存目标' });
+    act(() => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件');
+  });
+
+  it('sends only one clear prompt when clear is clicked twice', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    prompt.mockImplementation(() => new Promise(() => {}));
+    render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
+
+    const clear = screen.getByRole('button', { name: '清除目标' });
+    act(() => {
+      clear.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      clear.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear');
     confirm.mockRestore();
   });
 

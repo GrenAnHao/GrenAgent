@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 
@@ -128,6 +128,23 @@ describe('GoalPill', () => {
     render(<GoalPill />);
     await waitFor(() => expect(getState).toHaveBeenCalledWith('/repo'));
     expect(screen.queryByTestId('goal-pill')).toBeNull();
+  });
+
+  it('does not bind a goal when Pi state still points at another session file', async () => {
+    activeSessionPath = '/new.json';
+    getState.mockResolvedValue({ sessionId: 'old-session', sessionFile: '/old.json' });
+    useGoalStore.getState().setSnapshot(
+      'old-session',
+      makeSnapshot({ sessionId: 'old-session', goalId: 'goal-old', condition: '旧会话目标' }),
+    );
+
+    render(<GoalPill />);
+    await waitFor(() => expect(getState).toHaveBeenCalledWith('/repo'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('goal-pill')).toBeNull();
+    expect(screen.queryByText('旧会话目标')).toBeNull();
   });
 
   it('edits the condition with Enter and ignores Escape', async () => {
