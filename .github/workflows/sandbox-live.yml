@@ -15,6 +15,7 @@ on:
 jobs:
   sandbox-windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,16 +40,10 @@ jobs:
         run: |
           if (Test-Path -LiteralPath package-lock.json) { npm ci } else { npm install }
 
-      - name: Install electron-agent dependencies
-        working-directory: electron-agent
+      - name: Sandbox unit tests
+        working-directory: extensions
         shell: pwsh
-        run: |
-          if (Test-Path -LiteralPath package-lock.json) { npm ci } else { npm install }
-
-      - name: Typecheck electron-agent
-        working-directory: electron-agent
-        shell: pwsh
-        run: npx tsc --noEmit -p tsconfig.node.json
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
 
       - name: Live OS isolation
         working-directory: extensions
@@ -59,6 +54,7 @@ jobs:
 
   sandbox-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,20 +68,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
+          # Best-effort: some images disable unprivileged user namespaces (bwrap needs them).
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
 
       - name: Install extensions dependencies
         working-directory: extensions
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Install electron-agent dependencies
-        working-directory: electron-agent
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-      - name: Typecheck electron-agent
-        working-directory: electron-agent
-        run: npx tsc --noEmit -p tsconfig.node.json
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
 
       - name: Live OS isolation
         working-directory: extensions
@@ -95,6 +88,7 @@ jobs:
 
   sandbox-macos:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,14 +103,9 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Install electron-agent dependencies
-        working-directory: electron-agent
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-      - name: Typecheck electron-agent
-        working-directory: electron-agent
-        run: npx tsc --noEmit -p tsconfig.node.json
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
 
       - name: Live OS isolation
         working-directory: extensions
@@ -126,6 +115,7 @@ jobs:
 
   sandbox-linux-negative:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,14 +130,9 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Install electron-agent dependencies
-        working-directory: electron-agent
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-      - name: Typecheck electron-agent
-        working-directory: electron-agent
-        run: npx tsc --noEmit -p tsconfig.node.json
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
 
       - name: Hide bwrap if present
         run: |
