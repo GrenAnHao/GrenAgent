@@ -9,7 +9,7 @@ export type ToolOrigin = 'main' | 'subagent' | 'goal';
 export type ToolEffect = 'allow' | 'deny' | 'ask';
 export type RuleScope = 'session' | 'workspace' | 'global';
 export type MatcherKind = 'any' | 'command_prefix' | 'path_glob' | 'mcp_server';
-export type ApprovalPreset = 'ask' | 'auto' | 'full';
+export type ApprovalPreset = 'readonly' | 'ask' | 'auto' | 'workspace' | 'full';
 
 /** sidecar 提取的调用特征。主进程不重新解析命令或路径，只消费这些布尔量。 */
 export interface ToolCallFlags {

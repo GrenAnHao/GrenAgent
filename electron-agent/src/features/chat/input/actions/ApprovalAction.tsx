@@ -1,6 +1,6 @@
 import { Icon } from '@lobehub/ui';
 import { Select } from '@lobehub/ui/base-ui';
-import { Hand, Shield, ShieldAlert, type LucideIcon } from 'lucide-react';
+import { Eye, Hand, PencilLine, Shield, ShieldAlert, type LucideIcon } from 'lucide-react';
 import { pi } from '../../../../lib/pi';
 import {
   APPROVAL_HINTS,
@@ -9,23 +9,28 @@ import {
   type ApprovalPolicy,
   useApprovalStore,
 } from '../../../../stores/approvalStore';
+import { useModeStore } from '../../../../stores/modeStore';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 
-/** 每个审批策略的 lucide 图标（对齐 Codex：请求批准=手/替我审批=盾/完全访问=感叹号盾牌）。 */
+/** 每个审批策略的 lucide 图标（仅查看 / 请求批准 / 替我审批 / 工作区编辑 / 完全权限）。 */
 const ICONS: Record<ApprovalPolicy, LucideIcon> = {
+  readonly: Eye,
   ask: Hand,
   auto: Shield,
+  workspace: PencilLine,
   full: ShieldAlert,
 };
 
 /**
- * 审批策略选择器：请求批准 / 替我审批 / 完全访问，与「模式」并列。
+ * 审批策略选择器：仅查看 / 请求批准 / 替我审批 / 工作区编辑 / 完全权限，与「模式」并列。
  * 每级是一档确认强度（驱动 safety 的逐次确认行为）。当前级别由 sidecar approval 扩展经 setStatus
  * 推送到 approvalStore（切会话/刷新回读）；切换走 agent_set_approval（底层 /approval，不调 LLM）。
+ * Ask 模式下选择器禁用（value 仍显示当前档；实际强制只读由 worker 的 resolvePreset 做）。
  */
 export default function ApprovalAction() {
   const { workspace, workspaceReady } = useAgentStoreContext();
   const level = useApprovalStore((s) => s.byWorkspace[workspace] ?? 'auto');
+  const mode = useModeStore((s) => s.byWorkspace[workspace] ?? 'agent');
 
   const onChange = (next: string) => {
     const target = next as ApprovalPolicy;
@@ -37,7 +42,7 @@ export default function ApprovalAction() {
     <Select
       size="small"
       popupMatchSelectWidth={false}
-      disabled={!workspaceReady}
+      disabled={!workspaceReady || mode === 'ask'}
       value={level}
       options={APPROVAL_POLICIES.map((p) => ({ label: APPROVAL_LABELS[p], value: p }))}
       optionRender={(option) => {
@@ -57,7 +62,7 @@ export default function ApprovalAction() {
       }}
       placeholder="审批"
       prefix={ICONS[level]}
-      style={{ width: 'auto', maxWidth: 120 }}
+      style={{ width: 'auto', maxWidth: 148 }}
       onChange={onChange}
     />
   );

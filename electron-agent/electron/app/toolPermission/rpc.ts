@@ -8,7 +8,7 @@ type Params = Record<string, unknown>;
 type Method = (params: Params) => unknown | Promise<unknown>;
 
 const ORIGINS: readonly ToolOrigin[] = ['main', 'subagent', 'goal'];
-const PRESETS: readonly ApprovalPreset[] = ['ask', 'auto', 'full'];
+const PRESETS: readonly ApprovalPreset[] = ['readonly', 'ask', 'auto', 'workspace', 'full'];
 const EFFECTS: readonly ToolEffect[] = ['allow', 'deny', 'ask'];
 const SCOPES: readonly RuleScope[] = ['session', 'workspace', 'global'];
 const MATCHERS: readonly MatcherKind[] = ['any', 'command_prefix', 'path_glob', 'mcp_server'];

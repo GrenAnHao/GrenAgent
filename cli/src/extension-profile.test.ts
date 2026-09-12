@@ -51,12 +51,13 @@ test("Electron allowed ids retain auto-title without enabling other unmanaged ex
   assert.deepEqual(filterManagedExtensions(extensions, '["goal"]'), extensions.slice(0, 3));
 });
 
-test("Electron empty allowed ids retain only safety and auto-title", () => {
+test("Electron empty allowed ids retain only safety, auto-title and sandbox", () => {
   const extensions = [
     { name: "safety" },
     { name: "auto-title" },
+    { name: "sandbox" },
     { name: "goal", manifest: { id: "goal" } },
     { name: "code-exec" },
   ];
-  assert.deepEqual(filterManagedExtensions(extensions, '[]'), extensions.slice(0, 2));
+  assert.deepEqual(filterManagedExtensions(extensions, '[]'), extensions.slice(0, 3));
 });

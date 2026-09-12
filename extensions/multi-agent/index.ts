@@ -304,12 +304,12 @@ export default function (pi: ExtensionAPI) {
       }
       const profileModel = profileToModel(profile, getConfig);
       const profileEnv: Record<string, string> = params.profile ? profileToEnv(profile) : {};
-      // 子代理继承 owner 审批策略，但把 `full` 下调为 `auto`：自主 spawn 的子代理对用户可见性低，
-      // 不应连 safety 的危险命令确认 / 受保护路径拦截（④）都跳过。能力硬限（① readonly/deny）与
-      // owner 自身会话不受影响——这里只收紧"模型自动起的子代理"。headless 下 ask 仍在 safety 内
-      // 降级为 auto 行为（不全拦），故 auto 是安全且足够的下限。
+      // 子代理继承 owner 审批策略，但把 `full` / `workspace` 下调为 `auto`：自主 spawn 的子代理
+      // 对用户可见性低，不应连 safety 的危险命令确认 / 受保护路径拦截（④）都跳过。能力硬限
+      // （① readonly/deny）与 owner 自身会话不受影响——这里只收紧"模型自动起的子代理"。
+      // headless 下 ask 仍在 safety 内降级为 auto 行为（不全拦），故 auto 是安全且足够的下限。
       const ownerPolicy = getApprovalPolicy();
-      profileEnv.APPROVAL_POLICY = ownerPolicy === "full" ? "auto" : ownerPolicy;
+      profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
       const limits = profileLimits(profile);
 
       // Named-agent resolution (markdown agents in ~/.pi/agent/agents + .pi/agents).

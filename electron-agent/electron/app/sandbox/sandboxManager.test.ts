@@ -45,4 +45,9 @@ describe('SandboxManager', () => {
     // osIsolation 为 false，degraded 即为「未声称 OS 隔离」的可观测表现。
     expect(launch.degraded).toBe(true);
   });
+
+  it('prepare never throws SANDBOX_UNAVAILABLE', () => {
+    const manager = new SandboxManager({});
+    expect(() => manager.prepare({ profile: 'workspace' })).not.toThrow();
+  });
 });

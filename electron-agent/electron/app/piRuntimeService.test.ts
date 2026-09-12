@@ -991,6 +991,29 @@ agentDir: 'C:/agent',
     }
   });
 
+  it('accepts readonly and workspace approval levels', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-approval-five-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
+    __resetApprovalForTest();
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: fakeAgentHost().host,
+      modelRuntimeHost: noopModelHost,
+      goalHost: emptyGoalHost(),
+      runtimeConfigPath,
+    });
+    try {
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'readonly' }))
+        .resolves.toEqual({ ok: true, level: 'readonly' });
+      await expect(service.send('C:/work', 'agent_set_approval', { level: 'workspace' }))
+        .resolves.toEqual({ ok: true, level: 'workspace' });
+    } finally {
+      __resetApprovalForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('非法审批档不写内存也不落盘', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-approval-invalid-'));
     const runtimeConfigPath = join(root, 'runtime-settings.json');

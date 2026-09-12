@@ -9,7 +9,7 @@ import {
 } from "../_shared/tool-groups.js";
 import {
   desktopControl, evaluateToolCall, rememberToolRule, resolveToolOrigin, settleToolCall,
-  type ToolCallFacts, type ToolRuleDraft,
+  type ApprovalPreset, type ToolCallFacts, type ToolRuleDraft,
 } from "../_shared/desktop-control.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
@@ -28,7 +28,7 @@ const CODE_EXEC = new Set<string>(CODE_EXEC_TOOLS);
 function collectFacts(
   event: { toolName: string; toolCallId?: string; input?: unknown },
   ctx: { cwd: string; sessionManager?: { getSessionId?: () => string | undefined } },
-  preset: "ask" | "auto" | "full",
+  preset: ApprovalPreset,
 ): ToolCallFacts {
   const input = (event.input ?? {}) as Record<string, unknown>;
   const command = typeof input.command === "string" ? input.command : undefined;
@@ -115,8 +115,7 @@ export default function (pi: ExtensionAPI) {
 
     // ②③④ 授权决策统一交给主进程：规则匹配、内置护栏与审计都在那边，
     // 这里只负责提取事实与执行结果。第 ① 层的能力硬限已在上方强制，不受此影响。
-    const policy = getApprovalPolicy();
-    const preset = policy === "full" ? "full" : policy === "ask" ? "ask" : "auto";
+    const preset = getApprovalPolicy();
     const control = desktopControl();
     const facts = collectFacts(event, ctx, preset);
     const verdict = await evaluateToolCall(control, facts);

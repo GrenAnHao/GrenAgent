@@ -88,6 +88,12 @@ describe("spawn_agent · approval policy injected into sub-agent (B)", () => {
     expect(injectedPolicy()).toBe("auto");
   });
 
+  it("floors owner workspace → auto (does not inherit workspace as-is)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("workspace");
+    await loadSpawnAgent()("t7", { task: "do x" }, null, null, ctx);
+    expect(injectedPolicy()).toBe("auto");
+  });
+
   it("passes ask through unchanged", async () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("ask");
     await loadSpawnAgent()("t5", { task: "do x" }, null, null, ctx);

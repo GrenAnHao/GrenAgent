@@ -26,7 +26,7 @@ export async function authorizeDesktopOperation(
 
 export type ToolOrigin = 'main' | 'subagent' | 'goal';
 export type ToolEffect = 'allow' | 'deny' | 'ask';
-export type ApprovalPreset = 'ask' | 'auto' | 'full';
+export type ApprovalPreset = 'readonly' | 'ask' | 'auto' | 'workspace' | 'full';
 export type RuleScope = 'session' | 'workspace' | 'global';
 export type MatcherKind = 'any' | 'command_prefix' | 'path_glob' | 'mcp_server';
 export type AuditResolution = 'auto' | 'rule' | 'user_allow' | 'user_deny' | 'queued' | 'aborted';

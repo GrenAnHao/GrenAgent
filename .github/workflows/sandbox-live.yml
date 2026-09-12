@@ -1,0 +1,152 @@
+name: Sandbox live isolation
+
+on:
+  pull_request:
+    branches:
+      - feat/os-sandbox
+      - master
+      - main
+  push:
+    branches:
+      - feat/os-sandbox
+      - master
+      - main
+
+jobs:
+  sandbox-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Assert Windows helper is present
+        shell: pwsh
+        run: |
+          $helper = "extensions/_shared/sandbox/windows/bin/pi-sandbox-win.exe"
+          if (-not (Test-Path -LiteralPath $helper)) {
+            Write-Error "Missing $helper. Helper must be checked in; this job must not skip green."
+            exit 1
+          }
+
+      - name: Install extensions dependencies
+        working-directory: extensions
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath package-lock.json) { npm ci } else { npm install }
+
+      - name: Sandbox unit tests
+        working-directory: extensions
+        shell: pwsh
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
+
+      - name: Live OS isolation
+        working-directory: extensions
+        shell: pwsh
+        env:
+          PI_SANDBOX_LIVE: "1"
+        run: npx vitest run _shared/sandbox/isolation.live.test.ts
+
+  sandbox-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # Best-effort: some images disable unprivileged user namespaces (bwrap needs them).
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
+      - name: Install extensions dependencies
+        working-directory: extensions
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
+
+      - name: Live OS isolation
+        working-directory: extensions
+        env:
+          PI_SANDBOX_LIVE: "1"
+        run: npx vitest run _shared/sandbox/isolation.live.test.ts
+
+  sandbox-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install extensions dependencies
+        working-directory: extensions
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
+
+      - name: Live OS isolation
+        working-directory: extensions
+        env:
+          PI_SANDBOX_LIVE: "1"
+        run: npx vitest run _shared/sandbox/isolation.live.test.ts
+
+  sandbox-linux-negative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install extensions dependencies
+        working-directory: extensions
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Sandbox unit tests
+        working-directory: extensions
+        run: npx vitest run _shared/sandbox sandbox/index.test.ts --exclude "**/*.live.test.ts"
+
+      - name: Hide bwrap if present
+        run: |
+          set -euo pipefail
+          if command -v bwrap >/dev/null 2>&1; then
+            sudo mv "$(command -v bwrap)" /tmp/bwrap-hidden
+          fi
+          if command -v bwrap >/dev/null 2>&1; then
+            echo "bwrap still on PATH after hide" >&2
+            exit 1
+          fi
+
+      - name: Live OS isolation (runner missing)
+        working-directory: extensions
+        env:
+          PI_SANDBOX_LIVE: "1"
+        run: npx vitest run _shared/sandbox/isolation.live.test.ts -t "throws SANDBOX_UNAVAILABLE"

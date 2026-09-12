@@ -62,7 +62,7 @@ describe("toolWhitelist / activeToolsFor", () => {
     expect(active).toContain("grep");
     expect(active).not.toContain("write");
     expect(active).not.toContain("edit");
-    expect(active).not.toContain("bash");
+    expect(active).toContain("bash");
     expect(active).not.toContain("mcp__server__do");
   });
 
@@ -92,7 +92,6 @@ describe("gateToolCall", () => {
     for (const t of [
       "write",
       "edit",
-      "bash",
       "kb_add",
       "memory_save",
       "memory_update",
@@ -109,6 +108,15 @@ describe("gateToolCall", () => {
       expect(gateToolCall("ask", t, {})?.block).toBe(true);
     }
   });
+  it("ask allows bash and leaves writes blocked", () => {
+    expect(gateToolCall("ask", "bash", { command: "ls" })).toBeUndefined();
+    expect(gateToolCall("ask", "bash_escalate", {})).toBeUndefined();
+    expect(gateToolCall("ask", "write", { path: "a" })?.block).toBe(true);
+    expect(gateToolCall("ask", "write", { path: "a" })?.reason).toContain(
+      "不能修改文件或调用 MCP；命令行由只读 OS 沙箱执行",
+    );
+  });
+
   it("ask allows read-only retrieval and web lookup", () => {
     for (const t of [
       "read",

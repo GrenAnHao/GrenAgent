@@ -42,8 +42,14 @@ describe("approval policy", () => {
     expect(parseApproval("xx")).toBeUndefined();
     expect(parseApproval(undefined)).toBeUndefined();
   });
-  it("has zh labels for all 3", () => {
-    expect(Object.keys(APPROVAL_LABELS).sort()).toEqual(["ask", "auto", "full"]);
+  it("has zh labels for all 5", () => {
+    expect(Object.keys(APPROVAL_LABELS).sort()).toEqual([
+      "ask", "auto", "full", "readonly", "workspace",
+    ]);
+  });
+  it("parse accepts the two new keys", () => {
+    expect(parseApproval("readonly")).toBe("readonly");
+    expect(parseApproval("WORKSPACE")).toBe("workspace");
   });
 });
 

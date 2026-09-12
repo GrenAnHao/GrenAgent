@@ -42,7 +42,11 @@ const defaultCapabilities: SandboxCapabilities = {
   pathBoundary: true,
 };
 
-/** Central policy gate for every child process and PTY entry point. */
+/**
+ * bash / user_bash 由 extensions/sandbox confine。
+ * 本类只给 PTY 与子代理做路径 / env 过滤。
+ * `degraded` 不是降级裸跑开关。
+ */
 export class SandboxManager {
   private readonly capabilities: SandboxCapabilities;
   private readonly now: () => number;

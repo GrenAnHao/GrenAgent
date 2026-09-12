@@ -1,0 +1,10 @@
+# 选 A：预编译 pi-sandbox-win.exe 入仓，只忽略编译中间产物。
+*.o
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+# 覆盖用户全局 *.exe，否则 helper 无法入仓
+!/bin/
+!/bin/*.exe

@@ -1,9 +1,12 @@
 import { cpSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// 选 A 预编译入仓：helper exe 与 runner.py 同模式。extensions 打进
+// chunk 后 import.meta.url 会漂，必须再拷到 out/main 与 chunks 旁。
 export const PI_ADJACENT_ASSETS = [
   { from: 'extensions/code-exec/runner.py', to: 'runner.py' },
   { from: 'extensions/code-exec/runner.mjs', to: 'runner.mjs' },
+  { from: 'extensions/_shared/sandbox/windows/bin/pi-sandbox-win.exe', to: 'pi-sandbox-win.exe' },
   { from: 'extensions/fable-behavior/prompts', to: 'prompts', dir: true },
 ] as const;
 

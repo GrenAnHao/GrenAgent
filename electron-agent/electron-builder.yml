@@ -15,6 +15,10 @@ asarUnpack:
   - out/main/runner.py
   - out/main/runner.mjs
   - out/main/prompts/**
+  # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out/main。
+  # asar:true 下 exe 必须 unpack，否则无法 spawn。
+  - out/main/pi-sandbox-win.exe
+  - out/main/chunks/pi-sandbox-win.exe
 afterPack: ./scripts/package-codegraph.cjs
 win:
   target:

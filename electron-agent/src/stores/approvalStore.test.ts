@@ -12,6 +12,8 @@ describe('approvalStore', () => {
   });
   it('isApprovalPolicy guards values', () => {
     expect(isApprovalPolicy('auto')).toBe(true);
+    expect(isApprovalPolicy('readonly')).toBe(true);
+    expect(isApprovalPolicy('workspace')).toBe(true);
     expect(isApprovalPolicy('nope')).toBe(false);
   });
 });

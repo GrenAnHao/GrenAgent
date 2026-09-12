@@ -45,21 +45,24 @@ export function __resetAgentModeForTest(): void {
   byCwd.clear();
 }
 
-// ask：纯只读问答。白名单为经核实存在的只读工具（工具名取自各扩展的 registerTool）：
-//   - pi 内置：read / grep / find / ls
+// ask：只读问答。白名单为经核实存在的只读工具 + bash / bash_escalate（写由只读 OS 沙箱拦）：
+//   - pi 内置：read / grep / find / ls / bash / bash_escalate
 //   - 联网只读：fetch_url / fetch_llms / fetch_html / fetch_markdown / fetch_txt / fetch_json（web-fetch）、
 //     web_search / web_search_multi / fetch_web_content / fetch_github_readme（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
 //     memory_search / conversation_search、git_diff（code-review）
 //   - 交互/只读视图（不改文件）：ask_user（agent-mode 提问卡）、hl_read（hashline 带 #TAG 的只读视图）
-// 写类(write/edit/review_note/todo/generate_image/speak)、命令行(bash)、
+// 写类(write/edit/review_note/todo/generate_image/speak)、
 // 子代理(spawn_agent/explore_context)、外部命令(diagnostics)、MCP(<server>__*) 一律不在白名单，
-// 经 setActiveTools 隐藏 + tool_call 兜底双重拦截。多列的名字若当前不可用，会在 activeToolsFor 交集中被滤除。
+// 经 setActiveTools 隐藏 + tool_call 兜底双重拦截。命令行由只读 OS 沙箱执行。
+// 多列的名字若当前不可用，会在 activeToolsFor 交集中被滤除。
 export const ASK_TOOLS: readonly string[] = [
   "read",
   "grep",
   "find",
   "ls",
+  "bash",
+  "bash_escalate",
   "fetch_url",
   "fetch_llms",
   "fetch_html",
@@ -83,8 +86,8 @@ export const ASK_TOOLS: readonly string[] = [
   "ask_user",
 ];
 
-// plan：在 ask 的只读集之上额外放行 bash（再由 isSafeCommand 限定为只读命令），与既有规划模式一致。
-export const PLAN_TOOLS: readonly string[] = [...ASK_TOOLS, "bash"];
+// plan：与 ask 共用白名单（已含 bash / bash_escalate）；bash 再由 isSafeCommand 限定为只读命令。
+export const PLAN_TOOLS: readonly string[] = ASK_TOOLS;
 
 // brainstorm：使用完整工具集（与 agent 相同），不限制写文件/执行命令。
 // 头脑风暴模式下 AI 仍需要能写文件、生成原型、执行代码——限制工具集是错误设计。
@@ -118,8 +121,8 @@ export interface ToolGateResult {
   reason: string;
 }
 // tool_call 兜底拦截（setActiveTools 之外的第二道防线，防止动态注册的工具绕过白名单）：
-//   ask        : 白名单之外一律拦（含 bash/write/edit/MCP/写类扩展工具）
-//   plan       : 白名单（只读检索 + 只读 bash）之外一律拦
+//   ask        : 白名单之外一律拦（含 write/edit/MCP/写类扩展工具；bash 放行，写由只读沙箱拦）
+//   plan       : 白名单（只读检索 + bash）之外一律拦；bash 再经 isSafeCommand 限定只读命令
 //   agent/debug/brainstorm: 不拦（brainstorm 有完整工具集，由 fable-behavior 引导行为）
 export function gateToolCall(mode: AgentMode, toolName: string, input: unknown): ToolGateResult | undefined {
   if (mode === "ask") {
@@ -128,7 +131,7 @@ export function gateToolCall(mode: AgentMode, toolName: string, input: unknown):
       block: true,
       reason:
         `问答模式（只读）：已禁用工具「${toolName}」。本模式仅允许只读检索与联网查阅，` +
-        `不能修改文件、执行命令行或调用 MCP。如需动手改动，请切换到 Agent 或 Debug 模式。`,
+        `不能修改文件或调用 MCP；命令行由只读 OS 沙箱执行。如需动手改动，请切换到 Agent 或 Debug 模式。`,
     };
   }
   if (mode === "plan") {

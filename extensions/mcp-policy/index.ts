@@ -82,8 +82,9 @@ export default function (pi: ExtensionAPI) {
     const policy = loadPolicy();
     const args = (event.input ?? {}) as Record<string, unknown>;
     const { server, tool } = parseToolName(toolName);
-    // ask 审批策略下 safety 已统一确认 mcp__*，传入避免 mcp-policy 二次弹窗（disabled/headless 仍拦）。
-    const d = decide(policy, toolName, args, ctx.hasUI, getApprovalPolicy() === "ask");
+    // ask / readonly 下 safety 已统一确认 mcp__*，传入避免 mcp-policy 二次弹窗（disabled/headless 仍拦）。
+    const ownerPolicy = getApprovalPolicy();
+    const d = decide(policy, toolName, args, ctx.hasUI, ownerPolicy === "ask" || ownerPolicy === "readonly");
 
     if (d.action === "pass") {
       audit(policy.audit.enabled, server, tool, "auto", args);
