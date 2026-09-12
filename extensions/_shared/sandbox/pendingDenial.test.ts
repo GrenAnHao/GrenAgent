@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   rememberPendingDenial,
   consumePendingDenial,
+  peekPendingDenial,
   clearPendingDenials,
   __resetPendingDenialsForTest,
 } from "./pendingDenial.js";
@@ -32,6 +33,24 @@ it("isolates the same workspace and command by sessionId", () => {
   rememberPendingDenial("/w", "x", "workspace-write", "s2");
   expect(consumePendingDenial("/w", "x", "s1")).toEqual({ mode: "read-only" });
   expect(consumePendingDenial("/w", "x", "s2")).toEqual({ mode: "workspace-write" });
+});
+it("peekPendingDenial returns the record without consuming it", () => {
+  rememberPendingDenial("/w", "echo a", "read-only", "s1");
+  expect(peekPendingDenial("/w", "echo a", "s1")).toEqual({ mode: "read-only" });
+  expect(peekPendingDenial("/w", "echo a", "s1")).toEqual({ mode: "read-only" });
+  expect(consumePendingDenial("/w", "echo a", "s1")).toEqual({ mode: "read-only" });
+  expect(peekPendingDenial("/w", "echo a", "s1")).toBeUndefined();
+});
+it("consume matches the last newline segment when an exact key misses", () => {
+  rememberPendingDenial("/w", "pref\necho a", "read-only", "s1");
+  expect(consumePendingDenial("/w", "echo a", "s1")).toEqual({ mode: "read-only" });
+  expect(consumePendingDenial("/w", "echo a", "s1")).toBeUndefined();
+});
+it("prefers an exact command match over a last-segment match", () => {
+  rememberPendingDenial("/w", "echo a", "workspace-write", "s1");
+  rememberPendingDenial("/w", "pref\necho a", "read-only", "s1");
+  expect(consumePendingDenial("/w", "echo a", "s1")).toEqual({ mode: "workspace-write" });
+  expect(consumePendingDenial("/w", "pref\necho a", "s1")).toEqual({ mode: "read-only" });
 });
 it("clearPendingDenials drops every record for that sessionId", () => {
   rememberPendingDenial("/w", "a", "read-only", "s1");

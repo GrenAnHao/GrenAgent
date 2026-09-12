@@ -16,6 +16,7 @@ export { isStrictWidening, justifyOk } from "./escalate.js";
 export {
   clearPendingDenials,
   consumePendingDenial,
+  peekPendingDenial,
   rememberPendingDenial,
 } from "./pendingDenial.js";
 export { attributeRun } from "./attribute.js";
