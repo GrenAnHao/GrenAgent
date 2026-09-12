@@ -5,14 +5,14 @@ import { useGoalStore } from './goalStore';
 const snapshot = (sessionId: string, revision: number, status: GoalSnapshot['status'] = 'active'): GoalSnapshot => ({
   goalId: `goal-${sessionId}`,
   sessionId,
-  workspace: '/repo',
   revision,
   condition: `condition-${sessionId}`,
   status,
-  roundsUsed: 0,
+  roundsStarted: 0,
   maxRounds: 256,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: `2026-09-01T00:00:0${revision}.000Z`,
+  activation: 'disarmed',
 });
 
 describe('goalStore session projection', () => {
@@ -49,8 +49,8 @@ describe('goalStore session projection', () => {
   });
 
   it('accepts a new Goal generation even when its revision restarts at one', () => {
-    const old = { ...snapshot('session-a', 8, 'cleared'), goalId: 'old-goal', createdAt: '2026-09-01T00:00:00.000Z' };
-    const next = { ...snapshot('session-a', 1, 'disarmed'), goalId: 'new-goal', createdAt: '2026-09-02T00:00:00.000Z' };
+    const old = { ...snapshot('session-a', 8, 'complete'), goalId: 'old-goal', createdAt: '2026-09-01T00:00:00.000Z' };
+    const next = { ...snapshot('session-a', 1, 'active'), goalId: 'new-goal', createdAt: '2026-09-02T00:00:00.000Z' };
     useGoalStore.getState().setSnapshot('session-a', old);
     useGoalStore.getState().setSnapshot('session-a', next);
     expect(useGoalStore.getState().getSnapshot('session-a')).toEqual(next);

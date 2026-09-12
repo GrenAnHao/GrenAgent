@@ -1,5 +1,5 @@
 import { Channel, invoke, listen, type UnlistenFn } from '../platform/runtime';
-import type { GoalSnapshot } from '../../electron/agentData/goalContracts';
+import type { GoalSnapshot } from '../stores/goalStore';
 import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
 import type { UsageReport } from './usageReport';

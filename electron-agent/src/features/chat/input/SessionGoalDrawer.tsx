@@ -124,16 +124,10 @@ export interface SessionGoalDrawerProps {
 }
 
 const statusLabels: Record<GoalSnapshot['status'], string> = {
-  active: '执行中', paused: '已暂停', disarmed: '待恢复', judging: '正在验收', blocked: '业务阻塞', complete: '已完成', error: '已停止', cleared: '已清除',
+  active: '执行中', paused: '已暂停', blocked: '业务阻塞', complete: '已完成',
 };
 
-const sourceLabels: Record<NonNullable<GoalSnapshot['source']>, string> = {
-  human: '用户创建',
-  legacy: '旧日志迁移',
-  fork: '会话分叉',
-};
-
-const editableStatuses: GoalSnapshot['status'][] = ['active', 'paused', 'blocked', 'disarmed', 'error'];
+const editableStatuses: GoalSnapshot['status'][] = ['active', 'paused', 'blocked'];
 
 export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapshot }: SessionGoalDrawerProps) {
   const [events, setEvents] = useState<GoalEvent[]>([]);
@@ -175,7 +169,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
     };
   }, [open, sessionId, valid, currentSnapshot?.revision]);
 
-  const clearable = !!currentSnapshot && ['active', 'paused', 'blocked', 'disarmed', 'error'].includes(currentSnapshot.status);
+  const clearable = !!currentSnapshot && ['active', 'paused', 'blocked'].includes(currentSnapshot.status);
   const canEditCondition = !!currentSnapshot && editableStatuses.includes(currentSnapshot.status);
   const clearGoal = async () => {
     if (!currentSnapshot || !clearable || mutating || savingCondition || !window.confirm('清除当前目标？')) return;
@@ -232,13 +226,9 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
         ? 'resume'
         : current.status === 'paused'
           ? 'pause'
-          : current.status === 'disarmed'
-              ? 'disarm'
-              : undefined;
+          : undefined;
       if (restoreAction) {
-        const restorePayload = restoreAction === 'block'
-          ? { condition, reason: current.blockage?.summary ?? 'blocked', fingerprint: current.blockage?.fingerprint ?? '' }
-          : { condition };
+        const restorePayload = { condition };
         next = await agentDataApi.goals.update({
           sessionId,
           goalId: next.goalId,
@@ -276,9 +266,6 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
         <p className={styles.status}>{statusLabels[currentSnapshot.status]}</p>
       </div>
 
-      {currentSnapshot.status === 'cleared' ? (
-        <p className={styles.muted}>该目标已清除，历史记录仍保留。</p>
-      ) : null}
       {canEditCondition ? (
         <section className={styles.editor} aria-labelledby="session-goal-condition-heading">
           <label id="session-goal-condition-heading" htmlFor="session-goal-condition">目标条件</label>
@@ -325,42 +312,17 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
         <dl className={styles.details}>
           <dt>sessionId</dt><dd>{currentSnapshot.sessionId}</dd>
           <dt>goalId</dt><dd>{currentSnapshot.goalId}</dd>
-          {currentSnapshot.source ? <><dt>来源</dt><dd>{sourceLabels[currentSnapshot.source]}</dd></> : null}
           <dt>revision</dt><dd>{currentSnapshot.revision}</dd>
-          <dt>轮次</dt><dd>{currentSnapshot.roundsUsed} / {currentSnapshot.maxRounds}</dd>
+          <dt>轮次</dt><dd>{currentSnapshot.roundsStarted} / {currentSnapshot.maxRounds}</dd>
           <dt>创建时间</dt><dd>{currentSnapshot.createdAt}</dd>
           <dt>更新时间</dt><dd>{currentSnapshot.updatedAt}</dd>
         </dl>
       </section>
 
-      {currentSnapshot.stopReason ? (
-        <section className={styles.section} aria-labelledby="session-goal-stop-heading">
-          <h4 id="session-goal-stop-heading">停止原因</h4>
-          <p className={styles.muted}>{currentSnapshot.stopReason.kind}</p>
-          <p className={styles.muted}>{currentSnapshot.stopReason.summary}</p>
-        </section>
-      ) : null}
-
-      {currentSnapshot.judge ? (
-        <section className={styles.section} aria-labelledby="session-goal-judge-heading">
-          <h4 id="session-goal-judge-heading">裁判依据</h4>
-          <dl className={styles.details}>
-            <dt>模型</dt><dd>{currentSnapshot.judge.model}</dd>
-            <dt>结论</dt><dd>{currentSnapshot.judge.verdict}</dd>
-            <dt>理由</dt><dd>{currentSnapshot.judge.reason}</dd>
-            <dt>缺失项</dt><dd>{currentSnapshot.judge.missing.length ? currentSnapshot.judge.missing.join('、') : '无'}</dd>
-          </dl>
-        </section>
-      ) : null}
-
-      {currentSnapshot.blockage ? (
+      {currentSnapshot.blockedReason ? (
         <section className={styles.section} aria-labelledby="session-goal-blockage-heading">
           <h4 id="session-goal-blockage-heading">阻塞证据</h4>
-          <dl className={styles.details}>
-            <dt>连续次数</dt><dd>{currentSnapshot.blockage.count}</dd>
-            <dt>摘要</dt><dd>{currentSnapshot.blockage.summary}</dd>
-            <dt>指纹</dt><dd>{currentSnapshot.blockage.fingerprint || '—'}</dd>
-          </dl>
+          <p className={styles.muted}>{currentSnapshot.blockedReason.message}</p>
         </section>
       ) : null}
 

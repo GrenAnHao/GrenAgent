@@ -120,19 +120,19 @@ describe('ExtensionUiHost', () => {
     expect(useImMessagesStore.getState().conversations).toEqual([]);
   });
 
-  it('routes a schema v1 goal snapshot by its session id', () => {
+  it('routes a schema v1 nested snapshot with activation and roundsStarted', () => {
     render(<ExtensionUiHost />);
     const snapshot = {
       goalId: 'goal-a',
-      sessionId: 'session-a',
-      workspace: '/ws',
       revision: 2,
       condition: '写完测试',
       status: 'active',
-      roundsUsed: 1,
+      roundsStarted: 1,
       maxRounds: 256,
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:01.000Z',
+      activation: 'armed',
+      blockedReason: { code: 'model-reported', message: '缺密钥' },
     };
     emit({
       workspace: '/ws',
@@ -140,14 +140,56 @@ describe('ExtensionUiHost', () => {
         id: 'g1',
         method: 'setStatus',
         statusKey: 'goal',
-        statusText: JSON.stringify({ schemaVersion: 1, ...snapshot }),
+        statusText: JSON.stringify({
+          schemaVersion: 1,
+          sessionId: 'session-a',
+          workspace: '/ws',
+          snapshot,
+          history: [],
+        }),
       },
     });
-    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', expect.objectContaining(snapshot));
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', expect.objectContaining({
+      ...snapshot,
+      sessionId: 'session-a',
+      history: [],
+    }));
     expect(goalSetGoal).not.toHaveBeenCalled();
   });
 
-  it('ignores goal payloads without schema v1 or session id', () => {
+  it('defaults missing activation to disarmed', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 'g1b',
+        method: 'setStatus',
+        statusKey: 'goal',
+        statusText: JSON.stringify({
+          schemaVersion: 1,
+          sessionId: 'session-a',
+          snapshot: {
+            goalId: 'goal-a',
+            revision: 1,
+            condition: '写完测试',
+            status: 'active',
+            roundsStarted: 0,
+            maxRounds: 256,
+            createdAt: '2026-09-01T00:00:00.000Z',
+            updatedAt: '2026-09-01T00:00:01.000Z',
+          },
+          history: [],
+        }),
+      },
+    });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', expect.objectContaining({
+      sessionId: 'session-a',
+      activation: 'disarmed',
+      roundsStarted: 0,
+    }));
+  });
+
+  it('ignores legacy { condition, paused, react } and non-v1 envelopes', () => {
     render(<ExtensionUiHost />);
     emit({
       workspace: '/ws',
@@ -157,11 +199,58 @@ describe('ExtensionUiHost', () => {
       workspace: '/ws',
       request: { id: 'g3', method: 'setStatus', statusKey: 'goal', statusText: JSON.stringify({ schemaVersion: 2, sessionId: 'session-a', condition: '未来状态' }) },
     });
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 'g3b',
+        method: 'setStatus',
+        statusKey: 'goal',
+        statusText: JSON.stringify({
+          schemaVersion: 1,
+          sessionId: 'session-a',
+          goalId: 'goal-flat',
+          revision: 1,
+          condition: '扁平旧测',
+          status: 'active',
+          roundsStarted: 1,
+          maxRounds: 256,
+        }),
+      },
+    });
     expect(goalSetSnapshot).not.toHaveBeenCalled();
     expect(goalSetGoal).not.toHaveBeenCalled();
   });
 
-  it('clears a schema v1 session projection when the payload has no snapshot', () => {
+  it('ignores status judging', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 'g-judging',
+        method: 'setStatus',
+        statusKey: 'goal',
+        statusText: JSON.stringify({
+          schemaVersion: 1,
+          sessionId: 'session-a',
+          snapshot: {
+            goalId: 'goal-a',
+            revision: 1,
+            condition: '写完测试',
+            status: 'judging',
+            roundsStarted: 1,
+            maxRounds: 256,
+            createdAt: '2026-09-01T00:00:00.000Z',
+            updatedAt: '2026-09-01T00:00:01.000Z',
+            activation: 'armed',
+          },
+          history: [],
+        }),
+      },
+    });
+    expect(goalSetSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('clears a schema v1 session projection when snapshot is null', () => {
     render(<ExtensionUiHost />);
     emit({
       workspace: '/ws',
@@ -169,29 +258,65 @@ describe('ExtensionUiHost', () => {
         id: 'g4',
         method: 'setStatus',
         statusKey: 'goal',
-        statusText: JSON.stringify({ schemaVersion: 1, sessionId: 'session-a', snapshot: null }),
+        statusText: JSON.stringify({ schemaVersion: 1, sessionId: 'session-a', snapshot: null, history: [] }),
       },
     });
     expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', undefined);
   });
 
-  it('routes goal://status payloads by schema version and session id', () => {
+  it('copies envelope history onto the snapshot as-is', () => {
+    render(<ExtensionUiHost />);
+    const history = [
+      { source: 'event', kind: 'create', goalId: 'goal-a', revision: 1, at: '2026-09-01T00:00:00.000Z', payload: { condition: '写完测试' } },
+      { source: 'round', goalId: 'goal-a', revision: 1, round: 1, content: '续跑' },
+    ];
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 'g-hist',
+        method: 'setStatus',
+        statusKey: 'goal',
+        statusText: JSON.stringify({
+          schemaVersion: 1,
+          sessionId: 'session-a',
+          snapshot: {
+            goalId: 'goal-a',
+            revision: 1,
+            condition: '写完测试',
+            status: 'paused',
+            roundsStarted: 2,
+            maxRounds: 8,
+            createdAt: '2026-09-01T00:00:00.000Z',
+            updatedAt: '2026-09-01T00:00:01.000Z',
+            activation: 'disarmed',
+          },
+          history,
+        }),
+      },
+    });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-a', expect.objectContaining({ history }));
+  });
+
+  it('routes goal://status payloads by schema version and envelope session id', () => {
     render(<ExtensionUiHost />);
     const snapshot = {
       goalId: 'goal-channel',
-      sessionId: 'session-channel',
-      workspace: '/ws',
       revision: 3,
       condition: '渠道事件',
       status: 'paused',
-      roundsUsed: 2,
+      roundsStarted: 2,
       maxRounds: 8,
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:01.000Z',
+      activation: 'disarmed',
     };
-    emitGoal({ schemaVersion: 1, workspace: '/ws', sessionId: 'session-channel', snapshot });
-    emitGoal({ schemaVersion: 2, workspace: '/ws', sessionId: 'session-channel', snapshot });
-    expect(goalSetSnapshot).toHaveBeenCalledWith('session-channel', expect.objectContaining(snapshot));
+    emitGoal({ schemaVersion: 1, workspace: '/ws', sessionId: 'session-channel', snapshot, history: [] });
+    emitGoal({ schemaVersion: 2, workspace: '/ws', sessionId: 'session-channel', snapshot, history: [] });
+    expect(goalSetSnapshot).toHaveBeenCalledWith('session-channel', expect.objectContaining({
+      ...snapshot,
+      sessionId: 'session-channel',
+      history: [],
+    }));
     expect(goalSetSnapshot).toHaveBeenCalledTimes(1);
   });
 

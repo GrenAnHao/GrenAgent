@@ -37,14 +37,14 @@ if (!('ResizeObserver' in globalThis)) {
 const makeSnapshot = (overrides: Partial<GoalSnapshot> = {}): GoalSnapshot => ({
   goalId: 'goal-a',
   sessionId: 'session-a',
-  workspace: '/repo',
   revision: 2,
   condition: '写完测试',
   status: 'active',
-  roundsUsed: 3,
+  roundsStarted: 3,
   maxRounds: 256,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-01T00:00:01.000Z',
+  activation: 'armed',
   ...overrides,
 });
 
@@ -112,7 +112,8 @@ describe('GoalPill', () => {
   it('offers resume for a blocked goal and shows its blockage count', async () => {
     goalGet.mockResolvedValue(makeSnapshot({
       status: 'blocked',
-      blockage: { fingerprint: 'wait', count: 3, summary: '等待外部依赖', at: '2026-09-01T00:00:00.000Z' },
+      activation: 'disarmed',
+      blockedReason: { code: 'model-reported', message: '等待外部依赖' },
     }));
     render(<GoalPill />);
 
@@ -122,9 +123,9 @@ describe('GoalPill', () => {
   });
 
   it('keeps judging and complete goals read-only', async () => {
-    goalGet.mockResolvedValue(makeSnapshot({ status: 'judging' }));
+    goalGet.mockResolvedValue(makeSnapshot({ status: 'complete', activation: 'disarmed' }));
     render(<GoalPill />);
-    await screen.findByText('正在验收');
+    await screen.findByText('已完成');
     expect(screen.queryByRole('button', { name: '暂停目标' })).toBeNull();
     expect(screen.queryByRole('button', { name: '修改目标' })).toBeNull();
     expect(screen.queryByRole('button', { name: '清除目标' })).toBeNull();

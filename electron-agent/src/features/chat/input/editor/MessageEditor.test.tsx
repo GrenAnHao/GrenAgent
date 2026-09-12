@@ -57,14 +57,14 @@ vi.mock('../GoalPill', () => ({
       onClick={() => onOpenDetails?.({
         sessionId: 'session-a',
         goalId: 'goal-a',
-        workspace: '/repo',
         revision: 1,
         condition: '完成测试',
         status: 'active',
-        roundsUsed: 1,
+        roundsStarted: 1,
         maxRounds: 10,
         createdAt: '2026-09-01T00:00:00.000Z',
         updatedAt: '2026-09-01T00:00:01.000Z',
+        activation: 'armed',
       } as never)}
     >
       查看目标详情
@@ -116,14 +116,14 @@ describe('MessageEditor project context citations', () => {
     useGoalStore.getState().setSnapshot('session-a', {
       goalId: 'goal-a',
       sessionId: 'session-a',
-      workspace: '/repo',
       revision: 1,
       condition: '完成测试',
       status: 'active',
-      roundsUsed: 1,
+      roundsStarted: 1,
       maxRounds: 10,
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:01.000Z',
+      activation: 'armed',
     });
     render(<MessageEditor leftActions={[]} rightActions={[]} />);
 

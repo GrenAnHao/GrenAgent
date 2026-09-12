@@ -1,7 +1,38 @@
 import { create } from 'zustand';
-import type { GoalSnapshot } from '../../electron/agentData/goalContracts';
 
-export type { GoalSnapshot } from '../../electron/agentData/goalContracts';
+export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
+
+export type GoalHistoryItem =
+  | {
+      source: 'event';
+      kind: string;
+      goalId: string;
+      revision: number;
+      at: string;
+      payload: Record<string, unknown>;
+    }
+  | {
+      source: 'round';
+      goalId: string;
+      revision: number;
+      round: number;
+      content?: string;
+    };
+
+export interface GoalSnapshot {
+  goalId: string;
+  sessionId: string;
+  revision: number;
+  condition: string;
+  status: GoalStatus;
+  roundsStarted: number;
+  maxRounds: number;
+  createdAt: string;
+  updatedAt: string;
+  activation: 'armed' | 'disarmed';
+  blockedReason?: { code: string; message: string };
+  history?: GoalHistoryItem[];
+}
 
 /** 旧版 setStatus 投影的形状，仅保留给插件兼容层，不参与会话 Goal 渲染。 */
 export interface GoalInfo {
@@ -11,7 +42,7 @@ export interface GoalInfo {
 }
 
 export interface GoalStoreState {
-  /** AgentData 快照的只读前端投影；sessionId 是唯一索引，不以 workspace/path 代替。 */
+  /** 当前会话 Goal 投影；sessionId 来自信封，是唯一索引。 */
   bySession: Record<string, GoalSnapshot>;
   /** @deprecated 旧扩展状态兼容字段，禁止作为当前会话 Goal 的权威来源。 */
   goal?: GoalInfo;

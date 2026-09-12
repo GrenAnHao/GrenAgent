@@ -19,12 +19,11 @@ if (!('ResizeObserver' in globalThis)) {
 import { SessionGoalDrawer } from './SessionGoalDrawer';
 
 const snapshot: GoalSnapshot = {
-  goalId: 'goal-a', sessionId: 'session-a', workspace: '/repo', revision: 4,
-  condition: '完成并通过测试', status: 'blocked', roundsUsed: 7, maxRounds: 12,
+  goalId: 'goal-a', sessionId: 'session-a', revision: 4,
+  condition: '完成并通过测试', status: 'blocked', roundsStarted: 7, maxRounds: 12,
   createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:01.000Z',
-  stopReason: { kind: 'blocked', summary: '等待外部依赖', at: '2026-09-01T00:00:01.000Z' },
-  blockage: { fingerprint: 'wait', count: 3, summary: '等待外部依赖', at: '2026-09-01T00:00:01.000Z' },
-  judge: { model: 'judge/model', verdict: 'fail', reason: '缺少测试', missing: ['测试'], revision: 3, at: '2026-09-01T00:00:00.500Z' },
+  activation: 'disarmed',
+  blockedReason: { code: 'model-reported', message: '等待外部依赖' },
 };
 
 const event: GoalEvent = {
@@ -64,7 +63,7 @@ describe('SessionGoalDrawer', () => {
   it('clears through the typed CAS API and keeps the tombstone visible', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     history.mockResolvedValue([]);
-    update.mockResolvedValue({ ...snapshot, status: 'cleared', revision: 5, clearedAt: '2026-09-01T00:00:02.000Z' });
+    update.mockResolvedValue({ ...snapshot, status: 'complete', revision: 5 });
     render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
 
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));

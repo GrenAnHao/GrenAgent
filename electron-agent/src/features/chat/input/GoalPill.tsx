@@ -36,9 +36,6 @@ const styles = createStaticStyles(({ css }) => ({
   iconError: css`
     color: ${cssVar.colorError};
   `,
-  iconJudging: css`
-    color: ${cssVar.colorPrimary};
-  `,
   label: css`
     flex: none;
     font-size: 12px;
@@ -70,18 +67,13 @@ const styles = createStaticStyles(({ css }) => ({
 const statusLabels: Record<GoalSnapshot['status'], string> = {
   active: '执行中',
   paused: '已暂停',
-  disarmed: '待恢复',
-  judging: '正在验收',
   blocked: '业务阻塞',
   complete: '已完成',
-  error: '已停止',
-  cleared: '已清除',
 };
 
 function iconClass(status: GoalSnapshot['status']): string {
-  if (status === 'paused' || status === 'disarmed') return styles.iconWarning;
-  if (status === 'blocked' || status === 'error') return styles.iconError;
-  if (status === 'judging') return styles.iconJudging;
+  if (status === 'paused') return styles.iconWarning;
+  if (status === 'blocked') return styles.iconError;
   return styles.icon;
 }
 
@@ -165,15 +157,13 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
     [busy, sessionId, setSnapshot, snapshot],
   );
 
-  const canEdit = !!snapshot && ['active', 'paused', 'blocked', 'disarmed', 'error'].includes(snapshot.status);
-  const canClear = !!snapshot && ['active', 'paused', 'blocked', 'disarmed', 'error'].includes(snapshot.status);
-  const canToggle = !!snapshot && ['active', 'paused', 'blocked', 'disarmed', 'error'].includes(snapshot.status);
+  const canEdit = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
+  const canClear = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
+  const canToggle = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
 
   if (!snapshot || !sessionId) return null;
 
-  const statusText = snapshot.status === 'blocked' && snapshot.blockage
-    ? `${statusLabels[snapshot.status]} · ${snapshot.blockage.count} 次`
-    : statusLabels[snapshot.status];
+  const statusText = statusLabels[snapshot.status];
   const openDetails = () => {
     if (onOpenDetails) onOpenDetails(snapshot);
     else setDrawerOpen(true);
@@ -185,7 +175,7 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
         <Icon className={iconClass(snapshot.status)} icon={Target} size={14} />
         <span className={styles.label}>{statusText}</span>
         <span className={styles.text} title={snapshot.condition}>{snapshot.condition}</span>
-        <span className={styles.rounds}>{snapshot.roundsUsed}/{snapshot.maxRounds}</span>
+        <span className={styles.rounds}>{snapshot.roundsStarted}/{snapshot.maxRounds}</span>
         <div className={styles.actions}>
           {canEdit ? <ActionIcon {...({ 'aria-label': '修改目标' } as { 'aria-label': string })} disabled={busy} icon={PencilLine} onClick={openDetails} size="small" title="修改目标" /> : null}
           {canToggle ? (
