@@ -98,9 +98,9 @@ describe('resolveToolOrigin', () => {
     expect(resolveToolOrigin()).toBe('subagent');
   });
 
-  it('无 ALS 时 PI_GOAL_WORKER=1 → goal（sidecar 回退）', () => {
+  it('无 ALS 时 PI_GOAL_WORKER=1 → main', () => {
     delete process.env.PI_IS_SUBAGENT;
     process.env.PI_GOAL_WORKER = '1';
-    expect(resolveToolOrigin()).toBe('goal');
+    expect(resolveToolOrigin()).toBe('main');
   });
 });

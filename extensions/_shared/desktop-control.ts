@@ -76,7 +76,6 @@ export function resolveToolOrigin(): ToolOrigin {
   const ctx = currentWorkspaceContext();
   if (ctx) return ctx.origin;
   if (process.env.PI_IS_SUBAGENT === '1') return 'subagent';
-  if (process.env.PI_GOAL_WORKER === '1' || process.env.PI_SYSTEM_WORKER === '1') return 'goal';
   return 'main';
 }
 
