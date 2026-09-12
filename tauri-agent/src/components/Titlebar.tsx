@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { ActionIcon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
+import { Maximize2, Minimize2, Minus, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useLayoutStore, selectSidebarVisible } from '../stores/layoutStore';
+import { useModuleStore } from '../stores/moduleStore';
 import { TITLE_BAR_HEIGHT } from './titlebarConstants';
 import { GrenAgentBrand } from './GrenAgentBrand';
 
@@ -23,6 +25,15 @@ const styles = createStaticStyles(({ css }) => ({
 
     background: var(--gren-titlebar-bg, ${cssVar.colorBgContainer});
     user-select: none;
+  `,
+  brandRow: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  `,
+  toggle: css`
+    -webkit-app-region: no-drag;
   `,
   title: css`
     /* Let clicks fall through to the drag-region parent so the brand area is draggable. */
@@ -59,6 +70,10 @@ const styles = createStaticStyles(({ css }) => ({
 
 export function Titlebar() {
   const [maximized, setMaximized] = useState(false);
+  const sidebarVisible = useLayoutStore(selectSidebarVisible);
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
+  const activeModule = useModuleStore((s) => s.activeModule);
+  const chatModule = activeModule === 'chat';
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -75,9 +90,26 @@ export function Titlebar() {
 
   return (
     <div data-tauri-drag-region className={styles.bar}>
-      <span data-tauri-drag-region className={styles.title}>
-        <GrenAgentBrand />
-      </span>
+      <div className={styles.brandRow}>
+        <ActionIcon
+          icon={sidebarVisible ? PanelLeftClose : PanelLeftOpen}
+          size={{ blockSize: 28, size: 14 }}
+          title={sidebarVisible ? '收起会话列表' : '展开会话列表'}
+          className={styles.toggle}
+          data-testid="sidebar-toggle"
+          data-app-region="no-drag"
+          aria-label={sidebarVisible ? '收起会话列表' : '展开会话列表'}
+          aria-expanded={sidebarVisible}
+          disabled={!chatModule}
+          onClick={() => {
+            if (!chatModule) return;
+            toggleSidebar();
+          }}
+        />
+        <span data-tauri-drag-region className={styles.title}>
+          <GrenAgentBrand />
+        </span>
+      </div>
       <div className={styles.controls}>
         <ActionIcon
           icon={Minus}
