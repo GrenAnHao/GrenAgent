@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { GoalEvent } from '../../../lib/agentData';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoalSnapshot } from '../../../stores/goalStore';
 
-const { history, update } = vi.hoisted(() => ({ history: vi.fn(), update: vi.fn() }));
-vi.mock('../../../lib/agentData', () => ({ agentDataApi: { goals: { history, update } } }));
+const { prompt } = vi.hoisted(() => ({ prompt: vi.fn() }));
+vi.mock('../../../lib/pi', () => ({ pi: { prompt } }));
+vi.mock('../../../stores/AgentStoreContext', () => ({
+  useAgentStoreContext: () => ({ workspace: '/repo' }),
+}));
 
-// jsdom has no ResizeObserver, and the drawer's layout observes its own size.
 if (!('ResizeObserver' in globalThis)) {
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
     observe(): void {}
@@ -19,29 +20,49 @@ if (!('ResizeObserver' in globalThis)) {
 import { SessionGoalDrawer } from './SessionGoalDrawer';
 
 const snapshot: GoalSnapshot = {
-  goalId: 'goal-a', sessionId: 'session-a', revision: 4,
-  condition: '完成并通过测试', status: 'blocked', roundsStarted: 7, maxRounds: 12,
-  createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:01.000Z',
+  goalId: 'goal-a',
+  sessionId: 'session-a',
+  revision: 4,
+  condition: '完成并通过测试',
+  status: 'blocked',
+  roundsStarted: 7,
+  maxRounds: 12,
+  createdAt: '2026-09-01T00:00:00.000Z',
+  updatedAt: '2026-09-01T00:00:01.000Z',
   activation: 'disarmed',
   blockedReason: { code: 'model-reported', message: '等待外部依赖' },
+  history: [
+    {
+      source: 'event',
+      kind: 'create',
+      goalId: 'goal-a',
+      revision: 1,
+      at: '2026-09-13T00:00:00.000Z',
+      payload: { condition: '完成并通过测试' },
+    },
+    {
+      source: 'round',
+      goalId: 'goal-a',
+      revision: 2,
+      round: 3,
+      content: '继续核对工作区证据',
+    },
+  ],
 };
 
-const event: GoalEvent = {
-  id: 'event-1', goalId: 'goal-a', sessionId: 'session-a', revision: 4,
-  kind: 'block', payload: { reason: '等待外部依赖' }, createdAt: '2026-09-01T00:00:01.000Z',
-};
+const activeSnapshot: GoalSnapshot = { ...snapshot, status: 'active', activation: 'armed' };
 
-const activeSnapshot: GoalSnapshot = { ...snapshot, status: 'active', revision: 4 };
+beforeEach(() => {
+  prompt.mockResolvedValue(undefined);
+});
 
 afterEach(() => {
   cleanup();
-  history.mockReset();
-  update.mockReset();
+  prompt.mockReset();
 });
 
 describe('SessionGoalDrawer', () => {
-  it('shows session metadata, stop reason, judge, blockage, and recent events', async () => {
-    history.mockResolvedValue([event]);
+  it('renders metadata and snapshot history without AgentData', () => {
     render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
 
     expect(screen.getByText('完成并通过测试', { selector: 'p' })).toBeTruthy();
@@ -49,46 +70,53 @@ describe('SessionGoalDrawer', () => {
     expect(screen.getByText('goal-a')).toBeTruthy();
     expect(screen.getByText('7 / 12')).toBeTruthy();
     expect(screen.getAllByText('等待外部依赖').length).toBeGreaterThan(0);
-    expect(screen.getByText('缺少测试')).toBeTruthy();
-    await waitFor(() => expect(history).toHaveBeenCalledWith('session-a'));
-    expect(screen.getByText('block · r4')).toBeTruthy();
+    expect(screen.getByText(/create/)).toBeTruthy();
+    expect(screen.getByText('2026-09-13T00:00:00.000Z')).toBeTruthy();
+    expect(screen.getByText('第 3 轮')).toBeTruthy();
+    expect(screen.getByText('继续核对工作区证据')).toBeTruthy();
+    expect(screen.queryByText('admin.goal.history')).toBeNull();
   });
 
-  it('does not render a closed drawer or query history while closed', () => {
+  it('does not render a closed drawer', () => {
     render(<SessionGoalDrawer open={false} onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
     expect(screen.queryByText('完成并通过测试')).toBeNull();
-    expect(history).not.toHaveBeenCalled();
   });
 
-  it('clears through the typed CAS API and keeps the tombstone visible', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    history.mockResolvedValue([]);
-    update.mockResolvedValue({ ...snapshot, status: 'complete', revision: 5 });
-    render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
-
-    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
-    await waitFor(() => expect(update).toHaveBeenCalledWith({
-      sessionId: 'session-a', goalId: 'goal-a', revision: 4, action: 'clear',
-    }));
-    expect(screen.getByText('该目标已清除，历史记录仍保留。')).toBeTruthy();
-    confirm.mockRestore();
-  });
-
-  it('saves a controlled condition editor with revisioned updates and emits snapshots', async () => {
-    history.mockResolvedValue([]);
-    update
-      .mockResolvedValueOnce({ ...activeSnapshot, status: 'paused', revision: 5, condition: '新条件' })
-      .mockResolvedValueOnce({ ...activeSnapshot, status: 'active', revision: 6, condition: '新条件' });
-    const onSnapshot = vi.fn();
-    render(<SessionGoalDrawer open onClose={vi.fn()} onSnapshot={onSnapshot} sessionId="session-a" snapshot={activeSnapshot} />);
+  it('edits the condition through /goal edit', async () => {
+    render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={activeSnapshot} />);
 
     const input = screen.getByRole('textbox', { name: '目标条件' });
     fireEvent.change(input, { target: { value: '新条件' } });
     fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
 
-    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-    expect(update.mock.calls[0][0]).toMatchObject({ sessionId: 'session-a', goalId: 'goal-a', revision: 4, action: 'pause', payload: { condition: '新条件' } });
-    expect(update.mock.calls[1][0]).toMatchObject({ sessionId: 'session-a', goalId: 'goal-a', revision: 5, action: 'resume', payload: { condition: '新条件' } });
-    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'active', condition: '新条件', revision: 6 }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件'));
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears after confirm through /goal clear', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<SessionGoalDrawer open onClose={vi.fn()} sessionId="session-a" snapshot={snapshot} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+    expect(confirm).toHaveBeenCalledWith('清除当前目标？');
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear'));
+    confirm.mockRestore();
+  });
+
+  it('allows clearing a complete goal', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(
+      <SessionGoalDrawer
+        open
+        onClose={vi.fn()}
+        sessionId="session-a"
+        snapshot={{ ...snapshot, status: 'complete' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear'));
+    expect(screen.queryByLabelText('目标条件')).toBeNull();
+    confirm.mockRestore();
   });
 });

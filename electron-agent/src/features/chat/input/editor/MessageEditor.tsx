@@ -34,7 +34,10 @@ const styles = createStaticStyles(({ css }) => ({
     margin: 8px 16px 16px;
   `,
   // 单层无缝容器：chips / 编辑器 / 操作栏共用同一底色与边框。
+  // 作为 body 空闲高度的度量容器：内容列宽随会话区伸缩，固定高度会让窄列下的输入框显得方而笨重。
   surface: css`
+    container-type: inline-size;
+
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -52,12 +55,21 @@ const styles = createStaticStyles(({ css }) => ({
       border-color: ${cssVar.colorBorder};
     }
   `,
+  goalSlot: css`
+    &:not(:empty) {
+      margin: -10px -12px 0;
+      padding: 6px 12px;
+      border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    }
+  `,
   body: css`
     scrollbar-width: thin;
 
     overflow-y: auto;
 
-    min-height: 105px;
+    /* 空闲高度跟着列宽走，让输入框的长宽比在窄列下不塌成方块：宽列仍保持原先约 105 的手感，
+       窄列压到 72（约三行）——真要输入更多内容时本来就会顶到 max-height 自行长高。 */
+    min-height: clamp(72px, 12cqw, 108px);
     max-height: 300px;
 
     cursor: text;
@@ -145,7 +157,6 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   return (
     <div ref={zoneRef} className={styles.zone}>
       <SteerQueue />
-      <GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} />
       <SessionGoalDrawer
         onClose={() => setGoalDrawerSessionId(undefined)}
         onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
@@ -155,12 +166,13 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
       />
       <WorkspaceBar onReferencePastedText={addPastedText} />
       <PromptRequestCard />
-      <div ref={surfaceRef} className={styles.surface}>
+      <div ref={surfaceRef} className={styles.surface} data-testid="composer-surface">
+        <div className={styles.goalSlot}><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /></div>
         {hasChips ? <InputChips /> : null}
         <div
           className={styles.body}
           onClick={(e) => {
-            // 点击编辑器下方空白区也聚焦输入（整块 105 区域可用）。
+            // 点击编辑器下方空白区也聚焦输入（整块 body 区域可用）。
             if (e.target === e.currentTarget) editor.focus();
           }}
         >

@@ -3,18 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 
-const { getState, goalGet, goalUpdate, goalHistory } = vi.hoisted(() => ({
+const { getState, prompt } = vi.hoisted(() => ({
   getState: vi.fn(),
-  goalGet: vi.fn(),
-  goalUpdate: vi.fn(),
-  goalHistory: vi.fn(),
+  prompt: vi.fn(),
 }));
 let activeSessionPath: string | null = '/sessions/a.jsonl';
 
-vi.mock('../../../lib/pi', () => ({ pi: { getState } }));
-vi.mock('../../../lib/agentData', () => ({
-  agentDataApi: { goals: { get: goalGet, update: goalUpdate, history: goalHistory } },
-}));
+vi.mock('../../../lib/pi', () => ({ pi: { getState, prompt } }));
 vi.mock('../../../store/session', () => ({
   useSessionStore: (selector: (state: { activeSessionPath: string | null }) => unknown) =>
     selector({ activeSessionPath }),
@@ -25,7 +20,6 @@ vi.mock('../../../stores/AgentStoreContext', () => ({
 
 import { GoalPill } from './GoalPill';
 
-// jsdom has no ResizeObserver, and the Goal detail drawer observes its own size.
 if (!('ResizeObserver' in globalThis)) {
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
     observe(): void {}
@@ -48,93 +42,160 @@ const makeSnapshot = (overrides: Partial<GoalSnapshot> = {}): GoalSnapshot => ({
   ...overrides,
 });
 
+async function renderGoal(overrides: Partial<GoalSnapshot> = {}, props: { onOpenDetails?: (snapshot: GoalSnapshot) => void } = {}) {
+  useGoalStore.getState().setSnapshot('session-a', makeSnapshot(overrides));
+  render(<GoalPill {...props} />);
+  return screen.findByTestId('goal-pill');
+}
+
+function lampStyle(): string {
+  return screen.getByTestId('goal-lamp').getAttribute('style') ?? '';
+}
+
 beforeEach(() => {
   useGoalStore.setState({ bySession: {}, goal: undefined });
   activeSessionPath = '/sessions/a.jsonl';
-  getState.mockResolvedValue({ sessionFile: '/sessions/a.jsonl', sessionId: 'session-a' });
-  goalGet.mockResolvedValue(makeSnapshot());
-  goalUpdate.mockImplementation(async (input: { action: string }) => makeSnapshot({
-    status: input.action === 'pause' ? 'paused' : 'active',
-    revision: 3,
-  }));
-  goalHistory.mockResolvedValue([]);
+  getState.mockResolvedValue({ sessionId: 'session-a' });
+  prompt.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   cleanup();
   getState.mockReset();
-  goalGet.mockReset();
-  goalUpdate.mockReset();
-  goalHistory.mockReset();
+  prompt.mockReset();
 });
 
 describe('GoalPill', () => {
-  it('loads and renders only the active session goal', async () => {
-    render(<GoalPill />);
+  it('renders armed active status, glowing lamp, and action labels', async () => {
+    await renderGoal();
 
-    expect(await screen.findByText('写完测试')).toBeTruthy();
-    expect(goalGet).toHaveBeenCalledWith('session-a', '/repo');
-    expect(screen.getByText('执行中')).toBeTruthy();
+    expect(screen.getByText('执行中的目标')).toBeTruthy();
+    expect(screen.getByText('写完测试')).toBeTruthy();
+    expect(lampStyle()).toContain('#3dd68c');
+    expect(lampStyle()).toMatch(/box-shadow/i);
+    expect(screen.getByRole('button', { name: '暂停目标' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '编辑目标' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '清除目标' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '展开目标详情' })).toBeTruthy();
+    expect(screen.queryByText(/\/256/)).toBeNull();
   });
 
-  it('sends a typed pause update with the session CAS reference', async () => {
-    render(<GoalPill />);
-    await screen.findByText('写完测试');
+  it('renders disarmed active as idle with a gray lamp and resume', async () => {
+    await renderGoal({ activation: 'disarmed' });
 
-    fireEvent.click(screen.getByRole('button', { name: '暂停目标' }));
-
-    await waitFor(() => expect(goalUpdate).toHaveBeenCalledWith({
-      sessionId: 'session-a',
-      goalId: 'goal-a',
-      revision: 2,
-      action: 'pause',
-    }));
+    expect(screen.getByText('未运行的目标')).toBeTruthy();
+    expect(lampStyle()).toContain('#8b919c');
+    expect(lampStyle()).toMatch(/box-shadow:\s*none/i);
+    expect(screen.getByRole('button', { name: '恢复目标' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '暂停目标' })).toBeNull();
   });
 
-  it('edits through the in-session drawer and typed CAS updates', async () => {
-    render(<GoalPill />);
-    await screen.findByText('写完测试');
+  it('renders paused with an amber lamp and resume', async () => {
+    await renderGoal({ status: 'paused', activation: 'disarmed' });
 
-    fireEvent.click(screen.getByRole('button', { name: '修改目标' }));
-    const input = await screen.findByRole('textbox', { name: '目标条件' });
-    fireEvent.change(input, { target: { value: '新目标' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
-
-    await waitFor(() => expect(goalUpdate).toHaveBeenCalledTimes(2));
-    expect(goalUpdate.mock.calls[0][0]).toMatchObject({
-      sessionId: 'session-a', goalId: 'goal-a', revision: 2, action: 'pause', payload: { condition: '新目标' },
-    });
-    expect(goalUpdate.mock.calls[1][0]).toMatchObject({
-      sessionId: 'session-a', goalId: 'goal-a', revision: 3, action: 'resume', payload: { condition: '新目标' },
-    });
+    expect(screen.getByText('已暂停的目标')).toBeTruthy();
+    expect(lampStyle()).toContain('#f5a524');
+    expect(screen.getByRole('button', { name: '恢复目标' })).toBeTruthy();
   });
 
-  it('offers resume for a blocked goal and shows its blockage count', async () => {
-    goalGet.mockResolvedValue(makeSnapshot({
+  it('renders blocked with a red lamp and row title from the reason', async () => {
+    const pill = await renderGoal({
       status: 'blocked',
       activation: 'disarmed',
-      blockedReason: { code: 'model-reported', message: '等待外部依赖' },
-    }));
-    render(<GoalPill />);
+      blockedReason: { code: 'model-reported', message: '缺密钥' },
+    });
 
-    expect(await screen.findByText('业务阻塞 · 3 次')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '解除阻塞并恢复' }));
-    await waitFor(() => expect(goalUpdate).toHaveBeenCalledWith(expect.objectContaining({ action: 'resume' })));
+    expect(screen.getByText('受阻的目标')).toBeTruthy();
+    expect(lampStyle()).toContain('#f53f3f');
+    expect(pill.getAttribute('title')).toBe('缺密钥');
+    expect(screen.getByRole('button', { name: '恢复目标' })).toBeTruthy();
   });
 
-  it('keeps judging and complete goals read-only', async () => {
-    goalGet.mockResolvedValue(makeSnapshot({ status: 'complete', activation: 'disarmed' }));
-    render(<GoalPill />);
-    await screen.findByText('已完成');
+  it('renders complete without pause or edit, green lamp without glow', async () => {
+    await renderGoal({ status: 'complete', activation: 'disarmed' });
+
+    expect(screen.getByText('已完成的目标')).toBeTruthy();
+    expect(lampStyle()).toContain('#3dd68c');
+    expect(lampStyle()).toMatch(/box-shadow:\s*none/i);
     expect(screen.queryByRole('button', { name: '暂停目标' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '修改目标' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '清除目标' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '恢复目标' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '编辑目标' })).toBeNull();
+    expect(screen.getByRole('button', { name: '清除目标' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '展开目标详情' })).toBeTruthy();
   });
 
-  it('does not render a goal while the active session has no snapshot', async () => {
-    goalGet.mockResolvedValue(undefined);
+  it('does not render a pill when the session has no snapshot', async () => {
     render(<GoalPill />);
-    await waitFor(() => expect(goalGet).toHaveBeenCalled());
+    await waitFor(() => expect(getState).toHaveBeenCalledWith('/repo'));
     expect(screen.queryByTestId('goal-pill')).toBeNull();
+  });
+
+  it('edits the condition with Enter and ignores Escape', async () => {
+    await renderGoal();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
+    const input = screen.getByRole('textbox', { name: '目标条件' });
+    expect((input as HTMLInputElement).value).toBe('写完测试');
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(screen.getByRole('button', { name: '保存目标' })).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: '新条件' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: '目标条件' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑目标' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '新条件' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '目标条件' }), { key: 'Enter' });
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件'));
+  });
+
+  it('clears only after confirm and ignores a second click while busy', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let resolvePrompt: () => void = () => undefined;
+    prompt.mockImplementation(() => new Promise<void>((resolve) => {
+      resolvePrompt = resolve;
+    }));
+    await renderGoal();
+
+    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith('清除当前目标？');
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear');
+    resolvePrompt();
+    confirm.mockRestore();
+  });
+
+  it('does not clear when confirm is dismissed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await renderGoal();
+
+    fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+
+    expect(confirm).toHaveBeenCalledWith('清除当前目标？');
+    expect(prompt).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('pauses an armed goal and resumes a paused goal', async () => {
+    await renderGoal();
+    fireEvent.click(screen.getByRole('button', { name: '暂停目标' }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal pause'));
+
+    cleanup();
+    prompt.mockClear();
+    await renderGoal({ status: 'paused', activation: 'disarmed', revision: 3 });
+    fireEvent.click(screen.getByRole('button', { name: '恢复目标' }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal resume'));
+  });
+
+  it('never shows the round budget on the bar', async () => {
+    await renderGoal({ roundsStarted: 12, maxRounds: 256 });
+    expect(screen.queryByText(/\/256/)).toBeNull();
   });
 });

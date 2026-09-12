@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Drawer, Input } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
+import { Icon } from '@lobehub/ui';
 import { Save, Trash2 } from 'lucide-react';
-import { agentDataApi, type GoalEvent } from '../../../lib/agentData';
-import type { GoalSnapshot } from '../../../stores/goalStore';
+import { pi } from '../../../lib/pi';
+import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
+import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../../stores/goalStore';
 
 const styles = createStaticStyles(({ css }) => ({
   root: css`
@@ -53,28 +55,6 @@ const styles = createStaticStyles(({ css }) => ({
     dt { color: ${cssVar.colorTextSecondary}; }
     dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
   `,
-  disclosure: css`
-    overflow: hidden;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadius};
-
-    summary {
-      cursor: pointer;
-      padding: 7px 9px;
-      font-size: 12px;
-      color: ${cssVar.colorTextSecondary};
-    }
-
-    pre {
-      overflow: auto;
-      margin: 0;
-      padding: 8px 9px;
-      font-size: 11px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      background: ${cssVar.colorFillQuaternary};
-    }
-  `,
   timeline: css`
     display: flex;
     flex-direction: column;
@@ -119,129 +99,65 @@ export interface SessionGoalDrawerProps {
   sessionId: string;
   snapshot?: GoalSnapshot;
   onClose: () => void;
-  /** Allows the parent pill to keep its session projection in sync after a drawer action. */
   onSnapshot?: (snapshot: GoalSnapshot) => void;
 }
 
 const statusLabels: Record<GoalSnapshot['status'], string> = {
-  active: '执行中', paused: '已暂停', blocked: '业务阻塞', complete: '已完成',
+  active: '执行中的目标',
+  paused: '已暂停的目标',
+  blocked: '受阻的目标',
+  complete: '已完成的目标',
 };
 
 const editableStatuses: GoalSnapshot['status'][] = ['active', 'paused', 'blocked'];
 
-export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapshot }: SessionGoalDrawerProps) {
-  const [events, setEvents] = useState<GoalEvent[]>([]);
-  const [loading, setLoading] = useState(false);
+function historyKey(item: GoalHistoryItem, index: number): string {
+  if (item.source === 'event') return `event-${item.kind}-${item.revision}-${item.at}-${index}`;
+  return `round-${item.round}-${item.revision}-${index}`;
+}
+
+export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: SessionGoalDrawerProps) {
+  const { workspace } = useAgentStoreContext();
+  const liveSnapshot = useGoalStore((state) => (sessionId ? state.bySession[sessionId] : undefined));
+  const currentSnapshot = liveSnapshot ?? snapshot;
   const [mutating, setMutating] = useState(false);
   const [savingCondition, setSavingCondition] = useState(false);
-  const [localSnapshot, setLocalSnapshot] = useState<GoalSnapshot | undefined>(snapshot);
-  const [conditionDraft, setConditionDraft] = useState(snapshot?.condition ?? '');
-  const epoch = useRef(0);
-  const currentSnapshot = localSnapshot;
+  const [conditionDraft, setConditionDraft] = useState(currentSnapshot?.condition ?? '');
   const valid = !!currentSnapshot && currentSnapshot.sessionId === sessionId;
+  const history = currentSnapshot?.history ?? [];
 
   useEffect(() => {
-    setLocalSnapshot(snapshot);
-    setConditionDraft(snapshot?.condition ?? '');
-  }, [snapshot?.goalId, snapshot?.revision, snapshot?.condition]);
+    setConditionDraft(currentSnapshot?.condition ?? '');
+  }, [currentSnapshot?.goalId, currentSnapshot?.revision, currentSnapshot?.condition]);
 
-  useEffect(() => {
-    const request = ++epoch.current;
-    setEvents([]);
-    if (!open || !valid) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    void agentDataApi.goals
-      .history(sessionId)
-      .then((result) => {
-        if (request === epoch.current) setEvents(Array.isArray(result) ? result.slice(-12) : []);
-      })
-      .catch(() => {
-        if (request === epoch.current) setEvents([]);
-      })
-      .finally(() => {
-        if (request === epoch.current) setLoading(false);
-      });
-    return () => {
-      epoch.current++;
-    };
-  }, [open, sessionId, valid, currentSnapshot?.revision]);
-
-  const clearable = !!currentSnapshot && ['active', 'paused', 'blocked'].includes(currentSnapshot.status);
+  const clearable = !!currentSnapshot;
   const canEditCondition = !!currentSnapshot && editableStatuses.includes(currentSnapshot.status);
+
+  const runCommand = async (message: string) => {
+    if (!workspace) return;
+    await pi.prompt(workspace, message);
+  };
+
   const clearGoal = async () => {
     if (!currentSnapshot || !clearable || mutating || savingCondition || !window.confirm('清除当前目标？')) return;
     setMutating(true);
     try {
-      const next = await agentDataApi.goals.update({
-        sessionId,
-        goalId: currentSnapshot.goalId,
-        revision: currentSnapshot.revision,
-        action: 'clear',
-      });
-      setLocalSnapshot(next);
-      onSnapshot?.(next);
+      await runCommand('/goal clear');
     } catch {
-      // Keep the last confirmed snapshot visible when the CAS update fails.
+      // 失败不藏条；扩展回执说明原因。
     } finally {
       setMutating(false);
     }
   };
 
   const saveCondition = async () => {
-    const current = currentSnapshot;
     const condition = conditionDraft.trim();
-    if (!current || !canEditCondition || !condition || condition === current.condition || mutating || savingCondition) return;
+    if (!currentSnapshot || !canEditCondition || !condition || condition === currentSnapshot.condition || mutating || savingCondition) return;
     setSavingCondition(true);
     try {
-      if (current.status === 'blocked') {
-        const next = await agentDataApi.goals.update({
-          sessionId,
-          goalId: current.goalId,
-          revision: current.revision,
-          action: 'block',
-          payload: { condition },
-        });
-        setLocalSnapshot(next);
-        onSnapshot?.(next);
-        setConditionDraft(next.condition);
-        return;
-      }
-      const firstAction = current.status === 'active' ? 'pause' : 'resume';
-      let next = await agentDataApi.goals.update({
-        sessionId,
-        goalId: current.goalId,
-        revision: current.revision,
-        action: firstAction,
-        payload: { condition },
-      });
-      setLocalSnapshot(next);
-      onSnapshot?.(next);
-
-      // AgentData currently exposes condition changes through the human CAS
-      // actions. Restore the original status with a second revisioned update.
-      const restoreAction = current.status === 'active'
-        ? 'resume'
-        : current.status === 'paused'
-          ? 'pause'
-          : undefined;
-      if (restoreAction) {
-        const restorePayload = { condition };
-        next = await agentDataApi.goals.update({
-          sessionId,
-          goalId: next.goalId,
-          revision: next.revision,
-          action: restoreAction,
-          payload: restorePayload,
-        });
-        setLocalSnapshot(next);
-        onSnapshot?.(next);
-      }
-      setConditionDraft(next.condition);
+      await runCommand(`/goal edit ${condition}`);
     } catch {
-      // Keep the last confirmed snapshot and draft when the CAS update fails.
+      // 失败留草稿。
     } finally {
       setSavingCondition(false);
     }
@@ -280,7 +196,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
           <div className={styles.actions}>
             <Button
               disabled={mutating || savingCondition || !conditionDraft.trim() || conditionDraft.trim() === currentSnapshot.condition}
-              icon={<Save size={14} />}
+              icon={<Icon icon={Save} size={14} />}
               loading={savingCondition}
               onClick={() => void saveCondition()}
               size="small"
@@ -297,7 +213,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
             aria-label="清除目标"
             danger
             disabled={mutating}
-            icon={<Trash2 size={14} />}
+            icon={<Icon icon={Trash2} size={14} />}
             onClick={() => void clearGoal()}
             size="small"
             type="text"
@@ -328,19 +244,25 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose, onSnapsh
 
       <section className={styles.section} aria-labelledby="session-goal-events-heading">
         <h4 id="session-goal-events-heading">操作记录</h4>
-        {loading ? <p className={styles.muted}>正在读取记录…</p> : null}
-        {!loading && events.length === 0 ? <p className={styles.muted}>暂无操作记录</p> : null}
-        {events.length ? (
+        {history.length === 0 ? <p className={styles.muted}>暂无操作记录</p> : (
           <ol className={styles.timeline}>
-            {events.map((event) => (
-              <li key={event.id}>
-                <div>{event.kind} · r{event.revision}</div>
-                <small>{event.createdAt}</small>
-                {Object.keys(event.payload).length ? <details className={styles.disclosure}><summary>查看事件数据</summary><pre>{JSON.stringify(event.payload, null, 2)}</pre></details> : null}
+            {history.map((item, index) => (
+              <li key={historyKey(item, index)}>
+                {item.source === 'event' ? (
+                  <>
+                    <div>{item.kind}</div>
+                    <small>{item.at}</small>
+                  </>
+                ) : (
+                  <>
+                    <div>第 {item.round} 轮</div>
+                    {item.content ? <p className={styles.muted}>{item.content}</p> : null}
+                  </>
+                )}
               </li>
             ))}
           </ol>
-        ) : null}
+        )}
       </section>
     </Drawer>
   );

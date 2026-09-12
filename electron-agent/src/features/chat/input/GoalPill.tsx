@@ -1,48 +1,34 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
-import { CircleHelp, Pause, PencilLine, Play, Target, Trash2 } from 'lucide-react';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { agentDataApi } from '../../../lib/agentData';
-import { pathsEquivalent } from '../../../lib/pathUtils';
+import { Check, Maximize2, Pause, PencilLine, Play, Trash2, X } from 'lucide-react';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useSessionStore } from '../../../store/session';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 import { SessionGoalDrawer } from './SessionGoalDrawer';
+import { formatGoalElapsed } from './goalElapsed';
 
 const styles = createStaticStyles(({ css }) => ({
-  pill: css`
+  row: css`
     display: flex;
     gap: 8px;
     align-items: center;
-
-    margin-bottom: 8px;
-    padding: 5px 6px 5px 10px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-
-    background: ${cssVar.colorBgElevated};
+    min-width: 0;
   `,
-  paused: css`
-    opacity: 0.72;
-  `,
-  icon: css`
+  lamp: css`
     flex: none;
-    color: ${cssVar.colorSuccess};
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
   `,
-  iconWarning: css`
-    color: ${cssVar.colorWarning};
-  `,
-  iconError: css`
-    color: ${cssVar.colorError};
-  `,
-  label: css`
+  sentence: css`
     flex: none;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: ${cssVar.colorText};
   `,
-  text: css`
+  condition: css`
     overflow: hidden;
     flex: 1;
     min-width: 0;
@@ -52,29 +38,40 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
-  rounds: css`
+  elapsed: css`
     flex: none;
-    font-size: 11px;
+    font-size: 13px;
     color: ${cssVar.colorTextQuaternary};
   `,
   actions: css`
     display: flex;
     flex: none;
     gap: 2px;
+    margin-left: auto;
+  `,
+  editor: css`
+    display: flex;
+    flex: 1;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+
+    input {
+      min-width: 0;
+      flex: 1;
+      padding: 2px 8px;
+      border: 1px solid ${cssVar.colorBorder};
+      border-radius: ${cssVar.borderRadius};
+      color: ${cssVar.colorText};
+      background: ${cssVar.colorBgContainer};
+      outline: none;
+    }
   `,
 }));
 
-const statusLabels: Record<GoalSnapshot['status'], string> = {
-  active: '执行中',
-  paused: '已暂停',
-  blocked: '业务阻塞',
-  complete: '已完成',
-};
-
-function iconClass(status: GoalSnapshot['status']): string {
-  if (status === 'paused') return styles.iconWarning;
-  if (status === 'blocked') return styles.iconError;
-  return styles.icon;
+export interface GoalPillProps {
+  /** MessageEditor owns the in-session drawer; standalone callers keep the local fallback. */
+  onOpenDetails?: (snapshot: GoalSnapshot) => void;
 }
 
 function readSessionId(state: unknown): string | undefined {
@@ -83,19 +80,45 @@ function readSessionId(state: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function readSessionFile(state: unknown): string | undefined {
-  if (!state || typeof state !== 'object') return undefined;
-  const value = (state as { sessionFile?: unknown }).sessionFile;
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+function statusSentence(snapshot: GoalSnapshot): string {
+  if (snapshot.status === 'active') {
+    return snapshot.activation === 'armed' ? '执行中的目标' : '未运行的目标';
+  }
+  if (snapshot.status === 'paused') return '已暂停的目标';
+  if (snapshot.status === 'blocked') return '受阻的目标';
+  return '已完成的目标';
 }
 
-/**
- * 会话输入区里的 Goal 快照。sessionId 由 Pi get_state 提供，path 只用于判断是否存在
- * 真实会话；所有写入都通过 AgentData CAS API，不再拼接 /goal 命令。
- */
-export interface GoalPillProps {
-  /** MessageEditor owns the in-session drawer; standalone callers keep the local fallback. */
-  onOpenDetails?: (snapshot: GoalSnapshot) => void;
+function lampAppearance(snapshot: GoalSnapshot): { background: string; boxShadow: string } {
+  if (snapshot.status === 'active' && snapshot.activation === 'armed') {
+    return { background: '#3dd68c', boxShadow: '0 0 0 3px #3dd68c2e' };
+  }
+  if (snapshot.status === 'complete') {
+    return { background: '#3dd68c', boxShadow: 'none' };
+  }
+  if (snapshot.status === 'paused') {
+    return { background: '#f5a524', boxShadow: 'none' };
+  }
+  if (snapshot.status === 'blocked') {
+    return { background: '#f53f3f', boxShadow: 'none' };
+  }
+  return { background: '#8b919c', boxShadow: 'none' };
+}
+
+function canToggle(snapshot: GoalSnapshot): boolean {
+  return snapshot.status === 'active' || snapshot.status === 'paused' || snapshot.status === 'blocked';
+}
+
+function canEdit(snapshot: GoalSnapshot): boolean {
+  return snapshot.status !== 'complete';
+}
+
+function showPause(snapshot: GoalSnapshot): boolean {
+  return snapshot.status === 'active' && snapshot.activation === 'armed';
+}
+
+function actionProps(label: string) {
+  return { 'aria-label': label, title: label } as { 'aria-label': string; title: string };
 }
 
 export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps) {
@@ -104,105 +127,177 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
   const [sessionId, setSessionId] = useState<string>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [now, setNow] = useState(() => Date.now());
   const epoch = useRef(0);
-  const setSnapshot = useGoalStore((s) => s.setSnapshot);
+  const inflight = useRef(false);
   const snapshot = useGoalStore((s) => (sessionId ? s.bySession[sessionId] : undefined));
 
-  // activeSessionPath 不是 Goal 所有权键。每次切换后重新询问 Pi 的真实 sessionId，
-  // 并用 epoch 丢弃旧会话的迟到 get_state/get 响应。
   useEffect(() => {
     const request = ++epoch.current;
     setSessionId(undefined);
-    if (!activeSessionPath || !workspace) return;
+    if (!workspace) return;
     void pi
       .getState(workspace)
       .then((state) => {
         if (request !== epoch.current) return;
-        const stateSessionFile = readSessionFile(state);
-        if (stateSessionFile && !pathsEquivalent(stateSessionFile, activeSessionPath)) return;
         const nextSessionId = readSessionId(state);
-        if (!nextSessionId) return;
-        setSessionId(nextSessionId);
-        return agentDataApi.goals.get(nextSessionId, workspace).then((result) => {
-          if (request === epoch.current) setSnapshot(nextSessionId, result);
-        });
+        if (nextSessionId) setSessionId(nextSessionId);
       })
       .catch(() => {
-        // 会话状态暂不可读时保持无 Goal；下次状态事件或切换会话会再次拉取。
+        // 会话状态暂不可读时保持无 Goal；下次切换会话会再次拉取。
       });
     return () => {
       epoch.current++;
     };
-  }, [activeSessionPath, workspace, setSnapshot]);
+  }, [workspace, activeSessionPath]);
 
-  const update = useCallback(
-    async (action: 'pause' | 'resume' | 'clear', payload?: Record<string, unknown>) => {
-      if (!snapshot || !sessionId || busy) return;
-      setBusy(true);
-      try {
-        const next = await agentDataApi.goals.update({
-          sessionId,
-          goalId: snapshot.goalId,
-          revision: snapshot.revision,
-          action,
-          ...(payload ? { payload } : {}),
-        });
-        setSnapshot(sessionId, next);
-      } catch {
-        // Mutation errors are surfaced by the AgentData event/toast layer; keep the pill usable.
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, sessionId, setSnapshot, snapshot],
-  );
+  useEffect(() => {
+    setEditing(false);
+    setDraft(snapshot?.condition ?? '');
+  }, [snapshot?.goalId, snapshot?.condition]);
 
-  const canEdit = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
-  const canClear = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
-  const canToggle = !!snapshot && ['active', 'paused', 'blocked'].includes(snapshot.status);
+  useEffect(() => {
+    if (!snapshot) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [snapshot?.goalId]);
+
+  const runCommand = useCallback(async (message: string) => {
+    if (!workspace || inflight.current) return;
+    inflight.current = true;
+    setBusy(true);
+    try {
+      await pi.prompt(workspace, message);
+    } catch {
+      // 动作失败不藏条；扩展回执会说明原因。
+    } finally {
+      inflight.current = false;
+      setBusy(false);
+    }
+  }, [workspace]);
+
+  const saveEdit = useCallback(() => {
+    const condition = draft.trim();
+    if (!condition || inflight.current) return;
+    setEditing(false);
+    void runCommand(`/goal edit ${condition}`);
+  }, [draft, runCommand]);
 
   if (!snapshot || !sessionId) return null;
 
-  const statusText = statusLabels[snapshot.status];
   const openDetails = () => {
     if (onOpenDetails) onOpenDetails(snapshot);
     else setDrawerOpen(true);
   };
 
+  const rowTitle = snapshot.status === 'blocked' ? snapshot.blockedReason?.message : undefined;
+  const lamp = lampAppearance(snapshot);
+
   return (
     <>
-      <div className={cx(styles.pill, snapshot.status === 'paused' && styles.paused)} data-testid="goal-pill">
-        <Icon className={iconClass(snapshot.status)} icon={Target} size={14} />
-        <span className={styles.label}>{statusText}</span>
-        <span className={styles.text} title={snapshot.condition}>{snapshot.condition}</span>
-        <span className={styles.rounds}>{snapshot.roundsStarted}/{snapshot.maxRounds}</span>
-        <div className={styles.actions}>
-          {canEdit ? <ActionIcon {...({ 'aria-label': '修改目标' } as { 'aria-label': string })} disabled={busy} icon={PencilLine} onClick={openDetails} size="small" title="修改目标" /> : null}
-          {canToggle ? (
-            <ActionIcon
-              {...({ 'aria-label': snapshot.status === 'active' ? '暂停目标' : snapshot.status === 'blocked' ? '解除阻塞并恢复' : '恢复目标' } as { 'aria-label': string })}
+      <div className={styles.row} data-testid="goal-pill" title={rowTitle}>
+        <span
+          className={styles.lamp}
+          data-testid="goal-lamp"
+          ref={(node) => {
+            if (node) node.setAttribute('style', `background: ${lamp.background}; box-shadow: ${lamp.boxShadow};`);
+          }}
+        />
+        {editing ? (
+          <div className={styles.editor}>
+            <input
+              aria-label="目标条件"
               disabled={busy}
-              icon={snapshot.status === 'active' ? Pause : Play}
-              onClick={() => void update(snapshot.status === 'active' ? 'pause' : 'resume')}
-              size="small"
-              title={snapshot.status === 'active' ? '暂停目标' : snapshot.status === 'blocked' ? '解除阻塞并恢复' : '恢复目标'}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  saveEdit();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setEditing(false);
+                  setDraft(snapshot.condition);
+                }
+              }}
+              value={draft}
             />
-          ) : null}
-          <ActionIcon
-            {...({ 'aria-label': '查看目标详情' } as { 'aria-label': string })}
-            disabled={busy}
-            icon={CircleHelp}
-            onClick={openDetails}
-            size="small"
-            title="查看目标详情"
-          />
-          {canClear ? <ActionIcon {...({ 'aria-label': '清除目标' } as { 'aria-label': string })} disabled={busy} icon={Trash2} onClick={() => { if (window.confirm('清除当前目标？')) void update('clear'); }} size="small" title="清除目标" /> : null}
-        </div>
+            <button
+              {...actionProps('保存目标')}
+              disabled={busy || !draft.trim()}
+              onClick={saveEdit}
+              type="button"
+            >
+              <Icon icon={Check} size={14} />
+            </button>
+            <button
+              {...actionProps('取消编辑')}
+              disabled={busy}
+              onClick={() => {
+                setEditing(false);
+                setDraft(snapshot.condition);
+              }}
+              type="button"
+            >
+              <Icon icon={X} size={14} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <span className={styles.sentence}>{statusSentence(snapshot)}</span>
+            <span className={styles.condition} title={rowTitle ? undefined : snapshot.condition}>
+              {snapshot.condition}
+            </span>
+            <span className={styles.elapsed}>· {formatGoalElapsed(snapshot.updatedAt, now)}</span>
+            <div className={styles.actions}>
+              {canToggle(snapshot) ? (
+                <ActionIcon
+                  {...actionProps(showPause(snapshot) ? '暂停目标' : '恢复目标')}
+                  disabled={busy}
+                  icon={showPause(snapshot) ? Pause : Play}
+                  onClick={() => void runCommand(showPause(snapshot) ? '/goal pause' : '/goal resume')}
+                  size="small"
+                />
+              ) : null}
+              {canEdit(snapshot) ? (
+                <ActionIcon
+                  {...actionProps('编辑目标')}
+                  disabled={busy}
+                  icon={PencilLine}
+                  onClick={() => {
+                    setDraft(snapshot.condition);
+                    setEditing(true);
+                  }}
+                  size="small"
+                />
+              ) : null}
+              <ActionIcon
+                {...actionProps('清除目标')}
+                disabled={busy}
+                icon={Trash2}
+                onClick={() => {
+                  if (inflight.current || busy) return;
+                  if (!window.confirm('清除当前目标？')) return;
+                  void runCommand('/goal clear');
+                }}
+                size="small"
+              />
+              <ActionIcon
+                {...actionProps('展开目标详情')}
+                disabled={busy}
+                icon={Maximize2}
+                onClick={openDetails}
+                size="small"
+              />
+            </div>
+          </>
+        )}
       </div>
       {onOpenDetails ? null : (
         <SessionGoalDrawer
           onClose={() => setDrawerOpen(false)}
-          onSnapshot={(next) => setSnapshot(sessionId, next)}
           open={drawerOpen}
           sessionId={sessionId}
           snapshot={snapshot}
