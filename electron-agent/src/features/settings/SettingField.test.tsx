@@ -22,6 +22,45 @@ describe('SettingFieldInput', () => {
     expect(screen.getByTestId('set-field-E').getAttribute('aria-checked')).toBe('false');
   });
 
+  describe('storeBoolean: true-empty', () => {
+    const field = {
+      key: 'goal.autoContinueOnOpen',
+      label: 'Goal 重开后自动继续',
+      type: 'boolean' as const,
+      storeBoolean: 'true-empty' as const,
+    };
+
+    it('打开 Switch 写入 true，关上写入空串', () => {
+      const onChange = vi.fn();
+      render(<SettingFieldInput field={field} value="" onChange={onChange} />);
+      fireEvent.click(screen.getByTestId('set-field-goal.autoContinueOnOpen'));
+      expect(onChange).toHaveBeenCalledWith('true');
+
+      cleanup();
+      const onChangeOff = vi.fn();
+      render(<SettingFieldInput field={field} value="true" onChange={onChangeOff} />);
+      fireEvent.click(screen.getByTestId('set-field-goal.autoContinueOnOpen'));
+      expect(onChangeOff).toHaveBeenCalledWith('');
+    });
+
+    it('仅 value===true 显示为开；1/空/TRUE 均显示关', () => {
+      render(<SettingFieldInput field={field} value="true" onChange={() => {}} />);
+      expect(screen.getByTestId('set-field-goal.autoContinueOnOpen').getAttribute('aria-checked')).toBe('true');
+
+      cleanup();
+      render(<SettingFieldInput field={field} value="1" onChange={() => {}} />);
+      expect(screen.getByTestId('set-field-goal.autoContinueOnOpen').getAttribute('aria-checked')).toBe('false');
+
+      cleanup();
+      render(<SettingFieldInput field={field} value="" onChange={() => {}} />);
+      expect(screen.getByTestId('set-field-goal.autoContinueOnOpen').getAttribute('aria-checked')).toBe('false');
+
+      cleanup();
+      render(<SettingFieldInput field={field} value="TRUE" onChange={() => {}} />);
+      expect(screen.getByTestId('set-field-goal.autoContinueOnOpen').getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
   it('text input reflects value and emits changes', () => {
     const onChange = vi.fn();
     render(<SettingFieldInput field={{ key: 'Y', label: 'Y', type: 'text' }} value="a" onChange={onChange} />);

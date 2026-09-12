@@ -31,6 +31,8 @@ export interface SettingField {
   /** boolean 类型未落盘（值为空）时的默认显示态：'1'＝默认开。须与扩展侧 getConfig(...) ?? 默认 对齐，
    *  否则会出现「扩展默认开、面板却显示关」的错配。省略＝默认关（空值显示为关，沿用旧约定）。 */
   default?: '0' | '1';
+  /** boolean 落盘格式：one-zero＝'1'/'0'（默认）；true-empty＝'true'/''（扩展侧仅认小写 true）。 */
+  storeBoolean?: 'one-zero' | 'true-empty';
 }
 
 export interface SettingSection {
@@ -81,6 +83,14 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         default: '1',
         description:
           '上下文将满需压缩时先弹确认，可拒绝本次压缩（默认开）。压缩会把靠前的对话压成摘要，关闭则自动压缩、不打扰。',
+      },
+      {
+        key: 'goal.autoContinueOnOpen',
+        label: 'Goal 重开后自动继续',
+        type: 'boolean',
+        default: '0',
+        description: '打开后，重启或打开已有进行中目标的会话时自动武装并续跑。默认关。仅写入 true 生效。',
+        storeBoolean: 'true-empty',
       },
     ],
   },

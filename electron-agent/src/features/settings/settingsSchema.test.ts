@@ -16,6 +16,21 @@ describe('SETTINGS_SCHEMA general', () => {
       'titleModel',
       'AUTO_TITLE',
       'COMPACTION_PREVIEW',
+      'goal.autoContinueOnOpen',
     ]);
+  });
+
+  it('提供 Goal 重开后自动继续开关（true-empty 存储）', () => {
+    const fields = SETTINGS_SCHEMA.find((category) => category.id === 'general')?.fields ?? [];
+    const goalAutoContinue = fields.find((field) => field.key === 'goal.autoContinueOnOpen');
+
+    expect(goalAutoContinue).toMatchObject({
+      key: 'goal.autoContinueOnOpen',
+      label: 'Goal 重开后自动继续',
+      type: 'boolean',
+      default: '0',
+      description: '打开后，重启或打开已有进行中目标的会话时自动武装并续跑。默认关。仅写入 true 生效。',
+      storeBoolean: 'true-empty',
+    });
   });
 });
