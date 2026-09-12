@@ -1,21 +1,11 @@
 import { memo } from 'react';
 import { ActionIcon } from '@lobehub/ui';
-import { PanelLeftOpen, PanelRightOpen, SquareTerminal } from 'lucide-react';
+import { PanelRightOpen, SquareTerminal } from 'lucide-react';
 import { PanelHeader } from '../../components/PanelHeader';
-import { useLayoutStore, selectSidebarVisible, selectRightPanelVisible } from '../../stores/layoutStore';
+import { useLayoutStore, selectRightPanelVisible } from '../../stores/layoutStore';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { SubAgentMenuButton } from '../subagents/SubAgentMenuButton';
 import { WorkspaceTabs } from '../workspace/WorkspaceTabs';
-
-/** 仅订阅侧栏实际可见性，避免布局其它变化时重渲染主列 header。 */
-export const SidebarToggleButton = memo(function SidebarToggleButton() {
-  const sidebarVisible = useLayoutStore(selectSidebarVisible);
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
-
-  if (sidebarVisible) return null;
-
-  return <ActionIcon icon={PanelLeftOpen} size="small" title="Sidebar" onClick={toggleSidebar} />;
-});
 
 /** 主题与面板开关，与聊天区解耦订阅。 */
 export const MainHeaderActions = memo(function MainHeaderActions() {
@@ -67,7 +57,6 @@ export const MainColumnHeader = memo(function MainColumnHeader() {
     <PanelHeader
       left={
         <>
-          <SidebarToggleButton />
           <WorkspaceTabs />
           <PlanModeBadge />
         </>

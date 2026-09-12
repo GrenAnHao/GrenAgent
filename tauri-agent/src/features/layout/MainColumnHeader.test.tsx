@@ -33,4 +33,13 @@ describe('MainColumnHeader plan-mode badge', () => {
     render(<MainColumnHeader />);
     expect(screen.queryByRole('button', { name: '项目上下文' })).toBeNull();
   });
+
+  it('does not host the sidebar toggle after collapse', () => {
+    useLayoutStore.setState({ sidebarOpen: false, availableWidth: 0 });
+    render(<MainColumnHeader />);
+    expect(screen.queryByTestId('sidebar-toggle')).toBeNull();
+    expect(screen.queryByTitle('Sidebar')).toBeNull();
+    expect(screen.queryByTitle('收起会话列表')).toBeNull();
+    expect(screen.queryByTitle('展开会话列表')).toBeNull();
+  });
 });
