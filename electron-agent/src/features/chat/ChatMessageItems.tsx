@@ -4,6 +4,7 @@ import type { DisplayMessage } from './groupMessages';
 import { UserMessage } from './UserMessage';
 import { TurnTimeline } from './TurnTimeline';
 import { NoticePill } from './NoticePill';
+import { SubagentSettledPill } from './SubagentSettledPill';
 import { AnswerCard } from './AnswerCard';
 import { PlanCard } from './PlanCard';
 import { QuestionsCard } from './QuestionsCard';
@@ -100,6 +101,7 @@ export function renderMessageBody(
         return <QuestionsCard answered={answeredQuestions.has(msg.id)} content={msg.content} />;
       }
       if (msg.customType === 'visual-inline') return <VisualCard content={msg.content} />;
+      if (msg.customType === 'subagent-settled') return <SubagentSettledPill content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
     case 'command-input':
       return (
