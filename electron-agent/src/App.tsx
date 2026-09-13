@@ -5,7 +5,6 @@ import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
 import { ExtensionUiHost } from './features/extensionUi/ExtensionUiHost';
 import { useThemeStore } from './stores/themeStore';
 import { schemePrimary, schemeTokens } from './theme/colorSchemes';
-import { ChatView } from './features/chat/ChatView';
 import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
 import { Sidebar } from './features/sessions/Sidebar';
 import { DockPanel } from './features/dock/DockPanel';
@@ -18,7 +17,7 @@ import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreCon
 import { agentStoreRegistry, useAgentRegistryStore } from './stores/agentStoreRegistry';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
-import { MainColumnHeader } from './features/layout/MainColumnHeader';
+import { MainChatColumn } from './features/layout/MainChatColumn';
 import { RightPanelShell, SidebarShell, TerminalShell } from './features/layout/PanelShells';
 import { ModuleRail } from './features/layout/ModuleRail';
 import { ModuleContainer } from './features/workspace/ModuleContainer';
@@ -146,19 +145,6 @@ async function acquireDraftScratch(): Promise<string> {
   rememberScratch(cwd);
   return cwd;
 }
-
-const MainChatColumn = memo(function MainChatColumn() {
-  return (
-    <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
-      <MainColumnHeader />
-      <Flexbox flex={1} style={{ minHeight: 0, position: 'relative' }}>
-        <Flexbox flex={1} style={{ minHeight: 0, height: '100%', position: 'relative' }}>
-          <ChatView />
-        </Flexbox>
-      </Flexbox>
-    </Flexbox>
-  );
-});
 
 const SidebarPanel = memo(function SidebarPanel({
   runningSessionPaths,

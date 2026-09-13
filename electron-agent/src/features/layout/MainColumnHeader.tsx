@@ -2,6 +2,8 @@ import { memo } from 'react';
 import { ActionIcon } from '@lobehub/ui';
 import { PanelRightOpen, SquareTerminal } from 'lucide-react';
 import { PanelHeader } from '../../components/PanelHeader';
+import { useSessionStore } from '../../store/session';
+import { deriveTornDown, useChildOverlayStore } from '../../stores/childOverlayStore';
 import { useLayoutStore, selectRightPanelVisible } from '../../stores/layoutStore';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { SubAgentMenuButton } from '../subagents/SubAgentMenuButton';
@@ -54,12 +56,28 @@ const PlanModeBadge = memo(function PlanModeBadge() {
 });
 
 export const MainColumnHeader = memo(function MainColumnHeader() {
+  const overlay = useChildOverlayStore((s) => s.overlay);
   return (
     <PanelHeader
       left={
         <>
           <WorkspaceTabs />
-          <SubagentHeaderCatalog />
+          <SubagentHeaderCatalog
+            activeChildId={overlay?.id ?? null}
+            onOpen={(entry) => {
+              const parent = useSessionStore.getState().activeSessionPath;
+              if (!parent || !entry.sessionPath || entry.diagnostic) return;
+              useChildOverlayStore.getState().open({
+                id: entry.id,
+                sessionPath: entry.sessionPath,
+                parentSessionPath: parent,
+                label: entry.label,
+                mode: entry.mode,
+                activity: entry.activity,
+                tornDown: deriveTornDown(entry.mode, entry.activity),
+              });
+            }}
+          />
           <PlanModeBadge />
         </>
       }
