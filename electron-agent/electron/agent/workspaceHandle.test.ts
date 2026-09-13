@@ -526,5 +526,23 @@ describe('WorkspaceHandle', () => {
       expect(lookupParentHost(sessionPath, 'D:/proj')).toBeDefined();
       expect(onFatal).not.toHaveBeenCalled();
     });
+
+    it('switchSession 已换后 throw：onFatal dispose 后不挂回 host', async () => {
+      const nextPath = '/ws/s2.jsonl';
+      const { runtime, first, second } = makeRuntime();
+      attachParentFields(first, sessionPath);
+      attachParentFields(second, nextPath);
+      (runtime as { switchSession: ReturnType<typeof vi.fn>; session: unknown }).switchSession = vi.fn(async () => {
+        (runtime as { session: unknown }).session = second;
+        throw new Error('create failed after teardown');
+      });
+      const { handle, onFatal } = makeHandle(runtime);
+      onFatal.mockImplementation(() => { void handle.dispose(); });
+      await handle.start();
+      await expect(handle.switchSession(nextPath)).rejects.toThrow('create failed after teardown');
+      expect(onFatal).toHaveBeenCalled();
+      expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
+      expect(lookupParentHost(nextPath, 'D:/proj')).toBeUndefined();
+    });
   });
 });

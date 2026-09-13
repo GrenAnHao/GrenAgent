@@ -201,9 +201,8 @@ export class WorkspaceHandle {
       const current = this.options.runtime.session;
       // 旧 session 已 teardown（原地 invalidate、引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
       if (this.sessionInvalidated || current !== previous || current == null) {
-        this.options.onFatal(error);
         await this.detachParentHost(oldPath);
-        this.registerCurrentParentHost();
+        this.options.onFatal(error);
       }
       throw error;
     }
@@ -221,6 +220,7 @@ export class WorkspaceHandle {
   }
 
   private registerCurrentParentHost(): void {
+    if (this.disposed) return;
     const session = this.session;
     if (!session) return;
     const sessionPath = session.sessionFile;
