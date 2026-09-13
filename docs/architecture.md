@@ -2,7 +2,7 @@
 
 本文介绍 GrenAgent 的整体架构、模块职责与运行时数据流。面向需要理解或参与开发的工程师。
 
-> **桌面端主线是 Electron。** `electron-agent/` 为当前实现，`tauri-agent/`（Tauri 2 + Rust）已过时并冻结，文中涉及 Tauri 的段落均标注为历史，仅作迁移对照。桌面能力从 Tauri command 迁移到 Electron 的收口点见 `electron-agent/docs/tauri-api-inventory.md`。
+> **桌面端主线是 Electron。** `electron-agent/` 为当前实现。历史 Tauri 版（`tauri-agent/`，Tauri 2 + Rust）已于 2026-09-13 封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`；文中涉及 Tauri 的段落均标注为历史，仅作迁移对照。桌面能力从 Tauri command 迁移到 Electron 的收口点见 `electron-agent/docs/tauri-api-inventory.md`。
 
 ## 总览
 
@@ -133,9 +133,9 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。
 
-### tauri-agent —— 桌面应用（已过时 · 冻结）
+### tauri-agent —— 桌面应用（已封存）
 
-> 已停止维护：不再接受功能开发、缺陷修复与依赖升级。以下为历史结构，仅供迁移对照，参见 [`tauri-agent/README.md`](../tauri-agent/README.md) 与 [`electron-agent/docs/tauri-api-inventory.md`](../electron-agent/docs/tauri-api-inventory.md)。
+> 已于 2026-09-13 封存并从工作区移除：完整快照见 git 标签 `archive/tauri-agent`（`git checkout archive/tauri-agent -- tauri-agent` 可取回）。以下为历史结构，仅供迁移对照，参见 [`electron-agent/docs/tauri-api-inventory.md`](../electron-agent/docs/tauri-api-inventory.md)。
 
 包名 `grenagent-app`，分前端与 Rust 后端两部分。
 

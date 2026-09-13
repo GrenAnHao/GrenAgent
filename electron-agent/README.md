@@ -2,7 +2,7 @@
 
 GrenAgent 桌面应用（当前主线）：React 19 + TypeScript + Vite 渲染层，Electron 主进程（TypeScript 服务层）与自研 Agent Data Runtime。项目整体介绍见仓库根 [`README.md`](../README.md)，架构与开发细节见 [架构文档](../docs/architecture.md) 与 [开发指南](../docs/development.md)。
 
-历史桌面端 `tauri-agent/`（Tauri 2 + Rust）已过时并冻结，不再维护。
+历史桌面端 `tauri-agent/`（Tauri 2 + Rust）已封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`。
 
 ## 快速开始
 

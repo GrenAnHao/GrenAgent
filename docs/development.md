@@ -2,14 +2,12 @@
 
 本文介绍本地开发环境搭建、常用命令、测试与代码风格约定。
 
-> **桌面端主线是 Electron。** 本文命令默认在 `electron-agent/` 下执行；`tauri-agent/`（Tauri 2 + Rust）已过时并冻结，相关段落标注为历史，仅在需要对照旧客户端时参考，详见 [`tauri-agent/README.md`](../tauri-agent/README.md)。
+> **桌面端主线是 Electron。** 本文命令默认在 `electron-agent/` 下执行。历史 Tauri 版（`tauri-agent/`，Tauri 2 + Rust）已于 2026-09-13 封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`；下文标注为历史的段落仅在对照旧客户端时参考。
 
 ## 环境要求
 
 - Node.js >= 22.19（`cli/package.json` 声明 `engines.node >= 22.19.0`）
-- Bun：`electron-agent/` 与历史 `tauri-agent/` 均可用 Bun 管理依赖
-- `curl` 与 `tar`：仅在构建历史 Tauri 版的 TencentDB 运行时时需要，用于下载和解包上游源码、Node.js 运行时
-- Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，参见 Tauri 官方环境要求
+- Bun：`electron-agent/` 的包管理
 
 ## 安装
 
@@ -31,8 +29,6 @@ bun install
 | `bun run test` | 运行测试（`vitest run`） |
 | `bun run package` | electron-builder 打包，产物在 `release/` |
 | `npx tsc -p tsconfig.node.json --noEmit` | 主进程 / 宿主类型检查 |
-
-历史命令（仅 `tauri-agent/`，已过时）：`bun run dev`（Vite 前端）、`bun run tauri dev`（Tauri + Rust 桌面端）、`bun run build:tencentdb-memory`（构建随包分发的 TencentDB 运行时）。
 
 `cli/` 相关命令（源码仍给 worker / 测试用，不再产出桌面 `pi.exe`）：
 
@@ -62,7 +58,6 @@ bunx vitest run src/features/sessions/SessionItem.test.tsx
 - 使用 Vitest，测试文件与源文件同目录，命名 `*.test.ts` 或 `*.test.tsx`。
 - 优先用 `vi.spyOn` 而非 `vi.mock`，尽量测试真实实现，不要把逻辑复制进测试。
 - 涉及桌面能力时，mock `window.gren` 桥（契约见 `electron/ipc/contracts.ts`，渲染层入口为 `src/platform/runtime.ts`），不要 mock Electron 内部模块；无 bridge 时运行时会降级为 `browserPreviewBridge`。
-- （历史）Tauri 版需 mock `@tauri-apps/api`、`@tauri-apps/plugin-*` 等模块。
 
 ## 代码风格
 
@@ -102,18 +97,11 @@ export default function (pi: ExtensionAPI) {
 
 ## 构建产物
 
-当前（Electron）：
-
 - `out/main/main.js`：主进程（内嵌 Pi SDK）。
 - `out/main/pi-worker.js`：子代理入口，打包后解包到 `app.asar.unpacked`。
 - `out/main/runner.py`、`runner.mjs`、`prompts/`：`import.meta.url` 相邻资源。
 - `out/`：`electron-vite build` 的主进程与 preload 产物（其中 `dist/` 为渲染层产物）。
 - `release/`：electron-builder 打包产物（nsis / dmg / AppImage）。
-
-历史（Tauri 版，已过时）：
-
-- `binaries/pi`：sidecar 单文件二进制，由 `npm run build:sidecar` 生成。
-- `binaries/tencentdb-memory/<platform>/`：由 `bun run build:tencentdb-memory` 生成的托管运行时，包含 MemoryCore、MemoryKnowledge、Node.js 和固定版本清单，并在 `tauri.conf.json` 的 `resources` 中打包。
 
 ## 本地向量服务（embedding，独立模块）
 

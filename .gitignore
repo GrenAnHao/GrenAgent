@@ -21,16 +21,6 @@ output/
 /.superpowers/
 /openspec/
 /.cursor/
-# 同名目录也会出现在子项目里（上面那些是锚定到仓库根的，匹配不到嵌套路径）
-/tauri-agent/.claude/
-/tauri-agent/.superpowers/
-
-# Pi runtime data (per-project)
-/tauri-agent/.pi/
-/tauri-agent/.backup/
-/tauri-agent/.playwright-mcp/
-/tauri-agent/.superpowers/
-/tauri-agent/.vscode/
 
 # Local code index (tens of MB, rebuilt by `codegraph init`)
 /.codegraph/

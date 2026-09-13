@@ -8,8 +8,6 @@ const productionRoots = [
   'electron-agent/src',
   'extensions',
   'cli/src',
-  'tauri-agent/src-tauri/src',
-  'tauri-agent/src',
 ];
 const manifests = [
   'electron-agent/package.json',

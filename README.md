@@ -2,7 +2,7 @@
 
 本地优先的桌面 AI 编码 Agent。基于 Pi 运行时（`@earendil-works/pi-coding-agent`），把对话、工具调用、代码智能、知识库与记忆整合进一个 Electron 桌面应用；默认使用本机托管运行时，也可连接远程 Gateway。
 
-> **桌面端主线：Electron。** `electron-agent/` 是当前唯一维护的桌面实现；`tauri-agent/`（Tauri 2 + Rust）已过时并冻结，仅作历史参考，不再接受功能开发与缺陷修复，详见 [`tauri-agent/README.md`](./tauri-agent/README.md)。
+> **桌面端主线：Electron。** `electron-agent/` 是当前唯一维护的桌面实现；历史 Tauri 版（`tauri-agent/`，Tauri 2 + Rust）已于 2026-09-13 封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`（`git checkout archive/tauri-agent -- tauri-agent` 可取回）。
 
 <p align="center">
   <img src="images/hero-code-graph.jpg" alt="代码图谱 · 227 个文件 · 674 条依赖" width="100%">
@@ -74,7 +74,6 @@ GrenAgent 由以下部分组成：
 | `cli/` | `grenagent-agent-sidecar` | 内嵌 SDK 装配与 `pi-worker` 入口。源码由 electron-vite 打进主进程 / worker，不再产出独立 `pi.exe`。 |
 | `extensions/` | `pi-extensions-pack` | 内置扩展集合。由 `extensions/index.ts` 的 `allExtensions` 汇总，打进主进程与 worker。 |
 | `electron-agent/` | `electron-agent` | **当前桌面应用**。React 19 + TypeScript + Vite 渲染层，Electron 主进程（内嵌 Pi SDK）与自研 Agent Data Runtime。 |
-| `tauri-agent/` | `grenagent-app` | **已过时（冻结）**。历史桌面应用，Tauri 2 / Rust 后端。不再维护，仅作迁移参考。 |
 | `embedding/` | `embedding` | 独立本地向量服务（实验）。CPU 跑 `Xenova/all-MiniLM-L6-v2`，`POST /embed` 返回 384 维向量；尚未集成进主应用。 |
 
 渲染层只通过 `window.gren` 与主进程通信（单业务通道 `gren:invoke` + `gren:event:` 事件广播），主进程内嵌 Pi SDK 跑交互 / Goal / 短调用；子代理 `spawn(process.execPath, [PI_WORKER_ENTRY])`。业务代码统一走 `src/platform/runtime.ts` 的后端抽象，不直接依赖 Electron。详见 [架构文档](./docs/architecture.md)。
@@ -85,7 +84,6 @@ GrenAgent 由以下部分组成：
 
 - Node.js >= 22.19（`cli/package.json` 声明 `engines.node >= 22.19.0`）
 - Bun（`electron-agent/` 的包管理，详见 [开发指南](./docs/development.md)）
-- Rust 工具链：仅构建已过时的 `tauri-agent/` 时需要，日常开发不再需要
 
 ### 启动桌面端
 
@@ -145,9 +143,6 @@ bun run package        # electron-builder，产物在 release/
 ├── electron-agent/  # 桌面应用（electron-agent），当前主线
 │   ├── src/         # React 渲染层：features / stores / lib / platform / components / theme
 │   └── electron/    # Electron 主进程：app / agent / agentData / pi，及 ipc 与 preload
-├── tauri-agent/     # 历史桌面应用（grenagent-app），已过时并冻结
-│   ├── src/         # React 前端快照（仅供迁移对照）
-│   └── src-tauri/   # Tauri / Rust 后端快照
 ├── embedding/       # 独立本地向量服务（实验，未集成进主应用）
 └── docs/            # 架构与开发文档，及 superpowers/ 下的设计规格与实现计划
 ```
