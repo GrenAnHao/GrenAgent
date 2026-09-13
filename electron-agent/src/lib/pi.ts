@@ -124,6 +124,31 @@ export interface SubAgentItem {
   updatedAt: number;
 }
 
+export type SubagentCatalogMode = 'one-shot' | 'continuable';
+export type CatalogActivity = 'running' | 'idle' | 'ready' | 'settled' | 'unavailable';
+export type SubagentDelivery = 'followUp' | 'steer';
+
+export interface SubagentCatalogEntry {
+  id: string;
+  sessionPath: string;
+  createdAt: number;
+  mode: SubagentCatalogMode;
+  label: string;
+}
+
+export interface SubagentCatalogView {
+  entries: SubagentCatalogEntry[];
+  diagnostics: Array<{ id: string; reason: 'corrupt' }>;
+}
+
+export interface CatalogRowView extends SubagentCatalogEntry {
+  activity: CatalogActivity;
+  hasChildren: boolean;
+  tokens?: number;
+  durationMs?: number;
+  diagnostic?: 'corrupt' | 'unavailable';
+}
+
 export interface GitFileStatus {
   path: string;
   status: 'modified' | 'staged' | 'untracked' | string;
@@ -266,6 +291,19 @@ export const pi = {
     invoke<{ messages: AgentMessage[] }>('subagent_get_session_messages', { sessionPath }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
+  subagentCatalog: (parentSessionPath: string) =>
+    invoke<SubagentCatalogView>('subagent_catalog', { parentSessionPath }),
+  subagentCatalogRow: (sessionPath: string) =>
+    invoke<CatalogRowView>('subagent_catalog_row', { sessionPath }),
+  subagentPrompt: (
+    workspace: string,
+    parentSessionPath: string,
+    sessionPath: string,
+    message: string,
+    delivery: SubagentDelivery,
+  ) => invoke<void>('subagent_prompt', { workspace, parentSessionPath, sessionPath, message, delivery }),
+  subagentInterrupt: (workspace: string, parentSessionPath: string, sessionPath: string) =>
+    invoke<void>('subagent_interrupt', { workspace, parentSessionPath, sessionPath }),
   readUiHistory: (workspace: string, sessionKey: string) =>
     invoke<string>('ui_history_read', { workspace, sessionKey }),
   writeUiHistory: (workspace: string, sessionKey: string, content: string) =>

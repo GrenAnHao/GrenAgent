@@ -1,8 +1,18 @@
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { SessionManager } from '../../../cli/src/pi-sdk.js';
+import {
+  authorizeParent,
+  coldResumeAndDeliver,
+  deliverToChild,
+  getActivationBySessionPath,
+  interruptChild as interruptResidentChild,
+} from '../../../extensions/multi-agent/activation.js';
+import { foldCatalog, type SubagentCatalogEntry, type SubagentCatalogView } from '../../../extensions/multi-agent/catalog.js';
+import { sampleCatalogRow, type CatalogRowView } from '../../../extensions/multi-agent/catalog-sample.js';
+import type { Delivery } from '../../../extensions/multi-agent/inbox.js';
 import type { SandboxManager } from './sandbox/sandboxManager';
 
 export interface SubagentItem {
@@ -73,6 +83,49 @@ export class SubagentService {
     }
   }
 
+  catalog(parentSessionPath: string): SubagentCatalogView {
+    return foldCatalog(parentSessionPath.trim());
+  }
+
+  catalogRowSample(sessionPath: string): CatalogRowView {
+    const path = sessionPath.trim();
+    return sampleCatalogRow({
+      id: basename(path),
+      sessionPath: path,
+      createdAt: 0,
+      mode: peekChildMode(path),
+      label: '',
+    });
+  }
+
+  async promptChild(
+    workspace: string,
+    parentSessionPath: string,
+    sessionPath: string,
+    message: string,
+    delivery: Delivery,
+  ): Promise<void> {
+    const entry = resolveCatalogChild(parentSessionPath, sessionPath);
+    if (entry.mode === 'one-shot') {
+      throw new Error('cannot prompt a one-shot child: 只读');
+    }
+    const activation = getActivationBySessionPath(entry.sessionPath);
+    if (activation) {
+      authorizeParent(activation, workspace);
+      deliverToChild(activation.childId, message, delivery);
+      return;
+    }
+    await coldResumeAndDeliver(entry.id, entry.sessionPath, message, delivery);
+  }
+
+  interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): void {
+    const entry = resolveCatalogChild(parentSessionPath, sessionPath);
+    const activation = getActivationBySessionPath(entry.sessionPath);
+    if (!activation) return;
+    authorizeParent(activation, workspace);
+    interruptResidentChild(activation.childId);
+  }
+
   async cancel(workspace: string, agentId: string): Promise<void> {
     const id = agentId.trim();
     if (!id) throw new Error('agentId is required');
@@ -118,4 +171,46 @@ function asNumber(value: unknown): number {
 
 function asNullableNumber(value: unknown): number | null {
   return typeof value === 'number' ? value : null;
+}
+
+function resolveCatalogChild(parentSessionPath: string, sessionPath: string): SubagentCatalogEntry {
+  const path = sessionPath.trim();
+  const allowed = catalogWhitelist(parentSessionPath.trim());
+  const entry = allowed.get(path);
+  if (!entry) throw new Error('sessionPath is not in the parent catalog');
+  return entry;
+}
+
+function catalogWhitelist(parentSessionPath: string): Map<string, SubagentCatalogEntry> {
+  const map = new Map<string, SubagentCatalogEntry>();
+  const parent = foldCatalog(parentSessionPath);
+  for (const child of parent.entries) {
+    map.set(child.sessionPath, child);
+    for (const grand of foldCatalog(child.sessionPath).entries) {
+      map.set(grand.sessionPath, grand);
+    }
+  }
+  return map;
+}
+
+function peekChildMode(sessionPath: string): 'one-shot' | 'continuable' {
+  try {
+    if (!sessionPath || !existsSync(sessionPath)) return 'one-shot';
+    const meta = lastSubagentMeta(SessionManager.open(sessionPath).getEntries());
+    return meta?.mode === 'continuable' ? 'continuable' : 'one-shot';
+  } catch {
+    return 'one-shot';
+  }
+}
+
+function lastSubagentMeta(entries: unknown[]): Record<string, unknown> | undefined {
+  let found: Record<string, unknown> | undefined;
+  if (!Array.isArray(entries)) return undefined;
+  for (const entry of entries) {
+    const item = entry as { type?: string; customType?: string; data?: Record<string, unknown> };
+    if (item?.type === 'custom' && item.customType === 'subagent_meta' && item.data && typeof item.data === 'object') {
+      found = item.data;
+    }
+  }
+  return found;
 }

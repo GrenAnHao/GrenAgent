@@ -260,6 +260,20 @@ function registerSubagentCommands(service: SubagentService): void {
   registerCommand('subagent_cancel', (_event, args) => service.cancel(
     readString(args, 'workspace'), readString(args, 'agentId'),
   ));
+  registerCommand('subagent_catalog', (_event, args) => service.catalog(readString(args, 'parentSessionPath')));
+  registerCommand('subagent_catalog_row', (_event, args) => service.catalogRowSample(readString(args, 'sessionPath')));
+  registerCommand('subagent_prompt', (_event, args) => service.promptChild(
+    readString(args, 'workspace'),
+    readString(args, 'parentSessionPath'),
+    readString(args, 'sessionPath'),
+    readText(args, 'message'),
+    readDelivery(args, 'delivery'),
+  ));
+  registerCommand('subagent_interrupt', (_event, args) => service.interruptChild(
+    readString(args, 'workspace'),
+    readString(args, 'parentSessionPath'),
+    readString(args, 'sessionPath'),
+  ));
 }
 
 function registerFileCommands(service: FileService): void {
@@ -484,6 +498,12 @@ function readWikiSourceInput(args: Record<string, unknown>): WikiSourceInput {
   if (args.kind === 'manual' || args.kind === 'upload') return { kind: args.kind, name: readString(args, 'name'), content: readText(args, 'content') };
   if (args.kind === 'project') return { kind: args.kind, projectWorkspace: readString(args, 'projectWorkspace'), relativePath: readString(args, 'relativePath'), expectedContentHash: readString(args, 'expectedContentHash') };
   throw new Error('invalid source kind');
+}
+
+function readDelivery(args: Record<string, unknown>, key: string): 'followUp' | 'steer' {
+  const value = args[key];
+  if (value !== 'followUp' && value !== 'steer') throw new Error(`${key} must be followUp or steer`);
+  return value;
 }
 
 function readString(args: Record<string, unknown>, key: string): string {
