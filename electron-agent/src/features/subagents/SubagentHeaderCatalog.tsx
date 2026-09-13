@@ -305,19 +305,22 @@ export function SubagentHeaderCatalog({ activeChildId, onOpen }: SubagentHeaderC
   }, []);
 
   useEffect(() => {
+    setRootRows([]);
+    setChildRows({});
+    setExpanded({});
+    setOpen(false);
+    setFocusIndex(0);
     if (!parentPath) {
       loadGen.current += 1;
-      setRootRows([]);
-      setChildRows({});
-      setExpanded({});
-      setOpen(false);
       return;
     }
-    void loadRoot(parentPath, openRef.current);
+    // 下拉已关：只采根行。切会话必须先清行，避免 onOpen 拿到上一父会话的孩子。
+    void loadRoot(parentPath, false);
   }, [parentPath, loadRoot]);
 
   useEffect(() => {
-    let unsub = () => {};
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
     void onPiEvent((env) => {
       const event = env.event as { type?: string; sessionPath?: string } | undefined;
       if (event?.type !== 'subagent_catalog_changed') return;
@@ -325,11 +328,13 @@ export function SubagentHeaderCatalog({ activeChildId, onOpen }: SubagentHeaderC
       const parent = parentPathRef.current;
       if (!parent || path !== parent) return;
       void loadRoot(parent, openRef.current);
-    }).then((fn) => {
-      unsub = fn;
+    }).then((un) => {
+      if (cancelled) un();
+      else unlisten = un;
     });
     return () => {
-      unsub();
+      cancelled = true;
+      unlisten?.();
     };
   }, [loadRoot]);
 

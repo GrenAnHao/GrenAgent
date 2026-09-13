@@ -110,6 +110,40 @@ describe('SubagentHeaderCatalog', () => {
       expect(remaining == null || remaining.getAttribute('hidden') != null).toBe(true);
     });
   });
+
+  it('切换父会话立刻清掉旧目录行', async () => {
+    render(<SubagentHeaderCatalog />);
+    await screen.findByTestId('subagent-header-catalog');
+
+    let resolveNext: ((view: { entries: SubagentCatalogEntry[]; diagnostics: [] }) => void) | undefined;
+    subagentCatalog.mockImplementation((path: string) => {
+      if (path === PARENT) return Promise.resolve({ entries: [entry], diagnostics: [] });
+      return new Promise((resolve) => {
+        resolveNext = resolve;
+      });
+    });
+
+    useSessionStore.setState({ activeSessionPath: '/other.jsonl' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('subagent-header-catalog')).toBeNull();
+    });
+    expect(screen.queryByText('first child')).toBeNull();
+    resolveNext?.({ entries: [], diagnostics: [] });
+  });
+
+  it('卸载时注销尚未 resolve 的 onPiEvent', async () => {
+    let resolveListen: ((fn: () => void) => void) | undefined;
+    const un = vi.fn();
+    onPiEvent.mockReturnValue(
+      new Promise((resolve) => {
+        resolveListen = resolve;
+      }),
+    );
+    const { unmount } = render(<SubagentHeaderCatalog />);
+    unmount();
+    resolveListen?.(un);
+    await waitFor(() => expect(un).toHaveBeenCalled());
+  });
 });
 
 describe('formatCatalogDuration', () => {
