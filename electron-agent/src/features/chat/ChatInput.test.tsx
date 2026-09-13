@@ -64,6 +64,14 @@ describe('ChatInput send overlay cancel', () => {
     expect(onSend).toHaveBeenCalled();
   });
 
+  it('sends when overlay cancel is idle', async () => {
+    cancelPendingOverlay.mockResolvedValueOnce('idle');
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(cancelPendingOverlay).toHaveBeenCalledWith('/ws'));
+    expect(onSend).toHaveBeenCalled();
+  });
+
   it('does not cancel on empty send', async () => {
     getDocument.mockReturnValue('');
     render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);

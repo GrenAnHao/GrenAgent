@@ -56,6 +56,7 @@ export function ChatInput({
   // @lobehub/editor 的 markdown 序列化会把 _ 转义成 \_，对 AI 消息无意义，这里还原。
   const readDraft = useCallback(() => String(editor.getDocument('markdown') || '').replace(/\\_/g, '_'), [editor]);
 
+  const sendingRef = useRef(false);
   // 草稿持久化：debounce 写，避免每键都落 localStorage。
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scheduleSaveDraft = useCallback(() => {
@@ -74,27 +75,33 @@ export function ChatInput({
       data,
     }));
     if (!text && images.length === 0) return;
-    const cancel = await cancelPendingOverlay(workspace);
-    if (cancel === 'failed') {
-      message.error('取消当前提问失败，请重试');
-      return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      const cancel = await cancelPendingOverlay(workspace);
+      if (cancel === 'failed') {
+        message.error('取消当前提问失败，请重试');
+        return;
+      }
+      editor.cleanDocument();
+      setAttachments([]);
+      setPastedTexts([]);
+      setEmpty(true);
+      // 已发送：清掉该会话草稿（debounce 也一并取消，避免随后把空内容当草稿又写回）。
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
+      requestAnimationFrame(() => editor.focus());
+      // 路由：正在生成中发送 = 引导当前回合（steer）；run 进行中但已停笔（收尾/工具间隙）发送 =
+      // 跟进（followUp，回合结束后作为新一轮跑）；完全空闲 = 新一轮提示。这样回合刚答完紧跟的消息
+      // 不会被误当引导，且不触碰并发关键的 isStreaming。
+      void onSend(
+        text,
+        images.length ? images : undefined,
+        isGenerating ? 'steer' : isStreaming ? 'followUp' : undefined,
+      );
+    } finally {
+      sendingRef.current = false;
     }
-    editor.cleanDocument();
-    setAttachments([]);
-    setPastedTexts([]);
-    setEmpty(true);
-    // 已发送：清掉该会话草稿（debounce 也一并取消，避免随后把空内容当草稿又写回）。
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
-    requestAnimationFrame(() => editor.focus());
-    // 路由：正在生成中发送 = 引导当前回合（steer）；run 进行中但已停笔（收尾/工具间隙）发送 =
-    // 跟进（followUp，回合结束后作为新一轮跑）；完全空闲 = 新一轮提示。这样回合刚答完紧跟的消息
-    // 不会被误当引导，且不触碰并发关键的 isStreaming。
-    void onSend(
-      text,
-      images.length ? images : undefined,
-      isGenerating ? 'steer' : isStreaming ? 'followUp' : undefined,
-    );
   }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, onSend, draftKey, workspace, message]);
 
   const stop = useCallback(() => {
