@@ -38,7 +38,10 @@ export interface Activation {
 type ActivationRecord = Activation & {
   poked: boolean;
   watching: boolean;
+  mustWaitForBusy: boolean;
 };
+
+type IdleAwareSession = AgentSessionLike & { isIdle?: unknown };
 
 export class ChildLock {
   private readonly tails = new Map<string, Promise<void>>();
@@ -96,27 +99,59 @@ const noopUi: ExtensionUIContext = {
   setToolsExpanded: () => {},
 };
 
+function isSessionIdle(session: AgentSessionLike): boolean {
+  const idle = (session as IdleAwareSession).isIdle;
+  if (typeof idle === "boolean") return idle;
+  return !session.isStreaming;
+}
+
 function poke(act: ActivationRecord): void {
   act.poked = true;
+  act.mustWaitForBusy = true;
+}
+
+function delayTick(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+async function waitUntilBusyOrClosing(act: ActivationRecord, epoch: number): Promise<void> {
+  while (watchEpoch === epoch && activations.get(act.childId) === act) {
+    if (act.inbox.closing) return;
+    if (!isSessionIdle(act.session) || act.session.isStreaming === true) return;
+    await delayTick();
+  }
 }
 
 function startWatch(act: ActivationRecord): void {
   if (act.watching) return;
   act.watching = true;
+  if (act.poked) act.mustWaitForBusy = true;
   const epoch = watchEpoch;
   void watchSettlement(act, epoch);
 }
 
 async function watchSettlement(act: ActivationRecord, epoch: number): Promise<void> {
   while (watchEpoch === epoch && activations.get(act.childId) === act) {
+    if (act.mustWaitForBusy) {
+      await waitUntilBusyOrClosing(act, epoch);
+      act.mustWaitForBusy = false;
+      if (watchEpoch !== epoch || activations.get(act.childId) !== act) return;
+      if (act.inbox.closing) return;
+    }
     await act.session.waitForIdle();
     if (watchEpoch !== epoch || activations.get(act.childId) !== act) return;
     const stop = await childLock.run(act.childId, async () => {
       if (watchEpoch !== epoch || activations.get(act.childId) !== act) return true;
       if (act.inbox.closing) return true;
-      if (act.inbox.hasPending || act.ownedChildren.size > 0) return false;
+      if (act.inbox.hasPending || act.ownedChildren.size > 0) {
+        act.mustWaitForBusy = true;
+        return false;
+      }
       if (act.poked) {
         act.poked = false;
+        act.mustWaitForBusy = true;
         return false;
       }
       const { output, stopReason } = extractAssistantOutput(
@@ -174,6 +209,7 @@ export function installActivation(input: {
     ownedChildren: new Set(),
     poked: false,
     watching: false,
+    mustWaitForBusy: false,
   };
   activations.set(input.childId, act);
   if (act.announced) startWatch(act);
@@ -199,11 +235,10 @@ export function deliverToChild(childId: string, text: string, delivery: Delivery
   if (act.inbox.closing) {
     throw new SubagentError("activation is being disposed; the message was not accepted", "ACTIVATION_CLOSING");
   }
+  poke(act);
   void childLock.run(childId, async () => {
     const current = activations.get(childId);
-    if (!current || current.inbox.closing) {
-      throw new SubagentError("activation is being disposed; the message was not accepted", "ACTIVATION_CLOSING");
-    }
+    if (!current || current.inbox.closing) return;
     current.inbox.deliver(text, delivery);
     poke(current);
   });
@@ -343,6 +378,7 @@ export async function coldResumeAndDeliver(
     announced: false,
   });
   act.inbox.deliver(text, delivery);
+  poke(act);
   markAnnounced(childId);
 }
 

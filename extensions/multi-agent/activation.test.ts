@@ -43,15 +43,30 @@ function deferred() {
 
 function mockSession() {
   let idle = deferred();
+  const state = { isStreaming: false, isCompacting: false };
   return {
-    isStreaming: false,
+    get isStreaming() {
+      return state.isStreaming;
+    },
+    set isStreaming(value: boolean) {
+      state.isStreaming = value;
+    },
+    get isIdle() {
+      return !state.isStreaming && !state.isCompacting;
+    },
     pendingMessageCount: 0,
     messages: [{ role: "assistant", content: [{ type: "text", text: "child done" }] }],
-    prompt: vi.fn(async () => {}),
+    prompt: vi.fn(async () => {
+      state.isStreaming = true;
+    }),
     abort: vi.fn(async () => {}),
     dispose: vi.fn(),
-    waitForIdle: () => idle.promise,
+    waitForIdle: () => {
+      if (!state.isStreaming && !state.isCompacting) return Promise.resolve();
+      return idle.promise;
+    },
     resolveIdle: () => {
+      state.isStreaming = false;
       idle.resolve();
       idle = deferred();
     },
@@ -162,7 +177,6 @@ describe("activation", () => {
     const session = mockSession();
     const sendMessage = registerHost();
     install(session, { announced: true });
-    session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
@@ -173,6 +187,7 @@ describe("activation", () => {
   it("deliver during first idle cancels that settlement until the next idle", async () => {
     const session = mockSession();
     const sendMessage = registerHost();
+    session.isStreaming = true;
     install(session, { announced: true });
     session.resolveIdle();
     deliverToChild("sa-1", "more work", "followUp");
@@ -203,7 +218,6 @@ describe("activation", () => {
     const session = mockSession();
     const sendMessage = registerHost();
     install(session, { announced: true });
-    session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
@@ -217,7 +231,6 @@ describe("activation", () => {
     const session = mockSession();
     const sendMessage = registerHost({ workspace: "B" });
     const act = install(session, { announced: true, workspace: "A" });
-    session.resolveIdle();
     await vi.waitFor(() => {
       expect(session.dispose).toHaveBeenCalledTimes(1);
     });
@@ -235,6 +248,7 @@ describe("activation", () => {
   it("interruptChild aborts without closing inbox or sending notice", async () => {
     const session = mockSession();
     const sendMessage = registerHost();
+    session.isStreaming = true;
     const act = install(session, { announced: true });
     interruptChild("sa-1");
     expect(session.abort).toHaveBeenCalledTimes(1);
@@ -250,7 +264,6 @@ describe("activation", () => {
     expect(act.announced).toBe(false);
     markAnnounced("sa-1");
     expect(getActivation("sa-1")?.announced).toBe(true);
-    session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
@@ -298,7 +311,7 @@ describe("coldResumeAndDeliver", () => {
   it("opens session, rebuilds services, binds extensions, then delivers", async () => {
     const session = mockSession();
     const bindExtensions = vi.fn(async () => {});
-    const sessionWithBind = { ...session, bindExtensions };
+    Object.assign(session, { bindExtensions });
     sdk.open.mockReturnValue({
       getEntries: () =>
         metaEntries(
@@ -313,8 +326,9 @@ describe("coldResumeAndDeliver", () => {
         ),
       cwd: "/ws",
     });
-    sdk.createAgentSessionFromServices.mockResolvedValue({ session: sessionWithBind });
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
 
+    const sendMessage = registerHost();
     await coldResumeAndDeliver("sa-1", "/ws/child.jsonl", "continue please", "followUp");
 
     expect(sdk.open).toHaveBeenCalledWith("/ws/child.jsonl");
@@ -334,5 +348,32 @@ describe("coldResumeAndDeliver", () => {
     );
     expect(session.prompt).toHaveBeenCalled();
     expect(getActivation("sa-1")?.announced).toBe(true);
+    expect(getActivation("sa-1")).toBeDefined();
+    expect(session.dispose).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(0);
+  });
+
+  it("does not settle immediately after cold resume", async () => {
+    const session = mockSession();
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    sdk.open.mockReturnValue({
+      getEntries: () =>
+        metaEntries({
+          mode: "continuable",
+          tornDown: false,
+          parentSessionId: "p1",
+          parentSessionPath: "/ws/parent.jsonl",
+          workspace: "A",
+        }),
+      cwd: "/ws",
+    });
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    const sendMessage = registerHost();
+    await coldResumeAndDeliver("sa-1", "/ws/child.jsonl", "continue please", "followUp");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getActivation("sa-1")).toBeDefined();
+    expect(session.dispose).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(0);
   });
 });
