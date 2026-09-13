@@ -5,7 +5,7 @@ import {
   SessionManager,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import { extractAssistantOutput } from "./assistant-output.js";
+import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import {
   SubagentError,
   SubagentInbox,
@@ -35,11 +35,19 @@ export interface Activation {
   ownedChildren: Set<string>;
 }
 
+export type ActivationSettledInfo = {
+  childId: string;
+  stopReason: SubagentStopReason;
+  output: string;
+  sessionPath: string;
+};
+
 type ActivationRecord = Activation & {
   poked: boolean;
   watching: boolean;
   mustWaitForBusy: boolean;
   skipSettle: boolean;
+  onSettled?: (info: ActivationSettledInfo) => void;
 };
 
 type IdleAwareSession = AgentSessionLike & { isIdle?: unknown };
@@ -175,6 +183,16 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
           }),
         );
       }
+      try {
+        act.onSettled?.({
+          childId: act.childId,
+          stopReason,
+          output,
+          sessionPath: act.sessionPath,
+        });
+      } catch {
+        /* onSettled must not break watch */
+      }
       return true;
     });
     if (stop) return;
@@ -194,6 +212,8 @@ export function installActivation(input: {
     waitForIdle: () => Promise<void>;
   };
   announced?: boolean;
+  /** Natural first-idle settlement only. cancel / rollback must not call this. */
+  onSettled?: (info: ActivationSettledInfo) => void;
 }): Activation {
   if (activations.has(input.childId)) {
     throw new SubagentError(`duplicate activation for child ${input.childId}`, "DUPLICATE_CHILD");
@@ -213,6 +233,7 @@ export function installActivation(input: {
     watching: false,
     mustWaitForBusy: false,
     skipSettle: false,
+    onSettled: input.onSettled,
   };
   activations.set(input.childId, act);
   if (act.announced) startWatch(act);

@@ -4,8 +4,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parentModelSpec, resolveSubagentModel, spawnPiAgent, type AgentResult } from "./runner.js";
-import { canUseEmbeddedSubagent, runEmbeddedSubagent } from "./embedded-runner.js";
+import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
 import type { SubagentStopReason } from "./assistant-output.js";
+import { sendSettlementToParent } from "./parent-host.js";
+import { formatSettlementNotice } from "./settlement-notice.js";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
@@ -32,6 +35,15 @@ function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => stri
     return p?.trim() ? p.trim() : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function parentSessionId(ctx: { sessionManager?: { getSessionId?: () => string } }): string | null {
+  try {
+    const sid = ctx.sessionManager?.getSessionId?.();
+    return sid?.trim() ? sid.trim() : null;
+  } catch {
+    return null;
   }
 }
 
@@ -188,6 +200,7 @@ export default function (pi: ExtensionAPI) {
       "Each sub-agent starts fresh — include all context it needs in the task text.",
       "Use `agent` for a specialized role (e.g. scout/planner/reviewer); use `chain` to pipe one step's output into the next via {previous}.",
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
+      "After a background spawn settles you will receive a notice; do not wait just to collect the conclusion.",
     ],
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
@@ -497,6 +510,70 @@ export default function (pi: ExtensionAPI) {
         const layer = agentLayer(agent);
         const id = SubAgentRegistry.genId();
         const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
+        const parentPath = parentSessionPath(ctx);
+        const parentSid = parentSessionId(ctx);
+        const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
+        const spawnedText = `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`;
+
+        if (canUseEmbeddedSubagent(profile)) {
+          registry.create({
+            id,
+            task,
+            profile: params.profile ? JSON.stringify(profile) : null,
+            model: chosenModel ?? null,
+          });
+          const controller = new AbortController();
+          inflight.set(id, controller);
+          try {
+            const started = await startContinuableEmbedded({
+              cwd: ctx.cwd,
+              task,
+              agentId: id,
+              parentSessionPath: parentPath,
+              parentSessionId: parentSid,
+              model: chosenModel,
+              systemPrompt: layer.systemPrompt,
+              tools: layer.tools,
+              env: profileEnv,
+              mcp: profile.mcp,
+              timeoutMs: limits.timeoutMs,
+              signal: controller.signal,
+              onUpdate: (u) => {
+                if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
+                registry.progress(id, u.transcript);
+              },
+              onSettled: (info) => {
+                const status =
+                  info.stopReason === "aborted" ? "cancelled" : info.stopReason === "error" ? "error" : "done";
+                registry.finish(id, {
+                  status,
+                  output: info.output,
+                  exitCode: status === "done" ? 0 : -1,
+                });
+                inflight.delete(id);
+              },
+            });
+            registry.setSessionPath(id, started.sessionPath);
+            return {
+              content: [{ type: "text", text: spawnedText }],
+              details: {
+                agentId: id,
+                sessionPath: started.sessionPath,
+                mode: "continuable",
+                status: "running",
+              },
+            };
+          } catch (e) {
+            inflight.delete(id);
+            registry.finish(id, {
+              status: "error",
+              error: String((e as Error)?.message ?? e),
+              exitCode: -1,
+            });
+            throw e;
+          }
+        }
+
         registry.create({
           id,
           task,
@@ -518,7 +595,7 @@ export default function (pi: ExtensionAPI) {
         // Detached: keeps running after this tool call returns; the handler writes
         // the terminal state to the registry, which `wait`/`status` then read.
         void executeSubagent(ctx.cwd, task, id, profile, {
-          parentSessionPath: parentSessionPath(ctx),
+          parentSessionPath: parentPath,
           model: chosenModel,
           systemPrompt: layer.systemPrompt,
           tools: layer.tools,
@@ -547,6 +624,16 @@ export default function (pi: ExtensionAPI) {
                     transcript: r.transcript,
                   },
             );
+            sendSettlementToParent(
+              parentPath ?? "",
+              workspace,
+              formatSettlementNotice({
+                childId: id,
+                stopReason: r.stopReason ?? (controller.signal.aborted ? "aborted" : r.ok ? "completed" : "error"),
+                output: r.output,
+                sessionPath: r.sessionPath,
+              }),
+            );
           })
           .catch((e) => {
             resolveSession(undefined);
@@ -558,12 +645,7 @@ export default function (pi: ExtensionAPI) {
           new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2000)),
         ]);
         return {
-          content: [
-            {
-              type: "text",
-              text: `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`,
-            },
-          ],
+          content: [{ type: "text", text: spawnedText }],
           details: { agentId: id, status: "running", ...(childSessionPath ? { sessionPath: childSessionPath } : {}) },
         };
       }

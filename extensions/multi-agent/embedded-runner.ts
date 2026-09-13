@@ -7,12 +7,19 @@ import {
   getAgentDir,
   resolveCliModel,
   SessionManager,
-  type AgentSession,
   type AgentSessionEvent,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
+import { continuableReturnGuidance } from "./adjacent-tools.js";
+import {
+  disposeActivation,
+  installActivation,
+  markAnnounced,
+  type ActivationSettledInfo,
+  type AgentSessionLike,
+} from "./activation.js";
 import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import { type CapabilityProfile } from "./capability.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
@@ -23,6 +30,7 @@ export interface EmbeddedSubagentOpts {
   task: string;
   agentId: string;
   parentSessionPath?: string;
+  parentSessionId?: string | null;
   model?: string;
   systemPrompt?: string;
   /** Named-agent tool allowlist (--tools). */
@@ -32,6 +40,37 @@ export interface EmbeddedSubagentOpts {
   timeoutMs?: number;
   signal?: AbortSignal;
   onUpdate?: (update: AgentUpdate) => void;
+  mode?: "one-shot" | "continuable";
+}
+
+export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
+  onSettled?: (info: ActivationSettledInfo) => void;
+}
+
+export interface EmbeddedChildHandle {
+  session: AgentSessionLike & {
+    model?: { provider?: string; id?: string };
+    sessionId?: string;
+    bindExtensions: (opts: unknown) => Promise<unknown>;
+    subscribe: (fn: (event: AgentSessionEvent) => void) => () => void;
+    prompt: (
+      text: string,
+      opts?: { source?: string; preflightResult?: (ok: boolean) => void },
+    ) => Promise<unknown>;
+  };
+  sessionManager: {
+    appendCustomEntry: (type: string, data: unknown) => void;
+    appendModelChange: (provider: string, id: string) => void;
+    getSessionFile: () => string | undefined;
+  };
+  sessionPath: string;
+  unsub: () => void;
+  workspace: string;
+}
+
+export interface ContinuableEmbeddedStart {
+  agentId: string;
+  sessionPath: string;
 }
 
 export interface EmbeddedSubagentResult extends AgentResult {
@@ -146,6 +185,11 @@ const noopUi: ExtensionUIContext = {
   setToolsExpanded: () => {},
 };
 
+function firstLine(text: string): string {
+  const line = text.split("\n", 1)[0] ?? "";
+  return line.replace(/\r$/, "").trim();
+}
+
 function eventToJsonLine(event: AgentSessionEvent): string {
   try {
     return `${JSON.stringify(event)}\n`;
@@ -162,7 +206,20 @@ function streamingDeltaFromEvent(event: AgentSessionEvent, prev: string): string
   return prev;
 }
 
-export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<EmbeddedSubagentResult> {
+type PreparedEmbedded = {
+  childConfig: Record<string, string>;
+  parentPath: string | undefined;
+  workspace: string;
+  ctx: {
+    origin: "subagent";
+    workspace: string;
+    cwd: string;
+    config: Record<string, string>;
+  };
+  cleanup: () => void;
+};
+
+function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
   const rc = buildSubagentRuntimeConfig(opts.mcp, opts.env ?? {});
   const als = currentWorkspaceContext()?.config ?? {};
   const childConfig = withoutSensitiveProcessConfig({
@@ -171,189 +228,242 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
     ...(rc.path ? { PI_RUNTIME_CONFIG: rc.path } : {}),
   });
   const parentPath = opts.parentSessionPath?.trim() || undefined;
+  const workspace = currentWorkspaceContext()?.workspace ?? opts.cwd;
+  return {
+    childConfig,
+    parentPath,
+    workspace,
+    ctx: {
+      origin: "subagent",
+      workspace,
+      cwd: opts.cwd,
+      config: childConfig,
+    },
+    cleanup: rc.cleanup,
+  };
+}
+
+type OpenedEmbedded = EmbeddedChildHandle & {
+  getTranscript: () => string;
+  getStreamingDelta: () => string;
+  clearEmitTimer: () => void;
+};
+
+async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
+  const sessionManager = SessionManager.create(opts.cwd, undefined, {
+    id: opts.agentId,
+    ...(prepared.parentPath ? { parentSession: prepared.parentPath } : {}),
+  });
+  sessionManager.appendCustomEntry("subagent_meta", {
+    origin: "subagent",
+    agentId: opts.agentId,
+    parentSession: prepared.parentPath ?? null,
+    parentSessionId: opts.parentSessionId ?? null,
+    model: opts.model ?? null,
+    mode: opts.mode ?? "one-shot",
+    label: firstLine(opts.task).slice(0, 80),
+    inheritedEventCount: 0,
+  });
+
+  const services = await createAgentSessionServices({
+    cwd: opts.cwd,
+    agentDir: getAgentDir(),
+    resourceLoaderOptions: {
+      extensionFactories: getConfig("PI_SYSTEM_WORKER") === "1" ? [] : await filterExtensionFactories(),
+      noContextFiles: getConfig("PI_DISABLE_PROJECT_CONTEXT") === "1",
+      ...(opts.systemPrompt?.trim() ? { appendSystemPrompt: [opts.systemPrompt.trim()] } : {}),
+    },
+  });
+
+  const excludeTools = buildExcludeTools(prepared.childConfig);
+  let model = undefined;
+  if (opts.model?.trim()) {
+    const resolved = resolveCliModel({
+      cliModel: opts.model.trim(),
+      modelRuntime: services.modelRuntime,
+    });
+    if (resolved.error || !resolved.model) {
+      throw new Error(resolved.error ?? `unknown model: ${opts.model}`);
+    }
+    model = resolved.model;
+  }
+
+  const { session } = await createAgentSessionFromServices({
+    services,
+    sessionManager,
+    ...(model ? { model } : {}),
+    ...(opts.tools?.length ? { tools: opts.tools } : {}),
+    excludeTools,
+    sessionStartEvent: { type: "session_start", cwd: opts.cwd },
+  });
+
+  const sessionPath = sessionManager.getSessionFile();
+  if (!sessionPath) throw new Error("embedded sub-agent: session file not created");
+  const resolvedModel = session.model;
+  if (resolvedModel?.provider && resolvedModel.id) {
+    sessionManager.appendModelChange(resolvedModel.provider, resolvedModel.id);
+  }
+  const workspace = currentWorkspaceContext()?.workspace ?? prepared.workspace;
+  opts.onUpdate?.({ text: "", transcript: "", sessionPath });
 
   let transcript = "";
   let streamingDelta = "";
+  let emitTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastEmitAt = 0;
+  const streamThrottleMs = Number(getConfig("SUBAGENT_STREAM_THROTTLE_MS") ?? "") || 150;
+
+  const scheduleEmit = (): void => {
+    if (!opts.onUpdate) return;
+    const elapsed = Date.now() - lastEmitAt;
+    const emit = (): void => {
+      lastEmitAt = Date.now();
+      const { output } = extractAssistantOutput(session.messages, { streamingDelta });
+      opts.onUpdate!({ text: output, transcript, sessionPath });
+    };
+    if (elapsed >= streamThrottleMs) {
+      if (emitTimer) {
+        clearTimeout(emitTimer);
+        emitTimer = undefined;
+      }
+      emit();
+      return;
+    }
+    if (!emitTimer) {
+      emitTimer = setTimeout(() => {
+        emitTimer = undefined;
+        emit();
+      }, streamThrottleMs - elapsed);
+    }
+  };
+
+  await session.bindExtensions({
+    uiContext: noopUi,
+    mode: "rpc",
+    commandContextActions: {
+      waitForIdle: () => session.waitForIdle(),
+      newSession: async () => ({ cancelled: true }),
+      fork: async () => ({ cancelled: true }),
+      navigateTree: async () => ({ cancelled: true }),
+      switchSession: async () => ({ cancelled: true }),
+      reload: async () => {},
+    },
+    shutdownHandler: () => {},
+  });
+
+  const unsub = session.subscribe((event: AgentSessionEvent) => {
+    const line = eventToJsonLine(event);
+    if (line) transcript += line;
+    streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
+    scheduleEmit();
+    emitEmbeddedSubagentEvent(event as unknown as Record<string, unknown>, {
+      sessionId: session.sessionId,
+      sessionPath,
+      workspace,
+    });
+  });
+
+  return {
+    session: session as OpenedEmbedded["session"],
+    sessionManager,
+    sessionPath,
+    unsub,
+    workspace,
+    getTranscript: () => transcript,
+    getStreamingDelta: () => streamingDelta,
+    clearEmitTimer: () => {
+      if (emitTimer) clearTimeout(emitTimer);
+    },
+  };
+}
+
+/** Create the in-process child session. Caller owns unsub; this does not dispose. */
+export async function createEmbeddedChildSession(opts: EmbeddedSubagentOpts): Promise<EmbeddedChildHandle> {
+  const prepared = prepareEmbeddedConfig(opts);
+  try {
+    return await runInWorkspace(prepared.ctx, () => openEmbeddedChildSession(opts, prepared));
+  } catch (e) {
+    prepared.cleanup();
+    throw e;
+  }
+}
+
+export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<EmbeddedSubagentResult> {
+  const prepared = prepareEmbeddedConfig({ ...opts, mode: "one-shot" });
+  let transcript = "";
   let aborted = false;
 
   try {
-    return await runInWorkspace(
-      {
-        origin: "subagent",
-        workspace: currentWorkspaceContext()?.workspace ?? opts.cwd,
-        cwd: opts.cwd,
-        config: childConfig,
-      },
-      async () => {
-        const sessionManager = SessionManager.create(opts.cwd, undefined, {
-          id: opts.agentId,
-          ...(parentPath ? { parentSession: parentPath } : {}),
-        });
-        sessionManager.appendCustomEntry("subagent_meta", {
-          origin: "subagent",
-          agentId: opts.agentId,
-          parentSession: parentPath ?? null,
-          model: opts.model ?? null,
-        });
+    return await runInWorkspace(prepared.ctx, async () => {
+      const child = await openEmbeddedChildSession({ ...opts, mode: "one-shot" }, prepared);
+      const { session, sessionPath, unsub, clearEmitTimer } = child;
+      transcript = child.getTranscript();
 
-        const services = await createAgentSessionServices({
-          cwd: opts.cwd,
-          agentDir: getAgentDir(),
-          resourceLoaderOptions: {
-            extensionFactories: getConfig("PI_SYSTEM_WORKER") === "1" ? [] : await filterExtensionFactories(),
-            noContextFiles: getConfig("PI_DISABLE_PROJECT_CONTEXT") === "1",
-            ...(opts.systemPrompt?.trim() ? { appendSystemPrompt: [opts.systemPrompt.trim()] } : {}),
-          },
-        });
-
-        const excludeTools = buildExcludeTools(childConfig);
-        let model = undefined;
-        if (opts.model?.trim()) {
-          const resolved = resolveCliModel({
-            cliModel: opts.model.trim(),
-            modelRuntime: services.modelRuntime,
-          });
-          if (resolved.error || !resolved.model) {
-            throw new Error(resolved.error ?? `unknown model: ${opts.model}`);
-          }
-          model = resolved.model;
-        }
-
-        const { session } = await createAgentSessionFromServices({
-          services,
-          sessionManager,
-          ...(model ? { model } : {}),
-          ...(opts.tools?.length ? { tools: opts.tools } : {}),
-          excludeTools,
-          sessionStartEvent: { type: "session_start", cwd: opts.cwd },
-        });
-
-        const sessionPath = sessionManager.getSessionFile();
-        if (!sessionPath) throw new Error("embedded sub-agent: session file not created");
-        const resolvedModel = session.model;
-        if (resolvedModel?.provider && resolvedModel.id) {
-          sessionManager.appendModelChange(resolvedModel.provider, resolvedModel.id);
-        }
-        const workspace = currentWorkspaceContext()?.workspace ?? opts.cwd;
-        opts.onUpdate?.({ text: "", transcript: "", sessionPath });
-
-        let emitTimer: ReturnType<typeof setTimeout> | undefined;
-        let lastEmitAt = 0;
-        const streamThrottleMs = Number(getConfig("SUBAGENT_STREAM_THROTTLE_MS") ?? "") || 150;
-
-        const scheduleEmit = (): void => {
-          if (!opts.onUpdate) return;
-          const elapsed = Date.now() - lastEmitAt;
-          const emit = (): void => {
-            lastEmitAt = Date.now();
-            const { output } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
-            opts.onUpdate!({ text: output, transcript, sessionPath });
-          };
-          if (elapsed >= streamThrottleMs) {
-            if (emitTimer) {
-              clearTimeout(emitTimer);
-              emitTimer = undefined;
-            }
-            emit();
-            return;
-          }
-          if (!emitTimer) {
-            emitTimer = setTimeout(() => {
-              emitTimer = undefined;
-              emit();
-            }, streamThrottleMs - elapsed);
-          }
-        };
-
-        await session.bindExtensions({
-          uiContext: noopUi,
-          mode: "rpc",
-          commandContextActions: {
-            waitForIdle: () => session.waitForIdle(),
-            newSession: async () => ({ cancelled: true }),
-            fork: async () => ({ cancelled: true }),
-            navigateTree: async () => ({ cancelled: true }),
-            switchSession: async () => ({ cancelled: true }),
-            reload: async () => {},
-          },
-          shutdownHandler: () => {},
-        });
-
-        const unsub = session.subscribe((event: AgentSessionEvent) => {
-          const line = eventToJsonLine(event);
-          if (line) transcript += line;
-          streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
-          scheduleEmit();
-          emitEmbeddedSubagentEvent(event as unknown as Record<string, unknown>, {
-            sessionId: session.sessionId,
-            sessionPath,
-            workspace,
-          });
-        });
-
-        const idleMs = opts.timeoutMs ?? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000);
-        let idleTimer: ReturnType<typeof setTimeout> | undefined;
-        const armIdle = (): void => {
-          if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            void session.abort();
-          }, idleMs);
-        };
-        armIdle();
-
-        const onAbort = (): void => {
-          aborted = true;
+      const idleMs = opts.timeoutMs ?? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000);
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const armIdle = (): void => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
           void session.abort();
-        };
-        opts.signal?.addEventListener("abort", onAbort, { once: true });
+        }, idleMs);
+      };
+      armIdle();
 
-        let result: EmbeddedSubagentResult;
+      const onAbort = (): void => {
+        aborted = true;
+        void session.abort();
+      };
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+      let result: EmbeddedSubagentResult;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          void session
+            .prompt(opts.task, { source: "rpc", preflightResult: (ok) => ok && resolve() })
+            .catch(reject);
+        });
+        await session.waitForIdle();
+        const streamingDelta = child.getStreamingDelta();
+        transcript = child.getTranscript();
+        const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
+        const ok = !aborted && output.trim().length > 0 && stopReason !== "error";
+        result = {
+          ok,
+          output,
+          exitCode: ok ? 0 : aborted ? -1 : 1,
+          error: ok ? undefined : output.trim() ? undefined : aborted ? "aborted" : "(no output)",
+          transcript,
+          sessionPath,
+          stopReason,
+          partial: !ok && output.trim().length > 0,
+        };
+      } catch (e) {
+        const streamingDelta = child.getStreamingDelta();
+        transcript = child.getTranscript();
+        const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
+        result = {
+          ok: false,
+          output,
+          exitCode: aborted ? -1 : 1,
+          error: aborted ? "aborted" : String((e as Error)?.message ?? e),
+          transcript,
+          sessionPath,
+          stopReason,
+          partial: output.trim().length > 0,
+        };
+      } finally {
+        unsub();
+        if (idleTimer) clearTimeout(idleTimer);
+        clearEmitTimer();
+        opts.signal?.removeEventListener("abort", onAbort);
         try {
-          await new Promise<void>((resolve, reject) => {
-            void session
-              .prompt(opts.task, { source: "rpc", preflightResult: (ok) => ok && resolve() })
-              .catch(reject);
-          });
-          await session.waitForIdle();
-          const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
-          const ok = !aborted && output.trim().length > 0 && stopReason !== "error";
-          result = {
-            ok,
-            output,
-            exitCode: ok ? 0 : aborted ? -1 : 1,
-            error: ok ? undefined : output.trim() ? undefined : aborted ? "aborted" : "(no output)",
-            transcript,
-            sessionPath,
-            stopReason,
-            partial: !ok && output.trim().length > 0,
-          };
-        } catch (e) {
-          const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
-          result = {
-            ok: false,
-            output,
-            exitCode: aborted ? -1 : 1,
-            error: aborted ? "aborted" : String((e as Error)?.message ?? e),
-            transcript,
-            sessionPath,
-            stopReason,
-            partial: output.trim().length > 0,
-          };
-        } finally {
-          unsub();
-          if (idleTimer) clearTimeout(idleTimer);
-          if (emitTimer) clearTimeout(emitTimer);
-          opts.signal?.removeEventListener("abort", onAbort);
-          try {
-            await session.abort();
-          } catch {
-            /* idle */
-          }
-          session.dispose();
+          await session.abort();
+        } catch {
+          /* idle */
         }
-        return result;
-      },
-    );
+        session.dispose();
+      }
+      return result;
+    });
   } catch (e) {
     return {
       ok: false,
@@ -365,6 +475,75 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       stopReason: aborted ? "aborted" : "error",
     };
   } finally {
-    rc.cleanup();
+    prepared.cleanup();
+  }
+}
+
+function acceptPrompt(session: EmbeddedChildHandle["session"], text: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    void session
+      .prompt(text, {
+        source: "rpc",
+        preflightResult: (ok) => {
+          if (ok) resolve();
+          else reject(new Error("embedded sub-agent: prompt not accepted"));
+        },
+      })
+      .catch(reject);
+  });
+}
+
+/** Continuable embedded spawn: install Activation, accept the first prompt, return immediately. */
+export async function startContinuableEmbedded(opts: ContinuableEmbeddedOpts): Promise<ContinuableEmbeddedStart> {
+  const prepared = prepareEmbeddedConfig({ ...opts, mode: "continuable" });
+  let child: OpenedEmbedded | undefined;
+  try {
+    return await runInWorkspace(prepared.ctx, async () => {
+      child = await openEmbeddedChildSession({ ...opts, mode: "continuable" }, prepared);
+      const parentSessionId = opts.parentSessionId ?? "";
+      try {
+        installActivation({
+          childId: opts.agentId,
+          sessionPath: child.sessionPath,
+          parentSessionId,
+          parentSessionPath: opts.parentSessionPath?.trim() || "",
+          workspace: child.workspace,
+          session: child.session,
+          announced: false,
+          onSettled: (info) => {
+            child?.unsub();
+            child?.clearEmitTimer();
+            prepared.cleanup();
+            opts.onSettled?.(info);
+          },
+        });
+      } catch (e) {
+        child.unsub();
+        child.clearEmitTimer();
+        try {
+          child.session.dispose();
+        } catch {
+          /* create-only rollback */
+        }
+        prepared.cleanup();
+        throw e;
+      }
+      const text = `${opts.task}\n\n${continuableReturnGuidance(parentSessionId)}`;
+      try {
+        await acceptPrompt(child.session, text);
+      } catch (e) {
+        await disposeActivation(opts.agentId, "rollback");
+        child.unsub();
+        child.clearEmitTimer();
+        prepared.cleanup();
+        throw e;
+      }
+      markAnnounced(opts.agentId);
+      // spec 3: establishCatalogChild after first accept
+      return { agentId: opts.agentId, sessionPath: child.sessionPath };
+    });
+  } catch (e) {
+    if (child === undefined) prepared.cleanup();
+    throw e;
   }
 }

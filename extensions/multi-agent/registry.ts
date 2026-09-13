@@ -132,6 +132,12 @@ export class SubAgentRegistry {
     return row;
   }
 
+  setSessionPath(id: string, path: string): void {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    this.database.prepare("UPDATE subagents SET sessionPath=?, updatedAt=? WHERE id=?").run(trimmed, Date.now(), id);
+  }
+
   finish(
     id: string,
     patch: {

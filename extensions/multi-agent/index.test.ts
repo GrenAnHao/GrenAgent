@@ -25,6 +25,7 @@ vi.mock("./registry.js", () => {
     create() {}
     finish() {}
     touch() {}
+    setSessionPath() {}
     remove() {}
     get() {
       return null;
@@ -56,6 +57,10 @@ vi.mock("./embedded-runner.js", () => ({
     sessionPath: "/tmp/child.jsonl",
     stopReason: "completed",
   })),
+  startContinuableEmbedded: vi.fn(async () => ({
+    agentId: "sa_test",
+    sessionPath: "/tmp/child.jsonl",
+  })),
 }));
 vi.mock("../_shared/approval.js", () => ({ getApprovalPolicy: vi.fn(() => "auto") }));
 vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn(() => undefined) }));
@@ -65,7 +70,9 @@ import { getConfig } from "../_shared/runtime-config.js";
 import { __resetSubagentControlPlaneForTest } from "./controlPlane.js";
 import multiAgent from "./index.js";
 import { spawnPiAgent } from "./runner.js";
-import { canUseEmbeddedSubagent, runEmbeddedSubagent } from "./embedded-runner.js";
+import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
+import * as activation from "./activation.js";
+import * as parentHost from "./parent-host.js";
 
 type Execute = (
   id: string,
@@ -108,6 +115,10 @@ beforeEach(() => {
     transcript: "",
     sessionPath: "/tmp/child.jsonl",
     stopReason: "completed",
+  });
+  vi.mocked(startContinuableEmbedded).mockResolvedValue({
+    agentId: "sa_test",
+    sessionPath: "/tmp/child.jsonl",
   });
 });
 
@@ -212,6 +223,35 @@ describe("spawn_agent · embedded session child", () => {
     const r = await loadSpawnAgent()("tp2", { tasks: ["A", "B"] }, null, null, ctx);
     const results = r.details?.results as Array<{ sessionPath?: string; task: string }>;
     expect(results.map((x) => x.sessionPath)).toEqual(["/tmp/A.jsonl", "/tmp/B.jsonl"]);
+  });
+
+  it("embedded spawn returns continuable details immediately", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const r = await loadSpawnAgent()("ts", { task: "do x", action: "spawn" }, null, null, ctx);
+    expect(startContinuableEmbedded).toHaveBeenCalled();
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+    expect(r.content[0]?.text.startsWith("Background sub-agent started")).toBe(true);
+    expect(r.details).toMatchObject({
+      agentId: "sa_test",
+      sessionPath: "/tmp/child.jsonl",
+      mode: "continuable",
+      status: "running",
+    });
+  });
+
+  it("run does not installActivation or sendSettlementToParent", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const install = vi.spyOn(activation, "installActivation");
+    const send = vi.spyOn(parentHost, "sendSettlementToParent");
+    const r = await loadSpawnAgent()("tr", { task: "do x", action: "run" }, null, null, ctx);
+    expect(runEmbeddedSubagent).toHaveBeenCalled();
+    expect(startContinuableEmbedded).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(r.content[0]?.text).toBe("embedded-out");
+    install.mockRestore();
+    send.mockRestore();
   });
 });
 
