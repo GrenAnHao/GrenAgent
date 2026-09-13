@@ -39,6 +39,7 @@ type ActivationRecord = Activation & {
   poked: boolean;
   watching: boolean;
   mustWaitForBusy: boolean;
+  skipSettle: boolean;
 };
 
 type IdleAwareSession = AgentSessionLike & { isIdle?: unknown };
@@ -107,7 +108,7 @@ function isSessionIdle(session: AgentSessionLike): boolean {
 
 function poke(act: ActivationRecord): void {
   act.poked = true;
-  act.mustWaitForBusy = true;
+  if (isSessionIdle(act.session)) act.mustWaitForBusy = true;
 }
 
 function delayTick(): Promise<void> {
@@ -145,13 +146,14 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
     const stop = await childLock.run(act.childId, async () => {
       if (watchEpoch !== epoch || activations.get(act.childId) !== act) return true;
       if (act.inbox.closing) return true;
-      if (act.inbox.hasPending || act.ownedChildren.size > 0) {
+      if (act.skipSettle) {
+        act.skipSettle = false;
         act.mustWaitForBusy = true;
         return false;
       }
+      if (act.inbox.hasPending || act.ownedChildren.size > 0) return false;
       if (act.poked) {
         act.poked = false;
-        act.mustWaitForBusy = true;
         return false;
       }
       const { output, stopReason } = extractAssistantOutput(
@@ -210,6 +212,7 @@ export function installActivation(input: {
     poked: false,
     watching: false,
     mustWaitForBusy: false,
+    skipSettle: false,
   };
   activations.set(input.childId, act);
   if (act.announced) startWatch(act);
@@ -247,6 +250,7 @@ export function deliverToChild(childId: string, text: string, delivery: Delivery
 export function interruptChild(childId: string): void {
   const act = activations.get(childId);
   if (!act) return;
+  act.skipSettle = true;
   void act.session.abort();
 }
 

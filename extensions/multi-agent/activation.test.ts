@@ -257,6 +257,53 @@ describe("activation", () => {
     interruptChild("missing");
   });
 
+  it("steer while busy settles on the current turn idle without hanging", async () => {
+    const session = mockSession();
+    const sendMessage = registerHost();
+    session.isStreaming = true;
+    install(session, { announced: true });
+    deliverToChild("sa-1", "steer now", "steer");
+    await vi.waitFor(() => {
+      expect(session.prompt).toHaveBeenCalled();
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(0);
+    session.resolveIdle();
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(getActivation("sa-1")).toBeUndefined();
+  });
+
+  it("interrupt idle does not naturally settle until a later deliver", async () => {
+    const session = mockSession();
+    const sendMessage = registerHost();
+    session.isStreaming = true;
+    const act = install(session, { announced: true });
+    interruptChild("sa-1");
+    session.resolveIdle();
+    await vi.waitFor(() => {
+      expect(session.abort).toHaveBeenCalled();
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getActivation("sa-1")).toBeDefined();
+    expect(sendMessage).toHaveBeenCalledTimes(0);
+    expect(act.inbox.closing).toBeUndefined();
+    expect(session.dispose).not.toHaveBeenCalled();
+    deliverToChild("sa-1", "continue", "followUp");
+    await vi.waitFor(() => {
+      expect(session.prompt).toHaveBeenCalled();
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(0);
+    expect(getActivation("sa-1")).toBeDefined();
+    session.resolveIdle();
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(getActivation("sa-1")).toBeUndefined();
+  });
+
   it("markAnnounced starts settlement watch", async () => {
     const session = mockSession();
     const sendMessage = registerHost();
