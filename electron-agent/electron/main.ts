@@ -195,6 +195,7 @@ if (!process.env.VITEST) {
             event,
             source: meta.source,
             ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+            ...(meta.sessionPath ? { sessionPath: meta.sessionPath } : {}),
           };
           broadcastPiEvent('pi://event', envelope);
           void piRuntime?.handlePiEvent(workspace, event, meta).catch((error) => console.error('Pi event handling failed', error));

@@ -15,6 +15,7 @@ import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-con
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
 import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import { type CapabilityProfile } from "./capability.js";
+import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
 
 export interface EmbeddedSubagentOpts {
@@ -192,6 +193,7 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           origin: "subagent",
           agentId: opts.agentId,
           parentSession: parentPath ?? null,
+          model: opts.model ?? null,
         });
 
         const services = await createAgentSessionServices({
@@ -228,6 +230,12 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
 
         const sessionPath = sessionManager.getSessionFile();
         if (!sessionPath) throw new Error("embedded sub-agent: session file not created");
+        const resolvedModel = session.model;
+        if (resolvedModel?.provider && resolvedModel.id) {
+          sessionManager.appendModelChange(resolvedModel.provider, resolvedModel.id);
+        }
+        const workspace = currentWorkspaceContext()?.workspace ?? opts.cwd;
+        opts.onUpdate?.({ text: "", transcript: "", sessionPath });
 
         let emitTimer: ReturnType<typeof setTimeout> | undefined;
         let lastEmitAt = 0;
@@ -276,6 +284,11 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           if (line) transcript += line;
           streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
           scheduleEmit();
+          emitEmbeddedSubagentEvent(event as unknown as Record<string, unknown>, {
+            sessionId: session.sessionId,
+            sessionPath,
+            workspace,
+          });
         });
 
         const idleMs = opts.timeoutMs ?? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000);

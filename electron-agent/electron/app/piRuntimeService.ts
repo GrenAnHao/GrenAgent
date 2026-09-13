@@ -60,7 +60,7 @@ interface SessionOps {
   setSessionIdentity?(sessionId: string, sessionPath?: string): void;
 }
 
-interface PiEventMeta { sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal' }
+interface PiEventMeta { sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal' | 'subagent' }
 type EventMeta = string | PiEventMeta | SessionEventMeta;
 
 interface ThreadStorePort {
@@ -74,7 +74,8 @@ interface McpConfigPort { effective(workspace: string): Promise<Array<{ name: st
 export interface PiRuntimeEventEnvelope {
   workspace: string;
   sessionId?: string;
-  source: 'interactive' | 'goal';
+  sessionPath?: string;
+  source: 'interactive' | 'goal' | 'subagent';
   event: Record<string, unknown>;
 }
 
@@ -248,9 +249,10 @@ export class PiRuntimeService {
     }
   }
 
-  async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: EventMeta, source?: 'interactive' | 'goal'): Promise<void> {
+  async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: EventMeta, source?: 'interactive' | 'goal' | 'subagent'): Promise<void> {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId ?? readOptionalString(raw.sessionId);
     const eventSource = source ?? (typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined);
+    if (eventSource === 'subagent') return;
     const stateKey = this.findEventKey(workspace, eventSessionId);
     if (!stateKey) return;
     const active = this.activeTurns.get(stateKey);
@@ -366,6 +368,7 @@ export class PiRuntimeService {
 
   eventEnvelope(workspace: string, raw: Record<string, unknown>, metadata?: EventMeta): PiRuntimeEventEnvelope {
     const sessionId = (typeof metadata === 'string' ? metadata : metadata?.sessionId) ?? readOptionalString(raw.sessionId);
+    const sessionPath = typeof metadata === 'object' ? metadata?.sessionPath : undefined;
     const stateKey = this.findEventKey(workspace, sessionId);
     const active = stateKey ? this.activeTurns.get(stateKey) : undefined;
     const source = (typeof metadata === 'object' ? metadata?.source : undefined) ?? active?.source ?? 'interactive';
@@ -374,6 +377,7 @@ export class PiRuntimeService {
       event: raw,
       source,
       ...(sessionId ?? active?.sessionId ? { sessionId: sessionId ?? active?.sessionId } : {}),
+      ...(sessionPath ? { sessionPath } : {}),
     };
   }
 

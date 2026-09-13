@@ -10,8 +10,13 @@ import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
-import { buildSubAgentConversationMessages, subAgentSessionPath } from './subagentUtils';
-import { pi } from '../../lib/pi';
+import {
+  buildSubAgentConversationMessages,
+  isEmbeddedChildEvent,
+  shouldBindChildSession,
+  subAgentSessionPath,
+} from './subagentUtils';
+import { onPiEvent, pi } from '../../lib/pi';
 
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript / transcriptTail）。 */
 function transcriptOf(result: unknown): string {
@@ -126,39 +131,50 @@ function useRegistryTranscript(
 }
 
 /**
- * 绑定 embedded 子代理的真会话 JSONL（只读）；运行中轮询刷新。
+ * 同一 workspace 的第二条只读绑定：种子消息来自子会话 JSONL，
+ * 流式事件按 sessionPath 灌进 reducer（不再经 transcriptTail）。
  */
-function useSessionPathMessages(sessionPath: string | null | undefined, running: boolean): ChatMessage[] {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+function useChildSessionBinding(sessionPath: string | null | undefined, running: boolean): ChatMessage[] {
+  const [state, setState] = useState<AgentState>(() => initialAgentState());
 
   useEffect(() => {
     if (!sessionPath) {
-      setMessages([]);
+      setState(initialAgentState());
       return;
     }
     let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    setState(initialAgentState());
 
-    const fetch = async () => {
+    const seed = async () => {
       try {
         const { messages: raw } = await pi.subagentGetSessionMessages(sessionPath);
         if (cancelled || !raw?.length) return;
-        setMessages(messagesFromAgent(raw).map((m, i) => ({ ...m, id: `sa-${i}` })));
+        const msgs = messagesFromAgent(raw).map((m, i) => ({ ...m, id: `sa-${i}` }));
+        setState((s) => (s.messages.length >= msgs.length ? s : { ...s, messages: msgs }));
       } catch {
         /* keep last */
       }
     };
 
-    void fetch();
-    if (!running) return;
+    void seed();
+    void onPiEvent((env) => {
+      if (!isEmbeddedChildEvent(env, sessionPath)) return;
+      setState((s) => applyEvent(s, env.event));
+    }).then((un) => {
+      if (cancelled) un();
+      else unlisten = un;
+    });
 
-    const timer = setInterval(() => void fetch(), 1000);
+    const timer = running ? setInterval(() => void seed(), 2500) : undefined;
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      unlisten?.();
+      if (timer) clearInterval(timer);
     };
   }, [sessionPath, running]);
 
-  return messages;
+  return useMemo(() => state.messages.map((m, i) => ({ ...m, id: `sa-${i}` })), [state.messages]);
 }
 
 interface SubAgentConversationProps {
@@ -183,20 +199,21 @@ export function SubAgentConversation({
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
 
   const sessionPath = subAgentSessionPath(liveResult);
-  const sessionMessages = useSessionPathMessages(sessionPath, status === 'running');
+  const bindChild = shouldBindChildSession(liveResult);
+  const sessionMessages = useChildSessionBinding(bindChild ? sessionPath : null, status === 'running');
 
   const inlineTranscript = usableTranscript(transcriptOf(liveResult));
 
   const registryTranscript = useRegistryTranscript(
     workspace ?? '',
-    sessionPath || inlineTranscript ? null : agentId,
+    bindChild || inlineTranscript ? null : agentId,
     status === 'running',
   );
 
   const transcript = inlineTranscript || registryTranscript;
-  const transcriptMessages = useIncrementalMessages(sessionPath ? '' : transcript);
+  const transcriptMessages = useIncrementalMessages(bindChild ? '' : transcript);
 
-  const replayMessages = sessionPath ? sessionMessages : transcriptMessages;
+  const replayMessages = bindChild ? sessionMessages : transcriptMessages;
 
   const messages = useMemo(
     () => buildSubAgentConversationMessages(task, liveResult, status, replayMessages),

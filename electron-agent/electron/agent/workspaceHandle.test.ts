@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { currentWorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
+import { emitEmbeddedSubagentEvent } from '../../../extensions/multi-agent/embedded-events.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
 
 function makeSession(id: string) {
@@ -119,6 +120,21 @@ describe('WorkspaceHandle', () => {
     expect(event).not.toHaveProperty('message');
     expect(event.usage).toEqual({ input: 1 });
     expect(meta).toMatchObject({ sessionId: 's1', source: 'interactive' });
+  });
+
+  it('forwards embedded child events with sessionPath and source=subagent', async () => {
+    const { runtime } = makeRuntime();
+    const { handle, onEvent } = makeHandle(runtime);
+    await handle.start();
+    emitEmbeddedSubagentEvent(
+      { type: 'message_end', message: { role: 'assistant', content: [] } },
+      { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', workspace: 'D:/proj' },
+    );
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'message_end' }),
+      { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', source: 'subagent' },
+    );
+    await handle.dispose();
   });
 
   it('非 message_update 原样转发', async () => {
@@ -267,6 +283,42 @@ describe('WorkspaceHandle', () => {
     onEvent.mockClear();
     first.emit({ type: 'agent_end', willRetry: false });
     expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('getState 把 session.model 的 getter 拍成可 IPC 的纯对象', () => {
+    const { runtime, first } = makeRuntime();
+    Object.assign(first, {
+      model: {
+        get id() { return 'claude'; },
+        get provider() { return 'anthropic'; },
+        get name() { return 'Claude'; },
+        get api() { return 'anthropic-messages'; },
+        get reasoning() { return true; },
+        get thinkingLevelMap() { return { low: 'low', medium: 'medium', high: 'high' }; },
+        think() { return 'side-effect'; },
+      },
+      thinkingLevel: 'off',
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode: false,
+      followUpMode: false,
+      sessionFile: '/s.jsonl',
+      sessionName: '',
+      autoCompactionEnabled: true,
+      messages: [],
+      pendingMessageCount: 0,
+    });
+    const { handle } = makeHandle(runtime);
+    const state = handle.getState();
+    expect(state.model).toEqual({
+      id: 'claude',
+      provider: 'anthropic',
+      name: 'Claude',
+      api: 'anthropic-messages',
+      reasoning: true,
+      thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high' },
+    });
+    expect(state.model).not.toHaveProperty('think');
   });
 
   it('dispose 调用 onDispose(workspace, cwd)', async () => {

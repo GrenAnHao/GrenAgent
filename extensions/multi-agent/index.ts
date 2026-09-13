@@ -421,6 +421,8 @@ export default function (pi: ExtensionAPI) {
           output: string;
           error?: string;
           agentId: string;
+          sessionPath?: string;
+          stopReason?: SubagentStopReason;
         }> = [];
         let previous = "";
         for (let i = 0; i < steps.length; i++) {
@@ -502,6 +504,16 @@ export default function (pi: ExtensionAPI) {
         });
         const controller = new AbortController();
         inflight.set(id, controller);
+        let sessionReady: (path: string | undefined) => void = () => {};
+        const sessionReadyPromise = new Promise<string | undefined>((resolve) => {
+          sessionReady = resolve;
+        });
+        let sessionResolved = false;
+        const resolveSession = (path: string | undefined): void => {
+          if (sessionResolved) return;
+          sessionResolved = true;
+          sessionReady(path);
+        };
         // Detached: keeps running after this tool call returns; the handler writes
         // the terminal state to the registry, which `wait`/`status` then read.
         void executeSubagent(ctx.cwd, task, id, profile, {
@@ -515,9 +527,13 @@ export default function (pi: ExtensionAPI) {
           signal: controller.signal,
           // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
           // SubAgentLogBody 轮询 registry，即可像主对话一样实时回放后台子代理。
-          onUpdate: (u) => registry.progress(id, u.transcript),
+          onUpdate: (u) => {
+            if (u.sessionPath) resolveSession(u.sessionPath);
+            registry.progress(id, u.transcript);
+          },
         })
-          .then((r) =>
+          .then((r) => {
+            resolveSession(r.sessionPath);
             registry.finish(
               id,
               r.ok
@@ -529,10 +545,17 @@ export default function (pi: ExtensionAPI) {
                     exitCode: r.exitCode,
                     transcript: r.transcript,
                   },
-            ),
-          )
-          .catch((e) => registry.finish(id, { status: "error", error: String((e as Error)?.message ?? e), exitCode: -1 }))
+            );
+          })
+          .catch((e) => {
+            resolveSession(undefined);
+            registry.finish(id, { status: "error", error: String((e as Error)?.message ?? e), exitCode: -1 });
+          })
           .finally(() => inflight.delete(id));
+        const childSessionPath = await Promise.race([
+          sessionReadyPromise,
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2000)),
+        ]);
         return {
           content: [
             {
@@ -540,7 +563,7 @@ export default function (pi: ExtensionAPI) {
               text: `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`,
             },
           ],
-          details: { agentId: id, status: "running" },
+          details: { agentId: id, status: "running", ...(childSessionPath ? { sessionPath: childSessionPath } : {}) },
         };
       }
 
@@ -638,6 +661,8 @@ export default function (pi: ExtensionAPI) {
         error?: string;
         partial?: boolean;
         agentId?: string;
+        sessionPath?: string;
+        stopReason?: SubagentStopReason;
       }> = new Array(list.length);
       const concurrency = Math.max(1, limits.maxConcurrency ?? MAX_CONCURRENCY);
       const runOne = async (i: number): Promise<void> => {
@@ -678,7 +703,16 @@ export default function (pi: ExtensionAPI) {
                   transcript: r.transcript,
                 },
           );
-          results[i] = { task: t.task, ok: r.ok, output: r.output, error: r.error, partial: r.partial, agentId: subId };
+          results[i] = {
+            task: t.task,
+            ok: r.ok,
+            output: r.output,
+            error: r.error,
+            partial: r.partial,
+            agentId: subId,
+            sessionPath: r.sessionPath,
+            stopReason: r.stopReason,
+          };
         } catch (e) {
           // 单个任务异常（如未知 agent、registry 写入失败）不应 reject 整个 Promise.all 而遗弃其它
           // 正在运行的兄弟任务：就地记为该任务的失败结果，其余 worker 照常跑完。
@@ -721,6 +755,8 @@ export default function (pi: ExtensionAPI) {
             output: r.output,
             error: r.error,
             agentId: r.agentId,
+            sessionPath: r.sessionPath,
+            stopReason: r.stopReason,
           })),
         },
       };

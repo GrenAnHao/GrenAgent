@@ -110,6 +110,19 @@ export function subAgentSessionPath(result: unknown): string | null {
   return typeof path === 'string' && path.trim() ? path.trim() : null;
 }
 
+/** 有 sessionPath 走真会话绑定；没有则走旧 JSONL / registry 回放。 */
+export function shouldBindChildSession(result: unknown): boolean {
+  return subAgentSessionPath(result) != null;
+}
+
+/** 子会话流式事件是否属于这个绑定（按 sessionPath，不吃父会话 interactive 事件）。 */
+export function isEmbeddedChildEvent(
+  env: { source?: string; sessionPath?: string },
+  sessionPath: string,
+): boolean {
+  return !!sessionPath && env.sessionPath === sessionPath;
+}
+
 /** 后台 spawn：工具调用已返回但子代理仍在 registry 中运行。 */
 export function isBackgroundSpawn(result: unknown): boolean {
   const d = detailsOf(result);
@@ -238,6 +251,8 @@ interface UnitResult {
   output?: string;
   error?: string;
   agentId?: string;
+  sessionPath?: string;
+  stopReason?: string;
 }
 
 /** 一次 spawn_agent 调用展开出的逐个子代理任务文本（单任务 1 条；并行/链式 N 条）。 */
@@ -349,7 +364,11 @@ export function subAgentUnitView(
       task,
       result: {
         content: [{ type: 'text', text }],
-        details: r.agentId ? { agentId: r.agentId } : undefined,
+        details: {
+          ...(r.agentId ? { agentId: r.agentId } : {}),
+          ...(r.sessionPath ? { sessionPath: r.sessionPath } : {}),
+          ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+        },
       },
       status: r.ok ? 'done' : 'error',
     };

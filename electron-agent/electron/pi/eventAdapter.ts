@@ -22,7 +22,7 @@ export interface PiProjection {
 export interface SessionEventMeta {
   sessionId?: string;
   sessionPath?: string;
-  source?: 'interactive' | 'goal';
+  source?: 'interactive' | 'goal' | 'subagent';
   key?: string;
   logicalWorkspace?: string;
 }

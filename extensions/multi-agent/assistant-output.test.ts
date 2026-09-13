@@ -29,4 +29,20 @@ describe("extractAssistantOutput", () => {
     const r = extractAssistantOutput([], { aborted: true });
     expect(r.stopReason).toBe("aborted");
   });
+
+  it("skips empty usage-only assistant messages", () => {
+    const r = extractAssistantOutput([
+      { role: "assistant", content: [{ type: "text", text: "keep me" }], stopReason: "stop" },
+      { role: "assistant", content: [], usage: { input: 3, output: 0 }, stopReason: "stop" },
+    ] as Array<{ role: string; content: unknown; stopReason?: string; usage?: unknown }>);
+    expect(r.output).toBe("keep me");
+  });
+
+  it("never treats a session header object as output", () => {
+    const r = extractAssistantOutput([
+      { type: "session", id: "x", cwd: "/ws", version: 3 } as unknown as { role?: string; content?: unknown },
+    ]);
+    expect(r.output).toBe("");
+    expect(r.stopReason).toBe("error");
+  });
 });

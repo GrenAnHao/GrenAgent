@@ -1,7 +1,7 @@
 # DSH 子代理第一期：真会话子代理（Session Child）
 
 - 日期：2026-09-13
-- 状态：已批准，第一期实现中
+- 状态：第一期已落地
 - 主题：对齐 DeepSeek Harness（DSH）子代理的「真 Session」语义；在 **sidecar + Electron** 内用进程内子会话替代默认子进程 JSONL，父模型只收最后一条助手正文，详情面板绑定子会话 JSONL（只读）。
 - 关联：`extensions/multi-agent/`、`electron-agent/src/features/panels/SubAgentConversation.tsx`、`docs/superpowers/specs/2026-06-15-unified-subagent-system-design.md`（P5 embedded 备选，本期落地）。
 
@@ -74,7 +74,7 @@ DSH 子代理是五层叠在一起；GrenAgent 不能一份规格盖全。本期
 
 ## 5. Electron 详情
 
-- `details.sessionPath` 存在 → `SubAgentConversation` 经 IPC 读该 JSONL（`SessionManager.open` + `buildSessionContext`），只读展示；运行中轮询刷新。  
+- `details.sessionPath` 存在 → 同一 workspace 的第二条只读绑定：种子消息经 IPC 读子会话 JSONL，流式事件按 `sessionPath` 灌进该绑定（`source: subagent`），不经 `transcriptTail`。  
 - 无 `sessionPath`（旧卡片 / 子进程回退）→ 现有 JSONL `transcript` / registry 回放。  
 - 本期不做页头目录、子会话输入框、侧边栏子会话列表。
 

@@ -8,7 +8,8 @@ export interface PiEventEnvelope {
   workspace: string;
   event: AgentEvent;
   sessionId?: string;
-  source?: 'interactive' | 'goal';
+  sessionPath?: string;
+  source?: 'interactive' | 'goal' | 'subagent';
 }
 export interface PiUiRequestEnvelope {
   workspace: string;

@@ -7,6 +7,8 @@ import {
   subAgentRoleLabel,
   latestStepFromMessages,
   latestSubAgentStep,
+  isEmbeddedChildEvent,
+  shouldBindChildSession,
   subAgentSessionPath,
   subAgentUnitView,
   taskLabel,
@@ -22,6 +24,17 @@ describe('subAgentSessionPath', () => {
   it('reads details.sessionPath from tool result', () => {
     expect(subAgentSessionPath({ details: { sessionPath: '/tmp/sa.jsonl' } })).toBe('/tmp/sa.jsonl');
     expect(subAgentSessionPath({ details: { agentId: 'sa-1' } })).toBeNull();
+  });
+
+  it('binds child session only when sessionPath is present', () => {
+    expect(shouldBindChildSession({ details: { sessionPath: '/tmp/sa.jsonl' } })).toBe(true);
+    expect(shouldBindChildSession({ details: { transcript: '{"type":"message_start"}' } })).toBe(false);
+  });
+
+  it('matches live events by sessionPath', () => {
+    expect(isEmbeddedChildEvent({ source: 'subagent', sessionPath: '/s.jsonl' }, '/s.jsonl')).toBe(true);
+    expect(isEmbeddedChildEvent({ source: 'subagent', sessionPath: '/other.jsonl' }, '/s.jsonl')).toBe(false);
+    expect(isEmbeddedChildEvent({ source: 'interactive' }, '/s.jsonl')).toBe(false);
   });
 });
 
@@ -98,6 +111,17 @@ describe('subAgentUnitView', () => {
     const bad = subAgentUnitView({ tasks: ['a', 'b'] }, result, 'done', 1);
     expect(bad.status).toBe('error');
     expect(textOf(bad.result)).toContain('boom');
+  });
+
+  it('parallel unit forwards sessionPath so the dock binds the child session', () => {
+    const result = {
+      details: {
+        results: [{ task: 'a', ok: true, output: 'a out', agentId: 'sa-1', sessionPath: '/tmp/a.jsonl' }],
+      },
+    };
+    const view = subAgentUnitView({ tasks: ['a', 'b'] }, result, 'done', 0);
+    expect(subAgentSessionPath(view.result)).toBe('/tmp/a.jsonl');
+    expect(shouldBindChildSession(view.result)).toBe(true);
   });
 
   it('pending chain step → explanatory text', () => {

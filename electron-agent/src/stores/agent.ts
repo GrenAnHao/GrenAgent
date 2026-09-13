@@ -176,13 +176,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   onPiEvent((env) => {
     // Goal workers share the pi://event channel but are headless; their stream
     // must never be applied to the interactive session's message reducer.
-    if (env.workspace !== workspace || env.source === 'goal') return;
+    if (env.workspace !== workspace || env.source === 'goal' || env.source === 'subagent') return;
     queue.push(env.event);
     scheduleFlush();
   }).then((un) => unsubs.push(un));
 
   onPiExit((env) => {
-    if (env.workspace !== workspace || env.source === 'goal') return;
+    if (env.workspace !== workspace || env.source === 'goal' || env.source === 'subagent') return;
     useStore.setState({ isStreaming: false });
   }).then((un) => unsubs.push(un));
 

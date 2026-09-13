@@ -1,4 +1,5 @@
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
+import { registerEmbeddedSubagentEventSink } from '../../../extensions/multi-agent/embedded-events.js';
 import { toJsonEvent } from '../../../cli/src/json-event.js';
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOptions } from '../../../cli/src/pi-sdk.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
@@ -6,7 +7,7 @@ import { SessionUiAdapter } from './sessionUiAdapter.js';
 type TurnOrigin = 'main' | 'goal';
 export type ImageContent = NonNullable<PromptOptions['images']>[number];
 
-export interface HandleEventMeta { sessionId?: string; source: 'interactive' | 'goal' }
+export interface HandleEventMeta { sessionId?: string; sessionPath?: string; source: 'interactive' | 'goal' | 'subagent' }
 
 export interface WorkspaceHandleOptions {
   workspace: string;
@@ -22,6 +23,24 @@ export interface WorkspaceHandleOptions {
   onDispose?: (workspace: string, cwd: string) => void | Promise<void>;
 }
 
+/** 把 SDK Model（常带 getter / 方法）收成可走 IPC 的纯字段，避免空会话 getState / 模型列表丢 provider/id / 档位映射。 */
+export function snapshotSessionModel(model: unknown): Record<string, unknown> | null {
+  if (!model || typeof model !== 'object') return null;
+  const item = model as Record<string, unknown>;
+  const id = typeof item.id === 'string' ? item.id : '';
+  const provider = typeof item.provider === 'string' ? item.provider : '';
+  if (!id || !provider) return null;
+  const snap: Record<string, unknown> = { id, provider };
+  if (typeof item.name === 'string') snap.name = item.name;
+  if (typeof item.api === 'string') snap.api = item.api;
+  if (typeof item.baseUrl === 'string') snap.baseUrl = item.baseUrl;
+  if (typeof item.reasoning === 'boolean') snap.reasoning = item.reasoning;
+  if (item.thinkingLevelMap && typeof item.thinkingLevelMap === 'object') {
+    snap.thinkingLevelMap = { ...(item.thinkingLevelMap as Record<string, unknown>) };
+  }
+  return snap;
+}
+
 /**
  * 一个项目的交互 runtime。
  * runtime.session 可替换：new/switch/fork/reload 内部经 finishSessionReplacement 自动调
@@ -31,6 +50,7 @@ export interface WorkspaceHandleOptions {
 export class WorkspaceHandle {
   readonly ui: SessionUiAdapter;
   private unsubscribe: (() => void) | undefined;
+  private unsubChildEvents: (() => void) | undefined;
   private disposed = false;
   private sessionInvalidated = false;
   private turnOrigin: TurnOrigin = 'main';
@@ -56,6 +76,21 @@ export class WorkspaceHandle {
     // finishSessionReplacement 会 await 这个回调；直接 bindAndSubscribe，不要再包一层同步 rebind。
     this.options.runtime.setRebindSession(async () => { await this.bindAndSubscribe(); });
     this.options.runtime.setBeforeSessionInvalidate(() => { this.sessionInvalidated = true; });
+    this.unsubChildEvents = registerEmbeddedSubagentEventSink((event, meta) => {
+      if (this.disposed) return;
+      if (meta.workspace !== this.options.workspace && meta.workspace !== this.options.cwd) return;
+      let downgraded = event;
+      try {
+        downgraded = toJsonEvent(event as unknown as AgentSessionEvent) as unknown as Record<string, unknown>;
+      } catch {
+        /* already JSON-shaped */
+      }
+      this.options.onEvent(downgraded, {
+        ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+        sessionPath: meta.sessionPath,
+        source: 'subagent',
+      });
+    });
     await this.runMain(async () => { await this.bindAndSubscribe(); });
   }
 
@@ -101,7 +136,7 @@ export class WorkspaceHandle {
   getState(): Record<string, unknown> {
     const s = this.session;
     return {
-      model: s.model,
+      model: snapshotSessionModel(s.model),
       thinkingLevel: s.thinkingLevel,
       isStreaming: s.isStreaming,
       isCompacting: s.isCompacting,
@@ -137,6 +172,8 @@ export class WorkspaceHandle {
     try { await this.session.abort(); } catch { /* 清理阶段 abort 失败不阻断 */ }
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.unsubChildEvents?.();
+    this.unsubChildEvents = undefined;
     try { await this.options.runtime.dispose(); } catch { /* 同上 */ }
     try { await this.options.onDispose?.(this.options.workspace, this.options.cwd); } catch { /* 同上 */ }
   }
