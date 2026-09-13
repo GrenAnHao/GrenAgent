@@ -33,6 +33,10 @@ export interface Activation {
   inbox: SubagentInbox;
   announced: boolean;
   ownedChildren: Set<string>;
+  sessionManager?: {
+    appendCustomEntry: (type: string, data: unknown) => void;
+    getEntries: () => unknown[];
+  };
 }
 
 export type ActivationSettledInfo = {
@@ -211,6 +215,10 @@ export function installActivation(input: {
     dispose: () => void;
     waitForIdle: () => Promise<void>;
   };
+  sessionManager?: {
+    appendCustomEntry: (type: string, data: unknown) => void;
+    getEntries: () => unknown[];
+  };
   announced?: boolean;
   /** Natural first-idle settlement only. cancel / rollback must not call this. */
   onSettled?: (info: ActivationSettledInfo) => void;
@@ -226,6 +234,7 @@ export function installActivation(input: {
     workspace: input.workspace,
     mode: "continuable",
     session: input.session,
+    sessionManager: input.sessionManager,
     inbox: new SubagentInbox(input.session),
     announced: input.announced === true,
     ownedChildren: new Set(),
@@ -330,6 +339,20 @@ type SessionEntry = {
   data?: Record<string, unknown>;
 };
 
+export function writeTornDown(childId: string, sessionPath?: string | null): void {
+  const resident = getActivation(childId)?.sessionManager;
+  if (resident) {
+    const prev = lastSubagentMeta(resident.getEntries());
+    resident.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
+    return;
+  }
+  const path = typeof sessionPath === "string" ? sessionPath.trim() : "";
+  if (!path) return;
+  const sm = SessionManager.open(path);
+  const prev = lastSubagentMeta(sm.getEntries());
+  sm.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
+}
+
 function lastSubagentMeta(entries: unknown[]): Record<string, unknown> | undefined {
   let found: Record<string, unknown> | undefined;
   if (!Array.isArray(entries)) return undefined;
@@ -400,6 +423,7 @@ export async function coldResumeAndDeliver(
     parentSessionPath: metaString(meta, "parentSessionPath") ?? metaString(meta, "parentSession") ?? "",
     workspace: metaString(meta, "workspace") ?? cwd,
     session: session as AgentSessionLike,
+    sessionManager,
     announced: false,
   });
   act.inbox.deliver(text, delivery);

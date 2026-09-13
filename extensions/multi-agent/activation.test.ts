@@ -91,7 +91,18 @@ function registerHost(over: {
   return sendMessage;
 }
 
-function install(session: ReturnType<typeof mockSession>, over: { announced?: boolean; workspace?: string; childId?: string } = {}) {
+function install(
+  session: ReturnType<typeof mockSession>,
+  over: {
+    announced?: boolean;
+    workspace?: string;
+    childId?: string;
+    sessionManager?: {
+      appendCustomEntry: (type: string, data: unknown) => void;
+      getEntries: () => unknown[];
+    };
+  } = {},
+) {
   return installActivation({
     childId: over.childId ?? "sa-1",
     sessionPath: "/ws/child.jsonl",
@@ -100,6 +111,7 @@ function install(session: ReturnType<typeof mockSession>, over: { announced?: bo
     workspace: over.workspace ?? "A",
     session,
     announced: over.announced,
+    sessionManager: over.sessionManager,
   });
 }
 

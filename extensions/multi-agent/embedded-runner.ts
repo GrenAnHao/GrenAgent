@@ -62,6 +62,7 @@ export interface EmbeddedChildHandle {
     appendCustomEntry: (type: string, data: unknown) => void;
     appendModelChange: (provider: string, id: string) => void;
     getSessionFile: () => string | undefined;
+    getEntries: () => unknown[];
   };
   sessionPath: string;
   unsub: () => void;
@@ -509,6 +510,7 @@ export async function startContinuableEmbedded(opts: ContinuableEmbeddedOpts): P
           parentSessionPath: opts.parentSessionPath?.trim() || "",
           workspace: child.workspace,
           session: child.session,
+          sessionManager: child.sessionManager,
           announced: false,
           onSettled: (info) => {
             child?.unsub();

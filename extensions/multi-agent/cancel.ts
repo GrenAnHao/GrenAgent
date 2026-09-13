@@ -2,6 +2,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch } from "node:fs";
 import { dirname, join } from "node:path";
+import { disposeActivation, writeTornDown } from "./activation.js";
 import type { SubAgentRegistry } from "./registry.js";
 
 export function cancelRequestDir(cwd: string): string {
@@ -28,9 +29,11 @@ export function cancelSubAgent(
 ): void {
   const row = registry.get(agentId);
   if (!row || row.status !== "running") return;
+  writeTornDown(agentId, row.sessionPath);
   inflight.get(agentId)?.abort();
   registry.finish(agentId, { status: "cancelled", exitCode: -1 });
   inflight.delete(agentId);
+  void disposeActivation(agentId, "cancel");
 }
 
 const watchers = new Map<string, () => void>();
@@ -71,4 +74,24 @@ export function installCancelWatcher(cwd: string, onCancel: CancelHandler): () =
   };
   watchers.set(cwd, unwatch);
   return unwatch;
+}
+
+function normalizeCwd(cwd: string): string {
+  return cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/** Stop watching `<cwd>/.pi/subagents`. Path-tolerant. Idempotent if none installed. */
+export function uninstallCancelWatcher(cwd: string): boolean {
+  const exact = watchers.get(cwd);
+  if (exact) {
+    exact();
+    return true;
+  }
+  const want = normalizeCwd(cwd);
+  for (const key of [...watchers.keys()]) {
+    if (normalizeCwd(key) !== want) continue;
+    watchers.get(key)?.();
+    return true;
+  }
+  return false;
 }
