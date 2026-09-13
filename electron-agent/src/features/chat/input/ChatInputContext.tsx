@@ -43,7 +43,7 @@ export interface ChatInputContextValue {
   steering: string[];
   /** 已排队的跟进消息（当前回合结束后执行）；来自 pi 的 queue_update 事件。 */
   followUp: string[];
-  send: () => void;
+  send: () => void | Promise<void>;
   stop: () => void;
 }
 

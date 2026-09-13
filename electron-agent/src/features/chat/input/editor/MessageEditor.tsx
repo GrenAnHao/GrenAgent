@@ -11,6 +11,7 @@ import { GoalPill } from '../GoalPill';
 import { SessionGoalDrawer } from '../SessionGoalDrawer';
 import { WorkspaceBar } from '../workspace/WorkspaceBar';
 import { PromptRequestCard } from '../PromptRequestCard';
+import { ComposerPromptOverlay } from '../ComposerPromptOverlay';
 import { ContextUsageTag } from '../ContextUsageTag';
 import type { ActionKey } from '../config';
 import { InputChips } from './InputChips';
@@ -205,7 +206,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
             onPressEnter={({ event }) => {
               if (event.shiftKey || event.isComposing) return;
               event.preventDefault();
-              send();
+              void send();
               return true;
             }}
           />
@@ -218,6 +219,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
           </Flexbox>
         </Flexbox>
       </div>
+      <ComposerPromptOverlay anchorRef={surfaceRef} />
       {dragOver ? (
         <div className={styles.dropHint}>
           {dragKind === 'text' ? '拖放以插入文本' : dragKind === 'image' ? '拖放以插入图片' : '拖放文件以引用'}

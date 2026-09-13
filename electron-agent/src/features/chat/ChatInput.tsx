@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App } from 'antd';
 import { useEditor } from '@lobehub/editor/react';
 import { useAgentStore, useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useSessionStore } from '../../store';
@@ -13,6 +14,7 @@ import { MessageEditor } from './input/editor/MessageEditor';
 import { composeMessage } from './input/editor/composeMessage';
 import type { PastedText } from './input/editor/types';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
+import { cancelPendingOverlay } from './input/overlayPrompt';
 
 interface ChatInputProps {
   onSend: (
@@ -33,6 +35,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const { useStore } = useAgentStore();
   const { workspace } = useAgentStoreContext();
+  const { message } = App.useApp();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   // 草稿按会话隔离：优先用会话文件路径（每会话独立），新建/草稿对话还没落盘 session 时回退到 workspace(cwd)。
   const draftKey = activeSessionPath || workspace;
@@ -62,7 +65,7 @@ export function ChatInput({
     }, 300);
   }, [draftKey, readDraft]);
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const markdown = readDraft();
     const text = composeMessage(markdown, pastedTexts);
     const images: PromptImage[] = attachments.map(({ type, mimeType, data }) => ({
@@ -71,6 +74,11 @@ export function ChatInput({
       data,
     }));
     if (!text && images.length === 0) return;
+    const cancel = await cancelPendingOverlay(workspace);
+    if (cancel === 'failed') {
+      message.error('取消当前提问失败，请重试');
+      return;
+    }
     editor.cleanDocument();
     setAttachments([]);
     setPastedTexts([]);
@@ -87,7 +95,7 @@ export function ChatInput({
       images.length ? images : undefined,
       isGenerating ? 'steer' : isStreaming ? 'followUp' : undefined,
     );
-  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, onSend, draftKey]);
+  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, onSend, draftKey, workspace, message]);
 
   const stop = useCallback(() => {
     void onAbort();

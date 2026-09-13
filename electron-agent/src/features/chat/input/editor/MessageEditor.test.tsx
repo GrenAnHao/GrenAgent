@@ -58,6 +58,7 @@ vi.mock('../SessionGoalDrawer', () => ({
     open ? <div data-testid="session-goal-drawer">{snapshot?.condition}</div> : null,
 }));
 vi.mock('../PromptRequestCard', () => ({ PromptRequestCard: () => null }));
+vi.mock('../ComposerPromptOverlay', () => ({ ComposerPromptOverlay: () => null }));
 vi.mock('../ContextUsageTag', () => ({ ContextUsageTag: () => null }));
 vi.mock('./InputChips', () => ({ InputChips: () => null }));
 vi.mock('./ChatTag/ReactChatTagPlugin', () => ({ default: {} }));
@@ -89,6 +90,7 @@ const snapshot: GoalSnapshot = {
   maxRounds: 10,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-01T00:00:01.000Z',
+  ranMs: 0,
   activation: 'armed',
 };
 
