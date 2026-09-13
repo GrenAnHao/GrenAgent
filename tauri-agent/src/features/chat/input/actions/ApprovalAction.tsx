@@ -28,7 +28,7 @@ const styles = createStaticStyles(({ css }) => ({
 /**
  * 审批策略选择器：请求批准 / 替我审批 / 完全访问，与「模式」并列。
  * 每级是一档确认强度（驱动 safety 的逐次确认行为）。当前级别由 sidecar approval 扩展经 setStatus
- * 推送到 approvalStore（切会话/刷新回读）；切换走 agent_set_approval（底层 /approval，不调 LLM）。
+ * 推送到 approvalStore（切会话/刷新回读）；切换走 agent_set_approval（写运行时配置，不进对话）。
  */
 export default function ApprovalAction() {
   const { workspace, workspaceReady } = useAgentStoreContext();

@@ -1,4 +1,4 @@
-import { Button, Flexbox } from '@lobehub/ui';
+import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { App, Dropdown, Popconfirm, Switch } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -8,6 +8,8 @@ import {
   FolderInput,
   FolderOpen,
   Import,
+  LayoutGrid,
+  List,
   Plus,
   RefreshCw,
   Sparkles,
@@ -25,6 +27,26 @@ import {
   type SkillInfo,
 } from '../../lib/skillsIo';
 import { AddSkillModal } from './AddSkillModal';
+import { formatSkillSummary } from './formatSkillSummary';
+
+type SkillCatalogView = 'list' | 'grid';
+const VIEW_KEY = 'pi-skills-catalog-view';
+
+function readCatalogView(): SkillCatalogView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function writeCatalogView(view: SkillCatalogView): void {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // privacy / quota
+  }
+}
 
 interface NativeSkillsPanelProps {
   values: Record<string, string>;
@@ -84,6 +106,40 @@ const styles = createStaticStyles(({ css }) => ({
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
   `,
+  viewToggle: css`
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 8px;
+    background: ${cssVar.colorFillTertiary};
+  `,
+  viewBtn: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: ${cssVar.colorTextTertiary};
+    cursor: pointer;
+
+    &[data-active='true'] {
+      background: ${cssVar.colorBgContainer};
+      color: ${cssVar.colorText};
+    }
+  `,
+  catalog: css`
+    display: flex;
+    flex-direction: column;
+  `,
+  catalogGrid: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+  `,
   card: css`
     display: flex;
     align-items: center;
@@ -93,6 +149,28 @@ const styles = createStaticStyles(({ css }) => ({
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 8px;
     background: ${cssVar.colorBgContainer};
+  `,
+  cardGrid: css`
+    flex-direction: column;
+    align-items: stretch;
+    margin-block-end: 0;
+  `,
+  identity: css`
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  `,
+  actions: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  `,
+  actionsGrid: css`
+    justify-content: flex-end;
+    width: 100%;
   `,
   avatar: css`
     display: inline-flex;
@@ -127,6 +205,12 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  `,
+  summaryGrid: css`
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
   `,
   empty: css`
     display: flex;
@@ -178,6 +262,11 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [view, setView] = useState<SkillCatalogView>(readCatalogView);
+  const setCatalogView = (next: SkillCatalogView) => {
+    setView(next);
+    writeCatalogView(next);
+  };
 
   const reloadSkills = useCallback(async () => {
     setLoading(true);
@@ -284,6 +373,14 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
           </span>
         </div>
         <Flexbox horizontal align="center" gap={8}>
+          <div className={styles.viewToggle} role="group" aria-label="视图">
+            <button type="button" className={styles.viewBtn} data-active={view === 'list'} data-testid="skill-view-list" title="列表" aria-pressed={view === 'list'} onClick={() => setCatalogView('list')}>
+              <Icon icon={List} size={14} />
+            </button>
+            <button type="button" className={styles.viewBtn} data-active={view === 'grid'} data-testid="skill-view-grid" title="网格" aria-pressed={view === 'grid'} onClick={() => setCatalogView('grid')}>
+              <Icon icon={LayoutGrid} size={14} />
+            </button>
+          </div>
           <Button size="small" loading={loading} data-testid="skill-refresh" icon={<RefreshCw size={14} />} onClick={() => void handleRefresh()}>刷新</Button>
           <Button size="small" data-testid="skill-open-dir" icon={<FolderOpen size={14} />} onClick={() => void openDirectory()}>打开目录</Button>
           <Dropdown menu={importMenu} trigger={['click']}>
@@ -298,29 +395,36 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
       {skills.length === 0 ? (
         <div className={styles.empty} data-testid="skills-empty"><Sparkles size={22} /><span>未发现本机技能，点右上「新增技能」或导入</span></div>
       ) : (
-        skills.map((skill) => {
-          const off = disabled.has(skill.name);
-          return (
-            <div key={`${skill.scope}:${skill.name}`} className={styles.card} data-testid={`skill-${skill.name}`}>
-              <span className={styles.avatar} style={{ background: avatarBackground(skill.name) }}>{skill.name.slice(0, 1)}</span>
-              <div className={styles.meta}>
-                <span className={styles.name}>{skill.name}</span>
-                {skill.description ? <span className={styles.summary}>{skill.description}</span> : null}
+        <div className={`${styles.catalog} ${view === 'grid' ? styles.catalogGrid : ''}`} data-testid="skill-catalog" data-view={view}>
+          {skills.map((skill) => {
+            const off = disabled.has(skill.name);
+            const summary = formatSkillSummary(skill.description);
+            return (
+              <div key={`${skill.scope}:${skill.name}`} className={`${styles.card} ${view === 'grid' ? styles.cardGrid : ''}`} data-testid={`skill-${skill.name}`}>
+                <div className={styles.identity}>
+                  <span className={styles.avatar} style={{ background: avatarBackground(skill.name) }}>{skill.name.slice(0, 1)}</span>
+                  <div className={styles.meta}>
+                    <span className={styles.name}>{skill.name}</span>
+                    {summary ? <span className={`${styles.summary} ${view === 'grid' ? styles.summaryGrid : ''}`} data-testid={`skill-summary-${skill.name}`}>{summary}</span> : null}
+                  </div>
+                </div>
+                <div className={`${styles.actions} ${view === 'grid' ? styles.actionsGrid : ''}`}>
+                  <Switch size="small" checked={!off} onChange={() => toggleSkill(skill.name)} data-testid={`skill-toggle-${skill.name}`} />
+                  <Popconfirm
+                    title="永久删除技能"
+                    description={`确定删除「${skill.name}」吗？将从磁盘移除整个文件夹，不可恢复。`}
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true, 'data-testid': `skill-delete-confirm-${skill.name}` }}
+                    onConfirm={() => void handleDelete(skill)}
+                  >
+                    <button type="button" className={styles.delete} data-testid={`skill-delete-${skill.name}`} title="永久删除"><Trash2 size={15} /></button>
+                  </Popconfirm>
+                </div>
               </div>
-              <Switch size="small" checked={!off} onChange={() => toggleSkill(skill.name)} data-testid={`skill-toggle-${skill.name}`} />
-              <Popconfirm
-                title="永久删除技能"
-                description={`确定删除「${skill.name}」吗？将从磁盘移除整个文件夹，不可恢复。`}
-                okText="删除"
-                cancelText="取消"
-                okButtonProps={{ danger: true, 'data-testid': `skill-delete-confirm-${skill.name}` }}
-                onConfirm={() => void handleDelete(skill)}
-              >
-                <button type="button" className={styles.delete} data-testid={`skill-delete-${skill.name}`} title="永久删除"><Trash2 size={15} /></button>
-              </Popconfirm>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
       <AddSkillModal open={modalOpen} existingNames={skills.map((skill) => skill.name)} onSubmit={handleCreate} onClose={() => setModalOpen(false)} />
     </>

@@ -21,7 +21,12 @@ vi.mock('virtua', async () => {
 });
 
 // AgentStoreContext mock：直通假 useAgentStore（zustand-like 选择器）。excluded 供气泡上下文控制动作订阅。
-const mockState: { messages: ChatMessage[]; isStreaming: boolean; excluded: Set<number> } = {
+const mockState: {
+  messages: ChatMessage[];
+  isStreaming: boolean;
+  excluded: Set<number>;
+  waitingUiPrompt?: { kind: 'select' | 'confirm' | 'input' | 'editor' | 'custom'; title?: string };
+} = {
   messages: [],
   isStreaming: false,
   excluded: new Set(),
@@ -43,6 +48,7 @@ afterEach(() => {
   mockState.messages = [];
   mockState.isStreaming = false;
   mockState.excluded = new Set();
+  delete mockState.waitingUiPrompt;
 });
 
 function setMessages(msgs: ChatMessage[]) {
@@ -123,5 +129,33 @@ describe('ChatListView', { timeout: 60_000 }, () => {
       </ThemeProvider>,
     );
     expect(screen.queryByText('准备响应中…')).toBeNull();
+  });
+
+  it('等待批准时显示「等待批准…」而不是「准备响应中…」', () => {
+    mockState.isStreaming = true;
+    mockState.waitingUiPrompt = { kind: 'select', title: '请求批准' };
+    setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('等待批准…')).toBeTruthy();
+    expect(screen.queryByText('准备响应中…')).toBeNull();
+  });
+
+  it('已有工具卡片时仍显示等待批准脚注', () => {
+    mockState.isStreaming = true;
+    mockState.waitingUiPrompt = { kind: 'select' };
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'tool', id: 't1', toolCallId: 'tc1', toolName: 'bash', args: {}, result: {}, status: 'running' } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('等待批准…')).toBeTruthy();
   });
 });

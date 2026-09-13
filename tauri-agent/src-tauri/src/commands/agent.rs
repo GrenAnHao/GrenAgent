@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -38,6 +38,20 @@ async fn send(mgr: &PiManager, workspace: &str, cmd: PiOutbound) -> Result<Value
 
 fn perf_log(label: &str, elapsed_ms: u128) {
     eprintln!("[PERF-startup] {label}: {elapsed_ms}ms");
+}
+
+fn runtime_workspace_key(prefix: &str, workspace: &str) -> String {
+    format!(
+        "{prefix}:{}",
+        workspace.replace('\\', "/").trim_end_matches('/').to_lowercase()
+    )
+}
+
+fn pulse_rev() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
 }
 
 pub(crate) fn is_conversation_workspace(cwd: &Path) -> bool {
@@ -330,89 +344,83 @@ pub async fn agent_cycle_thinking_level(
     .await
 }
 
-/// 切换 agent 模式（agent / ask / debug / plan）。底层走 prompt 通道发送 `/mode <mode>`，
-/// 由 sidecar 的 agent-mode 扩展执行命令（限制工具集 + 注入对应 prompt），不调用 LLM；
-/// 切换后新模式经 setStatus 推回前端供选择器回读。
+/// 切换 agent 模式（agent / ask / debug / plan / brainstorm）。写 PI_RUNTIME_CONFIG 侧信道，
+/// 由 agent-mode 扩展 watchConfig 应用工具集；不发假 prompt、不进对话。
 #[tauri::command]
 pub async fn agent_set_mode(
     workspace: String,
     mode: String,
-    mgr: State<'_, Arc<PiManager>>,
+    store: State<'_, AppStateStore>,
 ) -> Result<Value, String> {
-    send(
-        &mgr,
-        &workspace,
-        PiOutbound::Prompt {
-            id: None,
-            message: format!("/mode {mode}"),
-            images: None,
-            streaming_behavior: None,
-        },
-    )
-    .await
+    let normalized = mode.trim().to_lowercase();
+    if normalized != "agent"
+        && normalized != "ask"
+        && normalized != "debug"
+        && normalized != "plan"
+        && normalized != "brainstorm"
+    {
+        return Err("INVALID_AGENT_MODE".into());
+    }
+    let mut patch = HashMap::new();
+    patch.insert(runtime_workspace_key("AGENT_MODE", &workspace), normalized.clone());
+    store.merge_runtime_patch(patch).await;
+    Ok(serde_json::json!({ "ok": true, "mode": normalized }))
 }
 
-/// 切换审批策略（ask / auto / full）。底层走 prompt 通道发送 `/approval <level>`，
-/// 由 sidecar 的 approval 扩展执行（设共享策略 + 持久化），不调用 LLM；
-/// 切换后新策略经 setStatus 推回前端供选择器回读。
+/// 切换审批策略（ask / auto / full）。写 PI_RUNTIME_CONFIG 侧信道，
+/// 由 sidecar approval 扩展 watchConfig 应用；不发假 prompt、不进对话。
 #[tauri::command]
 pub async fn agent_set_approval(
     workspace: String,
     level: String,
-    mgr: State<'_, Arc<PiManager>>,
+    store: State<'_, AppStateStore>,
 ) -> Result<Value, String> {
-    send(
-        &mgr,
-        &workspace,
-        PiOutbound::Prompt {
-            id: None,
-            message: format!("/approval {level}"),
-            images: None,
-            streaming_behavior: None,
-        },
-    )
-    .await
+    let normalized = level.trim().to_lowercase();
+    if normalized != "ask" && normalized != "auto" && normalized != "full" {
+        return Err("INVALID_APPROVAL_POLICY".into());
+    }
+    let mut patch = HashMap::new();
+    patch.insert(runtime_workspace_key("APPROVAL_POLICY", &workspace), normalized.clone());
+    store.merge_runtime_patch(patch).await;
+    Ok(serde_json::json!({ "ok": true, "level": normalized }))
 }
 
-/// 把某条消息移出 LLM 上下文（删任意段）：经 prompt 通道发 `/ctx-exclude <ts>`，由 compaction-policy
-/// 扩展拦截执行（appendEntry 持久 + 更新排除集），不调用 LLM、不进对话。timestamp 为该消息毫秒时间戳。
+/// 把某条消息移出 LLM 上下文：写 CONTEXT_EXCLUSION_OP pulse，由 compaction-policy watchConfig 应用。
 #[tauri::command]
 pub async fn agent_exclude_entry(
     workspace: String,
     timestamp: i64,
-    mgr: State<'_, Arc<PiManager>>,
+    store: State<'_, AppStateStore>,
 ) -> Result<Value, String> {
-    send(
-        &mgr,
-        &workspace,
-        PiOutbound::Prompt {
-            id: None,
-            message: format!("/ctx-exclude {timestamp}"),
-            images: None,
-            streaming_behavior: None,
-        },
-    )
-    .await
+    write_context_exclusion(&workspace, "add", timestamp, &store).await
 }
 
-/// 恢复被移出上下文的消息：经 prompt 通道发 `/ctx-restore <ts>`，同样由扩展拦截执行、不进对话。
+/// 恢复被移出上下文的消息：写 CONTEXT_EXCLUSION_OP pulse。
 #[tauri::command]
 pub async fn agent_restore_entry(
     workspace: String,
     timestamp: i64,
-    mgr: State<'_, Arc<PiManager>>,
+    store: State<'_, AppStateStore>,
 ) -> Result<Value, String> {
-    send(
-        &mgr,
-        &workspace,
-        PiOutbound::Prompt {
-            id: None,
-            message: format!("/ctx-restore {timestamp}"),
-            images: None,
-            streaming_behavior: None,
-        },
-    )
-    .await
+    write_context_exclusion(&workspace, "remove", timestamp, &store).await
+}
+
+async fn write_context_exclusion(
+    workspace: &str,
+    op: &str,
+    timestamp: i64,
+    store: &AppStateStore,
+) -> Result<Value, String> {
+    let pulse = serde_json::json!({
+        "op": op,
+        "ts": timestamp,
+        "rev": pulse_rev(),
+    })
+    .to_string();
+    let mut patch = HashMap::new();
+    patch.insert(runtime_workspace_key("CONTEXT_EXCLUSION_OP", workspace), pulse);
+    store.merge_runtime_patch(patch).await;
+    Ok(serde_json::json!({ "ok": true, "op": op, "timestamp": timestamp }))
 }
 
 /// 扫描会话 jsonl，返回内层 `message.timestamp == ts` 的 entry 的顶层 `id`（取最后匹配，规避同 ts 多分支）。

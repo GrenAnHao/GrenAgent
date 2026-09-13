@@ -1,9 +1,43 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
 use crate::state::AppState;
+
+fn is_preserved_runtime_key(key: &str) -> bool {
+    key == "APPROVAL_POLICY"
+        || key.starts_with("APPROVAL_POLICY:")
+        || key == "AGENT_MODE"
+        || key.starts_with("AGENT_MODE:")
+        || key.starts_with("CONTEXT_EXCLUSION_OP:")
+}
+
+fn read_runtime_map(path: &Path) -> HashMap<String, String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    match serde_json::from_str::<HashMap<String, String>>(&text) {
+        Ok(map) => map,
+        Err(_) => HashMap::new(),
+    }
+}
+
+fn write_runtime_map(path: &Path, map: &HashMap<String, String>) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(map) {
+        Ok(json) => {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+        Err(e) => eprintln!("[runtime-config] serialize failed: {e}"),
+    }
+}
 
 /// 线程安全的 AppState 持有者 + 持久化路径。作为 Tauri managed state。
 #[derive(Clone)]
@@ -64,7 +98,7 @@ impl AppStateStore {
     }
 
 
-    /// 运行时配置文件路径（注入 sidecar 供扩展 fs.watch 热更新）。
+    /// 运行时配置文件路径（注入 sidecar 供扩展热更新读取）。
     pub fn runtime_path(&self) -> PathBuf {
         self.runtime_path.clone()
     }
@@ -73,17 +107,22 @@ impl AppStateStore {
     pub async fn write_runtime_config(&self) {
         let env = self.settings_env().await;
         let path = self.runtime_path.clone();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        let preserved: HashMap<String, String> = read_runtime_map(&path)
+            .into_iter()
+            .filter(|(key, _)| is_preserved_runtime_key(key))
+            .collect();
+        let mut merged = env;
+        for (key, value) in preserved {
+            merged.entry(key).or_insert(value);
         }
-        match serde_json::to_string_pretty(&env) {
-            Ok(json) => {
-                let tmp = path.with_extension("json.tmp");
-                if std::fs::write(&tmp, json).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
-            }
-            Err(e) => eprintln!("[runtime-config] serialize failed: {e}"),
-        }
+        write_runtime_map(&path, &merged);
+    }
+
+    /// 合并写入运行时配置（审批切换走侧信道，不发假 prompt）。
+    pub async fn merge_runtime_patch(&self, patch: HashMap<String, String>) {
+        let path = self.runtime_path.clone();
+        let mut current = read_runtime_map(&path);
+        current.extend(patch);
+        write_runtime_map(&path, &current);
     }
 }

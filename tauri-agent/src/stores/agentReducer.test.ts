@@ -6,6 +6,7 @@ import {
   messagesFromAgent,
   messagesFromTranscript,
   excludedFromAgent,
+  type AgentState,
   type ChatMessage,
 } from './agentReducer';
 import type { AgentEvent } from '../lib/pi';
@@ -83,6 +84,12 @@ describe('applyEvent', () => {
     s = applyEvent(s, { type: 'compaction_start', reason: 'auto' } as AgentEvent);
     s = applyEvent(s, { type: 'agent_end' } as AgentEvent);
     expect(s.compacting).toBe(false);
+  });
+
+  it('clears waitingUiPrompt on agent_end', () => {
+    let s: AgentState = { ...initialAgentState(), waitingUiPrompt: { kind: 'select', title: '请求批准' } };
+    s = applyEvent(s, { type: 'agent_end' } as AgentEvent);
+    expect(s.waitingUiPrompt).toBeUndefined();
   });
 
   it('finalizes on agent_end and clears streaming', () => {
@@ -376,6 +383,22 @@ describe('applyEvent', () => {
     expect(text(last)).toBe('done');
     expect(last.kind === 'assistant' && last.streaming).toBe(false);
   });
+
+  it('message_end with empty content keeps text accumulated from text_delta', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: 'c=5' },
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: { role: 'assistant', content: [] },
+    } as AgentEvent);
+    const last = s.messages.at(-1)!;
+    expect(text(last)).toBe('c=5');
+    expect(last.kind === 'assistant' && last.streaming).toBe(false);
+  });
 });
 
 describe('custom injection messages -> notice', () => {
@@ -431,6 +454,24 @@ describe('messagesFromTranscript (子代理 JSONL 还原)', () => {
   it('ignores blank lines and malformed json', () => {
     const transcript = ['', 'not json', JSON.stringify({ type: 'agent_start' }), '  '].join('\n');
     expect(messagesFromTranscript(transcript)).toEqual([]);
+  });
+
+  it('replays json-mode text_delta when message_end snapshot is empty', () => {
+    const transcript = [
+      JSON.stringify({ type: 'session', version: 3 }),
+      JSON.stringify({ type: 'agent_start' }),
+      JSON.stringify({ type: 'message_start', message: { role: 'assistant', content: [] } }),
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: 'RESULT:c=5' },
+      }),
+      JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [] } }),
+      JSON.stringify({ type: 'agent_end' }),
+    ].join('\n');
+    const msgs = messagesFromTranscript(transcript);
+    const assistant = msgs.find((m) => m.kind === 'assistant');
+    expect(assistant && assistant.kind === 'assistant' ? assistant.text : '').toBe('RESULT:c=5');
+    expect(assistant && assistant.kind === 'assistant' ? assistant.streaming : true).toBe(false);
   });
 });
 

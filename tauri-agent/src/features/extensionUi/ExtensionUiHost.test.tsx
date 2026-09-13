@@ -2,12 +2,13 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 
-const { setStatus, goalSetGoal, setServers, msg, setRequest } = vi.hoisted(() => ({
+const { setStatus, goalSetGoal, setServers, msg, setRequest, setWaitingUiPrompt } = vi.hoisted(() => ({
   setStatus: vi.fn(),
   goalSetGoal: vi.fn(),
   setServers: vi.fn(),
   msg: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   setRequest: vi.fn(),
+  setWaitingUiPrompt: vi.fn(),
 }));
 const uiListeners = new Set<(e: unknown) => void>();
 let emit: (e: unknown) => void = (e) => {
@@ -35,6 +36,12 @@ vi.mock('../../stores/mcpStatusStore', () => ({
 vi.mock('../../stores/uiPromptStore', () => ({
   useUiPromptStore: { getState: () => ({ setRequest }) },
 }));
+vi.mock('../../stores/agentStoreRegistry', () => ({
+  agentStoreRegistry: {
+    get: (workspace: string) =>
+      workspace === '/ws' ? { useStore: { setState: setWaitingUiPrompt } } : undefined,
+  },
+}));
 
 import { ExtensionUiHost } from './ExtensionUiHost';
 import { useImMessagesStore } from '../../stores/imMessagesStore';
@@ -46,6 +53,7 @@ afterEach(() => {
   goalSetGoal.mockClear();
   setServers.mockClear();
   setRequest.mockClear();
+  setWaitingUiPrompt.mockClear();
   msg.info.mockClear();
   msg.warning.mockClear();
   useImMessagesStore.getState().setConversations([]);
@@ -85,6 +93,28 @@ describe('ExtensionUiHost', () => {
     emit({ workspace: '/ws', request: { id: 's1', method: 'setStatus', statusKey: 'plan-mode', statusText: '📋 Plan' } });
     expect(setStatus).toHaveBeenCalledWith('📋 Plan');
     expect(screen.queryByText('📋 Plan')).toBeNull();
+  });
+
+  it('routes setStatus(ui-prompt) to the agent store waiting state', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: {
+        id: 's2',
+        method: 'setStatus',
+        statusKey: 'ui-prompt',
+        statusText: JSON.stringify({ kind: 'select', title: '请求批准' }),
+      },
+    });
+    expect(setWaitingUiPrompt).toHaveBeenCalledWith({
+      waitingUiPrompt: { kind: 'select', title: '请求批准' },
+    });
+  });
+
+  it('clears waitingUiPrompt when ui-prompt status is empty', () => {
+    render(<ExtensionUiHost />);
+    emit({ workspace: '/ws', request: { id: 's3', method: 'setStatus', statusKey: 'ui-prompt' } });
+    expect(setWaitingUiPrompt).toHaveBeenCalledWith({ waitingUiPrompt: undefined });
   });
 
   it('routes setStatus(mcp) to the mcp status store', () => {

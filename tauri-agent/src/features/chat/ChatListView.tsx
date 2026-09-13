@@ -6,6 +6,7 @@ import { groupMessages } from './groupMessages';
 import { ChatMessageItems } from './ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from './messagePrecompute';
 import { PreparingIndicator } from './PreparingIndicator';
+import { waitingUiPromptLabel } from '../../stores/waitingUiPrompt';
 
 export function ChatListView() {
   const { useStore } = useAgentStore();
@@ -14,6 +15,7 @@ export function ChatListView() {
   const messages = useStore((s) => s.messages);
   const isStreaming = useStore((s) => s.isStreaming);
   const awaitingResponse = useStore((s) => s.awaitingResponse);
+  const waitingLabel = waitingUiPromptLabel(useStore((s) => s.waitingUiPrompt));
 
   // streaming 中 100ms 节流，避免每 token 触发整列重算（详见 useThrottledValue 契约）。
   const throttledMessages = useThrottledValue(messages, 100, { enabled: isStreaming });
@@ -25,16 +27,17 @@ export function ChatListView() {
   const last = display[display.length - 1];
   const lastIsSteer = last?.kind === 'user' && last.steering === true;
   const showPreparing =
-    (isStreaming || Boolean(awaitingResponse)) &&
-    !lastIsSteer &&
-    (!last || (last.kind !== 'turn' && last.kind !== 'tool'));
+    Boolean(waitingLabel) ||
+    ((isStreaming || Boolean(awaitingResponse)) &&
+      !lastIsSteer &&
+      (!last || (last.kind !== 'turn' && last.kind !== 'tool')));
 
   return (
     <ChatMessageItems
       messages={display}
       unitsByMessage={unitsByMessage}
       answeredQuestions={answeredQuestions}
-      footer={showPreparing ? <PreparingIndicator /> : undefined}
+      footer={showPreparing ? <PreparingIndicator label={waitingLabel} /> : undefined}
       fill="absolute"
       paddingInline={24}
       resetKey={sessionPath}

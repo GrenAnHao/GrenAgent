@@ -5,7 +5,7 @@ import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useSessionStore } from '../../../../store/session';
 import { isUnder } from '../../../../lib/pathUtils';
 import { resolveCommandIcon } from '../commandIcons';
-import { commandMatchesQuery, getFrontendCommands } from '../commandUtils';
+import { commandMatchesQuery, getFrontendCommands, visibleSlashCommands } from '../commandUtils';
 import type { CommandApiSource, PiCommand } from '../commandTypes';
 import { loadCommands } from './commandLoader';
 import { INSERT_CHAT_TAG_COMMAND } from './ChatTag/command';
@@ -48,7 +48,7 @@ function clampDesc(s: string | undefined): string | undefined {
 /** 过滤 + 按类目分组（每组前插带标题的分隔项）+ 补功能图标/描述，喂给编辑器 slash 菜单渲染。 */
 function toOptions(commands: PiCommand[], query: string): ISlashOption[] {
   const buckets = new Map<GroupKey, PiCommand[]>();
-  for (const c of commands) {
+  for (const c of visibleSlashCommands(commands)) {
     if (!commandMatchesQuery(c, query)) continue;
     const key = groupKey(c);
     const bucket = buckets.get(key) ?? [];

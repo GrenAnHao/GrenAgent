@@ -1,11 +1,29 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { Button, Icon } from '@lobehub/ui';
-import { MessageCircleQuestion, X } from 'lucide-react';
+import { MessageCircleQuestion, ShieldAlert, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { QuestionSelector } from '../../../components/QuestionSelector';
 import { extensionUiRespond } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
+
+/** sidecar 审批选项。点按钮即回传，不再走「请选择」单选题。 */
+const APPROVAL_ACTIONS = new Set(['允许本次', '总是允许', '允许', '拒绝']);
+const APPROVAL_TEST_IDS: Record<string, string> = {
+  允许本次: 'allow-once',
+  总是允许: 'allow-always',
+  允许: 'allow',
+  拒绝: 'deny',
+};
+const APPROVAL_ORDER = ['拒绝', '总是允许', '允许', '允许本次'];
+
+export function isApprovalSelect(options: string[] | undefined): boolean {
+  return Array.isArray(options) && options.length > 0 && options.every((label) => APPROVAL_ACTIONS.has(label));
+}
+
+function sortApprovalOptions(options: string[]): string[] {
+  return [...options].sort((a, b) => APPROVAL_ORDER.indexOf(a) - APPROVAL_ORDER.indexOf(b));
+}
 
 const styles = createStaticStyles(({ css }) => ({
   card: css`
@@ -85,7 +103,7 @@ const styles = createStaticStyles(({ css }) => ({
 
 /**
  * ChatInput 上方的内联「交互请求」：扩展经 ctx.ui.select / confirm / input 发起。
- * select 与对话流 QuestionsCard 共用 QuestionSelector（Cursor 风格选项行）。
+ * 审批类 select 走独立按钮（点一下即回传）；其余 select 与 QuestionsCard 共用 QuestionSelector。
  */
 export const PromptRequestCard = memo(function PromptRequestCard() {
   const { workspace } = useAgentStoreContext();
@@ -126,8 +144,43 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const isSelect = !isConfirm && !isInput;
   const dismiss = () => respond(isConfirm ? { confirmed: false } : { cancelled: true });
 
-  // select：QuestionSelector 本身已是完整卡片（头部 + 题面 + 选项 + 页脚），直接渲染、
-  // 不再套外层卡，避免「卡中卡」与「请选择」标题重复。题面（如代码）由 assistant 正文先给出。
+  if (isSelect && isApprovalSelect(request.options)) {
+    const options = sortApprovalOptions(request.options ?? []);
+    return (
+      <div className={styles.card} data-testid="prompt-request-approval">
+        <div className={styles.head}>
+          <Icon icon={ShieldAlert} size={13} />
+          <span className={styles.headTitle}>需要批准</span>
+          <button
+            className={styles.close}
+            data-testid="prompt-request-dismiss"
+            onClick={dismiss}
+            title="取消"
+            type="button"
+          >
+            <Icon icon={X} size={14} />
+          </button>
+        </div>
+        {request.title ? <div className={styles.body}>{request.title}</div> : null}
+        {respondError ? <div className={styles.error}>{`提交失败：${respondError}`}</div> : null}
+        <div className={styles.row}>
+          {options.map((label) => (
+            <Button
+              data-testid={`prompt-request-approval-${APPROVAL_TEST_IDS[label] ?? label}`}
+              key={label}
+              onClick={() => respond({ value: label })}
+              size="small"
+              type={label === '允许本次' || label === '允许' ? 'primary' : undefined}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 其余 select（问答 / 多选项）仍走 QuestionSelector。
   if (isSelect) {
     const options = request.options?.length ? request.options : ['确定', '取消'];
     const selectQuestion = {

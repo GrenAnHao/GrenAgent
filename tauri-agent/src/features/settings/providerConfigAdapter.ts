@@ -1,5 +1,17 @@
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+import { allowedCompatKeys, showsThinkingFormat } from './modelCompatCatalog';
+
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
+
+/** models.json 模型 compat：按当前 API 过滤后写入。对象型路由字段用字符串编辑，保存时再解析。 */
+export type ModelCompat = Record<string, unknown>;
+
+export interface ModelCost {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 
 export interface UiModel {
   id: string;
@@ -9,6 +21,10 @@ export interface UiModel {
   input?: ('text' | 'image')[];
   contextWindow?: number;
   maxTokens?: number;
+  cost?: ModelCost;
+  /** 写入 compat.thinkingFormat。仅 openai-completions 落盘。 */
+  thinkingFormat?: string;
+  compat?: ModelCompat;
   /**
    * 仅 anthropic-messages 推理模型有意义：写入 models.json 的 compat.forceAdaptiveThinking。
    * 开启时 pi 走自适应思考、发送 effort（供应商后台「推理强度」列才有值）；关闭时走 budget 思考、不发 effort。
@@ -31,7 +47,7 @@ export interface UiProvider {
   models: UiModel[];
 }
 
-/** models.json 里的单个模型条目（落盘形态）：含 pi 的 compat，不含 UI 专用的 forceAdaptiveThinking。 */
+/** models.json 里的单个模型条目（落盘形态）：含 pi 的 compat，不含 UI 专用的 thinkingFormat / forceAdaptiveThinking。 */
 interface ModelEntry {
   id: string;
   name?: string;
@@ -40,7 +56,8 @@ interface ModelEntry {
   input?: ('text' | 'image')[];
   contextWindow?: number;
   maxTokens?: number;
-  compat?: { forceAdaptiveThinking?: boolean };
+  cost?: ModelCost;
+  compat?: ModelCompat;
 }
 
 interface ProviderEntry {
@@ -97,28 +114,91 @@ export function defaultThinkingLevelMap(api: string | undefined, modelId?: strin
   }
 }
 
-/** models.json 模型条目 → UI 模型：把 compat.forceAdaptiveThinking 还原成 UI 字段（anthropic 推理模型缺省视为开启）。 */
+function parseRoutingObject(raw: unknown): unknown {
+  if (raw == null || raw === '') return undefined;
+  if (typeof raw !== 'string') return raw;
+  const text = raw.trim();
+  if (!text) return undefined;
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  }
+  const only = text.replace(/^only:\s*/i, '');
+  const items = only.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  return items.length ? { only: items } : undefined;
+}
+
+function stringifyRoutingObject(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeCompat(m: UiModel, api: string | undefined): ModelCompat | undefined {
+  const allowed = allowedCompatKeys(api);
+  const merged: ModelCompat = { ...(m.compat ?? {}) };
+  if (showsThinkingFormat(api) && m.thinkingFormat) merged.thinkingFormat = m.thinkingFormat;
+  if (api === 'anthropic-messages' && m.reasoning) {
+    merged.forceAdaptiveThinking =
+      m.forceAdaptiveThinking ?? (merged.forceAdaptiveThinking as boolean | undefined) ?? true;
+  }
+
+  const out: ModelCompat = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (!allowed.has(key) || value === undefined || value === '') continue;
+    if (key === 'openRouterRouting' || key === 'vercelGatewayRouting' || key === 'chatTemplateKwargs') {
+      const parsed = parseRoutingObject(value);
+      if (parsed !== undefined) out[key] = parsed;
+      continue;
+    }
+    out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** models.json 模型条目 → UI 模型：还原 compat / thinkingFormat / 自适应思考。 */
 function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
   const { compat, ...rest } = m;
+  const thinkingFormat = typeof compat?.thinkingFormat === 'string' ? compat.thinkingFormat : undefined;
+  const uiCompat: ModelCompat = { ...(compat ?? {}) };
+  if (uiCompat.openRouterRouting !== undefined) uiCompat.openRouterRouting = stringifyRoutingObject(uiCompat.openRouterRouting);
+  if (uiCompat.vercelGatewayRouting !== undefined) uiCompat.vercelGatewayRouting = stringifyRoutingObject(uiCompat.vercelGatewayRouting);
+  if (uiCompat.chatTemplateKwargs !== undefined) uiCompat.chatTemplateKwargs = stringifyRoutingObject(uiCompat.chatTemplateKwargs);
+  const model: UiModel = {
+    ...rest,
+    ...(thinkingFormat ? { thinkingFormat } : {}),
+    ...(Object.keys(uiCompat).length ? { compat: uiCompat } : {}),
+  };
   if (api === 'anthropic-messages' && m.reasoning) {
-    return { ...rest, forceAdaptiveThinking: compat?.forceAdaptiveThinking ?? true };
+    model.forceAdaptiveThinking = (compat?.forceAdaptiveThinking as boolean | undefined) ?? true;
   }
-  return { ...rest };
+  return model;
 }
 
 /**
  * UI 模型 → models.json 模型条目：
- * - 推理模型按供应商 API 协议（含模型）重写 thinkingLevelMap；非推理模型清掉映射。
- * - anthropic 推理模型据 forceAdaptiveThinking（缺省 true）写 compat.forceAdaptiveThinking，决定是否发送 effort。
+ * - 推理模型保留用户 thinkingLevelMap；没有映射时才按协议补默认。
+ * - 非推理模型清掉映射。
+ * - compat 按当前 API 过滤；thinkingFormat 写入 compat。
  */
 function serializeModel(m: UiModel, api: string | undefined): ModelEntry {
-  const { forceAdaptiveThinking, ...rest } = m;
-  if (!m.reasoning) return { ...rest, thinkingLevelMap: undefined };
-  const entry: ModelEntry = { ...rest, thinkingLevelMap: defaultThinkingLevelMap(api, m.id) };
-  if (api === 'anthropic-messages') {
-    entry.compat = { forceAdaptiveThinking: forceAdaptiveThinking ?? true };
-  }
-  return entry;
+  const { forceAdaptiveThinking, thinkingFormat, compat, ...rest } = m;
+  void forceAdaptiveThinking;
+  void thinkingFormat;
+  void compat;
+  if (!m.reasoning) return { ...rest, thinkingLevelMap: undefined, compat: serializeCompat(m, api) };
+  return {
+    ...rest,
+    thinkingLevelMap: m.thinkingLevelMap ?? defaultThinkingLevelMap(api, m.id),
+    compat: serializeCompat(m, api),
+  };
 }
 
 /**
@@ -132,7 +212,7 @@ function hasUserAgent(headers: Record<string, string> | undefined): boolean {
   return !!headers && Object.keys(headers).some((k) => k.toLowerCase() === 'user-agent');
 }
 
-function withDefaultUserAgent(headers: Record<string, string> | undefined): Record<string, string> {
+export function withDefaultUserAgent(headers: Record<string, string> | undefined): Record<string, string> {
   const h = { ...(headers ?? {}) };
   if (!hasUserAgent(h)) h['User-Agent'] = DEFAULT_USER_AGENT;
   return h;
@@ -209,7 +289,6 @@ export function serializeState(providers: UiProvider[]): { modelsJson: string; a
   const auth: AuthJson = {};
 
   for (const p of providers) {
-    // 推理模型按供应商 API 协议 + 模型重写官方原生档位映射与 compat；非推理模型清掉映射。保存即刷新，无需手动重勾。
     const models = p.models.map((m) => serializeModel(m, p.api));
     if (p.builtIn) {
       if (p.apiKey) auth[p.id] = { type: 'api_key', key: p.apiKey };

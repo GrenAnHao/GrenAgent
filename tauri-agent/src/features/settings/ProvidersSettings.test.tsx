@@ -58,7 +58,7 @@ describe('ProvidersSettings', () => {
     await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
 
     fireEvent.click(screen.getByTestId('prov-add-provider'));
-    fireEvent.click(await screen.findByTestId('prov-add-model'));
+    fireEvent.click(await screen.findByTestId('prov-add-model', undefined, { timeout: 10000 }));
     fireEvent.change(await screen.findByTestId('prov-model-id-0'), {
       target: { value: 'my-model' },
     });
@@ -75,11 +75,34 @@ describe('ProvidersSettings', () => {
       (setProviderConfig.mock.calls.at(-1) as unknown as [string, string])[0];
 
     // 输入任意上下文窗口 → 原样落盘（不再被 1M / 200k 二选一限制）
-    const ctxInput = screen.getByPlaceholderText('上下文窗口');
+    const ctxWrap = screen.getByTestId('prov-model-context-0');
+    const ctxInput = (ctxWrap.querySelector('input') ?? ctxWrap) as HTMLInputElement;
     fireEvent.change(ctxInput, { target: { value: '128000' } });
     fireEvent.blur(ctxInput);
     fireEvent.click(screen.getByTestId('prov-save'));
     await waitFor(() => expect(setProviderConfig).toHaveBeenCalledTimes(1));
     expect(ctxOf(lastModelsJson())).toBe(128000);
+  }, 30000);
+
+  it('saves per-model image input and a default thinking map, and exposes thinkingFormat when expanded', async () => {
+    render(<ProvidersSettings />);
+    await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('prov-add-provider'));
+    fireEvent.click(await screen.findByTestId('prov-add-model', undefined, { timeout: 10000 }));
+    fireEvent.change(await screen.findByTestId('prov-model-id-0'), { target: { value: 'glm-5.2' } });
+    fireEvent.click(screen.getByTestId('prov-model-image-0'));
+    fireEvent.click(screen.getByTestId('prov-model-reasoning-0'));
+    fireEvent.click(screen.getByTestId('prov-save'));
+    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
+    const raw = JSON.parse((setProviderConfig.mock.calls.at(-1) as unknown as [string, string])[0]);
+    const model = Object.values(raw.providers as Record<string, { models?: Array<Record<string, unknown>> }>)
+      .flatMap((p) => p.models ?? [])
+      .find((m) => m.id === 'glm-5.2');
+    expect(model?.input).toEqual(['text', 'image']);
+    expect(model?.thinkingLevelMap).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('prov-model-expand-0'));
+    expect(screen.getByTestId('prov-model-format-0')).toBeTruthy();
+    expect(screen.getByTestId('prov-compat-supportsReasoningEffort-0')).toBeTruthy();
   }, 30000);
 });

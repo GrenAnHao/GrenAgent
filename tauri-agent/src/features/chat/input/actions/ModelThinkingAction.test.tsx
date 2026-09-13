@@ -30,7 +30,14 @@ const { piMock } = vi.hoisted(() => ({
 
 const MODELS = [
   { id: 'm', name: 'My Model', provider: 'anthropic' },
-  { id: 'g', name: 'GPT', provider: 'openai' },
+  {
+    id: 'g',
+    name: 'GPT',
+    provider: 'openai',
+    api: 'openai-completions',
+    reasoning: true,
+    thinkingLevelMap: { low: 'L', medium: 'M', high: 'H' },
+  },
 ];
 
 vi.mock('../../../../lib/pi', () => ({ pi: piMock }));
@@ -50,10 +57,15 @@ vi.mock('../../../settings/providerListCache', () => ({
     ]),
 }));
 
-import ModelThinkingAction from './ModelThinkingAction';
+import ModelThinkingAction, { resetModelThinkingCacheForTests } from './ModelThinkingAction';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetModelThinkingCacheForTests();
+  piMock.getState.mockResolvedValue({
+    thinkingLevel: 'off',
+    model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+  });
 });
 
 afterEach(() => {
@@ -75,7 +87,7 @@ describe('ModelThinkingAction', () => {
     await waitFor(() => {
       expect(piMock.getState).toHaveBeenCalled();
     });
-    fireEvent.click(await screen.findByText('high'));
+    fireEvent.click(await screen.findByText('高'));
     expect(piMock.setThinkingLevel).toHaveBeenCalledWith('/ws', 'high');
     expect(piMock.setModel).not.toHaveBeenCalled();
   });
@@ -90,5 +102,67 @@ describe('ModelThinkingAction', () => {
     expect(screen.getByText('GPT')).toBeTruthy();
     fireEvent.change(input, { target: { value: 'zzzznope' } });
     expect(screen.getByText('无匹配模型')).toBeTruthy();
+  });
+
+  it('空会话 getState 尚无模型时回退到可用列表，不停留在占位「模型」', async () => {
+    piMock.getState.mockResolvedValue({ thinkingLevel: 'off', model: null, sessionFile: '/ws/s.jsonl' });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    expect(piMock.setModel).toHaveBeenCalledWith('/ws', 'anthropic', 'm');
+  });
+
+  it('getState 报 SESSION_WORKSPACE_MISMATCH 时用列表回退显示，不写回 setModel', async () => {
+    piMock.getState.mockRejectedValue(new Error('SESSION_WORKSPACE_MISMATCH'));
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    expect(piMock.setModel).not.toHaveBeenCalled();
+  });
+
+  it('选模型后立刻用该模型 settings 里的 thinkingLevelMap 渲染档位', async () => {
+    let selected = { id: 'm', provider: 'anthropic', api: 'anthropic-messages' };
+    piMock.getState.mockImplementation(async () => ({
+      thinkingLevel: 'off',
+      // 模拟 getState 丢映射：只回 provider/id/api，档位配置必须从可用列表补上。
+      model: { id: selected.id, provider: selected.provider, api: selected.api, reasoning: true },
+    }));
+    piMock.setModel.mockImplementation(async (_ws: string, provider: string, id: string) => {
+      selected = { id, provider, api: 'openai-completions' };
+    });
+
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(piMock.getState).toHaveBeenCalled();
+    });
+    fireEvent.click(await screen.findByText('GPT'));
+    await waitFor(() => {
+      expect(screen.getByText('低')).toBeTruthy();
+    });
+    expect(screen.getByText('中')).toBeTruthy();
+    expect(screen.getByText('高')).toBeTruthy();
+    expect(screen.queryByText('最低')).toBeNull();
+    expect(screen.queryByText('很高')).toBeNull();
+    expect(screen.queryByText('最高')).toBeNull();
+  });
+
+  it('会话模型还没回读完时显示加载，而不是占位「模型」', async () => {
+    let resolveState: (value: unknown) => void = () => {};
+    piMock.getState.mockReturnValue(
+      new Promise((resolve) => {
+        resolveState = resolve;
+      }),
+    );
+    render(<ModelThinkingAction />);
+    expect(screen.getByTestId('model-trigger').textContent).toContain('加载模型');
+    resolveState({
+      thinkingLevel: 'off',
+      model: { id: 'g', provider: 'openai' },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
   });
 });

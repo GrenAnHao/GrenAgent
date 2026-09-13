@@ -12,6 +12,8 @@ import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
 import { useVisualStore } from '../../stores/visualStore';
+import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
+import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -108,6 +110,10 @@ export function ExtensionUiHost() {
           }
         } else if (r.statusKey === 'approval-policy') {
           if (isApprovalPolicy(r.statusText)) useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+        } else if (r.statusKey === 'ui-prompt') {
+          agentStoreRegistry.get(e.workspace)?.useStore.setState({
+            waitingUiPrompt: parseWaitingUiPrompt(r.statusText),
+          });
         } else if (r.statusKey === 'visual') {
           try {
             const d = typeof r.statusText === 'string' ? JSON.parse(r.statusText) : null;

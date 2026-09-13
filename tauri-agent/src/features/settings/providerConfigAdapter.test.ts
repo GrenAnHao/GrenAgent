@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
 import { defaultThinkingLevelMap, loadState, serializeState, type UiProvider } from './providerConfigAdapter';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
@@ -132,5 +133,78 @@ describe('providerConfigAdapter', () => {
     expect(JSON.parse(modelsJson).providers.p.models[0].compat).toBeUndefined();
     const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
     expect(back?.models[0].forceAdaptiveThinking).toBeUndefined();
+  });
+
+  it('preserves a per-model thinkingLevelMap instead of overwriting it with the API default', () => {
+    const customMap = { minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: 'max' };
+    const { modelsJson } = serializeState([
+      {
+        id: 'p', name: 'P', builtIn: false, api: 'openai-completions',
+        models: [{ id: 'glm-5.2', reasoning: true, thinkingLevelMap: customMap }],
+      },
+    ]);
+    expect(JSON.parse(modelsJson).providers.p.models[0].thinkingLevelMap).toEqual(customMap);
+  });
+
+  it('round-trips image input, thinkingFormat and openai compat flags', () => {
+    const { modelsJson, authJson } = serializeState([
+      {
+        id: 'p', name: 'P', builtIn: false, api: 'openai-completions',
+        models: [{
+          id: 'glm-5.2',
+          reasoning: true,
+          input: ['text', 'image'],
+          maxTokens: 16384,
+          cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+          thinkingFormat: 'zai',
+          compat: { supportsDeveloperRole: false, supportsReasoningEffort: true, maxTokensField: 'max_tokens' },
+        }],
+      },
+    ]);
+    const raw = JSON.parse(modelsJson).providers.p.models[0];
+    expect(raw.input).toEqual(['text', 'image']);
+    expect(raw.maxTokens).toBe(16384);
+    expect(raw.cost).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+    expect(raw.compat).toMatchObject({
+      thinkingFormat: 'zai',
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: true,
+      maxTokensField: 'max_tokens',
+    });
+    expect(raw.compat.forceAdaptiveThinking).toBeUndefined();
+
+    const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
+    expect(back?.models[0]).toMatchObject({
+      id: 'glm-5.2',
+      input: ['text', 'image'],
+      thinkingFormat: 'zai',
+      maxTokens: 16384,
+    });
+    expect(back?.models[0].compat).toMatchObject({ supportsDeveloperRole: false, thinkingFormat: 'zai' });
+  });
+
+  it('does not persist anthropic-only compat on openai-completions models', () => {
+    const { modelsJson } = serializeState([
+      {
+        id: 'p', name: 'P', builtIn: false, api: 'openai-completions',
+        models: [{
+          id: 'm',
+          reasoning: true,
+          forceAdaptiveThinking: true,
+          compat: { forceAdaptiveThinking: true, supportsMidConvoEffort: true, thinkingFormat: 'qwen' },
+        }],
+      },
+    ]);
+    const compat = JSON.parse(modelsJson).providers.p.models[0].compat;
+    expect(compat.thinkingFormat).toBe('qwen');
+    expect(compat.forceAdaptiveThinking).toBeUndefined();
+    expect(compat.supportsMidConvoEffort).toBeUndefined();
+  });
+
+  it('shows the Anthropic group in the editor but does not allow those keys on openai-completions', () => {
+    const groups = groupsForEditor('openai-completions');
+    expect(groups.some((g) => g.id === 'anthropic')).toBe(true);
+    expect(allowedCompatKeys('openai-completions').has('forceAdaptiveThinking')).toBe(false);
+    expect(allowedCompatKeys('anthropic-messages').has('forceAdaptiveThinking')).toBe(true);
   });
 });

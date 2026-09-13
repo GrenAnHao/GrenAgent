@@ -4,6 +4,7 @@ import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDown } from 'lucide-react';
 import type { DisplayMessage } from './groupMessages';
+import { shouldSmoothScroll } from './listScrollPolicy';
 
 interface VirtualizedMessageListProps {
   display: DisplayMessage[];
@@ -26,12 +27,8 @@ interface VirtualizedMessageListProps {
 
 // 距底多少像素内算「贴底」：与原手写滚动阈值一致。
 const BOTTOM_THRESHOLD = 120;
-// 离屏缓冲条数（virtua 默认 4）：调大以减少快速滚动时的空白——离屏多预渲染几条、提前挂载与测高。
-// 取 18 折中：够挡住常速快速滚动的露白，又不至于让过多重型 Markdown 常驻挂载拖累基线性能。
-const BUFFER_SIZE = 18;
-// 未测量项的高度预估（hint）：减少离屏项进入视口实测时的滚动跳动。消息高度并不均匀，故仅作初始估算、
-// 测量后即被真实高度取代（virtua 文档建议 uniform 时使用，这里取一个中位量级、副作用可控）。
-const ITEM_SIZE_HINT = 100;
+// virtua 0.49 的 bufferSize 是像素（默认 200），不是条数。800≈一屏，挡住快拖露白。
+const BUFFER_SIZE = 800;
 // 「回到底部」按钮显示所需最少条数（对齐旧手写列表：太短的列表不必显示）。
 const JUMP_MIN_ITEMS = 3;
 
@@ -112,12 +109,15 @@ export function VirtualizedMessageList({
     }
   };
 
-  // 一键回到底部：平滑滚到末条并恢复自动贴底（对齐旧手写列表的「回到底部」按钮）。
+  // 一键回到底部：近距离平滑，大跨度瞬时落点（避免沿途挂载整列 Markdown）。
   const jumpToBottom = () => {
     if (!ref.current || countRef.current === 0) return;
     atBottomRef.current = true;
     setShowJump(false);
-    ref.current.scrollToIndex(countRef.current - 1, { align: 'end', smooth: true });
+    ref.current.scrollToIndex(countRef.current - 1, {
+      align: 'end',
+      smooth: shouldSmoothScroll(anchorIndexRef.current, countRef.current - 1),
+    });
   };
 
   // 内容变化（新消息 / 流式增长）后贴底。用 layout effect：绘制前同步贴底，消除「先显旧位置再跳底」的一帧闪
@@ -207,7 +207,6 @@ export function VirtualizedMessageList({
           ref={ref}
           style={{ height: '100%', flex: 1, minHeight: 0 }}
           bufferSize={BUFFER_SIZE}
-          itemSize={ITEM_SIZE_HINT}
           onScroll={() => {
             if (resizingRef.current) return;
             const h = ref.current;

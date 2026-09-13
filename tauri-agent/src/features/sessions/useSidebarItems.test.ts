@@ -73,4 +73,42 @@ describe('buildSidebarItems', () => {
     expect(types.indexOf('pinned-label')).toBeLessThan(types.indexOf('section'));
     expect(types.indexOf('conversation')).toBeGreaterThan(types.indexOf('pinned-label'));
   });
+
+  it('lifts a pinned session into the pinned section and does not duplicate it in the project', () => {
+    const items = buildSidebarItems({
+      conversations: [conv],
+      pinnedGroups: [],
+      normalGroups: [group],
+      collapsed: {},
+      pinnedSessions: ['s6'],
+      showAllCwds: new Set(),
+    });
+    const convIdx = items.findIndex((i) => i.type === 'section' && i.action === 'new-conversation');
+    const lifted = items.filter((i) => i.type === 'session' && i.session.path === 's6');
+    expect(items[0]?.type).toBe('pinned-label');
+    expect(lifted).toHaveLength(1);
+    expect(lifted[0]?.pinned).toBe(true);
+    expect(items.indexOf(lifted[0]!)).toBeLessThan(convIdx);
+  });
+
+  it('lifts a pinned conversation into the pinned section and keeps others under 对话', () => {
+    const other: ConversationItem = { cwd: '/w/other', sessionPath: '/w/other/s.json', name: '对话2', timestamp: '', isCurrent: false };
+    const items = buildSidebarItems({
+      conversations: [conv, other],
+      pinnedGroups: [],
+      normalGroups: [],
+      collapsed: {},
+      pinnedSessions: [],
+      pinnedConversations: ['/w/other'],
+      showAllCwds: new Set(),
+    });
+    const convIdx = items.findIndex((i) => i.type === 'section' && i.action === 'new-conversation');
+    const lifted = items.filter((i) => i.type === 'conversation' && i.item.cwd === '/w/other');
+    const rest = items.filter((i) => i.type === 'conversation' && i.item.cwd === '/w/c');
+    expect(items[0]?.type).toBe('pinned-label');
+    expect(lifted).toHaveLength(1);
+    expect(rest).toHaveLength(1);
+    expect(items.indexOf(lifted[0]!)).toBeLessThan(convIdx);
+    expect(items.indexOf(rest[0]!)).toBeGreaterThan(convIdx);
+  });
 });

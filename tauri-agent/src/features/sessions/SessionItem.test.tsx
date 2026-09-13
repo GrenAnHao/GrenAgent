@@ -46,12 +46,25 @@ describe('SessionItem', () => {
     expect(within(row).queryAllByRole('button', { hidden: true }).length).toBeGreaterThan(0);
   });
 
-  it('opens the same menu on right-click and fires delete', () => {
+  it('opens the same menu on right-click and asks before delete', () => {
     const onDelete = vi.fn();
     const { container } = render(<SessionItem {...base} onDelete={onDelete} />);
     const row = container.querySelector('.pi-session-row') as HTMLElement;
     fireEvent.contextMenu(row);
-    fireEvent.click(screen.getByText('删除'));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText('确定删除「修复登录 bug」吗？此操作不可恢复。')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('session-delete-confirm'));
     expect(onDelete).toHaveBeenCalledOnce();
+  });
+
+  it('does not delete when the confirm dialog is canceled', () => {
+    const onDelete = vi.fn();
+    const { container } = render(<SessionItem {...base} onDelete={onDelete} />);
+    fireEvent.contextMenu(container.querySelector('.pi-session-row') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }));
+    expect(screen.getByText('确定删除「修复登录 bug」吗？此操作不可恢复。')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('session-delete-cancel'));
+    expect(onDelete).not.toHaveBeenCalled();
   });
 });

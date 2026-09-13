@@ -123,7 +123,7 @@ export function BranchPicker() {
               setDiffOpen(true);
             }}
           >
-            <Icon icon={FileDiff} size={13} />
+            <Icon className={s.iconMuted} icon={FileDiff} size={13} />
             <span className={s.rowName}>查看改动（{changes}）</span>
           </div>
         ) : null}
@@ -135,7 +135,7 @@ export function BranchPicker() {
             setGraphOpen(true);
           }}
         >
-          <Icon icon={Network} size={13} />
+          <Icon className={s.iconMuted} icon={Network} size={13} />
           <span className={s.rowName}>Git 图谱</span>
         </div>
         {creating ? (
@@ -154,7 +154,7 @@ export function BranchPicker() {
           </div>
         ) : (
           <div className={s.footRow} onClick={() => setCreating(true)}>
-            <Icon icon={GitBranchPlus} size={13} />
+            <Icon className={s.iconMuted} icon={GitBranchPlus} size={13} />
             <span className={s.rowName}>创建并检出新分支…</span>
           </div>
         )}

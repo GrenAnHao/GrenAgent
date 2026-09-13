@@ -1,15 +1,16 @@
 import { Icon } from '@lobehub/ui';
-import { Checkbox, Input, InputNumber, Popconfirm, Select } from 'antd';
+import { Input, Popconfirm, Select } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { pi } from '../../lib/pi';
 import { invalidateAvailableModels } from './availableModelsCache';
-import { defaultThinkingLevelMap, loadState, serializeState, type UiModel, type UiProvider } from './providerConfigAdapter';
+import { loadState, serializeState, type UiModel, type UiProvider } from './providerConfigAdapter';
 import { invalidateProviderList } from './providerListCache';
 import { PROVIDER_PRESETS, type ApiType } from './providerPresets';
 import { ProviderDiagnostics } from './ProviderDiagnostics';
 import { ModelSyncModal } from './ModelSyncModal';
+import { ProviderModelCard } from './ProviderModelCard';
 
 const API_OPTIONS: { value: ApiType; label: string }[] = [
   { value: 'openai-completions', label: 'OpenAI Completions 兼容' },
@@ -304,6 +305,7 @@ export function ProvidersSettings() {
   const [dirty, setDirty] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let alive = true;
@@ -605,7 +607,7 @@ export function ProvidersSettings() {
                   <div className={styles.group}>
                     <div className={styles.groupTitle}>自定义请求头</div>
                     <div className={styles.desc}>
-                      附加到该供应商的所有请求；留空则仅自动注入中性 User-Agent（规避代理 WAF 按官方 SDK UA 拦截）
+                      附加到该供应商的所有请求；留空则仅自动注入中性 User-Agent（规避代理 WAF 按官方 SDK UA 拦截）。值里可用 {'{sessionId}'}，发送时自动换成当前会话 ID（OpenCode Go 等需要在请求头带 session 的服务）
                     </div>
                     {active.headers.map((h, i) => (
                       <div key={h._uid} className={styles.modelRow}>
@@ -621,7 +623,7 @@ export function ProvidersSettings() {
                           className={styles.modelInput}
                           data-testid={`prov-header-value-${i}`}
                           value={h.value}
-                          placeholder="值"
+                          placeholder="值（可用 {sessionId}）"
                           variant="filled"
                           onChange={(e) => updateHeader(i, { value: e.target.value })}
                         />
@@ -647,79 +649,19 @@ export function ProvidersSettings() {
                   <div className={styles.desc}>
                     {active.builtIn
                       ? '内置模型由 Pi 提供（配 Key 后自动出现在对话）；此处仅添加额外模型'
-                      : '至少添加一个模型；ID 需与服务端一致'}
+                      : '至少添加一个模型；ID 需与服务端一致。同一协议下，每个模型可单独配置思考协议、档位映射和兼容项。'}
                   </div>
                   {models.map((m, i) => (
-                    <div key={m._uid} className={styles.modelRow}>
-                      <Input
-                        className={styles.modelInput}
-                        data-testid={`prov-model-id-${i}`}
-                        value={m.id}
-                        placeholder="模型 ID"
-                        variant="filled"
-                        onChange={(e) => updateModel(i, { id: e.target.value })}
-                      />
-                      <Input
-                        className={styles.modelInput}
-                        data-testid={`prov-model-name-${i}`}
-                        value={m.name ?? ''}
-                        placeholder="显示名（可选）"
-                        variant="filled"
-                        onChange={(e) => updateModel(i, { name: e.target.value })}
-                      />
-                      <Checkbox
-                        className={styles.modelCheckbox}
-                        data-testid={`prov-model-reasoning-${i}`}
-                        checked={!!m.reasoning}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          updateModel(i, {
-                            reasoning: checked ? true : undefined,
-                            thinkingLevelMap: checked ? defaultThinkingLevelMap(active.api, m.id) : undefined,
-                            // anthropic 推理模型默认开启自适应思考（发 effort）；其余 API 用不到此字段。
-                            forceAdaptiveThinking:
-                              checked && active.api === 'anthropic-messages' ? true : undefined,
-                          });
-                        }}
-                      >
-                        推理
-                      </Checkbox>
-                      {active.api === 'anthropic-messages' && m.reasoning ? (
-                        <Checkbox
-                          className={styles.modelCheckbox}
-                          data-testid={`prov-model-adaptive-${i}`}
-                          checked={m.forceAdaptiveThinking ?? true}
-                          onChange={(e) => updateModel(i, { forceAdaptiveThinking: e.target.checked })}
-                          title="开启后向 Anthropic 发送 effort(推理强度)；老模型 claude 3.7/4.0/4.5 不支持自适应思考，请关闭改用预算思考"
-                        >
-                          自适应
-                        </Checkbox>
-                      ) : null}
-                      <InputNumber
-                        className={styles.modelContext}
-                        data-testid={`prov-model-context-${i}`}
-                        value={m.contextWindow}
-                        placeholder="上下文窗口"
-                        min={0}
-                        step={1000}
-                        controls={false}
-                        variant="filled"
-                        title="上下文窗口（tokens），如 200000 / 1000000"
-                        formatter={(v) => (v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '')}
-                        parser={(v) => (v ? Number(v.replace(/,/g, '')) : 0)}
-                        onChange={(v) =>
-                          updateModel(i, { contextWindow: typeof v === 'number' ? v : undefined })
-                        }
-                      />
-                      <button
-                        type="button"
-                        data-testid={`prov-model-del-${i}`}
-                        className={styles.iconBtn}
-                        onClick={() => removeModel(i)}
-                      >
-                        <Icon icon={Trash2} size={14} />
-                      </button>
-                    </div>
+                    <ProviderModelCard
+                      key={m._uid}
+                      model={m}
+                      index={i}
+                      api={active.api}
+                      expanded={!!expanded[m._uid]}
+                      onToggle={() => setExpanded((cur) => ({ ...cur, [m._uid]: !cur[m._uid] }))}
+                      onChange={(patch) => updateModel(i, patch)}
+                      onRemove={() => removeModel(i)}
+                    />
                   ))}
                   <div className={styles.modelActions}>
                     <button type="button" data-testid="prov-add-model" className={styles.addBtn} onClick={addModel}>

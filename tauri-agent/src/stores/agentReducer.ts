@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
+import type { WaitingUiPrompt } from './waitingUiPrompt';
 
 /** 用户消息里的图片（base64），用于在气泡中回显发送的图片。 */
 export interface UserImage {
@@ -51,6 +52,8 @@ export interface AgentState {
   /** 上下文压缩进行中：由 pi 的 compaction_start/compaction_end 事件驱动，UI 据此显示「正在压缩上下文…」。
    * 此前这两个事件被前端丢弃，压缩（手动 /compact 或自动）全程无任何状态反馈。 */
   compacting?: boolean;
+  /** 扩展正在等 ctx.ui 提示（批准 / 确认 / 输入）。由 setStatus('ui-prompt') 写入，agent_end 清掉。 */
+  waitingUiPrompt?: WaitingUiPrompt;
 }
 
 export function initialAgentState(): AgentState {
@@ -246,6 +249,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         awaitingResponse: false,
         aborting: false,
         compacting: false,
+        waitingUiPrompt: undefined,
         messages: touched ? messages : state.messages,
       };
     }
@@ -268,6 +272,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         awaitingResponse: false,
         aborting: false,
         compacting: false,
+        waitingUiPrompt: undefined,
         messages: touched ? messages : state.messages,
       };
     }
@@ -332,19 +337,21 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         }
       } else {
         const cur = messages[idx] as Extract<ChatMessage, { kind: 'assistant' }>;
-        // 终态消息可能不含 thinking 块（推理只在流式 delta 里给），保留流式累积的 thinking，避免完成后丢失。
+        // 终态消息可能不含 thinking / text 块（推理和正文只在流式 delta 里给），
+        // 保留流式累积，避免 `--mode json` 的空 message_end 把子代理回复抹掉。
         const finalThinking = thinking || cur.thinking;
+        const finalText = text || cur.text;
         // 仅含 tool call、无可见文本/思考的 assistant 消息不展示（否则会叠成多条灰线）
-        if (!text && !finalThinking) {
+        if (!finalText && !finalThinking) {
           messages.splice(idx, 1);
         } else {
           messages[idx] = {
             ...cur,
-            text,
+            text: finalText,
             thinking: finalThinking,
             streaming: false,
             timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
-            ...thinkingTiming(cur, finalThinking, text, true),
+            ...thinkingTiming(cur, finalThinking, finalText, true),
           };
         }
       }
@@ -356,39 +363,45 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'message_update': {
       const ev = event as Extract<AgentEvent, { type: 'message_update' }>;
-      const { text, thinking } = extractText(ev.message);
+      // pi 的流式增量事件只带 assistantMessageEvent、不带 message 快照。
+      // 直接读 ev.message 会因 undefined 抛 TypeError，子代理 JSONL 回放也会中断。
+      const snapshot = (ev.message ?? {}) as AgentMessage;
+      const { text, thinking } = extractText(snapshot);
       // 有些模型（如部分 OpenAI 兼容 / MiMo）只在流式 thinking_delta 里给推理、不写进 message.content，
-      // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。
+      // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。正文同理需要 text_delta 累积。
       const ame = ev.assistantMessageEvent as AssistantMessageEvent | undefined;
-      const thinkingDelta =
-        ame && ame.type === 'thinking_delta' && typeof ame.delta === 'string' ? ame.delta : '';
+      const delta = ame && typeof ame.delta === 'string' ? ame.delta : '';
+      const thinkingDelta = ame?.type === 'thinking_delta' ? delta : '';
+      const textDelta = ame?.type === 'text_delta' ? delta : '';
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
       if (idx >= 0) {
         const cur = messages[idx] as Extract<ChatMessage, { kind: 'assistant' }>;
         const nextThinking = thinking || cur.thinking + thinkingDelta;
+        const nextText = text || cur.text + textDelta;
         messages[idx] = {
           ...cur,
-          text,
+          text: nextText,
           thinking: nextThinking,
-          timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
-          ...thinkingTiming(cur, nextThinking, text),
+          timestamp: messageTimestamp(snapshot) ?? cur.timestamp,
+          ...thinkingTiming(cur, nextThinking, nextText),
         };
       } else {
         const nextThinking = thinking || thinkingDelta;
+        const nextText = text || textDelta;
         messages.push({
           kind: 'assistant',
           id: nextId(),
-          text,
+          text: nextText,
           thinking: nextThinking,
           streaming: true,
-          timestamp: messageTimestamp(ev.message),
-          ...thinkingTiming({}, nextThinking, text),
+          timestamp: messageTimestamp(snapshot),
+          ...thinkingTiming({}, nextThinking, nextText),
         });
       }
       // 解析 content 里随流式渐全的 toolCall 块 → 在工具参数生成阶段就把 running 卡片立起来，
       // 不再等 tool_execution_start（参数已写完、开始执行）才整条蹦出来。
-      return { ...state, messages: syncStreamingToolCalls(messages, ev.message) };
+      return { ...state, messages: syncStreamingToolCalls(messages, snapshot) };
     }
 
     case 'tool_execution_start': {

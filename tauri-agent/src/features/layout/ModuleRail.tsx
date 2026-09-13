@@ -1,5 +1,5 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { BarChart3, type LucideIcon, MessageSquare, Plug, Settings, Webhook } from 'lucide-react';
+import { BarChart3, type LucideIcon, MessageSquare, Plug, Settings } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 
 interface ModuleDef {
@@ -10,9 +10,9 @@ interface ModuleDef {
 }
 
 // 仅全局（应用级）模块常驻 rail；长期记忆与知识资产由本地 Agent Data 管理。
+// IM（微信 / HTTP 网关）已从产品路径卸下，侧栏不再露「连接」。接回见 docs/im-reintroduction.md。
 const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
-  { id: 'connections', label: '连接', Icon: Webhook },
   { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'usage', label: '用量', Icon: BarChart3 },
   { id: 'settings', label: '设置', Icon: Settings, footer: true },

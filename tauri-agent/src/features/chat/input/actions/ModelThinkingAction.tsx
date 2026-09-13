@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, Popover } from '@lobehub/ui';
+import { Segmented } from 'antd';
 import { createStaticStyles, cssVar, cx, useThemeMode } from 'antd-style';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
@@ -12,7 +13,8 @@ import {
   getCachedAvailableModels,
 } from '../../../settings/availableModelsCache';
 import { modelKey, parseModelKey, type ModelInfo } from '../modelUtils';
-import { levelOptions, resolveLevelForModel, type RpcModel } from '../thinkingLevels';
+import { pickFallbackModelKey, selectedModelLabel, sessionModelKey } from '../sessionModel';
+import { levelDisplayLabel, levelOptions, mergeModelCatalog, resolveLevelForModel, type RpcModel } from '../thinkingLevels';
 
 /**
  * ModelThinkingAction —「模型 + 推理档位」合并控件（替代原先并列的 ModelAction + ThinkingAction）。
@@ -164,42 +166,9 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 11px;
     color: ${cssVar.colorTextTertiary};
   `,
-  seg: css`
-    display: flex;
-    align-items: stretch;
+  levelSeg: css`
     width: 100%;
-    overflow: hidden;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 6px;
-  `,
-  segItem: css`
-    flex: 1 1 0;
-    min-width: 0;
-    height: 24px;
-    padding: 0 2px;
-    border: none;
-    border-inline-start: 1px solid ${cssVar.colorBorderSecondary};
-    background: transparent;
-    color: ${cssVar.colorTextSecondary};
-    font-size: 11px;
-    line-height: 24px;
-    text-align: center;
-    white-space: nowrap;
-    cursor: pointer;
-    transition:
-      background 0.15s,
-      color 0.15s;
-    &:first-of-type {
-      border-inline-start: none;
-    }
-    &:hover {
-      background: ${cssVar.colorFillTertiary};
-      color: ${cssVar.colorText};
-    }
-    &:disabled {
-      cursor: default;
-      opacity: 0.5;
-    }
+    font-size: 12px;
   `,
 }));
 
@@ -217,6 +186,12 @@ interface WsCache {
   loaded: boolean;
 }
 const cacheByWorkspace = new Map<string, WsCache>();
+let lastGlobalModelKey = '';
+
+export function resetModelThinkingCacheForTests(): void {
+  cacheByWorkspace.clear();
+  lastGlobalModelKey = '';
+}
 
 function writeCache(workspace: string, patch: Partial<WsCache>): void {
   const prev = cacheByWorkspace.get(workspace) ?? { modelKey: '', level: 'off', model: null, loaded: false };
@@ -229,7 +204,6 @@ export default function ModelThinkingAction() {
   const { isDarkMode } = useThemeMode();
   // 选中态用「中性提亮」而非品牌主色（主色在深灰主题里太跳）：底用中性半透明填充，文字用正文色。
   // 走 cssVar 的 var() 引用即可 —— ThemeBridge 已把 --ant-* 变量表挂到 <html>，portal 里同样能继承。
-  const selBg = cssVar.colorFillSecondary;
   const selFg = cssVar.colorText;
 
   const { models: polledModels, loading: modelsLoading } = useAvailableModelsState(
@@ -248,7 +222,37 @@ export default function ModelThinkingAction() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadSeq = useRef(0);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const canBindSession = useRef(true);
   const switchSeq = useThinkingMemoryStore((s) => s.switchSeq[workspace] ?? 0);
+
+  const applySelection = useCallback((key: string, nextModel: RpcModel | null, nextLevel?: string) => {
+    lastGlobalModelKey = key;
+    setValue(key);
+    setModel(nextModel);
+    if (nextLevel) setLevel(nextLevel);
+    setReady(true);
+    writeCache(workspace, {
+      modelKey: key,
+      model: nextModel,
+      loaded: true,
+      ...(nextLevel ? { level: nextLevel } : {}),
+    });
+  }, [workspace]);
+
+  const applyFallback = useCallback((bind: boolean): boolean => {
+    const fallback = pickFallbackModelKey(modelsRef.current, lastGlobalModelKey);
+    if (!fallback) {
+      setReady(true);
+      return false;
+    }
+    const { provider, id } = parseModelKey(fallback);
+    const info = modelsRef.current.find((item) => item.provider === provider && item.id === id);
+    applySelection(fallback, mergeModelCatalog({ provider, id, name: info?.name, api: info?.api, reasoning: info?.reasoning, thinkingLevelMap: info?.thinkingLevelMap }, modelsRef.current));
+    if (bind) void pi.setModel(workspace, provider, id);
+    return true;
+  }, [applySelection, workspace]);
 
   // 切换对话（workspace 变化）时 render 期对齐 state：不闪上一个对话的值。
   const prevWorkspaceRef = useRef(workspace);
@@ -260,46 +264,67 @@ export default function ModelThinkingAction() {
     setModel(cached?.model ?? null);
     setReady(cached?.loaded ?? false);
     setModels(getCachedAvailableModels(workspace) ?? []);
+    canBindSession.current = true;
   }
 
   useEffect(() => {
     if (polledModels && polledModels.length > 0) setModels(polledModels);
   }, [polledModels]);
 
-  // 一次 getState 同时回读「当前模型 + 推理档位」。
-  const loadState = useCallback(async () => {
+  // 一次 getState 同时回读「当前模型 + 推理档位」。空会话常还没挂上默认模型：有列表就回退第一项并写回会话。
+  const loadState = useCallback(async (): Promise<'ok' | 'empty' | 'error'> => {
     const seq = ++loadSeq.current;
     try {
       const state = (await pi.getState(workspace)) as RpcSessionState;
-      if (seq !== loadSeq.current) return;
-      const nextModel = state?.model ?? null;
-      let key: string | undefined;
-      if (nextModel?.provider && nextModel?.id) {
-        key = modelKey(nextModel.provider, nextModel.id);
-        setValue(key);
+      if (seq !== loadSeq.current) return 'ok';
+      const nextModel = mergeModelCatalog(state?.model ?? null, modelsRef.current);
+      const key = sessionModelKey(nextModel);
+      const sessionFile = typeof (state as { sessionFile?: unknown })?.sessionFile === 'string'
+        ? (state as { sessionFile: string }).sessionFile
+        : '';
+      canBindSession.current = Boolean(sessionFile);
+      if (key) {
+        applySelection(key, nextModel, state?.thinkingLevel);
+        return 'ok';
       }
       if (state?.thinkingLevel) setLevel(state.thinkingLevel);
-      setModel(nextModel);
-      setReady(true);
-      const prev = cacheByWorkspace.get(workspace);
-      writeCache(workspace, {
-        modelKey: key ?? prev?.modelKey ?? '',
-        level: state?.thinkingLevel ?? prev?.level ?? 'off',
-        model: nextModel,
-        loaded: true,
-      });
-    } catch {
+      return applyFallback(canBindSession.current) ? 'ok' : 'empty';
+    } catch (error) {
+      if (String(error).includes('SESSION_WORKSPACE_MISMATCH')) {
+        canBindSession.current = false;
+        return applyFallback(false) ? 'ok' : 'empty';
+      }
       setReady(false);
+      return 'error';
     }
-  }, [workspace]);
+  }, [applyFallback, applySelection, workspace]);
 
   useEffect(() => {
     if (!workspaceReady) {
       setReady(false);
       return;
     }
-    void loadState();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (left: number) => {
+      void loadState().then((result) => {
+        if (cancelled) return;
+        if (result === 'error' && left > 0) {
+          timer = setTimeout(() => attempt(left - 1), 1000);
+        }
+      });
+    };
+    attempt(12);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [workspace, workspaceReady, loadState, switchSeq]);
+
+  useEffect(() => {
+    if (!ready || value || models.length === 0) return;
+    applyFallback(canBindSession.current);
+  }, [applyFallback, models, ready, value]);
 
   // 供应商显示名：与模型列表/会话状态分开加载。
   useEffect(() => {
@@ -322,19 +347,30 @@ export default function ModelThinkingAction() {
     return () => window.clearTimeout(t);
   }, [open]);
 
-  // 选模型：setModel → 按「该模型记忆 / 模型默认」设推理档位 → bumpSwitch 重读刷新。不关面板（可接着调档位）。
+  // 选模型：先用列表里的档位配置立刻刷新底部，再 setModel → 按「该模型记忆 / 模型默认」写推理档位。
   const onChangeModel = (key: string) => {
     if (!key) return;
     const { provider, id } = parseModelKey(key);
+    const info = models.find((item) => item.provider === provider && item.id === id);
+    const nextModel = mergeModelCatalog(
+      {
+        provider,
+        id,
+        name: info?.name,
+        api: info?.api,
+        reasoning: info?.reasoning,
+        thinkingLevelMap: info?.thinkingLevelMap,
+      },
+      models,
+    );
+    const remembered = useThinkingMemoryStore.getState().byModel[modelKey(provider, id)];
+    const target = resolveLevelForModel(nextModel, remembered);
     loadSeq.current++;
-    setValue(key);
-    writeCache(workspace, { modelKey: key });
+    applySelection(key, nextModel, target);
     void (async () => {
-      await pi.setModel(workspace, provider, id);
       try {
+        await pi.setModel(workspace, provider, id);
         const state = (await pi.getState(workspace)) as RpcSessionState;
-        const remembered = useThinkingMemoryStore.getState().byModel[modelKey(provider, id)];
-        const target = resolveLevelForModel(state.model ?? null, remembered);
         if (target !== state.thinkingLevel) await pi.setThinkingLevel(workspace, target);
       } catch {
         /* 保持后端现状 */
@@ -394,14 +430,9 @@ export default function ModelThinkingAction() {
 
   const currentLevels = levelOptions(model);
   const isReasoning = currentLevels.length > 1;
-  const currentLevelLabel = currentLevels.find((o) => o.value === level)?.label;
-  const selectedModelName = (() => {
-    if (!value) return '';
-    const { provider, id } = parseModelKey(value);
-    return models.find((m) => m.provider === provider && m.id === id)?.name ?? id;
-  })();
-
-  const loading = modelsLoading && models.length === 0;
+  const currentLevelLabel = levelDisplayLabel(level);
+  const selectedModelName = selectedModelLabel(value, models);
+  const loading = !value && (!ready || (modelsLoading && models.length === 0));
   const disabled = !workspaceReady || models.length === 0;
 
   const panel = (
@@ -450,25 +481,23 @@ export default function ModelThinkingAction() {
       {isReasoning ? (
         <div className={styles.footer}>
           <span className={styles.footerLabel}>推理档位</span>
-          <div className={styles.seg}>
-            {currentLevels.map((o) => (
-              <button
-                key={String(o.value)}
-                type="button"
-                disabled={!ready}
-                className={styles.segItem}
-                // 当前档位高亮用内联 style：优先级最高，绕开 createStaticStyles 原子类注入顺序不定导致的覆盖。
-                style={
-                  o.value === level
-                    ? { background: selBg, color: selFg, fontWeight: 600 }
-                    : undefined
-                }
-                onClick={() => onPickLevel(String(o.value))}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            block
+            size="small"
+            className={styles.levelSeg}
+            disabled={!ready}
+            value={level}
+            options={currentLevels.map((o) => {
+              const value = String(o.value);
+              const display = levelDisplayLabel(value);
+              const vendor = o.label && o.label !== value && o.label !== display ? o.label : '';
+              return {
+                label: <span title={vendor ? `${display} · ${vendor}` : display}>{display}</span>,
+                value,
+              };
+            })}
+            onChange={(v) => onPickLevel(String(v))}
+          />
         </div>
       ) : null}
     </div>
@@ -488,6 +517,7 @@ export default function ModelThinkingAction() {
       <button
         type="button"
         className={cx(styles.trigger, isDarkMode ? styles.triggerFilled : styles.triggerOutlined)}
+        data-testid="model-trigger"
         disabled={disabled}
         title={selectedModelName || undefined}
       >

@@ -17,7 +17,7 @@ const MODE_ICONS: Record<AgentMode, LucideIcon> = {
 /**
  * 模式选择器：Agent / Ask / Debug / Plan / Brainstorm 互斥单选，每项带图标。
  * 当前模式由 sidecar 的 agent-mode 扩展经 setStatus 推送到 modeStore（切会话/刷新后回读）；
- * 切换走 agent_set_mode（底层 /mode 命令，不调 LLM），并乐观更新本地状态即时反馈。
+ * 切换走 agent_set_mode（写 runtime config，扩展 watchConfig 应用），并乐观更新本地状态。
  */
 export default function ModeAction() {
   const { workspace, workspaceReady } = useAgentStoreContext();
