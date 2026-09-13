@@ -58,6 +58,7 @@ export class WorkspaceHandle {
   private turnOrigin: TurnOrigin = 'main';
   private parentSessionPath: string | undefined;
   private unregisterParentHost: (() => void) | undefined;
+  private switching = false;
 
   constructor(private readonly options: WorkspaceHandleOptions) {
     this.ui = new SessionUiAdapter({
@@ -96,22 +97,7 @@ export class WorkspaceHandle {
       });
     });
     await this.runMain(async () => { await this.bindAndSubscribe(); });
-    const sessionPath = this.session.sessionFile;
-    const sessionId = this.session.sessionId;
-    if (sessionPath && sessionId) {
-      this.parentSessionPath = sessionPath;
-      this.unregisterParentHost = registerParentSessionHost({
-        sessionId,
-        sessionPath,
-        workspace: this.options.workspace,
-        isBusy: () => this.session.isStreaming,
-        isDraining: () => this.disposed,
-        sendMessage: (msg, opts) => { void this.session.sendCustomMessage(msg, opts); },
-        prompt: (text, delivery) => {
-          void this.prompt(text, this.session.isStreaming ? { streamingBehavior: delivery } : {}, 'main');
-        },
-      });
-    }
+    this.registerCurrentParentHost();
   }
 
   async prompt(text: string, options: { images?: ImageContent[]; streamingBehavior?: 'steer' | 'followUp' }, origin: TurnOrigin): Promise<void> {
@@ -205,10 +191,19 @@ export class WorkspaceHandle {
 
   private async replace<T>(action: () => Promise<T>): Promise<T> {
     this.ui.cancelAll();
+    this.switching = true;
+    if (this.parentSessionPath) {
+      try { await drainByParent(this.parentSessionPath); } catch { /* 换会话 drain 失败不阻断 */ }
+    }
+    this.unregisterParentHost?.();
+    this.unregisterParentHost = undefined;
+    this.parentSessionPath = undefined;
+    this.switching = false;
     const previous = this.options.runtime.session;
     try {
       const result = await this.runMain(action);
       this.sessionInvalidated = false;
+      this.registerCurrentParentHost();
       return result;
     } catch (error) {
       const current = this.options.runtime.session;
@@ -216,6 +211,24 @@ export class WorkspaceHandle {
       if (this.sessionInvalidated || current !== previous || current == null) this.options.onFatal(error);
       throw error;
     }
+  }
+
+  private registerCurrentParentHost(): void {
+    const sessionPath = this.session.sessionFile;
+    const sessionId = this.session.sessionId;
+    if (!sessionPath || !sessionId) return;
+    this.parentSessionPath = sessionPath;
+    this.unregisterParentHost = registerParentSessionHost({
+      sessionId,
+      sessionPath,
+      workspace: this.options.workspace,
+      isBusy: () => this.session.isStreaming,
+      isDraining: () => this.disposed || this.switching,
+      sendMessage: (msg, opts) => { void this.session.sendCustomMessage(msg, opts); },
+      prompt: (text, delivery) => {
+        void this.prompt(text, this.session.isStreaming ? { streamingBehavior: delivery } : {}, 'main');
+      },
+    });
   }
 
   private runMain<T>(fn: () => Promise<T>): Promise<T> {

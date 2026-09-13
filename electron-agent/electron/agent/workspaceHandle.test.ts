@@ -5,9 +5,10 @@ import { emitEmbeddedSubagentEvent } from '../../../extensions/multi-agent/embed
 import { lookupParentHost, __resetParentHostsForTest } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
 
-vi.mock('../../../extensions/multi-agent/activation.js', () => ({
-  drainByParent: vi.fn(async () => {}),
-}));
+vi.mock('../../../extensions/multi-agent/activation.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../extensions/multi-agent/activation.js')>();
+  return { ...actual, drainByParent: vi.fn(async () => {}) };
+});
 
 function makeSession(id: string) {
   const subs: Array<(e: unknown) => void> = [];
@@ -396,9 +397,9 @@ describe('WorkspaceHandle', () => {
       __resetParentHostsForTest();
     });
 
-    function attachParentFields(session: ReturnType<typeof makeSession>) {
+    function attachParentFields(session: ReturnType<typeof makeSession>, file = sessionPath) {
       Object.assign(session, {
-        sessionFile: sessionPath,
+        sessionFile: file,
         sendCustomMessage: vi.fn(async () => {}),
         isStreaming: false,
       });
@@ -429,6 +430,83 @@ describe('WorkspaceHandle', () => {
       await handle.dispose();
       expect(drainByParent).toHaveBeenCalledWith(sessionPath);
       expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
+    });
+
+    it('host.sendMessage 调用当前 session.sendCustomMessage', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      const host = lookupParentHost(sessionPath, 'D:/proj');
+      const msg = { customType: 'subagent-settled', content: 'done', display: true, details: {} };
+      const opts = { triggerTurn: true, deliverAs: 'followUp' as const };
+      host!.sendMessage(msg, opts);
+      expect((first as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).toHaveBeenCalledWith(msg, opts);
+      await handle.dispose();
+    });
+
+    it('host.prompt followUp 且未 streaming 不带 streamingBehavior，origin 为 main', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      const seen: Array<string | undefined> = [];
+      let resolvePrompt!: () => void;
+      const prompted = new Promise<void>((resolve) => { resolvePrompt = resolve; });
+      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void; streamingBehavior?: string }) => {
+        seen.push(currentWorkspaceContext()?.origin);
+        opts.preflightResult?.(true);
+        resolvePrompt();
+      });
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      lookupParentHost(sessionPath, 'D:/proj')!.prompt('hi', 'followUp');
+      await prompted;
+      expect(first.prompt).toHaveBeenCalledTimes(1);
+      expect(first.prompt.mock.calls[0][0]).toBe('hi');
+      expect(first.prompt.mock.calls[0][1].streamingBehavior).toBeUndefined();
+      expect(seen).toEqual(['main']);
+      await handle.dispose();
+    });
+
+    it('host.prompt steer 且 streaming 时带 streamingBehavior', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      first.isStreaming = true;
+      let resolvePrompt!: () => void;
+      const prompted = new Promise<void>((resolve) => { resolvePrompt = resolve; });
+      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void; streamingBehavior?: string }) => {
+        opts.preflightResult?.(true);
+        resolvePrompt();
+      });
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      lookupParentHost(sessionPath, 'D:/proj')!.prompt('hi', 'steer');
+      await prompted;
+      expect(first.prompt.mock.calls[0][1]).toMatchObject({ streamingBehavior: 'steer' });
+      await handle.dispose();
+    });
+
+    it('switchSession 先 drain 旧 path，再按新 session 注册 host', async () => {
+      const nextPath = '/ws/s2.jsonl';
+      const { runtime, first, second } = makeRuntime();
+      attachParentFields(first, sessionPath);
+      attachParentFields(second, nextPath);
+      vi.mocked(drainByParent).mockImplementation(async (path) => {
+        expect(path).toBe(sessionPath);
+        expect(runtime.switchSession).not.toHaveBeenCalled();
+        const host = lookupParentHost(sessionPath, 'D:/proj');
+        expect(host).toBeDefined();
+        expect(host?.isDraining()).toBe(true);
+      });
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      await handle.switchSession(nextPath);
+      expect(drainByParent.mock.invocationCallOrder[0]).toBeLessThan(runtime.switchSession.mock.invocationCallOrder[0]);
+      expect(drainByParent).toHaveBeenCalledWith(sessionPath);
+      expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
+      const next = lookupParentHost(nextPath, 'D:/proj');
+      expect(next).toBeDefined();
+      expect(next?.sessionId).toBe('s2');
+      await handle.dispose();
     });
   });
 });
