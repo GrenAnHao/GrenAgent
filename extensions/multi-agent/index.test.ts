@@ -456,39 +456,61 @@ function persistSessionTo(sm: SessionManager, path: string): void {
   writeFileSync(path, `${lines.join("\n")}\n`);
 }
 
+function seedCopiedCatalog(label: string): { oldPath: string; newPath: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), `${label}-`));
+  forkDirs.push(dir);
+  const sm = SessionManager.create("/ws", dir);
+  sm.appendCustomEntry("subagent_catalog", {
+    version: 0,
+    childId: "sa-old",
+    sessionPath: "/c/sa-old.jsonl",
+    childCreatedAt: 100,
+    mode: "one-shot",
+    label: "old",
+  });
+  const oldPath = persistSession(sm);
+  const newPath = join(dir, "forked.jsonl");
+  copyFileSync(oldPath, newPath);
+  return { oldPath, newPath, dir };
+}
+
 describe("multi-agent · user-fork catalog base", () => {
-  it("writes subagent_catalog_base when the forked file already has catalog facts", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cat-fork-"));
-    forkDirs.push(dir);
-    const sm = SessionManager.create("/ws", dir);
-    sm.appendCustomEntry("subagent_catalog", {
-      version: 0,
-      childId: "sa-old",
-      sessionPath: "/c/sa-old.jsonl",
-      childCreatedAt: 100,
-      mode: "one-shot",
-      label: "old",
-    });
-    const oldPath = persistSession(sm);
-    const newPath = join(dir, "forked.jsonl");
-    copyFileSync(oldPath, newPath);
+  it("writes subagent_catalog_base on a new factory session_start with reason fork", () => {
+    const { oldPath, newPath } = seedCopiedCatalog("cat-fork");
     expect(foldCatalog(newPath).entries.map((e) => e.id)).toEqual(["sa-old"]);
 
+    loadSpawnHarness();
     const smNew = SessionManager.open(newPath);
     const { appendEntry, handlers } = loadSpawnHarness();
     appendEntry.mockImplementation((customType: string, data: unknown) => {
       smNew.appendCustomEntry(customType, data);
     });
     const cwd = process.platform === "win32" ? "D:\\fork-cat" : "/fork-cat";
-    handlers.session_before_fork?.({}, { cwd, sessionManager: { getSessionFile: () => oldPath } });
-    handlers.session_start?.({}, { cwd, sessionManager: { getSessionFile: () => newPath } });
+    handlers.session_start?.(
+      { type: "session_start", reason: "fork", previousSessionFile: oldPath },
+      { cwd, sessionManager: { getSessionFile: () => newPath } },
+    );
 
     expect(appendEntry).toHaveBeenCalledWith("subagent_catalog_base", { version: 0, reason: "user-fork" });
     persistSessionTo(smNew, newPath);
     expect(foldCatalog(newPath).entries).toEqual([]);
   });
 
-  it("does not write base when the forked file has no catalog facts", () => {
+  it("does not write base on resume even when the new file has catalog facts", () => {
+    const { oldPath, newPath } = seedCopiedCatalog("cat-resume");
+    expect(foldCatalog(newPath).entries.map((e) => e.id)).toEqual(["sa-old"]);
+
+    const { appendEntry, handlers } = loadSpawnHarness();
+    const cwd = process.platform === "win32" ? "D:\\fork-resume" : "/fork-resume";
+    handlers.session_start?.(
+      { type: "session_start", reason: "resume", previousSessionFile: oldPath },
+      { cwd, sessionManager: { getSessionFile: () => newPath } },
+    );
+
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not write base when reason is fork but the new file has no catalog facts", () => {
     const dir = mkdtempSync(join(tmpdir(), "cat-fork-empty-"));
     forkDirs.push(dir);
     const sm = SessionManager.create("/ws", dir);
@@ -500,8 +522,10 @@ describe("multi-agent · user-fork catalog base", () => {
 
     const { appendEntry, handlers } = loadSpawnHarness();
     const cwd = process.platform === "win32" ? "D:\\fork-empty" : "/fork-empty";
-    handlers.session_before_fork?.({}, { cwd, sessionManager: { getSessionFile: () => oldPath } });
-    handlers.session_start?.({}, { cwd, sessionManager: { getSessionFile: () => newPath } });
+    handlers.session_start?.(
+      { type: "session_start", reason: "fork", previousSessionFile: oldPath },
+      { cwd, sessionManager: { getSessionFile: () => newPath } },
+    );
 
     expect(appendEntry).not.toHaveBeenCalled();
   });

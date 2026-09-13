@@ -214,13 +214,6 @@ export default function (pi: ExtensionAPI) {
   // + seed default named agents (scout/planner/reviewer/worker).
   registerWorkflows(pi);
 
-  // 用户 rewind/fork 会新建会话文件并拷贝旧 leaf 上的目录事实。session_before_fork
-  // 没有目标路径，只能先记下源文件，等下一次 session_start 再决定要不要写 base。
-  let pendingForkBase: string | undefined;
-  pi.on("session_before_fork", (_event, ctx) => {
-    pendingForkBase = parentSessionPath(ctx);
-  });
-
   // 进程启动即回收上一个进程遗留的孤儿子代理（registry.db 里卡在 "running" 的行）并装好取消监听，
   // 而不是仅靠 spawn_agent 懒触发 getRegistry。否则 sidecar 重启后只要主代理不再 spawn，遗留的
   // running 行没有任何路径会被清理：前端任务托盘直接读 registry.db，会一直显示"运行中"；面板上的
@@ -228,25 +221,20 @@ export default function (pi: ExtensionAPI) {
   // 切换会话时触发，正好覆盖"刚重启"的时机；getRegistry 对同一 cwd 幂等，只在首次 load 时 reap 一次，
   // 不会误杀进程内正在运行的子代理。子代理进程（PI_IS_SUBAGENT=1）必须跳过：它与兄弟子代理共享
   // 主工作区 registry，启动即 reap 会把正在并行运行的兄弟误判成孤儿。
-  pi.on("session_start", (_event, ctx) => {
+  // 用户 rewind/fork 会新建会话文件并拷贝旧 leaf 上的目录事实。GrenAgent fork 会重跑
+  // factory，不能靠闭包里的 pendingForkBase；用 SessionStartEvent.reason === "fork"。
+  pi.on("session_start", (event, ctx) => {
     if (process.env.PI_IS_SUBAGENT === "1") return;
     try {
       getRegistry(ctx.cwd);
     } catch {
       /* 回收失败不阻塞 session_start */
     }
-    try {
+    if (event?.reason === "fork") {
       const current = parentSessionPath(ctx);
-      if (
-        pendingForkBase &&
-        current &&
-        current !== pendingForkBase &&
-        foldCatalog(current).entries.length > 0
-      ) {
+      if (current && foldCatalog(current).entries.length > 0) {
         pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" });
       }
-    } finally {
-      pendingForkBase = undefined;
     }
   });
 
