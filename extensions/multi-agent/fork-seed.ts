@@ -20,3 +20,12 @@ export function completedPrefix(messages: unknown[], toolCallId: string): unknow
   if (list.length && roleOf(list[list.length - 1]) === "assistant") return list.slice(0, -1);
   return list;
 }
+
+/** Copy seed messages onto the child session. Returns written count. Does not rewrite tool ids. */
+export function writeSeed(
+  sessionManager: { appendMessage: (m: unknown) => void },
+  messages: unknown[],
+): number {
+  for (const m of messages) sessionManager.appendMessage(m);
+  return messages.length;
+}
