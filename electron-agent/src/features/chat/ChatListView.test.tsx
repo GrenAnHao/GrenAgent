@@ -169,7 +169,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
 
   it('本地 command-input 行出现在列表中', () => {
     useSessionStore.getState().setActiveSession('/tmp/s.json');
-    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完', beforeCount: 0 });
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
     render(
       <ThemeProvider themeMode="dark">
         <ChatListView />
@@ -183,26 +183,9 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
   });
 
-  it('空会话发出的 /goal 停在首条，不跟在后续助手正文后面', () => {
-    useSessionStore.getState().setActiveSession('/tmp/s.json');
-    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完', beforeCount: 0 });
-    setMessages([
-      { kind: 'assistant', id: 'a1', text: '开始干活', thinking: '', streaming: false } as ChatMessage,
-    ]);
-    render(
-      <ThemeProvider themeMode="dark">
-        <ChatListView />
-      </ThemeProvider>,
-    );
-
-    const scroll = document.querySelector('[data-testid="chat-scroll"]');
-    expect(scroll?.textContent?.indexOf('/goal')).toBeGreaterThanOrEqual(0);
-    expect(scroll!.textContent!.indexOf('/goal')).toBeLessThan(scroll!.textContent!.indexOf('开始干活'));
-  });
-
   it('末尾有本地 command-input 时，已有助手正文仍不显示准备态', () => {
     useSessionStore.getState().setActiveSession('/tmp/s.json');
-    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完', beforeCount: 0 });
+    useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
     mockState.isStreaming = true;
     setMessages([
       { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,

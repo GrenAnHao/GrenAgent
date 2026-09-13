@@ -4,7 +4,7 @@ import { useSessionStore } from '../../store/session';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { useUiPromptStore } from '../../stores/uiPromptStore';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
-import { groupMessages, mergeCommandInputs, type CommandInputMessage } from './groupMessages';
+import { groupMessages, type CommandInputMessage } from './groupMessages';
 import { ChatMessageItems } from './ChatMessageItems';
 import { ChatMiniMap } from '../ChatMiniMap';
 import { computeSubAgentUnits, computeAnsweredQuestions } from './messagePrecompute';
@@ -32,11 +32,11 @@ export function ChatListView() {
 
   // streaming 中 100ms 节流，避免每 token 触发整列重算（详见 useThrottledValue 契约）。
   const throttledMessages = useThrottledValue(messages, 100, { enabled: isStreaming });
-  // command-input 不进 groupMessages。按发送时的 beforeCount 插回，对齐 DSH 的 command/run seq。
-  // 准备态只看 grouped 末项：本地 /goal 行不能据此判断「有没有助手 turn」。
+  // command-input 不进 groupMessages（输入仍是 ChatMessage[]），按当前会话 path 拼在分组后。
+  // 准备态只看 grouped 末项：本地 /goal 行永远在 display 末尾，不能据此判断「有没有助手 turn」。
   const grouped = useMemo(() => groupMessages(throttledMessages), [throttledMessages]);
   const display = useMemo(
-    () => (sessionPath ? mergeCommandInputs(grouped, commandInputs) : grouped),
+    () => (sessionPath ? [...grouped, ...commandInputs] : grouped),
     [grouped, sessionPath, commandInputs],
   );
   const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
