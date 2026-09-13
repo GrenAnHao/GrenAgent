@@ -45,4 +45,27 @@ describe("extractAssistantOutput", () => {
     expect(r.output).toBe("");
     expect(r.stopReason).toBe("error");
   });
+
+  it("skipPrefix ignores seeded parent assistant", () => {
+    const r = extractAssistantOutput(
+      [
+        { role: "assistant", content: [{ type: "text", text: "parent said" }] },
+        { role: "user", content: "child task" },
+      ],
+      { skipPrefix: 1 },
+    );
+    expect(r.output).toBe("");
+    expect(r.stopReason).toBe("error");
+  });
+
+  it("skipPrefix still finds child assistant", () => {
+    const r = extractAssistantOutput(
+      [
+        { role: "assistant", content: [{ type: "text", text: "parent said" }] },
+        { role: "assistant", content: [{ type: "text", text: "child said" }] },
+      ],
+      { skipPrefix: 1 },
+    );
+    expect(r.output).toBe("child said");
+  });
 });

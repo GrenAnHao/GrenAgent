@@ -30,9 +30,9 @@ function mapStopReason(raw: string | undefined, aborted: boolean): SubagentStopR
  * 2. 否则 streamingDelta
  * 3. 否则空 + error
  */
-export function extractAssistantOutput(
+function extractFrom(
   messages: AssistantLike[],
-  options: { streamingDelta?: string; aborted?: boolean } = {},
+  options: { streamingDelta?: string; aborted?: boolean },
 ): AssistantOutputResult {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -47,4 +47,12 @@ export function extractAssistantOutput(
     return { output: delta, stopReason: options.aborted ? "aborted" : "completed" };
   }
   return { output: "", stopReason: options.aborted ? "aborted" : "error" };
+}
+
+export function extractAssistantOutput(
+  messages: AssistantLike[],
+  options: { streamingDelta?: string; aborted?: boolean; skipPrefix?: number } = {},
+): AssistantOutputResult {
+  const start = Math.max(0, options.skipPrefix ?? 0);
+  return extractFrom(messages.slice(start), options);
 }
