@@ -2,9 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export type ToolOrigin = "main" | "goal" | "subagent";
 
-/** 进程内嵌宿主的每回合上下文。origin 只有 main / goal；subagent 只出现在 fork 子进程（无 ALS，由 env 判定）。 */
+/** 进程内嵌宿主的每回合上下文。origin 可为 main / goal / subagent；无 ALS 时 fork 子进程由 env 判定 subagent。 */
 export interface WorkspaceContext {
-  origin: "main" | "goal";
+  origin: ToolOrigin;
   workspace: string;
   cwd: string;
   config: Readonly<Record<string, string>>;

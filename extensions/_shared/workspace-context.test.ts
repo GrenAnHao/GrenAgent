@@ -52,4 +52,11 @@ describe('workspace-context', () => {
     expect(resolveToolOrigin()).toBe('subagent');
     if (prev === undefined) delete process.env.PI_IS_SUBAGENT; else process.env.PI_IS_SUBAGENT = prev;
   });
+
+  it('resolveToolOrigin：ALS origin subagent', () => {
+    runInWorkspace(ctx({ origin: 'subagent' }), () => {
+      expect(resolveToolOrigin()).toBe('subagent');
+      expect(currentWorkspaceContext()?.origin).toBe('subagent');
+    });
+  });
 });
