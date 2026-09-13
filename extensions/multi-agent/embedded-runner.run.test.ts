@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const appendMessage = vi.fn();
 const appendCustomEntry = vi.fn();
 const appendModelChange = vi.fn();
 const createAgentSessionFromServices = vi.fn();
@@ -11,6 +12,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   resolveCliModel: (...args: unknown[]) => resolveCliModel(...args),
   SessionManager: {
     create: () => ({
+      appendMessage,
       appendCustomEntry,
       appendModelChange,
       getSessionFile: () => "/ws/.pi/sessions/sa-child.jsonl",
@@ -239,5 +241,78 @@ describe("startContinuableEmbedded", () => {
     install.mockRestore();
     send.mockRestore();
     __resetActivationsForTest();
+  });
+});
+
+describe("fork seed write", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetActivationsForTest();
+    resolveCliModel.mockImplementation(({ cliModel }: { cliModel: string }) => {
+      const [provider, id] = cliModel.split("/");
+      return { model: { provider, id }, error: undefined };
+    });
+  });
+
+  it("writes seed then catalog_base then one meta", async () => {
+    const seed = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: [{ type: "text", text: "parent said" }] },
+    ];
+    const session = fakeSession({ provider: "p", id: "m" });
+    session.messages = [
+      ...seed,
+      { role: "assistant", content: [{ type: "text", text: "child said" }], stopReason: "stop" },
+    ];
+    createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const r = await runEmbeddedSubagent({
+      cwd: "/ws",
+      task: "child task",
+      agentId: "sa-child",
+      seedMessages: seed,
+    });
+
+    expect(appendMessage.mock.calls.map((c) => c[0])).toEqual(seed);
+    const types = appendCustomEntry.mock.calls.map((c) => c[0]);
+    expect(types).toEqual(["subagent_catalog_base", "subagent_meta"]);
+    expect(appendCustomEntry.mock.calls[0][1]).toEqual({ version: 0, reason: "subagent-seed" });
+    expect(appendCustomEntry.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ inheritedEventCount: 2 }),
+    );
+    expect(r.output).toBe("child said");
+  });
+
+  it("does not treat seeded parent assistant as output", async () => {
+    const seed = [{ role: "assistant", content: [{ type: "text", text: "parent said" }] }];
+    const session = fakeSession({ provider: "p", id: "m" });
+    session.messages = [...seed, { role: "user", content: "child task" }];
+    createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const r = await runEmbeddedSubagent({
+      cwd: "/ws",
+      task: "child task",
+      agentId: "sa-child",
+      seedMessages: seed,
+    });
+
+    expect(r.ok).toBe(false);
+    expect(r.output).toBe("");
+    expect(r.error).toBe("(no output)");
+  });
+
+  it("does not write catalog_base or meta when seed write fails", async () => {
+    appendMessage.mockImplementation(() => {
+      throw new Error("seed write failed");
+    });
+    await expect(
+      createEmbeddedChildSession({
+        cwd: "/ws",
+        task: "child task",
+        agentId: "sa-child",
+        seedMessages: [{ role: "user", content: "hi" }],
+      }),
+    ).rejects.toThrow("seed write failed");
+    expect(appendCustomEntry).not.toHaveBeenCalled();
   });
 });

@@ -170,6 +170,7 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
       }
       const { output, stopReason } = extractAssistantOutput(
         act.session.messages as Parameters<typeof extractAssistantOutput>[0],
+        { skipPrefix: inheritedSkipPrefix(act) },
       );
       await act.inbox.close(async () => {
         act.session.dispose();
@@ -309,6 +310,7 @@ export async function disposeActivation(
     if (reason === "cancel" && announced) {
       const { output } = extractAssistantOutput(
         act.session.messages as Parameters<typeof extractAssistantOutput>[0],
+        { skipPrefix: inheritedSkipPrefix(act) },
       );
       sendSettlementToParent(
         act.parentSessionPath,
@@ -366,6 +368,12 @@ export function writeTornDown(childId: string, sessionPath?: string | null): voi
   } catch {
     /* tornDown is best-effort; cancel must still tear down */
   }
+}
+
+function inheritedSkipPrefix(act: { sessionManager?: { getEntries?: () => unknown[] } }): number {
+  const meta = lastSubagentMeta(act.sessionManager?.getEntries?.() ?? []);
+  const n = meta?.inheritedEventCount;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 function lastSubagentMeta(entries: unknown[]): Record<string, unknown> | undefined {

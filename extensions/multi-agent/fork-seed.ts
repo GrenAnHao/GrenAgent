@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+
 function roleOf(message: unknown): string | undefined {
   return (message as { role?: string }).role;
 }
@@ -19,6 +21,15 @@ export function completedPrefix(messages: unknown[], toolCallId: string): unknow
   }
   if (list.length && roleOf(list[list.length - 1]) === "assistant") return list.slice(0, -1);
   return list;
+}
+
+export function wipeSessionFile(path: string | undefined): void {
+  if (!path) return;
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** Copy seed messages onto the child session. Returns written count. Does not rewrite tool ids. */

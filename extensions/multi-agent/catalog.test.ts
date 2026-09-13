@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { establishCatalogChild, foldCatalog, foldCatalogFromEntries } from "./catalog.js";
+import { writeSeed } from "./fork-seed.js";
 
 const dirs: string[] = [];
 
@@ -130,5 +131,20 @@ describe("foldCatalog", () => {
     const path = join(tmpDir(), "broken.jsonl");
     writeFileSync(path, "not a pi session\n");
     expect(foldCatalog(path)).toEqual({ entries: [], diagnostics: [] });
+  });
+
+  it("fork seed catalog_base hides leaked parent facts", () => {
+    const dir = tmpDir();
+    const sm = SessionManager.create("/ws", dir, { id: "sa-fork" });
+    writeSeed(sm, [{ role: "user", content: "hi" }]);
+    sm.appendCustomEntry("subagent_catalog", catalogData({ childId: "sa-parent-1" }));
+    sm.appendCustomEntry("subagent_catalog", catalogData({ childId: "sa-parent-2" }));
+    sm.appendCustomEntry("subagent_catalog_base", { version: 0, reason: "subagent-seed" });
+    sm.appendCustomEntry("subagent_meta", { inheritedEventCount: 1, mode: "one-shot" });
+    const path = persistSession(sm);
+    expect(foldCatalog(path).entries).toEqual([]);
+    const raw = readFileSync(path, "utf8");
+    expect(raw).toContain('"customType":"subagent_catalog_base"');
+    expect(raw).toContain("subagent-seed");
   });
 });

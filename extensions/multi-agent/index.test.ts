@@ -77,6 +77,7 @@ import { __resetSubagentControlPlaneForTest } from "./controlPlane.js";
 import multiAgent from "./index.js";
 import { spawnPiAgent } from "./runner.js";
 import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
+import { runInWorkspace } from "../_shared/workspace-context.js";
 import * as activation from "./activation.js";
 import * as parentHost from "./parent-host.js";
 
@@ -554,6 +555,100 @@ describe("multi-agent · user-fork catalog base", () => {
     );
 
     expect(appendEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("spawn_agent fork", () => {
+  it("rejects tasks", async () => {
+    await expect(loadSpawnAgent()("tf", { tasks: ["a", "b"], fork: true }, null, null, ctx)).rejects.toThrow(
+      "fork 仅支持单任务",
+    );
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+  });
+
+  it("rejects worktree / non-embedded", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(false);
+    await expect(
+      loadSpawnAgent()("tf", { task: "x", fork: true, profile: { isolation: "worktree" } }, null, null, ctx),
+    ).rejects.toThrow("fork 需要 Electron 进程内子会话");
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects when called from a subagent origin", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    await expect(
+      runInWorkspace({ origin: "subagent", workspace: ctx.cwd, cwd: ctx.cwd, config: {} }, () =>
+        loadSpawnAgent()("tf", { task: "x", fork: true }, null, null, ctx),
+      ),
+    ).rejects.toThrow("fork 需要 Electron 进程内子会话");
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+  });
+
+  it("empty prefix succeeds like a normal spawn", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const r = await loadSpawnAgent()(
+      "tf",
+      { task: "x", fork: true },
+      null,
+      null,
+      { ...ctx, sessionManager: { buildContextEntries: () => [] } },
+    );
+    expect(r.details).toMatchObject({ forked: true, inheritedEventCount: 0 });
+    expect(runEmbeddedSubagent).toHaveBeenCalledWith(expect.objectContaining({ seedMessages: [] }));
+  });
+
+  it("spawn with a completed prefix sets inheritedEventCount", async () => {
+    const userMsg = { role: "user", content: "hi" };
+    const done = { role: "assistant", content: [{ type: "text", text: "done" }] };
+    const mine = {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "tc-spawn", name: "spawn_agent", arguments: {} }],
+    };
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const r = await loadSpawnAgent()(
+      "tc-spawn",
+      { task: "x", fork: true, action: "spawn" },
+      null,
+      null,
+      {
+        ...ctx,
+        sessionManager: {
+          getSessionFile: () => "/tmp/parent.jsonl",
+          getSessionId: () => "parent-1",
+          buildContextEntries: () => [
+            { type: "message", message: userMsg },
+            { type: "message", message: done },
+            { type: "message", message: mine },
+          ],
+        },
+      },
+    );
+    expect(r.details).toMatchObject({ forked: true, inheritedEventCount: 2 });
+    expect(startContinuableEmbedded).toHaveBeenCalledWith(
+      expect.objectContaining({ seedMessages: [userMsg, done] }),
+    );
+  });
+
+  it("fails the tool when parent context cannot be read", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    await expect(
+      loadSpawnAgent()(
+        "tf",
+        { task: "x", fork: true },
+        null,
+        null,
+        {
+          ...ctx,
+          sessionManager: {
+            buildContextEntries: () => {
+              throw new Error("entries boom");
+            },
+          },
+        },
+      ),
+    ).rejects.toThrow("entries boom");
+    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
   });
 });
 

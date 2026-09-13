@@ -8,7 +8,7 @@ import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded }
 import type { SubagentStopReason } from "./assistant-output.js";
 import { sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
-import { currentWorkspaceContext } from "../_shared/workspace-context.js";
+import { currentWorkspaceContext, resolveToolOrigin } from "../_shared/workspace-context.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
@@ -27,6 +27,7 @@ import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
 import { disposeActivation } from "./activation.js";
 import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
+import { completedPrefix } from "./fork-seed.js";
 
 const MAX_CONCURRENCY = 4;
 
@@ -97,6 +98,25 @@ function parentCatalogHasFacts(
   }
 }
 
+function parentLeafMessages(ctx: {
+  sessionManager?: { buildContextEntries?: () => unknown };
+}): unknown[] {
+  const entries = ctx.sessionManager?.buildContextEntries?.();
+  if (!Array.isArray(entries)) return [];
+  const out: unknown[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as { type?: string; message?: unknown };
+    if (item.type === "message") out.push(item.message);
+  }
+  return out;
+}
+
+function forkDetails(fork: unknown, seedMessages: unknown[]): Record<string, unknown> {
+  if (!fork) return {};
+  return { forked: true, inheritedEventCount: seedMessages.length };
+}
+
 function parentSessionId(ctx: { sessionManager?: { getSessionId?: () => string } }): string | null {
   try {
     const sid = ctx.sessionManager?.getSessionId?.();
@@ -112,7 +132,7 @@ async function executeSubagent(
   task: string,
   agentId: string,
   profile: ReturnType<typeof resolveProfile>,
-  opts: Parameters<typeof spawnPiAgent>[2] & { parentSessionPath?: string },
+  opts: Parameters<typeof spawnPiAgent>[2] & { parentSessionPath?: string; seedMessages?: unknown[] },
 ): Promise<SubagentRunResult> {
   if (canUseEmbeddedSubagent(profile)) {
     return runEmbeddedSubagent({
@@ -128,6 +148,7 @@ async function executeSubagent(
       timeoutMs: opts.timeoutMs,
       signal: opts.signal,
       onUpdate: opts.onUpdate,
+      seedMessages: opts.seedMessages,
     });
   }
   const r = await spawnPiAgent(cwd, task, opts);
@@ -273,6 +294,7 @@ export default function (pi: ExtensionAPI) {
       "Use `agent` for a specialized role (e.g. scout/planner/reviewer); use `chain` to pipe one step's output into the next via {previous}.",
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
       "After a background spawn settles you will receive a notice; do not wait just to collect the conclusion.",
+      "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
     ],
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
@@ -360,8 +382,11 @@ export default function (pi: ExtensionAPI) {
       agentId: Type.Optional(
         Type.String({ description: "Sub-agent id for status/wait/cancel (from a prior background spawn)." }),
       ),
+      fork: Type.Optional(
+        Type.Boolean({ description: "When true, seed the child with the parent session's completed turns." }),
+      ),
     }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       const action = params.action ?? "run";
       const registry = getRegistry(ctx.cwd);
 
@@ -443,6 +468,14 @@ export default function (pi: ExtensionAPI) {
       }
 
       const profile = resolveProfile(params.profile as ProfileInput | undefined);
+      if (params.fork) {
+        const inChild = resolveToolOrigin() === "subagent";
+        if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
+        if (!canUseEmbeddedSubagent(profile) || inChild) {
+          throw new Error("fork 需要 Electron 进程内子会话");
+        }
+      }
+      const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
       const wantWorktree = profile.isolation === "worktree";
       // chain has its own worktree guard below; only the single/parallel path is gated here.
       if (wantWorktree && !hasChain && list.length !== 1) {
@@ -610,6 +643,7 @@ export default function (pi: ExtensionAPI) {
               env: profileEnv,
               mcp: profile.mcp,
               timeoutMs: limits.timeoutMs,
+              seedMessages,
               signal: controller.signal,
               onUpdate: (u) => {
                 if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
@@ -645,6 +679,7 @@ export default function (pi: ExtensionAPI) {
                 sessionPath: started.sessionPath,
                 mode: "continuable",
                 status: "running",
+                ...forkDetails(params.fork, seedMessages),
               },
             };
           } catch (e) {
@@ -686,6 +721,7 @@ export default function (pi: ExtensionAPI) {
           env: profileEnv,
           mcp: profile.mcp,
           timeoutMs: limits.timeoutMs,
+          seedMessages,
           signal: controller.signal,
           // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
           // SubAgentLogBody 轮询 registry，即可像主对话一样实时回放后台子代理。
@@ -762,6 +798,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
+            seedMessages,
             signal: controller.signal,
             onUpdate: (u) => {
               // 写 transcript（registry 内部截断；progress 也 bump updatedAt → 保留 stuck detection 心跳）：
@@ -814,6 +851,7 @@ export default function (pi: ExtensionAPI) {
               transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
               isolated: !!wt,
               diff,
+              ...forkDetails(params.fork, seedMessages),
             }),
           };
         } finally {

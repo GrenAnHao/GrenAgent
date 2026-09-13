@@ -23,6 +23,7 @@ import {
 import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import { type CapabilityProfile } from "./capability.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
+import { wipeSessionFile, writeSeed } from "./fork-seed.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
 
 export interface EmbeddedSubagentOpts {
@@ -41,6 +42,7 @@ export interface EmbeddedSubagentOpts {
   signal?: AbortSignal;
   onUpdate?: (update: AgentUpdate) => void;
   mode?: "one-shot" | "continuable";
+  seedMessages?: unknown[];
 }
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
@@ -59,6 +61,7 @@ export interface EmbeddedChildHandle {
     ) => Promise<unknown>;
   };
   sessionManager: {
+    appendMessage: (m: unknown) => void;
     appendCustomEntry: (type: string, data: unknown) => void;
     appendModelChange: (provider: string, id: string) => void;
     getSessionFile: () => string | undefined;
@@ -248,6 +251,7 @@ type OpenedEmbedded = EmbeddedChildHandle & {
   getTranscript: () => string;
   getStreamingDelta: () => string;
   clearEmitTimer: () => void;
+  inheritedEventCount: number;
 };
 
 async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
@@ -255,16 +259,26 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     id: opts.agentId,
     ...(prepared.parentPath ? { parentSession: prepared.parentPath } : {}),
   });
-  sessionManager.appendCustomEntry("subagent_meta", {
-    origin: "subagent",
-    agentId: opts.agentId,
-    parentSession: prepared.parentPath ?? null,
-    parentSessionId: opts.parentSessionId ?? null,
-    model: opts.model ?? null,
-    mode: opts.mode ?? "one-shot",
-    label: firstLine(opts.task).slice(0, 80),
-    inheritedEventCount: 0,
-  });
+  let inheritedEventCount = 0;
+  try {
+    inheritedEventCount = writeSeed(sessionManager, opts.seedMessages ?? []);
+    if (inheritedEventCount > 0) {
+      sessionManager.appendCustomEntry("subagent_catalog_base", { version: 0, reason: "subagent-seed" });
+    }
+    sessionManager.appendCustomEntry("subagent_meta", {
+      origin: "subagent",
+      agentId: opts.agentId,
+      parentSession: prepared.parentPath ?? null,
+      parentSessionId: opts.parentSessionId ?? null,
+      model: opts.model ?? null,
+      mode: opts.mode ?? "one-shot",
+      label: firstLine(opts.task).slice(0, 80),
+      inheritedEventCount,
+    });
+  } catch (e) {
+    wipeSessionFile(sessionManager.getSessionFile());
+    throw e;
+  }
 
   const services = await createAgentSessionServices({
     cwd: opts.cwd,
@@ -318,7 +332,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     const elapsed = Date.now() - lastEmitAt;
     const emit = (): void => {
       lastEmitAt = Date.now();
-      const { output } = extractAssistantOutput(session.messages, { streamingDelta });
+      const { output } = extractAssistantOutput(session.messages, { streamingDelta, skipPrefix: inheritedEventCount });
       opts.onUpdate!({ text: output, transcript, sessionPath });
     };
     if (elapsed >= streamThrottleMs) {
@@ -369,6 +383,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     sessionPath,
     unsub,
     workspace,
+    inheritedEventCount,
     getTranscript: () => transcript,
     getStreamingDelta: () => streamingDelta,
     clearEmitTimer: () => {
@@ -425,7 +440,11 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         await session.waitForIdle();
         const streamingDelta = child.getStreamingDelta();
         transcript = child.getTranscript();
-        const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
+        const { output, stopReason } = extractAssistantOutput(session.messages, {
+          streamingDelta,
+          aborted,
+          skipPrefix: child.inheritedEventCount,
+        });
         const ok = !aborted && output.trim().length > 0 && stopReason !== "error";
         result = {
           ok,
@@ -440,7 +459,11 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       } catch (e) {
         const streamingDelta = child.getStreamingDelta();
         transcript = child.getTranscript();
-        const { output, stopReason } = extractAssistantOutput(session.messages, { streamingDelta, aborted });
+        const { output, stopReason } = extractAssistantOutput(session.messages, {
+          streamingDelta,
+          aborted,
+          skipPrefix: child.inheritedEventCount,
+        });
         result = {
           ok: false,
           output,

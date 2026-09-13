@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { completedPrefix, writeSeed } from "./fork-seed.js";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { completedPrefix, wipeSessionFile, writeSeed } from "./fork-seed.js";
 
 const user = (text: string) => ({ role: "user", content: text });
 const assistant = (text: string, toolCallId?: string) => ({
@@ -72,5 +75,15 @@ describe("writeSeed", () => {
     const appendMessage = vi.fn();
     expect(writeSeed({ appendMessage }, [])).toBe(0);
     expect(appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("wipeSessionFile removes an existing file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wipe-"));
+    const path = join(dir, "child.jsonl");
+    writeFileSync(path, "x\n");
+    wipeSessionFile(path);
+    expect(existsSync(path)).toBe(false);
+    expect(() => wipeSessionFile(undefined)).not.toThrow();
+    expect(() => wipeSessionFile(path)).not.toThrow();
   });
 });
