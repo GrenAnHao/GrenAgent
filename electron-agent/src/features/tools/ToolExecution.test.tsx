@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+vi.mock('../../stores/AgentStoreContext', () => ({
+  useAgentStoreContext: () => ({ workspace: '/ws' }),
+}));
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { ToolExecution } from './ToolExecution';
+import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 
 afterEach(cleanup);
 
@@ -149,5 +153,33 @@ describe('ToolExecution ask_user', () => {
       />,
     );
     expect(screen.getByTestId('answered-questions-card')).toBeTruthy();
+  });
+});
+
+describe('ToolExecution ask_user stub', () => {
+  afterEach(() => {
+    useInlineQuestionStore.setState({ byWorkspace: {} });
+  });
+
+  it('shows the pending stub only while a request is in the store', () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'u1',
+      data: { kind: 'questions', id: 'q1', questions: [] },
+    });
+    wrap(<ToolExecution toolName="ask_user" args={{}} result={{}} status="running" />);
+    expect(screen.getByTestId('ask-user-pending')).toBeTruthy();
+    expect(screen.queryByTestId('inline-question')).toBeNull();
+  });
+
+  it('hides the stub once the store is cleared', () => {
+    wrap(<ToolExecution toolName="ask_user" args={{}} result={{}} status="running" />);
+    expect(screen.queryByTestId('ask-user-pending')).toBeNull();
+  });
+
+  it('renders nothing on error', () => {
+    const { container } = wrap(<ToolExecution toolName="ask_user" args={{}} result={{}} status="error" />);
+    expect(screen.queryByTestId('ask-user-pending')).toBeNull();
+    expect(container.textContent).toBe('');
   });
 });

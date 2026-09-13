@@ -14,8 +14,7 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 /**
- * 阻塞式 ask_user 富卡：渲染在对话流末尾（紧跟提问消息），用户作答 → 回传 `[我的选择]`
- * 经 extension_ui_response resolve 掉 sidecar 端 ctx.ui.input 的阻塞调用。
+ * 阻塞式 ask_user 富卡，由 `ComposerPromptOverlay` 渲染。
  */
 export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const { workspace } = useAgentStoreContext();

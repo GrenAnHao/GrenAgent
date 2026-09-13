@@ -5,8 +5,9 @@ import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
-import { InlineQuestionCard } from '../chat/InlineQuestionCard';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
+import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
 import { LazyHighlighter } from './LazyHighlighter';
 import { EditPreview } from './EditPreview';
@@ -244,6 +245,8 @@ function ToolDetail({
 }
 
 function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionProps) {
+  const { workspace } = useAgentStoreContext();
+  const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
   const [expanded, setExpanded] = useState(status === 'running');
   const hasDetail = useMemo(() => {
     if (status === 'running') return true;
@@ -252,7 +255,7 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
 
   const bareName = toolName.toLowerCase();
 
-  // ask_user：运行中 → 内联选择卡；完成 → 紧凑问答摘要。
+  // ask_user：运行中 → 工具行占位；完成 → 紧凑问答摘要。浮层由 ComposerPromptOverlay 渲染。
   if (bareName === 'ask_user') {
     if (status === 'done') {
       if (parseAnswers(result).length === 0) {
@@ -260,7 +263,10 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
       }
       return <AnsweredQuestionsCard args={args} result={result} />;
     }
-    return <InlineQuestionCard />;
+    if (status === 'running' && hasPendingQuestion) {
+      return <PromptPendingRow data-testid="ask-user-pending" label="等待你选择" live />;
+    }
+    return null;
   }
 
   // show_visual / read_visual_choice：UI 通过 VisualCard 呈现，工具行仅显示标题行，不展开 body。
