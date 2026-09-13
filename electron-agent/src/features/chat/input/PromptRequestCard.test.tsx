@@ -7,7 +7,7 @@ vi.mock('../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
 
-import { PromptRequestCard } from './PromptRequestCard';
+import { isApprovalSelect, PromptRequestCard } from './PromptRequestCard';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
 
 afterEach(() => {
@@ -16,53 +16,57 @@ afterEach(() => {
   useUiPromptStore.setState({ byWorkspace: {} });
 });
 
+describe('isApprovalSelect', () => {
+  it('accepts known approval option sets', () => {
+    expect(isApprovalSelect(['允许', '拒绝'])).toBe(true);
+    expect(isApprovalSelect(['允许本次', '总是允许', '拒绝'])).toBe(true);
+  });
+
+  it('rejects ordinary questions', () => {
+    expect(isApprovalSelect(['A', 'B'])).toBe(false);
+    expect(isApprovalSelect(['允许', '稍后再说'])).toBe(false);
+    expect(isApprovalSelect([])).toBe(false);
+    expect(isApprovalSelect(undefined)).toBe(false);
+  });
+});
+
 describe('PromptRequestCard', () => {
   it('renders nothing without a pending request', () => {
     const { container } = render(<PromptRequestCard />);
     expect(container.firstChild).toBeNull();
   });
 
-  it('responds to a select choice with { value } and clears the store', () => {
+  it('renders approval actions as one-click buttons, not a 请选择 quiz', () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
-      request: { id: 'u1', method: 'select', title: '允许？', options: ['允许', '拒绝'] },
+      request: { id: 'u1', method: 'select', title: '危险命令：rm -rf ./tmp', options: ['允许', '拒绝'] },
     });
     render(<PromptRequestCard />);
-    fireEvent.click(screen.getByText('拒绝'));
-    fireEvent.click(screen.getByTestId('prompt-request-select-continue'));
+    expect(screen.getByTestId('prompt-request-approval')).toBeTruthy();
+    expect(screen.getByText('需要批准')).toBeTruthy();
+    expect(screen.queryByText('请选择')).toBeNull();
+    expect(screen.queryByTestId('prompt-request-select-continue')).toBeNull();
+    fireEvent.click(screen.getByTestId('prompt-request-approval-deny'));
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u1', value: '拒绝' });
     expect(useUiPromptStore.getState().byWorkspace['/ws']).toBeUndefined();
   });
 
-  it('responds to confirm with { confirmed: true }', () => {
+  it('submits 总是允许 immediately for the three-way approval card', () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
-      request: { id: 'u2', method: 'confirm', title: '项目信任', message: '信任此工作区？' },
+      request: { id: 'u1b', method: 'select', title: '请求批准：bash', options: ['允许本次', '总是允许', '拒绝'] },
     });
     render(<PromptRequestCard />);
-    expect(screen.getByText('信任此工作区？')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('prompt-request-confirm'));
-    expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u2', confirmed: true });
+    fireEvent.click(screen.getByTestId('prompt-request-approval-allow-always'));
+    expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u1b', value: '总是允许' });
   });
 
-  it('responds to input with { value } from the textarea', () => {
+  it('ignores generic selects now handled by the overlay', () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
-      request: { id: 'u3', method: 'input', title: '输入名称', placeholder: 'name' },
+      request: { id: 'u1c', method: 'select', title: '选一个', options: ['红', '蓝'] },
     });
-    render(<PromptRequestCard />);
-    fireEvent.change(screen.getByTestId('prompt-request-input'), { target: { value: 'hello' } });
-    fireEvent.click(screen.getByTestId('prompt-request-submit'));
-    expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u3', value: 'hello' });
-  });
-
-  it('dismisses a select request with { cancelled: true }', () => {
-    useUiPromptStore.getState().setRequest({
-      workspace: '/ws',
-      request: { id: 'u4', method: 'select', title: '选一个', options: ['A', 'B'] },
-    });
-    render(<PromptRequestCard />);
-    fireEvent.click(screen.getByTestId('prompt-request-select-skip'));
-    expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u4', cancelled: true });
+    const { container } = render(<PromptRequestCard />);
+    expect(container.firstChild).toBeNull();
   });
 });
