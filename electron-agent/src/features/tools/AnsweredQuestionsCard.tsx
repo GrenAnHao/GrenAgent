@@ -88,7 +88,7 @@ function extractQData(args: unknown): QData[] {
     .filter((q) => q.title);
 }
 
-function parseAnswers(result: unknown): string[] {
+export function parseAnswers(result: unknown): string[] {
   const text = extractText(result);
   if (!text) return [];
   const chunks = text

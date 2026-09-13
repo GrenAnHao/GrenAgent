@@ -124,3 +124,30 @@ describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
     expect(screen.queryByText('+ same')).toBeNull();
   });
 });
+
+describe('ToolExecution ask_user', () => {
+  it('shows cancelled when done with no answers', () => {
+    wrap(
+      <ToolExecution
+        toolName="ask_user"
+        args={{ questions: [{ question: 'T', options: ['甲'] }] }}
+        result={{ content: [{ type: 'text', text: '用户取消了选择' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.getByTestId('ask-user-cancelled')).toBeTruthy();
+    expect(screen.queryByTestId('answered-questions-card')).toBeNull();
+  });
+
+  it('shows answered card when done with choices', () => {
+    wrap(
+      <ToolExecution
+        toolName="ask_user"
+        args={{ questions: [{ question: 'T', options: ['甲', '乙'] }] }}
+        result={{ content: [{ type: 'text', text: '[我的选择]\n1. T：乙' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.getByTestId('answered-questions-card')).toBeTruthy();
+  });
+});

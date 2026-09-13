@@ -6,7 +6,8 @@ import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { InlineQuestionCard } from '../chat/InlineQuestionCard';
-import { AnsweredQuestionsCard } from './AnsweredQuestionsCard';
+import { PromptPendingRow } from '../chat/PromptPendingRow';
+import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
 import { LazyHighlighter } from './LazyHighlighter';
 import { EditPreview } from './EditPreview';
 import { GlobCard, GrepCard } from './SearchCards';
@@ -253,7 +254,12 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
 
   // ask_user：运行中 → 内联选择卡；完成 → 紧凑问答摘要。
   if (bareName === 'ask_user') {
-    if (status === 'done') return <AnsweredQuestionsCard args={args} result={result} />;
+    if (status === 'done') {
+      if (parseAnswers(result).length === 0) {
+        return <PromptPendingRow data-testid="ask-user-cancelled" label="已取消" />;
+      }
+      return <AnsweredQuestionsCard args={args} result={result} />;
+    }
     return <InlineQuestionCard />;
   }
 
