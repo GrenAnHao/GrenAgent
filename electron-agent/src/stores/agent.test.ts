@@ -121,6 +121,15 @@ describe('createAgentStore', () => {
     expect(store.useStore.getState().isStreaming).toBe(false);
   });
 
+  it('subagent_catalog_changed 不进消息', () => {
+    store = createAgentStore('.');
+    const before = store.useStore.getState();
+    emit({ type: 'subagent_catalog_changed', sessionPath: '/parent.jsonl' });
+    flushRAF();
+    expect(store.useStore.getState().messages).toEqual(before.messages);
+    expect(store.useStore.getState().lastError).toBe(before.lastError);
+  });
+
   it('推理时长在 message_end 后持久化，切换会话恢复时按 timestamp 回填', () => {
     // 只 fake Date（推理计时用 Date.now），不接管 rAF/setTimeout。
     vi.useFakeTimers({ toFake: ['Date'] });

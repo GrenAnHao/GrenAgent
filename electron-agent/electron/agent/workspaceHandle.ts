@@ -1,5 +1,6 @@
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
 import { drainByParent } from '../../../extensions/multi-agent/activation.js';
+import { registerCatalogChangeSink } from '../../../extensions/multi-agent/catalog-events.js';
 import { registerEmbeddedSubagentEventSink } from '../../../extensions/multi-agent/embedded-events.js';
 import { registerParentSessionHost } from '../../../extensions/multi-agent/parent-host.js';
 import { toJsonEvent } from '../../../cli/src/json-event.js';
@@ -53,6 +54,7 @@ export class WorkspaceHandle {
   readonly ui: SessionUiAdapter;
   private unsubscribe: (() => void) | undefined;
   private unsubChildEvents: (() => void) | undefined;
+  private unsubCatalogEvents: (() => void) | undefined;
   private disposed = false;
   private sessionInvalidated = false;
   private turnOrigin: TurnOrigin = 'main';
@@ -95,6 +97,19 @@ export class WorkspaceHandle {
         sessionPath: meta.sessionPath,
         source: 'subagent',
       });
+    });
+    this.unsubCatalogEvents = registerCatalogChangeSink((meta) => {
+      if (this.disposed) return;
+      const current = this.session.sessionFile;
+      if (!current || current !== meta.sessionPath) return;
+      this.options.onEvent(
+        { type: 'subagent_catalog_changed', sessionPath: meta.sessionPath },
+        {
+          source: 'interactive',
+          sessionPath: meta.sessionPath,
+          ...(this.session.sessionId ? { sessionId: this.session.sessionId } : {}),
+        },
+      );
     });
     await this.runMain(async () => { await this.bindAndSubscribe(); });
     this.registerCurrentParentHost();
@@ -181,6 +196,8 @@ export class WorkspaceHandle {
     this.unsubscribe = undefined;
     this.unsubChildEvents?.();
     this.unsubChildEvents = undefined;
+    this.unsubCatalogEvents?.();
+    this.unsubCatalogEvents = undefined;
     try { await this.options.runtime.dispose(); } catch { /* 同上 */ }
     try { await this.options.onDispose?.(this.options.workspace, this.options.cwd); } catch { /* 同上 */ }
   }

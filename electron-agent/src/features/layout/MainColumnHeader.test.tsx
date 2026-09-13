@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { useLayoutStore } from '../../stores/layoutStore';
+import { useSessionStore } from '../../store/session';
 
 vi.mock('../../stores/AgentStoreContext', () => ({
   useOptionalAgentStoreContext: () => ({ workspace: '/repo' }),
@@ -12,6 +13,7 @@ import { MainColumnHeader } from './MainColumnHeader';
 beforeEach(() => {
   usePlanModeStore.setState({ status: undefined });
   useLayoutStore.setState({ rightPanelOpen: false });
+  useSessionStore.setState({ activeSessionPath: null });
 });
 afterEach(() => {
   cleanup();

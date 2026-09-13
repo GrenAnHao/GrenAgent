@@ -5,6 +5,7 @@ import { PanelHeader } from '../../components/PanelHeader';
 import { useLayoutStore, selectRightPanelVisible } from '../../stores/layoutStore';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { SubAgentMenuButton } from '../subagents/SubAgentMenuButton';
+import { SubagentHeaderCatalog } from '../subagents/SubagentHeaderCatalog';
 import { WorkspaceTabs } from '../workspace/WorkspaceTabs';
 
 /** 主题与面板开关，与聊天区解耦订阅。 */
@@ -58,6 +59,7 @@ export const MainColumnHeader = memo(function MainColumnHeader() {
       left={
         <>
           <WorkspaceTabs />
+          <SubagentHeaderCatalog />
           <PlanModeBadge />
         </>
       }

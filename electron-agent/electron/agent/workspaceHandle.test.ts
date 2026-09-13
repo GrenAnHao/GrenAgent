@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { currentWorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
 import { drainByParent } from '../../../extensions/multi-agent/activation.js';
+import {
+  emitCatalogChanged,
+  __resetCatalogChangeSinksForTest,
+} from '../../../extensions/multi-agent/catalog-events.js';
 import { emitEmbeddedSubagentEvent } from '../../../extensions/multi-agent/embedded-events.js';
 import { lookupParentHost, __resetParentHostsForTest } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
@@ -543,6 +547,48 @@ describe('WorkspaceHandle', () => {
       expect(onFatal).toHaveBeenCalled();
       expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
       expect(lookupParentHost(nextPath, 'D:/proj')).toBeUndefined();
+    });
+  });
+
+  describe('catalog change sink', () => {
+    afterEach(() => {
+      __resetCatalogChangeSinksForTest();
+    });
+
+    it('start 后 emit 当前 sessionFile 会按 interactive 转发', async () => {
+      const { runtime, first } = makeRuntime();
+      Object.assign(first, { sessionFile: '/parent.jsonl' });
+      const { handle, onEvent } = makeHandle(runtime);
+      await handle.start();
+      onEvent.mockClear();
+      emitCatalogChanged({ sessionPath: '/parent.jsonl' });
+      expect(onEvent).toHaveBeenCalledWith(
+        { type: 'subagent_catalog_changed', sessionPath: '/parent.jsonl' },
+        expect.objectContaining({ source: 'interactive', sessionPath: '/parent.jsonl' }),
+      );
+      await handle.dispose();
+    });
+
+    it('别的 sessionPath 不转发', async () => {
+      const { runtime, first } = makeRuntime();
+      Object.assign(first, { sessionFile: '/parent.jsonl' });
+      const { handle, onEvent } = makeHandle(runtime);
+      await handle.start();
+      onEvent.mockClear();
+      emitCatalogChanged({ sessionPath: '/other.jsonl' });
+      expect(onEvent).not.toHaveBeenCalled();
+      await handle.dispose();
+    });
+
+    it('dispose 后不再转发', async () => {
+      const { runtime, first } = makeRuntime();
+      Object.assign(first, { sessionFile: '/parent.jsonl' });
+      const { handle, onEvent } = makeHandle(runtime);
+      await handle.start();
+      await handle.dispose();
+      onEvent.mockClear();
+      emitCatalogChanged({ sessionPath: '/parent.jsonl' });
+      expect(onEvent).not.toHaveBeenCalled();
     });
   });
 });
