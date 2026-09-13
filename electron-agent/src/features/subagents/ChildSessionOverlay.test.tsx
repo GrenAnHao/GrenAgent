@@ -119,4 +119,22 @@ describe('ChildSessionOverlay', () => {
     expect(onClose).toHaveBeenCalled();
     expect(useChildOverlayStore.getState().overlay).toBeNull();
   });
+
+  it('换子时清掉上一子未发送的草稿', async () => {
+    openOverlay({ mode: 'continuable', activity: 'ready', tornDown: false, sessionPath: '/a.jsonl' });
+    render(<ChildSessionOverlay />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'for-a' } });
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('for-a');
+    openOverlay({
+      id: 'sa-2',
+      mode: 'continuable',
+      activity: 'ready',
+      tornDown: false,
+      sessionPath: '/b.jsonl',
+      label: 'second',
+    });
+    await waitFor(() => {
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+    });
+  });
 });

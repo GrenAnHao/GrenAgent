@@ -390,6 +390,7 @@ export function SubagentHeaderCatalog({ activeChildId, onOpen }: SubagentHeaderC
   const openRow = (row: CatalogRowView) => {
     if (row.diagnostic) return;
     onOpen?.(row);
+    setOpen(false);
   };
 
   const toggleExpand = async (row: CatalogRowView) => {

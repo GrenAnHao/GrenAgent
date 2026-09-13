@@ -63,5 +63,6 @@ describe('MainChatColumn', () => {
     render(<MainChatColumn />);
     expect(screen.getByTestId('parent-chat-view')).toBeTruthy();
     expect(screen.getByTestId('subagent-child-overlay')).toBeTruthy();
+    expect(screen.getByTestId('parent-chat-view').parentElement?.getAttribute('inert')).not.toBeNull();
   });
 });

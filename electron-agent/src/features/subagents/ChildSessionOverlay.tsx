@@ -145,6 +145,10 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
 
   useEffect(() => {
+    setDraft('');
+  }, [overlay?.sessionPath]);
+
+  useEffect(() => {
     if (!overlay?.sessionPath) return;
     const sessionPath = overlay.sessionPath;
     const timer = window.setInterval(() => {
@@ -178,29 +182,39 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
   const submit = async () => {
     const text = draft.trim();
     if (!text || readonly) return;
+    const sessionPath = overlay.sessionPath;
+    const parentSessionPath = overlay.parentSessionPath;
     try {
       await pi.subagentPrompt(
         workspace,
-        overlay.parentSessionPath,
-        overlay.sessionPath,
+        parentSessionPath,
+        sessionPath,
         text,
         steer ? 'steer' : 'followUp',
       );
       const store = useChildOverlayStore.getState();
+      if (store.overlay?.sessionPath !== sessionPath) return;
       store.setError(null);
       store.setActivity('running');
       setDraft('');
     } catch (err) {
-      useChildOverlayStore.getState().setError(err instanceof Error ? err.message : String(err));
+      const store = useChildOverlayStore.getState();
+      if (store.overlay?.sessionPath !== sessionPath) return;
+      store.setError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const interrupt = async () => {
+    const sessionPath = overlay.sessionPath;
     try {
-      await pi.subagentInterrupt(workspace, overlay.parentSessionPath, overlay.sessionPath);
-      useChildOverlayStore.getState().setError(null);
+      await pi.subagentInterrupt(workspace, overlay.parentSessionPath, sessionPath);
+      const store = useChildOverlayStore.getState();
+      if (store.overlay?.sessionPath !== sessionPath) return;
+      store.setError(null);
     } catch (err) {
-      useChildOverlayStore.getState().setError(err instanceof Error ? err.message : String(err));
+      const store = useChildOverlayStore.getState();
+      if (store.overlay?.sessionPath !== sessionPath) return;
+      store.setError(err instanceof Error ? err.message : String(err));
     }
   };
 

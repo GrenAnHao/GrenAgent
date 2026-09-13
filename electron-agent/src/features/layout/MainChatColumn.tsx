@@ -12,7 +12,13 @@ export const MainChatColumn = memo(function MainChatColumn() {
       <MainColumnHeader />
       <Flexbox flex={1} style={{ minHeight: 0, position: 'relative' }}>
         <Flexbox flex={1} style={{ minHeight: 0, height: '100%', position: 'relative' }}>
-          <ChatView />
+          <div
+            style={{ flex: 1, height: '100%', minHeight: 0, ...(overlay ? { pointerEvents: 'none' } : {}) }}
+            inert={overlay ? true : undefined}
+            aria-hidden={overlay ? true : undefined}
+          >
+            <ChatView />
+          </div>
           {overlay ? <ChildSessionOverlay /> : null}
         </Flexbox>
       </Flexbox>

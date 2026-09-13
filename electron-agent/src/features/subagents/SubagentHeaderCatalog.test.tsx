@@ -93,6 +93,9 @@ describe('SubagentHeaderCatalog', () => {
         mode: 'one-shot',
       }));
     });
+    await waitFor(() => {
+      expect(screen.queryByRole('tree')).toBeNull();
+    });
   });
 
   it('下拉 role="tree"，宽度 360px', async () => {
