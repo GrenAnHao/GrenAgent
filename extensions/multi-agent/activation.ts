@@ -261,6 +261,15 @@ export function getActivation(childId: string): Activation | undefined {
   return activations.get(childId);
 }
 
+export function getActivationBySessionPath(sessionPath: string): Activation | undefined {
+  const path = typeof sessionPath === "string" ? sessionPath.trim() : "";
+  if (!path) return undefined;
+  for (const act of activations.values()) {
+    if (act.sessionPath === path) return act;
+  }
+  return undefined;
+}
+
 export function deliverToChild(childId: string, text: string, delivery: Delivery): void {
   const act = activations.get(childId);
   if (!act) {
