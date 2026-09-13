@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { foldCatalog } from "./catalog.js";
+import * as catalogEvents from "./catalog-events.js";
 
 // index.ts 的 spawn_agent execute() 此前无单测。这里用最小 mock 隔离 fs / 子进程 / sqlite，
 // 覆盖 B（owner=full 时给自主子代理注入 APPROVAL_POLICY=auto，能力硬限不变）等运行时行为。
@@ -286,8 +287,10 @@ describe("spawn_agent · 单会话上限 (SUBAGENT_MAX_PER_SESSION)", () => {
 describe("spawn_agent · parent catalog write", () => {
   it("embedded run success writes one-shot catalog fact", async () => {
     vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const emit = vi.spyOn(catalogEvents, "emitCatalogChanged");
     const { execute, appendEntry } = loadSpawnHarness();
-    await execute("te-cat", { task: "do x" }, null, null, ctx);
+    const parentCtx = { ...ctx, sessionManager: { getSessionFile: () => "/ws/parent.jsonl" } };
+    await execute("te-cat", { task: "do x" }, null, null, parentCtx);
     expect(appendEntry).toHaveBeenCalledTimes(1);
     expect(appendEntry).toHaveBeenCalledWith(
       "subagent_catalog",
@@ -297,6 +300,7 @@ describe("spawn_agent · parent catalog write", () => {
         sessionPath: "/tmp/child.jsonl",
       }),
     );
+    expect(emit).toHaveBeenCalledWith({ sessionPath: "/ws/parent.jsonl" });
   });
 
   it("embedded spawn success writes continuable catalog fact", async () => {
@@ -479,8 +483,8 @@ describe("multi-agent · user-fork catalog base", () => {
     const { oldPath, newPath } = seedCopiedCatalog("cat-fork");
     expect(foldCatalog(newPath).entries.map((e) => e.id)).toEqual(["sa-old"]);
 
-    loadSpawnHarness();
     const smNew = SessionManager.open(newPath);
+    const emit = vi.spyOn(catalogEvents, "emitCatalogChanged");
     const { appendEntry, handlers } = loadSpawnHarness();
     appendEntry.mockImplementation((customType: string, data: unknown) => {
       smNew.appendCustomEntry(customType, data);
@@ -492,8 +496,30 @@ describe("multi-agent · user-fork catalog base", () => {
     );
 
     expect(appendEntry).toHaveBeenCalledWith("subagent_catalog_base", { version: 0, reason: "user-fork" });
+    expect(emit).toHaveBeenCalledWith({ sessionPath: newPath });
     persistSessionTo(smNew, newPath);
     expect(foldCatalog(newPath).entries).toEqual([]);
+  });
+
+  it("writes base when fork catalog read fails", () => {
+    const emit = vi.spyOn(catalogEvents, "emitCatalogChanged");
+    const { appendEntry, handlers } = loadSpawnHarness();
+    const cwd = process.platform === "win32" ? "D:\\fork-unreadable" : "/fork-unreadable";
+    handlers.session_start?.(
+      { type: "session_start", reason: "fork", previousSessionFile: "/old.jsonl" },
+      {
+        cwd,
+        sessionManager: {
+          getSessionFile: () => "/ws/broken.jsonl",
+          buildContextEntries: () => {
+            throw new Error("unreadable");
+          },
+        },
+      },
+    );
+
+    expect(appendEntry).toHaveBeenCalledWith("subagent_catalog_base", { version: 0, reason: "user-fork" });
+    expect(emit).toHaveBeenCalledWith({ sessionPath: "/ws/broken.jsonl" });
   });
 
   it("does not write base on resume even when the new file has catalog facts", () => {

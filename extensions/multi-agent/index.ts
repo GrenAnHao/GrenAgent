@@ -23,9 +23,9 @@ import { registerWorkflows } from "./workflows.js";
 import { registerAdjacentTools } from "./adjacent-tools.js";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
 import { disposeActivation } from "./activation.js";
-import { establishCatalogChild, foldCatalog } from "./catalog.js";
+import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 
 const MAX_CONCURRENCY = 4;
@@ -78,6 +78,22 @@ function writeOneShotCatalog(
     });
   } catch {
     /* one-shot: 目录失败不改变工具结果 */
+  }
+}
+
+function parentCatalogHasFacts(
+  ctx: { sessionManager?: { buildContextEntries?: () => unknown } },
+  sessionPath: string,
+): boolean {
+  try {
+    const sm = ctx.sessionManager;
+    if (sm && typeof sm.buildContextEntries === "function") {
+      return foldCatalogFromEntries(sm.buildContextEntries() as never).entries.length > 0;
+    }
+    const opened = SessionManager.open(sessionPath);
+    return foldCatalogFromEntries(opened.buildContextEntries() as never).entries.length > 0;
+  } catch {
+    return true;
   }
 }
 
@@ -231,9 +247,14 @@ export default function (pi: ExtensionAPI) {
       /* 回收失败不阻塞 session_start */
     }
     if (event?.reason === "fork") {
-      const current = parentSessionPath(ctx);
-      if (current && foldCatalog(current).entries.length > 0) {
-        pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" });
+      try {
+        const current = parentSessionPath(ctx);
+        if (current && parentCatalogHasFacts(ctx, current)) {
+          pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" });
+          emitCatalogChanged({ sessionPath: current });
+        }
+      } catch {
+        /* fork base 失败不阻断 reap 之后的其它 listener */
       }
     }
   });
