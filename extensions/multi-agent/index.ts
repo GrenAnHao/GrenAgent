@@ -17,6 +17,7 @@ import { forEachRegistry, getRegistry, inflight } from "./controlPlane.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
 import { registerWorkflows } from "./workflows.js";
+import { registerAdjacentTools } from "./adjacent-tools.js";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -762,6 +763,8 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
+
+  registerAdjacentTools(pi);
 
   // Periodic stuck reaping across all open registries (unref'd so it never keeps
   // the process alive). Lazy reaping on list/status covers on-demand cases.
