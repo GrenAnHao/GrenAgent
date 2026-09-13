@@ -26,14 +26,8 @@ export interface AgentResult {
 export interface AgentUpdate {
   text: string;
   transcript: string;
-}
-
-interface PiEvent {
-  type?: string;
-  role?: string;
-  text?: string;
-  content?: unknown;
-  message?: { role?: string; content?: unknown };
+  /** Set by embedded runner once the child session file exists. */
+  sessionPath?: string;
 }
 
 const timeoutMs = () => Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000;
@@ -43,6 +37,28 @@ export function resolveSubagentModel(): string | undefined {
   if (getConfig("SUBAGENT_MODE")?.trim() === "inherit") return undefined;
   const raw = getConfig("SUBAGENT_MODEL")?.trim();
   return raw || undefined;
+}
+
+/** Format the parent agent's current model as `provider/id` for `--model`. */
+export function parentModelSpec(model: { provider?: string; id?: string } | null | undefined): string | undefined {
+  const provider = model?.provider?.trim();
+  const id = model?.id?.trim();
+  if (!provider || !id) return undefined;
+  return `${provider}/${id}`;
+}
+
+export function assistantTextFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (p): p is { type: string; text: string } =>
+          !!p && typeof p === "object" && (p as { type?: string }).type === "text" && typeof (p as { text?: unknown }).text === "string",
+      )
+      .map((p) => p.text)
+      .join("");
+  }
+  return "";
 }
 
 export function resolvePiCommand(): { cmd: string; baseArgs: string[] } {
@@ -58,30 +74,55 @@ export function buildSubagentSkillArgs(root: string | undefined): string[] {
   return managedRoot ? ["--skill", managedRoot] : [];
 }
 
+/**
+ * 从子代理 `--mode json` JSONL 抽出最后一轮助手正文。
+ *
+ * pi 流式 `message_update` 经 toJsonEvent 后不再带 message 快照，正文只在
+ * `assistantMessageEvent.text_delta` 里；`message_end` 的 content 也可能是空数组。
+ * 旧实现只读 assistant.content，读不到就退回 raw JSONL 尾部——session 头会被当成
+ * 「产出」交给主代理，并让 quiet-complete 在 60s 后误判成功。
+ */
 export function extractFinalText(jsonlOutput: string): string {
-  const lines = jsonlOutput.split(/\r?\n/).filter((l) => l.trim());
-  let text = "";
+  if (!jsonlOutput) return "";
+  const lines = jsonlOutput.split(/\r?\n/);
+  let lastText = "";
+  let currentDelta = "";
   for (const line of lines) {
-    let ev: PiEvent | null = null;
+    if (!line.trim()) continue;
+    let ev: Record<string, unknown>;
     try {
-      ev = JSON.parse(line) as PiEvent;
+      ev = JSON.parse(line) as Record<string, unknown>;
     } catch {
       continue;
     }
-    const role = ev.message?.role ?? ev.role;
-    if (role !== "assistant") continue;
-    const content = ev.message?.content ?? ev.content ?? ev.text;
-    if (typeof content === "string") {
-      text = content;
-    } else if (Array.isArray(content)) {
-      const t = content
-        .filter((p): p is { type: string; text: string } => !!p && typeof p === "object" && (p as { type?: string }).type === "text")
-        .map((p) => p.text)
-        .join("");
-      if (t) text = t;
+
+    const msg = (ev.message && typeof ev.message === "object" ? ev.message : undefined) as
+      | { role?: string; content?: unknown }
+      | undefined;
+    const role = msg?.role ?? (typeof ev.role === "string" ? ev.role : undefined);
+
+    if (ev.type === "message_start" && role === "assistant") {
+      currentDelta = "";
+    }
+
+    const ame = ev.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
+    if (ev.type === "message_update" && ame?.type === "text_delta" && typeof ame.delta === "string") {
+      currentDelta += ame.delta;
+    }
+
+    const snap = role === "assistant" ? assistantTextFromContent(msg?.content ?? ev.content ?? ev.text) : "";
+    if (snap) {
+      lastText = snap;
+      currentDelta = "";
+    }
+
+    if (ev.type === "message_end" && (role === "assistant" || !role)) {
+      const endSnap = assistantTextFromContent(msg?.content);
+      lastText = endSnap || currentDelta || lastText;
+      currentDelta = "";
     }
   }
-  return text || jsonlOutput.slice(-4000).trim();
+  return lastText || currentDelta;
 }
 
 /**

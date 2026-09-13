@@ -1,10 +1,16 @@
 import { useMemo, useEffect, useRef, useState } from 'react';
-import { applyEvent, initialAgentState, type AgentState, type ChatMessage } from '../../stores/agentReducer';
+import {
+  applyEvent,
+  initialAgentState,
+  messagesFromAgent,
+  type AgentState,
+  type ChatMessage,
+} from '../../stores/agentReducer';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
-import { finalizeSubAgentMessages } from './subagentUtils';
+import { buildSubAgentConversationMessages, subAgentSessionPath } from './subagentUtils';
 import { pi } from '../../lib/pi';
 
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript / transcriptTail）。 */
@@ -18,18 +24,27 @@ function transcriptOf(result: unknown): string {
   return typeof d.transcriptTail === 'string' ? d.transcriptTail : '';
 }
 
-/** transcript 缺失时（如多任务/旧数据）的兜底：取结果文本块。 */
-function fallbackText(result: unknown): string {
-  if (!result || typeof result !== 'object') return '';
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter(
-      (b): b is { type: string; text: string } =>
-        !!b && typeof b === 'object' && (b as { type?: string }).type === 'text',
-    )
-    .map((b) => b.text)
-    .join('');
+/** session 头 / 控制事件不算可回放；当成空串以便走 registry 或结果正文兜底。 */
+function usableTranscript(raw: string): string {
+  for (const line of raw.split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s) continue;
+    try {
+      const ev = JSON.parse(s) as { type?: string };
+      if (
+        ev.type === 'message_start' ||
+        ev.type === 'message_update' ||
+        ev.type === 'message_end' ||
+        ev.type === 'tool_execution_start' ||
+        ev.type === 'tool_execution_end'
+      ) {
+        return raw;
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return '';
 }
 
 interface ParseCache {
@@ -39,8 +54,6 @@ interface ParseCache {
 
 /**
  * 增量解析 transcript JSONL：只处理自上次以来新增的行，不从头全量重跑 reducer。
- * 原先每次 transcript 更新都 split + 全量 applyEvent，随运行时间线性增长；
- * 现在只追加增量，首次或 transcript 回缩（异常）时才全量回放。
  */
 function useIncrementalMessages(transcript: string): ChatMessage[] {
   const cacheRef = useRef<ParseCache>({ lineCount: 0, state: initialAgentState() });
@@ -53,11 +66,9 @@ function useIncrementalMessages(transcript: string): ChatMessage[] {
     let state: AgentState;
 
     if (lines.length >= prev.lineCount && prev.lineCount > 0) {
-      // 正常增量路径
       startIdx = prev.lineCount;
       state = prev.state;
     } else {
-      // 全量回放（首次、或行数意外减少）
       startIdx = 0;
       state = initialAgentState();
     }
@@ -80,7 +91,6 @@ function useIncrementalMessages(transcript: string): ChatMessage[] {
 
 /**
  * 从 registry 按需拉取子代理 transcript（用于跨会话 / 后台 spawn 的面板打开）。
- * 仅当 result 里没有 transcript 时（即非内联 spawn_agent 消息）才走这条路径。
  */
 function useRegistryTranscript(
   workspace: string,
@@ -115,6 +125,42 @@ function useRegistryTranscript(
   return transcript;
 }
 
+/**
+ * 绑定 embedded 子代理的真会话 JSONL（只读）；运行中轮询刷新。
+ */
+function useSessionPathMessages(sessionPath: string | null | undefined, running: boolean): ChatMessage[] {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  useEffect(() => {
+    if (!sessionPath) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+
+    const fetch = async () => {
+      try {
+        const { messages: raw } = await pi.subagentGetSessionMessages(sessionPath);
+        if (cancelled || !raw?.length) return;
+        setMessages(messagesFromAgent(raw).map((m, i) => ({ ...m, id: `sa-${i}` })));
+      } catch {
+        /* keep last */
+      }
+    };
+
+    void fetch();
+    if (!running) return;
+
+    const timer = setInterval(() => void fetch(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sessionPath, running]);
+
+  return messages;
+}
+
 interface SubAgentConversationProps {
   task: string;
   result: unknown;
@@ -125,7 +171,7 @@ interface SubAgentConversationProps {
   'data-testid'?: string;
 }
 
-/** 单个子代理的对话视图：把子代理 JSONL 还原成消息，用主对话同款气泡 + 虚拟化渲染。 */
+/** 单个子代理的对话视图：真会话绑定或 JSONL 回放。 */
 export function SubAgentConversation({
   task,
   result,
@@ -134,42 +180,28 @@ export function SubAgentConversation({
   agentId,
   'data-testid': testId,
 }: SubAgentConversationProps) {
-  // 运行中 result（transcript）每帧增长，100ms 节流避免每个 token 都重解析整段 JSONL。
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
 
-  // 从工具结果里取内联 transcript（主对话里的 spawn_agent 消息）
-  const inlineTranscript = transcriptOf(liveResult);
+  const sessionPath = subAgentSessionPath(liveResult);
+  const sessionMessages = useSessionPathMessages(sessionPath, status === 'running');
 
-  // 若内联 transcript 为空（跨会话 / 后台 spawn），从 registry 按需拉取
+  const inlineTranscript = usableTranscript(transcriptOf(liveResult));
+
   const registryTranscript = useRegistryTranscript(
     workspace ?? '',
-    inlineTranscript ? null : agentId, // 有内联 transcript 时不走 registry
+    sessionPath || inlineTranscript ? null : agentId,
     status === 'running',
   );
 
   const transcript = inlineTranscript || registryTranscript;
+  const transcriptMessages = useIncrementalMessages(sessionPath ? '' : transcript);
 
-  // 增量解析 transcript，不全量重跑
-  const transcriptMessages = useIncrementalMessages(transcript);
+  const replayMessages = sessionPath ? sessionMessages : transcriptMessages;
 
-  const messages = useMemo<ChatMessage[]>(() => {
-    const out: ChatMessage[] = [{ kind: 'user', id: 'sa-task', text: task }];
-    if (transcript) {
-      out.push(...transcriptMessages);
-    } else {
-      const text = fallbackText(liveResult);
-      if (text)
-        out.push({
-          kind: 'assistant',
-          id: 'sa-out',
-          text,
-          thinking: '',
-          streaming: status === 'running',
-        });
-    }
-    // 终态收尾：transcript 末步缺 end 事件时回放会残留「运行中」步骤，据整体状态收尾。
-    return finalizeSubAgentMessages(out, status);
-  }, [task, liveResult, status, transcript, transcriptMessages]);
+  const messages = useMemo(
+    () => buildSubAgentConversationMessages(task, liveResult, status, replayMessages),
+    [task, liveResult, status, replayMessages],
+  );
 
   const display = useMemo(() => groupMessages(messages), [messages]);
   const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
@@ -181,7 +213,7 @@ export function SubAgentConversation({
       unitsByMessage={unitsByMessage}
       answeredQuestions={answeredQuestions}
       paddingInline={16}
-      resetKey={task}
+      resetKey={sessionPath ?? task}
       data-testid={testId}
     />
   );

@@ -254,6 +254,9 @@ function registerSubagentCommands(service: SubagentService): void {
   registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
     readString(args, 'workspace'), readString(args, 'agentId'),
   ));
+  registerCommand('subagent_get_session_messages', (_event, args) => ({
+    messages: service.sessionMessages(readString(args, 'sessionPath')),
+  }));
   registerCommand('subagent_cancel', (_event, args) => service.cancel(
     readString(args, 'workspace'), readString(args, 'agentId'),
   ));

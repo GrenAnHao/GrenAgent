@@ -3,14 +3,17 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { spawnPiAgent } from "./runner.js";
+import { parentModelSpec, resolveSubagentModel, spawnPiAgent, type AgentResult } from "./runner.js";
+import { canUseEmbeddedSubagent, runEmbeddedSubagent } from "./embedded-runner.js";
+import type { SubagentStopReason } from "./assistant-output.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
 import { discoverAgents, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
 import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
-import { cancelSubAgent, installCancelWatcher } from "./cancel.js";
+import { cancelSubAgent } from "./cancel.js";
+import { forEachRegistry, getRegistry, inflight } from "./controlPlane.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
 import { registerWorkflows } from "./workflows.js";
@@ -20,11 +23,81 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const MAX_CONCURRENCY = 4;
 
-// Background sub-agent control plane (pull model): one sqlite registry + a map of
-// in-flight AbortControllers per cwd. Lives across tool calls inside the long-lived
-// sidecar so `wait`/`status`/`cancel` can read/drive background spawns.
-const registries = new Map<string, SubAgentRegistry>();
-const inflight = new Map<string, AbortController>();
+type SubagentRunResult = AgentResult & { sessionPath?: string; stopReason?: SubagentStopReason };
+
+function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {
+  try {
+    const p = ctx.sessionManager?.getSessionFile?.();
+    return p?.trim() ? p.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Embedded session child (Electron sidecar) or subprocess fallback (CLI / worktree / Tauri). */
+async function executeSubagent(
+  cwd: string,
+  task: string,
+  agentId: string,
+  profile: ReturnType<typeof resolveProfile>,
+  opts: Parameters<typeof spawnPiAgent>[2] & { parentSessionPath?: string },
+): Promise<SubagentRunResult> {
+  if (canUseEmbeddedSubagent(profile)) {
+    return runEmbeddedSubagent({
+      cwd,
+      task,
+      agentId,
+      parentSessionPath: opts.parentSessionPath,
+      model: opts.model,
+      systemPrompt: opts.systemPrompt,
+      tools: opts.tools,
+      env: opts.env,
+      mcp: opts.mcp,
+      timeoutMs: opts.timeoutMs,
+      signal: opts.signal,
+      onUpdate: opts.onUpdate,
+    });
+  }
+  const r = await spawnPiAgent(cwd, task, opts);
+  const stopReason: SubagentStopReason = opts.signal?.aborted ? "aborted" : r.ok ? "completed" : "error";
+  return { ...r, stopReason };
+}
+
+function subagentDetails(
+  id: string,
+  r: SubagentRunResult,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    agentId: id,
+    exitCode: r.exitCode,
+    ...(r.sessionPath ? { sessionPath: r.sessionPath } : {}),
+    ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+    ...extra,
+  };
+}
+
+function cleanModel(value: string | undefined): string | undefined {
+  const t = value?.trim();
+  return t ? t : undefined;
+}
+
+/** explicit spawn model → named agent → profile → SUBAGENT_MODEL → parent session model. */
+function pickSubagentModel(
+  explicit: string | undefined,
+  layerModel: string | undefined,
+  profileModel: string | undefined,
+  parent: { provider?: string; id?: string } | undefined,
+): string | undefined {
+  return (
+    cleanModel(explicit) ??
+    cleanModel(layerModel) ??
+    cleanModel(profileModel) ??
+    resolveSubagentModel() ??
+    parentModelSpec(parent)
+  );
+}
+
 // 单会话累计已 spawn 的子代理数（按 sessionId；拿不到则退回按 cwd）。进程内状态，sidecar 重启清零
 // 可接受（新进程通常对应新一轮）。仅用于「单会话最大子代理数」上限，不影响其余功能逻辑。
 const sessionSpawnCount = new Map<string, number>();
@@ -37,19 +110,6 @@ function sessionSpawnKey(ctx: { cwd: string; sessionManager?: { getSessionId?: (
     /* sessionManager 不可用：退回 cwd 维度（单工作区通常单活跃会话，近似单会话） */
   }
   return ctx.cwd;
-}
-
-function getRegistry(cwd: string): SubAgentRegistry {
-  let reg = registries.get(cwd);
-  if (!reg) {
-    reg = new SubAgentRegistry(join(cwd, ".pi", "subagents", "registry.db"));
-    reg.load();
-    reg.reapOrphans(); // rows left "running" by a previous process are dead
-    registries.set(cwd, reg);
-    // installCancelWatcher is idempotent per cwd (UI/Rust append cancel-requests.jsonl).
-    installCancelWatcher(cwd, (agentId) => cancelSubAgent(agentId, reg!, inflight));
-  }
-  return reg;
 }
 
 // 把一个前台子代理登记进 inflight，让 UI 取消 / reapStuck 能 abort 它（此前只有后台 spawn 登记，
@@ -353,38 +413,64 @@ export default function (pi: ExtensionAPI) {
         if (action === "spawn") throw new Error("chain 暂不支持后台 spawn（请用 action:run）");
         if (wantWorktree) throw new Error("worktree 隔离暂不支持 chain（请用非隔离档案）");
         const steps = params.chain;
-        const chainResults: Array<{ step: number; agent?: string; task: string; ok: boolean; output: string; error?: string }> = [];
+        const chainResults: Array<{
+          step: number;
+          agent?: string;
+          task: string;
+          ok: boolean;
+          output: string;
+          error?: string;
+          agentId: string;
+        }> = [];
         let previous = "";
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];
           const taskText = step.task.replace(/\{previous\}/g, previous);
           const stepAgent = step.agent ?? params.agent;
           const layer = agentLayer(stepAgent);
+          const chosenModel = pickSubagentModel(step.model, layer.model, profileModel, ctx.model);
           const id = SubAgentRegistry.genId();
           registry.create({
             id,
             task: taskText,
             profile: params.profile ? JSON.stringify(profile) : null,
-            model: step.model ?? layer.model ?? profileModel ?? null,
+            model: chosenModel ?? null,
           });
           const controller = registerInflight(id, signal);
-          const r = await spawnPiAgent(ctx.cwd, taskText, {
-            model: step.model ?? layer.model ?? profileModel,
+          const r = await executeSubagent(ctx.cwd, taskText, id, profile, {
+            parentSessionPath: parentSessionPath(ctx),
+            model: chosenModel,
             systemPrompt: layer.systemPrompt,
             tools: layer.tools,
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             signal: controller.signal,
-            onUpdate: () => registry.touch(id),
+            onUpdate: (u) => registry.progress(id, u.transcript),
           }).finally(() => inflight.delete(id));
           registry.finish(
             id,
             r.ok
-              ? { status: "done", output: r.output, exitCode: r.exitCode }
-              : { status: controller.signal.aborted ? "cancelled" : "error", output: r.output, error: r.error, exitCode: r.exitCode },
+              ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+              : {
+                  status: controller.signal.aborted ? "cancelled" : "error",
+                  output: r.output,
+                  error: r.error,
+                  exitCode: r.exitCode,
+                  transcript: r.transcript,
+                },
           );
-          chainResults.push({ step: i + 1, agent: stepAgent, task: taskText, ok: r.ok, output: r.output, error: r.error });
+          chainResults.push({
+            step: i + 1,
+            agent: stepAgent,
+            task: taskText,
+            ok: r.ok,
+            output: r.output,
+            error: r.error,
+            agentId: id,
+            sessionPath: r.sessionPath,
+            stopReason: r.stopReason,
+          });
           if (!r.ok) {
             return {
               content: [{ type: "text", text: `Chain stopped at step ${i + 1}${stepAgent ? ` (${stepAgent})` : ""}: ${r.error ?? "failed"}` }],
@@ -407,7 +493,7 @@ export default function (pi: ExtensionAPI) {
         const { task, model, agent } = list[0];
         const layer = agentLayer(agent);
         const id = SubAgentRegistry.genId();
-        const chosenModel = model ?? layer.model ?? profileModel;
+        const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
         registry.create({
           id,
           task,
@@ -418,7 +504,8 @@ export default function (pi: ExtensionAPI) {
         inflight.set(id, controller);
         // Detached: keeps running after this tool call returns; the handler writes
         // the terminal state to the registry, which `wait`/`status` then read.
-        void spawnPiAgent(ctx.cwd, task, {
+        void executeSubagent(ctx.cwd, task, id, profile, {
+          parentSessionPath: parentSessionPath(ctx),
           model: chosenModel,
           systemPrompt: layer.systemPrompt,
           tools: layer.tools,
@@ -460,6 +547,7 @@ export default function (pi: ExtensionAPI) {
       if (list.length === 1) {
         const { task, model, agent } = list[0];
         const layer = agentLayer(agent);
+        const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
         const wt = wantWorktree ? await createWorktree(ctx.cwd) : null;
         if (wantWorktree && !wt && getConfig("ISOLATE_FALLBACK") !== "1") {
           throw new Error(
@@ -472,12 +560,13 @@ export default function (pi: ExtensionAPI) {
           id,
           task,
           profile: params.profile ? JSON.stringify(profile) : null,
-          model: model ?? layer.model ?? profileModel ?? null,
+          model: chosenModel ?? null,
         });
         const controller = registerInflight(id, signal);
         try {
-          const r = await spawnPiAgent(runCwd, task, {
-            model: model ?? layer.model ?? profileModel,
+          const r = await executeSubagent(runCwd, task, id, profile, {
+            parentSessionPath: parentSessionPath(ctx),
+            model: chosenModel,
             systemPrompt: layer.systemPrompt,
             tools: layer.tools,
             env: profileEnv,
@@ -491,9 +580,12 @@ export default function (pi: ExtensionAPI) {
               if (onUpdate) {
                 onUpdate({
                   content: [{ type: "text", text: u.text }],
-                  // 运行中只推尾部截断的 transcript（定长），完整版终态再给一次；
-                  // 避免 O(n^2) 全量串每帧经 IPC → 前端卡爆/OOM。
-                  details: { streaming: true, transcriptTail: tailLines(u.transcript, LIVE_TRANSCRIPT_TAIL) },
+                  details: u.sessionPath
+                    ? { streaming: true, agentId: id, sessionPath: u.sessionPath }
+                    : {
+                        streaming: true,
+                        transcriptTail: tailLines(u.transcript, LIVE_TRANSCRIPT_TAIL),
+                      },
                 });
               }
             },
@@ -512,12 +604,10 @@ export default function (pi: ExtensionAPI) {
               const partialText = `${r.output}\n\n_(超时截断：${r.error ?? "timeout"}；以上为已产出部分)_`;
               return {
                 content: [{ type: "text", text: partialText }],
-                details: {
-                  agentId: id,
-                  exitCode: r.exitCode,
+                details: subagentDetails(id, r, {
                   partial: true,
-                  transcript: tailLines(r.transcript, TRANSCRIPT_CAP),
-                },
+                  transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
+                }),
               };
             }
             throw new Error(`sub-agent failed (exit ${r.exitCode}): ${r.error ?? "unknown error"}`);
@@ -529,13 +619,11 @@ export default function (pi: ExtensionAPI) {
             : r.output || "(no output)";
           return {
             content: [{ type: "text", text }],
-            details: {
-              agentId: id,
-              exitCode: r.exitCode,
-              transcript: tailLines(r.transcript, TRANSCRIPT_CAP),
+            details: subagentDetails(id, r, {
+              transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
               isolated: !!wt,
               diff,
-            },
+            }),
           };
         } finally {
           inflight.delete(id);
@@ -543,9 +631,14 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      const results: Array<{ task: string; ok: boolean; output: string; error?: string; partial?: boolean }> = new Array(
-        list.length,
-      );
+      const results: Array<{
+        task: string;
+        ok: boolean;
+        output: string;
+        error?: string;
+        partial?: boolean;
+        agentId?: string;
+      }> = new Array(list.length);
       const concurrency = Math.max(1, limits.maxConcurrency ?? MAX_CONCURRENCY);
       const runOne = async (i: number): Promise<void> => {
         const t = list[i];
@@ -554,36 +647,44 @@ export default function (pi: ExtensionAPI) {
           const layer = agentLayer(t.agent);
           const subId = SubAgentRegistry.genId();
           id = subId;
+          const chosenModel = pickSubagentModel(t.model, layer.model, profileModel, ctx.model);
           registry.create({
             id: subId,
             task: t.task,
             profile: params.profile ? JSON.stringify(profile) : null,
-            model: t.model ?? layer.model ?? profileModel ?? null,
+            model: chosenModel ?? null,
           });
           const controller = registerInflight(subId, signal);
-          const r = await spawnPiAgent(ctx.cwd, t.task, {
-            model: t.model ?? layer.model ?? profileModel,
+          const r = await executeSubagent(ctx.cwd, t.task, subId, profile, {
+            parentSessionPath: parentSessionPath(ctx),
+            model: chosenModel,
             systemPrompt: layer.systemPrompt,
             tools: layer.tools,
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             signal: controller.signal,
-            onUpdate: () => registry.touch(subId),
+            onUpdate: (u) => registry.progress(subId, u.transcript),
           }).finally(() => inflight.delete(subId));
           registry.finish(
             subId,
             r.ok
-              ? { status: "done", output: r.output, exitCode: r.exitCode }
-              : { status: controller.signal.aborted ? "cancelled" : "error", output: r.output, error: r.error, exitCode: r.exitCode },
+              ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+              : {
+                  status: controller.signal.aborted ? "cancelled" : "error",
+                  output: r.output,
+                  error: r.error,
+                  exitCode: r.exitCode,
+                  transcript: r.transcript,
+                },
           );
-          results[i] = { task: t.task, ok: r.ok, output: r.output, error: r.error, partial: r.partial };
+          results[i] = { task: t.task, ok: r.ok, output: r.output, error: r.error, partial: r.partial, agentId: subId };
         } catch (e) {
           // 单个任务异常（如未知 agent、registry 写入失败）不应 reject 整个 Promise.all 而遗弃其它
           // 正在运行的兄弟任务：就地记为该任务的失败结果，其余 worker 照常跑完。
           const msg = String((e as Error)?.message ?? e);
           if (id) registry.finish(id, { status: "error", error: msg, exitCode: -1 });
-          results[i] = { task: t.task, ok: false, output: "", error: msg };
+          results[i] = { task: t.task, ok: false, output: "", error: msg, agentId: id };
         }
       };
       // 滑动窗口并发：concurrency 个 worker 各自从队列取下一个任务，单个卡住只占一个槽位——不再像
@@ -614,7 +715,13 @@ export default function (pi: ExtensionAPI) {
           mode: "parallel",
           count: results.length,
           failed: results.filter((r) => !r.ok).length,
-          results: results.map((r) => ({ task: r.task, ok: r.ok, output: r.output, error: r.error })),
+          results: results.map((r) => ({
+            task: r.task,
+            ok: r.ok,
+            output: r.output,
+            error: r.error,
+            agentId: r.agentId,
+          })),
         },
       };
     },
@@ -623,7 +730,7 @@ export default function (pi: ExtensionAPI) {
   // Periodic stuck reaping across all open registries (unref'd so it never keeps
   // the process alive). Lazy reaping on list/status covers on-demand cases.
   const stuckTimer = setInterval(() => {
-    for (const reg of registries.values()) reapStuck(reg);
+    forEachRegistry((reg) => reapStuck(reg));
   }, 60000);
   stuckTimer.unref?.();
 }

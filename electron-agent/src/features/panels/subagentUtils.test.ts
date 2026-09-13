@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildSubAgentConversationMessages,
   expandSubAgents,
   finalizeSubAgentMessages,
   subAgentMode,
   subAgentRoleLabel,
   latestStepFromMessages,
   latestSubAgentStep,
+  subAgentSessionPath,
   subAgentUnitView,
   taskLabel,
 } from './subagentUtils';
@@ -15,6 +17,13 @@ function textOf(result: unknown): string {
   const content = (result as { content?: Array<{ text?: string }> } | undefined)?.content;
   return content?.map((b) => b.text ?? '').join('') ?? '';
 }
+
+describe('subAgentSessionPath', () => {
+  it('reads details.sessionPath from tool result', () => {
+    expect(subAgentSessionPath({ details: { sessionPath: '/tmp/sa.jsonl' } })).toBe('/tmp/sa.jsonl');
+    expect(subAgentSessionPath({ details: { agentId: 'sa-1' } })).toBeNull();
+  });
+});
 
 describe('taskLabel', () => {
   it('single task (with optional agent prefix)', () => {
@@ -143,6 +152,46 @@ describe('latestStepFromMessages', () => {
 describe('latestSubAgentStep', () => {
   it('empty transcript → null', () => {
     expect(latestSubAgentStep('')).toBeNull();
+  });
+});
+
+describe('buildSubAgentConversationMessages', () => {
+  it('uses transcript replay when assistant/tool messages exist', () => {
+    const replay: ChatMessage[] = [
+      { kind: 'assistant', id: 'sa-0', text: 'c=5', thinking: '', streaming: false },
+    ];
+    const msgs = buildSubAgentConversationMessages(
+      'task',
+      { content: [{ type: 'text', text: 'ignored fallback' }] },
+      'done',
+      replay,
+    );
+    expect(msgs[0]).toMatchObject({ kind: 'user', text: 'task' });
+    expect(msgs[1]).toMatchObject({ kind: 'assistant', text: 'c=5' });
+  });
+
+  it('falls back to result text when transcript replay is empty (session header only)', () => {
+    const msgs = buildSubAgentConversationMessages(
+      'task',
+      { content: [{ type: 'text', text: 'RESULT:c=5' }] },
+      'done',
+      [],
+    );
+    expect(msgs.map((m) => (m.kind === 'assistant' || m.kind === 'user' ? m.text : ''))).toEqual([
+      'task',
+      'RESULT:c=5',
+    ]);
+  });
+
+  it('does not show (no output) as a fake reply', () => {
+    const msgs = buildSubAgentConversationMessages(
+      'task',
+      { content: [{ type: 'text', text: '(no output)' }] },
+      'done',
+      [],
+    );
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: 'user', text: 'task' });
   });
 });
 

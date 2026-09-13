@@ -261,6 +261,8 @@ export const pi = {
   /** 按需拉取单个子代理的完整 JSONL transcript（打开详情面板时调用，不在轮询路径中）。 */
   subagentGetTranscript: (workspace: string, agentId: string) =>
     invoke<string | null>('subagent_get_transcript', { workspace, agentId }),
+  subagentGetSessionMessages: (sessionPath: string) =>
+    invoke<{ messages: AgentMessage[] }>('subagent_get_session_messages', { sessionPath }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
   readUiHistory: (workspace: string, sessionKey: string) =>

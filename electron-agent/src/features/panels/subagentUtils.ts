@@ -42,6 +42,35 @@ export function latestSubAgentStep(transcript: string): { step: number; action: 
 }
 
 /**
+ * 子代理详情气泡：有可回放的 assistant/tool 用 transcript；否则退回工具结果正文。
+ * transcript 只有 session 头时回放为空，旧逻辑会因此只显示任务、永远看不到回复。
+ */
+export function buildSubAgentConversationMessages(
+  task: string,
+  result: unknown,
+  status: 'running' | 'done' | 'error',
+  transcriptMessages: ChatMessage[],
+): ChatMessage[] {
+  const out: ChatMessage[] = [{ kind: 'user', id: 'sa-task', text: task }];
+  const hasReplay = transcriptMessages.some((m) => m.kind === 'assistant' || m.kind === 'tool');
+  if (hasReplay) {
+    out.push(...transcriptMessages);
+  } else {
+    const text = subAgentFinalText(result);
+    if (text && text !== '(no output)') {
+      out.push({
+        kind: 'assistant',
+        id: 'sa-out',
+        text,
+        thinking: '',
+        streaming: status === 'running',
+      });
+    }
+  }
+  return finalizeSubAgentMessages(out, status);
+}
+
+/**
  * 终态兜底：运行中 transcript 的末步可能只有 tool_execution_start 而缺 tool_execution_end
  * （子代理进程结束时最后一步的结果事件尚未写入 transcript），回放会把该步一直停在 running、转圈不停。
  * 整体已进入终态（done/error）时据此把残留的「运行中」步骤收尾：工具置为对应终态、流式助手收流。
@@ -73,6 +102,12 @@ function detailsOf(result: unknown): Record<string, unknown> | null {
 export function subAgentId(result: unknown): string | null {
   const id = detailsOf(result)?.agentId;
   return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+/** 进程内真会话子代理的 JSONL 路径（embedded runner 写入 details.sessionPath）。 */
+export function subAgentSessionPath(result: unknown): string | null {
+  const path = detailsOf(result)?.sessionPath;
+  return typeof path === 'string' && path.trim() ? path.trim() : null;
 }
 
 /** 后台 spawn：工具调用已返回但子代理仍在 registry 中运行。 */
@@ -202,6 +237,7 @@ interface UnitResult {
   ok?: boolean;
   output?: string;
   error?: string;
+  agentId?: string;
 }
 
 /** 一次 spawn_agent 调用展开出的逐个子代理任务文本（单任务 1 条；并行/链式 N 条）。 */
@@ -309,7 +345,14 @@ export function subAgentUnitView(
   const r = resultsOf(result)?.[subIndex];
   if (r) {
     const text = r.ok ? r.output || '(no output)' : r.error || r.output || '(failed)';
-    return { task, result: { content: [{ type: 'text', text }] }, status: r.ok ? 'done' : 'error' };
+    return {
+      task,
+      result: {
+        content: [{ type: 'text', text }],
+        details: r.agentId ? { agentId: r.agentId } : undefined,
+      },
+      status: r.ok ? 'done' : 'error',
+    };
   }
   return {
     task,

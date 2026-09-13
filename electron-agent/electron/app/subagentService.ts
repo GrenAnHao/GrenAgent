@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
+import { SessionManager } from '../../../cli/src/pi-sdk.js';
 import type { SandboxManager } from './sandbox/sandboxManager';
 
 export interface SubagentItem {
@@ -57,6 +58,18 @@ export class SubagentService {
       return row ? asNullableString(row.transcript) : null;
     } finally {
       db.close();
+    }
+  }
+
+  /** Read-only: load LLM context messages from a child sub-agent session JSONL (no parent session switch). */
+  sessionMessages(sessionPath: string): unknown[] {
+    const path = sessionPath.trim();
+    if (!path || !existsSync(path)) return [];
+    try {
+      const sm = SessionManager.open(path);
+      return sm.buildSessionContext().messages as unknown[];
+    } catch {
+      return [];
     }
   }
 
