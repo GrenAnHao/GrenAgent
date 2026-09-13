@@ -200,6 +200,7 @@ describe("startContinuableEmbedded", () => {
     createAgentSessionFromServices.mockResolvedValue({ session });
     const install = vi.spyOn(activation, "installActivation");
     const announce = vi.spyOn(activation, "markAnnounced");
+    const send = vi.spyOn(parentHost, "sendSettlementToParent");
 
     const started = await startContinuableEmbedded({
       cwd: "/ws",
@@ -221,6 +222,8 @@ describe("startContinuableEmbedded", () => {
       }),
     );
     expect(announce).toHaveBeenCalledWith("sa-child");
+    expect(getActivation("sa-child")).toBeDefined();
+    expect(send).not.toHaveBeenCalled();
     expect(session.prompt).toHaveBeenCalledWith(
       `do work\n\n${continuableReturnGuidance("p1")}`,
       expect.objectContaining({ source: "rpc" }),
@@ -229,8 +232,12 @@ describe("startContinuableEmbedded", () => {
       "subagent_meta",
       expect.objectContaining({ mode: "continuable", parentSessionId: "p1" }),
     );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getActivation("sa-child")).toBeDefined();
+    expect(send).not.toHaveBeenCalled();
     announce.mockRestore();
     install.mockRestore();
+    send.mockRestore();
     __resetActivationsForTest();
   });
 });

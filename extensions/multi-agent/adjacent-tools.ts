@@ -1,5 +1,6 @@
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import {
   authorizeParent,
   coldResumeAndDeliver,
@@ -10,6 +11,10 @@ import {
 import { getRegistry } from "./controlPlane.js";
 import { SubagentError, type Delivery } from "./inbox.js";
 import { lookupParentHost } from "./parent-host.js";
+
+function callerWorkspace(ctx: { cwd: string }): string {
+  return currentWorkspaceContext()?.workspace ?? ctx.cwd;
+}
 
 type SessionEntry = {
   type?: string;
@@ -129,15 +134,15 @@ async function executeSendMessage(
     const senderAct = getActivation(senderId);
 
     if (targetAct && targetAct.parentSessionId === senderId) {
-      authorizeParent(targetAct, ctx.cwd);
+      authorizeParent(targetAct, callerWorkspace(ctx));
       const delivery: Delivery = targetAct.session.isStreaming ? "steer" : "followUp";
       deliverToChild(agentId, text, delivery);
       return delivered(agentId, lastUserMessageId(targetAct.session.messages));
     }
 
     if (senderAct && senderAct.parentSessionId === agentId) {
-      authorizeParent(senderAct, ctx.cwd);
-      const host = lookupParentHost(senderAct.parentSessionPath, ctx.cwd);
+      authorizeParent(senderAct, callerWorkspace(ctx));
+      const host = lookupParentHost(senderAct.parentSessionPath, senderAct.workspace);
       if (!host) {
         throw new SubagentError("parent host is not available in this process", "PARENT_UNAVAILABLE");
       }
@@ -200,7 +205,7 @@ function executeInterrupt(
     if (targetAct.parentSessionId !== senderId) {
       throw new SubagentError("only the direct parent may interrupt a resident child", "UNAUTHORIZED");
     }
-    authorizeParent(targetAct, ctx.cwd);
+    authorizeParent(targetAct, callerWorkspace(ctx));
     interruptChild(agentId);
     return {
       content: [{ type: "text" as const, text: `interrupt requested for agent ${agentId}` }],

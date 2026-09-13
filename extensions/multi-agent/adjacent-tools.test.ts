@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runInWorkspace } from "../_shared/workspace-context.js";
 import { SubagentError } from "./inbox.js";
 
 const activation = vi.hoisted(() => ({
@@ -316,5 +317,43 @@ describe("adjacent-tools", () => {
     const r = await interrupt("t10", { agent_id: "sa-1" }, null, null, ctx("sa-1"));
     expect(r.isError).toBe(true);
     expect(activation.interruptChild).not.toHaveBeenCalled();
+  });
+
+  it("ALS workspace 与 ctx.cwd 不同时，父→子 / interrupt 用 ALS workspace 授权", async () => {
+    const { send, interrupt } = loadAdjacent();
+    const act = childAct({ workspace: "D:/proj" });
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? act : undefined));
+    const als = { origin: "main" as const, workspace: "D:/proj", cwd: "D:/resolved", config: {} };
+    const toolCtx = ctx("p1", "D:/resolved");
+
+    await runInWorkspace(als, () => send("t-ws-p", { agent_id: "sa-1", message: "hi" }, null, null, toolCtx));
+    expect(activation.authorizeParent).toHaveBeenCalledWith(act, "D:/proj");
+
+    activation.authorizeParent.mockClear();
+    await runInWorkspace(als, () => interrupt("t-ws-i", { agent_id: "sa-1" }, null, null, toolCtx));
+    expect(activation.authorizeParent).toHaveBeenCalledWith(act, "D:/proj");
+  });
+
+  it("ALS workspace 与 ctx.cwd 不同时，子→父 lookup 用 activation.workspace", async () => {
+    const { send } = loadAdjacent();
+    const act = childAct({ workspace: "D:/proj" });
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? act : undefined));
+    parentHost.lookupParentHost.mockReturnValue({
+      sessionId: "p1",
+      sessionPath: "/ws/parent.jsonl",
+      workspace: "D:/proj",
+      isBusy: () => false,
+      isDraining: () => false,
+      sendMessage: vi.fn(),
+      prompt: vi.fn(),
+    });
+
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/proj", cwd: "D:/resolved", config: {} },
+      () => send("t-ws-c", { agent_id: "p1", message: "hi" }, null, null, ctx("sa-1", "D:/resolved")),
+    );
+
+    expect(activation.authorizeParent).toHaveBeenCalledWith(act, "D:/proj");
+    expect(parentHost.lookupParentHost).toHaveBeenCalledWith(act.parentSessionPath, "D:/proj");
   });
 });

@@ -316,16 +316,24 @@ describe("activation", () => {
     expect(getActivation("sa-1")).toBeUndefined();
   });
 
-  it("markAnnounced starts settlement watch", async () => {
+  it("markAnnounced pokes so idle announce does not settle before first busy", async () => {
     const session = mockSession();
     const sendMessage = registerHost();
-    const act = install(session);
-    expect(act.announced).toBe(false);
+    install(session);
+    expect(getActivation("sa-1")?.announced).toBe(false);
     markAnnounced("sa-1");
     expect(getActivation("sa-1")?.announced).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(getActivation("sa-1")).toBeDefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    session.isStreaming = true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    session.resolveIdle();
     await vi.waitFor(() => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
+    expect(getActivation("sa-1")).toBeUndefined();
   });
 });
 

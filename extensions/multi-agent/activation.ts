@@ -253,6 +253,7 @@ export function markAnnounced(childId: string): void {
   const act = activations.get(childId);
   if (!act) return;
   act.announced = true;
+  poke(act);
   startWatch(act);
 }
 
