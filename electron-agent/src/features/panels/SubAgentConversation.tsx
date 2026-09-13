@@ -2,7 +2,6 @@ import { useMemo, useEffect, useRef, useState } from 'react';
 import {
   applyEvent,
   initialAgentState,
-  messagesFromAgent,
   type AgentState,
   type ChatMessage,
 } from '../../stores/agentReducer';
@@ -12,11 +11,11 @@ import { ChatMessageItems } from '../chat/ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
 import {
   buildSubAgentConversationMessages,
-  isEmbeddedChildEvent,
   shouldBindChildSession,
   subAgentSessionPath,
 } from './subagentUtils';
-import { onPiEvent, pi } from '../../lib/pi';
+import { pi } from '../../lib/pi';
+import { useChildSessionBinding } from './useChildSessionBinding';
 
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript / transcriptTail）。 */
 function transcriptOf(result: unknown): string {
@@ -128,53 +127,6 @@ function useRegistryTranscript(
   }, [workspace, agentId, running]);
 
   return transcript;
-}
-
-/**
- * 同一 workspace 的第二条只读绑定：种子消息来自子会话 JSONL，
- * 流式事件按 sessionPath 灌进 reducer（不再经 transcriptTail）。
- */
-function useChildSessionBinding(sessionPath: string | null | undefined, running: boolean): ChatMessage[] {
-  const [state, setState] = useState<AgentState>(() => initialAgentState());
-
-  useEffect(() => {
-    if (!sessionPath) {
-      setState(initialAgentState());
-      return;
-    }
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    setState(initialAgentState());
-
-    const seed = async () => {
-      try {
-        const { messages: raw } = await pi.subagentGetSessionMessages(sessionPath);
-        if (cancelled || !raw?.length) return;
-        const msgs = messagesFromAgent(raw).map((m, i) => ({ ...m, id: `sa-${i}` }));
-        setState((s) => (s.messages.length >= msgs.length ? s : { ...s, messages: msgs }));
-      } catch {
-        /* keep last */
-      }
-    };
-
-    void seed();
-    void onPiEvent((env) => {
-      if (!isEmbeddedChildEvent(env, sessionPath)) return;
-      setState((s) => applyEvent(s, env.event));
-    }).then((un) => {
-      if (cancelled) un();
-      else unlisten = un;
-    });
-
-    const timer = running ? setInterval(() => void seed(), 2500) : undefined;
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      if (timer) clearInterval(timer);
-    };
-  }, [sessionPath, running]);
-
-  return useMemo(() => state.messages.map((m, i) => ({ ...m, id: `sa-${i}` })), [state.messages]);
 }
 
 interface SubAgentConversationProps {
