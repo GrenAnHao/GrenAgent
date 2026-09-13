@@ -11,12 +11,12 @@
 
 DSH 子代理是五层叠在一起；GrenAgent 不能一份规格盖全。本期只做 **规格 1**：
 
-| 规格 | 对齐 DSH | 本期 |
+| 规格 | 对齐 DSH | 状态 |
 |------|----------|------|
-| 1. 真会话 one-shot | 子代理是 Session；`SubagentResult.output` = 最后非空 assistant；inherit 父模型；详情打开子会话 | **实现** |
-| 2. 可继续 + notice | Activation、inbox、`send_message`、settle notice | 不做 |
-| 3. 页头目录 | 谱系目录、token/耗时、只读 vs 可续聊 | 不做 |
-| 4. fork | 种父会话已完成轮次 | 不做 |
+| 1. 真会话 one-shot | 子代理是 Session；`SubagentResult.output` = 最后非空 assistant；inherit 父模型；详情打开子会话 | **已落地** |
+| 2. 可继续 + notice | Activation、inbox、`send_message`、settle notice | [规格已落盘](./2026-09-13-dsh-subagent-continuable-notice-design.md) |
+| 3. 页头目录 | 谱系目录、token/耗时、只读 vs 可续聊 | [规格已落盘](./2026-09-13-dsh-subagent-header-catalog-design.md) |
+| 4. fork | 种父会话已完成轮次 | [规格已落盘](./2026-09-13-dsh-subagent-fork-seed-design.md) |
 
 **范围**：`extensions/multi-agent`（embedded runner + spawn 路由）+ `electron-agent`（详情绑定）。CLI / Tauri 继续走现有 `spawnPiAgent` 子进程路径。
 
@@ -89,8 +89,10 @@ DSH 子代理是五层叠在一起；GrenAgent 不能一份规格盖全。本期
 
 ---
 
-## 7. 后续规格（不在本期）
+## 7. 后续规格
 
-- 规格 2：Activation、inbox、`send_message`、settle notice  
-- 规格 3：页头子代理目录  
-- 规格 4：fork seed / `subagent_fork`  
+实现顺序仍是 1 → 2 与 3 可并行（3 的可续聊编辑器依赖 2）→ 4。不要把四份合成一份计划。
+
+- [规格 2：可续聊 + settle notice](./2026-09-13-dsh-subagent-continuable-notice-design.md)
+- [规格 3：页头目录](./2026-09-13-dsh-subagent-header-catalog-design.md)
+- [规格 4：fork 种子](./2026-09-13-dsh-subagent-fork-seed-design.md)
