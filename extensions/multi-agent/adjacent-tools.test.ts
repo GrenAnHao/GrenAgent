@@ -17,6 +17,10 @@ const control = vi.hoisted(() => ({
   getRegistry: vi.fn(),
 }));
 
+const sdk = vi.hoisted(() => ({
+  open: vi.fn(),
+}));
+
 vi.mock("./activation.js", () => ({
   getActivation: (...args: unknown[]) => activation.getActivation(...args),
   deliverToChild: (...args: unknown[]) => activation.deliverToChild(...args),
@@ -31,6 +35,12 @@ vi.mock("./parent-host.js", () => ({
 
 vi.mock("./controlPlane.js", () => ({
   getRegistry: (...args: unknown[]) => control.getRegistry(...args),
+}));
+
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  SessionManager: {
+    open: (...args: unknown[]) => sdk.open(...args),
+  },
 }));
 
 import { continuableReturnGuidance, registerAdjacentTools } from "./adjacent-tools.js";
@@ -66,6 +76,18 @@ function ctx(sessionId: string, cwd = "/ws") {
   return { cwd, sessionManager: { getSessionId: () => sessionId } };
 }
 
+function stubMeta(pathToParent: Record<string, string>) {
+  sdk.open.mockImplementation((path: string) => {
+    const parentSessionId = pathToParent[path];
+    if (!parentSessionId) throw new Error(`no session ${path}`);
+    return {
+      getEntries: () => [
+        { type: "custom", customType: "subagent_meta", data: { mode: "continuable", parentSessionId } },
+      ],
+    };
+  });
+}
+
 function childAct(over: Record<string, unknown> = {}) {
   return {
     childId: "sa-1",
@@ -93,9 +115,13 @@ describe("adjacent-tools", () => {
     activation.authorizeParent.mockReset();
     parentHost.lookupParentHost.mockReset();
     control.getRegistry.mockReset();
+    sdk.open.mockReset();
     activation.getActivation.mockReturnValue(undefined);
     activation.coldResumeAndDeliver.mockResolvedValue(undefined);
     control.getRegistry.mockReturnValue({ get: () => undefined });
+    sdk.open.mockImplementation((path: string) => {
+      throw new Error(`no session ${path}`);
+    });
   });
 
   it("continuableReturnGuidance locks the parent return sentence", () => {
@@ -177,10 +203,15 @@ describe("adjacent-tools", () => {
     const { send } = loadAdjacent();
     activation.getActivation.mockReturnValue(undefined);
     parentHost.lookupParentHost.mockReturnValue(undefined);
+    control.getRegistry.mockReturnValue({
+      get: (id: string) => (id === "sa-1" ? { sessionPath: "/ws/sa-1.jsonl" } : undefined),
+    });
+    stubMeta({ "/ws/sa-1.jsonl": "p1" });
     const r = await send("t4", { agent_id: "p1", message: "done" }, null, null, ctx("sa-1"));
     expect(r.isError).toBe(true);
     expect(r.content[0]?.text).toContain("未送达");
     expect(r.content[0]?.text).toContain("PARENT_UNAVAILABLE");
+    expect(r.details?.code).toBe("PARENT_UNAVAILABLE");
     expect(parentHost.lookupParentHost).not.toHaveBeenCalled();
     expect(activation.coldResumeAndDeliver).not.toHaveBeenCalled();
   });
@@ -205,6 +236,7 @@ describe("adjacent-tools", () => {
     control.getRegistry.mockReturnValue({
       get: (id: string) => (id === "sa-1" ? { sessionPath: "/ws/child.jsonl" } : undefined),
     });
+    stubMeta({ "/ws/child.jsonl": "p1" });
     const r = await send("t6", { agent_id: "sa-1", message: "hi" }, null, null, ctx("p1"));
     expect(activation.coldResumeAndDeliver).toHaveBeenCalledWith(
       "sa-1",
@@ -222,6 +254,7 @@ describe("adjacent-tools", () => {
     control.getRegistry.mockReturnValue({
       get: (id: string) => (id === "sa-1" ? { sessionPath: "/ws/child.jsonl" } : undefined),
     });
+    stubMeta({ "/ws/child.jsonl": "p1" });
     activation.coldResumeAndDeliver.mockRejectedValue(
       new SubagentError("child sa-1 is not resumable", "NOT_RESUMABLE"),
     );
@@ -229,6 +262,35 @@ describe("adjacent-tools", () => {
     expect(r.isError).toBe(true);
     expect(r.content[0]?.text).toContain("未送达");
     expect(r.content[0]?.text).toContain("NOT_RESUMABLE");
+  });
+
+  it("无 Activation、registry 有 sessionPath、meta.parentSessionId 是别人 → 不冷恢复 UNAUTHORIZED", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockReturnValue(undefined);
+    control.getRegistry.mockReturnValue({
+      get: (id: string) => (id === "sa-1" ? { sessionPath: "/ws/child.jsonl" } : undefined),
+    });
+    stubMeta({ "/ws/child.jsonl": "p-other" });
+    const r = await send("t6b", { agent_id: "sa-1", message: "hi" }, null, null, ctx("p1"));
+    expect(activation.coldResumeAndDeliver).not.toHaveBeenCalled();
+    expect(r.isError).toBe(true);
+    expect(r.content[0]?.text).toContain("未送达");
+    expect(r.content[0]?.text).toContain("UNAUTHORIZED");
+    expect(r.details?.code).toBe("UNAUTHORIZED");
+  });
+
+  it("父→完全不存在的 id → UNAUTHORIZED，不是 PARENT_UNAVAILABLE", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockReturnValue(undefined);
+    control.getRegistry.mockReturnValue({ get: () => undefined });
+    const r = await send("t2b", { agent_id: "sa-missing", message: "hi" }, null, null, ctx("p1"));
+    expect(r.isError).toBe(true);
+    expect(r.content[0]?.text).toContain("未送达");
+    expect(r.content[0]?.text).toContain("UNAUTHORIZED");
+    expect(r.content[0]?.text).not.toContain("PARENT_UNAVAILABLE");
+    expect(r.details?.code).toBe("UNAUTHORIZED");
+    expect(r.details?.code).not.toBe("PARENT_UNAVAILABLE");
+    expect(activation.coldResumeAndDeliver).not.toHaveBeenCalled();
   });
 
   it("interrupt 不存在的 id → interrupt requested（非 error）", async () => {

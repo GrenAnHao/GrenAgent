@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   authorizeParent,
@@ -10,6 +10,40 @@ import {
 import { getRegistry } from "./controlPlane.js";
 import { SubagentError, type Delivery } from "./inbox.js";
 import { lookupParentHost } from "./parent-host.js";
+
+type SessionEntry = {
+  type?: string;
+  customType?: string;
+  data?: Record<string, unknown>;
+};
+
+function lastSubagentMeta(entries: unknown[]): Record<string, unknown> | undefined {
+  let found: Record<string, unknown> | undefined;
+  if (!Array.isArray(entries)) return undefined;
+  for (let i = 0; i < entries.length; i++) {
+    const item = entries[i] as SessionEntry;
+    if (item?.type === "custom" && item.customType === "subagent_meta" && item.data && typeof item.data === "object") {
+      found = item.data;
+    }
+  }
+  return found;
+}
+
+/** Peek JSONL last subagent_meta.parentSessionId. Unreadable / no meta → undefined. */
+function peekParentSessionId(sessionPath: string): { readable: boolean; parentSessionId?: string } {
+  try {
+    const entries = SessionManager.open(sessionPath).getEntries();
+    const meta = lastSubagentMeta(entries);
+    if (!meta) return { readable: false };
+    const parent = meta.parentSessionId;
+    return {
+      readable: true,
+      parentSessionId: typeof parent === "string" && parent.trim() ? parent.trim() : undefined,
+    };
+  } catch {
+    return { readable: false };
+  }
+}
 
 export function continuableReturnGuidance(parentSessionId: string): string {
   const id = JSON.stringify(parentSessionId);
@@ -117,12 +151,27 @@ async function executeSendMessage(
 
     const sessionPath = registrySessionPath(ctx.cwd, agentId);
     if (sessionPath) {
+      const peek = peekParentSessionId(sessionPath);
+      if (!peek.readable) {
+        throw new SubagentError(`child ${agentId} is not resumable`, "NOT_RESUMABLE");
+      }
+      if (peek.parentSessionId !== senderId) {
+        throw new SubagentError("sender is not the direct parent of the target", "UNAUTHORIZED");
+      }
       await coldResumeAndDeliver(agentId, sessionPath, text, "followUp");
       const resumed = getActivation(agentId);
       return delivered(agentId, lastUserMessageId(resumed?.session.messages));
     }
 
-    throw new SubagentError("target is not resident and has no resumable session", "PARENT_UNAVAILABLE");
+    const senderPath = registrySessionPath(ctx.cwd, senderId);
+    if (senderPath) {
+      const peek = peekParentSessionId(senderPath);
+      if (peek.readable && peek.parentSessionId === agentId) {
+        throw new SubagentError("parent host is not available in this process", "PARENT_UNAVAILABLE");
+      }
+    }
+
+    throw new SubagentError("sender is not the direct parent or child of the target", "UNAUTHORIZED");
   } catch (error) {
     return fail(error);
   }
