@@ -119,7 +119,7 @@ const CORE_ALWAYS_ON = new Set([
 ]);
 
 async function filterExtensionFactories(): Promise<Array<(...args: never[]) => unknown>> {
-  const { manifestExtensions } = await import("../../index.js");
+  const { manifestExtensions } = await import("../index.js");
   const profile = (getConfig("EXTENSIONS_PROFILE") as "project" | "chat") ?? "project";
   let exts = manifestExtensions;
   if (profile === "chat") {
