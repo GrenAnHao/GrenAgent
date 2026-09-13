@@ -189,4 +189,45 @@ describe("sampleCatalogRow", () => {
     });
     expect(sample(sessionPath).hasChildren).toBe(true);
   });
+
+  it("durationMs is last assistant minus first user after slice", () => {
+    const sessionPath = writeChild({
+      messages: [
+        { role: "user", content: "hi", timestamp: 1000 },
+        assistant(1, 4000),
+      ],
+    });
+    expect(sample(sessionPath).durationMs).toBe(3000);
+  });
+
+  it("running durationMs uses opts.now as the end", () => {
+    const sessionPath = writeChild({
+      messages: [{ role: "user", content: "hi", timestamp: 1000 }],
+    });
+    installResident(sessionPath, { isStreaming: true });
+    expect(sample(sessionPath, { mode: "continuable" }, { now: 9000 }).durationMs).toBe(8000);
+  });
+
+  it("omits durationMs when messages have no timestamps", () => {
+    const sessionPath = writeChild({
+      messages: [
+        { role: "user", content: "hi" } as never,
+        { ...assistant(1), timestamp: undefined } as never,
+      ],
+    });
+    expect(sample(sessionPath).durationMs).toBeUndefined();
+  });
+
+  it("slices inheritedEventCount out of durationMs", () => {
+    const sessionPath = writeChild({
+      inheritedEventCount: 1,
+      messages: [
+        { role: "user", content: "seed", timestamp: 1 },
+        assistant(9, 2),
+        { role: "user", content: "own", timestamp: 100 },
+        assistant(1, 400),
+      ],
+    });
+    expect(sample(sessionPath).durationMs).toBe(300);
+  });
 });
