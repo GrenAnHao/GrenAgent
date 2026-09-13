@@ -174,11 +174,7 @@ export class WorkspaceHandle {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.parentSessionPath) {
-      try { await drainByParent(this.parentSessionPath); } catch { /* 清理阶段 drain 失败不阻断 */ }
-    }
-    this.unregisterParentHost?.();
-    this.unregisterParentHost = undefined;
+    await this.detachParentHost(this.parentSessionPath);
     this.ui.cancelAll();
     try { await this.session.abort(); } catch { /* 清理阶段 abort 失败不阻断 */ }
     this.unsubscribe?.();
@@ -191,42 +187,55 @@ export class WorkspaceHandle {
 
   private async replace<T>(action: () => Promise<T>): Promise<T> {
     this.ui.cancelAll();
+    const previous = this.options.runtime.session;
+    const oldPath = this.parentSessionPath;
+    try {
+      const result = await this.runMain(action);
+      this.sessionInvalidated = false;
+      if (this.options.runtime.session !== previous) {
+        await this.detachParentHost(oldPath);
+        this.registerCurrentParentHost();
+      }
+      return result;
+    } catch (error) {
+      const current = this.options.runtime.session;
+      // 旧 session 已 teardown（原地 invalidate、引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
+      if (this.sessionInvalidated || current !== previous || current == null) {
+        this.options.onFatal(error);
+        await this.detachParentHost(oldPath);
+        this.registerCurrentParentHost();
+      }
+      throw error;
+    }
+  }
+
+  private async detachParentHost(path: string | undefined): Promise<void> {
     this.switching = true;
-    if (this.parentSessionPath) {
-      try { await drainByParent(this.parentSessionPath); } catch { /* 换会话 drain 失败不阻断 */ }
+    if (path) {
+      try { await drainByParent(path); } catch { /* 换会话 / 拆除 drain 失败不阻断 */ }
     }
     this.unregisterParentHost?.();
     this.unregisterParentHost = undefined;
     this.parentSessionPath = undefined;
     this.switching = false;
-    const previous = this.options.runtime.session;
-    try {
-      const result = await this.runMain(action);
-      this.sessionInvalidated = false;
-      this.registerCurrentParentHost();
-      return result;
-    } catch (error) {
-      const current = this.options.runtime.session;
-      // 旧 session 已 teardown（原地 invalidate、引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
-      if (this.sessionInvalidated || current !== previous || current == null) this.options.onFatal(error);
-      throw error;
-    }
   }
 
   private registerCurrentParentHost(): void {
-    const sessionPath = this.session.sessionFile;
-    const sessionId = this.session.sessionId;
+    const session = this.session;
+    if (!session) return;
+    const sessionPath = session.sessionFile;
+    const sessionId = session.sessionId;
     if (!sessionPath || !sessionId) return;
     this.parentSessionPath = sessionPath;
     this.unregisterParentHost = registerParentSessionHost({
       sessionId,
       sessionPath,
       workspace: this.options.workspace,
-      isBusy: () => this.session.isStreaming,
+      isBusy: () => session.isStreaming,
       isDraining: () => this.disposed || this.switching,
-      sendMessage: (msg, opts) => { void this.session.sendCustomMessage(msg, opts); },
+      sendMessage: (msg, opts) => { void session.sendCustomMessage(msg, opts); },
       prompt: (text, delivery) => {
-        void this.prompt(text, this.session.isStreaming ? { streamingBehavior: delivery } : {}, 'main');
+        void this.prompt(text, session.isStreaming ? { streamingBehavior: delivery } : {}, 'main');
       },
     });
   }

@@ -485,28 +485,46 @@ describe('WorkspaceHandle', () => {
       await handle.dispose();
     });
 
-    it('switchSession 先 drain 旧 path，再按新 session 注册 host', async () => {
+    it('switchSession 成功换会话后才 drain 旧 path，再注册新 host', async () => {
       const nextPath = '/ws/s2.jsonl';
       const { runtime, first, second } = makeRuntime();
       attachParentFields(first, sessionPath);
       attachParentFields(second, nextPath);
+      const notice = { customType: 'subagent-settled', content: 'aborted', display: true, details: {} };
+      const noticeOpts = { triggerTurn: false as const };
       vi.mocked(drainByParent).mockImplementation(async (path) => {
         expect(path).toBe(sessionPath);
-        expect(runtime.switchSession).not.toHaveBeenCalled();
+        expect(runtime.switchSession).toHaveBeenCalled();
         const host = lookupParentHost(sessionPath, 'D:/proj');
         expect(host).toBeDefined();
         expect(host?.isDraining()).toBe(true);
+        host!.sendMessage(notice, noticeOpts);
+        expect((first as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).toHaveBeenCalledWith(notice, noticeOpts);
+        expect((second as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage).not.toHaveBeenCalled();
       });
       const { handle } = makeHandle(runtime);
       await handle.start();
       await handle.switchSession(nextPath);
-      expect(drainByParent.mock.invocationCallOrder[0]).toBeLessThan(runtime.switchSession.mock.invocationCallOrder[0]);
+      expect(runtime.switchSession.mock.invocationCallOrder[0]).toBeLessThan(drainByParent.mock.invocationCallOrder[0]);
       expect(drainByParent).toHaveBeenCalledWith(sessionPath);
       expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
       const next = lookupParentHost(nextPath, 'D:/proj');
       expect(next).toBeDefined();
       expect(next?.sessionId).toBe('s2');
+      vi.mocked(drainByParent).mockImplementation(async () => {});
       await handle.dispose();
+    });
+
+    it('switchSession 失败且 session 未换时不 drain、host 仍在', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      (runtime as { switchSession: ReturnType<typeof vi.fn> }).switchSession = vi.fn(async () => { throw new Error('create failed'); });
+      const { handle, onFatal } = makeHandle(runtime);
+      await handle.start();
+      await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed');
+      expect(drainByParent).not.toHaveBeenCalled();
+      expect(lookupParentHost(sessionPath, 'D:/proj')).toBeDefined();
+      expect(onFatal).not.toHaveBeenCalled();
     });
   });
 });
