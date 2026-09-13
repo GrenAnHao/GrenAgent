@@ -24,6 +24,9 @@ import { registerAdjacentTools } from "./adjacent-tools.js";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { disposeActivation } from "./activation.js";
+import { establishCatalogChild, foldCatalog } from "./catalog.js";
+import { emitCatalogChanged } from "./catalog-events.js";
 
 const MAX_CONCURRENCY = 4;
 
@@ -35,6 +38,46 @@ function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => stri
     return p?.trim() ? p.trim() : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function catalogLabel(task: string): string {
+  const line = (task.split(/\r?\n/, 1)[0] ?? "").trim();
+  if (!line) return "(untitled)";
+  return line.length <= 80 ? line : line.slice(0, 80);
+}
+
+function writeParentCatalog(
+  pi: ExtensionAPI,
+  ctx: { sessionManager?: { getSessionFile?: () => string | undefined } },
+  opts: { childId: string; sessionPath: string; mode: "one-shot" | "continuable"; label: string },
+): void {
+  establishCatalogChild((t, d) => pi.appendEntry(t, d), {
+    childId: opts.childId,
+    sessionPath: opts.sessionPath,
+    childCreatedAt: Date.now(),
+    mode: opts.mode,
+    label: opts.label,
+  });
+  const parentPath = parentSessionPath(ctx);
+  if (parentPath) emitCatalogChanged({ sessionPath: parentPath });
+}
+
+function writeOneShotCatalog(
+  pi: ExtensionAPI,
+  ctx: { sessionManager?: { getSessionFile?: () => string | undefined } },
+  opts: { childId: string; sessionPath?: string; label: string },
+): void {
+  if (!opts.sessionPath) return;
+  try {
+    writeParentCatalog(pi, ctx, {
+      childId: opts.childId,
+      sessionPath: opts.sessionPath,
+      mode: "one-shot",
+      label: opts.label,
+    });
+  } catch {
+    /* one-shot: 目录失败不改变工具结果 */
   }
 }
 
@@ -171,6 +214,13 @@ export default function (pi: ExtensionAPI) {
   // + seed default named agents (scout/planner/reviewer/worker).
   registerWorkflows(pi);
 
+  // 用户 rewind/fork 会新建会话文件并拷贝旧 leaf 上的目录事实。session_before_fork
+  // 没有目标路径，只能先记下源文件，等下一次 session_start 再决定要不要写 base。
+  let pendingForkBase: string | undefined;
+  pi.on("session_before_fork", (_event, ctx) => {
+    pendingForkBase = parentSessionPath(ctx);
+  });
+
   // 进程启动即回收上一个进程遗留的孤儿子代理（registry.db 里卡在 "running" 的行）并装好取消监听，
   // 而不是仅靠 spawn_agent 懒触发 getRegistry。否则 sidecar 重启后只要主代理不再 spawn，遗留的
   // running 行没有任何路径会被清理：前端任务托盘直接读 registry.db，会一直显示"运行中"；面板上的
@@ -184,6 +234,19 @@ export default function (pi: ExtensionAPI) {
       getRegistry(ctx.cwd);
     } catch {
       /* 回收失败不阻塞 session_start */
+    }
+    try {
+      const current = parentSessionPath(ctx);
+      if (
+        pendingForkBase &&
+        current &&
+        current !== pendingForkBase &&
+        foldCatalog(current).entries.length > 0
+      ) {
+        pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" });
+      }
+    } finally {
+      pendingForkBase = undefined;
     }
   });
 
@@ -494,6 +557,7 @@ export default function (pi: ExtensionAPI) {
               isError: true,
             };
           }
+          writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(taskText) });
           previous = r.output;
         }
         const last = chainResults[chainResults.length - 1];
@@ -554,6 +618,17 @@ export default function (pi: ExtensionAPI) {
               },
             });
             registry.setSessionPath(id, started.sessionPath);
+            try {
+              writeParentCatalog(pi, ctx, {
+                childId: id,
+                sessionPath: started.sessionPath,
+                mode: "continuable",
+                label: catalogLabel(task),
+              });
+            } catch (e) {
+              await disposeActivation(id, "rollback");
+              throw e;
+            }
             return {
               content: [{ type: "text", text: spawnedText }],
               details: {
@@ -720,6 +795,7 @@ export default function (pi: ExtensionAPI) {
           }
           const diff = wt ? await worktreeDiff(wt.dir) : undefined;
           registry.finish(id, { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript });
+          writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
           const text = wt
             ? `${r.output || "(no output)"}\n\n---\n### Diff (isolated worktree)\n\n${diff?.trim() ? "```diff\n" + diff + "\n```" : "(no file changes)"}`
             : r.output || "(no output)";
@@ -796,6 +872,9 @@ export default function (pi: ExtensionAPI) {
             sessionPath: r.sessionPath,
             stopReason: r.stopReason,
           };
+          if (r.ok) {
+            writeOneShotCatalog(pi, ctx, { childId: subId, sessionPath: r.sessionPath, label: catalogLabel(t.task) });
+          }
         } catch (e) {
           // 单个任务异常（如未知 agent、registry 写入失败）不应 reject 整个 Promise.all 而遗弃其它
           // 正在运行的兄弟任务：就地记为该任务的失败结果，其余 worker 照常跑完。

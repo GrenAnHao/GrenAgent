@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { foldCatalog } from "./catalog.js";
 
 // index.ts 的 spawn_agent execute() 此前无单测。这里用最小 mock 隔离 fs / 子进程 / sqlite，
 // 覆盖 B（owner=full 时给自主子代理注入 APPROVAL_POLICY=auto，能力硬限不变）等运行时行为。
@@ -82,18 +87,29 @@ type Execute = (
   ctx: { cwd: string; model?: { provider?: string; id?: string } },
 ) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown> }>;
 
-function loadSpawnAgent(): Execute {
+type SessionHandler = (event: unknown, ctx: unknown) => unknown;
+
+function loadSpawnHarness(): { execute: Execute; appendEntry: ReturnType<typeof vi.fn>; handlers: Record<string, SessionHandler> } {
   let exec: Execute | undefined;
+  const appendEntry = vi.fn();
+  const handlers: Record<string, SessionHandler> = {};
   const pi = {
     registerTool: (t: { name: string; execute: Execute }) => {
       if (t.name === "spawn_agent") exec = t.execute;
     },
     registerCommand: () => {},
     sendUserMessage: () => {},
-    on: () => {},
+    on: (event: string, h: SessionHandler) => {
+      handlers[event] = h;
+    },
+    appendEntry,
   };
   multiAgent(pi as unknown as Parameters<typeof multiAgent>[0]);
-  return exec!;
+  return { execute: exec!, appendEntry, handlers };
+}
+
+function loadSpawnAgent(): Execute {
+  return loadSpawnHarness().execute;
 }
 
 const ctx = { cwd: process.platform === "win32" ? "D:\\proj" : "/proj" };
@@ -266,3 +282,228 @@ describe("spawn_agent · 单会话上限 (SUBAGENT_MAX_PER_SESSION)", () => {
     );
   });
 });
+
+describe("spawn_agent · parent catalog write", () => {
+  it("embedded run success writes one-shot catalog fact", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("te-cat", { task: "do x" }, null, null, ctx);
+    expect(appendEntry).toHaveBeenCalledTimes(1);
+    expect(appendEntry).toHaveBeenCalledWith(
+      "subagent_catalog",
+      expect.objectContaining({
+        version: 0,
+        mode: "one-shot",
+        sessionPath: "/tmp/child.jsonl",
+      }),
+    );
+  });
+
+  it("embedded spawn success writes continuable catalog fact", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("ts-cat", { task: "do x", action: "spawn" }, null, null, ctx);
+    expect(appendEntry).toHaveBeenCalledTimes(1);
+    expect(appendEntry).toHaveBeenCalledWith(
+      "subagent_catalog",
+      expect.objectContaining({
+        version: 0,
+        mode: "continuable",
+        sessionPath: "/tmp/child.jsonl",
+      }),
+    );
+  });
+
+  it("does not write catalog when startContinuableEmbedded throws", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(startContinuableEmbedded).mockRejectedValue(new Error("spawn failed"));
+    const { execute, appendEntry } = loadSpawnHarness();
+    await expect(execute("ts-fail", { task: "do x", action: "spawn" }, null, null, ctx)).rejects.toThrow("spawn failed");
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("rolls back activation when spawn catalog write throws", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const { execute, appendEntry } = loadSpawnHarness();
+    appendEntry.mockImplementation(() => {
+      throw new Error("catalog disk full");
+    });
+    const dispose = vi.spyOn(activation, "disposeActivation");
+    await expect(execute("ts-rollback", { task: "do x", action: "spawn" }, null, null, ctx)).rejects.toThrow(
+      "catalog disk full",
+    );
+    expect(dispose).toHaveBeenCalledWith("sa_test", "rollback");
+    dispose.mockRestore();
+  });
+
+  it("subprocess fallback does not write catalog", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(false);
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("te-sub", { task: "do x" }, null, null, ctx);
+    expect(spawnPiAgent).toHaveBeenCalled();
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("writes catalog for each successful parallel unit", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(runEmbeddedSubagent).mockImplementation(async (opts) => ({
+      ok: opts.task !== "B",
+      output: opts.task === "B" ? "" : `out-${opts.task}`,
+      exitCode: opts.task === "B" ? 1 : 0,
+      error: opts.task === "B" ? "boom" : undefined,
+      transcript: "",
+      sessionPath: opts.task === "B" ? undefined : `/tmp/${opts.task}.jsonl`,
+      stopReason: opts.task === "B" ? ("error" as const) : ("completed" as const),
+    }));
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("tp-cat", { tasks: ["A", "B", "C"] }, null, null, ctx);
+    expect(appendEntry).toHaveBeenCalledTimes(2);
+    expect(appendEntry.mock.calls.map((c) => (c[1] as { sessionPath: string }).sessionPath).sort()).toEqual([
+      "/tmp/A.jsonl",
+      "/tmp/C.jsonl",
+    ]);
+  });
+
+  it("writes catalog for each successful chain step", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    let n = 0;
+    vi.mocked(runEmbeddedSubagent).mockImplementation(async () => {
+      n += 1;
+      return {
+        ok: true,
+        output: `step-${n}`,
+        exitCode: 0,
+        transcript: "",
+        sessionPath: `/tmp/step-${n}.jsonl`,
+        stopReason: "completed" as const,
+      };
+    });
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("tc-cat", { chain: [{ task: "first" }, { task: "second {previous}" }] }, null, null, ctx);
+    expect(appendEntry).toHaveBeenCalledTimes(2);
+    expect(appendEntry.mock.calls.map((c) => (c[1] as { sessionPath: string }).sessionPath)).toEqual([
+      "/tmp/step-1.jsonl",
+      "/tmp/step-2.jsonl",
+    ]);
+  });
+
+  it("does not write catalog when embedded run fails", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(runEmbeddedSubagent).mockResolvedValue({
+      ok: false,
+      output: "",
+      exitCode: 1,
+      error: "boom",
+      transcript: "",
+      sessionPath: "/tmp/child.jsonl",
+      stopReason: "error",
+    });
+    const { execute, appendEntry } = loadSpawnHarness();
+    await expect(execute("te-fail", { task: "do x" }, null, null, ctx)).rejects.toThrow("sub-agent failed");
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not write catalog when embedded run has no sessionPath", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(runEmbeddedSubagent).mockResolvedValue({
+      ok: true,
+      output: "embedded-out",
+      exitCode: 0,
+      transcript: "",
+      stopReason: "completed",
+    });
+    const { execute, appendEntry } = loadSpawnHarness();
+    await execute("te-nopath", { task: "do x" }, null, null, ctx);
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("swallows one-shot catalog write failure and still returns the tool result", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const { execute, appendEntry } = loadSpawnHarness();
+    appendEntry.mockImplementation(() => {
+      throw new Error("catalog disk full");
+    });
+    const r = await execute("te-soft", { task: "do x" }, null, null, ctx);
+    expect(r.content[0]?.text).toBe("embedded-out");
+    expect(r.details?.sessionPath).toBe("/tmp/child.jsonl");
+  });
+});
+
+const forkDirs: string[] = [];
+
+afterEach(() => {
+  for (const d of forkDirs.splice(0)) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* session file handle may linger on Windows */
+    }
+  }
+});
+
+function persistSession(sm: SessionManager): string {
+  const path = sm.getSessionFile();
+  if (!path) throw new Error("session file was not created");
+  const header = sm.getHeader();
+  const lines = [header, ...sm.getEntries()].filter(Boolean).map((entry) => JSON.stringify(entry));
+  writeFileSync(path, `${lines.join("\n")}\n`);
+  return path;
+}
+
+function persistSessionTo(sm: SessionManager, path: string): void {
+  const header = sm.getHeader();
+  const lines = [header, ...sm.getEntries()].filter(Boolean).map((entry) => JSON.stringify(entry));
+  writeFileSync(path, `${lines.join("\n")}\n`);
+}
+
+describe("multi-agent · user-fork catalog base", () => {
+  it("writes subagent_catalog_base when the forked file already has catalog facts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cat-fork-"));
+    forkDirs.push(dir);
+    const sm = SessionManager.create("/ws", dir);
+    sm.appendCustomEntry("subagent_catalog", {
+      version: 0,
+      childId: "sa-old",
+      sessionPath: "/c/sa-old.jsonl",
+      childCreatedAt: 100,
+      mode: "one-shot",
+      label: "old",
+    });
+    const oldPath = persistSession(sm);
+    const newPath = join(dir, "forked.jsonl");
+    copyFileSync(oldPath, newPath);
+    expect(foldCatalog(newPath).entries.map((e) => e.id)).toEqual(["sa-old"]);
+
+    const smNew = SessionManager.open(newPath);
+    const { appendEntry, handlers } = loadSpawnHarness();
+    appendEntry.mockImplementation((customType: string, data: unknown) => {
+      smNew.appendCustomEntry(customType, data);
+    });
+    const cwd = process.platform === "win32" ? "D:\\fork-cat" : "/fork-cat";
+    handlers.session_before_fork?.({}, { cwd, sessionManager: { getSessionFile: () => oldPath } });
+    handlers.session_start?.({}, { cwd, sessionManager: { getSessionFile: () => newPath } });
+
+    expect(appendEntry).toHaveBeenCalledWith("subagent_catalog_base", { version: 0, reason: "user-fork" });
+    persistSessionTo(smNew, newPath);
+    expect(foldCatalog(newPath).entries).toEqual([]);
+  });
+
+  it("does not write base when the forked file has no catalog facts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cat-fork-empty-"));
+    forkDirs.push(dir);
+    const sm = SessionManager.create("/ws", dir);
+    sm.appendCustomEntry("anchor", {});
+    const oldPath = persistSession(sm);
+    const newPath = join(dir, "forked.jsonl");
+    copyFileSync(oldPath, newPath);
+    expect(foldCatalog(newPath).entries).toEqual([]);
+
+    const { appendEntry, handlers } = loadSpawnHarness();
+    const cwd = process.platform === "win32" ? "D:\\fork-empty" : "/fork-empty";
+    handlers.session_before_fork?.({}, { cwd, sessionManager: { getSessionFile: () => oldPath } });
+    handlers.session_start?.({}, { cwd, sessionManager: { getSessionFile: () => newPath } });
+
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+});
+
