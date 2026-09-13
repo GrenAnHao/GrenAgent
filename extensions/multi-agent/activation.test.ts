@@ -443,4 +443,38 @@ describe("coldResumeAndDeliver", () => {
     expect(session.dispose).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledTimes(0);
   });
+
+  it("does not reread the parent prefix after the parent grows", async () => {
+    const seed = [
+      { role: "user", content: "old parent turn" },
+      { role: "assistant", content: [{ type: "text", text: "old parent reply" }] },
+    ];
+    const parentNew = { role: "user", content: "parent after fork" };
+    const session = mockSession();
+    session.messages = [...seed, { role: "user", content: "child task" }];
+    Object.assign(session, { bindExtensions: vi.fn(async () => {}) });
+    sdk.open.mockImplementation((path: string) => {
+      expect(path).toBe("/ws/child.jsonl");
+      return {
+        getEntries: () =>
+          metaEntries({
+            mode: "continuable",
+            tornDown: false,
+            inheritedEventCount: seed.length,
+            parentSession: "/ws/parent.jsonl",
+            parentSessionPath: "/ws/parent.jsonl",
+            workspace: "A",
+          }),
+        cwd: "/ws",
+      };
+    });
+    sdk.createAgentSessionFromServices.mockResolvedValue({ session });
+    registerHost();
+    await coldResumeAndDeliver("sa-1", "/ws/child.jsonl", "continue please", "followUp");
+    expect(sdk.open).toHaveBeenCalledTimes(1);
+    expect(sdk.open).toHaveBeenCalledWith("/ws/child.jsonl");
+    expect(sdk.open.mock.calls.some((c) => c[0] === "/ws/parent.jsonl")).toBe(false);
+    expect(session.messages.slice(0, seed.length)).toEqual(seed);
+    expect(session.messages).not.toContainEqual(parentNew);
+  });
 });
