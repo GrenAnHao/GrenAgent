@@ -210,6 +210,20 @@ describe("cancelSubAgent tornDown", () => {
     reg.close();
   });
 
+  it("invalid session jsonl does not block cancel", () => {
+    const cwd = tmpCwd();
+    const id = "sa-bad01";
+    const sessionPath = join(cwd, "sessions", `${id}.jsonl`);
+    mkdirSync(join(cwd, "sessions"), { recursive: true });
+    writeFileSync(sessionPath, "not a pi session\n");
+    const reg = runningRegistry(cwd, id, sessionPath);
+    const inflight = new Map<string, AbortController>();
+
+    expect(() => cancelSubAgent(id, reg, inflight)).not.toThrow();
+    expect(reg.get(id)?.status).toBe("cancelled");
+    reg.close();
+  });
+
   it("without sessionPath or activation does not throw or open a session file", () => {
     const cwd = tmpCwd();
     const id = "sa-nopath";

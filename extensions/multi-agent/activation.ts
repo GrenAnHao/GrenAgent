@@ -340,17 +340,22 @@ type SessionEntry = {
 };
 
 export function writeTornDown(childId: string, sessionPath?: string | null): void {
-  const resident = getActivation(childId)?.sessionManager;
-  if (resident) {
-    const prev = lastSubagentMeta(resident.getEntries());
-    resident.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
-    return;
+  try {
+    const act = getActivation(childId);
+    if (act) {
+      if (!act.sessionManager) return;
+      const prev = lastSubagentMeta(act.sessionManager.getEntries());
+      act.sessionManager.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
+      return;
+    }
+    const path = typeof sessionPath === "string" ? sessionPath.trim() : "";
+    if (!path) return;
+    const sm = SessionManager.open(path);
+    const prev = lastSubagentMeta(sm.getEntries());
+    sm.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
+  } catch {
+    /* tornDown is best-effort; cancel must still tear down */
   }
-  const path = typeof sessionPath === "string" ? sessionPath.trim() : "";
-  if (!path) return;
-  const sm = SessionManager.open(path);
-  const prev = lastSubagentMeta(sm.getEntries());
-  sm.appendCustomEntry("subagent_meta", { ...(prev ?? {}), tornDown: true });
 }
 
 function lastSubagentMeta(entries: unknown[]): Record<string, unknown> | undefined {
