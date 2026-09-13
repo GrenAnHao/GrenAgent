@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { currentWorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
+import { drainByParent } from '../../../extensions/multi-agent/activation.js';
 import { emitEmbeddedSubagentEvent } from '../../../extensions/multi-agent/embedded-events.js';
+import { lookupParentHost, __resetParentHostsForTest } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
+
+vi.mock('../../../extensions/multi-agent/activation.js', () => ({
+  drainByParent: vi.fn(async () => {}),
+}));
 
 function makeSession(id: string) {
   const subs: Array<(e: unknown) => void> = [];
@@ -375,5 +381,54 @@ describe('WorkspaceHandle', () => {
     expect(onEvent).toHaveBeenCalledTimes(n);
     expect(total).toBeLessThan(n * 200);
     expect(total).toBeLessThan((n * (n + 1)) / 2);
+  });
+
+  describe('parent host', () => {
+    const sessionPath = '/ws/s1.jsonl';
+
+    beforeEach(() => {
+      __resetParentHostsForTest();
+      vi.mocked(drainByParent).mockReset();
+      vi.mocked(drainByParent).mockImplementation(async () => {});
+    });
+
+    afterEach(() => {
+      __resetParentHostsForTest();
+    });
+
+    function attachParentFields(session: ReturnType<typeof makeSession>) {
+      Object.assign(session, {
+        sessionFile: sessionPath,
+        sendCustomMessage: vi.fn(async () => {}),
+        isStreaming: false,
+      });
+    }
+
+    it('start 之后 lookupParentHost 有值', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      const host = lookupParentHost(sessionPath, 'D:/proj');
+      expect(host).toBeDefined();
+      expect(host?.sessionId).toBe('s1');
+      expect(host?.workspace).toBe('D:/proj');
+      await handle.dispose();
+    });
+
+    it('dispose 之后 lookup 为空，且 drainByParent 在注销前调用', async () => {
+      const { runtime, first } = makeRuntime();
+      attachParentFields(first);
+      vi.mocked(drainByParent).mockImplementation(async () => {
+        const host = lookupParentHost(sessionPath, 'D:/proj');
+        expect(host).toBeDefined();
+        expect(host?.isDraining()).toBe(true);
+      });
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      await handle.dispose();
+      expect(drainByParent).toHaveBeenCalledWith(sessionPath);
+      expect(lookupParentHost(sessionPath, 'D:/proj')).toBeUndefined();
+    });
   });
 });

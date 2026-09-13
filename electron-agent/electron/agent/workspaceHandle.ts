@@ -1,5 +1,7 @@
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
+import { drainByParent } from '../../../extensions/multi-agent/activation.js';
 import { registerEmbeddedSubagentEventSink } from '../../../extensions/multi-agent/embedded-events.js';
+import { registerParentSessionHost } from '../../../extensions/multi-agent/parent-host.js';
 import { toJsonEvent } from '../../../cli/src/json-event.js';
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOptions } from '../../../cli/src/pi-sdk.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
@@ -54,6 +56,8 @@ export class WorkspaceHandle {
   private disposed = false;
   private sessionInvalidated = false;
   private turnOrigin: TurnOrigin = 'main';
+  private parentSessionPath: string | undefined;
+  private unregisterParentHost: (() => void) | undefined;
 
   constructor(private readonly options: WorkspaceHandleOptions) {
     this.ui = new SessionUiAdapter({
@@ -92,6 +96,22 @@ export class WorkspaceHandle {
       });
     });
     await this.runMain(async () => { await this.bindAndSubscribe(); });
+    const sessionPath = this.session.sessionFile;
+    const sessionId = this.session.sessionId;
+    if (sessionPath && sessionId) {
+      this.parentSessionPath = sessionPath;
+      this.unregisterParentHost = registerParentSessionHost({
+        sessionId,
+        sessionPath,
+        workspace: this.options.workspace,
+        isBusy: () => this.session.isStreaming,
+        isDraining: () => this.disposed,
+        sendMessage: (msg, opts) => { void this.session.sendCustomMessage(msg, opts); },
+        prompt: (text, delivery) => {
+          void this.prompt(text, this.session.isStreaming ? { streamingBehavior: delivery } : {}, 'main');
+        },
+      });
+    }
   }
 
   async prompt(text: string, options: { images?: ImageContent[]; streamingBehavior?: 'steer' | 'followUp' }, origin: TurnOrigin): Promise<void> {
@@ -168,6 +188,11 @@ export class WorkspaceHandle {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.parentSessionPath) {
+      try { await drainByParent(this.parentSessionPath); } catch { /* 清理阶段 drain 失败不阻断 */ }
+    }
+    this.unregisterParentHost?.();
+    this.unregisterParentHost = undefined;
     this.ui.cancelAll();
     try { await this.session.abort(); } catch { /* 清理阶段 abort 失败不阻断 */ }
     this.unsubscribe?.();
