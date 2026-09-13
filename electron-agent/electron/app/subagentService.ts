@@ -89,13 +89,7 @@ export class SubagentService {
 
   catalogRowSample(sessionPath: string): CatalogRowView {
     const path = sessionPath.trim();
-    return sampleCatalogRow({
-      id: basename(path),
-      sessionPath: path,
-      createdAt: 0,
-      mode: peekChildMode(path),
-      label: '',
-    });
+    return sampleCatalogRow(identityFromChildMeta(path));
   }
 
   async promptChild(
@@ -193,13 +187,26 @@ function catalogWhitelist(parentSessionPath: string): Map<string, SubagentCatalo
   return map;
 }
 
-function peekChildMode(sessionPath: string): 'one-shot' | 'continuable' {
+function identityFromChildMeta(sessionPath: string): SubagentCatalogEntry {
+  const meta = peekChildMeta(sessionPath);
+  const fallbackId = basename(sessionPath).replace(/\.jsonl$/i, '');
+  const agentId = typeof meta?.agentId === 'string' && meta.agentId.trim() ? meta.agentId.trim() : fallbackId;
+  const label = typeof meta?.label === 'string' && meta.label.trim() ? meta.label : '(untitled)';
+  return {
+    id: agentId,
+    sessionPath,
+    createdAt: typeof meta?.createdAt === 'number' && Number.isFinite(meta.createdAt) ? meta.createdAt : 0,
+    mode: meta?.mode === 'continuable' ? 'continuable' : 'one-shot',
+    label,
+  };
+}
+
+function peekChildMeta(sessionPath: string): Record<string, unknown> | undefined {
   try {
-    if (!sessionPath || !existsSync(sessionPath)) return 'one-shot';
-    const meta = lastSubagentMeta(SessionManager.open(sessionPath).getEntries());
-    return meta?.mode === 'continuable' ? 'continuable' : 'one-shot';
+    if (!sessionPath || !existsSync(sessionPath)) return undefined;
+    return lastSubagentMeta(SessionManager.open(sessionPath).getEntries());
   } catch {
-    return 'one-shot';
+    return undefined;
   }
 }
 

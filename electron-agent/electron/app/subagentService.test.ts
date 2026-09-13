@@ -1,8 +1,10 @@
+import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SessionManager } from '../../../cli/src/pi-sdk.js';
 import { foldCatalog } from '../../../extensions/multi-agent/catalog.js';
 import { sampleCatalogRow } from '../../../extensions/multi-agent/catalog-sample.js';
 import {
@@ -67,6 +69,23 @@ function stubActivation(sessionPath: string, childId: string, ws = workspace) {
   vi.mocked(getActivationBySessionPath).mockImplementation((path: string) => (
     path === sessionPath ? { childId, workspace: ws, sessionPath } as never : undefined
   ));
+}
+
+function persistSession(sm: SessionManager): string {
+  const path = sm.getSessionFile();
+  if (!path) throw new Error('session file was not created');
+  const header = sm.getHeader();
+  const lines = [header, ...sm.getEntries()].filter(Boolean).map((item) => JSON.stringify(item));
+  writeFileSync(path, `${lines.join('\n')}\n`);
+  return path;
+}
+
+async function writeChildMeta(meta: Record<string, unknown>): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'electron-agent-catalog-row-'));
+  directories.push(dir);
+  const sm = SessionManager.create('/ws', dir);
+  sm.appendCustomEntry('subagent_meta', meta);
+  return persistSession(sm);
 }
 
 async function createRegistry(withTranscript = true): Promise<{ workspace: string; db: DatabaseSync }> {
@@ -150,16 +169,19 @@ describe('SubagentService catalog IPC', () => {
     expect(foldCatalog).toHaveBeenCalledWith(parentPath);
   });
 
-  it('catalogRowSample builds a minimal entry and samples it', () => {
-    const row = service.catalogRowSample(sa1Path);
-    expect(sampleCatalogRow).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'sa-1.jsonl',
-      sessionPath: sa1Path,
-      createdAt: 0,
-      mode: 'one-shot',
-      label: '',
-    }));
-    expect(row).toMatchObject({ sessionPath: sa1Path, activity: 'settled' });
+  it('catalogRowSample fills id, label and mode from child subagent_meta', async () => {
+    const sessionPath = await writeChildMeta({
+      agentId: 'sa-meta-1',
+      label: 'from meta',
+      mode: 'continuable',
+    });
+    const row = service.catalogRowSample(sessionPath);
+    expect(row).toMatchObject({
+      id: 'sa-meta-1',
+      label: 'from meta',
+      mode: 'continuable',
+      sessionPath,
+    });
   });
 
   it('prompts a direct child with a resident activation via deliverToChild', async () => {
