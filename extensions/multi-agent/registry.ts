@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "../_shared/sqlite.js";
+import { isContinuableLeftover } from "./reap-continuable.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
 
 export type SubAgentStatus = "running" | "done" | "error" | "cancelled";
@@ -29,6 +30,8 @@ export interface SubAgentRow {
   exitCode: number | null;
   /** Raw `--mode json` JSONL stream, written incrementally while running (progress) and finalized on finish. */
   transcript: string | null;
+  /** Child session JSONL path (embedded continuable). Null for process / one-shot leftovers. */
+  sessionPath: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -55,6 +58,7 @@ export class SubAgentRegistry {
          error TEXT,
          exitCode INTEGER,
          transcript TEXT,
+         sessionPath TEXT,
          createdAt INTEGER NOT NULL,
          updatedAt INTEGER NOT NULL
        );
@@ -65,6 +69,9 @@ export class SubAgentRegistry {
     const cols = db.prepare("PRAGMA table_info(subagents)").all() as Array<{ name?: string }>;
     if (!cols.some((c) => c.name === "transcript")) {
       db.exec("ALTER TABLE subagents ADD COLUMN transcript TEXT");
+    }
+    if (!cols.some((c) => c.name === "sessionPath")) {
+      db.exec("ALTER TABLE subagents ADD COLUMN sessionPath TEXT");
     }
     this.db = db;
   }
@@ -83,7 +90,13 @@ export class SubAgentRegistry {
     return "sa-" + randomBytes(4).toString("hex");
   }
 
-  create(input: { id: string; task: string; profile?: string | null; model?: string | null }): SubAgentRow {
+  create(input: {
+    id: string;
+    task: string;
+    profile?: string | null;
+    model?: string | null;
+    sessionPath?: string | null;
+  }): SubAgentRow {
     const now = Date.now();
     const row: SubAgentRow = {
       id: input.id,
@@ -95,14 +108,27 @@ export class SubAgentRegistry {
       error: null,
       exitCode: null,
       transcript: null,
+      sessionPath: input.sessionPath ?? null,
       createdAt: now,
       updatedAt: now,
     };
     this.database
       .prepare(
-        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, sessionPath, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       )
-      .run(row.id, row.task, row.profile, row.model, row.status, row.output, row.error, row.exitCode, row.createdAt, row.updatedAt);
+      .run(
+        row.id,
+        row.task,
+        row.profile,
+        row.model,
+        row.status,
+        row.output,
+        row.error,
+        row.exitCode,
+        row.sessionPath,
+        row.createdAt,
+        row.updatedAt,
+      );
     return row;
   }
 
@@ -195,11 +221,20 @@ export class SubAgentRegistry {
     return Number(info.changes) > 0;
   }
 
-  /** After a restart any still-"running" row is an orphan (its process is gone). */
+  /** After a restart, leftover running rows are reaped. Continuable JSONL leftovers stay resumable. */
   reapOrphans(): number {
-    const info = this.database
-      .prepare("UPDATE subagents SET status='error', error='orphaned: process restarted', updatedAt=? WHERE status='running'")
-      .run(Date.now());
-    return Number(info.changes);
+    const rows = this.database
+      .prepare("SELECT * FROM subagents WHERE status='running'")
+      .all() as unknown as SubAgentRow[];
+    let n = 0;
+    for (const row of rows) {
+      if (isContinuableLeftover(row.sessionPath)) {
+        this.finish(row.id, { status: "done", error: "sidecar restarted", output: "" });
+      } else {
+        this.finish(row.id, { status: "error", error: "orphaned: process restarted" });
+      }
+      n += 1;
+    }
+    return n;
   }
 }

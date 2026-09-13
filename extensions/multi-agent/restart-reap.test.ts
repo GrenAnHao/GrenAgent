@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ const { installCancelWatcher, cancelSubAgent } = vi.hoisted(() => ({
 }));
 vi.mock("./cancel.js", () => ({ installCancelWatcher, cancelSubAgent }));
 
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import multiAgent from "./index.js";
 import { SubAgentRegistry } from "./registry.js";
 
@@ -41,10 +42,10 @@ function tmpCwd(): string {
 }
 
 // 在 <cwd>/.pi/subagents/registry.db 写一条上个进程遗留的 running 行（模拟重启前的子代理）。
-function seedRunningRow(cwd: string, id: string): void {
+function seedRunningRow(cwd: string, id: string, sessionPath?: string | null): void {
   const reg = new SubAgentRegistry(join(cwd, ".pi", "subagents", "registry.db"));
   reg.load();
-  reg.create({ id, task: "leftover from previous process" });
+  reg.create({ id, task: "leftover from previous process", sessionPath });
   reg.close();
 }
 
@@ -94,5 +95,24 @@ describe("multi-agent · reap orphans on session_start (restart recovery)", () =
 
     expect(readRow(cwd, "sa-orphan00")?.status).toBe("running");
     expect(installCancelWatcher).not.toHaveBeenCalled();
+  });
+
+  it("marks leftover continuable jsonl as done after session_start", () => {
+    const cwd = tmpCwd();
+    const sm = SessionManager.create(cwd, join(cwd, "sessions"), { id: "sa-cont01" });
+    sm.appendCustomEntry("subagent_meta", { mode: "continuable" });
+    const sessionPath = sm.getSessionFile();
+    if (!sessionPath) throw new Error("session file was not created");
+    const header = sm.getHeader();
+    const lines = [header, ...sm.getEntries()].filter(Boolean).map((entry) => JSON.stringify(entry));
+    writeFileSync(sessionPath, `${lines.join("\n")}\n`);
+    seedRunningRow(cwd, "sa-cont01", sessionPath);
+
+    loadSessionStartHandler()({}, { cwd });
+
+    const row = readRow(cwd, "sa-cont01");
+    expect(row?.status).toBe("done");
+    expect(row?.error).toBe("sidecar restarted");
+    expect(installCancelWatcher).toHaveBeenCalledWith(cwd, expect.any(Function));
   });
 });

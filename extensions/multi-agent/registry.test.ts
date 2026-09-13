@@ -63,6 +63,13 @@ describe("SubAgentRegistry", () => {
     expect(SubAgentRegistry.genId()).not.toBe(SubAgentRegistry.genId());
   });
 
+  it("stores sessionPath when provided", () => {
+    const r = reg();
+    r.create({ id: "sa-1", task: "t", sessionPath: "/ws/sa-1.jsonl" });
+    expect(r.get("sa-1")?.sessionPath).toBe("/ws/sa-1.jsonl");
+    r.close();
+  });
+
   it("reapOrphans marks leftover running rows as error", () => {
     const r = reg();
     r.create({ id: "sa-orphan00", task: "t" });
