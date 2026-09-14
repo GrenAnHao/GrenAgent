@@ -436,7 +436,12 @@ export default function (pi: ExtensionAPI) {
         if (action === "list") {
           const rows = registry.list();
           const body = rows.length
-            ? rows.map((x) => `${x.id}  [${x.status}]  ${x.model ?? "-"}  ${x.task}`).join("\n")
+            ? rows
+                .map(
+                  (x) =>
+                    `${x.id}  [${x.status}]  ${x.model ?? "-"}  parent=${x.parentId ?? "-"} depth=${x.depth}  ${x.task}`,
+                )
+                .join("\n")
             : "(no sub-agents)";
           return {
             content: [{ type: "text", text: body }],

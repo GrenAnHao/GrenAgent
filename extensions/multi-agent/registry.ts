@@ -32,6 +32,10 @@ export interface SubAgentRow {
   transcript: string | null;
   /** Child session JSONL path (embedded continuable). Null for process / one-shot leftovers. */
   sessionPath: string | null;
+  /** 直接父级 id（顶层会话 spawn 的为 null）。 */
+  parentId: string | null;
+  /** 委派深度：顶层 0。 */
+  depth: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +63,8 @@ export class SubAgentRegistry {
          exitCode INTEGER,
          transcript TEXT,
          sessionPath TEXT,
+         parentId TEXT,
+         depth INTEGER NOT NULL DEFAULT 0,
          createdAt INTEGER NOT NULL,
          updatedAt INTEGER NOT NULL
        );
@@ -73,6 +79,8 @@ export class SubAgentRegistry {
     if (!cols.some((c) => c.name === "sessionPath")) {
       db.exec("ALTER TABLE subagents ADD COLUMN sessionPath TEXT");
     }
+    if (!cols.some((c) => c.name === "parentId")) db.exec("ALTER TABLE subagents ADD COLUMN parentId TEXT");
+    if (!cols.some((c) => c.name === "depth")) db.exec("ALTER TABLE subagents ADD COLUMN depth INTEGER NOT NULL DEFAULT 0");
     this.db = db;
   }
 
@@ -96,6 +104,8 @@ export class SubAgentRegistry {
     profile?: string | null;
     model?: string | null;
     sessionPath?: string | null;
+    parentId?: string | null;
+    depth?: number;
   }): SubAgentRow {
     const now = Date.now();
     const row: SubAgentRow = {
@@ -109,12 +119,14 @@ export class SubAgentRegistry {
       exitCode: null,
       transcript: null,
       sessionPath: input.sessionPath ?? null,
+      parentId: input.parentId ?? null,
+      depth: input.depth ?? 0,
       createdAt: now,
       updatedAt: now,
     };
     this.database
       .prepare(
-        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, sessionPath, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, sessionPath, parentId, depth, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         row.id,
@@ -126,6 +138,8 @@ export class SubAgentRegistry {
         row.error,
         row.exitCode,
         row.sessionPath,
+        row.parentId,
+        row.depth,
         row.createdAt,
         row.updatedAt,
       );

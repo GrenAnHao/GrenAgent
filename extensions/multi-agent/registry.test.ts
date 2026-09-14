@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "../_shared/sqlite.js";
 import { SubAgentRegistry } from "./registry.js";
 import { LIVE_TRANSCRIPT_TAIL } from "./transcript-tail.js";
 
@@ -172,6 +173,30 @@ describe("SubAgentRegistry", () => {
     r.progress("sa-empty001", "kept");
     r.finish("sa-empty001", { status: "done", output: "out", exitCode: 0, transcript: "" });
     expect(r.get("sa-empty001")?.transcript).toBe("kept");
+    r.close();
+  });
+
+  it("migrates an old db without parentId/depth and persists them on create", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sa-reg-mig-"));
+    dirs.push(dir);
+    const file = join(dir, "registry.db");
+    const raw = new DatabaseSync(file);
+    raw.exec(
+      `CREATE TABLE subagents (id TEXT PRIMARY KEY, task TEXT NOT NULL, profile TEXT, model TEXT, status TEXT NOT NULL, output TEXT, error TEXT, exitCode INTEGER, transcript TEXT, sessionPath TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)`,
+    );
+    raw.close();
+    const reg = new SubAgentRegistry(file);
+    reg.load();
+    const row = reg.create({ id: "sa-n", task: "t", parentId: "sa-p", depth: 2 });
+    expect(row.parentId).toBe("sa-p");
+    expect(row.depth).toBe(2);
+    expect(reg.get("sa-n")).toMatchObject({ parentId: "sa-p", depth: 2 });
+    reg.close();
+  });
+
+  it("defaults parentId null / depth 0", () => {
+    const r = reg();
+    expect(r.create({ id: "sa-0", task: "t" })).toMatchObject({ parentId: null, depth: 0 });
     r.close();
   });
 });
