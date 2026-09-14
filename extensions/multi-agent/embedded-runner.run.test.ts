@@ -118,6 +118,23 @@ describe("runEmbeddedSubagent", () => {
     expect(excludeTools).not.toContain("send_message");
     expect(session.dispose).toHaveBeenCalled();
   });
+
+  it("passes thinkingLevel into createAgentSessionFromServices and records it in subagent_meta", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-x", thinkingLevel: "medium" });
+    const arg = createAgentSessionFromServices.mock.calls[0]?.[0] as { thinkingLevel?: string; excludeTools?: string[] };
+    expect(arg.thinkingLevel).toBe("medium");
+    expect(arg.excludeTools).toContain("list_subagent_models");
+    const meta = appendCustomEntry.mock.calls.find((c) => c[0] === "subagent_meta")?.[1] as { thinkingLevel?: string };
+    expect(meta.thinkingLevel).toBe("medium");
+  });
+
+  it("omits thinkingLevel when not given", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-y" });
+    const arg = createAgentSessionFromServices.mock.calls[0]?.[0] as { thinkingLevel?: string };
+    expect(arg).not.toHaveProperty("thinkingLevel");
+  });
 });
 
 describe("createEmbeddedChildSession", () => {

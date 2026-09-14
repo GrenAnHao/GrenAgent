@@ -103,6 +103,21 @@ describe("buildSubagentLaunch", () => {
     expect(deny.split(",")).toEqual(expect.arrayContaining(["spawn_agent", "explore_context"]));
     launch.cleanup();
   });
+
+  it("thinkingLevel → --thinking，位置在 --mode 之前", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", { thinkingLevel: "high" });
+    const i = launch.args.indexOf("--thinking");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(launch.args[i + 1]).toBe("high");
+    expect(i).toBeLessThan(launch.args.indexOf("--mode"));
+    launch.cleanup();
+  });
+
+  it("未给 thinkingLevel 则不传 --thinking", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", {});
+    expect(launch.args).not.toContain("--thinking");
+    launch.cleanup();
+  });
 });
 
 describe("buildSubagentSkillArgs", () => {

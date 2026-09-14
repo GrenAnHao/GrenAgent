@@ -1,6 +1,7 @@
 // In-process one-shot sub-agent: real SessionManager + JSONL in the Electron sidecar.
 // High-risk profiles (worktree) and non-Electron hosts fall back to spawnPiAgent in index.ts.
 
+import { type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -43,6 +44,7 @@ export interface EmbeddedSubagentOpts {
   onUpdate?: (update: AgentUpdate) => void;
   mode?: "one-shot" | "continuable";
   seedMessages?: unknown[];
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
@@ -144,7 +146,7 @@ async function filterExtensionFactories(): Promise<Array<(...args: never[]) => u
 }
 
 function buildExcludeTools(env: Record<string, string>): string[] {
-  const deny = new Set(["spawn_agent", "explore_context"]);
+  const deny = new Set(["spawn_agent", "explore_context", "list_subagent_models"]);
   for (const t of (env.SAFETY_DENY_TOOLS ?? "").split(",")) {
     const s = t.trim();
     if (s) deny.add(s);
@@ -274,6 +276,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
       mode: opts.mode ?? "one-shot",
       label: firstLine(opts.task).slice(0, 80),
       inheritedEventCount,
+      ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
   } catch (e) {
     wipeSessionFile(sessionManager.getSessionFile());
@@ -308,6 +311,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     sessionManager,
     ...(model ? { model } : {}),
     ...(opts.tools?.length ? { tools: opts.tools } : {}),
+    ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     excludeTools,
     sessionStartEvent: { type: "session_start", cwd: opts.cwd },
   });

@@ -231,6 +231,8 @@ type SpawnPiAgentOpts = {
   systemPrompt?: string;
   /** Named-agent tool allowlist → passed via --tools. */
   tools?: string[];
+  /** Sub-agent thinking level → passed via --thinking. */
+  thinkingLevel?: string;
 };
 
 export function buildSubagentLaunch(
@@ -253,6 +255,7 @@ export function buildSubagentLaunch(
   const args = [
     ...baseArgs,
     ...buildSubagentSkillArgs(getConfig("SUBAGENT_SKILLS_ROOT")),
+    ...(opts.thinkingLevel ? ["--thinking", opts.thinkingLevel] : []),
     "--mode",
     "json",
     "-p",
