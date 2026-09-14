@@ -1,7 +1,7 @@
 # DSH 子代理第六期：子级模型路由（用户授权白名单 + 发现工具）
 
 - 日期：2026-09-14
-- 状态：待审查
+- 状态：已落地
 - 主题：对齐 DSH「模型侧为子级选路由默认关闭、由用户白名单授权」的立场；开启后提供 `list_subagent_models` 发现工具与 `thinking_level` 参数。
 - 依赖：[规格 1](./2026-09-13-dsh-subagent-session-child-design.md)（`pickSubagentModel`、embedded runner）
 - 关联：`extensions/multi-agent/index.ts`、`extensions/multi-agent/embedded-runner.ts`、`extensions/multi-agent/runner.ts`、`electron-agent/src/features/settings/settingsSchema.ts`、`SettingField.tsx`、`ModelSelectField.tsx`
@@ -57,7 +57,7 @@ DSH：模型侧选路由默认关；用户在设置里勾精确路由白名单�
 | 键 | 类型 | 默认 | 文案 |
 |---|---|---|---|
 | `SUBAGENT_MODEL_SELECTION` | `boolean` | 关 | 允许模型为子代理自选路由。开启后 `spawn_agent` 可显式指定模型，且只能选下方白名单。改动对之后新建的会话生效 |
-| `SUBAGENT_MODEL_ALLOWLIST` | `model-list`（新） | `[]` | 可自选的路由白名单；`showWhen: { key: 'SUBAGENT_MODEL_SELECTION', equals: ['true'] }` |
+| `SUBAGENT_MODEL_ALLOWLIST` | `model-list`（新） | `[]` | 可自选的路由白名单；`showWhen: { key: 'SUBAGENT_MODEL_SELECTION', equals: ['1'] }` |
 
 `model-list` 字段：
 - 存储：JSON 数组字符串 `["provider/id", …]`；解析失败当 `[]`。
