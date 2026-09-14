@@ -2,9 +2,12 @@
 // each with its own context window). Single task or several in parallel.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { parentModelSpec, resolveSubagentModel, spawnPiAgent, type AgentResult } from "./runner.js";
 import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
+import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, routeOf, THINKING_LEVELS } from "./model-selection.js";
+import { availableModels, registerListSubagentModels } from "./list-models-tool.js";
 import type { SubagentStopReason } from "./assistant-output.js";
 import { sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
@@ -151,6 +154,7 @@ async function executeSubagent(
       signal: opts.signal,
       onUpdate: opts.onUpdate,
       seedMessages: opts.seedMessages,
+      thinkingLevel: opts.thinkingLevel as ThinkingLevel | undefined,
     });
   }
   const r = await spawnPiAgent(cwd, task, { ...opts, systemPrompt });
@@ -249,6 +253,11 @@ function reapStuck(reg: SubAgentRegistry): void {
 }
 
 export default function (pi: ExtensionAPI) {
+  const modelPolicy = readModelSelectionPolicy();
+  registerListSubagentModels(pi, modelPolicy);
+  const modelField = (desc: string) =>
+    modelPolicy.enabled ? { model: Type.Optional(Type.String({ description: desc })) } : {};
+
   // Workflow slash-commands (/implement, /scout-and-plan, /implement-and-review)
   // + seed default named agents (scout/planner/reviewer/worker).
   registerWorkflows(pi);
@@ -297,17 +306,23 @@ export default function (pi: ExtensionAPI) {
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
       "After a background spawn settles you will receive a notice; do not wait just to collect the conclusion.",
       "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
+      ...(modelPolicy.enabled
+        ? [
+            "开启自选路由时先调用 list_subagent_models，只用它列出的路由。",
+            "fork: true 时换模型会失去父前缀缓存，非必要不换。",
+          ]
+        : []),
     ],
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
-      model: Type.Optional(Type.String({ description: "Model (provider/id) for `task`. Omit → SUBAGENT_MODEL or main default." })),
+      ...modelField("Model route (provider/id) for `task`. Must come from `list_subagent_models`; omit to use the configured default."),
       tasks: Type.Optional(
         Type.Array(
           Type.Union([
             Type.String(),
             Type.Object({
               task: Type.String(),
-              model: Type.Optional(Type.String()),
+              ...modelField("Model route for this task; must come from `list_subagent_models`."),
               agent: Type.Optional(Type.String()),
             }),
           ]),
@@ -331,7 +346,7 @@ export default function (pi: ExtensionAPI) {
           Type.Object({
             task: Type.String(),
             agent: Type.Optional(Type.String()),
-            model: Type.Optional(Type.String()),
+            ...modelField("Model route for this step; must come from `list_subagent_models`."),
           }),
           { description: "Sequential steps; each step's task may contain {previous} (replaced by the prior step's output)." },
         ),
@@ -356,7 +371,7 @@ export default function (pi: ExtensionAPI) {
                 isolation: Type.Optional(
                   Type.Union([Type.Literal("process"), Type.Literal("worktree")]),
                 ),
-                model: Type.Optional(Type.String()),
+                ...modelField("Model route or alias (cheap/strong) for this profile."),
               },
               { additionalProperties: false },
             ),
@@ -387,6 +402,16 @@ export default function (pi: ExtensionAPI) {
       fork: Type.Optional(
         Type.Boolean({ description: "When true, seed the child with the parent session's completed turns." }),
       ),
+      ...(modelPolicy.enabled
+        ? {
+            thinking_level: Type.Optional(
+              Type.Union(
+                THINKING_LEVELS.map((l) => Type.Literal(l)),
+                { description: "Thinking level for the child model; only levels listed by `list_subagent_models` for that route." },
+              ),
+            ),
+          }
+        : {}),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const action = params.action ?? "run";
@@ -449,6 +474,41 @@ export default function (pi: ExtensionAPI) {
       }
 
       const list = normalizeTasks(params);
+      const explicitRoutes: string[] = [];
+      if (typeof params.model === "string" && params.model.trim()) explicitRoutes.push(params.model.trim());
+      for (const t of params.tasks ?? []) {
+        if (typeof t === "object" && typeof t.model === "string" && t.model.trim()) explicitRoutes.push(t.model.trim());
+      }
+      for (const s of params.chain ?? []) {
+        if (typeof s.model === "string" && s.model.trim()) explicitRoutes.push(s.model.trim());
+      }
+      const inlineProfileModel =
+        params.profile && typeof params.profile === "object" && typeof params.profile.model === "string" ? params.profile.model.trim() : "";
+      const thinkingLevel = typeof params.thinking_level === "string" ? params.thinking_level.trim() : "";
+      if (!modelPolicy.enabled) {
+        if (explicitRoutes.length > 0 || inlineProfileModel || thinkingLevel) {
+          return {
+            content: [{ type: "text", text: "子代理路由选择未开启（设置 → 子代理 → 允许模型自选路由）" }],
+            isError: true,
+          };
+        }
+      } else {
+        const avail = availableModels(ctx as never);
+        try {
+          for (const route of explicitRoutes) assertRouteAllowed(route, modelPolicy, avail);
+          if (inlineProfileModel && inlineProfileModel !== "cheap" && inlineProfileModel !== "strong") {
+            assertRouteAllowed(inlineProfileModel, modelPolicy, avail);
+          }
+          if (thinkingLevel) {
+            const target = explicitRoutes[0] ?? inlineProfileModel;
+            const model = avail.find((m) => routeOf(m) === target) ?? avail.find((m) => routeOf(m) === (parentModelSpec(ctx.model) ?? ""));
+            if (!model) throw new Error("thinking_level 需要一个可解析的目标模型");
+            assertThinkingLevel(thinkingLevel, model);
+          }
+        } catch (e) {
+          return { content: [{ type: "text", text: String((e as Error).message ?? e) }], isError: true };
+        }
+      }
       const hasChain = (params.chain?.length ?? 0) > 0;
       if (!spawnHasWork(params)) throw new Error("provide `task`, `tasks`, or `chain`");
 
@@ -568,6 +628,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
+            thinkingLevel: thinkingLevel || undefined,
             signal: controller.signal,
             onUpdate: (u) => registry.progress(id, u.transcript),
           }).finally(() => inflight.delete(id));
@@ -645,6 +706,7 @@ export default function (pi: ExtensionAPI) {
               env: profileEnv,
               mcp: profile.mcp,
               timeoutMs: limits.timeoutMs,
+              thinkingLevel: thinkingLevel || undefined,
               seedMessages,
               signal: controller.signal,
               onUpdate: (u) => {
@@ -723,6 +785,7 @@ export default function (pi: ExtensionAPI) {
           env: profileEnv,
           mcp: profile.mcp,
           timeoutMs: limits.timeoutMs,
+          thinkingLevel: thinkingLevel || undefined,
           seedMessages,
           signal: controller.signal,
           // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
@@ -800,6 +863,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
+            thinkingLevel: thinkingLevel || undefined,
             seedMessages,
             signal: controller.signal,
             onUpdate: (u) => {
@@ -896,6 +960,7 @@ export default function (pi: ExtensionAPI) {
             env: profileEnv,
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
+            thinkingLevel: thinkingLevel || undefined,
             signal: controller.signal,
             onUpdate: (u) => registry.progress(subId, u.transcript),
           }).finally(() => inflight.delete(subId));

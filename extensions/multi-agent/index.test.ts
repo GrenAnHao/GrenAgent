@@ -87,17 +87,29 @@ type Execute = (
   signal: AbortSignal | null,
   onUpdate: null,
   ctx: { cwd: string; model?: { provider?: string; id?: string } },
-) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown> }>;
+) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown>; isError?: boolean }>;
 
 type SessionHandler = (event: unknown, ctx: unknown) => unknown;
 
-function loadSpawnHarness(): { execute: Execute; appendEntry: ReturnType<typeof vi.fn>; handlers: Record<string, SessionHandler> } {
+function loadSpawnHarness(): {
+  execute: Execute;
+  appendEntry: ReturnType<typeof vi.fn>;
+  handlers: Record<string, SessionHandler>;
+  schema: Record<string, unknown>;
+  toolNames: string[];
+} {
   let exec: Execute | undefined;
+  let schema: Record<string, unknown> = {};
+  const toolNames: string[] = [];
   const appendEntry = vi.fn();
   const handlers: Record<string, SessionHandler> = {};
   const pi = {
-    registerTool: (t: { name: string; execute: Execute }) => {
-      if (t.name === "spawn_agent") exec = t.execute;
+    registerTool: (t: { name: string; execute: Execute; parameters?: { properties?: Record<string, unknown> } }) => {
+      toolNames.push(t.name);
+      if (t.name === "spawn_agent") {
+        exec = t.execute;
+        schema = t.parameters?.properties ?? {};
+      }
     },
     registerCommand: () => {},
     sendUserMessage: () => {},
@@ -107,7 +119,7 @@ function loadSpawnHarness(): { execute: Execute; appendEntry: ReturnType<typeof 
     appendEntry,
   };
   multiAgent(pi as unknown as Parameters<typeof multiAgent>[0]);
-  return { execute: exec!, appendEntry, handlers };
+  return { execute: exec!, appendEntry, handlers, schema, toolNames };
 }
 
 function loadSpawnAgent(): Execute {
@@ -115,6 +127,13 @@ function loadSpawnAgent(): Execute {
 }
 
 const ctx = { cwd: process.platform === "win32" ? "D:\\proj" : "/proj" };
+
+const AVAIL = [{ provider: "a", id: "b", name: "b", reasoning: true }, { provider: "a", id: "c", name: "c", reasoning: false }];
+const ctxM = { ...ctx, modelRegistry: { getAvailable: () => AVAIL } };
+const enable = (list = '["a/b","a/c"]') =>
+  vi.mocked(getConfig).mockImplementation((k: string) =>
+    k === "SUBAGENT_MAX_PER_SESSION" ? "0" : k === "SUBAGENT_MODEL_SELECTION" ? "1" : k === "SUBAGENT_MODEL_ALLOWLIST" ? list : undefined,
+  );
 
 beforeEach(() => {
   __resetSubagentControlPlaneForTest();
@@ -201,9 +220,11 @@ describe("spawn_agent · inherit parent model", () => {
   });
 
   it("explicit model wins over parent", async () => {
+    enable('["openai/gpt-4o"]');
     await loadSpawnAgent()("tm2", { task: "do x", model: "openai/gpt-4o" }, null, null, {
       ...ctx,
       model: { provider: "custom-mtwuh2s5", id: "deepseek-flash" },
+      modelRegistry: { getAvailable: () => [{ provider: "openai", id: "gpt-4o", name: "gpt-4o", reasoning: false }] },
     });
     expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.model).toBe("openai/gpt-4o");
   });
@@ -675,6 +696,81 @@ describe("spawn_agent · delegation scope statement", () => {
     await loadSpawnAgent()("t-ds4", { task: "do x", action: "spawn" }, null, null, ctx);
     const sp = vi.mocked(startContinuableEmbedded).mock.calls[0]?.[0]?.systemPrompt as string;
     expect(sp).toContain(STATEMENT);
+  });
+});
+
+describe("spawn_agent · model selection policy", () => {
+  it("disabled: schema has no model fields and no list tool", () => {
+    const h = loadSpawnHarness();
+    expect(h.schema).not.toHaveProperty("model");
+    expect(h.schema).not.toHaveProperty("thinking_level");
+    expect(h.toolNames).not.toContain("list_subagent_models");
+  });
+
+  it("disabled: explicit model is rejected before spawning", async () => {
+    const h = loadSpawnHarness();
+    const r = await h.execute("t", { task: "x", model: "a/b" }, null, null, ctxM);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("子代理路由选择未开启");
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("disabled: tasks[].model / chain[].model / profile.model are rejected too", async () => {
+    const h = loadSpawnHarness();
+    for (const params of [
+      { tasks: [{ task: "x", model: "a/b" }] },
+      { chain: [{ task: "x", model: "a/b" }] },
+      { task: "x", profile: { model: "a/b" } },
+      { task: "x", thinking_level: "high" },
+    ]) {
+      const r = await h.execute("t", params, null, null, ctxM);
+      expect(r.isError).toBe(true);
+    }
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("disabled: SUBAGENT_MODEL default still applies (user config, not model choice)", async () => {
+    vi.mocked(getConfig).mockImplementation((k: string) => (k === "SUBAGENT_MAX_PER_SESSION" ? "0" : k === "SUBAGENT_MODEL" ? "x/y" : undefined));
+    await loadSpawnAgent()("t", { task: "x" }, null, null, ctxM);
+    expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.model).toBe("x/y");
+  });
+
+  it("enabled: schema exposes model + thinking_level and registers the list tool", () => {
+    enable();
+    const h = loadSpawnHarness();
+    expect(h.schema).toHaveProperty("model");
+    expect(h.schema).toHaveProperty("thinking_level");
+    expect(h.toolNames).toContain("list_subagent_models");
+  });
+
+  it("enabled: allowlisted available route spawns; thinking_level is forwarded", async () => {
+    enable();
+    await loadSpawnAgent()("t", { task: "x", model: "a/b", thinking_level: "high" }, null, null, ctxM);
+    const opts = vi.mocked(spawnPiAgent).mock.calls[0]?.[2];
+    expect(opts?.model).toBe("a/b");
+    expect(opts?.thinkingLevel).toBe("high");
+  });
+
+  it("enabled: route outside allowlist is rejected", async () => {
+    enable('["a/b"]');
+    const r = await loadSpawnAgent()("t", { task: "x", model: "a/c" }, null, null, ctxM);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("不在授权白名单");
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("enabled: thinking_level on a non-reasoning model is rejected", async () => {
+    enable();
+    const r = await loadSpawnAgent()("t", { task: "x", model: "a/c", thinking_level: "medium" }, null, null, ctxM);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("不支持思考档");
+  });
+
+  it("enabled: one bad task in tasks[] aborts the whole batch", async () => {
+    enable('["a/b"]');
+    const r = await loadSpawnAgent()("t", { tasks: [{ task: "ok", model: "a/b" }, { task: "bad", model: "a/c" }] }, null, null, ctxM);
+    expect(r.isError).toBe(true);
+    expect(spawnPiAgent).not.toHaveBeenCalled();
   });
 });
 
