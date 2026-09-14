@@ -36,6 +36,8 @@ export interface SubAgentRow {
   parentId: string | null;
   /** 委派深度：顶层 0。 */
   depth: number;
+  /** jobs 扩展分配的 job id（可续跑/托盘关联）。 */
+  jobId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,6 +67,7 @@ export class SubAgentRegistry {
          sessionPath TEXT,
          parentId TEXT,
          depth INTEGER NOT NULL DEFAULT 0,
+         jobId TEXT,
          createdAt INTEGER NOT NULL,
          updatedAt INTEGER NOT NULL
        );
@@ -81,6 +84,7 @@ export class SubAgentRegistry {
     }
     if (!cols.some((c) => c.name === "parentId")) db.exec("ALTER TABLE subagents ADD COLUMN parentId TEXT");
     if (!cols.some((c) => c.name === "depth")) db.exec("ALTER TABLE subagents ADD COLUMN depth INTEGER NOT NULL DEFAULT 0");
+    if (!cols.some((c) => c.name === "jobId")) db.exec("ALTER TABLE subagents ADD COLUMN jobId TEXT");
     this.db = db;
   }
 
@@ -106,6 +110,7 @@ export class SubAgentRegistry {
     sessionPath?: string | null;
     parentId?: string | null;
     depth?: number;
+    jobId?: string | null;
   }): SubAgentRow {
     const now = Date.now();
     const row: SubAgentRow = {
@@ -121,12 +126,13 @@ export class SubAgentRegistry {
       sessionPath: input.sessionPath ?? null,
       parentId: input.parentId ?? null,
       depth: input.depth ?? 0,
+      jobId: input.jobId ?? null,
       createdAt: now,
       updatedAt: now,
     };
     this.database
       .prepare(
-        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, sessionPath, parentId, depth, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO subagents(id, task, profile, model, status, output, error, exitCode, sessionPath, parentId, depth, jobId, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         row.id,
@@ -140,6 +146,7 @@ export class SubAgentRegistry {
         row.sessionPath,
         row.parentId,
         row.depth,
+        row.jobId,
         row.createdAt,
         row.updatedAt,
       );
@@ -150,6 +157,10 @@ export class SubAgentRegistry {
     const trimmed = path.trim();
     if (!trimmed) return;
     this.database.prepare("UPDATE subagents SET sessionPath=?, updatedAt=? WHERE id=?").run(trimmed, Date.now(), id);
+  }
+
+  setJobId(id: string, jobId: string): void {
+    this.database.prepare("UPDATE subagents SET jobId=?, updatedAt=? WHERE id=?").run(jobId, Date.now(), id);
   }
 
   finish(

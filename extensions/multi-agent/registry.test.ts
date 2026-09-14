@@ -199,4 +199,28 @@ describe("SubAgentRegistry", () => {
     expect(r.create({ id: "sa-0", task: "t" })).toMatchObject({ parentId: null, depth: 0 });
     r.close();
   });
+
+  it("defaults jobId null on new db", () => {
+    const r = reg();
+    expect(r.create({ id: "sa-0", task: "t" })).toMatchObject({ jobId: null });
+    r.close();
+  });
+
+  it("migrates jobId column and stores it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sa-reg-job-"));
+    dirs.push(dir);
+    const file = join(dir, "r3.db");
+    const raw = new DatabaseSync(file);
+    raw.exec(
+      `CREATE TABLE subagents (id TEXT PRIMARY KEY, task TEXT NOT NULL, profile TEXT, model TEXT, status TEXT NOT NULL, output TEXT, error TEXT, exitCode INTEGER, transcript TEXT, sessionPath TEXT, parentId TEXT, depth INTEGER NOT NULL DEFAULT 0, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)`,
+    );
+    raw.close();
+    const reg = new SubAgentRegistry(file);
+    reg.load();
+    expect(reg.create({ id: "sa-j", task: "t", jobId: "subagent-1" })).toMatchObject({ jobId: "subagent-1" });
+    expect(reg.get("sa-j")?.jobId).toBe("subagent-1");
+    reg.setJobId("sa-j", "subagent-2");
+    expect(reg.get("sa-j")?.jobId).toBe("subagent-2");
+    reg.close();
+  });
 });
