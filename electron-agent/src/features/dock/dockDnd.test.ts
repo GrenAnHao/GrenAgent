@@ -31,9 +31,19 @@ describe('planDrop', () => {
     expect(planDrop(tabs, 'p2', 'term1')).toEqual({ type: 'move', id: 'p2', region: 'bottom', insertIndex: 0 });
   });
 
-  it('rejects dragging a terminal to the right region', () => {
-    expect(planDrop(tabs, 'term1', 'dock:right')).toBeNull();
-    expect(planDrop(tabs, 'term1', 'p1')).toBeNull();
+  it('moves a terminal to the right region', () => {
+    expect(planDrop(tabs, 'term1', 'dock:right')).toEqual({
+      type: 'move',
+      id: 'term1',
+      region: 'right',
+      insertIndex: 2,
+    });
+    expect(planDrop(tabs, 'term1', 'p1')).toEqual({
+      type: 'move',
+      id: 'term1',
+      region: 'right',
+      insertIndex: 0,
+    });
   });
 
   it('returns null for no-op (same index, missing target)', () => {

@@ -31,15 +31,13 @@ function regionOf(overId: string, tabs: DockTab[]): DockRegion | null {
 
 /**
  * 纯决策：给定拖起 tab 与落点（兄弟 tab id 或 `dock:<region>`），返回应执行的操作。
- * 返回 null 表示忽略（无效落点 / 同位 / 终端拖出底坞）。
+ * 返回 null 表示忽略（无效落点 / 同位）。
  */
 export function planDrop(tabs: DockTab[], activeId: string, overId: string): DropPlan | null {
   const activeTab = tabs.find((t) => t.id === activeId);
   if (!activeTab) return null;
 
   const targetRegion = regionOf(overId, tabs) ?? activeTab.region;
-  // 终端钉底坞：不可移入其它坞。
-  if (activeTab.kind === 'terminal' && targetRegion !== 'bottom') return null;
 
   const overTab = tabs.find((t) => t.id === overId) ?? null;
 

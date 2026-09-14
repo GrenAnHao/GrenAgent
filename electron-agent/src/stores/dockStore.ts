@@ -197,8 +197,6 @@ export const useDockStore = create<DockState>()(
         set((s) => {
           const tab = s.tabs.find((t) => t.id === id);
           if (!tab) return s;
-          // 终端钉在底坞：拒绝移入右坞。
-          if (tab.kind === 'terminal' && targetRegion === 'right') return s;
           if (tab.region === targetRegion) return s;
 
           const targetTabs = s.tabs.filter((t) => t.region === targetRegion).sort((a, b) => a.order - b.order);

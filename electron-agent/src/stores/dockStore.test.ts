@@ -55,7 +55,7 @@ describe('dockStore', () => {
     expect(useDockStore.getState().activeByRegion.right).toBe('page:https://1');
   });
 
-  it('moveTabRegion moves a page to bottom and rejects moving a terminal to right', () => {
+  it('moveTabRegion moves a page to bottom and allows moving a terminal to right', () => {
     const s = useDockStore.getState();
     s.openPage({ url: 'https://p', content: '' });
     s.moveTabRegion('page:https://p', 'bottom');
@@ -67,7 +67,9 @@ describe('dockStore', () => {
     s.addTab({ id: 'term-1', kind: 'terminal', region: 'bottom', title: 'T', closable: true, payload: { status: 'idle' } });
     s.moveTabRegion('term-1', 'right');
     tab = useDockStore.getState().tabs.find((t) => t.id === 'term-1')!;
-    expect(tab.region).toBe('bottom'); // rejected
+    expect(tab.region).toBe('right');
+    expect(useDockStore.getState().activeByRegion.right).toBe('term-1');
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
   });
 
   it('reorderTabs reorders within a region by index', () => {
