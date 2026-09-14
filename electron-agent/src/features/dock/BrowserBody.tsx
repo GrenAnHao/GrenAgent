@@ -102,6 +102,11 @@ export function BrowserBody({ tab }: DockBodyProps) {
       setLoading(false);
       setLoadError(details.errorDescription || '页面加载失败');
     };
+    const onNewWindow = (event: Event) => {
+      const url = (event as Event & { url?: string }).url;
+      event.preventDefault();
+      if (typeof url === 'string') loadUrl(view, url);
+    };
     const onIpcMessage = (event: Event) => {
       const details = event as WebviewIpcEvent;
       if (details.channel !== 'gren:webview-open') return;
@@ -115,6 +120,7 @@ export function BrowserBody({ tab }: DockBodyProps) {
     view.addEventListener('page-title-updated', onTitle);
     view.addEventListener('did-stop-loading', onStop);
     view.addEventListener('did-fail-load', onFail);
+    view.addEventListener('new-window', onNewWindow);
     view.addEventListener('ipc-message', onIpcMessage);
     return () => {
       view.removeEventListener('did-start-loading', onStart);
@@ -124,6 +130,7 @@ export function BrowserBody({ tab }: DockBodyProps) {
       view.removeEventListener('page-title-updated', onTitle);
       view.removeEventListener('did-stop-loading', onStop);
       view.removeEventListener('did-fail-load', onFail);
+      view.removeEventListener('new-window', onNewWindow);
       view.removeEventListener('ipc-message', onIpcMessage);
     };
   }, [tab.id, updateTab]);
@@ -165,7 +172,7 @@ export function BrowserBody({ tab }: DockBodyProps) {
           ref={webviewRef as React.Ref<HTMLElement>}
           src={initialUrlRef.current}
           partition="persist:gren-browser"
-          allowpopups
+          allowpopups="true"
           webpreferences="nativeWindowOpen=no"
           title={title}
         />
