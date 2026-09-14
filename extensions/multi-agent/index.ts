@@ -9,9 +9,9 @@ import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded }
 import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, routeOf, THINKING_LEVELS } from "./model-selection.js";
 import { availableModels, registerListSubagentModels } from "./list-models-tool.js";
 import type { SubagentStopReason } from "./assistant-output.js";
-import { sendSettlementToParent } from "./parent-host.js";
-import { formatSettlementNotice } from "./settlement-notice.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
+import { jobs } from "../jobs/service.js";
+import type { JobOutcome } from "../jobs/types.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
@@ -51,6 +51,11 @@ function catalogLabel(task: string): string {
   const line = (task.split(/\r?\n/, 1)[0] ?? "").trim();
   if (!line) return "(untitled)";
   return line.length <= 80 ? line : line.slice(0, 80);
+}
+
+function mapStop(r: SubagentRunResult, aborted: boolean): JobOutcome {
+  const status = r.stopReason === "aborted" || aborted ? "killed" : r.ok ? "completed" : "failed";
+  return { status, output: r.output, ...(r.error ? { error: r.error } : {}) };
 }
 
 function writeParentCatalog(
@@ -398,6 +403,12 @@ export default function (pi: ExtensionAPI) {
           },
         ),
       ),
+      mode: Type.Optional(
+        Type.Union([Type.Literal("one-shot"), Type.Literal("continuable")], {
+          description:
+            'Only with action "spawn": "continuable" (default) keeps the child resident for send_message; "one-shot" runs once as a background job, collect with job_output.',
+        }),
+      ),
       agentId: Type.Optional(
         Type.String({ description: "Sub-agent id for status/wait/cancel (from a prior background spawn)." }),
       ),
@@ -453,6 +464,26 @@ export default function (pi: ExtensionAPI) {
         if (!id) throw new Error(`action '${action}' requires agentId`);
         const row = registry.get(id);
         if (!row) throw new Error(`unknown agentId: ${id}`);
+
+        if ((action === "wait" || action === "status") && row?.jobId) {
+          const caller = parentSessionId(ctx) ?? ctx.cwd;
+          const capMs = action === "wait"
+            ? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000) + 30000
+            : 0;
+          const r = await jobs.read(row.jobId, caller, { wait: action === "wait", timeoutMs: capMs });
+          const fresh = registry.get(id) ?? row;
+          return {
+            content: [{ type: "text", text: r.text ? `${statusText(fresh)}\n${r.text}` : statusText(fresh) }],
+            details: { agentId: fresh.id, jobId: row.jobId, status: fresh.status, exitCode: fresh.exitCode },
+          };
+        }
+        if (action === "cancel" && row?.jobId) {
+          try {
+            jobs.kill(row.jobId, parentSessionId(ctx) ?? ctx.cwd, "spawn_agent cancel");
+          } catch {
+            /* 非 owner / 已终：仍走下面的 registry cancel */
+          }
+        }
 
         if (action === "remove") {
           if (row.status === "running") cancelSubAgent(id, registry, inflight);
@@ -691,6 +722,61 @@ export default function (pi: ExtensionAPI) {
         const parentPath = parentSessionPath(ctx);
         const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
         const spawnedText = `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`;
+        const spawnMode = params.mode === "one-shot" ? "one-shot" : "continuable";
+        const startOneShotJob = (): { jobId: string } => {
+          registry.create({ id, task, profile: params.profile ? JSON.stringify(profile) : null, model: chosenModel ?? null, parentId: parentSid ?? null, depth: childDepth });
+          const controller = new AbortController();
+          inflight.set(id, controller);
+          const jobId = jobs.start({
+            kind: "subagent",
+            label: catalogLabel(task),
+            owner: parentSid ?? ctx.cwd,
+            workspace,
+            run: () => {
+              const done = executeSubagent(ctx.cwd, task, id, profile, {
+                parentSessionPath: parentPath,
+                model: chosenModel,
+                systemPrompt: layer.systemPrompt,
+                tools: layer.tools,
+                env: profileEnv,
+                mcp: profile.mcp,
+                timeoutMs: limits.timeoutMs,
+                seedMessages,
+                depth: childDepth,
+                thinkingLevel: thinkingLevel || undefined,
+                signal: controller.signal,
+                onUpdate: (u) => {
+                  if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
+                  registry.progress(id, u.transcript);
+                },
+              })
+                .then((r) => {
+                  const aborted = controller.signal.aborted;
+                  registry.finish(id, r.ok
+                    ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+                    : { status: aborted ? "cancelled" : "error", output: r.output, error: r.error, exitCode: r.exitCode, transcript: r.transcript });
+                  if (r.ok) writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
+                  return mapStop(r, aborted);
+                })
+                .catch((e): JobOutcome => {
+                  registry.finish(id, { status: "error", error: String((e as Error)?.message ?? e), exitCode: -1 });
+                  return { status: "failed", error: String((e as Error)?.message ?? e) };
+                })
+                .finally(() => inflight.delete(id));
+              return { cancel: () => controller.abort(), done };
+            },
+          });
+          registry.setJobId(id, jobId);
+          return { jobId };
+        };
+
+        if (spawnMode === "one-shot") {
+          const { jobId } = startOneShotJob();
+          return {
+            content: [{ type: "text", text: `Background one-shot sub-agent started as job ${jobId}. Collect with job_output({ job_id: "${jobId}" }).` }],
+            details: { agentId: id, jobId, mode: "one-shot", status: "running" },
+          };
+        }
 
         if (canUseEmbeddedSubagent(profile)) {
           registry.create({
@@ -768,83 +854,10 @@ export default function (pi: ExtensionAPI) {
           }
         }
 
-        registry.create({
-          id,
-          task,
-          profile: params.profile ? JSON.stringify(profile) : null,
-          model: chosenModel ?? null,
-          parentId: parentSid ?? null, depth: childDepth,
-        });
-        const controller = new AbortController();
-        inflight.set(id, controller);
-        let sessionReady: (path: string | undefined) => void = () => {};
-        const sessionReadyPromise = new Promise<string | undefined>((resolve) => {
-          sessionReady = resolve;
-        });
-        let sessionResolved = false;
-        const resolveSession = (path: string | undefined): void => {
-          if (sessionResolved) return;
-          sessionResolved = true;
-          sessionReady(path);
-        };
-        // Detached: keeps running after this tool call returns; the handler writes
-        // the terminal state to the registry, which `wait`/`status` then read.
-        void executeSubagent(ctx.cwd, task, id, profile, {
-          parentSessionPath: parentPath,
-          model: chosenModel,
-          systemPrompt: layer.systemPrompt,
-          tools: layer.tools,
-          env: profileEnv,
-          mcp: profile.mcp,
-          timeoutMs: limits.timeoutMs,
-          thinkingLevel: thinkingLevel || undefined,
-          seedMessages,
-          depth: childDepth,
-          signal: controller.signal,
-          // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
-          // SubAgentLogBody 轮询 registry，即可像主对话一样实时回放后台子代理。
-          onUpdate: (u) => {
-            if (u.sessionPath) resolveSession(u.sessionPath);
-            registry.progress(id, u.transcript);
-          },
-        })
-          .then((r) => {
-            resolveSession(r.sessionPath);
-            registry.finish(
-              id,
-              r.ok
-                ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
-                : {
-                    status: controller.signal.aborted ? "cancelled" : "error",
-                    output: r.output,
-                    error: r.error,
-                    exitCode: r.exitCode,
-                    transcript: r.transcript,
-                  },
-            );
-            sendSettlementToParent(
-              parentPath ?? "",
-              workspace,
-              formatSettlementNotice({
-                childId: id,
-                stopReason: r.stopReason ?? (controller.signal.aborted ? "aborted" : r.ok ? "completed" : "error"),
-                output: r.output,
-                sessionPath: r.sessionPath,
-              }),
-            );
-          })
-          .catch((e) => {
-            resolveSession(undefined);
-            registry.finish(id, { status: "error", error: String((e as Error)?.message ?? e), exitCode: -1 });
-          })
-          .finally(() => inflight.delete(id));
-        const childSessionPath = await Promise.race([
-          sessionReadyPromise,
-          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2000)),
-        ]);
+        const { jobId } = startOneShotJob();
         return {
-          content: [{ type: "text", text: spawnedText }],
-          details: { agentId: id, status: "running", ...(childSessionPath ? { sessionPath: childSessionPath } : {}) },
+          content: [{ type: "text", text: `${spawnedText}\nAlso tracked as job ${jobId} (job_output / job_kill).` }],
+          details: { agentId: id, jobId, status: "running" },
         };
       }
 

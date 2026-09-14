@@ -21,6 +21,32 @@ vi.mock("./agents.js", () => ({
   suggestAgent: () => undefined,
   withBuiltinDefaults: (agents: unknown) => agents,
 }));
+const registryRows = vi.hoisted(() => {
+  const rows = new Map<string, Record<string, unknown>>();
+  return {
+    rows,
+    reset() {
+      rows.clear();
+    },
+  };
+});
+const jobsMock = vi.hoisted(() => {
+  const start = vi.fn((req: { run: () => { done: Promise<unknown> } }) => {
+    req.run();
+    return "subagent-1";
+  });
+  return {
+    start,
+    read: vi.fn(async () => ({ status: "completed", text: "job-out" })),
+    kill: vi.fn(() => "requested"),
+    snapshot: vi.fn(() => ({ status: "running" })),
+    hasLive: vi.fn(() => false),
+    onJobDone: vi.fn(() => () => {}),
+  };
+});
+vi.mock("../jobs/service.js", () => ({
+  jobs: jobsMock,
+}));
 vi.mock("./registry.js", () => {
   class SubAgentRegistry {
     static genId() {
@@ -28,16 +54,28 @@ vi.mock("./registry.js", () => {
     }
     load() {}
     reapOrphans() {}
-    create() {}
-    finish() {}
+    create(input: Record<string, unknown> = {}) {
+      const id = String(input.id ?? "sa_test");
+      const row = { id, task: input.task ?? "", status: "running", jobId: input.jobId ?? null, ...input };
+      registryRows.rows.set(id, row);
+      return row;
+    }
+    finish(id: string, patch: Record<string, unknown>) {
+      registryRows.rows.set(id, { ...(registryRows.rows.get(id) ?? { id }), ...patch });
+    }
     touch() {}
+    progress() {}
     setSessionPath() {}
+    setJobId(id: string, jobId: string) {
+      const prev = registryRows.rows.get(id) ?? { id };
+      registryRows.rows.set(id, { ...prev, jobId });
+    }
     remove() {}
-    get() {
-      return null;
+    get(id?: string) {
+      return id ? (registryRows.rows.get(id) ?? null) : null;
     }
     list() {
-      return [];
+      return [...registryRows.rows.values()];
     }
     findStuck() {
       return [];
@@ -73,6 +111,7 @@ vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn(() => undefine
 
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getConfig } from "../_shared/runtime-config.js";
+import { jobs } from "../jobs/service.js";
 import { __resetSubagentControlPlaneForTest } from "./controlPlane.js";
 import multiAgent from "./index.js";
 import { spawnPiAgent } from "./runner.js";
@@ -137,6 +176,7 @@ const enable = (list = '["a/b","a/c"]') =>
 
 beforeEach(() => {
   __resetSubagentControlPlaneForTest();
+  registryRows.reset();
   vi.clearAllMocks();
   // Hermetic: a stray PI_IS_SUBAGENT in the ambient env would trip the recursion guard.
   delete process.env.PI_IS_SUBAGENT;
@@ -833,6 +873,54 @@ describe("spawn_agent · nested delegation depth", () => {
     const opts = vi.mocked(startContinuableEmbedded).mock.calls[0]?.[0];
     expect(opts?.parentActivationId).toBe("sa-parent-1");
     expect(opts?.depth).toBe(2);
+  });
+});
+
+describe("spawn_agent · one-shot background via jobs", () => {
+  it("mode one-shot (embedded) starts a job, records jobId, writes one-shot catalog, no subagent-settled", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const sendSettlement = vi.spyOn(parentHost, "sendSettlementToParent");
+    const h = loadSpawnHarness();
+    const r = await h.execute("t", { task: "x", action: "spawn", mode: "one-shot" }, null, null, ctx);
+    expect(jobs.start).toHaveBeenCalledWith(expect.objectContaining({ kind: "subagent", label: "x" }));
+    expect(r.content[0].text).toContain("job subagent-1");
+    expect(r.details).toMatchObject({ jobId: "subagent-1", mode: "one-shot" });
+    expect(startContinuableEmbedded).not.toHaveBeenCalled();
+    expect(runEmbeddedSubagent).toHaveBeenCalled();
+    await vi.waitFor(() => expect(h.appendEntry).toHaveBeenCalledWith("subagent_catalog", expect.objectContaining({ mode: "one-shot" })));
+    expect(sendSettlement).not.toHaveBeenCalled();
+  });
+
+  it("mode omitted → continuable path unchanged", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    await loadSpawnAgent()("t", { task: "x", action: "spawn" }, null, null, ctx);
+    expect(startContinuableEmbedded).toHaveBeenCalled();
+    expect(jobs.start).not.toHaveBeenCalled();
+  });
+
+  it("subprocess background spawn goes through jobs and no longer emits subagent-settled itself", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(false);
+    const sendSettlement = vi.spyOn(parentHost, "sendSettlementToParent");
+    await loadSpawnAgent()("t", { task: "x", action: "spawn" }, null, null, ctx);
+    expect(jobs.start).toHaveBeenCalled();
+    await vi.waitFor(() => expect(spawnPiAgent).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sendSettlement).not.toHaveBeenCalled();
+  });
+
+  it("wait alias reads through jobs when the row has a jobId", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const h = loadSpawnHarness();
+    await h.execute("t", { task: "x", action: "spawn", mode: "one-shot" }, null, null, ctx);
+    const r = await h.execute("t2", { action: "wait", agentId: "sa_test" }, null, null, ctx);
+    expect(jobs.read).toHaveBeenCalledWith("subagent-1", expect.any(String), expect.objectContaining({ wait: true }));
+    expect(r.content[0].text).toContain("job-out");
+  });
+
+  it("mode one-shot with tasks/chain/worktree is rejected", async () => {
+    await expect(
+      loadSpawnAgent()("t", { tasks: ["a", "b"], action: "spawn", mode: "one-shot" }, null, null, ctx),
+    ).rejects.toThrow(/仅支持单任务/);
   });
 });
 

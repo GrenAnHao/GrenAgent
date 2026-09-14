@@ -23,7 +23,7 @@ export function filterExtensionsByProfile<T extends { name: string }>(
 }
 
 /** Electron 产品常驻：无 manifest 也要加载。 */
-export const CORE_ALWAYS_ON = new Set<string>(["safety", "auto-title", "sandbox"]);
+export const CORE_ALWAYS_ON = new Set<string>(["safety", "auto-title", "sandbox", "jobs"]);
 
 export function filterManagedExtensions<T extends { name: string; manifest?: { id: string } }>(
   extensions: T[],
