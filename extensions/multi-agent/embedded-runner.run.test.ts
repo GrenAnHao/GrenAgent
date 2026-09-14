@@ -4,10 +4,11 @@ const appendMessage = vi.fn();
 const appendCustomEntry = vi.fn();
 const appendModelChange = vi.fn();
 const createAgentSessionFromServices = vi.fn();
+const createAgentSessionServicesMock = vi.fn(async () => ({ modelRuntime: { id: "runtime" } }));
 const resolveCliModel = vi.fn();
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  createAgentSessionServices: vi.fn(async () => ({ modelRuntime: { id: "runtime" } })),
+  createAgentSessionServices: (...args: unknown[]) => createAgentSessionServicesMock(...args),
   createAgentSessionFromServices: (...args: unknown[]) => createAgentSessionFromServices(...args),
   resolveCliModel: (...args: unknown[]) => resolveCliModel(...args),
   SessionManager: {
@@ -47,7 +48,7 @@ import { createEmbeddedChildSession, runEmbeddedSubagent, startContinuableEmbedd
 
 function fakeSession(
   model: { provider: string; id: string },
-  behavior?: { prompt?: ReturnType<typeof vi.fn> },
+  behavior?: { prompt?: ReturnType<typeof vi.fn>; waitForIdle?: ReturnType<typeof vi.fn> },
 ) {
   return {
     messages: [{ role: "assistant", content: [{ type: "text", text: "child answer" }], stopReason: "stop" }],
@@ -60,7 +61,7 @@ function fakeSession(
       vi.fn(async (_task: string, opts?: { preflightResult?: (ok: boolean) => void }) => {
         opts?.preflightResult?.(true);
       }),
-    waitForIdle: vi.fn(async () => {}),
+    waitForIdle: behavior?.waitForIdle ?? vi.fn(async () => {}),
     bindExtensions: vi.fn(async () => {}),
     subscribe: vi.fn(() => () => {}),
     abort: vi.fn(async () => {}),
@@ -348,5 +349,63 @@ describe("fork seed write", () => {
       }),
     ).rejects.toThrow("seed write failed");
     expect(appendCustomEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("outputSchema", () => {
+  const schema = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    appendMessage.mockReset();
+    __resetActivationsForTest();
+    resolveCliModel.mockImplementation(({ cliModel }: { cliModel: string }) => {
+      const [provider, id] = cliModel.split("/");
+      return { model: { provider, id }, error: undefined };
+    });
+  });
+
+  function captureFactories() {
+    const factories: Array<(pi: unknown) => void> = [];
+    let lastAppend: string[] = [];
+    createAgentSessionServicesMock.mockImplementation(async (opts: { resourceLoaderOptions: { extensionFactories: Array<(pi: unknown) => void>; appendSystemPrompt?: string[] } }) => {
+      factories.push(...opts.resourceLoaderOptions.extensionFactories);
+      lastAppend = opts.resourceLoaderOptions.appendSystemPrompt ?? [];
+      return { modelRuntime: { id: "runtime" } };
+    });
+    return { factories, getAppend: () => lastAppend };
+  }
+
+  it("adds a per-child factory registering structured_output with the schema, and appends the instruction", async () => {
+    const { factories, getAppend } = captureFactories();
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-s1", outputSchema: schema as never, systemPrompt: "P" });
+    const registered: Array<{ name: string; parameters: unknown }> = [];
+    for (const f of factories) f({ registerTool: (t: { name: string; parameters: unknown }) => registered.push(t), on: () => {} });
+    expect(registered.some((t) => t.name === "structured_output" && t.parameters === schema)).toBe(true);
+    expect(getAppend()[0]).toMatch(/^P[\s\S]*structured_output/);
+  });
+
+  it("returns structured when the child called the tool; last call wins; omitted when not called", async () => {
+    const { factories } = captureFactories();
+    let releaseIdle!: () => void;
+    const idle = new Promise<void>((r) => (releaseIdle = r));
+    createAgentSessionFromServices.mockResolvedValue({
+      session: fakeSession({ provider: "a", id: "b" }, { waitForIdle: vi.fn(() => idle) }),
+    });
+    const p = runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-s2", outputSchema: schema as never });
+    await vi.waitFor(() => expect(factories.length).toBeGreaterThan(0));
+    let exec: ((id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    for (const f of factories) f({ registerTool: (t: { name: string; execute: typeof exec }) => { if (t.name === "structured_output") exec = t.execute; }, on: () => {} });
+    expect(await exec!("c1", { answer: "one" })).toMatchObject({ content: [{ text: "结果已记录" }] });
+    expect(await exec!("c2", { answer: "two" })).toMatchObject({ content: [{ text: "结果已替换先前记录" }] });
+    releaseIdle();
+    const r = await p;
+    expect(r.structured).toEqual({ answer: "two" });
+
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    const r2 = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-s3", outputSchema: schema as never });
+    expect(r2).not.toHaveProperty("structured");
+    expect(r2.stopReason).toBe("completed");
   });
 });

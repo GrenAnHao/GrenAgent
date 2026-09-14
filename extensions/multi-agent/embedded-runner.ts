@@ -27,6 +27,7 @@ import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { wipeSessionFile, writeSeed } from "./fork-seed.js";
 import { readMaxDepth } from "./depth.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
+import { createStructuredCapture, withStructuredInstruction, type StructuredCapture } from "./structured-output.js";
 
 export interface EmbeddedSubagentOpts {
   cwd: string;
@@ -48,6 +49,7 @@ export interface EmbeddedSubagentOpts {
   thinkingLevel?: ThinkingLevel;
   depth?: number;
   parentActivationId?: string;
+  outputSchema?: object;
 }
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
@@ -85,6 +87,7 @@ export interface ContinuableEmbeddedStart {
 export interface EmbeddedSubagentResult extends AgentResult {
   sessionPath: string;
   stopReason: SubagentStopReason;
+  structured?: unknown;
 }
 
 const CHAT_EXCLUDED = new Set([
@@ -260,6 +263,7 @@ type OpenedEmbedded = EmbeddedChildHandle & {
   getStreamingDelta: () => string;
   clearEmitTimer: () => void;
   inheritedEventCount: number;
+  structured?: StructuredCapture;
 };
 
 async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
@@ -290,13 +294,18 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     throw e;
   }
 
+  const structured = opts.outputSchema ? createStructuredCapture(opts.outputSchema) : undefined;
+  const baseFactories = getConfig("PI_SYSTEM_WORKER") === "1" ? [] : await filterExtensionFactories();
+  const extensionFactories = structured ? [...baseFactories, structured.factory] : baseFactories;
+  const systemPrompt = structured ? withStructuredInstruction(opts.systemPrompt) : opts.systemPrompt?.trim();
+
   const services = await createAgentSessionServices({
     cwd: opts.cwd,
     agentDir: getAgentDir(),
     resourceLoaderOptions: {
-      extensionFactories: getConfig("PI_SYSTEM_WORKER") === "1" ? [] : await filterExtensionFactories(),
+      extensionFactories,
       noContextFiles: getConfig("PI_DISABLE_PROJECT_CONTEXT") === "1",
-      ...(opts.systemPrompt?.trim() ? { appendSystemPrompt: [opts.systemPrompt.trim()] } : {}),
+      ...(systemPrompt ? { appendSystemPrompt: [systemPrompt] } : {}),
     },
   });
 
@@ -395,6 +404,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     unsub,
     workspace,
     inheritedEventCount,
+    structured,
     getTranscript: () => transcript,
     getStreamingDelta: () => streamingDelta,
     clearEmitTimer: () => {
@@ -466,6 +476,7 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           sessionPath,
           stopReason,
           partial: !ok && output.trim().length > 0,
+          ...(child.structured?.captured() ? { structured: child.structured.captured()!.value } : {}),
         };
       } catch (e) {
         const streamingDelta = child.getStreamingDelta();
@@ -484,6 +495,7 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           sessionPath,
           stopReason,
           partial: output.trim().length > 0,
+          ...(child.structured?.captured() ? { structured: child.structured.captured()!.value } : {}),
         };
       } finally {
         unsub();

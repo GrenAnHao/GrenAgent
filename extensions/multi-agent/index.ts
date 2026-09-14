@@ -36,7 +36,7 @@ import { assertDepthAllowed, childDepthOf } from "./depth.js";
 
 const MAX_CONCURRENCY = 4;
 
-type SubagentRunResult = AgentResult & { sessionPath?: string; stopReason?: SubagentStopReason };
+type SubagentRunResult = AgentResult & { sessionPath?: string; stopReason?: SubagentStopReason; structured?: unknown };
 
 function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {
   try {
@@ -162,6 +162,7 @@ async function executeSubagent(
       seedMessages: opts.seedMessages,
       thinkingLevel: opts.thinkingLevel as ThinkingLevel | undefined,
       depth: opts.depth,
+      outputSchema: opts.outputSchema,
     });
   }
   const r = await spawnPiAgent(cwd, task, { ...opts, systemPrompt });

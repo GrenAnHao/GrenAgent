@@ -125,6 +125,10 @@ describe("buildSubagentLaunch", () => {
     expect(launch.args).not.toContain("--thinking");
     launch.cleanup();
   });
+
+  it("outputSchema is rejected on the subprocess path", () => {
+    expect(() => buildSubagentLaunch("D:/a", "t", { outputSchema: { type: "object" } as never })).toThrow("outputSchema 需要 Electron 进程内子会话");
+  });
 });
 
 describe("buildSubagentSkillArgs", () => {

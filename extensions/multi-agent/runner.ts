@@ -237,6 +237,7 @@ type SpawnPiAgentOpts = {
   /** Sub-agent thinking level → passed via --thinking. */
   thinkingLevel?: string;
   depth?: number;
+  outputSchema?: object;
 };
 
 export function buildSubagentLaunch(
@@ -250,6 +251,7 @@ export function buildSubagentLaunch(
   spawnOptions: { cwd: string; stdio: ["ignore", "pipe", "pipe"]; detached?: boolean };
   cleanup: () => void;
 } {
+  if (opts.outputSchema) throw new Error("outputSchema 需要 Electron 进程内子会话");
   const { cmd, baseArgs } = resolvePiCommand();
   // --no-approve: sub-agents are isolated one-shot runs that must NOT load
   // project-local .pi resources (extensions / MCP / skills / SYSTEM.md). Pinning
