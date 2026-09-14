@@ -14,9 +14,13 @@ DSH 子代理是五层叠在一起；GrenAgent 不能一份规格盖全。本期
 | 规格 | 对齐 DSH | 状态 |
 |------|----------|------|
 | 1. 真会话 one-shot | 子代理是 Session；`SubagentResult.output` = 最后非空 assistant；inherit 父模型；详情打开子会话 | **已落地** |
-| 2. 可继续 + notice | Activation、inbox、`send_message`、settle notice | [规格已落盘](./2026-09-13-dsh-subagent-continuable-notice-design.md) |
-| 3. 页头目录 | 谱系目录、token/耗时、只读 vs 可续聊 | [规格已落盘](./2026-09-13-dsh-subagent-header-catalog-design.md) |
-| 4. fork | 种父会话已完成轮次 | [规格已落盘](./2026-09-13-dsh-subagent-fork-seed-design.md) |
+| 2. 可继续 + notice | Activation、inbox、`send_message`、settle notice | **已落地** |
+| 3. 页头目录 | 谱系目录、token/耗时、只读 vs 可续聊 | **已落地** |
+| 4. fork | 种父会话已完成轮次 | **已落地** |
+| 5. 委派范围声明 | 子级审批钉死为自动拒绝 + 固定声明 | [规格已落盘](./2026-09-14-dsh-subagent-delegation-scope-design.md) |
+| 6. 子级模型路由 | 默认关 + 白名单 + `list_subagent_models` + `thinking_level` | [规格已落盘](./2026-09-14-dsh-subagent-model-routes-design.md) |
+| 7. 嵌套委派 | `SUBAGENT_MAX_DEPTH`、`ownedChildren`、子级优先拆除、祖先打断 | [规格已落盘](./2026-09-14-dsh-subagent-nested-delegation-design.md) |
+| 8. jobs + 结构化输出 | 通用 jobs 服务、one-shot 后台、`outputSchema` 程序接口 | [规格已落盘](./2026-09-14-dsh-subagent-jobs-structured-output-design.md) |
 
 **范围**：`extensions/multi-agent`（embedded runner + spawn 路由）+ `electron-agent`（详情绑定）。CLI / Tauri 继续走现有 `spawnPiAgent` 子进程路径。
 

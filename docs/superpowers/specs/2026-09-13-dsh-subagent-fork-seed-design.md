@@ -1,7 +1,8 @@
 # DSH 子代理第四期：fork 种子（父会话已完成轮次）
 
 - 日期：2026-09-13
-- 状态：待审查
+- 状态：已落地（2026-09-14 核实）
+- 复核：2026-09-13 对照 `embedded-runner.ts` 与 pi SDK `SessionManager` 类型做过一轮修订（见 §11 附录）
 - 主题：对齐 DSH fork 后端：子会话以父会话**已完成轮次**为一次性快照，之后各自记账；产出只从种子之后读；目录不继承父事实。
 - 依赖：[规格 1](./2026-09-13-dsh-subagent-session-child-design.md)（embedded Session、`extractAssistantOutput`）、[规格 2](./2026-09-13-dsh-subagent-continuable-notice-design.md)（可续聊可带种子）、[规格 3](./2026-09-13-dsh-subagent-header-catalog-design.md)（`subagent_catalog_base`）
 - 关联：`extensions/multi-agent/embedded-runner.ts`、`extensions/multi-agent/assistant-output.ts`、`extensions/multi-agent/catalog.ts`
@@ -55,8 +56,17 @@ fork?: boolean   // 默认 false
 | `fork: true` + 单 `task` + embedded | 写种子再跑 |
 | `fork: true` + `action: "spawn"` + embedded | 种子 + 规格 2 可续聊；种子只在创建时拍一次，冷恢复重放子自己的 JSONL，不再向父要新前缀 |
 | `fork: true` + `tasks` / `chain` | 拒绝：`fork 仅支持单任务` |
-| `fork: true` + worktree / 非 Electron / `PI_IS_SUBAGENT` | 拒绝：`fork 需要 Electron 进程内子会话` |
+| `fork: true` + worktree / 非 Electron / **在子级里** | 拒绝：`fork 需要 Electron 进程内子会话` |
 | `fork: true` 且父没有已完成轮次 | 成功，等同普通 spawn，不写 `subagent_catalog_base` |
+
+「在子级里」的判定**不能只看 `PI_IS_SUBAGENT`**：那个 env 只有 `spawnPiAgent` 子进程路径会设（`runner.ts:286`），embedded 子级不设。用 `_shared/workspace-context.ts` 的 `resolveToolOrigin() === "subagent"`——embedded 子级整段跑在 `runInWorkspace({ origin: "subagent" })` 里，ALS 拿得到。判定条件写成：
+
+```ts
+const inChild = resolveToolOrigin() === "subagent";   // 覆盖 embedded + 子进程两条路
+if (opts.fork && (!canUseEmbeddedSubagent(profile) || inChild)) throw new Error("fork 需要 Electron 进程内子会话");
+```
+
+（注意：`_shared/workspace-context.ts` 里 `WorkspaceContext.origin` 现在声明成 `"main" | "goal"`，但 `embedded-runner.ts` 已经在传 `origin: "subagent"`——类型与实现不符的现状。本期顺手把类型扩成 `"main" | "goal" | "subagent"`，否则 `resolveToolOrigin()` 的返回值在类型层面永远到不了 `"subagent"`。）
 
 模型选择与规格 1 相同（显式 → named agent → profile → `SUBAGENT_MODEL` → 父模型）。DSH 为了 KV cache 常锁死父路由；GrenAgent 不另加这道禁令——父前缀已经按 Pi 消息对象拷贝，不是逐字节复用同一条 provider 请求。
 
@@ -74,24 +84,26 @@ Pi：JSONL 是树，`buildSessionContext().messages` 是当前 leaf 回溯到 ro
 
 **前缀算法（锁死）：**
 
-1. 取父 `session.messages`（当前 leaf 回溯到 root 的上下文，不是 JSONL 物理顺序）。
-2. 从尾往前找第一条 `role === "assistant"`，且 content 里带正在执行的 `spawn_agent` 工具调用（`fork: true` 仍是这个工具名）。
-3. 找到则丢掉该消息及其之后的全部。
-4. 找不到时：若最后一条是 `assistant`，丢掉它（当作未完成轮次）；若最后一条是 `user` 或列表为空，前缀 = 当前全部消息。
-5. 前缀只保留 `role` 为 `user` | `assistant` | `toolResult` 的项。排除 `custom` / `custom_message`（Goal Round、notice 不得进子上下文）。
-6. 得到空数组则不写种子。
+0. 工具 `ctx` 拿不到 `session.messages`；`ctx.sessionManager` 是 `ReadonlySessionManager`，只暴露 `buildContextEntries()`。所以父消息 = `ctx.sessionManager.buildContextEntries().filter(e => e.type === "message").map(e => e.message)`。`buildContextEntries()` 走 leaf→root 且已消化 compaction，不需要自己处理摘要；`compaction` / `branch_summary` / `custom` 条目不是 `type: "message"`，自动被这一步滤掉，正好满足第 5 步。
+1. 从尾往前找 content 里带 `toolCallId` 的那条 `assistant` 消息——`execute(toolCallId, params, ...)` 的第一个参数就是它，比「按工具名匹配」可靠得多（并行 `spawn_agent` 时工具名会有多个候选）。
+2. 找到则丢掉该消息及其之后的全部。
+3. 找不到（该 assistant 还没落盘）时：若最后一条是 `assistant`，丢掉它（当作未完成轮次）；若最后一条是 `user` 或列表为空，前缀 = 当前全部消息。
+4. 前缀只保留 `role` 为 `user` | `assistant` | `toolResult` 的项。`custom` / `custom_message`（Goal Round、notice）已在第 0 步被滤掉。
+5. 得到空数组则不写种子。
 
-第 4 步的回退避免「找不到 tool call 就误把半截 assistant 拷走」。实现必须带单测覆盖「messages 末尾就是那条 spawn_agent assistant」。
+第 3 步的回退避免「找不到 tool call 就误把半截 assistant 拷走」。实现必须带单测覆盖「messages 末尾就是那条 spawn_agent assistant」与「末尾 assistant 尚未落盘」两种形态。
 
 拷进子 JSONL 时：
 
-- 新 `SessionManager.create`（新 id、`parentSession` 指向父路径）
-- 按顺序写入 message entry，重发 id，重建 `parentId` 链，使子 leaf = 种子最后一条
-- **不要**拷贝父的 `compaction` / `branch_summary` / `goal` / `subagent_catalog` entry
-- 写完种子立刻：
-  - `subagent_meta.inheritedEventCount = 种子消息条数`
-  - 规格 3 的 `subagent_catalog_base`（`reason: "subagent-seed"`），即使种子里没有目录事实也写——子文件若因实现失误拷进了 custom，折叠仍安全
-- 再写 `subagent_meta` 其余字段、`model_change`、初始任务（可续聊则再加返回指引）
+- 新 `SessionManager.create(cwd, undefined, { id: agentId, parentSession: 父路径 })`
+- 按顺序 `sessionManager.appendMessage(msg)`——它会自己生成 entry `id` 并挂到当前 leaf，**不要**手工重发 id / 重建 parentId 链
+- 绝不改写 `msg` 内部字段：`assistant` 的 tool call id 与 `toolResult.toolCallId` 必须原样保留，否则 provider 侧「tool_result 找不到对应 tool_use」直接报错。entry id 换了不影响配对，message 内部 id 换了才致命
+- **不要**拷贝父的 `compaction` / `branch_summary` / `goal` / `subagent_catalog` entry（第 0 步已保证）
+- 写完种子，按此顺序落盘（全部是子文件自己的写入）：
+  1. `appendCustomEntry("subagent_catalog_base", { version: 0, reason: "subagent-seed" })`——即使种子里没有目录事实也写，防实现失误拷进 custom
+  2. `appendCustomEntry("subagent_meta", { ..., inheritedEventCount: 种子消息条数 })`——**只写这一条**，不要先写一条再补一条；`mode` / `parentSession` / `parentSessionId` / `label` 一并写全
+  3. `appendModelChange(provider, id)`
+  4. 初始任务（可续聊则再追加返回指引）
 
 初始任务是种子**之后**的新 user 消息，不是改写种子最后一条。
 
@@ -151,7 +163,7 @@ embedded runner：`skipPrefix = subagent_meta.inheritedEventCount`。
 |------|------|
 | `fork: true` 但走子进程 | 工具 `isError`，不启动 |
 | `fork: true` + `tasks` / `chain` | 同上 |
-| 父 `session.messages` 读失败 | 同上，不写半截 JSONL |
+| 父 `buildContextEntries()` 读失败 / 抛错 | 同上，不写半截 JSONL |
 | 种子写入中途失败 | 删子 JSONL（若已 create），不写父目录，工具失败 |
 | 空种子 | 成功，当普通 spawn |
 
@@ -177,12 +189,14 @@ embedded runner：`skipPrefix = subagent_meta.inheritedEventCount`。
 
 **completedPrefix**
 
-- 末尾是带 `spawn_agent` 的 assistant → 该消息不在前缀
+- 末尾是带 `spawn_agent` 的 assistant（`toolCallId` 命中）→ 该消息不在前缀
+- 并行两次 `spawn_agent`：只切掉 `toolCallId` 对应的那条，另一条的 toolResult 留在前缀
+- 末尾 assistant 尚未落盘（找不到 `toolCallId`）→ 丢掉最后一条 assistant
 - 前缀含更早的完整 user / assistant / toolResult
+- 拷贝后 `assistant.toolCall.id` 与 `toolResult.toolCallId` 与父侧完全一致（锁死「不改写 message 内部 id」）
 - 只有一条用户消息、还没有 assistant → 前缀 = 那条 user
 - 空 messages → 空前缀
-- 找不到 tool call 时丢掉最后一条 assistant
-- `custom` / `custom_message` 不进前缀
+- `custom` / `custom_message` / `compaction` 不进前缀
 
 **writeSeed + output**
 
@@ -206,3 +220,17 @@ embedded runner：`skipPrefix = subagent_meta.inheritedEventCount`。
 **冷恢复**
 
 - 创建后再改父会话；冷恢复的子 `messages` 前缀仍是旧种子，不含父新消息
+
+---
+
+## 11. 附录：本次复核已确认的现状（2026-09-13）
+
+| 项 | 结论 |
+|----|------|
+| 父消息取法 | 工具 `ctx.sessionManager` 是 `ReadonlySessionManager`，只有 `buildContextEntries()` / `getEntries()` / `getBranch()`；**没有** `session.messages`，也没有 `buildSessionContext()` |
+| 工具调用 id | `execute(toolCallId, params, signal, onUpdate, ctx)` 第一个参数现已被 `_toolCallId` 丢弃，fork 前缀直接用它 |
+| 写消息 API | `sessionManager.appendMessage(msg)` 自动分配 entry id 并挂到当前 leaf；禁止直写 CompactionSummary / BranchSummary（会抛错） |
+| 子进程才设 `PI_IS_SUBAGENT` | `runner.ts:286`；embedded 子级身份在 ALS `origin`，用 `resolveToolOrigin()` |
+| 现有子会话创建 | `embedded-runner.ts:188-197`：`SessionManager.create` + `appendCustomEntry("subagent_meta", ...)`；fork 种子要在它之前插入 |
+| 产出抽取 | `assistant-output.ts::extractAssistantOutput(messages, { streamingDelta?, aborted? })`，加 `skipPrefix` 是纯增量 |
+| 目录隔离 | 规格 3 的 `subagent_catalog_base` 已在 §3.3 定好，fork 只需按 §4 的顺序写一条 |

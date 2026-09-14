@@ -1,7 +1,8 @@
 # DSH 子代理第二期：可续聊 Activation + settle notice
 
 - 日期：2026-09-13
-- 状态：待审查
+- 状态：已落地（2026-09-14 核实）
+- 复核：2026-09-13 对照 `extensions/multi-agent` 与 `@earendil-works/pi-coding-agent` 类型做过一轮修订（见 §12 附录）
 - 主题：对齐 DeepSeek Harness（DSH）可继续子代理：进程内 Activation、inbox（Queue / Steer）、相邻 `send_message`、结算后向父会话注入 notice。
 - 依赖：[规格 1：真会话子代理](./2026-09-13-dsh-subagent-session-child-design.md)（已落地）
 - 后继：[规格 3：页头目录](./2026-09-13-dsh-subagent-header-catalog-design.md)、[规格 4：fork 种子](./2026-09-13-dsh-subagent-fork-seed-design.md)
@@ -59,7 +60,14 @@ DSH 用 SessionId；GrenAgent 已经用 `sa-…` 当子级对外 id，继续用�
 | `interrupt`（keepInbox） | `interrupt_agent` → `session.abort()`，不 dispose |
 | 无持久父邮箱 | 父 Session 不在线则子→父投递失败，不排队 |
 
-Pi 约定：`custom` 不进模型；`custom_message` 进模型。notice 必须走 `sendMessage`（`custom_message`），不能只 `appendCustomEntry`。
+Pi 约定（已核对 `@earendil-works/pi-coding-agent` 的 `.d.ts`）：
+
+| 目的 | 扩展侧 API（`pi`） | 手里有 `SessionManager` 时 |
+|------|-------------------|---------------------------|
+| 持久化、不进模型（`custom`） | `pi.appendEntry(customType, data)` → `void` | `sessionManager.appendCustomEntry(customType, data)` |
+| 进模型上下文 + 落盘 + 可唤醒（`custom_message`） | `pi.sendMessage({ customType, content, display, details }, { triggerTurn?, deliverAs? })` → `void` | `session.sendCustomMessage(...)` |
+
+`custom` 不进模型，`custom_message` 进模型。notice 必须走 `sendMessage`，只 `appendEntry` 父模型看不到。**不存在** `pi.appendCustomEntry`——写规格/实现时不要沿用这个名。
 
 ---
 
@@ -79,13 +87,19 @@ Pi 约定：`custom` 不进模型；`custom_message` 进模型。notice 必须�
 
 `WorkspaceHandle` 不拥有 Activation 图，只提供「这个工作区当前父会话」的投递能力。Activation 图挂在 sidecar 进程内单例上，按 `cwd` 分桶。
 
+**`pi` 是每会话一个实例**（扩展 factory 每次 `bindExtensions` 各跑一次），进程里可能有多个工作区 / 多个父会话。因此：
+
+- parent-host 注册表按 **`sessionPath`** 分桶，表项必须带 `workspace`；
+- 子→父投递时校验 `activation.workspace === host.workspace`，否则 `UNAUTHORIZED`。不能只按 `cwd` 桶找 host——A 工作区的子级会把结果塞进 B 工作区的父会话；
+- 拿「当前调用方是谁」一律走工具 `ctx`（`ctx.sessionManager.getSessionId()`），不要依赖模块级 `let currentPi`。
+
 ---
 
 ## 5. 数据
 
 ### 5.1 子会话 `subagent_meta`
 
-规格 1 已写 `origin / agentId / parentSession / model`。本期补齐，仍用 `appendCustomEntry`（不进模型）：
+规格 1 已写 `origin / agentId / parentSession / model`。本期补齐，仍用 **子会话** `sessionManager.appendCustomEntry`（`custom`，不进模型；扩展侧写父目录才用 `pi.appendEntry`）：
 
 ```ts
 {
@@ -101,6 +115,8 @@ Pi 约定：`custom` 不进模型；`custom_message` 进模型。notice 必须�
 ```
 
 `mode` 在创建时冻结。失败的创建不写这条，也不写规格 3 的目录事实。
+
+`label` / `mode` 与规格 3 的 `subagent_catalog` 事实有重叠：**目录显示以 `subagent_catalog` 为准**，`subagent_meta.label` 只作父目录行缺失时的兜底（例如父日志被外部工具改坏）。不要在两处各维护一份真值。
 
 ### 5.2 Activation（进程内，不持久）
 
@@ -128,16 +144,16 @@ interface Activation {
 
 ```ts
 interface ParentSessionHost {
-  sessionId: string;
-  sessionPath: string;
-  workspace: string;
+  sessionId: string;        // 父头 id
+  sessionPath: string;      // 注册键；换会话 / dispose 时注销
+  workspace: string;        // 跨工作区隔离用
   isBusy(): boolean;     // 父 AgentSession 非 idle
   isDraining(): boolean; // WorkspaceHandle 已 dispose / 正在换会话
   sendNotice(payload: SettlementNotice): void;
 }
 ```
 
-换会话或 dispose 时注销。notice 找不到 host 就记警告，不抛给子级。
+换会话或 dispose 时注销。notice 找不到 host（或 workspace 不匹配）就记警告，不抛给子级。
 
 ---
 
@@ -147,7 +163,7 @@ interface ParentSessionHost {
 
 1. `canUseEmbeddedSubagent(profile)` 为假 → 子进程路径（§8）。
 2. `SubAgentRegistry.genId()` → `sa-…`；registry 行 `running`。
-3. `createEmbeddedChildSession`：独立 `SessionManager` + JSONL，`parentSession` / `parentSessionId` 写入 header 与 `subagent_meta`（`mode: "continuable"`）。
+3. `createEmbeddedChildSession`：`SessionManager.create(cwd, undefined, { id, parentSession: 父 JSONL 路径 })`（`SessionHeader` 只有 `parentSession` 一个字段，放不下 id）。`parentSessionId` = `ctx.sessionManager.getSessionId()`（父头 `id`，`index.ts` 里 `sessionSpawnKey` 就是这么取的），**只**写进 `subagent_meta`，连同 `mode: "continuable"`。
 4. 工具过滤与规格 1 相同（强制去掉 `spawn_agent` / `explore_context`）；**子会话要能看到 `send_message`**。
 5. 初始任务末尾追加返回指引（§7.2）。
 6. 安装 Activation，inbox 接受初始任务（`followUp`），`announced = true`。
@@ -170,7 +186,15 @@ class SubagentInbox {
 }
 ```
 
-关闭中投递抛 `ACTIVATION_CLOSING`，消息未接受。`hasPending` 用 `AgentSession` 的队列事件（`queue_update` 的 `steering` / `followUp`）；读不到队列时，把「已 `prompt` 但尚未 `waitForIdle`」算作 pending。
+关闭中投递抛 `ACTIVATION_CLOSING`，消息未接受。`hasPending` 直接用 `AgentSession` 现成的同步读口：
+
+```ts
+session.pendingMessageCount;   // steering + followUp 未消费总条数
+session.getSteeringMessages(); // readonly string[]
+session.getFollowUpMessages(); // readonly string[]
+```
+
+**不要**去解析 `queue_update` 事件——SDK 里没有这个稳定事件名，照着写必然变成推测性代码。
 
 投递规则（对齐 DSH 模型消息，不给模型暴露 delivery 参数）：
 
@@ -178,6 +202,8 @@ class SubagentInbox {
 - 目标 idle 且 Activation 在 → `followUp`（开新轮）
 - 目标无 Activation 且 `mode === "continuable"` → 冷恢复后再 `followUp`
 - 目标 `mode === "one-shot"` 或 JSONL 不存在 → 失败，消息未送达
+
+调用约定（SDK 已明确）：`session.prompt(text, { streamingBehavior })` 在**流式期间必须**给 `streamingBehavior`，否则抛 `Error`；idle 时省略该参数即开新轮。判断「是否在流式」用 `session.isStreaming`（`getState()` 已在用），不要自己记账。
 
 人类路径（规格 3 编辑器）可以显式选 `followUp` / `steer`；本期工具不暴露该参数。
 
@@ -207,6 +233,8 @@ class SubagentInbox {
 | 未宣布就失败 | 关 | 可删 | 无 | 不适用 |
 | sidecar 重启时 registry 仍 `running` | — | 留 | **无** | 可冷恢复 |
 
+**冷恢复不是「open 完就有 session」。** 完整链路：`SessionManager.open(childPath)` → `createAgentSessionServices(...)`（重建资源加载器 / 扩展 / 模型运行时）→ `createAgentSessionFromServices({ services, sessionManager, ... })` → `bindExtensions`（与规格 1 同参）→ `prompt(text)`。services 构造成本与新建子会话同级，实现里必须显式写全这四步；子会话多时可考虑按 `cwd` 缓存一份 services，但缓存与「父切换了模型 / 配置」的失效关系要先定清楚，本期先不缓存。
+
 重启：`session_start` 里现有 reap 不得把可续聊行打成「已取消并通知父模型」。改成：JSONL 在且 `subagent_meta.mode === "continuable"` → registry 标 `done`，`output` 空或「sidecar restarted」，不 `sendNotice`。one-shot / 子进程孤行仍按现在 reap。
 
 `cancel` 在 `subagent_meta` 加 `tornDown: true`（再写一条 custom，不改 mode）。冷恢复见到它就失败。
@@ -228,7 +256,7 @@ message: string
 
 权限：
 
-- 调用方必须是当前 `exec` 所在的那份在线 `AgentSession`
+- 调用方必须是当前 `exec` 所在的那份在线 `AgentSession`。`senderId` = `ctx.sessionManager.getSessionId()`；子级找父级读自己 JSONL 里的 `subagent_meta.parentSessionId`
 - 每个在线 Agent 都可以对**直接**可续聊子级投递
 - 只有**驻留**可续聊子级可以对**直接**父级投递；父级必须仍有 parent host
 - 同级、隔代、自己 → `UNAUTHORIZED`，消息未送达
@@ -312,11 +340,13 @@ pi.sendMessage(
 
 一条消息同时进模型上下文、进 JSONL、唤醒或插入当前轮。禁止再 `sendUserMessage` 同一段，以免双份。
 
+已核实：`pi.sendMessage` 存在，签名 `{ triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }`，**同步返回 `void`**（不 await、不抛投递失败）。所以 §8.2 里那句「`sendMessage` 若不认 `deliverAs`」只在单测证明投递确实没发生时才走；两条通道必须二选一，不允许同时开着。
+
 `sendMessage` 若不认 `deliverAs`：busy 时改用已注册的 `WorkspaceHandle.prompt(全文, { streamingBehavior: "steer" }, "main")`，且不再写第二条 `custom_message`。实现时只保留一条通道，单测锁「父消息列表里只有一条 settled」。
 
 ### 8.3 Electron 渲染
 
-`ChatMessageItems` 对 `customType === "subagent-settled"` 走专用 pill，标题用第一行摘要，展开看 closing message。不要落到通用 NoticePill 的「已注入上下文」。
+在 `src/features/chat/ChatMessageItems.tsx` 的 `case 'notice'` 分发里加分支（现已有 `agent-answer` / `agent-plan` / `agent-questions` / `visual-inline` 同款写法）：`msg.customType === "subagent-settled"` 走专用 pill，标题用第一行摘要，展开看 closing message。不要落到兜底的通用 `NoticePill`（会显示成「已注入上下文」）。
 
 主 store 继续忽略 `source === "subagent"` 的子会话事件（规格 1）。notice 是父会话自己的 `custom_message`，必须进主对话。
 
@@ -367,6 +397,8 @@ pi.sendMessage(
 - 已宣布 + `completed` → notice 句式与 `details.childId` 正确
 - `cancel` 后 `tornDown`，冷恢复拒绝
 - sidecar reap：continuable + JSONL 在 → `done` 且不 notice；子进程孤儿仍按旧 reap
+- `hasPending` 用 `pendingMessageCount`：`steer` 入队后 > 0、被消费后归 0
+- A 工作区的子级向 B 工作区的父 host 投递 → `PARENT_UNAVAILABLE`（同进程多工作区时不许串台）
 
 **adjacent-tools**
 
@@ -395,3 +427,23 @@ pi.sendMessage(
 - 子进程 `spawn` 退出后有 notice、无 `send_message`
 
 不在本期做浏览器端到端真人续聊（规格 3）。
+
+---
+
+## 12. 附录：本次复核已确认的现状（2026-09-13）
+
+写实现前不必再查，以下都是读代码 / 读 `.d.ts` 得出的结论：
+
+| 项 | 结论 |
+|----|------|
+| `pi.sendMessage` | 存在，`{ triggerTurn?, deliverAs?: steer\|followUp\|nextTurn }`，同步 `void` |
+| `pi.appendEntry` | 存在（`appendCustomEntry` 只存在于 `SessionManager`，扩展侧没有） |
+| `session.prompt` | `PromptOptions` 含 `streamingBehavior: "steer" \| "followUp"`；流式期间不给会抛错 |
+| 队列读口 | `pendingMessageCount` / `getSteeringMessages()` / `getFollowUpMessages()` / `clearQueue()` |
+| 父会话取 id / 路径 | 工具 `ctx.sessionManager.getSessionId()` / `getSessionFile()`（`index.ts` 已有 `parentSessionPath` / `sessionSpawnKey` 两个现成取法） |
+| `WorkspaceHandle.prompt` | `(text, { images?, streamingBehavior? }, origin)`，**只收 `'main' \| 'goal'`**，notice 兜底只能传 `"main"` |
+| 现有后台 spawn | `index.ts:492-568`，`registry.create` + `executeSubagent(...)` 分离执行 + `inflight`；改造点就在这一段 |
+| 现有 reap | `session_start` → `getRegistry(cwd)`，子进程用 `PI_IS_SUBAGENT=1` 跳过；**embedded 子级不设这个 env** |
+| 子进程才设 `PI_IS_SUBAGENT` | `runner.ts:286`；embedded 子级的身份在 ALS `origin === "subagent"`（`resolveToolOrigin()`） |
+| Electron 主列 | `MainChatColumn` 是 `src/App.tsx` 里的本地组件（非独立文件），外层容器已 `position: relative` |
+| 子事件通道 | `extensions/multi-agent/embedded-events.ts` + `WorkspaceHandle.start()` 注册 sink，事件带 `source: 'subagent'`；渲染层 `src/stores/agent.ts:179` 已过滤 |
