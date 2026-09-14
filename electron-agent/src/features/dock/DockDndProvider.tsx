@@ -15,6 +15,7 @@ import { Globe, X } from 'lucide-react';
 import { useDockStore, type DockTab } from '../../stores/dockStore';
 import { dockTabStyles, resolveTone, toneColor } from './dockTabStyles';
 import { planDrop, restrictToWindowBelowTitlebar } from './dockDnd';
+import { useDockLauncherHotkeys } from './useDockLauncherHotkeys';
 
 type AppTheme = ReturnType<typeof useTheme>;
 
@@ -50,6 +51,7 @@ function DockTabOverlay({ tab, theme }: { tab: DockTab; theme: AppTheme }) {
 }
 
 export function DockDndProvider({ children }: { children: ReactNode }) {
+  useDockLauncherHotkeys();
   const theme = useTheme();
   const tabs = useDockStore((s) => s.tabs);
   const reorderTabs = useDockStore((s) => s.reorderTabs);
