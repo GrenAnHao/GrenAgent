@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { ActionIcon } from '@lobehub/ui';
-import { PanelRightOpen, SquareTerminal } from 'lucide-react';
+import { PanelBottom, PanelRightOpen } from 'lucide-react';
 import { PanelHeader } from '../../components/PanelHeader';
 import { useSessionStore } from '../../store/session';
 import { deriveTornDown, useChildOverlayStore } from '../../stores/childOverlayStore';
@@ -21,10 +21,11 @@ export const MainHeaderActions = memo(function MainHeaderActions() {
     <>
       <SubAgentMenuButton />
       <ActionIcon
-        icon={SquareTerminal}
+        icon={PanelBottom}
         active={terminalOpen}
         size="small"
-        title="Terminal"
+        title="底栏"
+        aria-label="底栏"
         onClick={toggleTerminal}
       />
       {!rightPanelVisible && (
