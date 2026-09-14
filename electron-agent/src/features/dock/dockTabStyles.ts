@@ -151,6 +151,43 @@ export const dockTabStyles = createStaticStyles(({ css }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
+  launcher: css`
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    gap: 2px;
+    padding: 8px;
+  `,
+  launcherRow: css`
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: ${cssVar.colorText};
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: ${cssVar.colorFillTertiary};
+    }
+
+    &:disabled {
+      color: ${cssVar.colorTextTertiary};
+      cursor: not-allowed;
+    }
+  `,
+  launcherShortcut: css`
+    margin-inline-start: auto;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 11px;
+  `,
 }));
 
 /** tab → 状态点色调。终端 running=绿、subagent running=黄（语义不同，分 kind 处理）。 */
