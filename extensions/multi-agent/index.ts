@@ -472,8 +472,9 @@ export default function (pi: ExtensionAPI) {
             : 0;
           const r = await jobs.read(row.jobId, caller, { wait: action === "wait", timeoutMs: capMs });
           const fresh = registry.get(id) ?? row;
+          const head = `agent ${fresh.id}: ${fresh.status}\nTask: ${fresh.task}`;
           return {
-            content: [{ type: "text", text: r.text ? `${statusText(fresh)}\n${r.text}` : statusText(fresh) }],
+            content: [{ type: "text", text: r.text ? `${head}\n${r.text}` : head }],
             details: { agentId: fresh.id, jobId: row.jobId, status: fresh.status, exitCode: fresh.exitCode },
           };
         }

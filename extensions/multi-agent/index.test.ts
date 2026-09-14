@@ -915,6 +915,7 @@ describe("spawn_agent · one-shot background via jobs", () => {
     const r = await h.execute("t2", { action: "wait", agentId: "sa_test" }, null, null, ctx);
     expect(jobs.read).toHaveBeenCalledWith("subagent-1", expect.any(String), expect.objectContaining({ wait: true }));
     expect(r.content[0].text).toContain("job-out");
+    expect(r.content[0].text.split("job-out").length - 1).toBe(1);
   });
 
   it("mode one-shot with tasks/chain/worktree is rejected", async () => {
