@@ -3,20 +3,15 @@ import { ActionIcon, Flexbox } from '@lobehub/ui';
 import { cx } from 'antd-style';
 import { Globe, PanelRightClose, Plus } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
-import {
-  defaultTerminalTitle,
-  useDockStore,
-  type DockRegion,
-  type DockTab,
-  type SubAgentPayload,
-} from '../../stores/dockStore';
+import { useDockStore, type DockRegion, type DockTab, type SubAgentPayload } from '../../stores/dockStore';
 import { dockTabStyles, resolveTone } from './dockTabStyles';
 import { TabStrip } from './TabStrip';
 import { TabBodyStack } from './TabBodyStack';
+import { DockLauncher } from './DockLauncher';
+import { openLauncherTab } from './openLauncherTab';
 
 interface DockPanelProps {
   region: DockRegion;
-  /** 收起本坞外壳（右坞传入）。 */
   onCollapse?: () => void;
 }
 
@@ -27,19 +22,6 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
   const activeByRegion = useDockStore((s) => s.activeByRegion);
   const setActive = useDockStore((s) => s.setActive);
   const closeTab = useDockStore((s) => s.closeTab);
-  const addTab = useDockStore((s) => s.addTab);
-
-  const addBrowser = useCallback(() => {
-    const id = `browser-${Date.now()}`;
-    addTab({
-      id,
-      kind: 'browser',
-      region: 'right',
-      title: '浏览器',
-      closable: true,
-      payload: { url: 'https://example.com', title: '浏览器' },
-    });
-  }, [addTab]);
 
   const subAgentStatus = useMemo(() => {
     const map: Record<string, 'running' | 'done' | 'error'> = {};
@@ -59,41 +41,71 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     (tab: DockTab) =>
       resolveTone(
         tab,
-        tab.kind === 'subagent'
-          ? subAgentStatus[(tab.payload as SubAgentPayload).messageId]
-          : undefined,
+        tab.kind === 'subagent' ? subAgentStatus[(tab.payload as SubAgentPayload).messageId] : undefined,
       ),
     [subAgentStatus],
   );
 
-  const addTerminal = useCallback(() => {
-    addTab({
-      id: `terminal-${Date.now()}`,
-      kind: 'terminal',
-      region: 'bottom',
-      title: defaultTerminalTitle(),
-      closable: true,
-      payload: { status: 'idle' },
-    });
-  }, [addTab]);
-
   const actions = (
     <>
       {region === 'bottom' ? (
-        <ActionIcon icon={Plus} size="small" title="新建终端" onClick={addTerminal} />
+        <span title="新建终端">
+          <ActionIcon
+            icon={Plus}
+            size="small"
+            title="新建终端"
+            aria-label="新建终端"
+            onClick={() => openLauncherTab({ region, kind: 'terminal' })}
+          />
+        </span>
       ) : (
-        <ActionIcon icon={Globe} size="small" title="打开浏览器" onClick={addBrowser} />
+        <span title="打开浏览器">
+          <ActionIcon
+            icon={Globe}
+            size="small"
+            title="打开浏览器"
+            aria-label="打开浏览器"
+            onClick={() => openLauncherTab({ region, kind: 'browser' })}
+          />
+        </span>
       )}
       {onCollapse ? (
-        <ActionIcon icon={PanelRightClose} size="small" title="Collapse panel" onClick={onCollapse} />
+        <span title="Collapse panel">
+          <ActionIcon
+            icon={PanelRightClose}
+            size="small"
+            title="Collapse panel"
+            aria-label="Collapse panel"
+            onClick={onCollapse}
+          />
+        </span>
       ) : null}
     </>
   );
 
-  const emptyHint =
-    region === 'bottom'
-      ? '没有打开的终端。点击右上角 + 新建。'
-      : '暂无内容。点击工具卡片（如 fetch_url 结果）或用 spawn_agent 委派任务，会在这里以独立 tab 打开。';
+  if (tabs.length === 0) {
+    return (
+      <Flexbox className={cx('dock-panel', dockTabStyles.container)}>
+        {onCollapse ? (
+          <div className={dockTabStyles.header}>
+            <div className={dockTabStyles.tabs} />
+            <div className={dockTabStyles.actions}>
+              <span title="Collapse panel">
+                <ActionIcon
+                  icon={PanelRightClose}
+                  size="small"
+                  title="Collapse panel"
+                  aria-label="Collapse panel"
+                  onClick={onCollapse}
+                />
+              </span>
+            </div>
+          </div>
+        ) : null}
+        <DockLauncher region={region} />
+      </Flexbox>
+    );
+  }
 
   return (
     <Flexbox className={cx('dock-panel', dockTabStyles.container)}>
@@ -106,7 +118,7 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
         onClose={closeTab}
         actions={actions}
       />
-      <TabBodyStack tabs={tabs} activeId={activeId} emptyHint={emptyHint} />
+      <TabBodyStack tabs={tabs} activeId={activeId} emptyHint="" />
     </Flexbox>
   );
 }
