@@ -3,6 +3,7 @@ import {
   defaultTerminalTitle,
   useDockStore,
   type DockRegion,
+  type DockTab,
   type FilePayload,
   type ReviewPayload,
 } from '../../stores/dockStore';
@@ -21,12 +22,22 @@ function revealRegion(region: DockRegion): void {
   else useLayoutStore.getState().setTerminalOpen(true);
 }
 
-function activateExisting(id: string, region: DockRegion): boolean {
-  const exists = useDockStore.getState().tabs.some((t) => t.id === id);
-  if (!exists) return false;
-  useDockStore.getState().setActive(region, id);
+function findExisting(region: DockRegion, kind: LauncherKind, workspace?: string): DockTab | undefined {
+  return useDockStore.getState().tabs.find((t) => {
+    if (t.region !== region || t.kind !== kind) return false;
+    if (kind === 'file') return (t.payload as FilePayload).workspace === workspace;
+    return true;
+  });
+}
+
+function uniqueId(canonical: string): string {
+  const taken = useDockStore.getState().tabs.some((t) => t.id === canonical);
+  return taken ? `${canonical}#${Date.now()}` : canonical;
+}
+
+function activateExisting(tab: DockTab, region: DockRegion): void {
+  useDockStore.getState().setActive(region, tab.id);
   revealRegion(region);
-  return true;
 }
 
 export function openLauncherTab(input: {
@@ -62,11 +73,14 @@ export function openLauncherTab(input: {
 
   if (kind === 'file') {
     if (!workspace) return;
-    const id = fileTabId(region, workspace);
-    if (activateExisting(id, region)) return;
+    const existing = findExisting(region, 'file', workspace);
+    if (existing) {
+      activateExisting(existing, region);
+      return;
+    }
     const payload: FilePayload = { workspace };
     useDockStore.getState().addTab({
-      id,
+      id: uniqueId(fileTabId(region, workspace)),
       kind: 'file',
       region,
       title: '文件',
@@ -76,11 +90,14 @@ export function openLauncherTab(input: {
     return;
   }
 
-  const id = reviewTabId(region);
-  if (activateExisting(id, region)) return;
+  const existing = findExisting(region, 'review');
+  if (existing) {
+    activateExisting(existing, region);
+    return;
+  }
   const payload: ReviewPayload = { workspace };
   useDockStore.getState().addTab({
-    id,
+    id: uniqueId(reviewTabId(region)),
     kind: 'review',
     region,
     title: '审查',
