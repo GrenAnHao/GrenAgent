@@ -18,6 +18,7 @@ import imageGen from "./image-gen/index.js";
 import sessionMemory from "./session-memory/index.js";
 import mcp, { pluginManifest as mcpManifest } from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
+import jobsExtension from "./jobs/index.js";
 import multiAgent from "./multi-agent/index.js";
 import lsp from "./lsp/index.js";
 import agentMode from "./agent-mode/index.js";
@@ -62,6 +63,7 @@ export {
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
+  jobsExtension,
   multiAgent,
   lsp,
   astTools,
@@ -101,6 +103,7 @@ export const allExtensions = [
   mcp,
   mcpPolicy,
   imageGen,  diagnostics,
+  jobsExtension,
   multiAgent,
   lsp,
   astTools,
@@ -143,6 +146,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "mcp-policy", factory: mcpPolicy },
   { name: "image-gen", factory: imageGen },
   { name: "diagnostics", factory: diagnostics },
+  { name: "jobs", factory: jobsExtension },
   { name: "multi-agent", factory: multiAgent },
   { name: "lsp", factory: lsp },
   { name: "ast-tools", factory: astTools },

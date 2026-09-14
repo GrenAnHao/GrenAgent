@@ -116,6 +116,7 @@ const CORE_ALWAYS_ON = new Set([
   "resource-manager",
   "mcp-policy",
   "image-gen",
+  "jobs",
   "multi-agent",
   "github",
   "batch-tools",
