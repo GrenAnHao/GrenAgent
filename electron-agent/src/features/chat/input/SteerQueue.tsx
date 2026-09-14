@@ -1,15 +1,14 @@
 import { Icon } from '@lobehub/ui';
 import { CornerDownRight, ListPlus } from 'lucide-react';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { useChatInput } from './ChatInputContext';
+import { dockCard } from './dockCard';
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
     display: flex;
     flex-direction: column;
     gap: 4px;
-
-    margin-bottom: 6px;
   `,
   item: css`
     display: flex;
@@ -21,8 +20,6 @@ const styles = createStaticStyles(({ css }) => ({
 
     font-size: 12px;
     color: ${cssVar.colorTextSecondary};
-
-    background: ${cssVar.colorFillTertiary};
   `,
   label: css`
     flex-shrink: 0;
@@ -49,7 +46,7 @@ export function SteerQueue() {
   if (steering.length === 0 && followUp.length === 0) return null;
 
   return (
-    <div className={styles.wrap} data-testid="steer-queue">
+    <div className={cx(dockCard.card, styles.wrap)} data-testid="steer-queue">
       {steering.map((text, i) => (
         <div key={`s-${i}`} className={styles.item}>
           <Icon icon={CornerDownRight} size={13} />

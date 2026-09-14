@@ -8,6 +8,7 @@ import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useSessionStore } from '../../../store/session';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 import { SessionGoalDrawer } from './SessionGoalDrawer';
+import { dockCard } from './dockCard';
 import { formatGoalElapsed } from './goalElapsed';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -206,6 +207,7 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
 
   return (
     <>
+      <div className={dockCard.card}>
       <div className={styles.row} data-testid="goal-pill" title={rowTitle}>
         <span
           className={styles.lamp}
@@ -303,6 +305,7 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
             </div>
           </>
         )}
+      </div>
       </div>
       {onOpenDetails ? null : (
         <SessionGoalDrawer

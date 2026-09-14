@@ -10,8 +10,16 @@ const { addPastedText, send, getState, prompt } = vi.hoisted(() => ({
   prompt: vi.fn(),
 }));
 
+const chatInput = vi.hoisted(() => ({
+  steering: [] as string[],
+  followUp: [] as string[],
+}));
+
 vi.mock('../../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/repo' }),
+  useAgentStore: () => ({
+    useStore: (sel: (s: { messages: unknown[] }) => unknown) => sel({ messages: [] }),
+  }),
 }));
 vi.mock('../../../../lib/pi', () => ({ pi: { getState, prompt } }));
 vi.mock('../ChatInputContext', () => ({
@@ -28,6 +36,8 @@ vi.mock('../ChatInputContext', () => ({
     attachments: [],
     pastedTexts: [],
     isGenerating: false,
+    steering: chatInput.steering,
+    followUp: chatInput.followUp,
   }),
 }));
 vi.mock('../workspace/WorkspaceBar', () => ({
@@ -52,7 +62,6 @@ vi.mock('../workspace/WorkspaceBar', () => ({
 vi.mock('@lobehub/editor/react', () => ({ Editor: () => null }));
 vi.mock('../ActionBar', () => ({ ActionBar: () => null }));
 vi.mock('../SendArea', () => ({ SendArea: () => null }));
-vi.mock('../SteerQueue', () => ({ SteerQueue: () => null }));
 vi.mock('../SessionGoalDrawer', () => ({
   SessionGoalDrawer: ({ open, snapshot }: { open: boolean; snapshot?: { condition?: string } }) =>
     open ? <div data-testid="session-goal-drawer">{snapshot?.condition}</div> : null,
@@ -97,6 +106,8 @@ const snapshot: GoalSnapshot = {
 beforeEach(() => {
   getState.mockResolvedValue({ sessionId: 'session-a' });
   prompt.mockResolvedValue(undefined);
+  chatInput.steering = [];
+  chatInput.followUp = [];
 });
 
 afterEach(() => {
@@ -133,12 +144,23 @@ describe('MessageEditor project context citations', () => {
     expect(screen.getByTestId('session-goal-drawer')).toHaveTextContent('完成测试');
   });
 
-  it('keeps the goal pill inside the composer surface', async () => {
+  it('keeps the goal pill in the dock, outside the composer surface', async () => {
     useGoalStore.getState().setSnapshot('session-a', snapshot);
     render(<MessageEditor leftActions={[]} rightActions={[]} />);
 
     const surface = await screen.findByTestId('composer-surface');
     const pill = await screen.findByTestId('goal-pill');
-    expect(surface.contains(pill)).toBe(true);
+    expect(surface.contains(pill)).toBe(false);
+    expect(screen.getByTestId('composer-dock').contains(pill)).toBe(true);
+  });
+
+  it('keeps the steer queue in the dock, outside the composer surface', async () => {
+    chatInput.steering = ['先改测试'];
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+
+    const surface = await screen.findByTestId('composer-surface');
+    const queue = await screen.findByTestId('steer-queue');
+    expect(surface.contains(queue)).toBe(false);
+    expect(screen.getByTestId('composer-dock').contains(queue)).toBe(true);
   });
 });

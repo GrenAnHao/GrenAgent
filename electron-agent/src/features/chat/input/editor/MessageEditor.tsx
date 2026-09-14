@@ -8,6 +8,7 @@ import { ActionBar } from '../ActionBar';
 import { SendArea } from '../SendArea';
 import { SteerQueue } from '../SteerQueue';
 import { GoalPill } from '../GoalPill';
+import { TodoDockFromStore } from '../TodoDock';
 import { SessionGoalDrawer } from '../SessionGoalDrawer';
 import { WorkspaceBar } from '../workspace/WorkspaceBar';
 import { PromptRequestCard } from '../PromptRequestCard';
@@ -56,11 +57,15 @@ const styles = createStaticStyles(({ css }) => ({
       border-color: ${cssVar.colorBorder};
     }
   `,
-  goalSlot: css`
-    &:not(:empty) {
-      margin: -10px -12px 0;
-      padding: 6px 12px;
-      border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+  dock: css`
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 6px;
+
+    &:empty {
+      display: none;
+      margin: 0;
     }
   `,
   body: css`
@@ -157,7 +162,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
 
   return (
     <div ref={zoneRef} className={styles.zone}>
-      <SteerQueue />
+      <div data-testid="composer-dock" className={styles.dock}><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /><SteerQueue /></div>
       <SessionGoalDrawer
         onClose={() => setGoalDrawerSessionId(undefined)}
         onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
@@ -168,7 +173,6 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
       <WorkspaceBar onReferencePastedText={addPastedText} />
       <PromptRequestCard />
       <div ref={surfaceRef} className={styles.surface} data-testid="composer-surface">
-        <div className={styles.goalSlot}><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /></div>
         {hasChips ? <InputChips /> : null}
         <div
           className={styles.body}
