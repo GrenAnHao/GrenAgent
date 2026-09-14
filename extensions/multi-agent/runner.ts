@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { resolveMcpServers } from "./capability.js";
+import { readMaxDepth } from "./depth.js";
 import { killProcessTree, registerSubagentProcess } from "./subagentProcessRegistry.js";
 
 export interface AgentResult {
@@ -182,13 +183,15 @@ export function buildSubagentRuntimeConfig(
     }
   }
   const parentMcp = typeof base.MCP_SERVERS === "string" ? (base.MCP_SERVERS as string) : process.env.MCP_SERVERS;
-  // 子代理一律禁止再 spawn 子代理：把 spawn_agent 并入 SAFETY_DENY_TOOLS（safety 扩展按工具名硬拦），
-  // 与 index.ts 的 PI_IS_SUBAGENT 守卫互为独立的双重防线；且经派生 runtime-config 落盘，
-  // 不只依赖 env 单链传递，更可靠。保留 extraEnv（profile）已有的 deny 列表。
+  // 子级深度到顶才把 spawn_agent 并入 SAFETY_DENY_TOOLS（safety 扩展按工具名硬拦）；
+  // 未到顶允许再委派。经派生 runtime-config 落盘，不只依赖 env 单链传递。
+  // 保留 extraEnv（profile）已有的 deny 列表。
   const denyTools = new Set(
     (extraEnv.SAFETY_DENY_TOOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   );
-  denyTools.add("spawn_agent");
+  // 子级深度到顶才藏掉 spawn_agent；未到顶允许再委派（第七期）。
+  const depth = Number(extraEnv.SUBAGENT_DEPTH ?? "");
+  if (Number.isSafeInteger(depth) && depth >= readMaxDepth()) denyTools.add("spawn_agent");
   // 探索子代理也禁止再发起探索（与 spawn_agent 同款防递归）。
   denyTools.add("explore_context");
   const env = withoutSensitiveProcessConfig({
@@ -233,6 +236,7 @@ type SpawnPiAgentOpts = {
   tools?: string[];
   /** Sub-agent thinking level → passed via --thinking. */
   thinkingLevel?: string;
+  depth?: number;
 };
 
 export function buildSubagentLaunch(

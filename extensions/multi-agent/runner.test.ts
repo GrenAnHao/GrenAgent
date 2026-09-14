@@ -97,10 +97,17 @@ describe("buildSubagentLaunch", () => {
     launch.cleanup();
   });
 
-  it("deny 列表含 spawn_agent 与 explore_context", () => {
-    const launch = buildSubagentLaunch("D:/a", "t", {});
-    const deny = launch.env.SAFETY_DENY_TOOLS ?? "";
-    expect(deny.split(",")).toEqual(expect.arrayContaining(["spawn_agent", "explore_context"]));
+  it("deny 列表：深度未到顶时只含 explore_context，不含 spawn_agent", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", { env: { SUBAGENT_DEPTH: "1" } });
+    const deny = (launch.env.SAFETY_DENY_TOOLS ?? "").split(",");
+    expect(deny).toContain("explore_context");
+    expect(deny).not.toContain("spawn_agent");
+    launch.cleanup();
+  });
+
+  it("deny 列表：深度到顶时含 spawn_agent", () => {
+    const launch = buildSubagentLaunch("D:/a", "t", { env: { SUBAGENT_DEPTH: "2" } });
+    expect((launch.env.SAFETY_DENY_TOOLS ?? "").split(",")).toContain("spawn_agent");
     launch.cleanup();
   });
 
@@ -147,16 +154,23 @@ describe("resolveSubagentModel", () => {
 });
 
 describe("buildSubagentRuntimeConfig", () => {
-  it("always denies spawn_agent so a sub-agent can't spawn its own sub-agents", () => {
+  it("does not deny spawn_agent when SUBAGENT_DEPTH is unset (below max)", () => {
     delete process.env.PI_RUNTIME_CONFIG;
     const rc = buildSubagentRuntimeConfig(false, {});
+    expect(rc.env.SAFETY_DENY_TOOLS.split(",")).not.toContain("spawn_agent");
+    rc.cleanup();
+  });
+
+  it("denies spawn_agent when SUBAGENT_DEPTH reaches the max", () => {
+    delete process.env.PI_RUNTIME_CONFIG;
+    const rc = buildSubagentRuntimeConfig(false, { SUBAGENT_DEPTH: "2" });
     expect(rc.env.SAFETY_DENY_TOOLS.split(",")).toContain("spawn_agent");
     rc.cleanup();
   });
 
   it("merges spawn_agent with a profile's existing deny list (no loss)", () => {
     delete process.env.PI_RUNTIME_CONFIG;
-    const rc = buildSubagentRuntimeConfig(false, { SAFETY_DENY_TOOLS: "web_search,web_fetch" });
+    const rc = buildSubagentRuntimeConfig(false, { SAFETY_DENY_TOOLS: "web_search,web_fetch", SUBAGENT_DEPTH: "2" });
     const deny = rc.env.SAFETY_DENY_TOOLS.split(",");
     expect(deny).toContain("spawn_agent");
     expect(deny).toContain("web_search");
@@ -227,7 +241,7 @@ describe("preset → injected sub-agent restrictions (end-to-end contract)", () 
   it("explore: readonly + denies bypass-writers/code-exec/spawn + no MCP", () => {
     delete process.env.PI_RUNTIME_CONFIG;
     const p = resolveProfile("explore");
-    const rc = buildSubagentRuntimeConfig(p.mcp, profileToEnv(p));
+    const rc = buildSubagentRuntimeConfig(p.mcp, { ...profileToEnv(p), SUBAGENT_DEPTH: "2" });
     expect(rc.env.SAFETY_READONLY).toBe("1");
     const deny = denyOf(rc);
     for (const t of [
@@ -249,7 +263,7 @@ describe("preset → injected sub-agent restrictions (end-to-end contract)", () 
   it("reviewer: readonly + net off (denies net tools) + cannot spawn", () => {
     delete process.env.PI_RUNTIME_CONFIG;
     const p = resolveProfile("reviewer");
-    const rc = buildSubagentRuntimeConfig(p.mcp, profileToEnv(p));
+    const rc = buildSubagentRuntimeConfig(p.mcp, { ...profileToEnv(p), SUBAGENT_DEPTH: "2" });
     expect(rc.env.SAFETY_READONLY).toBe("1");
     const deny = denyOf(rc);
     expect(deny).toContain("web_search"); // net=false
@@ -272,7 +286,7 @@ describe("preset → injected sub-agent restrictions (end-to-end contract)", () 
   it("default: workspace write (no readonly) yet still cannot spawn sub-agents", () => {
     delete process.env.PI_RUNTIME_CONFIG;
     const p = resolveProfile(undefined);
-    const rc = buildSubagentRuntimeConfig(p.mcp, profileToEnv(p));
+    const rc = buildSubagentRuntimeConfig(p.mcp, { ...profileToEnv(p), SUBAGENT_DEPTH: "2" });
     expect(rc.env.SAFETY_READONLY).toBeUndefined();
     const deny = denyOf(rc);
     expect(deny).toContain("spawn_agent");
@@ -283,7 +297,7 @@ describe("preset → injected sub-agent restrictions (end-to-end contract)", () 
   it("executor: worktree-isolated workspace write, still cannot spawn", () => {
     delete process.env.PI_RUNTIME_CONFIG;
     const p = resolveProfile("executor");
-    const rc = buildSubagentRuntimeConfig(p.mcp, profileToEnv(p));
+    const rc = buildSubagentRuntimeConfig(p.mcp, { ...profileToEnv(p), SUBAGENT_DEPTH: "2" });
     // executor.fs=workspace → 不只读；但 net=false → 禁联网，且永不可再 spawn
     expect(rc.env.SAFETY_READONLY).toBeUndefined();
     const deny = denyOf(rc);

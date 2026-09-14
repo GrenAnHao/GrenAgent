@@ -114,7 +114,8 @@ describe("runEmbeddedSubagent", () => {
     );
     expect(updates[0]?.sessionPath).toBe("/ws/.pi/sessions/sa-child.jsonl");
     const excludeTools = createAgentSessionFromServices.mock.calls[0][0].excludeTools as string[];
-    expect(excludeTools).toEqual(expect.arrayContaining(["spawn_agent", "explore_context", "bash"]));
+    expect(excludeTools).toEqual(expect.arrayContaining(["explore_context", "bash"]));
+    expect(excludeTools).not.toContain("spawn_agent");
     expect(excludeTools).not.toContain("send_message");
     expect(session.dispose).toHaveBeenCalled();
   });
@@ -134,6 +135,21 @@ describe("runEmbeddedSubagent", () => {
     await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-y" });
     const arg = createAgentSessionFromServices.mock.calls[0]?.[0] as { thinkingLevel?: string };
     expect(arg).not.toHaveProperty("thinkingLevel");
+  });
+
+  it("excludes spawn_agent only when depth reaches the max; records depth in meta", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-d1", depth: 1, env: { SUBAGENT_DEPTH: "1" } });
+    const a1 = createAgentSessionFromServices.mock.calls[0]?.[0] as { excludeTools: string[] };
+    expect(a1.excludeTools).not.toContain("spawn_agent");
+    expect(a1.excludeTools).toContain("explore_context");
+    const meta = appendCustomEntry.mock.calls.find((c) => c[0] === "subagent_meta")?.[1] as { depth?: number };
+    expect(meta.depth).toBe(1);
+
+    createAgentSessionFromServices.mockClear();
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-d2", depth: 2, env: { SUBAGENT_DEPTH: "2" } });
+    const a2 = createAgentSessionFromServices.mock.calls[0]?.[0] as { excludeTools: string[] };
+    expect(a2.excludeTools).toContain("spawn_agent");
   });
 });
 
@@ -176,7 +192,8 @@ describe("createEmbeddedChildSession", () => {
       }),
     );
     const excludeTools = createAgentSessionFromServices.mock.calls[0][0].excludeTools as string[];
-    expect(excludeTools).toEqual(expect.arrayContaining(["spawn_agent", "explore_context"]));
+    expect(excludeTools).toEqual(expect.arrayContaining(["explore_context"]));
+    expect(excludeTools).not.toContain("spawn_agent");
     expect(excludeTools).not.toContain("send_message");
   });
 });

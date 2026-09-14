@@ -221,6 +221,8 @@ export function installActivation(input: {
     getEntries: () => unknown[];
   };
   announced?: boolean;
+  depth?: number;
+  parentActivationId?: string;
   /** Natural first-idle settlement only. cancel / rollback must not call this. */
   onSettled?: (info: ActivationSettledInfo) => void;
 }): Activation {

@@ -11,7 +11,7 @@ import { availableModels, registerListSubagentModels } from "./list-models-tool.
 import type { SubagentStopReason } from "./assistant-output.js";
 import { sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
-import { currentWorkspaceContext, resolveToolOrigin } from "../_shared/workspace-context.js";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
@@ -27,11 +27,12 @@ import { registerAdjacentTools } from "./adjacent-tools.js";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
-import { disposeActivation } from "./activation.js";
+import { disposeActivation, getActivation } from "./activation.js";
 import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 import { completedPrefix } from "./fork-seed.js";
 import { withDelegationScope } from "../_shared/delegation-scope.js";
+import { assertDepthAllowed, childDepthOf } from "./depth.js";
 
 const MAX_CONCURRENCY = 4;
 
@@ -155,6 +156,7 @@ async function executeSubagent(
       onUpdate: opts.onUpdate,
       seedMessages: opts.seedMessages,
       thinkingLevel: opts.thinkingLevel as ThinkingLevel | undefined,
+      depth: opts.depth,
     });
   }
   const r = await spawnPiAgent(cwd, task, { ...opts, systemPrompt });
@@ -417,11 +419,6 @@ export default function (pi: ExtensionAPI) {
       const action = params.action ?? "run";
       const registry = getRegistry(ctx.cwd);
 
-      // Recursion guard: a sub-agent (spawned with PI_IS_SUBAGENT=1) may not spawn
-      // its own sub-agents. Only the top-level agent can create sub-agents.
-      if ((action === "run" || action === "spawn") && process.env.PI_IS_SUBAGENT === "1") {
-        throw new Error("子代理禁止再启动子代理（嵌套 spawn 已被拦截）");
-      }
       // 模型策略「禁用子代理」：直接拒绝 run/spawn（status/list/cancel/remove 仍可用于善后历史任务）。
       if ((action === "run" || action === "spawn") && getConfig("SUBAGENT_MODE")?.trim() === "disabled") {
         throw new Error(
@@ -479,6 +476,13 @@ export default function (pi: ExtensionAPI) {
       }
 
       const list = normalizeTasks(params);
+      const childDepth = childDepthOf(ctx as never);
+      const parentSid = parentSessionId(ctx);
+      try {
+        assertDepthAllowed(childDepth);
+      } catch (e) {
+        return { content: [{ type: "text", text: String((e as Error).message ?? e) }], isError: true };
+      }
       const explicitRoutes: string[] = [];
       if (typeof params.model === "string" && params.model.trim()) explicitRoutes.push(params.model.trim());
       for (const t of params.tasks ?? []) {
@@ -536,11 +540,8 @@ export default function (pi: ExtensionAPI) {
 
       const profile = resolveProfile(params.profile as ProfileInput | undefined);
       if (params.fork) {
-        const inChild = resolveToolOrigin() === "subagent";
         if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
-        if (!canUseEmbeddedSubagent(profile) || inChild) {
-          throw new Error("fork 需要 Electron 进程内子会话");
-        }
+        if (!canUseEmbeddedSubagent(profile)) throw new Error("fork 需要 Electron 进程内子会话");
       }
       const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
       const wantWorktree = profile.isolation === "worktree";
@@ -556,6 +557,7 @@ export default function (pi: ExtensionAPI) {
       // headless 下 ask 仍在 safety 内降级为 auto 行为（不全拦），故 auto 是安全且足够的下限。
       const ownerPolicy = getApprovalPolicy();
       profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
+      profileEnv.SUBAGENT_DEPTH = String(childDepth);
       const limits = profileLimits(profile);
 
       // Named-agent resolution (markdown agents in ~/.pi/agent/agents + .pi/agents).
@@ -623,6 +625,7 @@ export default function (pi: ExtensionAPI) {
             task: taskText,
             profile: params.profile ? JSON.stringify(profile) : null,
             model: chosenModel ?? null,
+            parentId: parentSid ?? null, depth: childDepth,
           });
           const controller = registerInflight(id, signal);
           const r = await executeSubagent(ctx.cwd, taskText, id, profile, {
@@ -634,6 +637,7 @@ export default function (pi: ExtensionAPI) {
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             thinkingLevel: thinkingLevel || undefined,
+            depth: childDepth,
             signal: controller.signal,
             onUpdate: (u) => registry.progress(id, u.transcript),
           }).finally(() => inflight.delete(id));
@@ -685,7 +689,6 @@ export default function (pi: ExtensionAPI) {
         const id = SubAgentRegistry.genId();
         const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
         const parentPath = parentSessionPath(ctx);
-        const parentSid = parentSessionId(ctx);
         const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
         const spawnedText = `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`;
 
@@ -695,6 +698,7 @@ export default function (pi: ExtensionAPI) {
             task,
             profile: params.profile ? JSON.stringify(profile) : null,
             model: chosenModel ?? null,
+            parentId: parentSid ?? null, depth: childDepth,
           });
           const controller = new AbortController();
           inflight.set(id, controller);
@@ -713,6 +717,8 @@ export default function (pi: ExtensionAPI) {
               timeoutMs: limits.timeoutMs,
               thinkingLevel: thinkingLevel || undefined,
               seedMessages,
+              depth: childDepth,
+              parentActivationId: parentSid && getActivation(parentSid) ? parentSid : undefined,
               signal: controller.signal,
               onUpdate: (u) => {
                 if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
@@ -767,6 +773,7 @@ export default function (pi: ExtensionAPI) {
           task,
           profile: params.profile ? JSON.stringify(profile) : null,
           model: chosenModel ?? null,
+          parentId: parentSid ?? null, depth: childDepth,
         });
         const controller = new AbortController();
         inflight.set(id, controller);
@@ -792,6 +799,7 @@ export default function (pi: ExtensionAPI) {
           timeoutMs: limits.timeoutMs,
           thinkingLevel: thinkingLevel || undefined,
           seedMessages,
+          depth: childDepth,
           signal: controller.signal,
           // 增量写 transcript（progress 内部也 bump updatedAt，保留 stuck detection 心跳）→ 右坞
           // SubAgentLogBody 轮询 registry，即可像主对话一样实时回放后台子代理。
@@ -857,6 +865,7 @@ export default function (pi: ExtensionAPI) {
           task,
           profile: params.profile ? JSON.stringify(profile) : null,
           model: chosenModel ?? null,
+          parentId: parentSid ?? null, depth: childDepth,
         });
         const controller = registerInflight(id, signal);
         try {
@@ -870,6 +879,7 @@ export default function (pi: ExtensionAPI) {
             timeoutMs: limits.timeoutMs,
             thinkingLevel: thinkingLevel || undefined,
             seedMessages,
+            depth: childDepth,
             signal: controller.signal,
             onUpdate: (u) => {
               // 写 transcript（registry 内部截断；progress 也 bump updatedAt → 保留 stuck detection 心跳）：
@@ -955,6 +965,7 @@ export default function (pi: ExtensionAPI) {
             task: t.task,
             profile: params.profile ? JSON.stringify(profile) : null,
             model: chosenModel ?? null,
+            parentId: parentSid ?? null, depth: childDepth,
           });
           const controller = registerInflight(subId, signal);
           const r = await executeSubagent(ctx.cwd, t.task, subId, profile, {
@@ -966,6 +977,7 @@ export default function (pi: ExtensionAPI) {
             mcp: profile.mcp,
             timeoutMs: limits.timeoutMs,
             thinkingLevel: thinkingLevel || undefined,
+            depth: childDepth,
             signal: controller.signal,
             onUpdate: (u) => registry.progress(subId, u.transcript),
           }).finally(() => inflight.delete(subId));

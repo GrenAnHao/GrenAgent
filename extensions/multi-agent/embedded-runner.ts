@@ -25,6 +25,7 @@ import { extractAssistantOutput, type SubagentStopReason } from "./assistant-out
 import { type CapabilityProfile } from "./capability.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { wipeSessionFile, writeSeed } from "./fork-seed.js";
+import { readMaxDepth } from "./depth.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
 
 export interface EmbeddedSubagentOpts {
@@ -45,6 +46,8 @@ export interface EmbeddedSubagentOpts {
   mode?: "one-shot" | "continuable";
   seedMessages?: unknown[];
   thinkingLevel?: ThinkingLevel;
+  depth?: number;
+  parentActivationId?: string;
 }
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
@@ -145,8 +148,10 @@ async function filterExtensionFactories(): Promise<Array<(...args: never[]) => u
   return exts.map((x) => x.factory);
 }
 
-function buildExcludeTools(env: Record<string, string>): string[] {
-  const deny = new Set(["spawn_agent", "explore_context", "list_subagent_models"]);
+function buildExcludeTools(env: Record<string, string>, depth: number | undefined): string[] {
+  const deny = new Set(["explore_context", "list_subagent_models"]);
+  const effective = depth ?? Number(env.SUBAGENT_DEPTH ?? "");
+  if (Number.isSafeInteger(effective) && effective >= readMaxDepth()) deny.add("spawn_agent");
   for (const t of (env.SAFETY_DENY_TOOLS ?? "").split(",")) {
     const s = t.trim();
     if (s) deny.add(s);
@@ -276,6 +281,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
       mode: opts.mode ?? "one-shot",
       label: firstLine(opts.task).slice(0, 80),
       inheritedEventCount,
+      depth: opts.depth ?? 0,
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
   } catch (e) {
@@ -293,7 +299,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     },
   });
 
-  const excludeTools = buildExcludeTools(prepared.childConfig);
+  const excludeTools = buildExcludeTools(prepared.childConfig, opts.depth);
   let model = undefined;
   if (opts.model?.trim()) {
     const resolved = resolveCliModel({
@@ -539,6 +545,8 @@ export async function startContinuableEmbedded(opts: ContinuableEmbeddedOpts): P
           session: child.session,
           sessionManager: child.sessionManager,
           announced: false,
+          depth: opts.depth ?? 0,
+          ...(opts.parentActivationId ? { parentActivationId: opts.parentActivationId } : {}),
           onSettled: (info) => {
             child?.unsub();
             child?.clearEmitTimer();

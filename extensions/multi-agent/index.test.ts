@@ -596,14 +596,13 @@ describe("spawn_agent fork", () => {
     expect(spawnPiAgent).not.toHaveBeenCalled();
   });
 
-  it("rejects when called from a subagent origin", async () => {
+  it("allows fork when called from a subagent origin", async () => {
     vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
-    await expect(
-      runInWorkspace({ origin: "subagent", workspace: ctx.cwd, cwd: ctx.cwd, config: {} }, () =>
-        loadSpawnAgent()("tf", { task: "x", fork: true }, null, null, ctx),
-      ),
-    ).rejects.toThrow("fork 需要 Electron 进程内子会话");
-    expect(runEmbeddedSubagent).not.toHaveBeenCalled();
+    const r = await runInWorkspace({ origin: "subagent", workspace: ctx.cwd, cwd: ctx.cwd, config: {} }, () =>
+      loadSpawnAgent()("tf", { task: "x", fork: true }, null, null, { ...ctx, sessionManager: { buildContextEntries: () => [] } }),
+    );
+    expect(r.isError).toBeFalsy();
+    expect(runEmbeddedSubagent).toHaveBeenCalled();
   });
 
   it("empty prefix succeeds like a normal spawn", async () => {
@@ -771,6 +770,69 @@ describe("spawn_agent · model selection policy", () => {
     const r = await loadSpawnAgent()("t", { tasks: [{ task: "ok", model: "a/b" }, { task: "bad", model: "a/c" }] }, null, null, ctxM);
     expect(r.isError).toBe(true);
     expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("spawn_agent · nested delegation depth", () => {
+  const depthCtx = (depth: number) => ({
+    ...ctx,
+    sessionManager: {
+      getEntries: () => [{ type: "custom", customType: "subagent_meta", data: { origin: "subagent", depth } }],
+      getSessionId: () => `sa-parent-${depth}`,
+    },
+  });
+  const cfg = (map: Record<string, string>) =>
+    vi.mocked(getConfig).mockImplementation((k: string) => (k === "SUBAGENT_MAX_PER_SESSION" ? "0" : map[k]));
+
+  it("no longer blocks spawn on PI_IS_SUBAGENT=1", async () => {
+    process.env.PI_IS_SUBAGENT = "1";
+    cfg({});
+    await loadSpawnAgent()("t", { task: "x" }, null, null, ctx);
+    expect(spawnPiAgent).toHaveBeenCalled();
+    delete process.env.PI_IS_SUBAGENT;
+  });
+
+  it("child depth = parent + 1 goes into env and executeSubagent opts", async () => {
+    cfg({});
+    await loadSpawnAgent()("t", { task: "x" }, null, null, depthCtx(1));
+    const opts = vi.mocked(spawnPiAgent).mock.calls[0]?.[2];
+    expect(opts?.env?.SUBAGENT_DEPTH).toBe("2");
+    expect(opts?.depth).toBe(2);
+  });
+
+  it("rejects when child depth exceeds SUBAGENT_MAX_DEPTH, without reserving a per-session slot", async () => {
+    cfg({ SUBAGENT_MAX_DEPTH: "1" });
+    const r = await loadSpawnAgent()("t", { task: "x" }, null, null, depthCtx(1));
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("已达委派深度上限 1");
+    expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("tasks[] all share the same child depth", async () => {
+    cfg({});
+    await loadSpawnAgent()("t", { tasks: ["a", "b"] }, null, null, depthCtx(0));
+    for (const call of vi.mocked(spawnPiAgent).mock.calls) expect(call[2]?.depth).toBe(1);
+  });
+
+  it("fork inside a child is no longer rejected for being a child", async () => {
+    cfg({});
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const r = await runInWorkspace(
+      { origin: "subagent", workspace: ctx.cwd, cwd: ctx.cwd, config: {} },
+      () => loadSpawnAgent()("t", { task: "x", fork: true }, null, null, { ...depthCtx(1), sessionManager: { ...depthCtx(1).sessionManager, buildContextEntries: () => [] } }),
+    );
+    expect(r.isError).toBeFalsy();
+    expect(runEmbeddedSubagent).toHaveBeenCalled();
+  });
+
+  it("continuable spawn passes parentActivationId when the caller is a resident activation", async () => {
+    cfg({});
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.spyOn(activation, "getActivation").mockImplementation((id: string) => (id === "sa-parent-1" ? ({ childId: id, ownedChildren: new Set() } as never) : undefined));
+    await loadSpawnAgent()("t", { task: "x", action: "spawn" }, null, null, depthCtx(1));
+    const opts = vi.mocked(startContinuableEmbedded).mock.calls[0]?.[0];
+    expect(opts?.parentActivationId).toBe("sa-parent-1");
+    expect(opts?.depth).toBe(2);
   });
 });
 
