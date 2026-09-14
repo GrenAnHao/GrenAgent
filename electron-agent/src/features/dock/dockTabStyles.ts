@@ -158,6 +158,7 @@ export const dockTabStyles = createStaticStyles(({ css }) => ({
     min-height: 0;
     gap: 2px;
     padding: 8px;
+    overflow: auto;
   `,
   launcherRow: css`
     display: flex;
