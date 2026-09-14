@@ -652,3 +652,29 @@ describe("spawn_agent fork", () => {
   });
 });
 
+describe("spawn_agent · delegation scope statement", () => {
+  const STATEMENT = "你是被委派的子代理：权限范围在启动时已固定";
+
+  it("subprocess path: systemPrompt ends with the statement", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(false);
+    await loadSpawnAgent()("t-ds1", { task: "do x" }, null, null, ctx);
+    const sp = vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.systemPrompt as string;
+    expect(sp).toContain(STATEMENT);
+    expect(sp.startsWith("你是被委派的子代理")).toBe(true);
+  });
+
+  it("embedded path: systemPrompt ends with the statement", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    await loadSpawnAgent()("t-ds2", { task: "do x" }, null, null, ctx);
+    const sp = vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.systemPrompt as string;
+    expect(sp).toContain(STATEMENT);
+  });
+
+  it("continuable spawn also carries the statement", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    await loadSpawnAgent()("t-ds4", { task: "do x", action: "spawn" }, null, null, ctx);
+    const sp = vi.mocked(startContinuableEmbedded).mock.calls[0]?.[0]?.systemPrompt as string;
+    expect(sp).toContain(STATEMENT);
+  });
+});
+

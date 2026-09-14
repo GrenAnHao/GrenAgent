@@ -28,6 +28,7 @@ import { disposeActivation } from "./activation.js";
 import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 import { completedPrefix } from "./fork-seed.js";
+import { withDelegationScope } from "../_shared/delegation-scope.js";
 
 const MAX_CONCURRENCY = 4;
 
@@ -134,6 +135,7 @@ async function executeSubagent(
   profile: ReturnType<typeof resolveProfile>,
   opts: Parameters<typeof spawnPiAgent>[2] & { parentSessionPath?: string; seedMessages?: unknown[] },
 ): Promise<SubagentRunResult> {
+  const systemPrompt = withDelegationScope(opts.systemPrompt);
   if (canUseEmbeddedSubagent(profile)) {
     return runEmbeddedSubagent({
       cwd,
@@ -141,7 +143,7 @@ async function executeSubagent(
       agentId,
       parentSessionPath: opts.parentSessionPath,
       model: opts.model,
-      systemPrompt: opts.systemPrompt,
+      systemPrompt,
       tools: opts.tools,
       env: opts.env,
       mcp: opts.mcp,
@@ -151,7 +153,7 @@ async function executeSubagent(
       seedMessages: opts.seedMessages,
     });
   }
-  const r = await spawnPiAgent(cwd, task, opts);
+  const r = await spawnPiAgent(cwd, task, { ...opts, systemPrompt });
   const stopReason: SubagentStopReason = opts.signal?.aborted ? "aborted" : r.ok ? "completed" : "error";
   return { ...r, stopReason };
 }
@@ -638,7 +640,7 @@ export default function (pi: ExtensionAPI) {
               parentSessionPath: parentPath,
               parentSessionId: parentSid,
               model: chosenModel,
-              systemPrompt: layer.systemPrompt,
+              systemPrompt: withDelegationScope(layer.systemPrompt),
               tools: layer.tools,
               env: profileEnv,
               mcp: profile.mcp,
