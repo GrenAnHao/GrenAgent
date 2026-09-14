@@ -569,14 +569,17 @@ describe('WorkspaceHandle', () => {
       await handle.dispose();
     });
 
-    it('别的 sessionPath 不转发', async () => {
+    it('子路径 catalog 变更也转发（页头展开行要热更新）', async () => {
       const { runtime, first } = makeRuntime();
       Object.assign(first, { sessionFile: '/parent.jsonl' });
       const { handle, onEvent } = makeHandle(runtime);
       await handle.start();
       onEvent.mockClear();
-      emitCatalogChanged({ sessionPath: '/other.jsonl' });
-      expect(onEvent).not.toHaveBeenCalled();
+      emitCatalogChanged({ sessionPath: '/child.jsonl' });
+      expect(onEvent).toHaveBeenCalledWith(
+        { type: 'subagent_catalog_changed', sessionPath: '/child.jsonl' },
+        expect.objectContaining({ source: 'interactive', sessionPath: '/child.jsonl' }),
+      );
       await handle.dispose();
     });
 

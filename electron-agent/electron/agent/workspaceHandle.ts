@@ -100,8 +100,8 @@ export class WorkspaceHandle {
     });
     this.unsubCatalogEvents = registerCatalogChangeSink((meta) => {
       if (this.disposed) return;
-      const current = this.session.sessionFile;
-      if (!current || current !== meta.sessionPath) return;
+      // 子级 spawn 孙级时 emit 的是子 JSONL 路径，不是主会话。页头用 known 集合二次过滤。
+      if (!this.session.sessionFile) return;
       this.options.onEvent(
         { type: 'subagent_catalog_changed', sessionPath: meta.sessionPath },
         {
