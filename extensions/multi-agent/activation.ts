@@ -12,7 +12,7 @@ import {
   type Delivery,
   type InboxSession,
 } from "./inbox.js";
-import { sendSettlementToParent } from "./parent-host.js";
+import { registerParentSessionHost, sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
 
 export interface AgentSessionLike extends InboxSession {
@@ -20,6 +20,10 @@ export interface AgentSessionLike extends InboxSession {
   abort: () => Promise<unknown> | unknown;
   dispose: () => void;
   waitForIdle: () => Promise<void>;
+  sendCustomMessage?: (
+    msg: { customType: string; content: string; display: boolean; details: Record<string, unknown> },
+    opts: { triggerTurn: boolean; deliverAs?: "steer" | "followUp" },
+  ) => void;
 }
 
 export interface Activation {
@@ -33,6 +37,8 @@ export interface Activation {
   inbox: SubagentInbox;
   announced: boolean;
   ownedChildren: Set<string>;
+  depth: number;
+  parentActivationId?: string;
   sessionManager?: {
     appendCustomEntry: (type: string, data: unknown) => void;
     getEntries: () => unknown[];
@@ -51,6 +57,8 @@ type ActivationRecord = Activation & {
   watching: boolean;
   mustWaitForBusy: boolean;
   skipSettle: boolean;
+  unregisterHost?: () => void;
+  wakers: Array<() => void>;
   onSettled?: (info: ActivationSettledInfo) => void;
 };
 
@@ -123,6 +131,19 @@ function poke(act: ActivationRecord): void {
   if (isSessionIdle(act.session)) act.mustWaitForBusy = true;
 }
 
+function wake(act: ActivationRecord): void {
+  for (const w of act.wakers.splice(0)) w();
+}
+
+function unlinkFromParent(act: ActivationRecord): void {
+  act.unregisterHost?.();
+  act.unregisterHost = undefined;
+  if (!act.parentActivationId) return;
+  const parent = activations.get(act.parentActivationId);
+  if (!parent || !parent.ownedChildren.delete(act.childId)) return;
+  wake(parent);
+}
+
 function delayTick(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -163,7 +184,8 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
         act.mustWaitForBusy = true;
         return false;
       }
-      if (act.inbox.hasPending || act.ownedChildren.size > 0) return false;
+      if (act.inbox.hasPending) return false;
+      if (act.ownedChildren.size > 0) return "wait" as const;
       if (act.poked) {
         act.poked = false;
         return false;
@@ -176,6 +198,7 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
         act.session.dispose();
       });
       activations.delete(act.childId);
+      unlinkFromParent(act);
       if (act.announced) {
         sendSettlementToParent(
           act.parentSessionPath,
@@ -200,7 +223,10 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
       }
       return true;
     });
-    if (stop) return;
+    if (stop === true) return;
+    if (stop === "wait") {
+      await new Promise<void>((resolve) => act.wakers.push(resolve));
+    }
   }
 }
 
@@ -241,13 +267,35 @@ export function installActivation(input: {
     inbox: new SubagentInbox(input.session),
     announced: input.announced === true,
     ownedChildren: new Set(),
+    depth: input.depth ?? 0,
+    parentActivationId: input.parentActivationId,
     poked: false,
     watching: false,
     mustWaitForBusy: false,
     skipSettle: false,
+    wakers: [],
     onSettled: input.onSettled,
   };
   activations.set(input.childId, act);
+  if (act.parentActivationId) {
+    const parent = activations.get(act.parentActivationId);
+    if (parent) {
+      if (parent.inbox.closing) {
+        activations.delete(act.childId);
+        throw new SubagentError(`parent activation ${act.parentActivationId} is draining`, "DRAINING");
+      }
+      parent.ownedChildren.add(act.childId);
+    }
+  }
+  act.unregisterHost = registerParentSessionHost({
+    sessionId: act.childId,
+    sessionPath: act.sessionPath,
+    workspace: act.workspace,
+    isBusy: () => !isSessionIdle(act.session),
+    isDraining: () => act.inbox.closing !== undefined,
+    sendMessage: (msg, opts) => act.session.sendCustomMessage?.(msg, opts),
+    prompt: (text, delivery) => deliverToChild(act.childId, text, delivery),
+  });
   if (act.announced) startWatch(act);
   return act;
 }
@@ -301,6 +349,10 @@ export async function disposeActivation(
   childId: string,
   reason: "settled" | "cancel" | "rollback",
 ): Promise<void> {
+  const owned = activations.get(childId)?.ownedChildren;
+  for (const id of owned ? [...owned] : []) {
+    await disposeActivation(id, "cancel");
+  }
   await childLock.run(childId, async () => {
     const act = activations.get(childId);
     if (!act) return;
@@ -309,6 +361,8 @@ export async function disposeActivation(
       act.session.dispose();
     });
     activations.delete(childId);
+    wake(act);
+    unlinkFromParent(act);
     if (reason === "cancel" && announced) {
       const { output } = extractAssistantOutput(
         act.session.messages as Parameters<typeof extractAssistantOutput>[0],

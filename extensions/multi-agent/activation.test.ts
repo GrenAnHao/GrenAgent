@@ -17,7 +17,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }));
 
 import { SubagentError } from "./inbox.js";
-import { registerParentSessionHost, __resetParentHostsForTest } from "./parent-host.js";
+import {
+  registerParentSessionHost,
+  lookupParentHost as parentHostLookup,
+  __resetParentHostsForTest,
+} from "./parent-host.js";
 import {
   ChildLock,
   authorizeParent,
@@ -61,6 +65,7 @@ function mockSession() {
     }),
     abort: vi.fn(async () => {}),
     dispose: vi.fn(),
+    sendCustomMessage: vi.fn(),
     waitForIdle: () => {
       if (!state.isStreaming && !state.isCompacting) return Promise.resolve();
       return idle.promise;
@@ -97,6 +102,11 @@ function install(
     announced?: boolean;
     workspace?: string;
     childId?: string;
+    depth?: number;
+    parentActivationId?: string;
+    sessionPath?: string;
+    parentSessionId?: string;
+    parentSessionPath?: string;
     sessionManager?: {
       appendCustomEntry: (type: string, data: unknown) => void;
       getEntries: () => unknown[];
@@ -105,13 +115,15 @@ function install(
 ) {
   return installActivation({
     childId: over.childId ?? "sa-1",
-    sessionPath: "/ws/child.jsonl",
-    parentSessionId: "p1",
-    parentSessionPath: "/ws/parent.jsonl",
+    sessionPath: over.sessionPath ?? "/ws/child.jsonl",
+    parentSessionId: over.parentSessionId ?? "p1",
+    parentSessionPath: over.parentSessionPath ?? "/ws/parent.jsonl",
     workspace: over.workspace ?? "A",
     session,
     announced: over.announced,
     sessionManager: over.sessionManager,
+    depth: over.depth ?? 1,
+    ...(over.parentActivationId ? { parentActivationId: over.parentActivationId } : {}),
   });
 }
 
@@ -334,6 +346,86 @@ describe("activation", () => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
     expect(getActivation("sa-1")).toBeUndefined();
+  });
+
+  it("installing a grandchild links it into the parent's ownedChildren", () => {
+    const parent = install(mockSession(), { childId: "sa-1", announced: false });
+    install(mockSession(), { childId: "sa-1-1", sessionPath: "/ws/grand.jsonl", parentActivationId: "sa-1", depth: 2 });
+    expect([...parent.ownedChildren]).toEqual(["sa-1-1"]);
+  });
+
+  it("parent does not settle while a grandchild is resident; settles after it settles", async () => {
+    const parentSession = mockSession();
+    const sendMessage = registerHost();
+    install(parentSession, { childId: "sa-1", announced: true });
+    const grand = mockSession();
+    grand.isStreaming = true; // 孙级在忙，不会立刻自然结算
+    install(grand, { childId: "sa-1-1", sessionPath: "/ws/grand.jsonl", parentActivationId: "sa-1", depth: 2, announced: true, parentSessionPath: "/ws/child.jsonl", parentSessionId: "sa-1" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(getActivation("sa-1")).toBeDefined();
+    grand.resolveIdle(); // 孙级自然结算 → 从父 ownedChildren 摘出 → 父结算
+    await vi.waitFor(() => {
+      expect(getActivation("sa-1")).toBeUndefined();
+    });
+    // 孙级的 notice 落在子级（sendCustomMessage），顶层 host 只收到子级自己的一条
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("a resident child is a parent host: grandchild settlement lands in the child's session", async () => {
+    const child = mockSession();
+    install(child, { childId: "sa-1", sessionPath: "/ws/child.jsonl", announced: false });
+    const grand = mockSession();
+    install(grand, {
+      childId: "sa-1-1",
+      sessionPath: "/ws/grand.jsonl",
+      parentActivationId: "sa-1",
+      depth: 2,
+      announced: true,
+      parentSessionPath: "/ws/child.jsonl",
+      parentSessionId: "sa-1",
+    });
+    await vi.waitFor(() => {
+      expect(child.sendCustomMessage).toHaveBeenCalledTimes(1);
+    });
+    const [msg, opts] = child.sendCustomMessage.mock.calls[0];
+    expect(msg.customType).toBe("subagent-settled");
+    expect(msg.details.childId).toBe("sa-1-1");
+    expect(opts).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+  });
+
+  it("busy child host gets the grandchild notice as steer", async () => {
+    const child = mockSession();
+    child.isStreaming = true;
+    install(child, { childId: "sa-1", announced: false });
+    const grand = mockSession();
+    install(grand, { childId: "sa-1-1", sessionPath: "/ws/grand.jsonl", parentActivationId: "sa-1", depth: 2, announced: true, parentSessionPath: "/ws/child.jsonl", parentSessionId: "sa-1" });
+    await vi.waitFor(() => {
+      expect(child.sendCustomMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(child.sendCustomMessage.mock.calls[0][1]).toEqual({ triggerTurn: false, deliverAs: "steer" });
+  });
+
+  it("cancel disposes grandchildren first, then the child; both leave the table", async () => {
+    const order: string[] = [];
+    const child = mockSession();
+    child.dispose = vi.fn(() => order.push("sa-1"));
+    install(child, { childId: "sa-1", announced: true });
+    const grand = mockSession();
+    grand.isStreaming = true;
+    grand.dispose = vi.fn(() => order.push("sa-1-1"));
+    install(grand, { childId: "sa-1-1", sessionPath: "/ws/grand.jsonl", parentActivationId: "sa-1", depth: 2, announced: true, parentSessionPath: "/ws/child.jsonl", parentSessionId: "sa-1" });
+    await disposeActivation("sa-1", "cancel");
+    expect(order).toEqual(["sa-1-1", "sa-1"]);
+    expect(getActivation("sa-1-1")).toBeUndefined();
+    expect(getActivation("sa-1")).toBeUndefined();
+  });
+
+  it("host registration is removed on dispose", async () => {
+    install(mockSession(), { childId: "sa-1", announced: false });
+    expect(parentHostLookup("/ws/child.jsonl", "A")).toBeDefined();
+    await disposeActivation("sa-1", "cancel");
+    expect(parentHostLookup("/ws/child.jsonl", "A")).toBeUndefined();
   });
 });
 
