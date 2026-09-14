@@ -3,8 +3,15 @@ import { persist } from 'zustand/middleware';
 import { useLayoutStore } from './layoutStore';
 
 export type DockRegion = 'right' | 'bottom';
-export type DockTabKind = 'terminal' | 'browser' | 'page' | 'subagent' | 'subagentLog' | 'projectContext';
-// 后续阶段：| 'file' | 'diff' | 'sidechat'
+export type DockTabKind =
+  | 'terminal'
+  | 'browser'
+  | 'page'
+  | 'subagent'
+  | 'subagentLog'
+  | 'projectContext'
+  | 'file'
+  | 'review';
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 
@@ -51,7 +58,15 @@ export interface ProjectContextPayload {
   workspace: string;
 }
 
-export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload;
+export interface FilePayload {
+  workspace: string;
+}
+
+export interface ReviewPayload {
+  workspace?: string;
+}
+
+export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload;
 
 export interface DockTab {
   id: string;

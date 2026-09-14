@@ -2,7 +2,9 @@ import type { ComponentType } from 'react';
 import type { DockTab, DockTabKind } from '../../stores/dockStore';
 import { PageBody } from './PageBody';
 import { BrowserBody } from './BrowserBody';
+import { FileTreeBody } from './FileTreeBody';
 import { ProjectContextBody } from './ProjectContextBody';
+import { ReviewPlaceholderBody } from './ReviewPlaceholderBody';
 import { SubAgentBody } from './SubAgentBody';
 import { SubAgentLogBody } from './SubAgentLogBody';
 import { TerminalBody } from './TerminalBody';
@@ -19,9 +21,8 @@ const BODY_RENDERERS: Record<DockTabKind, ComponentType<DockBodyProps>> = {
   subagent: SubAgentBody,
   subagentLog: SubAgentLogBody,
   projectContext: ProjectContextBody,
-  // file: FileBody,        // 阶段 2
-  // diff: DiffBody,        // 阶段 3
-  // sidechat: SideChatBody // 阶段 4
+  file: FileTreeBody,
+  review: ReviewPlaceholderBody,
 };
 
 export function TabBodyRenderer({ tab, active }: DockBodyProps) {

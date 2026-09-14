@@ -124,4 +124,27 @@ describe('dockStore', () => {
     expect((terms[0].payload as { status: string }).status).toBe('idle');
     expect(terms[0].id).not.toBe('term-1');
   });
+
+  it('accepts file and review tabs with stable ids', () => {
+    const s = useDockStore.getState();
+    s.addTab({
+      id: 'file:right:/repo',
+      kind: 'file',
+      region: 'right',
+      title: '文件',
+      closable: true,
+      payload: { workspace: '/repo' },
+    });
+    s.addTab({
+      id: 'review:right',
+      kind: 'review',
+      region: 'right',
+      title: '审查',
+      closable: true,
+      payload: { workspace: '/repo' },
+    });
+    const tabs = useDockStore.getState().tabs;
+    expect(tabs.map((t) => t.kind)).toEqual(['file', 'review']);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
 });

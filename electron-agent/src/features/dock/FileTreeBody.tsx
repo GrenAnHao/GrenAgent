@@ -2,15 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@lobehub/ui';
 import { ChevronDown, ChevronRight, File, Folder } from 'lucide-react';
 import { files, type FileNode } from '../../lib/files';
+import type { FilePayload } from '../../stores/dockStore';
 import { dockTabStyles } from './dockTabStyles';
+import type { DockBodyProps } from './TabBodyRenderer';
 
-interface FileTreeBodyProps {
-  tab: { payload: { workspace?: string } };
-  active?: boolean;
-}
-
-export function FileTreeBody({ tab }: FileTreeBodyProps) {
-  const workspace = tab.payload.workspace ?? '';
+export function FileTreeBody({ tab }: DockBodyProps) {
+  const workspace = (tab.payload as FilePayload).workspace;
   const [root, setRoot] = useState<FileNode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
