@@ -1,7 +1,7 @@
 # DSH 子代理第七期：嵌套委派与深度预算
 
 - 日期：2026-09-14
-- 状态：待审查
+- 状态：已落地
 - 主题：对齐 DSH 嵌套委派——子级可再委派（one-shot 与可续聊皆可），深度按 `subagent_meta` 与环境双源记账且单调不降，Activation 图带 `ownedChildren`，拆除子级优先，祖先可打断任意深度后代，目录多层。
 - 依赖：[规格 2](./2026-09-13-dsh-subagent-continuable-notice-design.md)（Activation / inbox / parent host / notice）、[规格 3](./2026-09-13-dsh-subagent-header-catalog-design.md)（目录 / 覆层 / IPC 白名单）、[规格 4](./2026-09-13-dsh-subagent-fork-seed-design.md)（fork 在子级里的拒绝条件）
 - 关联：`extensions/multi-agent/activation.ts`、`index.ts`、`adjacent-tools.ts`、`parent-host.ts`、`embedded-runner.ts`、`registry.ts`、`electron-agent/electron/app/subagentService.ts`、`electron-agent/src/features/subagents/SubagentHeaderCatalog.tsx`
@@ -153,7 +153,7 @@ function isAncestor(senderId: string, target: Activation): boolean {
 
 - 子级成功创建后代时，`writeParentCatalog(pi, ctx, …)` 在子级扩展实例里自然写子 JSONL，`emitCatalogChanged({ sessionPath: 子路径 })`。
 - `SubagentHeaderCatalog`：`subagent_catalog_changed` 的 `sessionPath` 若等于某已展开行的 `sessionPath`，只重采那一行的子目录；等于主会话路径则重折根目录（现有）。
-- `subagentService.catalogWhitelist(parentSessionPath)`：改为递归折叠——从主会话起逐层打开子 JSONL 折叠其目录，最多 `readMaxDepth()` 层；结果 Map 含全部后代。`subagent_prompt` / `subagent_interrupt` / `catalogRowSample` 都用它。
+- `subagentService.catalogWhitelist(parentSessionPath)`：改为递归折叠——从主会话起逐层打开子 JSONL 折叠其目录，固定 8 层 + 访问集环保护（主进程不读 sidecar 配置）；结果 Map 含全部后代。`subagent_prompt` / `subagent_interrupt` / `catalogRowSample` 都用它。
 - 覆层从孙级返回仍回主会话（规格 3 结论不变）。
 
 ### 4.8 registry
