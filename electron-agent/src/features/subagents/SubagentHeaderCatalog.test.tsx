@@ -147,6 +147,42 @@ describe('SubagentHeaderCatalog', () => {
     resolveListen?.(un);
     await waitFor(() => expect(un).toHaveBeenCalled());
   });
+
+  it('reloads when a catalog change arrives for an expanded child path', async () => {
+    const childPath = '/child.jsonl';
+    const grandPath = '/grand.jsonl';
+    const grand2Path = '/grand2.jsonl';
+    const childEntry = { id: 'sa-1', sessionPath: childPath, createdAt: 1, mode: 'continuable' as const, label: 'sa-1' };
+    const grandEntry = { id: 'sa-1-1', sessionPath: grandPath, createdAt: 1, mode: 'continuable' as const, label: 'sa-1-1' };
+    const grand2Entry = { id: 'sa-1-2', sessionPath: grand2Path, createdAt: 1, mode: 'continuable' as const, label: 'sa-1-2' };
+    let childKids = [grandEntry];
+    let listener: ((env: { event?: { type?: string; sessionPath?: string }; sessionPath?: string }) => void) | undefined;
+    onPiEvent.mockImplementation(async (fn) => {
+      listener = fn;
+      return () => {};
+    });
+    subagentCatalog.mockImplementation(async (path: string) => {
+      if (path === PARENT) return { entries: [childEntry], diagnostics: [] };
+      if (path === childPath) return { entries: childKids, diagnostics: [] };
+      return { entries: [], diagnostics: [] };
+    });
+    subagentCatalogRow.mockImplementation(async (path: string) => {
+      const rows: Record<string, CatalogRowView> = {
+        [childPath]: { ...childEntry, activity: 'settled', hasChildren: true, label: 'sa-1' },
+        [grandPath]: { ...grandEntry, activity: 'settled', hasChildren: false, label: 'sa-1-1' },
+        [grand2Path]: { ...grand2Entry, activity: 'settled', hasChildren: false, label: 'sa-1-2' },
+      };
+      return rows[path] ?? { id: path, sessionPath: path, createdAt: 1, mode: 'one-shot' as const, label: path, activity: 'settled' as const, hasChildren: false };
+    });
+    render(<SubagentHeaderCatalog />);
+    fireEvent.click(await screen.findByTestId('subagent-header-catalog'));
+    fireEvent.click(await screen.findByLabelText('展开'));
+    await screen.findByText('sa-1-1');
+    await waitFor(() => expect(listener).toBeDefined());
+    childKids = [grandEntry, grand2Entry];
+    listener?.({ event: { type: 'subagent_catalog_changed', sessionPath: childPath } });
+    await screen.findByText('sa-1-2');
+  });
 });
 
 describe('formatCatalogDuration', () => {

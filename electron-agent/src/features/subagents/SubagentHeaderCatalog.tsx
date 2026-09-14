@@ -326,7 +326,9 @@ export function SubagentHeaderCatalog({ activeChildId, onOpen }: SubagentHeaderC
       if (event?.type !== 'subagent_catalog_changed') return;
       const path = event.sessionPath ?? env.sessionPath;
       const parent = parentPathRef.current;
-      if (!parent || path !== parent) return;
+      if (!parent || !path) return;
+      const known = new Set<string>([parent, ...rootRowsRef.current.map((r) => r.sessionPath), ...Object.values(childRowsRef.current).flat().map((r) => r.sessionPath)]);
+      if (!known.has(path)) return;
       void loadRoot(parent, openRef.current);
     }).then((un) => {
       if (cancelled) un();

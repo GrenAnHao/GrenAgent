@@ -204,10 +204,19 @@ describe('SubagentService catalog IPC', () => {
     expect(deliverToChild).toHaveBeenCalledWith('sa-2', 'to grandchild', 'steer');
   });
 
-  it('rejects prompt of a great-grandchild', async () => {
-    await expect(service.promptChild(workspace, parentPath, sa3Path, 'too deep', 'followUp'))
+  it('allows prompt of a great-grandchild (whitelist is recursive)', async () => {
+    stubActivation(sa3Path, 'sa-3');
+    await service.promptChild(workspace, parentPath, sa3Path, 'deep', 'steer');
+    expect(deliverToChild).toHaveBeenCalledWith('sa-3', 'deep', 'steer');
+  });
+
+  it('whitelist tolerates a catalog cycle', async () => {
+    stubCatalog({
+      [parentPath]: [entry({ id: 'sa-1', sessionPath: sa1Path })],
+      [sa1Path]: [entry({ id: 'sa-p', sessionPath: parentPath })],
+    });
+    await expect(service.promptChild(workspace, parentPath, '/stranger.jsonl', 'x', 'followUp'))
       .rejects.toThrow('sessionPath is not in the parent catalog');
-    expect(deliverToChild).not.toHaveBeenCalled();
   });
 
   it('rejects prompt of a one-shot child', async () => {

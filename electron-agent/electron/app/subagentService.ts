@@ -175,15 +175,27 @@ function resolveCatalogChild(parentSessionPath: string, sessionPath: string): Su
   return entry;
 }
 
+const MAX_WHITELIST_DEPTH = 8;
+
 function catalogWhitelist(parentSessionPath: string): Map<string, SubagentCatalogEntry> {
   const map = new Map<string, SubagentCatalogEntry>();
-  const parent = foldCatalog(parentSessionPath);
-  for (const child of parent.entries) {
-    map.set(child.sessionPath, child);
-    for (const grand of foldCatalog(child.sessionPath).entries) {
-      map.set(grand.sessionPath, grand);
+  const visited = new Set<string>([parentSessionPath]);
+  const walk = (path: string, depth: number): void => {
+    if (depth > MAX_WHITELIST_DEPTH) return;
+    let entries: SubagentCatalogEntry[] = [];
+    try {
+      entries = foldCatalog(path).entries;
+    } catch {
+      return;
     }
-  }
+    for (const child of entries) {
+      if (visited.has(child.sessionPath)) continue;
+      visited.add(child.sessionPath);
+      map.set(child.sessionPath, child);
+      walk(child.sessionPath, depth + 1);
+    }
+  };
+  walk(parentSessionPath, 1);
   return map;
 }
 
