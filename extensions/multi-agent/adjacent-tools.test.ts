@@ -249,6 +249,26 @@ describe("adjacent-tools", () => {
     expect(r.content[0]?.text).toContain("message delivered to agent sa-1");
   });
 
+  it("sender 有 Activation、目标不在线、peek 为直接父 → 冷恢复并传 senderActivationId", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockImplementation((id: string) =>
+      id === "sa-1" ? childAct({ childId: "sa-1", parentSessionId: "top" }) : undefined,
+    );
+    control.getRegistry.mockReturnValue({
+      get: (id: string) => (id === "sa-1-1" ? { sessionPath: "/ws/grand.jsonl" } : undefined),
+    });
+    stubMeta({ "/ws/grand.jsonl": "sa-1" });
+    const r = await send("t6c", { agent_id: "sa-1-1", message: "hi" }, null, null, ctx("sa-1"));
+    expect(activation.coldResumeAndDeliver).toHaveBeenCalledWith(
+      "sa-1-1",
+      "/ws/grand.jsonl",
+      "Agent sa-1 sent a message: hi",
+      "followUp",
+      { senderActivationId: "sa-1" },
+    );
+    expect(r.isError).toBeFalsy();
+  });
+
   it("coldResumeAndDeliver 抛 NOT_RESUMABLE（one-shot）→ isError 未送达", async () => {
     const { send } = loadAdjacent();
     activation.getActivation.mockReturnValue(undefined);
