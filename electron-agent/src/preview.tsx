@@ -90,13 +90,6 @@ const plan = JSON.stringify({
   status: 'draft',
 });
 
-const todoList = [
-  { text: '梳理对话控件渲染链路', done: true },
-  { text: '对比 TodoCard 与 ConvCard 卡头风格', done: true },
-  { text: '补齐 preview 覆盖所有态', done: false },
-  { text: '跑 dev server 截图给用户', done: false },
-];
-
 const webResults = [
   { title: 'antd-style createStaticStyles 零运行时样式', url: 'https://ant-design.github.io/antd-style/', snippet: '用 cssVar 变量编写静态样式，切主题不重渲染组件。' },
   { title: 'CSS-in-JS 性能对比', url: 'https://example.com/css-in-js', snippet: '静态提取 vs 运行时计算的取舍与基准测试。' },
@@ -207,15 +200,21 @@ function Gallery() {
         </Item>
       </Section>
 
-      <Section title="待办 TodoCard（todo 工具 · 本次讨论焦点）">
-        <Item label="running · 部分完成 + 进度条">
-          {renderExtensionCard({ toolName: 'todo', args: {}, result: withDetails({ todos: todoList }), status: 'running' })}
-        </Item>
-        <Item label="done · 全部完成">
-          {renderExtensionCard({ toolName: 'todo', args: {}, result: withDetails({ todos: todoList.map((t) => ({ ...t, done: true })) }), status: 'done' })}
-        </Item>
-        <Item label="空态 · 清空（兜底文本并入卡头）">
-          {renderExtensionCard({ toolName: 'todo', args: {}, result: toolResult('Cleared 5 todos'), status: 'done' })}
+      <Section title="待办（dock 条 + 对话流行）">
+        <Item label="对话流 · 并行进行中">
+          <ToolExecution
+            toolName="todo"
+            args={{}}
+            result={withDetails({
+              todos: [
+                { id: 1, text: '搭骨架', status: 'completed' },
+                { id: 2, text: '写组件', status: 'in_progress' },
+                { id: 3, text: '跑后台构建', status: 'in_progress' },
+              ],
+              nextId: 4,
+            })}
+            status="done"
+          />
         </Item>
       </Section>
 

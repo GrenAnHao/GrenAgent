@@ -4,14 +4,11 @@ import { openPath, revealItemInDir } from '../../platform/runtime';
 import {
   ChevronDown,
   ChevronRight,
-  CircleCheck,
-  CircleDashed,
   Download,
   ExternalLink,
   FolderOpen,
   Globe,
   Image as ImageIcon,
-  ListChecks,
   Loader2,
   Network,
   Pause,
@@ -789,138 +786,6 @@ const SpeakCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
   );
 };
 
-// 参考 lobe 的任务列表视觉（TaskStatusIcon 圆形图标族 + 语义色）：未完成用空心虚线圆、
-// 完成用绿色勾选圆，配细进度条。默认全部展开、不可折叠。
-const todoCardStyles = createStaticStyles(({ css }) => ({
-  card: css`
-    overflow: hidden;
-    width: 100%;
-    max-width: 520px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadius};
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  header: css`
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    font-size: 13px;
-    font-weight: 500;
-    color: ${cssVar.colorText};
-  `,
-  title: css`
-    flex-shrink: 0;
-  `,
-  count: css`
-    overflow: hidden;
-    min-width: 0;
-    margin-inline-start: auto;
-    font-size: 12px;
-    font-weight: normal;
-    color: ${cssVar.colorTextTertiary};
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  `,
-  track: css`
-    height: 3px;
-    background: ${cssVar.colorFillSecondary};
-  `,
-  bar: css`
-    height: 100%;
-    border-radius: 0 2px 2px 0;
-    background: ${cssVar.colorSuccess};
-    transition: width 0.3s ease;
-  `,
-  list: css`
-    display: flex;
-    flex-direction: column;
-    padding: 6px 0 8px;
-  `,
-  item: css`
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 4px 12px;
-    font-size: 13px;
-    line-height: 1.55;
-    color: ${cssVar.colorTextSecondary};
-  `,
-  done: css`
-    color: ${cssVar.colorTextQuaternary};
-    text-decoration: line-through;
-  `,
-}));
-
-const TodoCard: FC<ExtensionCardProps> = ({ result }) => {
-  const d = getDetails(result);
-  let todos = Array.isArray(d?.todos)
-    ? (d!.todos as Array<{ id?: unknown; text?: unknown; done?: unknown }>).map((t) => ({
-        text: asString(t.text),
-        done: Boolean(t.done),
-      }))
-    : [];
-  // details 缺失时（部分实时事件未带 details）从 content 文本兜底解析。
-  if (todos.length === 0) {
-    const text = extractText(result);
-    const fromList = text
-      .split('\n')
-      .flatMap((line) => {
-        const m = line.match(/^\[([x ])\]\s*#(\d+):\s*(.+)$/i);
-        if (!m) return [];
-        return [{ done: m[1].toLowerCase() === 'x', text: m[3]!.trim() }];
-      });
-    if (fromList.length > 0) {
-      todos = fromList;
-    } else {
-      const added = text.match(/^Added todo #\d+:\s*(.+)$/i);
-      if (added) todos = [{ done: false, text: added[1]!.trim() }];
-    }
-  }
-  const total = todos.length;
-  const done = todos.filter((t) => t.done).length;
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  // 空状态：把兜底文本（如 "Cleared 5 todos"）并入 header 右侧 count 位置，
-  // 整张卡片收成一条干净横条，不再单独占一行。
-  const hint = total === 0 ? extractText(result).trim() : '';
-  const status = total ? `${done} / ${total}` : hint || '空';
-  return (
-    <div className={todoCardStyles.card} data-testid="card-todo">
-      <div className={todoCardStyles.header}>
-        <Icon icon={ListChecks} size={15} />
-        <span className={todoCardStyles.title}>待办</span>
-        <span className={todoCardStyles.count} title={status}>
-          {status}
-        </span>
-      </div>
-      {total > 0 && (
-        <>
-          <div className={todoCardStyles.track}>
-            <div className={todoCardStyles.bar} style={{ width: `${pct}%` }} />
-          </div>
-          <div className={todoCardStyles.list}>
-            {todos.map((t, i) => (
-              <div className={todoCardStyles.item} key={i}>
-                <Icon
-                  icon={t.done ? CircleCheck : CircleDashed}
-                  size={15}
-                  style={{
-                    flexShrink: 0,
-                    marginTop: 1,
-                    color: t.done ? cssVar.colorSuccess : cssVar.colorTextQuaternary,
-                  }}
-                />
-                <span className={t.done ? todoCardStyles.done : undefined}>{t.text}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
 const searchCardStyles = createStaticStyles(({ css }) => ({
   wrap: css`
     overflow: hidden;
@@ -1289,7 +1154,6 @@ const EXTENSION_CARD_RENDERERS: Record<string, FC<ExtensionCardProps>> = {
   fetch_github_readme: (p) => <FetchArticleCard {...p} testId="card-fetch_github_readme" />,
   fetch_web_content: (p) => <FetchArticleCard {...p} testId="card-fetch_web_content" />,
   speak: SpeakCard,
-  todo: TodoCard,
 };
 
 export function renderExtensionCard(props: ExtensionCardProps): ReactNode | null {

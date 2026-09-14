@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -17,6 +18,9 @@ export default defineConfig({
         },
       },
       {
+        resolve: {
+          alias: { '@extensions': fileURLToPath(new URL('../extensions', import.meta.url)) },
+        },
         test: {
           name: 'renderer',
           include: ['src/**/*.test.{ts,tsx}'],

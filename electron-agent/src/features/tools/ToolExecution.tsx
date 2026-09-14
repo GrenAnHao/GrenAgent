@@ -1,11 +1,13 @@
 import { Flexbox } from '@lobehub/ui';
-import { Globe, Search, Sparkles, type LucideIcon } from 'lucide-react';
+import { Globe, ListChecks, Search, Sparkles, type LucideIcon } from 'lucide-react';
+import { normalizeTodos, todoSummary } from '@extensions/_shared/todo-model';
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
+import { todoRowCopy } from '../chat/input/todoRow';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
@@ -285,8 +287,26 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
     );
   }
 
-  // todo / generate_image：作为独立卡片常驻展示，不套通用工具行。
-  if (bareName === 'todo' || bareName === 'generate_image') {
+  if (bareName === 'todo') {
+    const details = getDetails(result);
+    const normalized = details && details.error == null ? normalizeTodos(details) : null;
+    const copy = normalized ? todoRowCopy(todoSummary(normalized.todos)) : null;
+    return (
+      <div className={cardStyles.toolRow}>
+        <ConvRow
+          data-testid="tool-execution"
+          status={status}
+          icon={ListChecks}
+          name="更新任务清单"
+          args={status === 'error' ? (extractText(result) || copy?.args) : copy?.args}
+          meta={status === 'error' ? undefined : copy?.meta}
+        />
+      </div>
+    );
+  }
+
+  // generate_image：作为独立卡片常驻展示，不套通用工具行。
+  if (bareName === 'generate_image') {
     const card = renderExtensionCard({ toolName, args, result, status });
     if (card) {
       return (

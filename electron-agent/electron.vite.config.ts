@@ -50,6 +50,11 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname),
+    resolve: {
+      alias: {
+        "@extensions": resolve(__dirname, "../extensions"),
+      },
+    },
     build: {
       outDir: resolve(__dirname, "dist"),
       rollupOptions: {

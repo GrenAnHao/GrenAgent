@@ -13,6 +13,7 @@ vi.mock('../../platform/runtime', () => ({
     revealItemInDir(p);
     return Promise.resolve();
   },
+  invoke: () => Promise.reject(new Error('no ipc')),
 }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/proj' }),
@@ -68,37 +69,6 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     renderCard('speak', { content: [], details: { path: '/proj/.pi/audio/speech_1.mp3', voice: 'alloy', format: 'mp3' } });
     fireEvent.click(screen.getByTestId('reveal-file-speak'));
     expect(revealItemInDir).toHaveBeenCalledWith('/proj/.pi/audio/speech_1.mp3');
-  });
-
-  it('todo shows progress and items', () => {
-    renderCard('todo', {
-      content: [{ type: 'text', text: 'Added todo #1: write tests' }],
-      details: {
-        action: 'add',
-        nextId: 3,
-        todos: [
-          { id: 1, text: 'write tests', done: true },
-          { id: 2, text: 'ship it', done: false },
-        ],
-      },
-    });
-    expect(screen.getByTestId('card-todo')).toBeTruthy();
-    expect(screen.getByText('待办')).toBeTruthy();
-    expect(screen.getByText('1 / 2')).toBeTruthy();
-    expect(screen.getByText(/write tests/)).toBeTruthy();
-    expect(screen.getByText(/ship it/)).toBeTruthy();
-  });
-
-  it('todo collapses to a single bar when cleared', () => {
-    renderCard('todo', {
-      content: [{ type: 'text', text: 'Cleared 5 todos' }],
-      details: { action: 'clear', todos: [] },
-    });
-    expect(screen.getByTestId('card-todo')).toBeTruthy();
-    expect(screen.getByText('待办')).toBeTruthy();
-    // 兜底文本进入 header 右侧 count 位置，而非底部单独一行。
-    expect(screen.getByText('Cleared 5 todos')).toBeTruthy();
-    expect(screen.queryByText('暂无待办')).toBeNull();
   });
 
   it('web_search shows result count and links', () => {

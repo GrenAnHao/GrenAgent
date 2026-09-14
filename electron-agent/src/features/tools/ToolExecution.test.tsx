@@ -183,3 +183,46 @@ describe('ToolExecution ask_user stub', () => {
     expect(container.textContent).toBe('');
   });
 });
+
+describe('ToolExecution todo row', () => {
+  it('renders 更新任务清单 without card-todo', () => {
+    wrap(
+      <ToolExecution
+        toolName="todo"
+        args={{}}
+        result={{
+          details: {
+            todos: [
+              { id: 1, text: '搭骨架', status: 'completed' },
+              { id: 2, text: '写组件', status: 'in_progress' },
+              { id: 3, text: '跑后台构建', status: 'in_progress' },
+              { id: 4, text: '读源码', status: 'in_progress' },
+              { id: 5, text: '补测试', status: 'pending' },
+            ],
+            nextId: 6,
+          },
+          content: [{ type: 'text', text: '1 pending, 3 in progress, 1 completed' }],
+        }}
+        status="done"
+      />,
+    );
+    expect(screen.getByText('更新任务清单')).toBeTruthy();
+    expect(document.body.textContent).toContain('1/5 已完成');
+    expect(document.body.textContent).toContain('写组件');
+    expect(document.body.textContent).toContain('+2');
+    expect(screen.queryByTestId('card-todo')).toBeNull();
+  });
+
+  it('shows 已清空 for an empty successful list', () => {
+    wrap(
+      <ToolExecution
+        toolName="todo"
+        args={{}}
+        result={{ details: { todos: [], nextId: 1 }, content: [{ type: 'text', text: '0 pending, 0 in progress, 0 completed' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.getByText('已清空')).toBeTruthy();
+  });
+});
+
