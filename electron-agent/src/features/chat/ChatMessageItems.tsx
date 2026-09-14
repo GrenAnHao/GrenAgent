@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, type Ref } from 'react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import type { DisplayMessage } from './groupMessages';
 import { UserMessage } from './UserMessage';
@@ -11,7 +11,7 @@ import { AnswerCard } from './AnswerCard';
 import { PlanCard } from './PlanCard';
 import { QuestionsCard } from './QuestionsCard';
 import { VisualCard } from '../visual/VisualCard';
-import { VirtualizedMessageList, type MessageListViewport } from './VirtualizedMessageList';
+import { VirtualizedMessageList, type MessageListViewport, type TranscriptScrollHandle } from './VirtualizedMessageList';
 import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
@@ -47,6 +47,9 @@ interface ChatMessageItemsProps {
   paddingInline?: number;
   /** 会话 / 对话标识：变化时列表重置滚动锚点并贴底（透传给 VirtualizedMessageList）。 */
   resetKey?: string | null;
+  paddingBottom?: number;
+  scrollRef?: Ref<TranscriptScrollHandle>;
+  onGutterChange?: (px: number) => void;
   'data-testid'?: string;
 }
 
@@ -133,6 +136,9 @@ export function ChatMessageItems({
   fill,
   paddingInline,
   resetKey,
+  paddingBottom,
+  scrollRef,
+  onGutterChange,
   'data-testid': testId,
 }: ChatMessageItemsProps) {
   return (
@@ -143,6 +149,9 @@ export function ChatMessageItems({
       fill={fill}
       paddingInline={paddingInline}
       resetKey={resetKey}
+      paddingBottom={paddingBottom}
+      scrollRef={scrollRef}
+      onGutterChange={onGutterChange}
       data-testid={testId}
       renderItem={(msg) => renderMessageBody(msg, unitsByMessage, answeredQuestions)}
     />

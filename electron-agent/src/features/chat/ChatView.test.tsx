@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { AgentState } from '../../stores/agentReducer';
 
 const state = vi.hoisted(() => ({
+  workspace: '/home/.pi/agent/works/u1',
   workspaceReady: true,
   messageCount: 0,
   storeState: {
@@ -29,6 +30,7 @@ const state = vi.hoisted(() => ({
   setWorkspaceSessionPath: vi.fn(),
   upsertOptimisticSession: vi.fn(),
   clearDraftConversation: vi.fn(),
+  pendingSend: 'hello',
 }));
 
 vi.mock('../../lib/pi', () => ({
@@ -38,6 +40,7 @@ vi.mock('../../lib/pi', () => ({
     openWorkspace: state.piOpenWorkspace,
     newSession: state.piNewSession,
     getState: state.piGetState,
+    setSessionDisplayName: vi.fn(),
   },
 }));
 vi.mock('../../lib/commandLanes', () => ({ commandLanes: { run: state.commandRun } }));
@@ -51,7 +54,7 @@ vi.mock('./ChatInput', () => ({
     onAbort?: () => void | Promise<void>;
   }) => (
     <div>
-      <button type="button" data-testid="chat-input" onClick={() => void props.onSend('hello')}>
+      <button type="button" data-testid="chat-input" onClick={() => void props.onSend(state.pendingSend)}>
         send
       </button>
       <button type="button" data-testid="chat-abort" onClick={() => void props.onAbort?.()}>
@@ -66,7 +69,10 @@ vi.mock('./EmptyChatPrompt', () => ({
 vi.mock('../../store/session', () => {
   const store = () => ({
     ...state.sessionState,
-    setActiveSession: state.setActiveSession,
+    setActiveSession: (path: string) => {
+      state.sessionState.activeSessionPath = path;
+      state.setActiveSession(path);
+    },
     setWorkspaceSessionPath: state.setWorkspaceSessionPath,
     upsertOptimisticSession: state.upsertOptimisticSession,
     clearDraftConversation: state.clearDraftConversation,
@@ -96,7 +102,7 @@ vi.mock('../../stores/AgentStoreContext', () => {
   };
   return {
     useAgentStoreContext: () => ({
-      workspace: '/home/.pi/agent/works/u1',
+      workspace: state.workspace,
       store: {
         useStore,
         pushUserMessage: (text: string) => {
@@ -116,12 +122,15 @@ vi.mock('../../stores/AgentStoreContext', () => {
 
 state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => fn());
 
+import { pi } from '../../lib/pi';
+import { useCommandInputStore } from '../../stores/commandInputStore';
 import { ChatView } from './ChatView';
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  state.workspace = '/home/.pi/agent/works/u1';
   state.workspaceReady = true;
   state.messageCount = 0;
   state.storeState = {
@@ -138,9 +147,11 @@ afterEach(() => {
     activeSessionPath: '/home/.pi/agent/works/u1/s.jsonl',
     draftConversationCwd: null,
   };
+  state.pendingSend = 'hello';
   state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
   state.piNewSession.mockResolvedValue(undefined);
   state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
+  useCommandInputStore.setState({ bySession: {} });
 });
 
 describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
@@ -160,6 +171,7 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     render(<ChatView />);
     expect(screen.getByTestId('chat-list')).toBeTruthy();
     expect(screen.queryByTestId('chat-skeleton')).toBeNull();
+    expect(screen.getByTestId('composer-seat')).toBeTruthy();
   });
 
   it('空对话：居中占位 + 输入区，不渲染消息列表', () => {
@@ -170,6 +182,7 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(screen.getByTestId('empty-chat-prompt')).toBeTruthy();
     expect(screen.getByTestId('chat-input')).toBeTruthy();
     expect(screen.queryByTestId('chat-list')).toBeNull();
+    expect(screen.queryByTestId('composer-seat')).toBeNull();
   });
 });
 
@@ -294,5 +307,94 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piNewSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
     expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
     expect(state.clearDraftConversation).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
+  });
+
+  it('草稿首发 getState 遇到 SESSION_WORKSPACE_MISMATCH 时新建会话再读', async () => {
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
+    state.piGetState
+      .mockRejectedValueOnce(new Error('SESSION_WORKSPACE_MISMATCH'))
+      .mockResolvedValueOnce({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    expect(state.piNewSession).toHaveBeenCalledTimes(2);
+    expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
+    expect(state.storeState.lastError).toBeUndefined();
+    expect(state.piPrompt).toHaveBeenCalled();
+  });
+
+  it('项目点新会话后发送时即使已有 last_session 也要新建，而不是写回旧会话', async () => {
+    state.workspace = '/proj/foo';
+    state.sessionState.worksDir = '/home/.pi/agent/works';
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/proj/foo';
+    state.piOpenWorkspace.mockResolvedValue({
+      restoredSession: '/proj/foo/old.jsonl',
+      sessionFile: '/proj/foo/old.jsonl',
+    });
+    state.piGetState.mockResolvedValue({ sessionFile: '/proj/foo/created.jsonl' });
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    expect(state.piNewSession).toHaveBeenCalledWith('/proj/foo');
+    expect(state.setActiveSession).toHaveBeenCalledWith('/proj/foo/created.jsonl');
+    expect(state.clearDraftConversation).toHaveBeenCalledWith('/proj/foo');
+    expect(state.piPrompt).toHaveBeenCalled();
+  });
+});
+
+describe('ChatView 执行性 /goal', () => {
+  it('草稿对话发送 /goal 时先落盘会话再 prompt，并留下 command-input', async () => {
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.pendingSend = '/goal 测试子代理理';
+    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
+    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    expect(state.piNewSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
+    expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
+    expect(state.piPrompt).toHaveBeenCalledWith(
+      '/home/.pi/agent/works/u1',
+      '/goal 测试子代理理',
+      undefined,
+      undefined,
+    );
+    expect(state.piPrompt.mock.invocationCallOrder[0]).toBeGreaterThan(
+      state.setActiveSession.mock.invocationCallOrder[0],
+    );
+    expect(state.pushUserMessage).not.toHaveBeenCalled();
+    expect(useCommandInputStore.getState().list('/home/.pi/agent/works/u1/created.jsonl')).toEqual([
+      expect.objectContaining({
+        kind: 'command-input',
+        command: '/goal',
+        rest: '测试子代理理',
+        beforeCount: 0,
+      }),
+    ]);
+    expect(screen.queryByTestId('empty-chat-prompt')).toBeNull();
+    expect(screen.getByTestId('chat-list')).toBeTruthy();
+    expect(state.upsertOptimisticSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/home/.pi/agent/works/u1/created.jsonl',
+        name: '测试子代理理',
+      }),
+    );
+    expect(pi.setSessionDisplayName).toHaveBeenCalledWith(
+      '/home/.pi/agent/works/u1/created.jsonl',
+      '测试子代理理',
+    );
   });
 });

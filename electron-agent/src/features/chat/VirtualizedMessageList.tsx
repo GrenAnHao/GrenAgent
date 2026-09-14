@@ -1,10 +1,26 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { VList, type VListHandle } from 'virtua';
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDown } from 'lucide-react';
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import type { DisplayMessage } from './groupMessages';
+import { scrollbarGutterPx } from './composerWheel';
+import { shouldSmoothScroll } from './listScrollPolicy';
+
+export interface TranscriptScrollHandle {
+  scrollBy: (deltaY: number) => void;
+}
 
 /**
  * 叠加层用的视口把手：让浮层（如 ChatMiniMap）能跳转、并跟随视口位置。
@@ -12,7 +28,7 @@ import type { DisplayMessage } from './groupMessages';
  * 不会带着整列重型 Markdown 消息一起重渲染。
  */
 export interface MessageListViewport {
-  /** 平滑滚动到指定条目，使其对齐视口顶部。 */
+  /** 滚到指定条目（近距离平滑，大跨度瞬时落点）。 */
   scrollToIndex: (index: number) => void;
   /** 视口顶部条目的下标。 */
   getTopIndex: () => number;
@@ -42,6 +58,10 @@ interface VirtualizedMessageListProps {
    * 「首次打开不贴底」「切换时用旧锚点回跳而抖动」。传入当前会话 path 即可修复。
    */
   resetKey?: string | null;
+  /** 列表末尾座椅留白（px）：作为尾行高度，而不是滚动容器 CSS padding-bottom。 */
+  paddingBottom?: number;
+  onGutterChange?: (px: number) => void;
+  scrollRef?: Ref<TranscriptScrollHandle>;
   'data-testid'?: string;
 }
 
@@ -61,7 +81,6 @@ type Row = DisplayMessage | typeof FOOTER_ROW;
 const styles = createStaticStyles(({ css }) => ({
   jump: css`
     position: absolute;
-    inset-block-end: 16px;
     inset-inline-end: 16px;
     z-index: 2;
     display: flex;
@@ -101,6 +120,9 @@ export function VirtualizedMessageList({
   fill = 'flex',
   paddingInline = 24,
   resetKey,
+  paddingBottom = 0,
+  onGutterChange,
+  scrollRef,
   'data-testid': testId,
 }: VirtualizedMessageListProps) {
   const ref = useRef<VListHandle>(null);
@@ -113,12 +135,20 @@ export function VirtualizedMessageList({
   const anchorWithinRef = useRef(0);
   // 浮层的视口订阅者：每次滚动（anchor 更新后）通知一次，读数直接走 handle 与 anchor ref。
   const viewportListenersRef = useRef(new Set<() => void>());
+  const scrollToIndexRef = useRef<(index: number, align: 'start' | 'end') => void>(() => {});
   const [showJump, setShowJump] = useState(false);
+
+  scrollToIndexRef.current = (index, align) => {
+    ref.current?.scrollToIndex(index, {
+      align,
+      smooth: shouldSmoothScroll(anchorIndexRef.current, index),
+    });
+  };
 
   // 视口把手对象保持恒等，避免浮层因 props 变化反复重建订阅。
   const viewport = useMemo<MessageListViewport>(
     () => ({
-      scrollToIndex: (index) => ref.current?.scrollToIndex(index, { align: 'start', smooth: true }),
+      scrollToIndex: (index) => scrollToIndexRef.current(index, 'start'),
       getTopIndex: () => anchorIndexRef.current,
       getScrollOffset: () => ref.current?.scrollOffset ?? 0,
       getItemOffset: (index) => ref.current?.getItemOffset(index) ?? 0,
@@ -147,7 +177,7 @@ export function VirtualizedMessageList({
   };
   // 只把数据交给 virtua，元素由渲染函数按需创建：children 数组形态下，每次重渲染都要为全部消息
   // 创建元素、再被 virtua 整体摊平一遍，而流式期间列表每 100ms 就重渲一次，长会话下这笔开销很可观。
-  const hasFooter = Boolean(footer);
+  const hasFooter = Boolean(footer) || paddingBottom > 0;
   const rows = useMemo<Row[]>(
     () => (hasFooter ? [...display, FOOTER_ROW] : display),
     [display, hasFooter],
@@ -161,12 +191,12 @@ export function VirtualizedMessageList({
     }
   };
 
-  // 一键回到底部：平滑滚到末条并恢复自动贴底（对齐旧手写列表的「回到底部」按钮）。
+  // 一键回到底部：近距离平滑，大跨度瞬时落点（避免沿途挂载整列 Markdown）。
   const jumpToBottom = () => {
     if (!ref.current || countRef.current === 0) return;
     atBottomRef.current = true;
     setShowJump(false);
-    ref.current.scrollToIndex(countRef.current - 1, { align: 'end', smooth: true });
+    scrollToIndexRef.current(countRef.current - 1, 'end');
   };
 
   // 内容变化（新消息 / 流式增长）后贴底。用 layout effect：绘制前同步贴底，消除「先显旧位置再跳底」的一帧闪
@@ -200,6 +230,25 @@ export function VirtualizedMessageList({
     // 仅在会话标识变化时重置贴底；同会话内的增量贴底由上面的 useLayoutEffect(stickToBottom) 负责。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
+
+  useImperativeHandle(scrollRef, () => ({
+    scrollBy(deltaY) {
+      if (deltaY < 0) atBottomRef.current = false;
+      ref.current?.scrollBy(deltaY);
+    },
+  }));
+
+  useLayoutEffect(() => {
+    const el = containerRef.current?.firstElementChild;
+    if (!(el instanceof HTMLElement)) return;
+    const report = () => {
+      onGutterChange?.(scrollbarGutterPx(el.offsetWidth, el.clientWidth));
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [onGutterChange]);
 
   // 视口尺寸变化（窗口压缩 / 面板折叠 / 文字重排）时保持位置。
   // 难点：virtua 在 resize 时按自身锚点逐帧重排，中部阅读位会抖；且重排触发的 onScroll 会污染贴底判断。
@@ -274,8 +323,11 @@ export function VirtualizedMessageList({
         >
           {(row: Row) =>
             row === FOOTER_ROW ? (
-              <div key={FOOTER_ROW} style={itemStyle}>
-                {footer}
+              <div key={FOOTER_ROW}>
+                {footer ? <div style={itemStyle}>{footer}</div> : null}
+                {paddingBottom > 0 ? (
+                  <div data-testid="seat-spacer" style={{ height: paddingBottom }} />
+                ) : null}
               </div>
             ) : (
               <div key={row.id} style={itemStyle}>
@@ -290,6 +342,8 @@ export function VirtualizedMessageList({
         <button
           type="button"
           className={styles.jump}
+          data-testid="jump-to-bottom"
+          style={{ insetBlockEnd: paddingBottom + 16 }}
           onClick={jumpToBottom}
           title="回到底部"
           aria-label="回到底部"
