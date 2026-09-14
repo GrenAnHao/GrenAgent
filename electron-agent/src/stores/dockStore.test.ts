@@ -149,4 +149,59 @@ describe('dockStore', () => {
     expect(tabs.map((t) => t.kind)).toEqual(['file', 'review']);
     expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
   });
+
+  it('collapses the right dock when its last tab is closed', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://only', content: '' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    s.closeTab('page:https://only');
+    expect(useDockStore.getState().tabs).toHaveLength(0);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+  });
+
+  it('does not collapse a dock that still has tabs', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://1', content: '' });
+    s.openPage({ url: 'https://2', content: '' });
+    s.closeTab('page:https://2');
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    expect(useDockStore.getState().activeByRegion.right).toBe('page:https://1');
+  });
+
+  it('collapses the source dock after moving its last tab away', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://p', content: '' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    s.moveTabRegion('page:https://p', 'bottom');
+    expect(useDockStore.getState().tabs.filter((t) => t.region === 'right')).toHaveLength(0);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+  });
+
+  it('collapses the bottom dock when its last tab is closed', () => {
+    const s = useDockStore.getState();
+    s.addTab({
+      id: 'term-1',
+      kind: 'terminal',
+      region: 'bottom',
+      title: 'T',
+      closable: true,
+      payload: { status: 'idle' },
+    });
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+    s.closeTab('term-1');
+    expect(useLayoutStore.getState().terminalOpen).toBe(false);
+  });
+
+  it('retargets source active after moving a tab while siblings remain', () => {
+    const s = useDockStore.getState();
+    s.addTab({ id: 'term-keep', kind: 'terminal', region: 'bottom', title: 'K', closable: true, payload: { status: 'idle' } });
+    s.addTab({ id: 'term-move', kind: 'terminal', region: 'bottom', title: 'M', closable: true, payload: { status: 'idle' } });
+    expect(useDockStore.getState().activeByRegion.bottom).toBe('term-move');
+    s.moveTabRegion('term-move', 'right');
+    expect(useDockStore.getState().tabs.find((t) => t.id === 'term-keep')?.region).toBe('bottom');
+    expect(useDockStore.getState().activeByRegion.bottom).toBe('term-keep');
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
 });

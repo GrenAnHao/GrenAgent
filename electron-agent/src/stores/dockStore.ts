@@ -133,9 +133,15 @@ function patchTabs(tabs: DockTab[], updated: DockTab[]): DockTab[] {
   return tabs.map((t) => byId.get(t.id) ?? t);
 }
 
+function collapseEmptyRegion(region: DockRegion, tabs: DockTab[]): void {
+  if (tabs.some((t) => t.region === region)) return;
+  if (region === 'right') useLayoutStore.getState().setRightPanelOpen(false);
+  else useLayoutStore.getState().setTerminalOpen(false);
+}
+
 export const useDockStore = create<DockState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tabs: [],
       activeByRegion: { right: null, bottom: null },
 
@@ -155,11 +161,11 @@ export const useDockStore = create<DockState>()(
       updateTab: (id, patch) =>
         set((s) => ({ tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab)) })),
 
-      closeTab: (id) =>
+      closeTab: (id) => {
+        const target = get().tabs.find((t) => t.id === id);
+        if (!target) return;
+        const region = target.region;
         set((s) => {
-          const target = s.tabs.find((t) => t.id === id);
-          if (!target) return s;
-          const region = target.region;
           const regionTabs = s.tabs.filter((t) => t.region === region).sort((a, b) => a.order - b.order);
           const index = regionTabs.findIndex((t) => t.id === id);
           const tabs = s.tabs.filter((t) => t.id !== id);
@@ -170,7 +176,9 @@ export const useDockStore = create<DockState>()(
             activeByRegion[region] = fallback ? fallback.id : null;
           }
           return { tabs, activeByRegion };
-        }),
+        });
+        collapseEmptyRegion(region, get().tabs);
+      },
 
       setActive: (region, id) =>
         set((s) => ({ activeByRegion: { ...s.activeByRegion, [region]: id } })),
@@ -194,24 +202,36 @@ export const useDockStore = create<DockState>()(
 
       moveTabRegion: (id, targetRegion, insertIndex) => {
         let moved = false;
+        let sourceRegion: DockRegion | null = null;
         set((s) => {
           const tab = s.tabs.find((t) => t.id === id);
           if (!tab) return s;
           if (tab.region === targetRegion) return s;
 
+          const fromRegion = tab.region;
+          sourceRegion = fromRegion;
           const targetTabs = s.tabs.filter((t) => t.region === targetRegion).sort((a, b) => a.order - b.order);
           const at = insertIndex == null ? targetTabs.length : Math.max(0, Math.min(insertIndex, targetTabs.length));
           const movedTab: DockTab = { ...tab, region: targetRegion };
           const nextTarget = [...targetTabs.slice(0, at), movedTab, ...targetTabs.slice(at)].map((t, i) => ({ ...t, order: i }));
+          const activeByRegion = { ...s.activeByRegion, [targetRegion]: id };
+          if (activeByRegion[fromRegion] === id) {
+            const sourceTabs = s.tabs.filter((t) => t.region === fromRegion).sort((a, b) => a.order - b.order);
+            const index = sourceTabs.findIndex((t) => t.id === id);
+            const remaining = sourceTabs.filter((t) => t.id !== id);
+            const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0] ?? null;
+            activeByRegion[fromRegion] = fallback ? fallback.id : null;
+          }
           moved = true;
           return {
             tabs: patchTabs(s.tabs, nextTarget),
-            activeByRegion: { ...s.activeByRegion, [targetRegion]: id },
+            activeByRegion,
           };
         });
         if (!moved) return;
         if (targetRegion === 'right') useLayoutStore.getState().setRightPanelOpen(true);
         else useLayoutStore.getState().setTerminalOpen(true);
+        if (sourceRegion) collapseEmptyRegion(sourceRegion, get().tabs);
       },
 
       openPage: (page) => {
