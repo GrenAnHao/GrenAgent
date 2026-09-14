@@ -28,7 +28,10 @@ export function registerListSubagentModels(pi: ExtensionAPI, policy: ModelSelect
         .filter((m) => policy.allowlist.has(routeOf(m)))
         .filter((m) => !filter || m.provider === filter)
         .map((m) => `${routeOf(m)} — ${m.name ?? m.id}；思考档：${supportedThinkingLevels(m).join("/")}`);
-      return { content: [{ type: "text", text: rows.length ? rows.join("\n") : "白名单内暂无可用模型" }] };
+      return {
+        content: [{ type: "text", text: rows.length ? rows.join("\n") : "白名单内暂无可用模型" }],
+        details: {},
+      };
     },
   });
 }
