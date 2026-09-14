@@ -354,6 +354,8 @@ pi.sendMessage(
 
 `action: "spawn"` 走 `spawnPiAgent` 时：进程退出后，若 parent host 还在，发同样句式的 notice。`details.sessionPath` 可缺。这条路径没有 `send_message`、没有冷恢复。`wait` 行为不变。
 
+（第八期起子进程后台 notice 由 `job-done` 承担）
+
 ---
 
 ## 9. 错误

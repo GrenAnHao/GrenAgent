@@ -1,7 +1,7 @@
 # DSH 子代理第八期：通用 jobs 服务与结构化输出
 
 - 日期：2026-09-14
-- 状态：待审查
+- 状态：已落地
 - 主题：对齐 DSH `dsh-jobs` / `dsh-tool-jobs`：进程内通用后台 job 注册表 + `job_output` / `job_list` / `job_kill` + 结算 notice；`spawn_agent` 的 one-shot 后台作为首个生产者接入；`executeSubagent` 程序接口增加 `outputSchema` 结构化输出（不暴露给父模型）。
 - 依赖：[规格 2](./2026-09-13-dsh-subagent-continuable-notice-design.md)（continuable 路径不变、子进程 notice 归属调整）、[规格 5](./2026-09-14-dsh-subagent-delegation-scope-design.md)（声明拼接顺序）、[规格 7](./2026-09-14-dsh-subagent-nested-delegation-design.md)（子级结算须等活 job）
 - 关联：新 `extensions/jobs/`、`extensions/multi-agent/index.ts`、`embedded-runner.ts`、`activation.ts`、`electron-agent/src/features/chat/ChatMessageItems.tsx`
