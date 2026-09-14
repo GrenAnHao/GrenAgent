@@ -116,6 +116,40 @@ describe('ToolDecisionService.evaluate', () => {
     }));
     expect(audit.get(decision.auditId)?.args).toBe('{"path":"D:/repo/a.ts"}');
   });
+
+  it('pins a subagent ask to deny, audited as auto with no queue payload', async () => {
+    const { audit, service } = await fixture();
+    const decision = service.evaluate(facts({ origin: 'subagent', flags: { ...NO_FLAGS, dangerousCommand: true } }));
+    expect(decision).toMatchObject({ decision: 'deny', ruleId: 'builtin.subagent-ask-pinned' });
+    const row = audit.get(decision.auditId);
+    expect(row).toMatchObject({ decision: 'deny', resolution: 'auto', ruleId: 'builtin.subagent-ask-pinned' });
+    expect(row?.queuePayload).toBeUndefined();
+  });
+
+  it('keeps goal ask queued (only subagent is pinned)', async () => {
+    const { audit, service } = await fixture();
+    const decision = service.evaluate(facts({ origin: 'goal', flags: { ...NO_FLAGS, dangerousCommand: true } }));
+    expect(decision.decision).toBe('ask');
+    expect(audit.get(decision.auditId)).toMatchObject({ resolution: 'queued' });
+  });
+
+  it('does not override a subagent allow or an explicit builtin deny', async () => {
+    const { service } = await fixture();
+    const allow = service.evaluate(facts({ origin: 'subagent' }));
+    expect(allow.decision).toBe('allow');
+    const deny = service.evaluate(facts({ origin: 'subagent', tool: 'write', path: 'D:/repo/.git/config', flags: { ...NO_FLAGS, write: true, protectedPath: true } }));
+    expect(deny).toMatchObject({ decision: 'deny', ruleId: 'builtin.protected-path' });
+  });
+
+  it('pins the rule-lookup-failed ask for subagents too', async () => {
+    const { audit } = await fixture();
+    const broken = new ToolDecisionService(
+      { applicable: () => { throw new Error('database is locked'); }, add: () => { throw new Error('unused'); } } as never,
+      audit,
+    );
+    const decision = broken.evaluate(facts({ origin: 'subagent' }));
+    expect(decision).toMatchObject({ decision: 'deny', ruleId: 'builtin.subagent-ask-pinned' });
+  });
 });
 
 describe('ToolDecisionService live approval preset', () => {

@@ -1,5 +1,6 @@
 import { digestArgs } from './argsDigest';
 import { getApprovalPolicy } from '../../../../extensions/_shared/approval.js';
+import { SUBAGENT_ASK_PINNED_RULE_ID } from '../../../../extensions/_shared/delegation-scope.js';
 import { matchBuiltinRules } from './builtinRules';
 import { matchUserRules } from './rules';
 import type { AuditResolution, ToolAuditStore } from './auditStore';
@@ -54,6 +55,12 @@ export class ToolDecisionService {
       resolution = 'rule';
     }
 
+    // 子级没有交互 UI，也没有事后放行重跑的机制：ask 钉死为 deny，审计仍留 auto 行。
+    if (decision === 'ask' && call.origin === 'subagent') {
+      decision = 'deny';
+      ruleId = SUBAGENT_ASK_PINNED_RULE_ID;
+      resolution = 'auto';
+    }
     if (decision === 'ask') resolution = 'queued';
 
     const auditId = this.audit.record({
