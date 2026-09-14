@@ -7,6 +7,7 @@ import {
   deliverToChild,
   getActivation,
   interruptChild,
+  type Activation,
 } from "./activation.js";
 import { getRegistry } from "./controlPlane.js";
 import { SubagentError, type Delivery } from "./inbox.js";
@@ -192,6 +193,15 @@ async function executeSendMessage(
   }
 }
 
+function isAncestor(senderId: string, target: Activation): boolean {
+  let cur: Activation | undefined = target;
+  while (cur) {
+    if (cur.parentSessionId === senderId) return true;
+    cur = cur.parentActivationId ? getActivation(cur.parentActivationId) : undefined;
+  }
+  return false;
+}
+
 function executeInterrupt(
   params: { agent_id?: string },
   ctx: { cwd: string; sessionManager?: { getSessionId?: () => string } },
@@ -212,8 +222,8 @@ function executeInterrupt(
         details: { agentId },
       };
     }
-    if (targetAct.parentSessionId !== senderId) {
-      throw new SubagentError("only the direct parent may interrupt a resident child", "UNAUTHORIZED");
+    if (!isAncestor(senderId, targetAct)) {
+      throw new SubagentError("only an ancestor may interrupt a resident agent", "UNAUTHORIZED");
     }
     authorizeParent(targetAct, callerWorkspace(ctx));
     interruptChild(agentId);
@@ -252,14 +262,15 @@ export function registerAdjacentTools(pi: ExtensionAPI): void {
     name: "interrupt_agent",
     label: "Interrupt Agent",
     description:
-      "Interrupt a resident child agent. Only the direct parent may interrupt. " +
+      "Interrupt a resident agent's current turn. The target may be your direct child or any deeper agent created under you. " +
+      "Only the current turn stops; queued messages stay parked and agents it started keep running. " +
       "If the target is not resident, the request is recorded without error.",
     promptGuidelines: [
-      "Use interrupt_agent to stop a resident child you spawned.",
-      "Interrupting yourself, a sibling, or a non-child is rejected.",
+      "Use interrupt_agent to stop a resident descendant you (directly or indirectly) spawned.",
+      "Interrupting yourself, a sibling, or a non-descendant is rejected.",
     ],
     parameters: Type.Object({
-      agent_id: Type.String({ description: "Resident child agent id to interrupt." }),
+      agent_id: Type.String({ description: "Resident descendant agent id to interrupt." }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       return executeInterrupt(params, ctx);

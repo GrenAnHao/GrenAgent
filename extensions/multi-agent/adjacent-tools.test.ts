@@ -377,3 +377,37 @@ describe("adjacent-tools", () => {
     expect(parentHost.lookupParentHost).toHaveBeenCalledWith(act.parentSessionPath, "D:/proj");
   });
 });
+
+describe("interrupt_agent · ancestor authority", () => {
+  const acts: Record<string, { childId: string; parentSessionId: string; parentActivationId?: string; workspace: string }> = {
+    "sa-1": { childId: "sa-1", parentSessionId: "top", workspace: "/ws" },
+    "sa-1-1": { childId: "sa-1-1", parentSessionId: "sa-1", parentActivationId: "sa-1", workspace: "/ws" },
+    "sa-2": { childId: "sa-2", parentSessionId: "top", workspace: "/ws" },
+  };
+  let interrupt: Execute;
+  beforeEach(() => {
+    interrupt = loadAdjacent().interrupt;
+    activation.getActivation.mockImplementation((id: string) => acts[id] as never);
+  });
+  const call = (sender: string, target: string) =>
+    interrupt("t", { agent_id: target }, null, null, ctx(sender));
+
+  it("grandparent may interrupt a grandchild", async () => {
+    const r = await call("top", "sa-1-1");
+    expect(r.isError).toBeFalsy();
+    expect(activation.interruptChild).toHaveBeenCalledWith("sa-1-1");
+  });
+  it("child may interrupt its own grandchild-of-top (its child)", async () => {
+    const r = await call("sa-1", "sa-1-1");
+    expect(r.isError).toBeFalsy();
+  });
+  it("sibling / branch cannot", async () => {
+    expect((await call("sa-2", "sa-1-1")).isError).toBe(true);
+    expect((await call("sa-1-1", "sa-2")).isError).toBe(true);
+  });
+  it("grandchild cannot interrupt its grandparent", async () => {
+    acts.top = { childId: "top", parentSessionId: "", workspace: "/ws" } as never;
+    expect((await call("sa-1-1", "top")).isError).toBe(true);
+    delete acts.top;
+  });
+});
