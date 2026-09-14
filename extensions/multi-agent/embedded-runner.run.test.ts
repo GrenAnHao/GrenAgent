@@ -376,6 +376,20 @@ describe("outputSchema", () => {
     return { factories, getAppend: () => lastAppend };
   }
 
+  it("keeps structured_output on a named-agent tools allowlist", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({
+      cwd: "/ws",
+      task: "t",
+      agentId: "sa-tools",
+      outputSchema: schema as never,
+      tools: ["read"],
+    });
+    expect(createAgentSessionFromServices.mock.calls[0][0].tools).toEqual(
+      expect.arrayContaining(["read", "structured_output"]),
+    );
+  });
+
   it("adds a per-child factory registering structured_output with the schema, and appends the instruction", async () => {
     const { factories, getAppend } = captureFactories();
     createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });

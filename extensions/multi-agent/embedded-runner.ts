@@ -27,7 +27,12 @@ import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { wipeSessionFile, writeSeed } from "./fork-seed.js";
 import { readMaxDepth } from "./depth.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
-import { createStructuredCapture, withStructuredInstruction, type StructuredCapture } from "./structured-output.js";
+import {
+  createStructuredCapture,
+  STRUCTURED_OUTPUT_TOOL,
+  withStructuredInstruction,
+  type StructuredCapture,
+} from "./structured-output.js";
 
 export interface EmbeddedSubagentOpts {
   cwd: string;
@@ -326,7 +331,13 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     services,
     sessionManager,
     ...(model ? { model } : {}),
-    ...(opts.tools?.length ? { tools: opts.tools } : {}),
+    ...(opts.tools?.length
+      ? {
+          tools: opts.outputSchema
+            ? [...new Set([...opts.tools, STRUCTURED_OUTPUT_TOOL])]
+            : opts.tools,
+        }
+      : {}),
     ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     excludeTools,
     sessionStartEvent: { type: "session_start", cwd: opts.cwd },
