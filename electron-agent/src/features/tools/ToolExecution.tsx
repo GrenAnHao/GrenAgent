@@ -289,17 +289,18 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
 
   if (bareName === 'todo') {
     const details = getDetails(result);
-    const normalized = details && details.error == null ? normalizeTodos(details) : null;
+    const failed = status === 'error' || details?.error != null;
+    const normalized = !failed && details ? normalizeTodos(details) : null;
     const copy = normalized ? todoRowCopy(todoSummary(normalized.todos)) : null;
     return (
       <div className={cardStyles.toolRow}>
         <ConvRow
           data-testid="tool-execution"
-          status={status}
+          status={failed ? 'error' : status}
           icon={ListChecks}
           name="更新任务清单"
-          args={status === 'error' ? (extractText(result) || copy?.args) : copy?.args}
-          meta={status === 'error' ? undefined : copy?.meta}
+          args={failed ? (extractText(result) || String(details?.error ?? '')) : copy?.args}
+          meta={failed ? undefined : copy?.meta}
         />
       </div>
     );

@@ -224,5 +224,22 @@ describe('ToolExecution todo row', () => {
     );
     expect(screen.getByText('已清空')).toBeTruthy();
   });
+
+  it('shows error copy when details.error is set even if status is done', () => {
+    wrap(
+      <ToolExecution
+        toolName="todo"
+        args={{}}
+        result={{
+          details: { todos: [], nextId: 1, error: 'text required' },
+          content: [{ type: 'text', text: 'Error: text required' }],
+        }}
+        status="done"
+      />,
+    );
+    expect(screen.getByText('Error: text required')).toBeTruthy();
+    expect(document.querySelector('[data-status="error"]')).toBeTruthy();
+    expect(screen.queryByText('已清空')).toBeNull();
+  });
 });
 
