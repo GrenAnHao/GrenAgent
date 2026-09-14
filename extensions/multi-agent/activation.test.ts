@@ -16,6 +16,22 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => sdk.getAgentDir(),
 }));
 
+const jobsMock = vi.hoisted(() => {
+  const m: {
+    hasLive: ReturnType<typeof vi.fn>;
+    onJobDone: ReturnType<typeof vi.fn>;
+    listener?: (s: { owner: string }) => void;
+  } = {
+    hasLive: vi.fn(() => false),
+    onJobDone: vi.fn((l: (s: { owner: string }) => void) => {
+      m.listener = l;
+      return () => {};
+    }),
+  };
+  return m;
+});
+vi.mock("../jobs/service.js", () => ({ jobs: jobsMock }));
+
 import { SubagentError } from "./inbox.js";
 import {
   registerParentSessionHost,
@@ -132,6 +148,7 @@ describe("activation", () => {
     __resetActivationsForTest();
     __resetParentHostsForTest();
     vi.clearAllMocks();
+    jobsMock.hasLive.mockReturnValue(false);
   });
 
   it("ChildLock serializes run on the same childId", async () => {
@@ -440,6 +457,18 @@ describe("activation", () => {
     expect(parentHostLookup("/ws/child.jsonl", "A")).toBeDefined();
     await disposeActivation("sa-1", "cancel");
     expect(parentHostLookup("/ws/child.jsonl", "A")).toBeUndefined();
+  });
+
+  it("does not settle while the child owns a live job; settles after the job is gone", async () => {
+    jobsMock.hasLive.mockReturnValue(true);
+    const session = mockSession();
+    const sendMessage = registerHost();
+    install(session, { announced: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sendMessage).not.toHaveBeenCalled();
+    jobsMock.hasLive.mockReturnValue(false);
+    jobsMock.listener?.({ owner: "sa-1" });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
   });
 });
 

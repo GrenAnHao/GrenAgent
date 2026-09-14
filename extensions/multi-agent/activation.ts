@@ -12,6 +12,7 @@ import {
   type Delivery,
   type InboxSession,
 } from "./inbox.js";
+import { jobs } from "../jobs/service.js";
 import { registerParentSessionHost, sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
 
@@ -135,6 +136,11 @@ function wake(act: ActivationRecord): void {
   for (const w of act.wakers.splice(0)) w();
 }
 
+jobs.onJobDone((snapshot) => {
+  const act = activations.get(snapshot.owner);
+  if (act) wake(act);
+});
+
 function unlinkFromParent(act: ActivationRecord): void {
   act.unregisterHost?.();
   act.unregisterHost = undefined;
@@ -185,7 +191,7 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
         return false;
       }
       if (act.inbox.hasPending) return false;
-      if (act.ownedChildren.size > 0) return "wait" as const;
+      if (act.ownedChildren.size > 0 || jobs.hasLive(act.childId)) return "wait" as const;
       if (act.poked) {
         act.poked = false;
         return false;
@@ -227,7 +233,12 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
     if (stop === "wait") {
       await new Promise<void>((resolve) => {
         act.wakers.push(resolve);
-        if (act.ownedChildren.size === 0 || activations.get(act.childId) !== act) wake(act);
+        if (
+          activations.get(act.childId) !== act ||
+          (act.ownedChildren.size === 0 && !jobs.hasLive(act.childId))
+        ) {
+          wake(act);
+        }
       });
     }
   }
