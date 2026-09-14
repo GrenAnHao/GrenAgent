@@ -140,6 +140,30 @@ async function executeSendMessage(
       return delivered(agentId, lastUserMessageId(targetAct.session.messages));
     }
 
+    if (!targetAct) {
+      const sessionPath = registrySessionPath(ctx.cwd, agentId);
+      if (sessionPath) {
+        const peek = peekParentSessionId(sessionPath);
+        if (peek.readable && peek.parentSessionId === senderId) {
+          if (senderAct) {
+            await coldResumeAndDeliver(agentId, sessionPath, text, "followUp", {
+              senderActivationId: senderId,
+            });
+          } else {
+            await coldResumeAndDeliver(agentId, sessionPath, text, "followUp");
+          }
+          const resumed = getActivation(agentId);
+          return delivered(agentId, lastUserMessageId(resumed?.session.messages));
+        }
+        if (!peek.readable && !senderAct) {
+          throw new SubagentError(`child ${agentId} is not resumable`, "NOT_RESUMABLE");
+        }
+        if (peek.readable && peek.parentSessionId !== senderId && !senderAct) {
+          throw new SubagentError("sender is not the direct parent of the target", "UNAUTHORIZED");
+        }
+      }
+    }
+
     if (senderAct && senderAct.parentSessionId === agentId) {
       authorizeParent(senderAct, callerWorkspace(ctx));
       const host = lookupParentHost(senderAct.parentSessionPath, senderAct.workspace);
@@ -152,20 +176,6 @@ async function executeSendMessage(
 
     if (targetAct || senderAct) {
       throw new SubagentError("sender is not the direct parent or child of the target", "UNAUTHORIZED");
-    }
-
-    const sessionPath = registrySessionPath(ctx.cwd, agentId);
-    if (sessionPath) {
-      const peek = peekParentSessionId(sessionPath);
-      if (!peek.readable) {
-        throw new SubagentError(`child ${agentId} is not resumable`, "NOT_RESUMABLE");
-      }
-      if (peek.parentSessionId !== senderId) {
-        throw new SubagentError("sender is not the direct parent of the target", "UNAUTHORIZED");
-      }
-      await coldResumeAndDeliver(agentId, sessionPath, text, "followUp");
-      const resumed = getActivation(agentId);
-      return delivered(agentId, lastUserMessageId(resumed?.session.messages));
     }
 
     const senderPath = registrySessionPath(ctx.cwd, senderId);

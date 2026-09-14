@@ -469,6 +469,7 @@ export async function coldResumeAndDeliver(
   sessionPath: string,
   text: string,
   delivery: Delivery,
+  link: { senderActivationId?: string } = {},
 ): Promise<void> {
   const sessionManager = SessionManager.open(sessionPath);
   const entries = sessionManager.getEntries();
@@ -507,6 +508,10 @@ export async function coldResumeAndDeliver(
     session: session as AgentSessionLike,
     sessionManager,
     announced: false,
+    depth: typeof meta.depth === "number" ? meta.depth : 0,
+    ...(link.senderActivationId && activations.has(link.senderActivationId)
+      ? { parentActivationId: link.senderActivationId }
+      : {}),
   });
   act.inbox.deliver(text, delivery);
   poke(act);

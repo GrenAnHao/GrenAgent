@@ -2,7 +2,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch } from "node:fs";
 import { dirname, join } from "node:path";
-import { disposeActivation, writeTornDown } from "./activation.js";
+import { disposeActivation, getActivation, writeTornDown } from "./activation.js";
 import type { SubAgentRegistry } from "./registry.js";
 
 export function cancelRequestDir(cwd: string): string {
@@ -29,6 +29,14 @@ export function cancelSubAgent(
 ): void {
   const row = registry.get(agentId);
   if (!row || row.status !== "running") return;
+  const tornDownDescendants = (id: string): void => {
+    const act = getActivation(id);
+    for (const kid of act ? [...act.ownedChildren] : []) {
+      tornDownDescendants(kid);
+      writeTornDown(kid, getActivation(kid)?.sessionPath);
+    }
+  };
+  tornDownDescendants(agentId);
   writeTornDown(agentId, row.sessionPath);
   inflight.get(agentId)?.abort();
   registry.finish(agentId, { status: "cancelled", exitCode: -1 });

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { getActivation, installActivation, __resetActivationsForTest } from "./activation.js";
+import * as activationMod from "./activation.js";
 import { appendCancelRequest, cancelRequestPath, cancelSubAgent, drainCancelRequests, installCancelWatcher, uninstallCancelWatcher } from "./cancel.js";
 import { registerParentSessionHost, __resetParentHostsForTest } from "./parent-host.js";
 import { SubAgentRegistry } from "./registry.js";
@@ -277,6 +278,24 @@ describe("cancelSubAgent tornDown", () => {
       }),
       expect.anything(),
     );
+    reg.close();
+  });
+
+  it("writes tornDown for every descendant torn down with the child", () => {
+    const written: string[] = [];
+    vi.spyOn(activationMod, "writeTornDown").mockImplementation((id: string) => { written.push(id); });
+    vi.spyOn(activationMod, "getActivation").mockImplementation((id: string) =>
+      id === "sa-1" ? ({ childId: "sa-1", ownedChildren: new Set(["sa-1-1"]), sessionPath: "/c.jsonl" } as never)
+      : id === "sa-1-1" ? ({ childId: "sa-1-1", ownedChildren: new Set(), sessionPath: "/g.jsonl" } as never)
+      : undefined,
+    );
+    // spy getActivation 会让随后 disposeActivation 拿到没有 inbox 的假对象。
+    // 本用例只断言 tornDown 顺序，把 dispose 变成空操作：
+    vi.spyOn(activationMod, "disposeActivation").mockResolvedValue(undefined);
+    const cwd = tmpCwd();
+    const reg = runningRegistry(cwd, "sa-1");
+    cancelSubAgent("sa-1", reg, new Map());
+    expect(written).toEqual(["sa-1-1", "sa-1"]);
     reg.close();
   });
 });

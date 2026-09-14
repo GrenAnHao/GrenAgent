@@ -583,4 +583,25 @@ describe("coldResumeAndDeliver", () => {
     expect(session.messages.slice(0, seed.length)).toEqual(seed);
     expect(session.messages).not.toContainEqual(parentNew);
   });
+
+  it("links the resumed child into the sender's ownedChildren when given", async () => {
+    const sender = install(mockSession(), { childId: "sa-1", announced: false });
+    sdk.open.mockReturnValue({
+      getEntries: () => [
+        {
+          type: "custom",
+          customType: "subagent_meta",
+          data: { mode: "continuable", parentSessionId: "sa-1", parentSession: "/ws/child.jsonl", depth: 2 },
+        },
+      ],
+      appendCustomEntry: vi.fn(),
+      cwd: "/ws",
+    });
+    sdk.createAgentSessionFromServices.mockResolvedValue({
+      session: { ...mockSession(), bindExtensions: vi.fn(async () => {}) },
+    });
+    await coldResumeAndDeliver("sa-1-1", "/ws/grand.jsonl", "hi", "followUp", { senderActivationId: "sa-1" });
+    expect([...sender.ownedChildren]).toEqual(["sa-1-1"]);
+    expect(getActivation("sa-1-1")?.depth).toBe(2);
+  });
 });
