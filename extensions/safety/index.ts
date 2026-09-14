@@ -11,6 +11,7 @@ import {
   desktopControl, evaluateToolCall, rememberToolRule, resolveToolOrigin, settleToolCall,
   type ApprovalPreset, type ToolCallFacts, type ToolRuleDraft,
 } from "../_shared/desktop-control.js";
+import { DELEGATION_DENY_REASON, SUBAGENT_ASK_PINNED_RULE_ID } from "../_shared/delegation-scope.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
 // 工具分组取自单一真相源（_shared/tool-groups），避免与 capability 能力闸各维护一份而漂移失配。
@@ -122,6 +123,7 @@ export default function (pi: ExtensionAPI) {
 
     if (verdict.decision === "allow") return undefined;
     if (verdict.decision === "deny") {
+      if (verdict.ruleId === SUBAGENT_ASK_PINNED_RULE_ID) return { block: true, reason: DELEGATION_DENY_REASON };
       return { block: true, reason: `已被授权规则拒绝：${event.toolName}` };
     }
 

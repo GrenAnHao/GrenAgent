@@ -153,4 +153,20 @@ describe("safety approval gating", () => {
     const r = await setup()({ toolName: "dap_launch", input: { program: "x.py" } }, { hasUI: true, cwd, ui });
     expect(r?.block).toBe(true);
   });
+
+  it("uses the delegation deny reason when the pinned subagent rule fires", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    mocks.evaluateToolCall.mockResolvedValue({ decision: "deny", auditId: "a1", ruleId: "builtin.subagent-ask-pinned" } as never);
+    const r = await setup()({ toolName: "bash", input: { command: "rm -rf /tmp/x" } }, { hasUI: false, cwd, ui: {} });
+    expect(r).toMatchObject({ block: true });
+    expect(r?.reason).toContain("已被自动拒绝");
+    expect(r?.reason).toContain("不要重试");
+  });
+
+  it("keeps the generic deny reason for other rule ids", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    mocks.evaluateToolCall.mockResolvedValue({ decision: "deny", auditId: "a1", ruleId: "builtin.protected-path" } as never);
+    const r = await setup()({ toolName: "bash", input: { command: "rm -rf /tmp/x" } }, { hasUI: false, cwd, ui: {} });
+    expect(r?.reason).toBe("已被授权规则拒绝：bash");
+  });
 });
