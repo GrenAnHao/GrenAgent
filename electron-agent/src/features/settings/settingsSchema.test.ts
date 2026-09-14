@@ -34,3 +34,14 @@ describe('SETTINGS_SCHEMA general', () => {
     });
   });
 });
+
+describe('subagent model selection keys', () => {
+  const all = () => SETTINGS_SCHEMA.flatMap((c) => [...(c.fields ?? []), ...(c.sections ?? []).flatMap((s) => s.fields)]);
+  it('has the switch and the allowlist, the latter shown only when the switch is 1', () => {
+    const sw = all().find((f) => f.key === 'SUBAGENT_MODEL_SELECTION');
+    const list = all().find((f) => f.key === 'SUBAGENT_MODEL_ALLOWLIST');
+    expect(sw?.type).toBe('boolean');
+    expect(list?.type).toBe('model-list');
+    expect(list?.showWhen).toEqual({ key: 'SUBAGENT_MODEL_SELECTION', equals: ['1'] });
+  });
+});

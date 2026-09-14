@@ -2,6 +2,7 @@ import { Flexbox } from '@lobehub/ui';
 import { Input, InputNumber, Select, Switch } from 'antd';
 import { createStyles } from 'antd-style';
 import type { SettingField } from './settingsSchema';
+import { ModelListField } from './ModelListField';
 import { ModelSelectField } from './ModelSelectField';
 
 const useStyles = createStyles(({ css, token }) => ({
@@ -89,6 +90,8 @@ export function SettingFieldInput({ field, value, onChange, testIdPrefix = 'set-
             onChange={onChange}
           />
         );
+      case 'model-list':
+        return <ModelListField value={value} testId={testId} onChange={onChange} />;
       case 'password':
         return (
           <Input.Password

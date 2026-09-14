@@ -1,7 +1,7 @@
 import { AudioLines, Bot, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability';
+export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability' | 'model-list';
 export type SettingGroup = '核心' | '能力' | '联网' | '扩展与安全';
 
 export const SETTING_GROUPS: SettingGroup[] = ['核心', '能力', '联网', '扩展与安全'];
@@ -256,6 +256,19 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             placeholder: '如 openai/gpt-4o',
             description: '能力档案 model:"strong" 解析到此；留空回退「子代理模型」',
             showWhen: { key: 'SUBAGENT_MODE', equals: ['custom', ''] },
+          },
+          {
+            key: 'SUBAGENT_MODEL_SELECTION',
+            label: '允许模型为子代理自选路由',
+            type: 'boolean',
+            description: '开启后 spawn_agent 可显式指定模型，且只能选下方白名单；改动对之后新建的会话生效',
+          },
+          {
+            key: 'SUBAGENT_MODEL_ALLOWLIST',
+            label: '可自选的路由白名单',
+            type: 'model-list',
+            description: '至少勾一条才算开启；不在当前目录里的条目会标「不可用」，可手动移除',
+            showWhen: { key: 'SUBAGENT_MODEL_SELECTION', equals: ['1'] },
           },
         ],
       },
