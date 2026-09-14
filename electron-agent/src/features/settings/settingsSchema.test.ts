@@ -45,3 +45,10 @@ describe('subagent model selection keys', () => {
     expect(list?.showWhen).toEqual({ key: 'SUBAGENT_MODEL_SELECTION', equals: ['1'] });
   });
 });
+
+describe('subagent max depth', () => {
+  it('exposes SUBAGENT_MAX_DEPTH as a number with default 2', () => {
+    const all = SETTINGS_SCHEMA.flatMap((c) => [...(c.fields ?? []), ...(c.sections ?? []).flatMap((s) => s.fields)]);
+    expect(all.find((f) => f.key === 'SUBAGENT_MAX_DEPTH')).toMatchObject({ type: 'number', default: '2' });
+  });
+});

@@ -30,7 +30,7 @@ export interface SettingField {
   showWhen?: { key: string; equals: string[] };
   /** boolean 类型未落盘（值为空）时的默认显示态：'1'＝默认开。须与扩展侧 getConfig(...) ?? 默认 对齐，
    *  否则会出现「扩展默认开、面板却显示关」的错配。省略＝默认关（空值显示为关，沿用旧约定）。 */
-  default?: '0' | '1';
+  default?: string;
   /** boolean 落盘格式：one-zero＝'1'/'0'（默认）；true-empty＝'true'/''（扩展侧仅认小写 true）。 */
   storeBoolean?: 'one-zero' | 'true-empty';
 }
@@ -196,6 +196,14 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             type: 'number',
             placeholder: '6',
             description: '一次对话累计可启动的子代理上限；默认 6，设 0＝不限。达到后主代理再 spawn 会被拒绝，可开新对话重置。',
+          },
+          {
+            key: 'SUBAGENT_MAX_DEPTH',
+            label: '委派深度上限',
+            type: 'number',
+            default: '2',
+            placeholder: '2',
+            description: '顶层为 0，子代理为 1，孙代理为 2。设为 1 即禁止子代理再委派',
           },
         ],
       },
