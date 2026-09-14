@@ -53,14 +53,14 @@ function deliver(snapshot: JobSnapshot): void {
   };
   if (!host.isIdle()) {
     host.sendMessage(msg, { triggerTurn: false, deliverAs: "steer" });
-    return;
-  }
-  const spent = wakes.get(snapshot.owner) ?? 0;
-  if (spent < num("JOBS_WAKE_BUDGET", DEFAULT_WAKE_BUDGET)) {
-    wakes.set(snapshot.owner, spent + 1);
-    host.sendMessage(msg, { triggerTurn: true, deliverAs: "followUp" });
   } else {
-    host.sendMessage(msg, { triggerTurn: false });
+    const spent = wakes.get(snapshot.owner) ?? 0;
+    if (spent < num("JOBS_WAKE_BUDGET", DEFAULT_WAKE_BUDGET)) {
+      wakes.set(snapshot.owner, spent + 1);
+      host.sendMessage(msg, { triggerTurn: true, deliverAs: "followUp" });
+    } else {
+      host.sendMessage(msg, { triggerTurn: false });
+    }
   }
   jobs.markReported(snapshot.id);
 }

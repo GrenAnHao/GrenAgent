@@ -82,6 +82,7 @@ describe("jobs extension · notice delivery", () => {
     expect(msg).toMatchObject({ customType: "job-done", display: true, details: { jobId: "subagent-1", kind: "subagent", status: "completed" } });
     expect(msg.content.split("\n")[0]).toBe("Background job subagent-1 (subagent: L) finished completed.");
     expect(opts).toEqual({ triggerTurn: false, deliverAs: "steer" });
+    expect(jobs.snapshot("subagent-1")?.reported).toBe(true);
   });
 
   it("idle owner → wake up to JOBS_WAKE_BUDGET times, then inject only; input resets", async () => {
