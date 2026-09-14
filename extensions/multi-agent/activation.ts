@@ -225,7 +225,10 @@ async function watchSettlement(act: ActivationRecord, epoch: number): Promise<vo
     });
     if (stop === true) return;
     if (stop === "wait") {
-      await new Promise<void>((resolve) => act.wakers.push(resolve));
+      await new Promise<void>((resolve) => {
+        act.wakers.push(resolve);
+        if (act.ownedChildren.size === 0 || activations.get(act.childId) !== act) wake(act);
+      });
     }
   }
 }

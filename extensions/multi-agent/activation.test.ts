@@ -372,6 +372,20 @@ describe("activation", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("parent still settles if the grandchild unlinks while the wait waker is being armed", async () => {
+    const parentSession = mockSession();
+    const sendMessage = registerHost();
+    install(parentSession, { childId: "sa-1", announced: true });
+    const grand = mockSession();
+    grand.isStreaming = true;
+    install(grand, { childId: "sa-1-1", sessionPath: "/ws/grand.jsonl", parentActivationId: "sa-1", depth: 2, announced: true, parentSessionPath: "/ws/child.jsonl", parentSessionId: "sa-1" });
+    grand.resolveIdle(); // 不先等 20ms，让 unlink 与父 wait 交接重叠
+    await vi.waitFor(() => {
+      expect(getActivation("sa-1")).toBeUndefined();
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("a resident child is a parent host: grandchild settlement lands in the child's session", async () => {
     const child = mockSession();
     install(child, { childId: "sa-1", sessionPath: "/ws/child.jsonl", announced: false });
