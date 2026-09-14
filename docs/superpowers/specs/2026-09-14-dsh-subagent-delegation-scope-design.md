@@ -1,7 +1,7 @@
 # DSH 子代理第五期：委派范围声明与子级审批钉死
 
 - 日期：2026-09-14
-- 状态：待审查
+- 状态：已落地
 - 主题：对齐 DSH 子代理的审批语义（子级审批钉死为自动拒绝）与 `subagent:delegation` 声明（每个子级系统提示固定注入一句范围说明）。
 - 依赖：[规格 1](./2026-09-13-dsh-subagent-session-child-design.md)（embedded 子会话）、工具授权 S1（`electron-agent/electron/app/toolPermission/`）
 - 关联：`electron-agent/electron/app/toolPermission/toolDecisionService.ts`、`extensions/safety/index.ts`、`extensions/multi-agent/index.ts`
