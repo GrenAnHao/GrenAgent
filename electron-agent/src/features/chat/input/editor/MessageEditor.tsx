@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Flexbox } from '@lobehub/ui';
 import { Editor } from '@lobehub/editor/react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
@@ -25,6 +25,7 @@ import { useFileMention } from './useFileMention';
 import { useSlashOptions } from './useSlashOptions';
 import { useTauriFileDrop } from './useTauriFileDrop';
 import { useGoalStore, type GoalSnapshot } from '../../../../stores/goalStore';
+import { draftShouldForwardWheel } from '../../composerWheel';
 
 const PLACEHOLDER = '输入消息，@ 引用文件/目录，/ 调用命令…';
 const STREAMING_PLACEHOLDER = '继续跟进，引导当前回答…';
@@ -123,10 +124,11 @@ interface MessageEditorProps {
 
 export function MessageEditor({ leftActions, rightActions }: MessageEditorProps) {
   const { workspace } = useAgentStoreContext();
-  const { editor, send, addAttachments, addPastedText, setEmpty, attachments, pastedTexts, isGenerating } =
+  const { editor, send, addAttachments, addPastedText, setEmpty, attachments, pastedTexts, isGenerating, scrollTranscript } =
     useChatInput();
   const zoneRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLDivElement>(null);
   const [goalDrawerSessionId, setGoalDrawerSessionId] = useState<string>();
   const goalDrawerSnapshot = useGoalStore((state) =>
     goalDrawerSessionId ? state.bySession[goalDrawerSessionId] : undefined,
@@ -158,6 +160,28 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     onPastedText: addPastedText,
   });
 
+  useEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const draft = draftRef.current;
+      if (!draft) return;
+      if (
+        !draftShouldForwardWheel({
+          scrollTop: draft.scrollTop,
+          clientHeight: draft.clientHeight,
+          scrollHeight: draft.scrollHeight,
+          deltaY: e.deltaY,
+        })
+      )
+        return;
+      e.preventDefault();
+      scrollTranscript?.(e.deltaY);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [scrollTranscript]);
+
   const hasChips = attachments.length > 0 || pastedTexts.length > 0;
 
   return (
@@ -175,7 +199,9 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
       <div ref={surfaceRef} className={styles.surface} data-testid="composer-surface">
         {hasChips ? <InputChips /> : null}
         <div
+          ref={draftRef}
           className={styles.body}
+          data-composer-draft
           onClick={(e) => {
             // 点击编辑器下方空白区也聚焦输入（整块 body 区域可用）。
             if (e.target === e.currentTarget) editor.focus();

@@ -133,6 +133,21 @@ export function ChatView() {
     return () => ro.disconnect();
   }, [showEmptyLayout]);
 
+  useEffect(() => {
+    if (showEmptyLayout) return;
+    const seat = seatRef.current;
+    if (!seat) return;
+    const onSeatWheel = (e: WheelEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-composer-draft]')) return;
+      if (t?.closest("[data-testid='composer-prompt-overlay']")) return;
+      e.preventDefault();
+      transcriptRef.current?.scrollBy(e.deltaY);
+    };
+    seat.addEventListener('wheel', onSeatWheel, { passive: false });
+    return () => seat.removeEventListener('wheel', onSeatWheel);
+  }, [showEmptyLayout]);
+
   // 切换到非对话视图（选项卡）时，若正在生成中则自动中止，避免切回时停止按钮残留显示。
   const activeWorkspaceView = useModuleStore((s) => s.activeWorkspaceView);
   useEffect(() => {
@@ -511,7 +526,11 @@ export function ChatView() {
                   style={{ width: '100%' }}
                   data-testid="chat-input-region"
                 >
-                  <ChatInput onSend={handleSend} onAbort={handleAbort} />
+                  <ChatInput
+                    onSend={handleSend}
+                    onAbort={handleAbort}
+                    scrollTranscript={(d) => transcriptRef.current?.scrollBy(d)}
+                  />
                 </motion.div>
               </div>
             </div>

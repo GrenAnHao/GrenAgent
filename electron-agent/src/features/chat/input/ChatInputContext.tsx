@@ -45,6 +45,8 @@ export interface ChatInputContextValue {
   followUp: string[];
   send: () => void | Promise<void>;
   stop: () => void;
+  /** 草稿滚到边缘时把滚轮交给对话列表；空会话不传。 */
+  scrollTranscript?: (deltaY: number) => void;
 }
 
 const ChatInputContext = createContext<ChatInputContextValue | null>(null);

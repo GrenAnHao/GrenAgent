@@ -25,6 +25,7 @@ interface ChatInputProps {
   onAbort: () => Promise<void> | void;
   leftActions?: ActionKey[];
   rightActions?: ActionKey[];
+  scrollTranscript?: (deltaY: number) => void;
 }
 
 export function ChatInput({
@@ -32,6 +33,7 @@ export function ChatInput({
   onAbort,
   leftActions = DEFAULT_LEFT_ACTIONS,
   rightActions = DEFAULT_RIGHT_ACTIONS,
+  scrollTranscript,
 }: ChatInputProps) {
   const { useStore } = useAgentStore();
   const { workspace } = useAgentStoreContext();
@@ -170,6 +172,7 @@ export function ChatInput({
       followUp,
       send,
       stop,
+      scrollTranscript,
     }),
     [
       editor,
@@ -184,6 +187,7 @@ export function ChatInput({
       followUp,
       send,
       stop,
+      scrollTranscript,
     ],
   );
 
