@@ -124,11 +124,13 @@ html body {
   margin: 8px 0;
 }
 
-.pi-md.pi-md.pi-md li > *:first-child {
+.pi-md.pi-md.pi-md li > *:first-child,
+.pi-md.pi-md.pi-md li p:first-child {
   margin-top: 0;
 }
 
-.pi-md.pi-md.pi-md li > *:last-child {
+.pi-md.pi-md.pi-md li > *:last-child,
+.pi-md.pi-md.pi-md li p:last-child {
   margin-bottom: 0;
 }
 
