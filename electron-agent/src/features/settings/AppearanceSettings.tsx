@@ -8,9 +8,10 @@ import {
   primaryColorsSwatches,
 } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 import { useThemeStore, type Appearance, type NeutralColor, type PrimaryColor } from '../../stores/themeStore';
 import { COLOR_SCHEMES } from '../../theme/colorSchemes';
+import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../theme/contentFont';
 import { SettingCard } from './SettingCard';
 
 const APPEARANCES: { value: Appearance; label: string; icon: LucideIcon }[] = [
@@ -73,9 +74,65 @@ const styles = createStaticStyles(({ css }) => ({
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 6px;
   `,
+  control: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  `,
+  stepper: css`
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    height: 36px;
+    border-radius: 18px;
+    background: ${cssVar.colorFillSecondary};
+    font-size: var(--pi-font-size, 14px);
+    line-height: calc(24px + var(--pi-font-delta, 0px));
+
+    &:hover [data-arrows],
+    &:focus-within [data-arrows] {
+      opacity: 1;
+    }
+  `,
+  value: css`
+    min-width: 18px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  `,
+  unit: css`
+    font-size: var(--pi-font-size, 14px);
+    color: ${cssVar.colorTextSecondary};
+  `,
+  arrows: css`
+    position: absolute;
+    right: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    opacity: 0;
+  `,
+  arrow: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 12px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    color: ${cssVar.colorText};
+    background: ${cssVar.colorFillTertiary};
+    cursor: pointer;
+    &:disabled {
+      color: ${cssVar.colorTextQuaternary};
+      cursor: default;
+    }
+  `,
 }));
 
-/** 外观设置：主题（浅/深/跟随系统）+ 主题色 + 中性色，直连 themeStore（前端持久化，非后端 config）。 */
+/** 外观设置：对话字号 + 主题（浅/深/跟随系统）+ 主题色 + 中性色，直连 themeStore（前端持久化，非后端 config）。 */
 export function AppearanceSettings() {
   const appearance = useThemeStore((s) => s.appearance);
   const setAppearance = useThemeStore((s) => s.setAppearance);
@@ -85,9 +142,44 @@ export function AppearanceSettings() {
   const setNeutralColor = useThemeStore((s) => s.setNeutralColor);
   const colorScheme = useThemeStore((s) => s.colorScheme);
   const setColorScheme = useThemeStore((s) => s.setColorScheme);
+  const fontSize = useThemeStore((s) => s.fontSize);
+  const setFontSize = useThemeStore((s) => s.setFontSize);
 
   return (
     <>
+      <SettingCard
+        title="对话字号"
+        desc="只放大可读文字。模块栏、状态标签和代码保持原大小。"
+      >
+        <div className={styles.control}>
+          <div className={styles.stepper} data-testid="font-size-stepper">
+            <span className={styles.value}>{fontSize}</span>
+            <span className={styles.arrows} data-arrows>
+              <button
+                type="button"
+                className={styles.arrow}
+                data-testid="font-size-inc"
+                aria-label="增大字号"
+                disabled={fontSize >= FONT_SIZE_MAX}
+                onClick={() => setFontSize(fontSize + 1)}
+              >
+                <Icon icon={ChevronUp} size={9} />
+              </button>
+              <button
+                type="button"
+                className={styles.arrow}
+                data-testid="font-size-dec"
+                aria-label="减小字号"
+                disabled={fontSize <= FONT_SIZE_MIN}
+                onClick={() => setFontSize(fontSize - 1)}
+              >
+                <Icon icon={ChevronDown} size={9} />
+              </button>
+            </span>
+          </div>
+          <span className={styles.unit}>px</span>
+        </div>
+      </SettingCard>
       <SettingCard title="主题">
         <div className={styles.themeRow}>
           {APPEARANCES.map((a) => (
