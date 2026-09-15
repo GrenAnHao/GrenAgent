@@ -270,7 +270,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
               <div className={styles.hint}>运行中…（点「打开完整对话」在右侧面板看实时进度）</div>
             ) : finalText ? (
               <div className={styles.resultBox}>
-                <LazyMarkdown variant="chat" fontSize={13}>
+                <LazyMarkdown variant="chat" tone="secondary">
                   {finalText}
                 </LazyMarkdown>
               </div>
@@ -283,7 +283,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
           </button>
           {showPrompt ? (
             <div className={styles.promptBox}>
-              <LazyMarkdown variant="chat" fontSize={13}>
+              <LazyMarkdown variant="chat" tone="secondary">
                 {task}
               </LazyMarkdown>
             </div>

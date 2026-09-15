@@ -206,7 +206,7 @@ export const QuestionSelector = memo(function QuestionSelector({
           <div className={styles.body}>
             <div className={styles.question}>
               {/`/.test(q.title) ? (
-                <LazyMarkdown enableMermaid={false} fontSize={14} variant="chat">
+                <LazyMarkdown enableMermaid={false} variant="chat">
                   {q.title}
                 </LazyMarkdown>
               ) : (

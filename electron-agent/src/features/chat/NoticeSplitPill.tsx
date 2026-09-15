@@ -11,30 +11,26 @@ const styles = createStaticStyles(({ css }) => ({
     overflow: auto;
     padding-inline-end: 4px;
     scrollbar-width: thin;
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextSecondary};
 
-    & h1,
-    & h2,
-    & h3,
-    & h4 {
+    & .pi-md.pi-md.pi-md :is(h1, h2, h3, h4, h5, h6) {
       margin: 4px 0;
-      font-size: 12px;
+      font-size: var(--pi-font-size-secondary, 13px);
       font-weight: 600;
       color: ${cssVar.colorTextSecondary};
     }
 
-    & p {
+    & .pi-md.pi-md.pi-md p {
       margin: 4px 0;
     }
 
-    & ul,
-    & ol {
+    & .pi-md.pi-md.pi-md :is(ul, ol) {
       margin: 2px 0;
       padding-inline-start: 18px;
     }
 
-    & li {
+    & .pi-md.pi-md.pi-md li {
       margin: 1px 0;
     }
   `,
@@ -59,7 +55,7 @@ function NoticeSplitPillInner({ content, icon, testId }: NoticeSplitPillProps) {
       <MutedLine icon={icon} text={title} open={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
         <div className={styles.body}>
-          <LazyMarkdown variant="chat" fontSize={12}>
+          <LazyMarkdown variant="chat" tone="secondary">
             {body}
           </LazyMarkdown>
         </div>

@@ -47,7 +47,7 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
         <StructuredMessageBody
           formatted={formatStructuredMessageText(segment.content)}
           fallback={
-            <LazyMarkdown variant="chat" fontSize={14} animated={segment.streaming}>
+            <LazyMarkdown variant="chat" animated={segment.streaming}>
               {segment.content}
             </LazyMarkdown>
           }

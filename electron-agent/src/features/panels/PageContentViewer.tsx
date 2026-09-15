@@ -32,11 +32,9 @@ const styles = createStaticStyles(({ css }) => ({
     flex: 1;
     min-height: 0;
     padding-inline-end: 4px;
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: var(--pi-font-size-secondary, 13px);
+    line-height: calc(20px + var(--pi-font-delta-secondary, 0px));
     color: ${cssVar.colorText};
-
-    /* 长文/长 URL 换行，别顶到右边框 */
     word-break: break-word;
     overflow-wrap: anywhere;
   `,
@@ -88,7 +86,7 @@ export function PageContentViewer({ page, onClose }: { page: PageView; onClose: 
             {page.content}
           </LazyHighlighter>
         ) : tab === 'preview' ? (
-          <LazyMarkdown variant="chat" fontSize={13}>
+          <LazyMarkdown variant="chat" tone="secondary">
             {page.content}
           </LazyMarkdown>
         ) : (

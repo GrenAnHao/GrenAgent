@@ -57,7 +57,7 @@ export function MarkdownWarmup() {
 
   return (
     <div aria-hidden style={HIDDEN_STYLE}>
-      <LazyMarkdown variant="chat" fontSize={14}>
+      <LazyMarkdown variant="chat">
         {WARMUP_MD}
       </LazyMarkdown>
     </div>

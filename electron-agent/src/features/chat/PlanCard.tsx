@@ -11,15 +11,15 @@ import ModelAction from './input/actions/ModelAction';
 const styles = createStaticStyles(({ css }) => ({
   title: css`
     padding: 9px 12px 0;
-    font-size: 14px;
+    font-size: var(--pi-font-size, 14px);
     font-weight: 600;
     letter-spacing: -0.01em;
     color: ${cssVar.colorText};
   `,
   summary: css`
     padding: 4px 12px 0;
-    font-size: 12.5px;
-    line-height: 1.5;
+    font-size: var(--pi-font-size-secondary, 13px);
+    line-height: calc(20px + var(--pi-font-delta-secondary, 0px));
     color: ${cssVar.colorTextSecondary};
     white-space: pre-wrap;
   `,
@@ -33,7 +33,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     gap: 8px;
     align-items: flex-start;
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorText};
   `,
   todoIcon: css`
@@ -56,12 +56,12 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
   `,
   docError: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorTextTertiary};
   `,
   fallback: css`
     padding: 10px 12px;
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorTextSecondary};
     white-space: pre-wrap;
   `,

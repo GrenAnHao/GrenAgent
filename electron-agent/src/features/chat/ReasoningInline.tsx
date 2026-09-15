@@ -116,7 +116,7 @@ function ReasoningInlineInner({ content, streaming, durationMs }: ReasoningInlin
     <div className={styles.wrap} data-testid="reasoning-inline">
       <MutedLine text={label} open={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
-        <LazyMarkdown variant="chat" fontSize={13}>
+        <LazyMarkdown variant="chat" tone="secondary">
           {text}
         </LazyMarkdown>
       ) : null}
