@@ -16,7 +16,6 @@ import { ArrowDown } from 'lucide-react';
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import type { DisplayMessage } from './groupMessages';
 import { scrollbarGutterPx } from './composerWheel';
-import { shouldSmoothScroll } from './listScrollPolicy';
 
 export interface TranscriptScrollHandle {
   scrollBy: (deltaY: number) => void;
@@ -28,7 +27,7 @@ export interface TranscriptScrollHandle {
  * 不会带着整列重型 Markdown 消息一起重渲染。
  */
 export interface MessageListViewport {
-  /** 滚到指定条目（近距离平滑，大跨度瞬时落点）。 */
+  /** 平滑滚动到指定条目，使其对齐视口顶部。 */
   scrollToIndex: (index: number) => void;
   /** 视口顶部条目的下标。 */
   getTopIndex: () => number;
@@ -135,20 +134,12 @@ export function VirtualizedMessageList({
   const anchorWithinRef = useRef(0);
   // 浮层的视口订阅者：每次滚动（anchor 更新后）通知一次，读数直接走 handle 与 anchor ref。
   const viewportListenersRef = useRef(new Set<() => void>());
-  const scrollToIndexRef = useRef<(index: number, align: 'start' | 'end') => void>(() => {});
   const [showJump, setShowJump] = useState(false);
-
-  scrollToIndexRef.current = (index, align) => {
-    ref.current?.scrollToIndex(index, {
-      align,
-      smooth: shouldSmoothScroll(anchorIndexRef.current, index),
-    });
-  };
 
   // 视口把手对象保持恒等，避免浮层因 props 变化反复重建订阅。
   const viewport = useMemo<MessageListViewport>(
     () => ({
-      scrollToIndex: (index) => scrollToIndexRef.current(index, 'start'),
+      scrollToIndex: (index) => ref.current?.scrollToIndex(index, { align: 'start', smooth: true }),
       getTopIndex: () => anchorIndexRef.current,
       getScrollOffset: () => ref.current?.scrollOffset ?? 0,
       getItemOffset: (index) => ref.current?.getItemOffset(index) ?? 0,
@@ -191,12 +182,12 @@ export function VirtualizedMessageList({
     }
   };
 
-  // 一键回到底部：近距离平滑，大跨度瞬时落点（避免沿途挂载整列 Markdown）。
+  // 一键回到底部：平滑滚到最后一条。
   const jumpToBottom = () => {
     if (!ref.current || countRef.current === 0) return;
     atBottomRef.current = true;
     setShowJump(false);
-    scrollToIndexRef.current(countRef.current - 1, 'end');
+    ref.current.scrollToIndex(countRef.current - 1, { align: 'end', smooth: true });
   };
 
   // 内容变化（新消息 / 流式增长）后贴底。用 layout effect：绘制前同步贴底，消除「先显旧位置再跳底」的一帧闪

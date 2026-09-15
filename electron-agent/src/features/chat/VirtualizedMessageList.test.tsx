@@ -1,9 +1,8 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { DisplayMessage } from './groupMessages';
 import type { MessageListViewport } from './VirtualizedMessageList';
-import { SMOOTH_JUMP_MAX_ITEMS } from './listScrollPolicy';
 
 const { scrollToIndex, scrollBy, fireScroll } = vi.hoisted(() => ({
   scrollToIndex: vi.fn(),
@@ -82,40 +81,6 @@ describe('VirtualizedMessageList', () => {
       <VirtualizedMessageList display={[]} renderItem={() => null} data-testid="vlist-empty" />,
     );
     expect(getByTestId('vlist-empty')).toBeTruthy();
-  });
-
-  it('近距离时间轴跳转保留平滑滚动', () => {
-    let viewport: MessageListViewport | undefined;
-    renderList((vp) => {
-      viewport = vp;
-      return null;
-    });
-
-    act(() => {
-      viewport!.scrollToIndex(SMOOTH_JUMP_MAX_ITEMS);
-    });
-
-    expect(scrollToIndex).toHaveBeenCalledWith(SMOOTH_JUMP_MAX_ITEMS, {
-      align: 'start',
-      smooth: true,
-    });
-  });
-
-  it('大跨度时间轴跳转瞬时落点，不沿途平滑滚', () => {
-    let viewport: MessageListViewport | undefined;
-    renderList((vp) => {
-      viewport = vp;
-      return null;
-    });
-
-    act(() => {
-      viewport!.scrollToIndex(20);
-    });
-
-    expect(scrollToIndex).toHaveBeenCalledWith(20, {
-      align: 'start',
-      smooth: false,
-    });
   });
 
   it('reserves seat padding as a trailing spacer row', () => {

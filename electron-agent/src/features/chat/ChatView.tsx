@@ -12,14 +12,12 @@ import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { TranscriptScrollHandle } from './VirtualizedMessageList';
 import type { PromptImage } from './input/ChatInputContext';
-import { isExecutiveCommandMessage, sidebarTitleForPrompt } from './input/commandClassification';
+import { isExecutiveCommandMessage } from './input/commandClassification';
 import { parseCommandToken } from './input/editor/commandPaste';
-import { groupMessages } from './groupMessages';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { pi } from '../../lib/pi';
-import { isUnder } from '../../lib/pathUtils';
+import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
-import { needsSessionCreateOnSend } from '../../lib/pendingSession';
 import { markScratchUsed } from '../../lib/startupConversation';
 import { createStartupPerf } from '../../lib/startupPerf';
 import { useSessionStore } from '../../store/session';
@@ -104,18 +102,16 @@ export function ChatView() {
   const { workspace, store, workspaceReady } = useAgentStoreContext();
   const { message: messageApi } = App.useApp();
   const worksDir = useSessionStore((s) => s.worksDir);
+  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
+  const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
   const messages = store.useStore((s) => s.messages);
   const lastError = store.useStore((s) => s.lastError);
   const retrying = store.useStore((s) => s.retrying);
   const compacting = store.useStore((s) => s.compacting);
   const isEmpty = messages.length === 0;
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
-  const commandInputCount = useCommandInputStore((s) => {
-    const path = useSessionStore.getState().activeSessionPath;
-    if (!path) return 0;
-    return s.bySession[path]?.length ?? 0;
-  });
-  const showEmptyLayout = isEmpty && workspaceReady && commandInputCount === 0;
+  const isDraftConversation = Boolean(draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace));
+  const showEmptyLayout = isEmpty && workspaceReady;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
   const [seatHeight, setSeatHeight] = useState(0);
@@ -187,85 +183,22 @@ export function ChatView() {
     if (!text && !images?.length) return;
     // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
     userAbortedRef.current = false;
-    const sidebarTitle = sidebarTitleForPrompt(text);
-
-    // 发送路径性能埋点：拆出 openWorkspace / newSession / getState / promptToStream 各耗时
-    //（DEV 控制台 [PERF-startup] send:<ws>），用于定位「新对话/久置后发送」的延迟究竟卡在哪。
-    const sendPerf = createStartupPerf(`send:${workspace}`);
-    const ensureSessionForSend = async () => {
-      const st = useSessionStore.getState();
-      if (
-        !needsSessionCreateOnSend({
-          workspace,
-          activeSessionPath: st.activeSessionPath,
-          draftConversationCwd: st.draftConversationCwd,
-        })
-      ) {
-        return;
-      }
-      sendPerf.start('openWorkspace');
-      await pi.openWorkspace(workspace);
-      sendPerf.end('openWorkspace');
-      // 待创建草稿必须 newSession：项目里点新会话时 openWorkspace 会带回 last_session，不能写回旧会话。
-      sendPerf.start('newSession');
-      await pi.newSession(workspace);
-      sendPerf.end('newSession');
-      sendPerf.start('getState');
-      let state: { sessionFile?: string };
-      try {
-        state = (await pi.getState(workspace)) as { sessionFile?: string };
-      } catch (error) {
-        // 草稿 worker 仍可能短暂带着外工作区 last_session；归属失败时新建本对话会话再读一次。
-        if (!String(error).includes('SESSION_WORKSPACE_MISMATCH')) throw error;
-        sendPerf.start('newSession');
-        await pi.newSession(workspace);
-        sendPerf.end('newSession');
-        state = (await pi.getState(workspace)) as { sessionFile?: string };
-      }
-      sendPerf.end('getState');
-      const path = state.sessionFile;
-      if (path) {
-        st.setActiveSession(path);
-        st.setWorkspaceSessionPath(workspace, path);
-        st.upsertOptimisticSession({
-          id: `opt-${path}`,
-          path,
-          cwd: workspace,
-          timestamp: new Date().toISOString(),
-          name: sidebarTitle || null,
-        });
-      }
-      st.clearDraftConversation(workspace);
-      // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
-      markScratchUsed(workspace);
-    };
 
     // 执行性命令（/dream 等）：不产生对话轮次。跳过乐观气泡与 awaitingResponse，
     // 改瞬态 toast，仍 pi.prompt 让 Pi 执行——切换/重载后不再有幽灵气泡。
-    // 初屏草稿、侧栏新建对话、项目/输入区新会话都还没有会话；首条消息或 /goal 才转正。
     if (text && isExecutiveCommandMessage(text)) {
-      const parsed = parseCommandToken(text);
-      const cmd = parsed ? `/${parsed.name}` : text.split(/\s/, 1)[0];
+      const cmd = text.split(/\s/, 1)[0];
       try {
-        sendPerf.start('ensureSession');
-        await ensureSessionForSend();
-        sendPerf.end('ensureSession');
         await pi.prompt(workspace, text, undefined, images);
-        if (parsed?.name.toLowerCase() !== 'goal') {
-          messageApi.info(`已执行 ${cmd}`);
-        }
+        messageApi.info(`已执行 ${cmd}`);
         const sessionPath = useSessionStore.getState().activeSessionPath;
         if (sessionPath) {
+          const parsed = parseCommandToken(text);
           useCommandInputStore.getState().append(sessionPath, {
             command: cmd,
             rest: parsed?.rest ?? text.slice(cmd.length).trim(),
-            beforeCount: groupMessages(store.useStore.getState().messages).length,
           });
-          if (parsed?.name.toLowerCase() === 'goal' && sidebarTitle && sidebarTitle !== cmd) {
-            void pi.setSessionDisplayName(sessionPath, sidebarTitle).catch(() => {});
-          }
         }
-        if (text) void syncSidebarOnSend(workspace, sidebarTitle);
       } catch (e) {
         messageApi.error(`${cmd} 执行失败：${e instanceof Error ? e.message : String(e)}`);
       }
@@ -311,6 +244,51 @@ export function ChatView() {
     if (text || images?.length) store.pushUserMessage(text, images);
     // 发送即置「准备响应中」：桥接到后端首个 agent_start 之间的冷启动/会话预备窗口，消除无反馈空档。
     store.useStore.setState({ awaitingResponse: true });
+    // 发送路径性能埋点：拆出 openWorkspace / newSession / getState / promptToStream 各耗时
+    //（DEV 控制台 [PERF-startup] send:<ws>），用于定位「新对话/久置后发送」的延迟究竟卡在哪。
+    const sendPerf = createStartupPerf(`send:${workspace}`);
+
+    const ensureSessionForSend = async () => {
+      if (!isDraftConversation && activeSessionPath) return;
+      if (!isConversation) return;
+      const st = useSessionStore.getState();
+      sendPerf.start('openWorkspace');
+      const openResult = await pi.openWorkspace(workspace);
+      sendPerf.end('openWorkspace');
+      if (!openResult.sessionFile) {
+        sendPerf.start('newSession');
+        await pi.newSession(workspace);
+        sendPerf.end('newSession');
+      }
+      sendPerf.start('getState');
+      let state: { sessionFile?: string };
+      try {
+        state = (await pi.getState(workspace)) as { sessionFile?: string };
+      } catch (error) {
+        // 草稿 worker 仍可能短暂带着外工作区 last_session；归属失败时新建本对话会话再读一次。
+        if (!String(error).includes('SESSION_WORKSPACE_MISMATCH')) throw error;
+        sendPerf.start('newSession');
+        await pi.newSession(workspace);
+        sendPerf.end('newSession');
+        state = (await pi.getState(workspace)) as { sessionFile?: string };
+      }
+      sendPerf.end('getState');
+      const path = state.sessionFile ?? openResult.sessionFile;
+      if (path) {
+        st.setActiveSession(path);
+        st.setWorkspaceSessionPath(workspace, path);
+        st.upsertOptimisticSession({
+          id: `opt-${path}`,
+          path,
+          cwd: workspace,
+          timestamp: new Date().toISOString(),
+          name: text || null,
+        });
+      }
+      st.clearDraftConversation(workspace);
+      // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
+      markScratchUsed(workspace);
+    };
 
     try {
       sendPerf.start('ensureSession');
@@ -322,7 +300,7 @@ export function ChatView() {
       sendPerf.report();
       return;
     }
-    if (text) void syncSidebarOnSend(workspace, sidebarTitle);
+    if (text) void syncSidebarOnSend(workspace, text);
 
     // 发送一轮：成功返回 ok；失败带错误信息（区分用户主动 abort，不计入重试）。
     // 失败判定含三类：pi.prompt 抛错、本轮产生错误事件(lastError)、本轮无任何助手/工具输出。
