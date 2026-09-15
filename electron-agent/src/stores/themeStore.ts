@@ -26,22 +26,27 @@ interface ThemeState {
   toggleAppearance: () => void;
 }
 
+let applyFontSize: (fontSize: number) => void = () => {};
+
 export const useThemeStore = create<ThemeState>()(
   persist(
-    (set) => ({
-      appearance: 'dark',
-      primaryColor: undefined,
-      neutralColor: undefined,
-      colorScheme: DEFAULT_COLOR_SCHEME,
-      fontSize: FONT_SIZE_DEFAULT,
-      setAppearance: (appearance) => set({ appearance }),
-      setPrimaryColor: (primaryColor) => set({ primaryColor }),
-      setNeutralColor: (neutralColor) => set({ neutralColor }),
-      setColorScheme: (colorScheme) => set({ colorScheme }),
-      setFontSize: (fontSize) => set({ fontSize: clampFontSize(fontSize) }),
-      toggleAppearance: () =>
-        set((state) => ({ appearance: state.appearance === 'dark' ? 'light' : 'dark' })),
-    }),
+    (set) => {
+      applyFontSize = (fontSize) => set({ fontSize });
+      return {
+        appearance: 'dark',
+        primaryColor: undefined,
+        neutralColor: undefined,
+        colorScheme: DEFAULT_COLOR_SCHEME,
+        fontSize: FONT_SIZE_DEFAULT,
+        setAppearance: (appearance) => set({ appearance }),
+        setPrimaryColor: (primaryColor) => set({ primaryColor }),
+        setNeutralColor: (neutralColor) => set({ neutralColor }),
+        setColorScheme: (colorScheme) => set({ colorScheme }),
+        setFontSize: (fontSize) => set({ fontSize: clampFontSize(fontSize) }),
+        toggleAppearance: () =>
+          set((state) => ({ appearance: state.appearance === 'dark' ? 'light' : 'dark' })),
+      };
+    },
     {
       name: 'pi-theme',
       partialize: (state) => ({
@@ -54,7 +59,7 @@ export const useThemeStore = create<ThemeState>()(
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         const next = clampFontSize(state.fontSize);
-        if (next !== state.fontSize) useThemeStore.setState({ fontSize: next });
+        if (next !== state.fontSize) applyFontSize(next);
       },
     },
   ),

@@ -1,6 +1,18 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FONT_SIZE_DEFAULT } from '../theme/contentFont';
 import { useThemeStore } from './themeStore';
+
+describe('themeStore fontSize first import', () => {
+  it('clamps dirty fontSize on first hydrate', async () => {
+    localStorage.setItem(
+      'pi-theme',
+      JSON.stringify({ state: { fontSize: 999, appearance: 'dark', colorScheme: 'github' }, version: 0 }),
+    );
+    vi.resetModules();
+    const { useThemeStore: freshStore } = await import('./themeStore');
+    expect(freshStore.getState().fontSize).toBe(17);
+  });
+});
 
 afterEach(() => {
   localStorage.removeItem('pi-theme');
