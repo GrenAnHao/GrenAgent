@@ -149,7 +149,7 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   groupTitle: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     font-weight: 600;
     color: ${cssVar.colorText};
     margin-block-end: 10px;
@@ -159,12 +159,12 @@ const styles = createStaticStyles(({ css }) => ({
     max-width: 520px;
   `,
   label: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorText};
     margin-block-end: 6px;
   `,
   desc: css`
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextDescription};
     margin-block-end: 8px;
   `,

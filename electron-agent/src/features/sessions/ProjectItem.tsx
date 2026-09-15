@@ -15,7 +15,6 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 0 8px 0 10px;
     border-radius: 7px;
     color: ${cssVar.colorText};
-    font-size: 13px;
     cursor: pointer;
 
     &:hover {

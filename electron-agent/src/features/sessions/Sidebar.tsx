@@ -59,7 +59,7 @@ const styles = createStaticStyles(({ css }) => ({
     margin: 0 6px;
     padding: 2px 10px 4px 28px;
     color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     cursor: pointer;
 
     &:hover {
