@@ -74,4 +74,22 @@ describe("reconstructFromEntries", () => {
       { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: "bad" } } },
     ])).toEqual(emptyTodoState());
   });
+
+  it("keeps the last success when a trailing isError snapshot differs", () => {
+    const kept = { id: 1, text: "keep", status: "pending" as const };
+    const s = reconstructFromEntries([
+      { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [kept], nextId: 2 } } },
+      { type: "message", message: { role: "toolResult", toolName: "todo", isError: true, details: { todos: [{ id: 1, text: "failed", status: "completed" }], nextId: 2 } } },
+    ]);
+    expect(s).toEqual({ todos: [kept], nextId: 2 });
+  });
+
+  it("keeps the last success when a trailing details.error snapshot differs", () => {
+    const kept = { id: 1, text: "keep", status: "pending" as const };
+    const s = reconstructFromEntries([
+      { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [kept], nextId: 2 } } },
+      { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [{ id: 1, text: "failed", status: "completed" }], nextId: 2, error: "nope" } } },
+    ]);
+    expect(s).toEqual({ todos: [kept], nextId: 2 });
+  });
 });
