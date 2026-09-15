@@ -184,6 +184,22 @@ describe('ToolExecution ask_user stub', () => {
   });
 });
 
+describe('ToolExecution generate_image card', { timeout: 30_000 }, () => {
+  it('still renders generate_image as its own card', () => {
+    wrap(
+      <ToolExecution
+        toolName="generate_image"
+        args={{ prompt: '一只在键盘上打字的橘猫，扁平插画' }}
+        result={undefined}
+        status="running"
+      />,
+    );
+    expect(screen.getByTestId('card-generate_image')).toBeTruthy();
+    expect(screen.queryByTestId('card-todo')).toBeNull();
+    expect(screen.queryByText('更新任务清单')).toBeNull();
+  });
+});
+
 describe('ToolExecution todo row', () => {
   it('renders 更新任务清单 without card-todo', () => {
     wrap(

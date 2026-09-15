@@ -15,6 +15,7 @@ import { UserMessage } from './features/chat/UserMessage';
 import { PlanCard } from './features/chat/PlanCard';
 import { SubAgentInline } from './features/chat/SubAgentInline';
 import { AttachmentCard } from './features/chat/AttachmentCard';
+import { TodoDock } from './features/chat/input/TodoDock';
 import { CodeSurface, ConvCard, ConvRow, ConvStrip, MutedLine, OptionRow, StatusGlyph } from './features/chat/conv';
 import { AgentStoreContext } from './stores/AgentStoreContext';
 import type { AgentStoreApi } from './stores/agent';
@@ -201,6 +202,15 @@ function Gallery() {
       </Section>
 
       <Section title="待办（dock 条 + 对话流行）">
+        <Item label="任务条 · 并行进行中">
+          <TodoDock
+            todos={[
+              { id: 1, text: '搭骨架', status: 'completed' },
+              { id: 2, text: '写组件', status: 'in_progress' },
+              { id: 3, text: '跑后台构建', status: 'in_progress' },
+            ]}
+          />
+        </Item>
         <Item label="对话流 · 并行进行中">
           <ToolExecution
             toolName="todo"

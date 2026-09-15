@@ -74,6 +74,24 @@ describe('ComposerPromptOverlay', () => {
     expect(screen.getByTestId('inline-question')).toBeTruthy();
   });
 
+  it('portals the question card outside the composer so seat height stays put', () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'u1',
+      data: {
+        kind: 'questions',
+        id: 'q1',
+        questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
+      },
+    });
+    renderOverlay();
+    const overlay = screen.getByTestId('composer-prompt-overlay');
+    const surface = screen.getByTestId('composer-surface');
+    expect(surface.contains(overlay)).toBe(false);
+    expect(surface.parentElement?.contains(overlay)).toBe(false);
+    expect(overlay.parentElement).toBe(document.body);
+  });
+
   it('renders overlay select and skips approval', () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',

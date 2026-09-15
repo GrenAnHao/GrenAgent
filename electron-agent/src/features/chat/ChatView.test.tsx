@@ -124,6 +124,7 @@ state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => f
 
 import { pi } from '../../lib/pi';
 import { useCommandInputStore } from '../../stores/commandInputStore';
+import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { ChatView } from './ChatView';
 
 afterEach(() => {
@@ -183,6 +184,22 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(screen.getByTestId('chat-input')).toBeTruthy();
     expect(screen.queryByTestId('chat-list')).toBeNull();
     expect(screen.queryByTestId('composer-seat')).toBeNull();
+  });
+
+  it('keeps the compose column width when leaving the empty layout', () => {
+    state.workspaceReady = true;
+    state.messageCount = 0;
+    state.storeState.messages = [];
+    const empty = render(<ChatView />);
+    expect(empty.getByTestId('chat-input-region')).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
+    empty.unmount();
+
+    state.messageCount = 1;
+    state.storeState.messages = Array(state.messageCount).fill({});
+    render(<ChatView />);
+    const occupied = screen.getByTestId('chat-input-region');
+    expect(occupied).toHaveStyle({ width: '100%' });
+    expect(occupied.parentElement).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
   });
 });
 

@@ -17,6 +17,13 @@ describe('TodoDock', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('unmounts after todos is cleared to an empty list', () => {
+    const { rerender } = render(<TodoDock todos={LIST} />);
+    expect(screen.getByTestId('todo-dock')).toBeTruthy();
+    rerender(<TodoDock todos={[]} />);
+    expect(screen.queryByTestId('todo-dock')).toBeNull();
+  });
+
   it('collapses to counts without task names', () => {
     render(<TodoDock todos={LIST} />);
     expect(screen.getByTestId('todo-dock').textContent).toContain('任务');

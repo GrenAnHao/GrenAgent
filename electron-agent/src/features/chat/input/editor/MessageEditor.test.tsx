@@ -66,7 +66,6 @@ vi.mock('../SessionGoalDrawer', () => ({
   SessionGoalDrawer: ({ open, snapshot }: { open: boolean; snapshot?: { condition?: string } }) =>
     open ? <div data-testid="session-goal-drawer">{snapshot?.condition}</div> : null,
 }));
-vi.mock('../PromptRequestCard', () => ({ PromptRequestCard: () => null }));
 vi.mock('../ComposerPromptOverlay', () => ({ ComposerPromptOverlay: () => null }));
 vi.mock('../ContextUsageTag', () => ({ ContextUsageTag: () => null }));
 vi.mock('./InputChips', () => ({ InputChips: () => null }));
@@ -80,6 +79,7 @@ vi.mock('./useSlashOptions', () => ({ useSlashOptions: () => ({ slashItems: [], 
 vi.mock('./useTauriFileDrop', () => ({ useTauriFileDrop: () => ({ dragOver: false, dragKind: null }) }));
 
 import { MessageEditor } from './MessageEditor';
+import { useUiPromptStore } from '../../../../stores/uiPromptStore';
 
 if (!('ResizeObserver' in globalThis)) {
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
@@ -113,6 +113,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useGoalStore.setState({ bySession: {}, goal: undefined });
+  useUiPromptStore.setState({ byWorkspace: {} });
   addPastedText.mockClear();
   send.mockClear();
   getState.mockReset();
@@ -162,5 +163,19 @@ describe('MessageEditor project context citations', () => {
     const queue = await screen.findByTestId('steer-queue');
     expect(surface.contains(queue)).toBe(false);
     expect(screen.getByTestId('composer-dock').contains(queue)).toBe(true);
+  });
+
+  it('keeps the approval card in the editor flow, not the overlay', () => {
+    useUiPromptStore.getState().setRequest({
+      workspace: '/repo',
+      request: { id: 'u1', method: 'select', title: '危险命令：rm -rf ./tmp', options: ['允许', '拒绝'] },
+    });
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+
+    const approval = screen.getByTestId('prompt-request-approval');
+    const surface = screen.getByTestId('composer-surface');
+    expect(surface.contains(approval)).toBe(false);
+    expect(screen.getByTestId('composer-dock').parentElement?.contains(approval)).toBe(true);
+    expect(screen.queryByTestId('composer-prompt-overlay')).toBeNull();
   });
 });

@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+vi.mock('../../stores/AgentStoreContext', () => ({
+  useAgentStoreContext: () => ({ workspace: '/ws' }),
+  useOptionalAgentStoreContext: () => undefined,
+}));
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
