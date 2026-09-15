@@ -36,5 +36,7 @@ it('index.css imports the axis and uses html body', () => {
   expect(css).toContain("@import './theme/contentFont.css'");
   expect(css).not.toMatch(/^body\s*\{/m);
   const axis = readFileSync(new URL('./contentFont.css', import.meta.url), 'utf8');
-  expect(axis).toContain('html body');
+  expect(axis).toContain('html body {');
+  expect(axis).toContain('.pi-md.pi-md.pi-md p:not(:first-child)');
+  expect(axis).toContain('.pi-md.pi-md.pi-md li p:first-child');
 });

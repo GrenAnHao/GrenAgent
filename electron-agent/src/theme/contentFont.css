@@ -78,7 +78,9 @@ html body {
   font-weight: inherit;
 }
 
-.pi-md.pi-md.pi-md p {
+.pi-md.pi-md.pi-md p,
+.pi-md.pi-md.pi-md p:not(:first-child),
+.pi-md.pi-md.pi-md p:not(:last-child) {
   margin: 16px 0;
 }
 
@@ -116,7 +118,9 @@ html body {
   margin-top: 4px;
 }
 
-.pi-md.pi-md.pi-md li > p {
+.pi-md.pi-md.pi-md li > p,
+.pi-md.pi-md.pi-md li p:first-child {
+  display: block;
   margin: 8px 0;
 }
 
