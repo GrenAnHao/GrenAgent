@@ -84,14 +84,6 @@ html body {
   margin: 16px 0;
 }
 
-.pi-md.pi-md.pi-md :where(h4, h5, h6) + :where(ul, ol) {
-  margin-top: 8px;
-}
-
-.pi-md.pi-md.pi-md :where(h4, h5, h6):has(+ :where(ul, ol)) {
-  margin-bottom: 8px;
-}
-
 .pi-md.pi-md.pi-md a {
   color: var(--gren-acc, inherit);
   text-decoration: underline;
@@ -110,6 +102,14 @@ html body {
   padding-left: 18px;
 }
 
+.pi-md.pi-md.pi-md :is(h4, h5, h6) + :is(ul, ol) {
+  margin-top: 8px;
+}
+
+.pi-md.pi-md.pi-md :is(h4, h5, h6):has(+ :is(ul, ol)) {
+  margin-bottom: 8px;
+}
+
 .pi-md.pi-md.pi-md li:not(:first-child) {
   margin-top: 6px;
 }
@@ -119,7 +119,9 @@ html body {
 }
 
 .pi-md.pi-md.pi-md li > p,
-.pi-md.pi-md.pi-md li p:first-child {
+.pi-md.pi-md.pi-md li p:first-child,
+.pi-md.pi-md.pi-md li p:not(:first-child),
+.pi-md.pi-md.pi-md li p:not(:last-child) {
   display: block;
   margin: 8px 0;
 }

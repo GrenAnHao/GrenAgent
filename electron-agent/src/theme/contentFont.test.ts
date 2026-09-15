@@ -41,4 +41,6 @@ it('index.css imports the axis and uses html body', () => {
   expect(axis).toContain('.pi-md.pi-md.pi-md p:not(:last-child)');
   expect(axis).toContain('.pi-md.pi-md.pi-md li p:first-child');
   expect(axis).toContain('.pi-md.pi-md.pi-md li p:last-child');
+  expect(axis).toContain('.pi-md.pi-md.pi-md li p:not(:first-child)');
+  expect(axis).toContain('.pi-md.pi-md.pi-md :is(h4, h5, h6) + :is(ul, ol)');
 });
