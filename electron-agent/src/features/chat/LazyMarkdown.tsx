@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, type ComponentProps, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 
 import { Mermaid } from './Mermaid';
 import { splitMermaid } from './splitMermaid';
@@ -24,11 +24,46 @@ class MarkdownErrorBoundary extends Component<
   }
 }
 
+type LazyMarkdownProps = Omit<MarkdownProps, 'fontSize'> & {
+  tone?: 'body' | 'secondary';
+  prose?: boolean;
+};
+
+function markdownClassName(prose: boolean, tone: 'body' | 'secondary', className?: string): string | undefined {
+  const names = [
+    prose ? 'pi-md' : null,
+    prose && tone === 'secondary' ? 'pi-md-secondary' : null,
+    className,
+  ].filter(Boolean) as string[];
+  return names.length > 0 ? names.join(' ') : undefined;
+}
+
+const fallbackPreStyle = {
+  margin: 0,
+  whiteSpace: 'pre-wrap' as const,
+  fontFamily: 'var(--pi-font-sans)',
+  fontSize: 'var(--pi-font-size, 14px)',
+  lineHeight: 'calc(24px + var(--pi-font-delta, 0px))',
+};
+
+// @lobehub 把 --lobe-markdown-font-size / -line-height 写成 <article> 上的行内变量，
+// variant="chat" 时恒为 14px / 1.6，会把后代字号钉死（见「动工前必读」）。Typography 里
+// `...style` 展开在自有变量之后，用行内 style 指回我们的轴即可。
+const LOBE_AXIS_BODY = {
+  '--lobe-markdown-font-size': 'var(--pi-font-size, 14px)',
+  '--lobe-markdown-line-height': 'calc(24px + var(--pi-font-delta, 0px))',
+} as CSSProperties;
+
+const LOBE_AXIS_SECONDARY = {
+  '--lobe-markdown-font-size': 'var(--pi-font-size-secondary, 13px)',
+  '--lobe-markdown-line-height': 'calc(20px + var(--pi-font-delta-secondary, 0px))',
+} as CSSProperties;
+
 // 正文块：始终关掉 @lobehub 的 mermaid（blob image）路径——mermaid 由本文件分段后交给自写组件渲染。
 function MarkdownBlock(props: Omit<MarkdownProps, 'enableMermaid'>) {
   const plain: ReactNode = props.children as ReactNode;
   return (
-    <MarkdownErrorBoundary fallback={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{plain}</pre>}>
+    <MarkdownErrorBoundary fallback={<pre style={fallbackPreStyle}>{plain}</pre>}>
       <Suspense fallback={<span style={{ whiteSpace: 'pre-wrap' }}>{plain}</span>}>
         <Markdown enableMermaid={false} {...props} />
       </Suspense>
@@ -64,11 +99,22 @@ function renderMermaidAware(content: string, enableMermaid: boolean, rest: Markd
 
 // 对话里不内联渲染图片：图片统一走 generate_image 工具卡（GenerateImageCard）展示。这里剥掉正文里的
 // data-URL 图片、图片请求 JSON 回显，以及本地/相对路径的图片引用（避免裂图 + 与工具卡重复），只渲染正文。
-function LazyMarkdownInner({ enableMermaid = true, children, ...rest }: MarkdownProps) {
+function LazyMarkdownInner({
+  enableMermaid = true,
+  children,
+  tone = 'body',
+  prose = true,
+  className,
+  style,
+  ...rest
+}: LazyMarkdownProps) {
+  const mdClass = markdownClassName(prose, tone, className);
+  const axisStyle = tone === 'secondary' ? LOBE_AXIS_SECONDARY : LOBE_AXIS_BODY;
+  const blockProps = { ...rest, className: mdClass, style: { ...axisStyle, ...style } };
   if (typeof children !== 'string') {
-    return <MarkdownBlock {...rest}>{children}</MarkdownBlock>;
+    return <MarkdownBlock {...blockProps}>{children}</MarkdownBlock>;
   }
-  return <>{renderMermaidAware(stripInlineImages(children), enableMermaid, rest)}</>;
+  return <>{renderMermaidAware(stripInlineImages(children), enableMermaid, blockProps)}</>;
 }
 
 // memo：props 不变时不重渲染，避免流式中未变消息反复解析 markdown。
