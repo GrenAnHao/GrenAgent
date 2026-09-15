@@ -21,5 +21,7 @@ describe("isSafeCommand", () => {
     expect(isSafeCommand("Out-File .\\a.txt")).toBe(false);
     expect(isSafeCommand("copy .\\a.txt .\\b.txt")).toBe(false);
     expect(isSafeCommand("Set-Location ..")).toBe(false);
+    expect(isSafeCommand("Get-ChildItem; del .\\a.txt")).toBe(false);
+    expect(isSafeCommand("Get-ChildItem | ri")).toBe(false);
   });
 });
