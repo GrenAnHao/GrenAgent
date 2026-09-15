@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_COLOR_SCHEME, type PrimaryColorName } from '../theme/colorSchemes';
+import { clampFontSize, FONT_SIZE_DEFAULT } from '../theme/contentFont';
 
 export type Appearance = 'light' | 'dark' | 'auto';
 
@@ -16,10 +17,12 @@ interface ThemeState {
   neutralColor?: NeutralColor;
   /** 配色预设 id（见 theme/colorSchemes）；驱动表面/文字/边框的整体方案，并给出默认主题色。 */
   colorScheme: string;
+  fontSize: number;
   setAppearance: (appearance: Appearance) => void;
   setPrimaryColor: (color?: PrimaryColor) => void;
   setNeutralColor: (color?: NeutralColor) => void;
   setColorScheme: (id: string) => void;
+  setFontSize: (fontSize: number) => void;
   toggleAppearance: () => void;
 }
 
@@ -30,10 +33,12 @@ export const useThemeStore = create<ThemeState>()(
       primaryColor: undefined,
       neutralColor: undefined,
       colorScheme: DEFAULT_COLOR_SCHEME,
+      fontSize: FONT_SIZE_DEFAULT,
       setAppearance: (appearance) => set({ appearance }),
       setPrimaryColor: (primaryColor) => set({ primaryColor }),
       setNeutralColor: (neutralColor) => set({ neutralColor }),
       setColorScheme: (colorScheme) => set({ colorScheme }),
+      setFontSize: (fontSize) => set({ fontSize: clampFontSize(fontSize) }),
       toggleAppearance: () =>
         set((state) => ({ appearance: state.appearance === 'dark' ? 'light' : 'dark' })),
     }),
@@ -44,7 +49,13 @@ export const useThemeStore = create<ThemeState>()(
         primaryColor: state.primaryColor,
         neutralColor: state.neutralColor,
         colorScheme: state.colorScheme,
+        fontSize: state.fontSize,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const next = clampFontSize(state.fontSize);
+        if (next !== state.fontSize) useThemeStore.setState({ fontSize: next });
+      },
     },
   ),
 );
