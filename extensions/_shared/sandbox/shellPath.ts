@@ -106,19 +106,13 @@ export async function resolveShellPath(deps: ResolveShellPathDeps = {}): Promise
   const platform = deps.platform ?? process.platform;
   if (platform !== "win32") return "bash";
 
-  const which = deps.which ?? spawnWhere;
   const exists = deps.exists ?? existsSync;
   const statSize = deps.statSize ?? defaultStatSize;
   const ps51 = windowsPowershell51();
 
-  const pwshHits: string[] = [];
-  const fromWhich = which("pwsh.exe");
-  if (fromWhich) pwshHits.push(fromWhich);
-  if (!deps.which) {
-    for (const hit of spawnWhereAll("pwsh.exe")) {
-      if (!pwshHits.includes(hit)) pwshHits.push(hit);
-    }
-  }
+  const pwshHits = deps.which
+    ? [deps.which("pwsh.exe")].filter((h): h is string => Boolean(h))
+    : spawnWhereAll("pwsh.exe");
   for (const hit of pwshHits) {
     if (isUsableWin32Exe(hit, exists, statSize)) return hit;
   }
