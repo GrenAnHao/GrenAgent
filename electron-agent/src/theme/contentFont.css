@@ -1,0 +1,202 @@
+/* 对话字号轴。--pi-font-size 由 useFontSizeSync 写在 documentElement 上（12–17px，默认 14）。
+   次级档公式与 DSH 相同：min(size - 1px, max(13px, size - 2px)) → 12→11 … 14→13、15→13、17→15。
+   选择器必须是 html body：antd v6 hashed:false 会注入无哈希 body { font-size; font-family }，
+   晚于 Vite 的 index.css，同为 (0,0,1) 时会盖掉本文件。 */
+html {
+  --pi-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --pi-font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+
+  --pi-font-delta: calc(var(--pi-font-size, 14px) - 14px);
+  --pi-font-size-secondary: min(
+    calc(var(--pi-font-size, 14px) - 1px),
+    max(13px, calc(var(--pi-font-size, 14px) - 2px))
+  );
+  --pi-font-delta-secondary: calc(var(--pi-font-size-secondary) - 13px);
+
+  --pi-md-h1: 700 calc(21px + var(--pi-font-delta)) / calc(30px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h2: 700 calc(19px + var(--pi-font-delta)) / calc(28px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h3: 700 calc(18px + var(--pi-font-delta)) / calc(26px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-h4: 600 var(--pi-font-size, 14px) / calc(24px + var(--pi-font-delta)) var(--pi-font-sans);
+  --pi-md-base: var(--pi-font-size, 14px) / calc(24px + var(--pi-font-delta)) var(--pi-font-sans);
+}
+
+html body {
+  font-family: var(--pi-font-sans);
+  font-size: var(--pi-font-size, 14px);
+  line-height: calc(24px + var(--pi-font-delta, 0px));
+}
+
+.pi-md.pi-md.pi-md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--pi-md-base);
+  color: inherit;
+}
+
+.pi-md.pi-md.pi-md-secondary {
+  font-size: var(--pi-font-size-secondary, 13px);
+  line-height: calc(20px + var(--pi-font-delta-secondary, 0px));
+}
+
+/* mermaid 分段会吐多个平级 .pi-md；首末子块 margin 归零后相邻块会塌陷成 0，补一条缝。 */
+.pi-md + .pi-md {
+  margin-block-start: 16px;
+}
+
+.pi-md.pi-md.pi-md strong {
+  font-weight: 600;
+}
+
+.pi-md.pi-md.pi-md h1 {
+  font: var(--pi-md-h1);
+  margin: 32px 0 16px;
+}
+
+.pi-md.pi-md.pi-md h2 {
+  font: var(--pi-md-h2);
+  margin: 32px 0 16px;
+}
+
+.pi-md.pi-md.pi-md h3 {
+  font: var(--pi-md-h3);
+  margin: 32px 0 16px;
+}
+
+.pi-md.pi-md.pi-md h4 {
+  font: var(--pi-md-h4);
+  margin: 16px 0;
+}
+
+.pi-md.pi-md.pi-md :where(h5, h6) {
+  font: 600 var(--pi-font-size, 14px) / calc(24px + var(--pi-font-delta, 0px)) var(--pi-font-sans);
+  margin: 16px 0;
+}
+
+.pi-md.pi-md.pi-md :where(h1, h2, h3, h4, h5, h6) strong {
+  font-weight: inherit;
+}
+
+.pi-md.pi-md.pi-md p {
+  margin: 16px 0;
+}
+
+.pi-md.pi-md.pi-md :where(h4, h5, h6) + :where(ul, ol) {
+  margin-top: 8px;
+}
+
+.pi-md.pi-md.pi-md :where(h4, h5, h6):has(+ :where(ul, ol)) {
+  margin-bottom: 8px;
+}
+
+.pi-md.pi-md.pi-md a {
+  color: var(--gren-acc, inherit);
+  text-decoration: underline;
+  text-decoration-color: var(--gren-border, rgba(127, 127, 127, 0.45));
+  text-underline-offset: 3px;
+}
+
+.pi-md.pi-md.pi-md a:hover,
+.pi-md.pi-md.pi-md a:focus {
+  outline: none;
+  text-decoration-color: var(--gren-acc, inherit);
+}
+
+.pi-md.pi-md.pi-md :where(ul, ol) {
+  margin: 16px 0;
+  padding-left: 18px;
+}
+
+.pi-md.pi-md.pi-md li:not(:first-child) {
+  margin-top: 6px;
+}
+
+.pi-md.pi-md.pi-md li > :where(ul, ol) {
+  margin-top: 4px;
+}
+
+.pi-md.pi-md.pi-md li > p {
+  margin: 8px 0;
+}
+
+.pi-md.pi-md.pi-md li > *:first-child {
+  margin-top: 0;
+}
+
+.pi-md.pi-md.pi-md li > *:last-child {
+  margin-bottom: 0;
+}
+
+.pi-md.pi-md.pi-md hr {
+  display: block;
+  border: none;
+  height: 0.5px;
+  margin: 32px 0;
+  background: var(--gren-border, rgba(127, 127, 127, 0.28));
+}
+
+.pi-md.pi-md.pi-md blockquote {
+  border-left: 2px solid var(--gren-fg-muted, rgba(127, 127, 127, 0.55));
+  margin: 16px 0 0;
+  padding-left: 14px;
+}
+
+/* 行内 code 不跟轴。 */
+.pi-md.pi-md.pi-md :not(pre) > code {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  font: 12px/19px var(--pi-font-mono);
+  background-color: var(--gren-bg-2, rgba(127, 127, 127, 0.1));
+  border: 0.5px solid var(--gren-border, rgba(127, 127, 127, 0.22));
+  border-radius: 6px;
+  padding: 0 5px;
+}
+
+/* lobe 的 pre 是 calc(--lobe-markdown-font-size * 0.85)，基字号跟轴后会涨到 14.45px。
+   本轮钉在 12px（与现在 14 * 0.85 ≈ 11.9 等价），代码块不跟轴。 */
+.pi-md.pi-md.pi-md pre {
+  font-size: 12px;
+}
+
+.pi-md.pi-md.pi-md table {
+  display: table;
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+  box-shadow: none;
+}
+
+.pi-md.pi-md.pi-md th,
+.pi-md.pi-md.pi-md td {
+  min-width: 0;
+  padding: 10px 16px;
+  border-bottom: 0.5px solid var(--gren-border, rgba(127, 127, 127, 0.22));
+  font-size: var(--pi-font-size-secondary, 13px);
+  line-height: calc(22px + var(--pi-font-delta-secondary, 0px));
+  text-align: start;
+}
+
+.pi-md.pi-md.pi-md th {
+  font-weight: 500;
+}
+
+.pi-md.pi-md.pi-md th:first-child,
+.pi-md.pi-md.pi-md td:first-child {
+  padding-left: 0;
+}
+
+.pi-md.pi-md.pi-md td:last-child {
+  padding-right: 0;
+}
+
+.pi-md.pi-md.pi-md > *:first-child,
+.pi-md.pi-md.pi-md p:first-child {
+  margin-top: 0;
+}
+
+.pi-md.pi-md.pi-md > *:last-child,
+.pi-md.pi-md.pi-md p:last-child {
+  margin-bottom: 0;
+}

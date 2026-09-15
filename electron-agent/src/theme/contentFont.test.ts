@@ -1,3 +1,5 @@
+// @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { clampFontSize, FONT_SIZE_DEFAULT, FONT_SIZE_MAX, FONT_SIZE_MIN } from './contentFont';
 
@@ -27,4 +29,12 @@ describe('clampFontSize', () => {
     expect(clampFontSize(undefined)).toBe(FONT_SIZE_DEFAULT);
     expect(clampFontSize('abc')).toBe(FONT_SIZE_DEFAULT);
   });
+});
+
+it('index.css imports the axis and uses html body', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+  expect(css).toContain("@import './theme/contentFont.css'");
+  expect(css).not.toMatch(/^body\s*\{/m);
+  const axis = readFileSync(new URL('./contentFont.css', import.meta.url), 'utf8');
+  expect(axis).toContain('html body');
 });
