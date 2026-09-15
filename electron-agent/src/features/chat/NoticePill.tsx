@@ -19,10 +19,16 @@ const styles = createStaticStyles(({ css }) => ({
       margin: 4px 0;
       font-size: var(--pi-font-size-secondary, 13px);
       font-weight: 600;
+      line-height: inherit;
       color: ${cssVar.colorTextSecondary};
     }
 
-    & .pi-md.pi-md.pi-md p {
+    & .pi-md.pi-md.pi-md p,
+    & .pi-md.pi-md.pi-md p:not(:first-child),
+    & .pi-md.pi-md.pi-md p:not(:last-child),
+    & .pi-md.pi-md.pi-md li p,
+    & .pi-md.pi-md.pi-md li p:not(:first-child),
+    & .pi-md.pi-md.pi-md li p:not(:last-child) {
       margin: 4px 0;
     }
 
@@ -31,7 +37,8 @@ const styles = createStaticStyles(({ css }) => ({
       padding-inline-start: 18px;
     }
 
-    & .pi-md.pi-md.pi-md li {
+    & .pi-md.pi-md.pi-md li,
+    & .pi-md.pi-md.pi-md li:not(:first-child) {
       margin: 1px 0;
     }
   `,
