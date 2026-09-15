@@ -82,6 +82,8 @@ const styles = createStaticStyles(({ css }) => ({
     cursor: text;
   `,
   editor: css`
+    font: var(--pi-md-base);
+
     p {
       margin-block: 0;
     }

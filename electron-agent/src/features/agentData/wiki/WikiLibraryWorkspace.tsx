@@ -313,7 +313,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
           {sourceDetail.source.error ? <Alert type="error" title={sourceDetail.source.error} /> : null}
           <div className={w.toolbar}><Button disabled={readOnly || sourceDetail.source.lifecycle !== 'active'} onClick={() => setSourceDialog({ source: sourceDetail.source })}>更新这份资料</Button><Button disabled={readOnly || sourceDetail.source.lifecycle !== 'active'} onClick={() => void prepareIngest([sourceDetail.source.sourceId])}>重新生成页面</Button><Button danger disabled={readOnly} onClick={() => setDeleteTarget({ kind: 'source', kbId, sourceId: sourceDetail.source.sourceId })}>删除资料</Button></div>
           {sourceDetail.source.generationSuppressed ? <p className={w.muted}>页面已删除，普通抽取不会恢复；可显式重新生成。</p> : null}
-          <div className={w.document}><LazyMarkdown>{sourceDetail.content}</LazyMarkdown></div>
+          <div className={w.document}><LazyMarkdown prose={false}>{sourceDetail.content}</LazyMarkdown></div>
         </> : <div className={w.emptyState}>{selectedSourceId ? '正在读取资料…' : '选择原始资料查看内容和版本'}</div>}</div>
         <div hidden={tab !== 'pages'}>{showPage ? <WikiPageEditor ref={editor} key={`${kbId}:${selectedPageId ?? `new:${newPageVersion}`}`} kbId={kbId} page={selectedPage} readOnly={readOnly} visible={visible} confirmationVisible={confirmationVisible} onDeleteRequested={setDeleteTarget} onSaved={(saved) => { setSelectedPage(saved); setSelectedPageId(saved.pageId); setShowPage(true); void reload(); }} onClose={closePage} /> : <div className={w.emptyState}>{selectedPageId ? '正在读取页面…' : '选择知识页面，或新建人工页面'}</div>}</div>
       </div>

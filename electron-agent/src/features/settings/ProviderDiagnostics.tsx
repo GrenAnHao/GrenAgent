@@ -34,7 +34,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
   `,
   title: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     font-weight: 600;
     color: ${cssVar.colorText};
   `,
@@ -46,7 +46,7 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 16px 14px;
   `,
   desc: css`
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextDescription};
     margin-block-end: 14px;
   `,
@@ -55,7 +55,7 @@ const styles = createStaticStyles(({ css }) => ({
     max-width: 520px;
   `,
   label: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorText};
     margin-block-end: 6px;
   `,

@@ -47,8 +47,7 @@ export const chatStyles = createStaticStyles(({ css }) => ({
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorFillQuaternary};
-    font-size: 14px;
-    line-height: 1.6;
+    font: var(--pi-md-base);
     white-space: pre-wrap;
     word-break: break-word;
   `,

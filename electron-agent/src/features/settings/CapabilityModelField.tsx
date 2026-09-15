@@ -7,12 +7,12 @@ import type { SettingField } from './settingsSchema';
 
 const styles = createStaticStyles(({ css }) => ({
   label: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${cssVar.colorText};
   `,
   desc: css`
     margin-block-start: 2px;
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextDescription};
   `,
 }));

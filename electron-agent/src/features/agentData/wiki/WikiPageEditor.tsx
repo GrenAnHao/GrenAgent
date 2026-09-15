@@ -122,7 +122,7 @@ export const WikiPageEditor = forwardRef<WikiPageEditorHandle, Props>(function W
     {notice ? <p role="status">{notice}</p> : null}
     <label className={w.field}>标题<Input aria-label="页面标题" value={draftTitle} readOnly={readOnly || saving || reloading} onChange={(event) => setTitle(event.target.value)} /></label>
     <div hidden={preview}><label className={w.field}>Markdown 正文<Input.TextArea aria-label="Markdown 正文" rows={16} value={draftContent} readOnly={readOnly || saving || reloading} onChange={(event) => setContent(event.target.value)} /></label></div>
-    <div hidden={!preview} className={`${w.document} ${w.preview}`}><LazyMarkdown>{draftContent}</LazyMarkdown></div>
+    <div hidden={!preview} className={`${w.document} ${w.preview}`}><LazyMarkdown prose={false}>{draftContent}</LazyMarkdown></div>
     <label className={w.field}>引用原始资料<Select mode="multiple" aria-label="页面来源引用" disabled={readOnly || saving || reloading} value={draftRefs.map((sourceRef) => JSON.stringify(sourceRef))} options={referenceOptions} onChange={(values: string[]) => setRefs(values.map((value) => JSON.parse(value) as WikiSourceRef))} placeholder="可不关联，或关联多份资料" /></label>
     {sourceError ? <Alert type="error" title={`资料列表：${sourceError}`} /> : null}
     {!draftRefs.length ? <div className={w.muted}><p>人工创建</p><p>先关联原始资料</p></div> : <div className={w.toolbar}>{draftRefs.map((sourceRef) => {
@@ -139,7 +139,7 @@ export const WikiPageEditor = forwardRef<WikiPageEditorHandle, Props>(function W
     <Modal open={visible && unlocking} title="允许后续抽取更新" onCancel={() => setUnlocking(false)} onOk={() => void setLocked(false)} okText="允许后续抽取更新" cancelText="保持锁定" confirmLoading={saving}><p>解除人工锁定不会立即调用模型。{draftRefs.length > 1 ? '此页关联多份资料，仍不会被单源增量抽取覆盖。' : '下次显式抽取可能更新此页面。'}</p></Modal>
     <Modal open={visible && !!snapshot} title={`来源快照 · r${snapshot?.ref.revision ?? ''}`} onCancel={() => { sourceSequence.current++; setSnapshot(undefined); }} footer={<Button onClick={() => { sourceSequence.current++; setSnapshot(undefined); }}>关闭快照</Button>}>
       {snapshot?.source ? <p>{snapshot.source.name} · {snapshot.source.kind}{snapshot.source.lifecycle === 'deleted' ? ' · 来源已删除' : ''}</p> : null}
-      {snapshot?.error ? <Alert type="error" title={snapshot.error} /> : snapshot?.content !== undefined ? <div className={w.document}><LazyMarkdown>{snapshot.content}</LazyMarkdown></div> : <p>正在读取快照…</p>}
+      {snapshot?.error ? <Alert type="error" title={snapshot.error} /> : snapshot?.content !== undefined ? <div className={w.document}><LazyMarkdown prose={false}>{snapshot.content}</LazyMarkdown></div> : <p>正在读取快照…</p>}
     </Modal>
     <WikiDeleteDialog target={visible ? deleteTarget : undefined} onClose={() => setDeleteTarget(undefined)} onDeleted={onClose} />
   </section>;

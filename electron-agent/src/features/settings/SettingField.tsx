@@ -17,12 +17,12 @@ const useStyles = createStyles(({ css, token }) => ({
     min-width: 0;
   `,
   label: css`
-    font-size: 13px;
+    font-size: var(--pi-font-size, 14px);
     color: ${token.colorText};
   `,
   desc: css`
     margin-block-start: 2px;
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${token.colorTextDescription};
   `,
   control: css`

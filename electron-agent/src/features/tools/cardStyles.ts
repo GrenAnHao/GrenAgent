@@ -49,7 +49,7 @@ export const cardStyles = createStaticStyles(({ css }) => ({
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 1;
-    font-size: 12px;
+    font-size: var(--pi-font-size-secondary, 13px);
     color: ${cssVar.colorTextDescription};
   `,
   toolName: css`

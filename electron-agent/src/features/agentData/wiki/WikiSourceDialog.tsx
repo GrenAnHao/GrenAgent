@@ -115,7 +115,7 @@ export function WikiSourceDialog({ open, visible = true, kbId, bindings, source,
       { key: 'manual', label: '手动录入', children: <>
         <label className={w.field}>资料名称<Input aria-label="资料名称" value={name} disabled={!!source || busy} onChange={(event) => { setName(event.target.value); setSaved(false); }} /></label>
         <label className={w.field}>Markdown 原文<Input.TextArea aria-label="资料 Markdown" rows={9} value={content} disabled={reading || busy || !!base && base.lifecycle !== 'active'} onChange={(event) => { setContent(event.target.value); setSaved(false); }} /></label>
-        <details><summary>预览资料</summary><div className={`${w.document} ${w.preview}`}><LazyMarkdown>{content}</LazyMarkdown></div></details>
+        <details><summary>预览资料</summary><div className={`${w.document} ${w.preview}`}><LazyMarkdown prose={false}>{content}</LazyMarkdown></div></details>
         <Button type="primary" loading={busy} disabled={reading || !readReady || saved || !name.trim() || !!base && base.lifecycle !== 'active'} onClick={() => void saveText()}>{source ? '更新这份资料' : '添加资料'}</Button>
       </> },
       ...(!source ? [{ key: 'project', label: '从项目导入', children: <>
