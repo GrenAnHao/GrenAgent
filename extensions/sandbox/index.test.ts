@@ -18,7 +18,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  createBashToolDefinition: (_cwd: string, opts: object) => ({ name: "bash", ...opts }),
+  createBashToolDefinition: (_cwd: string, opts: object) => ({
+    name: "bash",
+    description: "Execute a bash command.",
+    promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
+    promptGuidelines: ["Do not leak PI_* environment variables."],
+    ...opts,
+  }),
 }));
 
 vi.mock("../_shared/sandbox/operations.js", () => ({
@@ -142,6 +148,25 @@ describe("sandbox extension", () => {
   it("registers bash and bash_escalate", () => {
     const { tools } = load();
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["bash", "bash_escalate"]));
+  });
+
+  it("annotates the bash tool for PowerShell on win32", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    try {
+      const { tools } = load();
+      const bash = tools.find((tool) => tool.name === "bash") as {
+        promptSnippet?: string;
+        description?: string;
+        promptGuidelines?: string[];
+      };
+      expect(bash.promptSnippet).toContain("PowerShell");
+      expect(bash.promptSnippet).not.toContain("ls, grep, find");
+      expect(bash.description).toContain("exit $LASTEXITCODE");
+      expect(bash.promptGuidelines?.some((g) => g.includes("PowerShell"))).toBe(true);
+    } finally {
+      if (original) Object.defineProperty(process, "platform", original);
+    }
   });
 
   it("subscribes to user_bash and returns operations", () => {

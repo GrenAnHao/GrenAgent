@@ -9,6 +9,7 @@ import { clearPendingDenials, consumePendingDenial, peekPendingDenial } from "..
 import { createSandboxProvider } from "../_shared/sandbox/provider.js";
 import { resolvePreset } from "../_shared/sandbox/resolvePreset.js";
 import type { FileSandboxMode } from "../_shared/sandbox/types.js";
+import { annotateWindowsBashTool } from "./windowsBashPrompt.js";
 
 export default function (pi: ExtensionAPI) {
   const provider = createSandboxProvider();
@@ -40,7 +41,7 @@ export default function (pi: ExtensionAPI) {
 
   // createBashToolDefinition 返回 ToolDefinition，才能 registerTool（createBashTool 返回 AgentTool）。
   // 包根已导出该函数，无需深导入 dist/core/tools/bash.js。构造期 cwd 只是 SDK 兜底，执行时用 ctx.cwd。
-  pi.registerTool(createBashToolDefinition(cwd, { operations }));
+  pi.registerTool(annotateWindowsBashTool(createBashToolDefinition(cwd, { operations })));
 
   pi.on("user_bash", () => ({ operations }));
 
