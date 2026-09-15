@@ -13,3 +13,14 @@ export function draftShouldForwardWheel(p: {
   if (p.deltaY < 0) return p.scrollTop <= 0;
   return p.scrollTop + p.clientHeight >= p.scrollHeight - 1;
 }
+
+export function scrollerKeepsWheel(p: {
+  overflowY: string;
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  deltaY: number;
+}): boolean {
+  if (p.overflowY !== "auto" && p.overflowY !== "scroll") return false;
+  return !draftShouldForwardWheel(p);
+}

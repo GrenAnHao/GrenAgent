@@ -7,6 +7,7 @@ import { App } from 'antd';
 import { ChatListView } from './ChatListView';
 import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
+import { scrollerKeepsWheel } from './composerWheel';
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { TranscriptScrollHandle } from './VirtualizedMessageList';
@@ -138,9 +139,28 @@ export function ChatView() {
     const seat = seatRef.current;
     if (!seat) return;
     const onSeatWheel = (e: WheelEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t?.closest('[data-composer-draft]')) return;
-      if (t?.closest("[data-testid='composer-prompt-overlay']")) return;
+      const currentSeat = seatRef.current;
+      if (!currentSeat) return;
+      const start = e.target instanceof Element ? e.target : null;
+      if (start?.closest('[data-composer-draft]')) return;
+      if (start?.closest("[data-testid='composer-prompt-overlay']")) return;
+      let node: Element | null = start;
+      while (node && node !== currentSeat) {
+        if (node instanceof HTMLElement) {
+          const overflowY = getComputedStyle(node).overflowY;
+          if (
+            scrollerKeepsWheel({
+              overflowY,
+              scrollTop: node.scrollTop,
+              clientHeight: node.clientHeight,
+              scrollHeight: node.scrollHeight,
+              deltaY: e.deltaY,
+            })
+          )
+            return;
+        }
+        node = node.parentElement;
+      }
       e.preventDefault();
       transcriptRef.current?.scrollBy(e.deltaY);
     };
