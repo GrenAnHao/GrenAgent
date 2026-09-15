@@ -1,5 +1,6 @@
 import { useLayoutEffect } from 'react';
 import { useTheme } from 'antd-style';
+import { useFontSizeSync } from '../theme/useFontSizeSync';
 
 /**
  * antd cssVar 变量表的 key。cssinjs 把整份 --ant-* 序列化成 `.<key>{...}` 这一条类规则，
@@ -17,6 +18,7 @@ export const ANTD_CSS_VAR_KEY = 'gren-css-var';
  */
 export function ThemeBridge() {
   const theme = useTheme();
+  useFontSizeSync();
 
   useLayoutEffect(() => {
     // 让 --ant-* 在根元素上就有定义，全树（含非 antd 元素）都能继承到当前明暗的真实值。
