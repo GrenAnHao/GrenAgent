@@ -1,5 +1,6 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { attributeRun } from "./attribute.js";
+import { decodeSpawnChunk } from "./decodeSpawnChunk.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { rememberPendingDenial } from "./pendingDenial.js";
@@ -45,6 +46,21 @@ interface RunResult {
 }
 
 const RUNNER_FAILED = "[sandbox: runner failed] The command never started.\n";
+const WINDOWS_BASH_UNAVAILABLE =
+  "[sandbox: SANDBOX_UNAVAILABLE] Windows OS sandbox cannot start Git Bash or WSL bash under a restricted token (Win32 error 5). The command was not executed. Switch approval to 完全权限.\n";
+
+function isWindowsBashExe(path: string): boolean {
+  return /(?:^|[\\/])(?:bash|sh)\.exe$/i.test(path);
+}
+
+export const PS_UTF8_PREFIX = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n";
+
+export function shellArgv(platform: NodeJS.Platform, shell: string, command: string): string[] {
+  if (platform === "win32") {
+    return [shell, "-NoProfile", "-NonInteractive", "-Command", PS_UTF8_PREFIX + command];
+  }
+  return [shell, "-c", command];
+}
 
 export function createSandboxedBashOperations(
   deps: SandboxedBashOperationsDeps,
@@ -128,12 +144,14 @@ export function createSandboxedBashOperations(
         finish(null);
       });
       child.stdout?.on("data", (data: Buffer) => {
-        stdout += data.toString();
-        options.onData?.(data);
+        const decoded = decodeSpawnChunk(data);
+        stdout += decoded.toString();
+        options.onData?.(decoded);
       });
       child.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
-        options.onData?.(data);
+        const decoded = decodeSpawnChunk(data);
+        stderr += decoded.toString();
+        options.onData?.(decoded);
       });
       child.on("close", (code) => {
         finish(typeof code === "number" ? code : null);
@@ -171,7 +189,11 @@ export function createSandboxedBashOperations(
       delete env.PI_SANDBOX_MODE_ONCE;
 
       const shell = await (deps.resolveShell ?? resolveShellPath)();
-      const base = [shell, "-c", command];
+      const base = shellArgv(platform, shell, command);
+      if (platform === "win32" && isConfined(policy.mode) && isWindowsBashExe(shell)) {
+        options.onData?.(Buffer.from(WINDOWS_BASH_UNAVAILABLE));
+        return { exitCode: null };
+      }
       if (!isConfined(policy.mode)) {
         const result = await run(base, cwd, { ...options, env });
         if (result.spawnError) {

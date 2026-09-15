@@ -42,8 +42,8 @@ function fakeChild(opts: {
   exitCode?: number | null;
   spawnError?: NodeJS.ErrnoException;
   hang?: boolean;
-  stdout?: string;
-  stderr?: string;
+  stdout?: string | Buffer;
+  stderr?: string | Buffer;
 }) {
   const child = new EventEmitter() as EventEmitter & {
     pid: number | undefined;
@@ -90,6 +90,7 @@ function makeOps(opts: {
   spawnImpl?: ReturnType<typeof vi.fn>;
   platform?: NodeJS.Platform;
   kill?: (pid: number, signal?: NodeJS.Signals) => void;
+  resolveShell?: () => Promise<string> | string;
 }) {
   const spawnCalls: Array<{ file: string; args: readonly string[] }> = [];
   const spawnImpl = opts.spawnImpl ?? vi.fn((file: string, args: readonly string[]) => {
@@ -103,8 +104,8 @@ function makeOps(opts: {
     getPolicy: () => policy(opts.mode ?? "read-only", opts.sessionId ?? "sess-1"),
     confine,
     spawnImpl,
-    resolveShell: async () => SHELL,
-    platform: opts.platform,
+    resolveShell: opts.resolveShell ?? (async () => SHELL),
+    platform: opts.platform ?? "linux",
     kill: opts.kill,
   });
   return { ops, confine, spawnImpl, spawnCalls };
@@ -363,4 +364,101 @@ describe("createSandboxedBashOperations", () => {
     expect(result.exitCode).toBeNull();
     expect(text()).toContain("[sandbox: runner failed] The command never started.");
   });
+
+  it("spawns PowerShell -Command with UTF-8 prefix on win32", async () => {
+    const { ops, confine, spawnImpl } = makeOps({
+      mode: "danger-full-access",
+      platform: "win32",
+      resolveShell: async () => "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(confine).not.toHaveBeenCalled();
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        expect.stringMatching(
+          /^\[Console\]::OutputEncoding=\[System\.Text\.Encoding\]::UTF8;\necho hi$/,
+        ),
+      ],
+      expect.objectContaining({ cwd: CWD }),
+    );
+  });
+
+  it("passes UTF-8-prefixed PowerShell argv into confine on win32", async () => {
+    const confine = vi.fn(async (argv: string[]) => confined(["runner", "--", ...argv]));
+    const { ops, spawnImpl } = makeOps({
+      mode: "read-only",
+      platform: "win32",
+      resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      confine,
+    });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    const handed = confine.mock.calls[0]?.[0] as string[];
+    expect(handed[0]).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+    expect(handed.slice(1, 4)).toEqual(["-NoProfile", "-NonInteractive", "-Command"]);
+    expect(handed[4]).toBe("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\necho hi");
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "runner",
+      ["--", ...handed],
+      expect.objectContaining({ cwd: CWD }),
+    );
+  });
+
+  it("refuses Windows bash.exe under the restricted-token helper", async () => {
+    const { ops, confine, spawnImpl } = makeOps({
+      mode: "read-only",
+      platform: "win32",
+      resolveShell: async () => "C:\\Git\\bin\\bash.exe",
+    });
+    const { onData, text } = collectOnData();
+    const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(confine).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(result.exitCode).toBeNull();
+    expect(text()).toContain("SANDBOX_UNAVAILABLE");
+    expect(text()).toContain("完全权限");
+  });
+
+  it("decodes UTF-16LE WSL errors before display", async () => {
+    const payload = Buffer.from(
+      "拒绝访问。\r\n错误代码: Bash/Service/CreateInstance/E_ACCESSDENIED\r\n",
+      "utf16le",
+    );
+    const { ops } = makeOps({
+      mode: "danger-full-access",
+      spawnImpl: vi.fn(() => fakeChild({ exitCode: 1, stdout: payload })),
+    });
+    const { onData, text } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(text()).toContain("Bash/Service/CreateInstance/E_ACCESSDENIED");
+    expect(text()).toContain("拒绝访问");
+  });
+});
+
+describe.skipIf(process.platform !== "win32")("PowerShell UTF-8 prefix live", () => {
+  it("emits UTF-8 中文 on stdout, not GBK", async () => {
+    const { spawn } = await import("node:child_process");
+    const { resolveShellPath } = await import("./shellPath.js");
+    const { PS_UTF8_PREFIX } = await import("./operations.js");
+    const shell = await resolveShellPath();
+    const script = `${PS_UTF8_PREFIX}Write-Output "中文"`;
+    const text: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      child.stdout.on("data", (d: Buffer) => text.push(d));
+      child.on("error", reject);
+      child.on("close", () => resolve());
+    });
+    const buf = Buffer.concat(text);
+    expect(buf.toString("hex")).toContain("e4b8ade69687");
+    expect(buf.toString("hex")).not.toContain("d6d0cec4");
+  }, 15000);
 });
