@@ -1,7 +1,7 @@
 # 输入框增强提示词
 
 - 日期：2026-09-17
-- 范围：GrenAgent 主对话输入栏。把草稿改写成更清晰、更完整的提示词，写回输入框，不发送、不进会话历史。
+- 范围：GrenAgent 主对话输入栏。把草稿改写成更清晰、更完整的提示词，写回输入框，不发送、不进会话历史。可选实验：结合会话目标、wiki/记忆与代码图。
 - 状态：设计已按节批准，待实现计划
 
 > **裁决记录（2026-09-17）**
@@ -11,7 +11,8 @@
 > - **写回：** 输入框上方预览浮层，用户点「应用」才替换正文。预览内流式出字。
 > - **模型：** 设置项 `enhancePromptModel` 可选；留空＝当前会话模型。设了但不可用则失败，不静默回退。
 > - **改写范围：** 只改编辑器正文。粘贴块、图片附件不动。正文里的 `@路径` / `/命令` / URL 由模型原样保留。
-> - **实现：** 独立 oneshot（`streamSimple`），不走 `agent_prompt`。
+> - **默认实现：** 独立 oneshot（`streamSimple`），不走 `agent_prompt`，不跑工具。
+> - **实验：** 设置 `enhancePromptUseProjectContext` 默认关。打开后主进程跑有限轮只读工具（wiki / 记忆 / 代码图），会话目标由渲染进程随 IPC 注入。不 spawn 子代理。
 
 ## 1. 目标 / 非目标
 
@@ -19,8 +20,9 @@
 
 1. 输入栏发送按钮左侧有「增强提示词」按钮（`Wand2` 图标，无 emoji）。
 2. 点击后用一次性 LLM 调用改写当前正文，预览浮层流式展示；点「应用」只替换编辑器正文，不发送。
-3. 调用不进入对话历史、不跑工具、不改会话模型。
+3. 调用不进入对话历史、不改会话模型。默认路径不跑工具。
 4. 设置里可指定增强用的模型；留空则用当前会话模型。
+5. 可选实验开关：打开后改写可查阅会话目标、项目 wiki/记忆和代码图，生成更贴项目的提示词。
 
 **非目标**
 
@@ -30,11 +32,13 @@
 - 不为子代理面板单独做入口（子代理不复用 `ChatInput`）。
 - 不和询问浮层叠两层 portal。
 - 不做快捷键、不做多版本对比、不把增强模型做成按会话覆盖。
-- 不测真实供应商网络、不测像素级样式。
+- 实验路径不 spawn 子代理、不 `session.prompt`、不写 wiki/记忆、不跑 `codegraph_impact` / callers / callees。
+- 实验路径不把工具原文展示在预览卡里。
+- 不测真实供应商网络、不测像素级样式、不测真实 wiki/代码图索引质量。
 
 **成功标准**
 
-有正文时点按钮出现齐宽预览卡，文字边生成边出现；「应用」后输入框正文变成美化稿，芯片区附件仍在；「取消」或发送后原文不动且没有新的用户/助手消息。设置留空时走会话模型；填了不可用模型时预览卡报错。
+有正文时点按钮出现齐宽预览卡，文字边生成边出现；「应用」后输入框正文变成美化稿，芯片区附件仍在；「取消」或发送后原文不动且没有新的用户/助手消息。设置留空时走会话模型；填了不可用模型时预览卡报错。实验开关默认关，关时行为与纯正文 oneshot 相同；打开且 wiki/代码图为空时仍能改写（工具空结果，不整次失败）。
 
 ## 2. 已确认的设计决定
 
@@ -56,10 +60,11 @@
 | 同一 workspace | 同时只跑一次增强 |
 | 切工作区 | 中止并关浮层 |
 | `/` `@` 菜单 | z-index 高于预览卡，打开不关预览卡 |
-| 超时 | 60 秒 |
+| 超时 | 默认路径 60 秒；实验路径 90 秒 |
 | 超长 | 正文超过 16000 字则 toast，不开浮层 |
 | 短调用队列 | 不进 `ShortCallQueue`（避免和标题 / wiki 排队） |
 | ChatTag | 第一版不重建 pill |
+| 实验开关 | `enhancePromptUseProjectContext`，默认关 |
 
 ## 3. 架构
 
@@ -67,17 +72,19 @@
 ChatInput / SendArea
   EnhancePromptAction ──► enhancePromptStore ──► EnhancePromptOverlay
                                 │                      ▲
-                                │ Channel delta        │ 应用 setValue
+                                │ Channel 文本 delta    │ 应用 setValue
                                 ▼                      │
                          IPC enhance_prompt            │
                                 │                      │
-                     resolveModel → streamSimple ──────┘
+                     resolveModel                      │
+                      ├─ 开关关：streamSimple ─────────┘
+                      └─ 开关开：只读工具循环 ─────────┘
                      enhance_prompt_abort → AbortSignal
 ```
 
-- 前端只读 `readDraft()`（与发送同一套 markdown 序列化，含 `\_` → `_`）。
-- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、流式、清洗、中止。不写 session。
-- 流式通道复用 `diagnose_provider_model` 的 `Channel` 模式：delta 为纯文本 chunk；invoke 结束返回 `{ ok, content, error?, cancelled? }`。
+- 前端只读 `readDraft()`（与发送同一套 markdown 序列化，含 `\_` → `_`）。实验开时额外带上当前会话 Goal 快照文案。
+- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、默认流式 / 实验工具循环、清洗、中止。不写 session。
+- 流式通道复用 `diagnose_provider_model` 的 `Channel` 模式：delta 为纯文本 chunk（只含提示词正文，不含工具输出）；invoke 结束返回 `{ ok, content, error?, cancelled? }`。
 
 ## 4. 组件与交互
 
@@ -93,7 +100,7 @@ ChatInput / SendArea
 - 当前 workspace 有待答询问浮层（`inlineQuestionStore` 或应进 overlay 的 `uiPromptStore`）
 - 没有可用模型：`peekComposerModel(workspace)` 为空，且已 persist 的 `enhancePromptModel` 也空（不因设置了但暂时不可用而禁用，那种情况点开后由预览卡报错）
 
-加载中：按钮保持可点外观但不重复开浮层；用 `aria-busy` / `title`「正在增强…」区分。
+加载中：按钮保持可点外观但不重复开浮层；用 `aria-busy` / `title`「正在增强…」区分。实验开关不改变禁用规则。
 
 ### 4.2 预览浮层
 
@@ -101,7 +108,9 @@ ChatInput / SendArea
 
 - 无条目时不 portal。
 - 锚定 `surfaceRef`，`position: fixed`，齐宽，与 `ComposerPromptOverlay` 同一套量位置方式（`MENU_GAP` 等）。
-- 卡片：标题「增强提示词」、状态（生成中 / 完成 / 失败）、预览正文、取消、应用。
+- 卡片：标题「增强提示词」、状态、预览正文、取消、应用。
+- 默认路径状态：生成中 / 完成 / 失败。
+- 实验路径在收到第一段文本 delta 之前状态为「正在结合项目上下文…」，之后改为「生成中」。工具原文不进预览正文。
 - 生成中「应用」可用（预览非空）；失败或预览为空时「应用」禁用。
 - 失败时预览区可保留原文快照作对照，错误一行写在按钮上方。
 - 关闭入口：取消、关闭（X）、Esc、发送。不关：失焦、点外面、打开 `/` `@`。
@@ -118,8 +127,9 @@ ChatInput / SendArea
 | `preview` | 已收到的文本 |
 | `error` | 失败文案 |
 | `seq` | 单调递增，忽略过期 delta |
+| `awaitingContext` | 实验路径：尚未收到第一段文本 delta |
 
-`start` 把 status 置 `streaming`、清空 preview/error 并 bump seq。`append(seq, chunk)` 仅当 seq 匹配。`finish(seq, content)` 用清洗后的全文替换 preview。`fail` / `cancel` 清槽或置 error。切 workspace 由组件 `useEffect` 调 abort + `clear`。
+`start` 把 status 置 `streaming`、清空 preview/error 并 bump seq；若实验开则 `awaitingContext = true`。`append(seq, chunk)` 仅当 seq 匹配，并把 `awaitingContext` 置 false。`finish(seq, content)` 用清洗后的全文替换 preview。`fail` / `cancel` 清槽或置 error。切 workspace 由组件 `useEffect` 调 abort + `clear`。
 
 ## 5. 数据流
 
@@ -128,8 +138,9 @@ ChatInput / SendArea
 1. 按钮读取 `readDraft().trim()`。空 → 禁用，走不到这里。
 2. 长度 `> 16000` → `message.warning('正文过长，请缩短后再增强')`，return。
 3. `store.start(workspace)`，打开浮层。
-4. `pi.enhancePrompt(workspace, text, onChunk)`。`onChunk` 为 `Channel<string>`，`onmessage` 里 `append`。
-5. invoke 返回后：`cancelled` → `clear`（浮层已关则忽略）；`ok` → `finish`（以服务端清洗后的 `content` 为准，避免流式中的围栏残留）；否则 `fail`。
+4. `pi.enhancePrompt(workspace, text, onChunk, goalText?)`。`goalText` 仅实验开时传递：当前会话 `GoalSnapshot` 存在则格式为 `状态: {status}\n条件: {condition}`，超过 2000 字截断；无 Goal 则省略或传空串。主进程在开关关时忽略该字段。
+5. `onChunk` 为 `Channel<string>`，`onmessage` 里 `append`。
+6. invoke 返回后：`cancelled` → `clear`（浮层已关则忽略）；`ok` → `finish`（以服务端清洗后的 `content` 为准，避免流式中的围栏残留）；否则 `fail`。
 
 前端再点发送：现有 `send()` 在 `cancelPendingOverlay` 之后、真正 `onSend` 之前，增加 `abortEnhancePrompt(workspace)` 并 `clear` store。失败中止不阻断发送（与询问浮层 `failed` 不同：增强不是必须先成功取消的协议回传）。
 
@@ -144,7 +155,7 @@ ChatInput / SendArea
 
 不把「设了但不可用」回退成会话模型。草稿若 handle 已有 `session.model` 可以用；没有则失败（按钮侧也会因 `peekComposerModel` 为空而禁用，双保险）。
 
-### 5.3 调用
+### 5.3 默认调用（开关关）
 
 - `modelRuntimeHost.streamSimple({ user: text, systemPrompt, model, signal })`。
 - 每条 `text_delta` 向 Channel 发 `delta`。
@@ -156,7 +167,7 @@ ChatInput / SendArea
 
 ### 5.4 系统提示与清洗
 
-系统提示（固定字符串，测试可对这份原文断言）：
+默认系统提示（固定字符串，测试可对这份原文断言）：
 
 ```
 你是提示词改写器。把用户的草稿改写成更清晰、更完整的提示词：保留原意，补上结构、约束和成功标准。
@@ -165,17 +176,26 @@ ChatInput / SendArea
 使用与原文相同的语言。
 ```
 
+实验开时在其后追加（有 Goal 才插入 Goal 段）：
+
+```
+你可以调用只读工具查阅本项目的 wiki、记忆和代码图，以便改写后的提示词贴合该项目的关键约定与实现。
+不要向用户复述工具原始输出。最终只输出改写后的提示词正文。
+当前会话目标：
+<goalText 或「无」>
+```
+
 清洗 `sanitizeEnhanceOutput(raw)`：
 
 1. `trim`。
-2. 若整段匹配「可选语言标记的一对围栏包住全部内容」（首尾各一行 ` ``` `，中间任意），则取内层再 `trim`。中间的代码块不动。
+2. 若整段匹配「可选语言标记的一对围栏包住全部内容」（首尾各一行围栏，中间任意），则取内层再 `trim`。中间的代码块不动。
 3. 结果为空 → 失败，「模型返回为空」。
 
 流式过程中不清洗。用户在 `streaming` 时点应用：写入当前 `preview` 原样。`done` 之后预览已是清洗稿，应用写清洗稿。
 
 ## 6. 设置
 
-`electron-agent/src/features/settings/settingsSchema.ts` 的 `id: 'general'`，插在 `titleModel` 之后、`AUTO_TITLE` 之前：
+`electron-agent/src/features/settings/settingsSchema.ts` 的 `id: 'general'`，插在 `titleModel` 之后、`AUTO_TITLE` 之前，连续两项：
 
 | 属性 | 值 |
 | --- | --- |
@@ -186,20 +206,28 @@ ChatInput / SendArea
 | `description` | 输入框「增强提示词」使用的模型；留空＝当前会话模型 |
 | `effect` | `instant` |
 
-testid：`set-field-enhancePromptModel`（`SettingFieldInput` 现有规则）。
+| 属性 | 值 |
+| --- | --- |
+| `key` | `enhancePromptUseProjectContext` |
+| `label` | 增强提示词结合项目（实验） |
+| `type` | `boolean` |
+| `default` | `0` |
+| `description` | 打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关 |
 
-存盘与 `titleModel` 同形：`provider/id`，落 `runtime-settings.json`。删除供应商时 `scrubLinkedModelSettings` 已覆盖 `type: 'model'`，不必单写清理。
+testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectContext`。
 
-`settingsSchema.test.ts` 的 general 字段表要加上这一项。
+`enhancePromptModel` 存盘与 `titleModel` 同形：`provider/id`，落 `runtime-settings.json`。删除供应商时 `scrubLinkedModelSettings` 已覆盖 `type: 'model'`，不必单写清理。布尔项不参与供应商清理。
+
+`settingsSchema.test.ts` 的 general 字段表要加上这两项。
 
 ## 7. IPC
 
 `electron-agent/src/lib/pi.ts`：
 
-- `enhancePrompt(workspace, text, onChunk: Channel<string>)` → `invoke('enhance_prompt', { workspace, text, onChunk })`
+- `enhancePrompt(workspace, text, onChunk: Channel<string>, goalText?: string)` → `invoke('enhance_prompt', { workspace, text, onChunk, goalText })`
 - `abortEnhancePrompt(workspace)` → `invoke('enhance_prompt_abort', { workspace })`
 
-`register.ts` 注册这两条。Channel 发送方式与 `diagnose_provider_model` 相同。
+`goalText` 可选字符串；缺省或非字符串当空。`register.ts` 注册这两条。Channel 发送方式与 `diagnose_provider_model` 相同。
 
 ## 8. 失败与边界
 
@@ -214,6 +242,8 @@ testid：`set-field-enhancePromptModel`（`SettingFieldInput` 现有规则）。
 | 超时 / 网络 / 空回复 | 预览卡错误 |
 | 用户取消、Esc、发送、切工作区 | 中止，关浮层，不弹错误 |
 | 主对话正在流式生成 | 允许增强（不抢 `agent_prompt`） |
+| 实验开但 wiki/记忆/代码图不可用或空 | 工具返回空，继续改写，不整次失败 |
+| 实验开达到工具轮次上限 | 停止再调工具，用已有上下文出提示词 |
 
 ## 9. 测试
 
@@ -224,16 +254,22 @@ testid：`set-field-enhancePromptModel`（`SettingFieldInput` 现有规则）。
 - 超长拒绝（与前端同一阈值，主进程也挡一层）。
 - abort：signal 触发后不再把后续 delta 当成功。
 - 超时：假时钟 / 立即 abort 的 signal，返回超时错误。
+- 开关关：不注册、不调用任何工具；忽略 `goalText`。
+- 开关开：只允许 `wiki.search` / `wiki.read` / `memory.search` / `codegraph_search` / `codegraph_explore`；调用 `wiki.replace` 或 `codegraph_impact` 被拒绝。
+- 工具空结果：仍返回 ok 的改写（mock 模型在无工具结果时仍产出文本）。
+- 上限：第 9 次工具调用被拒绝；超过 4 轮不再发工具。
+- 单次工具结果超过 4000 字被截断。
 
 **前端**
 
 - `EnhancePromptAction`：空正文、询问待答时 `disabled`；有正文可点。
 - Overlay：delta 追加；应用后 `setValue` 被调用且粘贴块 mock 仍在；取消后 `setValue` 不被调用。
+- Overlay 实验：`awaitingContext` 时显示「正在结合项目上下文…」，首包 delta 后改为生成中。
 - `ChatInput` send：发送前调用 abort 且不把预览稿当发送正文。
-- `settingsSchema`：含 `enhancePromptModel`，`type: 'model'`。
+- `settingsSchema`：含 `enhancePromptModel`（`type: 'model'`）与 `enhancePromptUseProjectContext`（默认 `0`）。
 - `scrubLinkedModelSettings`：删供应商会清 `enhancePromptModel`（可并入现有表驱动用例）。
 
-不测真实 LLM、不测 ChatTag pill 还原、不做 e2e。
+不测真实 LLM、不测 ChatTag pill 还原、不测真实索引质量、不做 e2e。
 
 ## 10. 文件清单
 
@@ -243,10 +279,47 @@ testid：`set-field-enhancePromptModel`（`SettingFieldInput` 现有规则）。
 | `electron-agent/src/features/chat/input/actions/EnhancePromptAction.tsx` | 新增按钮 |
 | `electron-agent/src/features/chat/input/EnhancePromptOverlay.tsx` | 新增预览浮层 |
 | `electron-agent/src/features/chat/input/editor/MessageEditor.tsx` | 挂浮层 |
-| `electron-agent/src/features/chat/ChatInput.tsx` | 发送前 abort 增强 |
+| `electron-agent/src/features/chat/ChatInput.tsx` | 发送前 abort 增强；实验开时带 Goal |
 | `electron-agent/src/stores/enhancePromptStore.ts` | 新增 |
 | `electron-agent/src/lib/pi.ts` | IPC 封装 |
-| `electron-agent/electron/app/enhancePrompt.ts` | 解析 / 流式 / 清洗 |
+| `electron-agent/electron/app/enhancePrompt.ts` | 解析 / 默认流式 / 实验工具循环 / 清洗 |
 | `electron-agent/electron/ipc/register.ts` | 注册命令 |
-| `electron-agent/src/features/settings/settingsSchema.ts` | 设置项 |
+| `electron-agent/src/features/settings/settingsSchema.ts` | 两项设置 |
 | 对应 `*.test.ts(x)` | 见 §9 |
+
+## 11. 实验：结合项目上下文
+
+仅当已 persist 的 `enhancePromptUseProjectContext` 为真（`'1'` / 布尔控件开）时走本节。关则 §5.3，行为不得依赖 Goal 或工具。
+
+### 11.1 注入与工具
+
+**始终注入（非工具）：** IPC `goalText`。无 Goal 或空串则系统提示写「无」。主进程不读 renderer 的 `goalStore`。
+
+**只读工具（workspace 收口，host 本地执行）：**
+
+| 工具 | 落到现有能力 |
+| --- | --- |
+| `wiki.search` | `agentData` `wiki.search` / `wiki.pages.search` |
+| `wiki.read` | `wiki.read` / `wiki.pages.read` |
+| `memory.search` | `memory.search`（当前用户 + 该 workspace） |
+| `codegraph_search` | `codeRetrieval.call` + `codegraph_search` |
+| `codegraph_explore` | `codeRetrieval.call` + `codegraph_explore` |
+
+其它名字一律拒绝并回给模型一句错误，不执行。
+
+### 11.2 循环与上限
+
+在 `enhancePrompt.ts` 自建 tool loop：带 tools 的 complete/stream 回灌工具结果。不创建可见 `AgentSession`，不写主会话 JSONL，不进 `ShortCallQueue`。
+
+| 上限 | 值 |
+| --- | --- |
+| 工具回合 | 4 |
+| 合计工具调用 | 8 |
+| 单次工具结果 | 4000 字，超出截断 |
+| 超时 | 90 秒 |
+
+达到回合或次数上限后不再发工具，要求模型立刻只输出改写后的提示词。wiki/记忆/代码图抛错或未索引：该次工具返回空/错误字符串，循环继续。
+
+### 11.3 流式
+
+工具回合的 JSON / 结果不进 Channel。仅把最终提示词的 `text_delta` 发给预览。用户取消时 abort 掉整段循环。
