@@ -62,6 +62,14 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     icon: Settings2,
     fields: [
       {
+        key: 'defaultSessionModel',
+        label: '新会话默认模型',
+        type: 'model',
+        placeholder: '如 anthropic/claude-sonnet',
+        description: '进入空白草稿时使用；留空＝上次选过的，没有再用列表第一项',
+        effect: 'instant',
+      },
+      {
         key: 'titleModel',
         label: '对话标题模型',
         type: 'model',

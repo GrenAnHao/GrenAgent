@@ -13,11 +13,24 @@ describe('SETTINGS_SCHEMA general', () => {
       description: '首轮对话结束后生成简短标题（默认开）',
     });
     expect(fields.map((field) => field.key)).toEqual([
+      'defaultSessionModel',
       'titleModel',
       'AUTO_TITLE',
       'COMPACTION_PREVIEW',
       'goal.autoContinueOnOpen',
     ]);
+  });
+
+  it('把新会话默认模型放在通用与模型的第一项', () => {
+    const fields = SETTINGS_SCHEMA.find((category) => category.id === 'general')?.fields ?? [];
+    expect(fields[0]).toMatchObject({
+      key: 'defaultSessionModel',
+      label: '新会话默认模型',
+      type: 'model',
+      placeholder: '如 anthropic/claude-sonnet',
+      description: '进入空白草稿时使用；留空＝上次选过的，没有再用列表第一项',
+      effect: 'instant',
+    });
   });
 
   it('提供 Goal 重开后自动继续开关（true-empty 存储）', () => {

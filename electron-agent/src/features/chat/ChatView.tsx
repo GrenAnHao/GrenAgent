@@ -14,6 +14,7 @@ import type { TranscriptScrollHandle } from './VirtualizedMessageList';
 import type { PromptImage } from './input/ChatInputContext';
 import { isExecutiveCommandMessage } from './input/commandClassification';
 import { parseCommandToken } from './input/editor/commandPaste';
+import { peekComposerModel } from './input/actions/ModelThinkingAction';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
@@ -286,6 +287,8 @@ export function ChatView() {
         });
       }
       st.clearDraftConversation(workspace);
+      const selected = peekComposerModel(workspace);
+      if (selected) await pi.setModel(workspace, selected.provider, selected.id);
       // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
       markScratchUsed(workspace);
     };

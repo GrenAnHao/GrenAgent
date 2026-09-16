@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   piOpenWorkspace: vi.fn(),
   piNewSession: vi.fn(),
   piGetState: vi.fn(),
+  piSetModel: vi.fn(),
+  composerModel: { provider: 'openai', id: 'g' } as { provider: string; id: string } | null,
   commandRun: vi.fn(),
   sessionState: {
     worksDir: '/home/.pi/agent/works',
@@ -40,6 +42,7 @@ vi.mock('../../lib/pi', () => ({
     openWorkspace: state.piOpenWorkspace,
     newSession: state.piNewSession,
     getState: state.piGetState,
+    setModel: state.piSetModel,
     setSessionDisplayName: vi.fn(),
   },
 }));
@@ -62,6 +65,9 @@ vi.mock('./ChatInput', () => ({
       </button>
     </div>
   ),
+}));
+vi.mock('./input/actions/ModelThinkingAction', () => ({
+  peekComposerModel: () => state.composerModel,
 }));
 vi.mock('./EmptyChatPrompt', () => ({
   EmptyChatPrompt: () => <div data-testid="empty-chat-prompt" />,
@@ -150,6 +156,8 @@ afterEach(() => {
   state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
   state.piNewSession.mockResolvedValue(undefined);
   state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
+  state.composerModel = { provider: 'openai', id: 'g' };
+  state.piSetModel.mockResolvedValue(undefined);
 });
 
 describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
@@ -307,6 +315,9 @@ describe('ChatView 发送失败自动重试', () => {
   });
 
   it('草稿对话首发时先懒初始化 workspace 和 session', async () => {
+    state.composerModel = { provider: 'openai', id: 'g' };
+    state.piSetModel.mockClear();
+    state.piSetModel.mockResolvedValue(undefined);
     state.sessionState.activeSessionPath = null;
     state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
     state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
@@ -321,6 +332,27 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piNewSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
     expect(state.setActiveSession).toHaveBeenCalledWith('/home/.pi/agent/works/u1/created.jsonl');
     expect(state.clearDraftConversation).toHaveBeenCalledWith('/home/.pi/agent/works/u1');
+    expect(state.piSetModel).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'openai', 'g');
+    expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(state.piPrompt.mock.invocationCallOrder[0]);
+    expect(state.piNewSession.mock.invocationCallOrder[0]).toBeLessThan(state.piSetModel.mock.invocationCallOrder[0]);
+  });
+
+  it('草稿首发没有输入栏模型时不调用 setModel', async () => {
+    state.composerModel = null;
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
+    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.piPrompt.mockResolvedValue(undefined);
+    state.piSetModel.mockClear();
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    expect(state.piNewSession).toHaveBeenCalled();
+    expect(state.piSetModel).not.toHaveBeenCalled();
+    expect(state.piPrompt).toHaveBeenCalled();
   });
 
   it('草稿首发 getState 遇到 SESSION_WORKSPACE_MISMATCH 时新建会话再读', async () => {
