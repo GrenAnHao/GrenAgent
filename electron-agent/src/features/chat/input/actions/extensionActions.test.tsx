@@ -29,6 +29,7 @@ function renderWithCtx(ui: ReactNode) {
     followUp: [],
     send: vi.fn(),
     stop: vi.fn(),
+    readDraft: () => '',
   };
   render(<ChatInputProvider value={ctx}>{ui}</ChatInputProvider>);
   return setValue;

@@ -62,7 +62,7 @@
 | 点浮层外 | 不关（避免误触丢掉生成中的稿） |
 | Esc | 等同取消 |
 | 输入框在浮层打开时 | 仍可编辑；「应用」仍写入预览稿，会盖掉这段编辑 |
-| 同一 workspace | 同时只跑一次增强 |
+| 同一 workspace | 同时只跑一次增强：新的 `enhance_prompt` 先中止上一次（bump `seq`、清旧槽），不是忽略新请求 |
 | 切工作区 | 中止并关浮层 |
 | `/` `@` 菜单 | z-index 高于预览卡，打开不关预览卡 |
 | 超时 | 默认路径 60 秒；实验路径 90 秒 |
@@ -88,8 +88,8 @@ ChatInput / SendArea
                      enhance_prompt_abort → AbortSignal
 ```
 
-- 前端只读 `readDraft()`（与发送同一套 markdown 序列化，含 `\_` → `_`）。实验开时额外带上当前会话 Goal 快照文案。
-- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、默认流式 / 实验工具循环、清洗、中止。默认流式只调 `ModelRuntimeHost.streamSimple`（§12）。不写 session。
+- 前端只读 `readDraft()`（与发送同一套 markdown 序列化，含 `\_` → `_`）。`readDraft` 需新增进 `ChatInputContext`——目前它是 `ChatInput.tsx` 的局部闭包，动作按钮取不到。实验开时额外带上当前会话 Goal 快照文案。
+- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、默认流式 / 实验工具循环、清洗、中止。默认流式只调 `ModelRuntimeHost.streamSimple`（§12）。不写 session。设置经注入的 `settings: () => Promise<Record<string, string>>`（生产＝`SettingsService.getAll()`）读取；不用 `SettingsManager`（它只暴露 `getDefaultProvider` / `getDefaultModel`）。
 - 流式通道复用 `diagnose_provider_model` 的 `Channel` 模式：delta 为纯文本 chunk（只含提示词正文，不含工具输出）；invoke 结束返回 `{ ok, content, error?, cancelled? }`。
 
 ## 4. 组件与交互
@@ -106,20 +106,22 @@ ChatInput / SendArea
 - 当前 workspace 有待答询问浮层（`inlineQuestionStore` 或应进 overlay 的 `uiPromptStore`）
 - 没有可用模型：`peekComposerModel(workspace)` 为空，且已 persist 的 `enhancePromptModel` 也空（不因设置了但暂时不可用而禁用，那种情况点开后由预览卡报错）
 
+`peekComposerModel` 读的是 `ModelThinkingAction` 的模块级缓存，只有该组件挂载过才有值；未挂载时按「无模型」禁用，属可接受的保守退化（不会误放行）。
+
 加载中：按钮保持可点外观但不重复开浮层；用 `aria-busy` / `title`「正在增强…」区分。实验开关不改变禁用规则。
 
 ### 4.2 预览浮层
 
 新文件 `electron-agent/src/features/chat/input/EnhancePromptOverlay.tsx`。
 
-- 无条目时不 portal。
-- 锚定 `surfaceRef`，`position: fixed`，齐宽，与 `ComposerPromptOverlay` 同一套量位置方式（`MENU_GAP` 等）。
+- 当前 workspace 槽 `status === 'idle'` 时不 portal。
+- 锚定 `surfaceRef`，`position: fixed`，齐宽，与 `ComposerPromptOverlay` 同一套量位置方式（`MENU_GAP = 8`）。z-index 取 **1040**：低于 `/` `@` 菜单（1100）与询问浮层（1050），两者可盖在预览卡之上。
 - 卡片：标题「增强提示词」、状态、预览正文、取消、应用。
 - 默认路径状态：生成中 / 完成 / 失败。
 - 实验路径在收到第一段文本 delta 之前状态为「正在结合项目上下文…」，之后改为「生成中」。工具原文不进预览正文。
 - 生成中「应用」可用（预览非空）；失败或预览为空时「应用」禁用。
 - 失败时预览区可保留原文快照作对照，错误一行写在按钮上方。
-- 关闭入口：取消、关闭（X）、Esc、发送。不关：失焦、点外面、打开 `/` `@`。
+- 关闭入口：取消、关闭（X）、Esc、发送。不关：失焦、点外面、打开 `/` `@`。Esc 用 **capture 阶段**监听，避免焦点在编辑器内时被编辑器吞掉。
 
 `MessageEditor` 在现有 `ComposerPromptOverlay` 旁挂上本浮层。两层不同时出现：询问待答时按钮禁用，因此不会开增强浮层。
 
@@ -134,6 +136,7 @@ ChatInput / SendArea
 | `error` | 失败文案 |
 | `seq` | 单调递增，忽略过期 delta |
 | `awaitingContext` | 实验路径：尚未收到第一段文本 delta |
+| `source` | 发起时的原文快照；失败时预览为空则用它作对照 |
 
 `start` 把 status 置 `streaming`、清空 preview/error 并 bump seq；若实验开则 `awaitingContext = true`。`append(seq, chunk)` 仅当 seq 匹配，并把 `awaitingContext` 置 false。`finish(seq, content)` 用清洗后的全文替换 preview。`fail` / `cancel` 清槽或置 error。切 workspace 由组件 `useEffect` 调 abort + `clear`。
 
@@ -141,22 +144,22 @@ ChatInput / SendArea
 
 ### 5.1 发起
 
-1. 按钮读取 `readDraft().trim()`。空 → 禁用，走不到这里。
+1. 按钮经 `useChatInput().readDraft()` 读正文并 `trim()`。空 → 禁用，走不到这里。
 2. 长度 `> 16000` → `message.warning('正文过长，请缩短后再增强')`，return。
 3. `store.start(workspace)`，打开浮层。
-4. `pi.enhancePrompt(workspace, text, onChunk, goalText?)`。`goalText` 仅实验开时传递：当前会话 `GoalSnapshot` 存在则格式为 `状态: {status}\n条件: {condition}`，超过 2000 字截断；无 Goal 则省略或传空串。主进程在开关关时忽略该字段。
+4. `pi.enhancePrompt(workspace, text, onChunk, goalText?)`，返回 `Promise<EnhancePromptResult>`。`goalText` 仅实验开时传递，由 `EnhancePromptAction` 自己组装：先 `pi.getState(workspace)` 取 sessionId（复用从 `GoalPill.tsx` 导出的 `readSessionId`，不另写一份），再读 `useGoalStore().bySession[sessionId]`；有 `GoalSnapshot` 则格式为 `状态: {status}\n条件: {condition}`，超过 2000 字截断；无 Goal 或取不到 sessionId 则传空串。主进程在开关关时忽略该字段。
 5. `onChunk` 为 `Channel<string>`，`onmessage` 里 `append`。
 6. invoke 返回后：`cancelled` → `clear`（浮层已关则忽略）；`ok` → `finish`（以服务端清洗后的 `content` 为准，避免流式中的围栏残留）；否则 `fail`。
 
-前端再点发送：现有 `send()` 在 `cancelPendingOverlay` 之后、真正 `onSend` 之前，增加 `abortEnhancePrompt(workspace)` 并 `clear` store。失败中止不阻断发送（与询问浮层 `failed` 不同：增强不是必须先成功取消的协议回传）。
+前端再点发送：在现有 `send()` 的 `sendingRef` 判定之后、`cancelPendingOverlay` **之前**，先 `abortEnhancePrompt(workspace)` 并 `clear` store——必须早于 `editor.cleanDocument()`，否则中止竞态下预览稿可能被写回已清空的编辑器。失败中止不阻断发送（与询问浮层 `failed` 不同：增强不是必须先成功取消的协议回传）。
 
 ### 5.2 主进程模型解析
 
 顺序：
 
-1. 读设置 `enhancePromptModel`，`trim`。
+1. 读设置 `enhancePromptModel`（来自 §3 注入的 `settings()`，生产＝`SettingsService.getAll()`），`trim`。
 2. 非空：按第一个 `/` 切成 `provider` / `id`（非法串当「设了但不可用」）。`ModelRuntime.getModel(provider, id)` 有值则用；否则失败，错误：「增强提示词模型不可用，请在设置中重选或留空」。
-3. 空：`agentHost.get(workspace)?.session.model`；有 `provider`+`id` 则用。
+3. 空：取 `agentHost.get(workspace)?.session.model` 的 `provider` / `id`，再走 `ModelRuntime.getModel(provider, id)`；命中才用。**不直接把 `session.model` 当 `model` 对象往下传**——它是 pi-sdk 的 `AgentSession['model']`，与 `ModelRuntime.getModel()` 返回的 `Model` 不同形（`workspaceHandle.ts` 的 `snapshotSessionModel` 只把它当 `unknown` 处理）。
 4. 仍没有：失败，「没有可用模型」。
 
 不把「设了但不可用」回退成会话模型。草稿若 handle 已有 `session.model` 可以用；没有则失败（按钮侧也会因 `peekComposerModel` 为空而禁用，双保险）。
@@ -182,7 +185,7 @@ ChatInput / SendArea
 使用与原文相同的语言。
 ```
 
-实验开时在其后追加（有 Goal 才插入 Goal 段）：
+实验开时以 `\n\n` 拼接在其后（有 Goal 才插入 Goal 段）：
 
 ```
 你可以调用只读工具查阅本项目的 wiki、记忆和代码图，以便改写后的提示词贴合该项目的关键约定与实现。
@@ -217,7 +220,7 @@ ChatInput / SendArea
 | `key` | `enhancePromptUseProjectContext` |
 | `label` | 增强提示词结合项目（实验） |
 | `type` | `boolean` |
-| `default` | `0` |
+| `default` | `'0'`（`SettingField.default` 是 `string`） |
 | `description` | 打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关 |
 
 testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectContext`。
@@ -230,10 +233,12 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 
 `electron-agent/src/lib/pi.ts`：
 
-- `enhancePrompt(workspace, text, onChunk: Channel<string>, goalText?: string)` → `invoke('enhance_prompt', { workspace, text, onChunk, goalText })`
-- `abortEnhancePrompt(workspace)` → `invoke('enhance_prompt_abort', { workspace })`
+- `enhancePrompt(workspace, text, onChunk: Channel<string>, goalText?: string)` → `invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText })`
+- `abortEnhancePrompt(workspace)` → `invoke<void>('enhance_prompt_abort', { workspace })`
 
-`goalText` 可选字符串；缺省或非字符串当空。`register.ts` 注册这两条。Channel 发送方式与 `diagnose_provider_model` 相同。
+其中 `EnhancePromptResult = { ok: boolean; content: string; error?: string; cancelled?: boolean }`。
+
+`goalText` 可选字符串；缺省或非字符串当空。`register.ts` 注册这两条。处理器**必须**按 `diagnose_provider_model` 的方式从 `args.onChunk` 构造 `emit`：校验 `__grenChannelId` 为字符串后，用 `event.sender.send(\`${IPC_CHANNELS.eventPrefix}channel:${id}\`, chunk)` 推 delta——漏掉这一步渲染层收不到任何流式文本。
 
 ## 8. 失败与边界
 
@@ -270,16 +275,18 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 
 - `completeSimple` / `streamSimple` 接受 `provider`+`modelId`，命中 `getModel`；缺省走 `resolveDefaultModel`。
 - `signal` 透传到 runtime 第三参（已有用例保留；`streamSimple` 补一条）。
+- `ProviderService.oneshot` 适配器：`signal` 透传到 Host（`ProviderServiceOptions.oneshot` 已扩出第三参）。
 - 适配器流式行 `{ type: 'delta' | 'done' | 'error' }`，非流式 `{ ok, content }`；模型未命中 emit `model not found: provider/id`；`signal` 传到 Host。
 - `enhancePrompt.ts` 与 `main.ts` 不 import `runOneshotWithRuntime`。
 
 **前端**
 
 - `EnhancePromptAction`：空正文、询问待答时 `disabled`；有正文可点。
+- `EnhancePromptAction` 实验开：把 Goal 格式化为 `状态: …\n条件: …` 随 IPC 传入；取不到 sessionId 时传空串。
 - Overlay：delta 追加；应用后 `setValue` 被调用且粘贴块 mock 仍在；取消后 `setValue` 不被调用。
 - Overlay 实验：`awaitingContext` 时显示「正在结合项目上下文…」，首包 delta 后改为生成中。
 - `ChatInput` send：发送前调用 abort 且不把预览稿当发送正文。
-- `settingsSchema`：含 `enhancePromptModel`（`type: 'model'`）与 `enhancePromptUseProjectContext`（默认 `0`）。
+- `settingsSchema`：含 `enhancePromptModel`（`type: 'model'`）与 `enhancePromptUseProjectContext`（默认 `'0'`）。
 - `scrubLinkedModelSettings`：删供应商会清 `enhancePromptModel`（可并入现有表驱动用例）。
 
 不测真实 LLM、不测 ChatTag pill 还原、不测真实索引质量、不做 e2e。
@@ -292,7 +299,9 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 | `electron-agent/src/features/chat/input/actions/EnhancePromptAction.tsx` | 新增按钮 |
 | `electron-agent/src/features/chat/input/EnhancePromptOverlay.tsx` | 新增预览浮层 |
 | `electron-agent/src/features/chat/input/editor/MessageEditor.tsx` | 挂浮层 |
-| `electron-agent/src/features/chat/ChatInput.tsx` | 发送前 abort 增强；实验开时带 Goal |
+| `electron-agent/src/features/chat/ChatInput.tsx` | 发送前 abort 增强；向 ctx 暴露 `readDraft` |
+| `electron-agent/src/features/chat/input/ChatInputContext.tsx` | `ChatInputContextValue` 增加 `readDraft` |
+| `electron-agent/src/features/chat/input/GoalPill.tsx` | 导出 `readSessionId`，供增强动作复用 |
 | `electron-agent/src/stores/enhancePromptStore.ts` | 新增 |
 | `electron-agent/src/lib/pi.ts` | IPC 封装 |
 | `electron-agent/electron/app/enhancePrompt.ts` | 解析 / 默认流式 / 实验工具循环 / 清洗 |
@@ -313,13 +322,15 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 
 **只读工具（workspace 收口，host 本地执行）：**
 
-| 工具 | 落到现有能力 |
-| --- | --- |
-| `wiki.search` | `agentData` `wiki.search` / `wiki.pages.search` |
-| `wiki.read` | `wiki.read` / `wiki.pages.read` |
-| `memory.search` | `memory.search`（当前用户 + 该 workspace） |
-| `codegraph_search` | `codeRetrieval.call` + `codegraph_search` |
-| `codegraph_explore` | `codeRetrieval.call` + `codegraph_explore` |
+| 工具 | 落到现有能力 | 参数 |
+| --- | --- | --- |
+| `wiki.search` | `agentData.request('wiki.search', …)` | `{ workspace, query, limit }` |
+| `wiki.read` | `agentData.request('wiki.read', …)` | `{ workspace, page }` |
+| `memory.search` | `agentData.request('memory.search', …)` | `{ userId, workspace, query, limit }` |
+| `codegraph_search` | `agentData.request('codeRetrieval.call', …)` | `{ workspace, tool: 'codegraph_search', args }` |
+| `codegraph_explore` | `agentData.request('codeRetrieval.call', …)` | `{ workspace, tool: 'codegraph_explore', args }` |
+
+只用 workspace 收口的这一组：**不引 `wiki.pages.search` / `wiki.pages.read`**——它们按 `kbId` 收参、走 `requestAdmin` 管理面语义，与本工具的 workspace 收口不匹配，且没有「workspace → kbId」的现成解析路径。`memory.search` 的 `userId` 取当前用户 id，取不到回退 `'local'`（与 `memoryService.ts` 的既有回退一致）。
 
 其它名字一律拒绝并回给模型一句错误，不执行。
 
@@ -334,7 +345,7 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 | 单次工具结果 | 4000 字，超出截断 |
 | 超时 | 90 秒 |
 
-达到回合或次数上限后不再发工具，要求模型立刻只输出改写后的提示词。wiki/记忆/代码图抛错或未索引：该次工具返回空/错误字符串，循环继续。
+达到回合或次数上限后不再发工具，要求模型立刻只输出改写后的提示词。「合计上限 8」与「第 9 次调用被拒绝」是同一条规则：第 8 次执行完即关闭工具通道，第 9 次请求直接拒绝。wiki/记忆/代码图抛错或未索引：该次工具返回空/错误字符串，循环继续。
 
 ### 11.3 流式
 
@@ -346,7 +357,7 @@ SDK 模式下短调用的**唯一**主进程 API 是 `ModelRuntimeHost`。不进
 
 ### 12.1 签名
 
-在现有 `completeSimple` / `streamSimple` 上增加按供应商解析（都空则仍 `resolveDefaultModel`）：
+在现有 `completeSimple` / `streamSimple` 上增加按供应商解析（都空则仍 `resolveDefaultModel`）。两个方法当前用的是内联对象类型，需抽成下面这个共用接口：
 
 ```ts
 interface ShortCallInput {
@@ -372,7 +383,7 @@ interface ShortCallInput {
 | mermaid 修复 / 供应商诊断 | `ProviderService.oneshot` 适配器内部改调 Host；stdout JSON 行形状不变，**必须透传 `AbortSignal`** |
 | 实验增强（§11） | 不是 short call |
 
-Electron `main.ts` **禁止**再 `runOneshotWithRuntime`。`formatNonStream` 仍可给 `completeSimple` 抽文本。适配器抽成可单测函数（如 `hostOneshotAdapter.ts`）：`oneshot(request, onLine, signal?)` → Host；`request.system` 映到 `systemPrompt`。流式行 `{ type: 'delta' | 'done' | 'error' }`，非流式 `{ ok, content }` / `{ ok: false, error }`。模型未命中时适配器仍 emit `model not found: provider/id`，不改诊断现有文案。诊断 / mermaid 本期可不新增 abort IPC，但签名必须能传 `signal`。
+Electron `main.ts` **禁止**再 `runOneshotWithRuntime`。`formatNonStream` 仍可给 `completeSimple` 抽文本。适配器抽成可单测函数（如 `hostOneshotAdapter.ts`）：`oneshot(request, onLine, signal?)` → Host；`request.system` 映到 `systemPrompt`。流式行 `{ type: 'delta' | 'done' | 'error' }`，非流式 `{ ok, content }` / `{ ok: false, error }`。模型未命中时适配器仍 emit `model not found: provider/id`，不改诊断现有文案。诊断 / mermaid 本期可不新增 abort IPC，但签名必须能传 `signal`——为此要把 `ProviderServiceOptions.oneshot` 从 `(request, onLine)` 扩成 `(request, onLine, signal?)`（`providerService.ts:20`），`main.ts` 的注入点同步透传。
 
 ### 12.3 明确不是 short call
 

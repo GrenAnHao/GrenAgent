@@ -76,7 +76,7 @@ export interface GoalPillProps {
   onOpenDetails?: (snapshot: GoalSnapshot) => void;
 }
 
-function readSessionId(state: unknown): string | undefined {
+export function readSessionId(state: unknown): string | undefined {
   if (!state || typeof state !== 'object') return undefined;
   const value = (state as { sessionId?: unknown }).sessionId;
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;

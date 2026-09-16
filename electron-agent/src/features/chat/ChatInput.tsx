@@ -15,6 +15,8 @@ import { composeMessage } from './input/editor/composeMessage';
 import type { PastedText } from './input/editor/types';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
 import { cancelPendingOverlay } from './input/overlayPrompt';
+import { pi } from '../../lib/pi';
+import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
 
 interface ChatInputProps {
   onSend: (
@@ -80,6 +82,8 @@ export function ChatInput({
     if (sendingRef.current) return;
     sendingRef.current = true;
     try {
+      void pi.abortEnhancePrompt(workspace);
+      useEnhancePromptStore.getState().clear(workspace);
       const cancel = await cancelPendingOverlay(workspace);
       if (cancel === 'failed') {
         message.error('取消当前提问失败，请重试');
@@ -160,6 +164,7 @@ export function ChatInput({
       // ctx.setEmpty 给 MessageEditor 的 onChange 用：在更新空态的同时安排草稿持久化。
       setEmpty: handleChange,
       setValue,
+      readDraft,
       attachments,
       addAttachments: (items) => setAttachments((prev) => [...prev, ...items]),
       removeAttachment: (index) => setAttachments((prev) => prev.filter((_, i) => i !== index)),
@@ -179,6 +184,7 @@ export function ChatInput({
       empty,
       handleChange,
       setValue,
+      readDraft,
       attachments,
       pastedTexts,
       isStreaming,

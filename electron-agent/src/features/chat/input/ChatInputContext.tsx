@@ -28,6 +28,8 @@ export interface ChatInputContextValue {
   setEmpty: (value: boolean) => void;
   /** 用文本覆盖编辑器内容并聚焦（动作按钮预填提示词、新会话清空等沿用此入口）。 */
   setValue: (text: string) => void;
+  /** 读当前编辑器正文（markdown，与发送同一套序列化）。 */
+  readDraft: () => string;
   attachments: ImageAttachment[];
   addAttachments: (items: ImageAttachment[]) => void;
   removeAttachment: (index: number) => void;

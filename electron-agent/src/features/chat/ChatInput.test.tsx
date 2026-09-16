@@ -1,12 +1,13 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { onSend, cancelPendingOverlay, getDocument, cleanDocument, toastError } = vi.hoisted(() => ({
+const { onSend, cancelPendingOverlay, getDocument, cleanDocument, toastError, abortEnhancePrompt } = vi.hoisted(() => ({
   onSend: vi.fn(() => Promise.resolve()),
   cancelPendingOverlay: vi.fn(() => Promise.resolve('cancelled' as const)),
   getDocument: vi.fn(() => 'hello'),
   cleanDocument: vi.fn(),
   toastError: vi.fn(),
+  abortEnhancePrompt: vi.fn(() => Promise.resolve()),
 }));
 
 // App.useApp() 在 <App> 外会退化成静态实例并告警，这里直接给掉，顺带能断言失败 toast。
@@ -15,6 +16,7 @@ vi.mock('antd', async (importOriginal) => {
   return { ...actual, App: { ...actual.App, useApp: () => ({ message: { error: toastError } }) } };
 });
 vi.mock('./input/overlayPrompt', () => ({ cancelPendingOverlay }));
+vi.mock('../../lib/pi', () => ({ pi: { abortEnhancePrompt } }));
 vi.mock('@lobehub/editor/react', () => ({
   useEditor: () => ({
     getDocument,
@@ -53,6 +55,7 @@ afterEach(() => {
   cancelPendingOverlay.mockClear();
   toastError.mockClear();
   cleanDocument.mockClear();
+  abortEnhancePrompt.mockClear();
   getDocument.mockReturnValue('hello');
 });
 
@@ -78,7 +81,19 @@ describe('ChatInput send overlay cancel', () => {
     fireEvent.click(screen.getByTestId('do-send'));
     await Promise.resolve();
     expect(cancelPendingOverlay).not.toHaveBeenCalled();
+    expect(abortEnhancePrompt).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('aborts enhance prompt before overlay cancel and keeps original draft', async () => {
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(abortEnhancePrompt).toHaveBeenCalledWith('/ws'));
+    expect(cancelPendingOverlay).toHaveBeenCalledWith('/ws');
+    expect(abortEnhancePrompt.mock.invocationCallOrder[0]).toBeLessThan(
+      cancelPendingOverlay.mock.invocationCallOrder[0],
+    );
+    expect(onSend).toHaveBeenCalledWith('hello', undefined, undefined);
   });
 
   it('does not send when cancel fails', async () => {

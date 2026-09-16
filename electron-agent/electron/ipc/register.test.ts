@@ -275,4 +275,23 @@ describe('registerIpcHandlers', () => {
     await handler(IPC_CHANNELS.windowToggleMaximize)(event);
     expect(window.unmaximize).toHaveBeenCalledOnce();
   });
+
+  it('enhance_prompt 从 onChunk.__grenChannelId 推 delta，abort 调 service.abort', async () => {
+    const run = vi.fn(async (_input: unknown, emit: (chunk: string) => void) => {
+      emit('chunk-1');
+      return { ok: true, content: 'chunk-1' };
+    });
+    const abort = vi.fn();
+    registerIpcHandlers({ enhancePrompt: { run, abort } } as never);
+    const invoke = handler(IPC_CHANNELS.invoke);
+    const sender = { send: vi.fn() };
+    await invoke({ sender }, { command: 'enhance_prompt', args: { workspace: '/ws', text: 'hello', onChunk: { __grenChannelId: 'channel-9' } } });
+    expect(run).toHaveBeenCalledWith(
+      { workspace: '/ws', text: 'hello', goalText: '' },
+      expect.any(Function),
+    );
+    expect(sender.send).toHaveBeenCalledWith(`${IPC_CHANNELS.eventPrefix}channel:channel-9`, 'chunk-1');
+    await invoke({ sender }, { command: 'enhance_prompt_abort', args: { workspace: '/ws' } });
+    expect(abort).toHaveBeenCalledWith('/ws');
+  });
 });

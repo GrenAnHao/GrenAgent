@@ -108,6 +108,13 @@ export interface DiagnoseResult {
   tokensPerSec?: number | null;
 }
 
+export interface EnhancePromptResult {
+  ok: boolean;
+  content: string;
+  error?: string;
+  cancelled?: boolean;
+}
+
 export interface SubAgentItem {
   id: string;
   task: string;
@@ -283,6 +290,9 @@ export const pi = {
     invoke<string>('fix_mermaid_diagram', { workspace, code, error }),
   diagnoseProviderModel: (providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: Channel<string>) =>
     invoke<DiagnoseResult>('diagnose_provider_model', { providerId, modelId, prompt, stream, onChunk }),
+  enhancePrompt: (workspace: string, text: string, onChunk: Channel<string>, goalText?: string) =>
+    invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText }),
+  abortEnhancePrompt: (workspace: string) => invoke<void>('enhance_prompt_abort', { workspace }),
   subagentList: (workspace: string) => invoke<SubAgentItem[]>('subagent_list', { workspace }),
   /** 按需拉取单个子代理的完整 JSONL transcript（打开详情面板时调用，不在轮询路径中）。 */
   subagentGetTranscript: (workspace: string, agentId: string) =>

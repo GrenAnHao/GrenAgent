@@ -35,6 +35,10 @@ export interface IpcServices {
   usage?: UsageService;
   pi?: PiRuntimeService;
   provider?: ProviderService;
+  enhancePrompt?: {
+    run(input: { workspace: string; text: string; goalText?: string }, emit: (chunk: string) => void): Promise<unknown>;
+    abort(workspace: string): void;
+  };
   workspace?: WorkspaceService;
   uiHistory?: UiHistoryService;
   workspaceApproval?: WorkspaceApprovalService;
@@ -99,6 +103,22 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.usage) registerCommand('usage_report', () => services.usage!.report());
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
+  if (services.enhancePrompt) {
+    registerCommand('enhance_prompt', (event, args) => {
+      const channel = args.onChunk;
+      const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
+        ? (chunk: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
+        : () => {};
+      const goalText = typeof args.goalText === 'string' ? args.goalText : '';
+      return services.enhancePrompt!.run(
+        { workspace: readString(args, 'workspace'), text: readText(args, 'text'), goalText },
+        emit,
+      );
+    });
+    registerCommand('enhance_prompt_abort', (_event, args) => {
+      services.enhancePrompt!.abort(readString(args, 'workspace'));
+    });
+  }
   if (services.workspace) registerWorkspaceCommands(services.workspace);
   if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
   if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);

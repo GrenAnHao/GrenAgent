@@ -67,6 +67,7 @@ vi.mock('../SessionGoalDrawer', () => ({
     open ? <div data-testid="session-goal-drawer">{snapshot?.condition}</div> : null,
 }));
 vi.mock('../ComposerPromptOverlay', () => ({ ComposerPromptOverlay: () => null }));
+vi.mock('../EnhancePromptOverlay', () => ({ EnhancePromptOverlay: () => null }));
 vi.mock('../ContextUsageTag', () => ({ ContextUsageTag: () => null }));
 vi.mock('./InputChips', () => ({ InputChips: () => null }));
 vi.mock('./ChatTag/ReactChatTagPlugin', () => ({ default: {} }));

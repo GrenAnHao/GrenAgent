@@ -8,6 +8,7 @@ import UploadAction from './actions/UploadAction';
 import WebSearchAction from './actions/WebSearchAction';
 import GenerateImageAction from './actions/GenerateImageAction';
 import SpeakAction from './actions/SpeakAction';
+import EnhancePromptAction from './actions/EnhancePromptAction';
 
 /**
  * 动作注册表：key -> 组件。
@@ -23,6 +24,7 @@ export const actionMap = {
   webSearch: WebSearchAction,
   generateImage: GenerateImageAction,
   speak: SpeakAction,
+  enhancePrompt: EnhancePromptAction,
 } satisfies Record<string, ComponentType>;
 
 export type ActionKey = keyof typeof actionMap;
@@ -41,6 +43,7 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   webSearch: '联网搜索',
   generateImage: '生成图片',
   speak: '朗读文本',
+  enhancePrompt: '增强提示词',
 };
 
 export const DEFAULT_LEFT_ACTIONS: ActionKey[] = [
@@ -54,7 +57,7 @@ export const DEFAULT_LEFT_ACTIONS: ActionKey[] = [
   'compact',
   'newSession',
 ];
-export const DEFAULT_RIGHT_ACTIONS: ActionKey[] = [];
+export const DEFAULT_RIGHT_ACTIONS: ActionKey[] = ['enhancePrompt'];
 
 /**
  * 工具栏空间不足时的折叠优先级：靠前者先被收进"更多"溢出菜单。
@@ -83,6 +86,7 @@ export const ACTION_WIDTH = {
   speak: 28,
   compact: 28,
   newSession: 28,
+  enhancePrompt: 28,
 } satisfies Record<ActionKey, number>;
 
 /** "更多"溢出按钮自身的宽度，折叠发生时计入预留。 */

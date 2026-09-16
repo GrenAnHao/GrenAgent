@@ -127,4 +127,51 @@ describe('ModelRuntimeHost 短调用', () => {
     const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'x', modelId: 'y' }) });
     await expect(host.describeModel()).rejects.toThrow('MODEL_UNAVAILABLE');
   });
+
+  it('completeSimple 接受 provider+modelId 并 getModel', async () => {
+    const completeSimple = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+    const getModel = vi.fn((_p: string, _id: string) => model);
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'other', modelId: 'nope' }) });
+    await expect(host.completeSimple({ user: 'q', provider: 'openai', modelId: 'gpt-x' })).resolves.toBe('ok');
+    expect(getModel).toHaveBeenCalledWith('openai', 'gpt-x');
+    expect(completeSimple.mock.calls[0][0]).toBe(model);
+  });
+
+  it('provider+modelId 未命中时抛 模型不可用，不回退默认', async () => {
+    const completeSimple = vi.fn();
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel: () => undefined, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await expect(host.completeSimple({ user: 'q', provider: 'gone', modelId: 'x' })).rejects.toThrow('模型不可用');
+    expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it('streamSimple 把 signal 透传到第三参并映射 text_delta', async () => {
+    const signal = new AbortController().signal;
+    async function* streamSimple() {
+      yield { type: 'text_delta', delta: '你好' };
+      yield { type: 'done', message: { usage: { totalTokens: 1 } } };
+    }
+    const inner = vi.fn(streamSimple);
+    const create = vi.fn().mockResolvedValue({
+      completeSimple: vi.fn(),
+      streamSimple: inner,
+      getAvailableSnapshot: () => [model],
+      getModel: () => model,
+      hasConfiguredAuth: () => true,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    const events: Array<{ type: string; text?: string }> = [];
+    for await (const ev of host.streamSimple({ user: 'q', signal })) events.push(ev);
+    expect(events).toEqual([
+      { type: 'delta', text: '你好' },
+      { type: 'done', usage: { totalTokens: 1 } },
+    ]);
+    expect(inner.mock.calls[0][2]).toEqual({ signal });
+  });
 });

@@ -21,6 +21,7 @@ import { ShellService } from "./app/shellService";
 import { AgentDataService } from "./app/agentDataService";
 import { PermissionManager } from "./app/permissionManager";
 import { DevService } from "./app/devService";
+import { createEnhancePrompt } from "./app/enhancePrompt";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { attachWebviewSecurity } from "./webviewSecurity";
@@ -42,7 +43,7 @@ import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 import { collectModels } from "../../cli/src/probe-models.js";
-import { runOneshotWithRuntime, type OneshotRequest } from "../../extensions/_shared/oneshot.js";
+import { runHostOneshot } from "./agent/hostOneshotAdapter";
 import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
 import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
 
@@ -211,6 +212,12 @@ if (!process.env.VITEST) {
         },
       }),
     });
+    const enhancePrompt = createEnhancePrompt({
+      host: modelRuntimeHost,
+      agentHost,
+      settings: () => settings.getAll(),
+      agentData,
+    });
     registerIpcHandlers({
       settings,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
@@ -249,10 +256,7 @@ if (!process.env.VITEST) {
           if (!model) throw new Error(`workspace not open: ${workspace}`);
           return { provider: model.provider, modelId: model.id };
         },
-        oneshot: async (request, onLine) => {
-          const runtime = await modelRuntimeHost.ensure();
-          await runOneshotWithRuntime(runtime, request as unknown as OneshotRequest, (obj) => onLine?.(JSON.stringify(obj)));
-        },
+        oneshot: (request, onLine, signal) => runHostOneshot(modelRuntimeHost, request, onLine, signal),
       }),
       workspace,
       uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
@@ -268,6 +272,7 @@ if (!process.env.VITEST) {
         sandbox,
       ),
       agentData,
+      enhancePrompt,
       permissions,
       plugins,
       // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。

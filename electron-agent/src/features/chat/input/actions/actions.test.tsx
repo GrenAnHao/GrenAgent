@@ -80,6 +80,7 @@ const ctx: ChatInputContextValue = {
   followUp: [],
   send: vi.fn(),
   stop: vi.fn(),
+  readDraft: () => '',
 };
 
 beforeEach(() => {

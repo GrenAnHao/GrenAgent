@@ -15,10 +15,29 @@ describe('SETTINGS_SCHEMA general', () => {
     expect(fields.map((field) => field.key)).toEqual([
       'defaultSessionModel',
       'titleModel',
+      'enhancePromptModel',
+      'enhancePromptUseProjectContext',
       'AUTO_TITLE',
       'COMPACTION_PREVIEW',
       'goal.autoContinueOnOpen',
     ]);
+  });
+
+  it('在标题模型后提供增强提示词模型与实验开关', () => {
+    const fields = SETTINGS_SCHEMA.find((category) => category.id === 'general')?.fields ?? [];
+    expect(fields.find((field) => field.key === 'enhancePromptModel')).toMatchObject({
+      label: '增强提示词模型',
+      type: 'model',
+      placeholder: '留空＝当前会话模型',
+      description: '输入框「增强提示词」使用的模型；留空＝当前会话模型',
+      effect: 'instant',
+    });
+    expect(fields.find((field) => field.key === 'enhancePromptUseProjectContext')).toMatchObject({
+      label: '增强提示词结合项目（实验）',
+      type: 'boolean',
+      default: '0',
+      description: '打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关',
+    });
   });
 
   it('把新会话默认模型放在通用与模型的第一项', () => {

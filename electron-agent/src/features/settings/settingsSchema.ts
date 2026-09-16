@@ -78,6 +78,21 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         effect: 'instant',
       },
       {
+        key: 'enhancePromptModel',
+        label: '增强提示词模型',
+        type: 'model',
+        placeholder: '留空＝当前会话模型',
+        description: '输入框「增强提示词」使用的模型；留空＝当前会话模型',
+        effect: 'instant',
+      },
+      {
+        key: 'enhancePromptUseProjectContext',
+        label: '增强提示词结合项目（实验）',
+        type: 'boolean',
+        default: '0',
+        description: '打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关',
+      },
+      {
         key: 'AUTO_TITLE',
         label: '自动生成对话标题',
         type: 'boolean',

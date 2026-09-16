@@ -3,6 +3,15 @@ import { formatNonStream } from '../../../extensions/_shared/oneshot.js';
 
 type Model = NonNullable<ReturnType<ModelRuntime['getModel']>>;
 
+export interface ShortCallInput {
+  user: string;
+  systemPrompt?: string;
+  model?: Model;
+  provider?: string;
+  modelId?: string;
+  signal?: AbortSignal;
+}
+
 export interface ModelRuntimeHostOptions {
   /** 注入点仅为可测性；生产传 () => ModelRuntime.create({ authPath, modelsPath })。 */
   create: () => Promise<ModelRuntime>;
@@ -55,9 +64,9 @@ export class ModelRuntimeHost {
     return `${model.provider}/${model.id}`;
   }
 
-  async completeSimple(input: { user: string; systemPrompt?: string; model?: Model; signal?: AbortSignal }): Promise<string> {
+  async completeSimple(input: ShortCallInput): Promise<string> {
     const runtime = await this.ensure();
-    const model = input.model ?? await this.resolveDefaultModel();
+    const model = await this.resolveCallModel(input, runtime);
     const msg = await runtime.completeSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
@@ -68,9 +77,9 @@ export class ModelRuntimeHost {
     return formatted.content;
   }
 
-  async *streamSimple(input: { user: string; systemPrompt?: string; model?: Model; signal?: AbortSignal }): AsyncGenerator<{ type: 'delta' | 'done' | 'error'; text?: string; usage?: unknown; error?: string }> {
+  async *streamSimple(input: ShortCallInput): AsyncGenerator<{ type: 'delta' | 'done' | 'error'; text?: string; usage?: unknown; error?: string }> {
     const runtime = await this.ensure();
-    const model = input.model ?? await this.resolveDefaultModel();
+    const model = await this.resolveCallModel(input, runtime);
     for await (const ev of runtime.streamSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
@@ -80,6 +89,17 @@ export class ModelRuntimeHost {
       else if (ev.type === 'done') yield { type: 'done', usage: ev.message.usage };
       else if (ev.type === 'error') yield { type: 'error', usage: ev.error.usage, error: ev.error.errorMessage };
     }
+  }
+
+  private async resolveCallModel(input: ShortCallInput, runtime: ModelRuntime): Promise<Model> {
+    if (input.model) return input.model;
+    if (input.provider || input.modelId) {
+      if (!input.provider || !input.modelId) throw new Error('模型不可用');
+      const found = runtime.getModel(input.provider, input.modelId);
+      if (!found) throw new Error('模型不可用');
+      return found;
+    }
+    return this.resolveDefaultModel();
   }
 
   private settings(): Promise<{ provider: string; modelId: string }> {
