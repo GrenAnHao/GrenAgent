@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
-import { browserWindowOptions, resolveRendererHtml } from "./mainConfig";
+import { browserWindowOptions, resolveAppIcon, resolveRendererHtml } from "./mainConfig";
 import { SettingsService } from "./app/settingsService";
 import { McpPolicyService } from "./app/mcpPolicyService";
 import { McpConfigService } from "./app/mcpConfigService";
@@ -47,7 +47,10 @@ import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRe
 import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
 
 export function createWindow() {
-  const window = new BrowserWindow(browserWindowOptions);
+  const window = new BrowserWindow({
+    ...browserWindowOptions,
+    icon: resolveAppIcon(app.isPackaged, app.getAppPath(), __dirname),
+  });
   attachWebviewSecurity(window.webContents);
   attachDevToolsShortcut(window);
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
