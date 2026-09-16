@@ -3,3 +3,6 @@ dist/
 out/
 release/
 resources/
+D/
+*.log
+*.tsbuildinfo

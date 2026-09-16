@@ -9,11 +9,10 @@
 | [`memory`](./memory) | `memory_search` `conversation_search` | Agent Data Runtime | 本地 L0-L3 长期记忆、会话捕获与自动召回 |
 | [`web-fetch`](./web-fetch) | `fetch_url` `fetch_html` `fetch_markdown` `fetch_txt` `fetch_json` | 否 | 网页抓取(SSRF 防护) |
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
-| [`code-review`](./code-review) | `git_diff` `review_note` `/review` | 否 | 结构化代码审查 + 报告 |
 | [`multi-agent`](./multi-agent) | `spawn_agent` | 子 agent 需 | 委派隔离 pi 子进程(单个/并行) |
 | [`fable-behavior`](./fable-behavior) | — | 否 | Fable 5 + coding-agent 行为层(Tier 注入 + 子 agent 种子) |
 | [`tts`](./tts) | `speak` | 是 | 文字转语音(OpenAI 兼容) |
-| [`im-gateway`](./im-gateway) | `/imgateway` + webhook | 否 | HTTP 网关,接入 IM 平台 |
+| [`im-gateway`](./im-gateway) / [`im-platforms`](./im-platforms) | — | — | **暂缓**：源码保留，未打进产品加载清单。接回见仓库根目录 `docs/im-reintroduction.md` |
 
 合计 **当前桌面端打进主进程 / worker 的全部扩展**，长期记忆与知识检索由本地 `memory`、`wiki-rag` 与 `code-retrieval` 提供。
 
@@ -24,7 +23,6 @@
 pi -e ./extensions/memory/index.ts \
    -e ./extensions/web-fetch/index.ts \
    -e ./extensions/image-gen/index.ts \
-   -e ./extensions/code-review/index.ts \
    -e ./extensions/multi-agent/index.ts
 
 # 方式 2:作为一个 Pi Package 安装(本目录已带聚合 package.json)

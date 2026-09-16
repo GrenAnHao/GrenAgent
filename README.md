@@ -63,7 +63,7 @@
 - **本地长期记忆** — L0-L3 分层记忆由当前 Pi 模型提炼并按工作区隔离。
 - **用量统计** — 按天、模型、项目聚合 Token 与费用。
 - **终端 Dock** — 终端 tab 容器，子代理会话独立成 tab。
-- **IM 接入** — 微信（ilink 官方 bot）扫码登录，手机遥控 Agent；「连接」面板展示登录状态与会话只读镜像。
+- **IM 接入** — 微信 ilink bot 与 HTTP 网关源码仍在仓库，当前稳定版不加载。接回见 [IM 功能：暂缓与后期接入](./docs/im-reintroduction.md)。
 
 ## 架构
 
@@ -115,17 +115,17 @@ bun run package        # electron-builder，产物在 release/
 
 | 类别 | 扩展 | 说明 |
 | --- | --- | --- |
-| 安全与策略 | `safety`、`approval`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、死循环检测、声明式规则、MCP 工具权限 |
-| 会话管理 | `auto-title`、`checkpoint`、`compaction-policy`、`session-memory`、`goal`、`todo` | 自动标题、工作区快照、上下文压缩、会话状态、目标驱动、待办 |
+| 安全与策略 | `safety`、`approval`、`sandbox`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、OS 沙箱、死循环检测、声明式规则、MCP 工具权限 |
+| 会话管理 | `auto-title`、`compaction-policy`、`session-memory`、`goal`、`todo` | 自动标题、上下文压缩、会话状态、目标驱动、待办 |
 | 模式与交互 | `agent-mode`、`diagram-hint` | Agent / Ask / Debug / Plan 模式；Mermaid / KaTeX 渲染提示 |
 | 知识与记忆 | `memory`、`wiki-rag`、`session-memory` | 本地 L0-L3 记忆、Wiki 检索和当前会话压缩状态 |
 | 联网与信息 | `web-fetch`、`web-search` | 单页抓取（`fetch_url`）；多引擎搜索与站点抓取（`web_search` 等） |
 | MCP | `mcp` | 连接外部 MCP server，工具名 `mcp__<server>__<tool>` |
 | 媒体生成 | `image-gen`、`tts` | 文生图（`generate_image`）；语音合成（`speak`） |
-| 代码智能 | `code-retrieval`、`ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`code-review`、`diagnostics` | CodeGraph MCP 代码检索、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |
+| 代码智能 | `code-retrieval`、`ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`diagnostics` | CodeGraph 代码检索、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |
 | 多代理 | `multi-agent` | 子代理委派（`spawn_agent`） |
 | 外部集成 | `github` | GitHub CLI 封装（`github`） |
-| IM 接入 | `im-gateway`、`im-platforms` | HTTP webhook 网关；微信 ilink bot（`/im`） |
+| IM 接入（暂缓） | `im-gateway`、`im-platforms` | 源码保留，不进 `allExtensions`。接回见 [IM 功能：暂缓与后期接入](./docs/im-reintroduction.md) |
 
 完整清单与工具名见 [架构文档 — 内置扩展](./docs/architecture.md#内置扩展)。
 
@@ -144,7 +144,7 @@ bun run package        # electron-builder，产物在 release/
 │   ├── src/         # React 渲染层：features / stores / lib / platform / components / theme
 │   └── electron/    # Electron 主进程：app / agent / agentData / pi，及 ipc 与 preload
 ├── embedding/       # 独立本地向量服务（实验，未集成进主应用）
-└── docs/            # 架构与开发文档，及 superpowers/ 下的设计规格与实现计划
+└── docs/            # 架构与开发文档；superpowers/ 为现行规格与计划，6–8 月已落地文稿在 superpowers/archive/
 ```
 
 ## 许可证

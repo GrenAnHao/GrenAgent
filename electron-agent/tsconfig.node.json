@@ -11,7 +11,6 @@
   },
   "include": [
     "electron.vite.config.ts",
-    "vite.config.ts",
     "electron/**/*.ts",
     "src/lib/usageReport.ts",
     "../extensions/**/*.ts",

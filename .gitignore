@@ -36,6 +36,7 @@ output/
 /.tmp-electron-browser/
 /electron-agent/.mermaid-repro/
 /electron-agent/.runtime/
+/electron-agent/D/
 /dump-event.err
 /.tsc-out.txt
 /.tsc-src.txt
