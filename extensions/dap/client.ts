@@ -14,7 +14,7 @@ export class DapClient {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly conn: DapConnection;
   private readonly initializedEvent: Promise<void>;
-  private resolveInitialized: () => void = () => {};
+  private resolveInitialized: () => void;
   private threadId = 1;
   private terminated = false;
   private readonly breakpoints = new Map<string, number[]>();
@@ -36,6 +36,7 @@ export class DapClient {
       this.conn.rejectAll(new Error("调试适配器已退出"));
       this.flush({ terminated: true });
     });
+    this.resolveInitialized = () => {};
     this.initializedEvent = new Promise((r) => {
       this.resolveInitialized = r;
     });

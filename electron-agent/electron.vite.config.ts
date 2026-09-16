@@ -12,11 +12,13 @@ export default defineConfig({
       ],
     },
     build: {
+      bytecode: { transformArrowFunctions: false },
       rollupOptions: {
         input: {
           main: resolve(__dirname, "electron/main.ts"),
           "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
         },
+        output: { format: "cjs" },
         external: [
           "@homebridge/node-pty-prebuilt-multiarch",
           "@colbymchenry/codegraph",

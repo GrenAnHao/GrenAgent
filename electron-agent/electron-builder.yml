@@ -9,10 +9,15 @@ files:
   - package.json
   - build/icon.ico
 asar: true
+electronFuses:
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 asarUnpack:
   - node_modules/@colbymchenry/**
   - node_modules/@ast-grep/**
   - out/main/pi-worker.js
+  - out/main/pi-worker.jsc
+  - out/main/bytecode-loader.cjs
   - out/main/chunks/**
   - out/main/runner.py
   - out/main/runner.mjs
