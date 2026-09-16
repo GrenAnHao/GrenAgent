@@ -11,7 +11,8 @@
 > - **写回：** 输入框上方预览浮层，用户点「应用」才替换正文。预览内流式出字。
 > - **模型：** 设置项 `enhancePromptModel` 可选；留空＝当前会话模型。设了但不可用则失败，不静默回退。
 > - **改写范围：** 只改编辑器正文。粘贴块、图片附件不动。正文里的 `@路径` / `/命令` / URL 由模型原样保留。
-> - **默认实现：** 独立 oneshot（`streamSimple`），不走 `agent_prompt`，不跑工具。
+> - **默认实现：** 走主进程短调用标准入口 `ModelRuntimeHost.streamSimple`，不走 `agent_prompt`，不跑工具。
+> - **短调用标准：** 唯一入口是 `ModelRuntimeHost.completeSimple / streamSimple`（模型、system、user、`AbortSignal`）。不向渲染层暴露通用 `pi.oneshot`。mermaid / 诊断的 JSON 行适配器改为调 Host 并透传 signal。实验工具循环不是 short call。
 > - **实验：** 设置 `enhancePromptUseProjectContext` 默认关。打开后主进程跑有限轮只读工具（wiki / 记忆 / 代码图），会话目标由渲染进程随 IPC 注入。不 spawn 子代理。
 
 ## 1. 目标 / 非目标
@@ -23,6 +24,7 @@
 3. 调用不进入对话历史、不改会话模型。默认路径不跑工具。
 4. 设置里可指定增强用的模型；留空则用当前会话模型。
 5. 可选实验开关：打开后改写可查阅会话目标、项目 wiki/记忆和代码图，生成更贴项目的提示词。
+6. 短调用收口到 `ModelRuntimeHost`：增强默认路径、mermaid 修复、供应商诊断共用同一套 `completeSimple` / `streamSimple`（含取消）。
 
 **非目标**
 
@@ -34,6 +36,9 @@
 - 不做快捷键、不做多版本对比、不把增强模型做成按会话覆盖。
 - 实验路径不 spawn 子代理、不 `session.prompt`、不写 wiki/记忆、不跑 `codegraph_impact` / callers / callees。
 - 实验路径不把工具原文展示在预览卡里。
+- 不向渲染层增加通用 `pi.oneshot` IPC（避免任意提示词通道）。
+- 不删除 `extensions/_shared/oneshot.ts` 的 CLI `runOneshot()`；Electron 主进程不再调用它。
+- 不修诊断里 usage 字段与 pi-ai `Usage` 对不齐（仍可恒 null）。
 - 不测真实供应商网络、不测像素级样式、不测真实 wiki/代码图索引质量。
 
 **成功标准**
@@ -65,6 +70,7 @@
 | 短调用队列 | 不进 `ShortCallQueue`（避免和标题 / wiki 排队） |
 | ChatTag | 第一版不重建 pill |
 | 实验开关 | `enhancePromptUseProjectContext`，默认关 |
+| 短调用入口 | `ModelRuntimeHost.completeSimple` / `streamSimple`；Electron 不再调用 `runOneshotWithRuntime` |
 
 ## 3. 架构
 
@@ -77,13 +83,13 @@ ChatInput / SendArea
                          IPC enhance_prompt            │
                                 │                      │
                      resolveModel                      │
-                      ├─ 开关关：streamSimple ─────────┘
+                      ├─ 开关关：Host.streamSimple ────┘
                       └─ 开关开：只读工具循环 ─────────┘
                      enhance_prompt_abort → AbortSignal
 ```
 
 - 前端只读 `readDraft()`（与发送同一套 markdown 序列化，含 `\_` → `_`）。实验开时额外带上当前会话 Goal 快照文案。
-- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、默认流式 / 实验工具循环、清洗、中止。不写 session。
+- 主进程 `electron-agent/electron/app/enhancePrompt.ts` 负责解析模型、系统提示、默认流式 / 实验工具循环、清洗、中止。默认流式只调 `ModelRuntimeHost.streamSimple`（§12）。不写 session。
 - 流式通道复用 `diagnose_provider_model` 的 `Channel` 模式：delta 为纯文本 chunk（只含提示词正文，不含工具输出）；invoke 结束返回 `{ ok, content, error?, cancelled? }`。
 
 ## 4. 组件与交互
@@ -157,13 +163,13 @@ ChatInput / SendArea
 
 ### 5.3 默认调用（开关关）
 
-- `modelRuntimeHost.streamSimple({ user: text, systemPrompt, model, signal })`。
-- 每条 `text_delta` 向 Channel 发 `delta`。
+- 只调 §12 的 `modelRuntimeHost.streamSimple({ user: text, systemPrompt, model, signal })`。`model` 来自 §5.2。
+- 每条 Host 事件 `type === 'delta'` 且有 `text` 时向 Channel 发该字符串（Host 已把 runtime `text_delta` 映射为 `{ type: 'delta', text }`）。
 - `error` 事件或抛错 → invoke 以失败返回。
 - `done` → 拼接全文，走 §5.4 清洗，返回 `{ ok: true, content }`。
 - workspace → `AbortController` 映射；新的 `enhance_prompt` 先中止同 workspace 上一次。`enhance_prompt_abort` 只 abort，不从 Channel 再推 delta。
 - 超时 60 秒 abort，错误：「增强超时，请重试」。
-- 不经 `ProviderService.oneshot` JSON 行、不经 `ShortCallQueue`。
+- 不经 `ProviderService.oneshot`、不经 `runOneshotWithRuntime`、不经 `ShortCallQueue`。
 
 ### 5.4 系统提示与清洗
 
@@ -260,6 +266,13 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 - 上限：第 9 次工具调用被拒绝；超过 4 轮不再发工具。
 - 单次工具结果超过 4000 字被截断。
 
+**短调用收口（`modelRuntimeHost.test.ts` / `hostOneshotAdapter.test.ts`）**
+
+- `completeSimple` / `streamSimple` 接受 `provider`+`modelId`，命中 `getModel`；缺省走 `resolveDefaultModel`。
+- `signal` 透传到 runtime 第三参（已有用例保留；`streamSimple` 补一条）。
+- 适配器流式行 `{ type: 'delta' | 'done' | 'error' }`，非流式 `{ ok, content }`；模型未命中 emit `model not found: provider/id`；`signal` 传到 Host。
+- `enhancePrompt.ts` 与 `main.ts` 不 import `runOneshotWithRuntime`。
+
 **前端**
 
 - `EnhancePromptAction`：空正文、询问待答时 `disabled`；有正文可点。
@@ -283,6 +296,9 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 | `electron-agent/src/stores/enhancePromptStore.ts` | 新增 |
 | `electron-agent/src/lib/pi.ts` | IPC 封装 |
 | `electron-agent/electron/app/enhancePrompt.ts` | 解析 / 默认流式 / 实验工具循环 / 清洗 |
+| `electron-agent/electron/agent/modelRuntimeHost.ts` | 短调用标准入口：按 provider/id 解析模型 |
+| `electron-agent/electron/agent/hostOneshotAdapter.ts` | mermaid / 诊断 JSON 行 → Host |
+| `electron-agent/electron/main.ts` | `ProviderService.oneshot` 改为调适配器，不再 `runOneshotWithRuntime` |
 | `electron-agent/electron/ipc/register.ts` | 注册命令 |
 | `electron-agent/src/features/settings/settingsSchema.ts` | 两项设置 |
 | 对应 `*.test.ts(x)` | 见 §9 |
@@ -309,7 +325,7 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 
 ### 11.2 循环与上限
 
-在 `enhancePrompt.ts` 自建 tool loop：带 tools 的 complete/stream 回灌工具结果。不创建可见 `AgentSession`，不写主会话 JSONL，不进 `ShortCallQueue`。
+在 `enhancePrompt.ts` 自建 tool loop：走 `ModelRuntime` 带 tools 的 complete/stream 回灌工具结果，不走 `Host.streamSimple`。不创建可见 `AgentSession`，不写主会话 JSONL，不进 `ShortCallQueue`。
 
 | 上限 | 值 |
 | --- | --- |
@@ -322,4 +338,46 @@ testid：`set-field-enhancePromptModel`、`set-field-enhancePromptUseProjectCont
 
 ### 11.3 流式
 
-工具回合的 JSON / 结果不进 Channel。仅把最终提示词的 `text_delta` 发给预览。用户取消时 abort 掉整段循环。
+工具回合的 JSON / 结果不进 Channel。仅把最终助手正文的纯文本 chunk 发给预览（与 §5.3 相同的 Channel 字符串约定）。用户取消时 abort 掉整段循环。此循环不是 §12 短调用。
+
+## 12. 短调用标准入口
+
+SDK 模式下短调用的**唯一**主进程 API 是 `ModelRuntimeHost`。不进会话、不加载扩展、不跑工具。
+
+### 12.1 签名
+
+在现有 `completeSimple` / `streamSimple` 上增加按供应商解析（都空则仍 `resolveDefaultModel`）：
+
+```ts
+interface ShortCallInput {
+  user: string;
+  systemPrompt?: string;
+  model?: Model;
+  provider?: string;
+  modelId?: string;
+  signal?: AbortSignal;
+}
+```
+
+解析顺序：`model` 对象 → `provider`+`modelId` 且 `getModel` 命中 → 否则若提供了 provider/id 但未命中则抛「模型不可用」→ 都未指定则 `resolveDefaultModel()`。`signal` 必须传到 `ModelRuntime.completeSimple / streamSimple` 的第三参。
+
+`streamSimple` 对外事件保持：`{ type: 'delta', text }` / `{ type: 'done', usage }` / `{ type: 'error', error, usage }`。
+
+### 12.2 谁必须走这里
+
+| 调用方 | 方式 |
+| --- | --- |
+| 增强提示词默认路径 | 直接 `streamSimple`（已解析的 `model` 对象 + `signal`） |
+| `SystemWorkerManager` | 已走 `completeSimple` + `ShortCallQueue`，保持 |
+| mermaid 修复 / 供应商诊断 | `ProviderService.oneshot` 适配器内部改调 Host；stdout JSON 行形状不变，**必须透传 `AbortSignal`** |
+| 实验增强（§11） | 不是 short call |
+
+Electron `main.ts` **禁止**再 `runOneshotWithRuntime`。`formatNonStream` 仍可给 `completeSimple` 抽文本。适配器抽成可单测函数（如 `hostOneshotAdapter.ts`）：`oneshot(request, onLine, signal?)` → Host；`request.system` 映到 `systemPrompt`。流式行 `{ type: 'delta' | 'done' | 'error' }`，非流式 `{ ok, content }` / `{ ok: false, error }`。模型未命中时适配器仍 emit `model not found: provider/id`，不改诊断现有文案。诊断 / mermaid 本期可不新增 abort IPC，但签名必须能传 `signal`。
+
+### 12.3 明确不是 short call
+
+- 实验 wiki / 记忆 / 代码图工具循环（§11）
+- `agent_prompt` / 子代理 `session.prompt`
+- 渲染层通用 oneshot IPC（不新增）
+
+诊断 usage 与 pi-ai `Usage` 字段不对齐的问题本期不修。
