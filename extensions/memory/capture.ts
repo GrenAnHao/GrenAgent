@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { flattenTranscript } from "../_shared/transcript.js";
 import { type AskFn, askLlm, parseJsonLoose, resolveModel } from "./llm.js";
+import { LOCAL_MEMORY_EXTRACT_SYSTEM } from "./prompts.js";
 import type { MemoryScope } from "./store.js";
 
 export interface CaptureClient {
@@ -16,10 +17,7 @@ interface Extraction {
   l3?: string;
 }
 
-const SYSTEM =
-  "Extract durable layered memory from the conversation. Return JSON only with optional fields: " +
-  "l1 (an object or array of concise facts), l2 (concise markdown), and l3 (long-term markdown). " +
-  "Do not include fields with no useful information.";
+const SYSTEM = LOCAL_MEMORY_EXTRACT_SYSTEM;
 
 export class LayeredMemoryCapture {
   private tail: Promise<void> = Promise.resolve();
