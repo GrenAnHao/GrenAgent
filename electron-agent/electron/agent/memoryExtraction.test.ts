@@ -19,6 +19,7 @@ describe('parseMemoryExtraction', () => {
   it('丢弃越界类型而不抛错（对齐上游已知坑的收敛版）', () => {
     const parsed = parseMemoryExtraction({ l1: [{ ...record, type: 'persona' }, { ...record, type: 'work_method' }] }, 'chat');
     expect(parsed.l1).toHaveLength(1);
+    expect(parsed.l1![0].type).toBe('persona');
   });
 
   it('priority 缺失时补 50，越界时钳到 0..100', () => {
@@ -36,7 +37,7 @@ describe('parseMemoryExtraction', () => {
   });
 
   it('类型白名单按模式收敛', () => {
-    expect(L1_TYPES_WORK).toHaveLength(4);
-    expect(L1_TYPES_CHAT).toHaveLength(3);
+    expect(L1_TYPES_WORK).toEqual(['work_fact', 'work_task', 'work_method', 'work_artifact']);
+    expect(L1_TYPES_CHAT).toEqual(['persona', 'episodic', 'instruction']);
   });
 });
