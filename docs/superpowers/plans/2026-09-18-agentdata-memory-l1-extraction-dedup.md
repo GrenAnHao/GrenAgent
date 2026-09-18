@@ -156,17 +156,19 @@ git commit -m "feat(memory): port TencentDB L1 extraction prompts"
 it('memory_extract 使用移植后的抽取提示词', () => {
   const task = { id: 't1', kind: 'memory_extract', input: { delta: 'user: hi' } };
   const prompt = serviceTaskPromptForTest(task);
-  expect(prompt).toContain('宁缺毋滥');
+  expect(prompt).toContain('不提取与工作无关的个人偏好');
   expect(prompt).toContain('Task kind: memory_extract');
 });
 ```
 
 > 若 `serviceTaskPrompt` 未导出，在实现文件中加 `export function serviceTaskPromptForTest(task: SystemWorkerTask): string { return serviceTaskPrompt(task); }`，或直接把 `serviceTaskPrompt` 改为导出。
+>
+> ⚠️ 锚点必须取自 **work** 版：接线用的是 `MEMORY_EXTRACT_WORK_SYSTEM_PROMPT`，而 `宁缺毋滥` 只存在于 chat 版（见「执行期订正记录」）。
 
 - [ ] **步骤 2：运行测试验证失败**
 
 运行：`npm --prefix electron-agent test -- --run electron/pi/systemWorkerManager.test.ts`
-预期：FAIL，断言 `宁缺毋滥` 不成立（当前指令只有一行）
+预期：FAIL，断言 `不提取与工作无关的个人偏好` 不成立（当前指令只有一行）
 
 - [ ] **步骤 3：编写实现**
 
@@ -749,7 +751,7 @@ import { LOCAL_MEMORY_EXTRACT_SYSTEM } from './prompts';
 
 describe('local extraction prompt', () => {
   it('与 electron 侧权威提示词同源锚点', () => {
-    expect(LOCAL_MEMORY_EXTRACT_SYSTEM).toContain('宁缺毋滥');
+    expect(LOCAL_MEMORY_EXTRACT_SYSTEM).toContain('不提取与工作无关的个人偏好');
     expect(LOCAL_MEMORY_EXTRACT_SYSTEM).toContain('work_fact');
     expect(LOCAL_MEMORY_EXTRACT_SYSTEM).toContain('不应该提取的内容');
   });
@@ -839,7 +841,8 @@ git commit --allow-empty -m "test(memory): phase-1 regression green"
 
 - 任务 1：计划原测试断言 work 版包含 `宁缺毋滥`，实测该短语只存在于 chat 版（work 版的对应原则是"面向工作协作 / 面向团队共享"）。已把 work 版锚点改为 `不应该提取的内容` + `不提取与工作无关的个人偏好`，chat 版锚点补上 `不应该提取的内容`。提示词正文未做任何改动（已用脚本校验与上游逐字一致）。
 - 任务 1：删除了计划原稿中的 `MEMORY_EXTRACT_OUTPUT_TAIL`。它与移植后的提示词输出协议直接冲突（移植版只允许输出 JSON 数组），且是无消费者的死代码。`l2` / `l3` 的恢复交由后续 L2/L3 计划。
-- 任务 1：上游文件为 CRLF 行尾，而 JS 模板字面量在解析时把 CRLF 归一为 LF（该提示词共 269 处），因此运行时长度是 5269 / 2369 而非源文字符数 5545 / 2464。头注释中的字符数与 sha256 一律按**运行时取值**记录，以免行尾规范化被误判为漂移。
+- 任务 1：上游文件为 CRLF 行尾，而 JS 模板字面量在解析时把 CRLF 归一为 LF，因此运行时长度是 5269 / 2369 而非源文字符数 5545 / 2464。差额构成：work 版 267 处 CRLF + 9 处转义反引号，chat 版 86 处 CRLF + 9 处转义反引号。头注释中的字符数与 sha256 一律按**运行时取值**记录，以免行尾规范化被误判为漂移。
+- 任务 8：镜像只覆盖 work 版常量（接线用的就是它）；chat 版暂不镜像，若将来需要接线再补。
 
 **5. 已知遗留（不在本计划内，已在后续计划中登记）**
 

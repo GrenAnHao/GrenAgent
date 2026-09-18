@@ -16,8 +16,8 @@ Electron 版的 Agent Data 模块为 TypeScript 自研实现，以下开源项�
 
 ## TencentDB Agent Memory
 
-- 项目：TencentDB-Agent-Memory（MemoryCore）
-- 许可证：MIT
+- 项目：https://github.com/TencentCloud/TencentDB-Agent-Memory
+- 许可证：MIT（Copyright Tencent）
 - 用途：`electron-agent/electron/agent/memoryPrompts.ts` 中的 L1 记忆抽取系统提示词（`MEMORY_EXTRACT_WORK_SYSTEM_PROMPT`、`MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT`）为**逐字移植**，取自上游 `MemoryCore/src/core/prompts/l1-extraction.ts`。
 - 上游版本锚点：HEAD `0468a2a5b50eaafc54758ed1e2e6609472e5b6ce`；该文件最后一次变更 `41444344ce11467a5b5ad6aa032f5e261da1f4d2`（2026-07-22，v2.0.0-beta.1）。
 - 边界：仅移植提示词文本常量，未复制其运行时、存储层或调度实现。

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT,
@@ -5,7 +6,22 @@ import {
   memoryExtractPrompt,
 } from './memoryPrompts';
 
+/** 运行时取值，不含定界反引号；CRLF 已由模板字面量规范化为 LF。 */
+const UPSTREAM = {
+  work: { chars: 5269, sha256: '392b45852d0c08cad60d02f59d7660d3c09e1d47db78c3c4baf49bee9a3460c8' },
+  chat: { chars: 2369, sha256: 'fae33004afa3c0b714d70b45ef5252a3cb2406b7f746e118dfc6a22519892268' },
+} as const;
+
+const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+
 describe('memoryPrompts', () => {
+  it('两个常量与上游运行时取值逐字一致（长度 + sha256）', () => {
+    expect(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT.length).toBe(UPSTREAM.work.chars);
+    expect(sha256(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT)).toBe(UPSTREAM.work.sha256);
+    expect(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT.length).toBe(UPSTREAM.chat.chars);
+    expect(sha256(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT)).toBe(UPSTREAM.chat.sha256);
+  });
+
   it('work 版保留四类枚举与排除清单', () => {
     for (const type of ['work_fact', 'work_task', 'work_method', 'work_artifact']) {
       expect(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT).toContain(type);
