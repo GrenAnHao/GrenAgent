@@ -154,7 +154,11 @@ describe('MemoryService', () => {
     const { db, service } = setup();
     const capture = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: prefer dark mode', fingerprint: 'fp1' });
 
-    service.completeExtraction(capture.taskId!, { l1: { preference: 'dark' }, l2: 'scenario text', l3: 'persona text' });
+    service.completeExtraction(capture.taskId!, {
+      l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80 }],
+      l2: 'scenario text',
+      l3: 'persona text',
+    });
 
     const rows = db.prepare('SELECT level, memory_scope as scope, project_id as projectId FROM memories ORDER BY level').all() as Array<{ level: number; scope: string; projectId: string }>;
     expect(rows).toEqual([
@@ -166,7 +170,23 @@ describe('MemoryService', () => {
     // 另一个项目的作用域也能读到这两层（全局），但读不到 L1（项目私有）。
     const other = { userId: 'u', projectId: 'project-B', workspace: '/repo-b' };
     expect((await service.search({ ...other, query: 'scenario' })).map((r) => r.level)).toEqual([2]);
-    expect(await service.search({ ...other, query: 'preference' })).toHaveLength(0);
+    expect(await service.search({ ...other, query: 'dark mode' })).toHaveLength(0);
+    db.close();
+  });
+
+  it('把 L1 记录数组逐条落库，而不是整包字符串', async () => {
+    const { db, store, service } = setup();
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    await service.completeExtraction(captured.taskId!, {
+      l1: [
+        { content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 },
+        { content: '后端需在周五前完成表结构设计', type: 'work_task', priority: 85 },
+      ],
+    });
+    const rows = store.search(scope, '团队决定');
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].content)).toMatchObject({ type: 'work_method', priority: 90 });
+    expect(store.search(scope, '表结构')).toHaveLength(1);
     db.close();
   });
 
@@ -174,7 +194,7 @@ describe('MemoryService', () => {
     const { db, service } = setup();
     const capture = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: remember this', fingerprint: 'fp1' });
 
-    expect(service.completeExtraction(capture.taskId!, { l1: { preference: 'dark' } })).toHaveLength(1);
+    expect(service.completeExtraction(capture.taskId!, { l1: [{ content: 'remember this', type: 'work_fact', priority: 80 }] })).toHaveLength(1);
     expect(() => service.completeExtraction('missing', { l1: {} })).toThrow('memory capture task not found');
     const retry = await service.capture({ ...scope, source: 'session:s2', transcript: 'user: validate this', fingerprint: 'fp2' });
     expect(() => service.completeExtraction(retry.taskId!, 'invalid')).toThrow('memory extraction output is invalid');
@@ -226,7 +246,7 @@ describe('MemoryService', () => {
     db.close();
   });
 
-  it.each([{}, { l1: {}, l2: ' ', l3: '' }, { l1: [] }])('commits valid empty extraction output %j without creating memory rows', async (output) => {
+  it.each([{}, { l2: ' ', l3: '' }, { l1: [] }])('commits valid empty extraction output %j without creating memory rows', async (output) => {
     const { db, service } = setup();
     const input = { ...scope, source: 'session:s', transcript: 'user: hello', fingerprint: 'fp' };
     const capture = await service.capture(input);

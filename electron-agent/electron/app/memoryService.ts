@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord, MemoryConversation, MemoryConversationDetail, MemoryCreateInput, MemoryDraft, MemoryListInput, MemoryPage, MemoryReadInput, MemoryUpdateInput } from '../agentData/memoryContracts';
 import { RpcError } from '../agentData/protocol';
+import { parseMemoryExtraction } from '../agent/memoryExtraction';
 
 import type { ServiceTask } from './appServer/types';
 
@@ -13,7 +14,7 @@ export interface MemoryTaskQueue {
   get?(id: string): ServiceTask | undefined;
   findPending?(kind: string, matches: (task: ServiceTask) => boolean): ServiceTask | undefined;
 }
-export interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; validateProject?: (projectId: string) => Promise<string> }
+export interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; validateProject?: (projectId: string) => Promise<string>; extractMode?: 'work' | 'chat' }
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
 
 export class MemoryService {
@@ -111,18 +112,16 @@ export class MemoryService {
   completeExtraction(taskId: string, output: unknown): MemoryRecord[] {
     const capture = this.pending.get(taskId) ?? this.captureFromTask(taskId);
     if (!capture) throw new Error('memory capture task not found');
-    const extraction = validateExtraction(output);
+    const extraction = parseMemoryExtraction(output, this.options.extractMode ?? 'work');
     const writes: MemoryRecord[] = [];
     const globalScope = { ...capture.scope, scope: 'global' as const };
-    if (extraction.l1 !== undefined) {
-      const content = JSON.stringify(extraction.l1);
-      if (content !== '{}' && content !== '[]') writes.push(this.options.store.upsert(capture.scope, { level: 1, content, source: capture.source }));
+    for (const record of extraction.l1 ?? []) {
+      writes.push(this.options.store.upsert(capture.scope, { level: 1, content: JSON.stringify(record), source: capture.source }));
     }
     if (extraction.l2) writes.push(this.options.store.upsert(globalScope, { level: 2, content: extraction.l2, source: capture.source }));
     if (extraction.l3) writes.push(this.options.store.upsert(globalScope, { level: 3, content: extraction.l3, source: capture.source }));
     this.options.store.commitCapture(capture.scope, capture.source, capture.fingerprint, capture.delta);
     this.finishCapture(taskId);
-
     return writes;
   }
 
@@ -152,17 +151,6 @@ export class MemoryService {
     if (typeof task.sourceProjectId !== 'string' || typeof input.source !== 'string') return undefined;
     return { scope: { userId: typeof input.userId === 'string' ? input.userId : 'local', projectId: task.sourceProjectId, workspace: typeof input.workspace === 'string' ? input.workspace : task.sourceProjectId, sessionId: typeof task.sourceSessionId === 'string' ? task.sourceSessionId : undefined }, source: input.source, fingerprint: typeof input.fingerprint === 'string' ? input.fingerprint : '', delta: input.delta };
   }
-}
-
-function validateExtraction(value: unknown): { l1?: unknown; l2?: string; l3?: string } {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('memory extraction output is invalid');
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !['l1', 'l2', 'l3'].includes(key))) throw new Error('memory extraction output is invalid');
-  if ('l1' in record && record.l1 !== undefined && (typeof record.l1 !== 'object' || record.l1 === null)) throw new Error('memory extraction output is invalid');
-  if ('l2' in record && record.l2 !== undefined && typeof record.l2 !== 'string') throw new Error('memory extraction output is invalid');
-  if ('l3' in record && record.l3 !== undefined && typeof record.l3 !== 'string') throw new Error('memory extraction output is invalid');
-  const result = { l1: record.l1, l2: typeof record.l2 === 'string' ? record.l2.trim() : undefined, l3: typeof record.l3 === 'string' ? record.l3.trim() : undefined };
-  return result;
 }
 
 function sameSource(scope: MemoryScope, source: string, input: MemoryCaptureInput): boolean {
