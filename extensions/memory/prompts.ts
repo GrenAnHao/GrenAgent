@@ -146,7 +146,7 @@ priority：
 metadata 建议：
 - 如能确定 owner，填入 {"owner": "名称或ID"}。
 - 如能确定 deadline，填入 {"deadline": "ISO8601"}。
-- 如能确定 status，填入 {"status": "todo|doing|done|blocked|deferred|cancelled"}。
+- 如能确定状态，填入 {"status": "todo|doing|done|blocked|deferred|cancelled"}。
 
 ---
 
