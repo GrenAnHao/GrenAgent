@@ -12,9 +12,31 @@ const goalJudgeOutput = z.object({
   blockageFingerprint: z.string().max(400).optional(),
 }).strict().refine((value) => value.verdict !== 'pass' || value.missing.length === 0, 'a passing judge cannot report missing items');
 
+const l1RecordForRegistry = z.object({
+  content: z.string().min(1),
+  type: z.string().min(1),
+  priority: z.number().optional(),
+  scene_name: z.string().optional(),
+  source_message_ids: z.array(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+export const memoryExtractionOutput = z.object({
+  l1: z.array(l1RecordForRegistry).optional(),
+  l2: z.string().optional(),
+  l3: z.string().optional(),
+}).strict();
+export const memoryDedupOutput = z.array(z.object({
+  record_id: z.string().min(1),
+  action: z.enum(['store', 'update', 'merge', 'skip']),
+  target_ids: z.array(z.string()),
+  merged_content: z.string().optional(),
+  merged_type: z.string().optional(),
+  merged_priority: z.number().optional(),
+})).max(200);
+
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
-  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'memory_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },

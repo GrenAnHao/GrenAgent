@@ -24,4 +24,14 @@ describe('ServiceTaskRegistry', () => {
     expect(registry.get('wiki_page_generate')).toMatchObject({ kind: 'wiki_page_generate', timeoutMs: 60_000 });
     expect(() => registry.validateOutput('wiki_page_generate', '# md')).not.toThrow();
   });
+
+  it('memory_extract 的输出 schema 拒绝非记录数组', () => {
+    const registry = new ServiceTaskRegistry();
+    expect(() => registry.validateOutput('memory_extract', { l1: [{ content: '', type: 'work_fact' }] })).toThrow();
+    expect(registry.validateOutput('memory_extract', { l1: [{ content: 'x', type: 'work_fact' }] })).toMatchObject({ l1: [expect.any(Object)] });
+  });
+
+  it('memory_extract 超时放宽到 60s', () => {
+    expect(new ServiceTaskRegistry().get('memory_extract')!.timeoutMs).toBe(60_000);
+  });
 });
