@@ -12,7 +12,7 @@
  *   MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT  ← 上游 l1-extraction.ts 15-101 行
  *     2369 字符，sha256=fae33004afa3c0b714d70b45ef5252a3cb2406b7f746e118dfc6a22519892268
  *   MEMORY_DEDUP_WORK_SYSTEM_PROMPT    ← 上游 l1-dedup.ts 72-134 行 WORK_CONFLICT_DETECTION_SYSTEM_PROMPT
- *     2434 字符，sha256=1dbaddfff22d4125fc6c4c129c20973ec4747ed2ad6cc830808dd974a45c3f5a
+ *     2372 字符，sha256=c8b68d5b186004d27e1b5437ebb6971d58c8823cbf732966cf9dcdaa64ef3a3c
  *
  * extensions/ 与 electron-agent/ 两个包不能互相 import，因此计划任务 8 会在
  * extensions/memory/prompts.ts 落一份同文镜像，届时由两侧的锚点测试发现漂移；

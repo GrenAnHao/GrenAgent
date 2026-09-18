@@ -137,9 +137,11 @@ export class MemoryService {
         input: {
           newMemories: [...records].map(([record_id, record]) => ({ record_id, ...record })),
           candidates: [...records.values()].flatMap((record) =>
-            recallCandidates(this.options.store, capture.scope, record.content, 5).map((hit) => ({
-              record_id: hit.id, content: hit.content, level: hit.level,
-            }))),
+            recallCandidates(this.options.store, capture.scope, record.content, 5)
+              .filter((hit) => hit.level === 1)
+              .map((hit) => ({
+                record_id: hit.id, content: hit.content, level: hit.level,
+              }))),
         },
         sourceProjectId: capture.scope.projectId ?? capture.scope.workspace,
         sourceSessionId: capture.scope.sessionId,

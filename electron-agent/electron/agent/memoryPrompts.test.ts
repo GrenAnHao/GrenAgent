@@ -11,16 +11,19 @@ import {
 const UPSTREAM = {
   work: { chars: 5269, sha256: '392b45852d0c08cad60d02f59d7660d3c09e1d47db78c3c4baf49bee9a3460c8' },
   chat: { chars: 2369, sha256: 'fae33004afa3c0b714d70b45ef5252a3cb2406b7f746e118dfc6a22519892268' },
+  dedup: { chars: 2372, sha256: 'c8b68d5b186004d27e1b5437ebb6971d58c8823cbf732966cf9dcdaa64ef3a3c' },
 } as const;
 
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
 
 describe('memoryPrompts', () => {
-  it('两个常量与上游运行时取值逐字一致（长度 + sha256）', () => {
+  it('抽取与去重常量与上游运行时取值逐字一致（长度 + sha256）', () => {
     expect(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT.length).toBe(UPSTREAM.work.chars);
     expect(sha256(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT)).toBe(UPSTREAM.work.sha256);
     expect(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT.length).toBe(UPSTREAM.chat.chars);
     expect(sha256(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT)).toBe(UPSTREAM.chat.sha256);
+    expect(MEMORY_DEDUP_WORK_SYSTEM_PROMPT.length).toBe(UPSTREAM.dedup.chars);
+    expect(sha256(MEMORY_DEDUP_WORK_SYSTEM_PROMPT)).toBe(UPSTREAM.dedup.sha256);
   });
 
   it('work 版保留四类枚举与排除清单', () => {

@@ -34,4 +34,11 @@ describe('ServiceTaskRegistry', () => {
   it('memory_extract 超时放宽到 60s', () => {
     expect(new ServiceTaskRegistry().get('memory_extract')!.timeoutMs).toBe(60_000);
   });
+
+  it('memory_deduplicate 允许 store 决策省略 target_ids', () => {
+    const registry = new ServiceTaskRegistry();
+    expect(registry.validateOutput('memory_deduplicate', [{ record_id: 'r0', action: 'store' }])).toEqual([
+      { record_id: 'r0', action: 'store', target_ids: [] },
+    ]);
+  });
 });

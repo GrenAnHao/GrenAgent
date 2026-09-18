@@ -28,7 +28,7 @@ export const memoryExtractionOutput = z.object({
 export const memoryDedupOutput = z.array(z.object({
   record_id: z.string().min(1),
   action: z.enum(['store', 'update', 'merge', 'skip']),
-  target_ids: z.array(z.string()),
+  target_ids: z.array(z.string()).optional().default([]),
   merged_content: z.string().optional(),
   merged_type: z.string().optional(),
   merged_priority: z.number().optional(),
