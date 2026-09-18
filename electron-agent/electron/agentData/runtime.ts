@@ -130,6 +130,7 @@ export class AgentDataRuntime {
         execute: async (task) => {
           const output = await this.options.executeServiceTask!(task);
           if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
+          if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
           return output;
         },
         onSettled: (task) => this.memoryService!.taskSettled(task),

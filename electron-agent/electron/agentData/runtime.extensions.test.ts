@@ -24,12 +24,12 @@ describe('AgentData extension RPC contracts', () => {
     const runtime = new AgentDataRuntime({ dataPath, executeServiceTask: async (task) => {
       inputs.push(task.input);
       if (task.id === 'recovered') throw new Error('previous attempt failed');
-      return { l1: { recovery: 'completed' } };
+      return { l1: [{ content: 'recovery completed', type: 'work_fact', priority: 80 }] };
     } });
     const client = new AgentDataClient(await runtime.start());
     try {
       await expect.poll(() => client.request('memory.search', { ...scope, query: 'recovery' })).toEqual([
-        expect.objectContaining({ content: '{"recovery":"completed"}' }),
+        expect.objectContaining({ content: expect.stringContaining('recovery') }),
       ]);
       expect(inputs).toEqual([
         expect.objectContaining({ delta: 'user: first', fingerprint: 'fp1' }),

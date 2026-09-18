@@ -45,14 +45,14 @@ describe('AgentDataRuntime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-worker-'));
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
-      executeServiceTask: async () => ({ l1: { theme: 'dark' } }),
+      executeServiceTask: async () => ({ l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80 }] }),
     });
     const client = new AgentDataClient(await runtime.start());
     const params = { userId: 'u', workspace: '/a', projectId: '/a', sessionId: 's', source: 'session:s', transcript: 'user: dark mode', fingerprint: 'fp1' };
 
     const capture = await client.request<{ taskId: string }>('memory.capture', params);
     await expect.poll(() => client.request<Array<{ content: string }>>('memory.search', { ...params, query: 'dark', limit: 10 })).toEqual([
-      expect.objectContaining({ content: '{"theme":"dark"}' }),
+      expect.objectContaining({ content: expect.stringContaining('dark') }),
     ]);
     expect(capture.taskId).toBeTruthy();
 

@@ -37,7 +37,7 @@ async function fixture() {
   const runtime = new AgentDataRuntime({
     dataPath: join(directory, 'agent-data.db'),
     methods: { 'permission.authorize': (params) => permissions.authorize(params.operation as { kind: string }, String(params.profile)) },
-    executeServiceTask: async () => ({ l1: { preference: 'dark' }, l2: 'global dark preference' }),
+    executeServiceTask: async () => ({ l1: [{ content: 'prefer dark', type: 'work_fact', priority: 80 }], l2: 'global dark preference' }),
   });
   runtimes.push(runtime);
   await runtime.start();

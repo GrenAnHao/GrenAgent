@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  MEMORY_DEDUP_WORK_SYSTEM_PROMPT,
   MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT,
   MEMORY_EXTRACT_WORK_SYSTEM_PROMPT,
   memoryExtractPrompt,
@@ -56,5 +57,9 @@ describe('memoryPrompts', () => {
   it('默认走 work 版', () => {
     expect(memoryExtractPrompt()).toBe(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT);
     expect(memoryExtractPrompt('chat')).toBe(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT);
+  });
+
+  it('work 去重提示词保留动作枚举', () => {
+    expect(MEMORY_DEDUP_WORK_SYSTEM_PROMPT).toContain('store|update|skip|merge');
   });
 });

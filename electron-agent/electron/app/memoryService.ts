@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import type { L1Record } from '../agent/memoryExtraction';
+import { parseMemoryExtraction } from '../agent/memoryExtraction';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord, MemoryConversation, MemoryConversationDetail, MemoryCreateInput, MemoryDraft, MemoryListInput, MemoryPage, MemoryReadInput, MemoryUpdateInput } from '../agentData/memoryContracts';
 import { RpcError } from '../agentData/protocol';
-import { parseMemoryExtraction } from '../agent/memoryExtraction';
 
+import { memoryDedupOutput } from './appServer/serviceTaskRegistry';
 import type { ServiceTask } from './appServer/types';
+import { applyDedupDecisions, recallCandidates } from './memoryDedup';
 
 export interface MemorySearchScope extends MemoryScope { projectId: string; query: string; limit?: number }
 export interface MemoryCaptureInput extends MemoryScope { projectId: string; source: string; transcript: string; fingerprint: string; extract?: boolean }
@@ -16,9 +19,16 @@ export interface MemoryTaskQueue {
 }
 export interface MemoryServiceOptions { store: MemoryStore; queue: MemoryTaskQueue; validateProject?: (projectId: string) => Promise<string>; extractMode?: 'work' | 'chat' }
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
+interface PendingDedup {
+  capture: PendingCapture;
+  records: Map<string, L1Record>;
+  l2?: string;
+  l3?: string;
+}
 
 export class MemoryService {
   private readonly pending = new Map<string, PendingCapture>();
+  private readonly pendingDedup = new Map<string, PendingDedup>();
   private readonly finishing = new Set<string>();
   constructor(private readonly options: MemoryServiceOptions) {}
 
@@ -110,23 +120,70 @@ export class MemoryService {
   }
 
   completeExtraction(taskId: string, output: unknown): MemoryRecord[] {
-    const capture = this.pending.get(taskId) ?? this.captureFromTask(taskId);
+    const extractTaskId = taskId;
+    const capture = this.pending.get(extractTaskId) ?? this.captureFromTask(extractTaskId);
     if (!capture) throw new Error('memory capture task not found');
     const extraction = parseMemoryExtraction(output, this.options.extractMode ?? 'work');
+    const l1 = extraction.l1 ?? [];
+    const withCandidates = l1.filter((record) => recallCandidates(this.options.store, capture.scope, record.content, 5)
+      .some((hit) => hit.level === 1));
+    if (withCandidates.length > 0) {
+      const dedupTaskId = randomUUID();
+      const records = new Map(l1.map((record, index) => [`r${index}`, record]));
+      this.pendingDedup.set(dedupTaskId, { capture, records, l2: extraction.l2, l3: extraction.l3 });
+      void this.options.queue.enqueue({
+        id: dedupTaskId,
+        kind: 'memory_deduplicate',
+        input: {
+          newMemories: [...records].map(([record_id, record]) => ({ record_id, ...record })),
+          candidates: [...records.values()].flatMap((record) =>
+            recallCandidates(this.options.store, capture.scope, record.content, 5).map((hit) => ({
+              record_id: hit.id, content: hit.content, level: hit.level,
+            }))),
+        },
+        sourceProjectId: capture.scope.projectId ?? capture.scope.workspace,
+        sourceSessionId: capture.scope.sessionId,
+        system: true,
+      }).catch(() => { this.pendingDedup.delete(dedupTaskId); });
+      this.finishCapture(extractTaskId);
+      return [];
+    }
     const writes: MemoryRecord[] = [];
     const globalScope = { ...capture.scope, scope: 'global' as const };
-    for (const record of extraction.l1 ?? []) {
+    for (const record of l1) {
       writes.push(this.options.store.upsert(capture.scope, { level: 1, content: JSON.stringify(record), source: capture.source }));
     }
     if (extraction.l2) writes.push(this.options.store.upsert(globalScope, { level: 2, content: extraction.l2, source: capture.source }));
     if (extraction.l3) writes.push(this.options.store.upsert(globalScope, { level: 3, content: extraction.l3, source: capture.source }));
     this.options.store.commitCapture(capture.scope, capture.source, capture.fingerprint, capture.delta);
-    this.finishCapture(taskId);
+    this.finishCapture(extractTaskId);
+    return writes;
+  }
+
+  completeDedup(taskId: string, output: unknown): MemoryRecord[] {
+    const pending = this.pendingDedup.get(taskId);
+    if (!pending) throw new Error('memory capture task not found');
+    const parsed = memoryDedupOutput.safeParse(output);
+    if (!parsed.success) throw new Error('memory dedup output is invalid');
+    const writes = applyDedupDecisions(
+      { upsert: (s, i) => this.options.store.upsert(s, i), remove: (s, id) => this.options.store.remove(s, id) },
+      pending.capture.scope.userId,
+      parsed.data,
+      pending.records,
+      pending.capture.source,
+      pending.capture.scope,
+    );
+    const globalScope = { ...pending.capture.scope, scope: 'global' as const };
+    if (pending.l2) writes.push(this.options.store.upsert(globalScope, { level: 2, content: pending.l2, source: pending.capture.source }));
+    if (pending.l3) writes.push(this.options.store.upsert(globalScope, { level: 3, content: pending.l3, source: pending.capture.source }));
+    this.options.store.commitCapture(pending.capture.scope, pending.capture.source, pending.capture.fingerprint, pending.capture.delta);
+    this.pendingDedup.delete(taskId);
     return writes;
   }
 
   taskSettled(task: ServiceTask): void {
     if (task.kind === 'memory_extract' && (task.status === 'failed' || task.status === 'cancelled')) this.finishCapture(task.id, task);
+    if (task.kind === 'memory_deduplicate' && (task.status === 'failed' || task.status === 'cancelled')) this.pendingDedup.delete(task.id);
   }
 
   private finishCapture(taskId: string, task?: ServiceTask): void {

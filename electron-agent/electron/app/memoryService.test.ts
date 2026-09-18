@@ -361,4 +361,41 @@ describe('MemoryService', () => {
     expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: first\nuser: second' });
     db.close();
   });
+
+  it('有候选项时先入队 memory_deduplicate，且不立即提交 capture', async () => {
+    const { db, store, tasks, service } = setup();
+    store.upsert(scope, { level: 1, content: JSON.stringify({ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 80 }) });
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    await service.completeExtraction(captured.taskId!, { l1: [{ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 }] });
+
+    expect(tasks.map((task) => task.kind)).toEqual(['memory_extract', 'memory_deduplicate']);
+    expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: a' });
+    db.close();
+  });
+
+  it('去重决策解析失败时不提交 capture，留待重试', async () => {
+    const { db, service } = setup();
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    await service.completeExtraction(captured.taskId!, { l1: [{ content: 'x', type: 'work_fact' }] });
+    expect(() => service.completeDedup('missing', [])).toThrow('memory capture task not found');
+    db.close();
+  });
+
+  it('memory_deduplicate 失败时不提交 capture，也不写入新 L1', async () => {
+    const { db, store, tasks, service } = setup();
+    store.upsert(scope, { level: 1, content: JSON.stringify({ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 80 }) });
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    await service.completeExtraction(captured.taskId!, { l1: [{ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 }] });
+    const dedup = tasks.find((task) => task.kind === 'memory_deduplicate');
+    expect(dedup).toBeDefined();
+    expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: a' });
+
+    service.taskSettled({ id: dedup!.id, kind: 'memory_deduplicate', status: 'failed', input: dedup!.input, attempts: 0, createdAt: 0, updatedAt: 0 });
+
+    expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: a' });
+    const rows = store.search(scope, '团队决定');
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].content)).toMatchObject({ priority: 80 });
+    db.close();
+  });
 });

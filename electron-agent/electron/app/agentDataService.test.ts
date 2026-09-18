@@ -9,7 +9,7 @@ describe('AgentDataService', () => {
   it('keeps queued memory extraction recoverable while stopping a Wiki executor', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'wiki-stop-memory-')); let release!: (value: string) => void;
     const execute = vi.fn(async (task: { kind: string }) => task.kind === 'wiki_page_generate'
-      ? new Promise<string>((resolve) => { release = resolve; }) : { l1: { preference: 'resumedmemory' } });
+      ? new Promise<string>((resolve) => { release = resolve; }) : { l1: [{ content: 'resumedmemory', type: 'work_fact', priority: 80 }] });
     const service = new AgentDataService({ dataPath: join(directory, 'data.db'), executeServiceTask: execute });
     await service.start();
     const work = service.runServiceTask({ id: 'wiki-hold', kind: 'wiki_page_generate', input: { source: 'A' } });
@@ -95,7 +95,7 @@ describe('AgentDataService', () => {
     const started: string[] = [];
     const service = new AgentDataService({ dataPath: ':memory:', executeServiceTask: async (task) => {
       started.push(task.kind);
-      return task.kind === 'wiki_page_generate' ? wikiResult : { l1: { theme: 'dark' } };
+      return task.kind === 'wiki_page_generate' ? wikiResult : { l1: [{ content: 'prefer dark', type: 'work_fact', priority: 80 }] };
     } });
     await service.start();
     let wiki: Promise<unknown> | undefined;
@@ -113,7 +113,7 @@ describe('AgentDataService', () => {
       await expect(wiki).resolves.toBe('# Wiki');
       await vi.waitFor(() => expect(started).toEqual(['wiki_page_generate', 'memory_extract']));
       await expect(service.request('memory.search', { ...scope, query: 'dark' })).resolves.toEqual([
-        expect.objectContaining({ content: '{"theme":"dark"}' }),
+        expect.objectContaining({ content: expect.stringContaining('dark') }),
       ]);
     } finally {
       releaseWiki('# Wiki');
