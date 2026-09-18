@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SystemWorkerManager } from './systemWorkerManager';
+import { SystemWorkerManager, serviceTaskPromptForTest } from './systemWorkerManager';
 
 type CompleteInput = { user: string; systemPrompt?: string; signal?: AbortSignal };
 
@@ -182,11 +182,18 @@ describe('SystemWorkerManager', () => {
     expect(order).toEqual(['memory', 'wiki']);
   });
 
-  it('从 complete 文本解析 memory_extract 的 JSON，prompt 含 JSON only', async () => {
+  it('memory_extract 使用移植后的抽取提示词', () => {
+    const task = { id: 't1', kind: 'memory_extract', input: { delta: 'user: hi' } };
+    const prompt = serviceTaskPromptForTest(task);
+    expect(prompt).toContain('工作情境切分与团队共享记忆提取专家');
+    expect(prompt).toContain('Task kind: memory_extract');
+  });
+
+  it('从 complete 文本解析 memory_extract 的 JSON，prompt 含移植后的抽取指令', async () => {
     const complete = vi.fn(async (_input: CompleteInput) => '```json\n{"l1":{"theme":"dark"}}\n```');
     const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
     await expect(manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'remember dark mode' } })).resolves.toEqual({ l1: { theme: 'dark' } });
-    expect(String(complete.mock.calls[0]![0].user)).toContain('JSON only');
+    expect(String(complete.mock.calls[0]![0].user)).toContain('返回且仅返回一个合法的 JSON 数组');
     expect(String(complete.mock.calls[0]![0].user)).toContain('memory_extract');
   });
 
