@@ -27,13 +27,34 @@ export interface MemoryExtraction { l1?: L1Record[]; l2?: string; l3?: string }
 /** 上游 scene-extraction 的默认情境名；L1 抽取未给场景时使用。 */
 const DEFAULT_SCENE = '未分类';
 
+/** 上游抽取输出是 scene 数组；摊成 Pi 的 {l1} 信封以便兼容旧路径。 */
+export function flattenSceneExtraction(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const l1: Array<z.infer<typeof l1RecordSchema>> = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const scene = item as Record<string, unknown>;
+    const sceneName = typeof scene.scene_name === 'string' ? scene.scene_name : undefined;
+    if (!Array.isArray(scene.memories)) continue;
+    for (const memory of scene.memories) {
+      const parsed = l1RecordSchema.safeParse(memory);
+      if (!parsed.success) continue;
+      l1.push({
+        ...parsed.data,
+        scene_name: parsed.data.scene_name?.trim() || sceneName,
+      });
+    }
+  }
+  return { l1 };
+}
+
 export function parseMemoryExtraction(value: unknown, mode: 'work' | 'chat' = 'work'): MemoryExtraction {
   const allowed = new Set<string>(mode === 'chat' ? L1_TYPES_CHAT : L1_TYPES_WORK);
   const root = z.object({
     l1: z.array(l1RecordSchema).optional(),
     l2: z.string().optional(),
     l3: z.string().optional(),
-  }).strict().safeParse(value);
+  }).strict().safeParse(flattenSceneExtraction(value));
   if (!root.success) throw new Error('memory extraction output is invalid');
 
   const l1 = root.data.l1

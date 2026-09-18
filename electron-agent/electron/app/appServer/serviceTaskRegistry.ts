@@ -32,11 +32,25 @@ export const memoryDedupOutput = z.array(z.object({
   merged_content: z.string().optional(),
   merged_type: z.string().optional(),
   merged_priority: z.number().optional(),
+  merged_timestamps: z.array(z.string()).optional(),
 })).max(200);
+export const memorySceneOutput = z.object({
+  scenes: z.array(z.object({
+    filename: z.string().min(1),
+    action: z.enum(['write', 'delete']).optional(),
+    content: z.string().optional(),
+  })).max(50),
+  persona_update_request: z.string().optional(),
+}).strict();
+export const memoryPersonaOutput = z.object({
+  content: z.string().min(1),
+}).strict();
 
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
   { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'memory_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },

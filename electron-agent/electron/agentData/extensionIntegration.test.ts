@@ -36,8 +36,15 @@ async function fixture() {
   const permissions = new PermissionManager({ dataDir: directory });
   const runtime = new AgentDataRuntime({
     dataPath: join(directory, 'agent-data.db'),
+    layerSchedule: { delayMs: 0, minIntervalMs: 0 },
     methods: { 'permission.authorize': (params) => permissions.authorize(params.operation as { kind: string }, String(params.profile)) },
-    executeServiceTask: async () => ({ l1: [{ content: 'prefer dark', type: 'work_fact', priority: 80 }], l2: 'global dark preference' }),
+    executeServiceTask: async (task) => {
+      if (task.kind === 'memory_scene') {
+        return { scenes: [{ filename: 'Preferences.md', action: 'write', content: 'global dark preference' }] };
+      }
+      if (task.kind === 'memory_persona') return { content: '# Team Operating Doctrine\n- 先对齐协议再落库' };
+      return { l1: [{ content: 'prefer dark', type: 'work_fact', priority: 80 }] };
+    },
   });
   runtimes.push(runtime);
   await runtime.start();

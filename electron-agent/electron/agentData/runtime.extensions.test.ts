@@ -22,8 +22,10 @@ describe('AgentData extension RPC contracts', () => {
     storage.close();
     const inputs: unknown[] = [];
     const runtime = new AgentDataRuntime({ dataPath, executeServiceTask: async (task) => {
-      inputs.push(task.input);
+      if (task.kind === 'memory_extract') inputs.push(task.input);
       if (task.id === 'recovered') throw new Error('previous attempt failed');
+      if (task.kind === 'memory_scene') return { scenes: [] };
+      if (task.kind === 'memory_persona') return { content: '# Team Operating Doctrine' };
       return { l1: [{ content: 'recovery completed', type: 'work_fact', priority: 80 }] };
     } });
     const client = new AgentDataClient(await runtime.start());

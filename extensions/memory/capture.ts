@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { flattenTranscript } from "../_shared/transcript.js";
 import { type AskFn, askLlm, parseJsonLoose, resolveModel } from "./llm.js";
-import { LOCAL_MEMORY_EXTRACT_SYSTEM } from "./prompts.js";
+import { LOCAL_MEMORY_EXTRACT_SYSTEM, formatExtractionPrompt, messagesFromTranscript } from "./prompts.js";
 import type { MemoryScope } from "./store.js";
 
 export interface CaptureClient {
@@ -11,11 +11,7 @@ export interface CaptureClient {
 type CaptureContext = Pick<ExtensionContext, "model" | "modelRegistry" | "signal"> & MemoryScope & { extract?: boolean };
 type AskFactory = (ctx: CaptureContext) => AskFn | undefined;
 
-interface Extraction {
-  l1?: unknown;
-  l2?: string;
-  l3?: string;
-}
+type ExtractionWrite = { level: 1 | 2 | 3; content: string };
 
 const SYSTEM = LOCAL_MEMORY_EXTRACT_SYSTEM;
 
@@ -45,25 +41,15 @@ export class LayeredMemoryCapture {
 
     const ask = this.askFactory(ctx);
     if (!ask) return;
-    let extracted: Extraction | undefined;
+    let writes: ExtractionWrite[] | undefined;
     try {
-      extracted = parseJsonLoose<Extraction>(await ask(SYSTEM, delta));
+      writes = parseFallbackExtraction(await ask(SYSTEM, formatExtractionPrompt({
+        newMessages: messagesFromTranscript(delta),
+      })), source);
     } catch {
       return;
     }
-    if (!extracted || typeof extracted !== "object" || Array.isArray(extracted)) return;
-    if (Object.keys(extracted).some((key) => !['l1', 'l2', 'l3'].includes(key))) return;
-    if (extracted.l1 !== undefined && (!extracted.l1 || typeof extracted.l1 !== 'object')) return;
-    if (extracted.l2 !== undefined && typeof extracted.l2 !== 'string') return;
-    if (extracted.l3 !== undefined && typeof extracted.l3 !== 'string') return;
-
-    const writes: Array<{ level: 1 | 2 | 3; content: string }> = [];
-    if (extracted.l1 !== undefined) {
-      const content = JSON.stringify(extracted.l1);
-      if (content && content !== "{}" && content !== "[]") writes.push({ level: 1, content });
-    }
-    if (typeof extracted.l2 === "string" && extracted.l2.trim()) writes.push({ level: 2, content: markdown(extracted.l2, source) });
-    if (typeof extracted.l3 === "string" && extracted.l3.trim()) writes.push({ level: 3, content: markdown(extracted.l3, source) });
+    if (!writes) return;
     try {
       for (const write of writes) await this.client.request("memory.upsert", { ...scope(ctx), ...write, source });
       await this.client.request("memory.commitCapture", { ...scope(ctx), source, fingerprint });
@@ -84,6 +70,53 @@ function scope(ctx: MemoryScope): Record<string, unknown> {
 
 function markdown(content: string, source: string): string {
   return `> Source: ${source}\n\n${content.trim()}`;
+}
+
+function parseFallbackExtraction(raw: string, source: string): ExtractionWrite[] | undefined {
+  const parsed = parseJsonLoose(raw);
+  if (parsed === undefined) return undefined;
+  if (Array.isArray(parsed)) {
+    return flattenSceneRecords(parsed).map((record) => ({ level: 1 as const, content: JSON.stringify(record) }));
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const extracted = parsed as Record<string, unknown>;
+  if (Object.keys(extracted).some((key) => !['l1', 'l2', 'l3'].includes(key))) return undefined;
+  if (extracted.l2 !== undefined && typeof extracted.l2 !== 'string') return undefined;
+  if (extracted.l3 !== undefined && typeof extracted.l3 !== 'string') return undefined;
+  const writes: ExtractionWrite[] = [];
+  if (extracted.l1 !== undefined) {
+    if (!Array.isArray(extracted.l1)) return undefined;
+    for (const record of flattenSceneRecords([{ scene_name: '未分类', memories: extracted.l1 }])) {
+      writes.push({ level: 1, content: JSON.stringify(record) });
+    }
+  }
+  if (typeof extracted.l2 === 'string' && extracted.l2.trim()) writes.push({ level: 2, content: markdown(extracted.l2, source) });
+  if (typeof extracted.l3 === 'string' && extracted.l3.trim()) writes.push({ level: 3, content: markdown(extracted.l3, source) });
+  return writes;
+}
+
+function flattenSceneRecords(scenes: unknown[]): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  for (const item of scenes) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const scene = item as Record<string, unknown>;
+    const sceneName = typeof scene.scene_name === 'string' && scene.scene_name.trim() ? scene.scene_name : '未分类';
+    if (!Array.isArray(scene.memories)) continue;
+    for (const memory of scene.memories) {
+      if (!memory || typeof memory !== 'object' || Array.isArray(memory)) continue;
+      const rec = memory as Record<string, unknown>;
+      if (typeof rec.content !== 'string' || !rec.content.trim() || typeof rec.type !== 'string' || !rec.type.trim()) continue;
+      records.push({
+        content: rec.content.trim(),
+        type: rec.type,
+        priority: typeof rec.priority === 'number' ? rec.priority : 50,
+        scene_name: typeof rec.scene_name === 'string' && rec.scene_name.trim() ? rec.scene_name : sceneName,
+        source_message_ids: Array.isArray(rec.source_message_ids) ? rec.source_message_ids.filter((id): id is string => typeof id === 'string') : [],
+        metadata: rec.metadata && typeof rec.metadata === 'object' && !Array.isArray(rec.metadata) ? rec.metadata : {},
+      });
+    }
+  }
+  return records;
 }
 
 function hash(value: string): string {

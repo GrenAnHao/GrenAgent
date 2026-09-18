@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SystemWorkerManager, serviceTaskPromptForTest } from './systemWorkerManager';
+import { SystemWorkerManager, serviceTaskRequestForTest } from './systemWorkerManager';
 
 type CompleteInput = { user: string; systemPrompt?: string; signal?: AbortSignal };
 
@@ -85,7 +85,7 @@ describe('SystemWorkerManager', () => {
     }
   });
 
-  it('wiki_page_generate 用 60s，memory_extract 用 30s', async () => {
+  it('wiki_page_generate 与 memory_extract 都用 60s', async () => {
     vi.useFakeTimers();
     try {
       const wiki = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
@@ -101,6 +101,10 @@ describe('SystemWorkerManager', () => {
       const mem = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
       const memRun = mem.run({ id: 'mem', kind: 'memory_extract', input: {} });
       await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(30_000);
+      let memSettled = false;
+      void memRun.then(() => { memSettled = true; }, () => { memSettled = true; });
+      expect(memSettled).toBe(false);
       await vi.advanceTimersByTimeAsync(30_000);
       await expect(memRun).rejects.toThrow('aborted');
     } finally {
@@ -182,19 +186,97 @@ describe('SystemWorkerManager', () => {
     expect(order).toEqual(['memory', 'wiki']);
   });
 
-  it('memory_extract 使用移植后的抽取提示词', () => {
-    const task = { id: 't1', kind: 'memory_extract', input: { delta: 'user: hi' } };
-    const prompt = serviceTaskPromptForTest(task);
-    expect(prompt).toContain('工作情境切分与团队共享记忆提取专家');
-    expect(prompt).toContain('Task kind: memory_extract');
+  it('memory_extract 把系统提示放进 systemPrompt，用户侧用上游抽取模板', () => {
+    const task = { id: 't1', kind: 'memory_extract', input: { delta: 'user: hi', previousSceneName: '无' } };
+    const request = serviceTaskRequestForTest(task);
+    expect(request.systemPrompt).toContain('工作情境切分与团队共享记忆提取专家');
+    expect(request.user).toContain('【待提取的新消息】');
+    expect(request.user).toContain('[user]');
+    expect(request.user).toContain('Task kind: memory_extract');
+    expect(request.user).toContain('\nInput: ');
+    expect(request.user).not.toContain('工作情境切分与团队共享记忆提取专家');
   });
 
-  it('从 complete 文本解析 memory_extract 的 JSON，prompt 含移植后的抽取指令', async () => {
+  it('chat mode 使用 chat 抽取系统提示', () => {
+    const request = serviceTaskRequestForTest({ id: 't1', kind: 'memory_extract', input: { delta: 'user: hi', mode: 'chat' } });
+    expect(request.systemPrompt).toContain('情境切分与记忆提取专家');
+    expect(request.systemPrompt).not.toContain('工作情境切分与团队共享记忆提取专家');
+  });
+
+  it('从 complete 文本解析 memory_extract 的 JSON，系统提示走 systemPrompt', async () => {
     const complete = vi.fn(async (_input: CompleteInput) => '```json\n{"l1":{"theme":"dark"}}\n```');
     const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
     await expect(manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'remember dark mode' } })).resolves.toEqual({ l1: { theme: 'dark' } });
-    expect(String(complete.mock.calls[0]![0].user)).toContain('返回且仅返回一个合法的 JSON 数组');
+    expect(complete.mock.calls[0]![0].systemPrompt).toContain('返回且仅返回一个合法的 JSON 数组');
     expect(String(complete.mock.calls[0]![0].user)).toContain('memory_extract');
+    expect(String(complete.mock.calls[0]![0].user)).toContain('【待提取的新消息】');
+  });
+
+  it('memory_extract 把上游 scene 数组摊成 {l1} 信封', async () => {
+    const complete = vi.fn(async () => JSON.stringify([
+      {
+        scene_name: '团队在围绕抽取对齐',
+        message_ids: ['m0'],
+        memories: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80, source_message_ids: ['m0'] }],
+      },
+    ]));
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    await expect(manager.run({ id: 'memory', kind: 'memory_extract', input: { delta: 'user: dark' } })).resolves.toEqual({
+      l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80, source_message_ids: ['m0'], scene_name: '团队在围绕抽取对齐' }],
+    });
+  });
+
+  it('memory_deduplicate 使用上游冲突检测用户模板', () => {
+    const request = serviceTaskRequestForTest({
+      id: 'd1',
+      kind: 'memory_deduplicate',
+      input: {
+        newMemories: [{ record_id: 'r0', content: '新', type: 'work_method', priority: 90, scene_name: 's' }],
+        candidates: [{ record_id: 'old1', content: '旧', type: 'work_method', priority: 80, scene_name: 's' }],
+      },
+    });
+    expect(request.systemPrompt).toContain('团队工作记忆冲突检测器');
+    expect(request.user).toContain('统一候选记忆池');
+    expect(request.user).toContain('Task kind: memory_deduplicate');
+    expect(request.user).not.toContain('团队工作记忆冲突检测器');
+  });
+
+  it('memory_scene 把系统提示放进 systemPrompt，用户侧内联场景正文', () => {
+    const request = serviceTaskRequestForTest({
+      id: 's1',
+      kind: 'memory_scene',
+      input: {
+        memories: [{ content: '先对齐抽取协议', type: 'work_method' }],
+        scenes: [{ filename: '团队记忆-SOP与禁忌.md', content: '## 核心 SOP\nv1' }],
+        currentTimestamp: '2026-09-18T12:00:00.000Z',
+        maxScenes: 15,
+        mode: 'work',
+      },
+    });
+    expect(request.systemPrompt).toContain('Team Work Method Memory Consolidation Architect');
+    expect(request.systemPrompt).toContain('"action": "write"');
+    expect(request.user).toContain('先对齐抽取协议');
+    expect(request.user).toContain('## 核心 SOP');
+    expect(request.user).toContain('Task kind: memory_scene');
+    expect(request.user).not.toContain('Team Work Method Memory Consolidation Architect');
+  });
+
+  it('memory_persona 使用 Team Operating Doctrine 系统提示', () => {
+    const request = serviceTaskRequestForTest({
+      id: 'p1',
+      kind: 'memory_persona',
+      input: {
+        generation: 'first',
+        changedScenesContent: '#### 团队记忆-SOP与禁忌.md\n## 核心 SOP',
+        currentTime: '2026-09-18T12:00:00.000Z',
+        totalProcessed: 1,
+        sceneCount: 1,
+        changedSceneCount: 1,
+      },
+    });
+    expect(request.systemPrompt).toContain('Team Operating Doctrine Architect');
+    expect(request.user).toContain('团队记忆-SOP与禁忌.md');
+    expect(request.user).toContain('Task kind: memory_persona');
   });
 
   it('非法 JSON 失败，可按 maxAttempts 重试', async () => {

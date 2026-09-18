@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { LayeredMemoryCapture, type CaptureClient } from "./capture.js";
 
+function sceneJson(content: string, extras: Record<string, unknown> = {}): string {
+  return JSON.stringify([{
+    scene_name: '工作情境',
+    message_ids: ['m0'],
+    memories: [{ content, type: 'work_fact', priority: 80, source_message_ids: ['m0'], ...extras }],
+  }]);
+}
+
 const scope = { userId: "local", workspace: "/repo", sessionId: "s1" };
 // 只用 model.id 与 modelRegistry.find，按真实参数类型收敛，不复制 pi 的完整结构。
 const ctx = {
@@ -50,7 +58,7 @@ describe("LayeredMemoryCapture", () => {
       peak = Math.max(peak, active);
       await new Promise((resolve) => setTimeout(resolve, 10));
       active -= 1;
-      return '{"l1":{"fact":"ok"},"l2":"detail","l3":"long"}';
+      return sceneJson('ok');
     });
     const capture = new LayeredMemoryCapture(c, () => ask);
     const first = capture.enqueue(ctx, [{ role: "user", content: "one" }]);
@@ -65,7 +73,7 @@ describe("LayeredMemoryCapture", () => {
 
   it("uses the current model, tolerates fenced JSON, and stores referenced markdown layers", async () => {
     const c = client();
-    const ask = vi.fn(async () => "noise\n```json\n{\"l1\":{\"decision\":\"ship\"},\"l2\":\"detail\",\"l3\":\"plan\"}\n```\n");
+    const ask = vi.fn(async () => `noise\n\`\`\`json\n${sceneJson('ship it')}\n\`\`\`\n`);
     const capture = new LayeredMemoryCapture(c, (value) => {
       expect(value.model).toBe(ctx.model);
       expect(value.modelRegistry).toBe(ctx.modelRegistry);
@@ -73,14 +81,15 @@ describe("LayeredMemoryCapture", () => {
     });
     await capture.enqueue(ctx, [{ role: "user", content: "ship it" }]);
     const levels = c.calls.filter((x) => x.method === "memory.upsert").map((x) => x.params);
-    expect(levels.find((x) => x.level === 1)?.content).toContain('"decision":"ship"');
-    expect(levels.find((x) => x.level === 2)?.content).toContain("> Source: session:s1");
-    expect(levels.find((x) => x.level === 3)?.content).toContain("> Source: session:s1");
+    expect(levels.find((x) => x.level === 1)?.content).toContain('"content":"ship it"');
+    expect(levels.find((x) => x.level === 1)?.content).toContain('"type":"work_fact"');
+    expect(ask.mock.calls[0]?.[1]).toContain('【待提取的新消息】');
+    expect(ask.mock.calls[0]?.[1]).toContain('ship it');
   });
 
   it("accepts JSON strings containing closing braces", async () => {
     const c = client();
-    const capture = new LayeredMemoryCapture(c, () => async () => '{"l1":{"note":"brace } is text"}} trailing');
+    const capture = new LayeredMemoryCapture(c, () => async () => `${sceneJson('brace } is text')} trailing`);
     await capture.enqueue(ctx, [{ role: "user", content: "quoted brace" }]);
     expect(c.calls.find((x) => x.method === "memory.upsert" && x.params.level === 1)?.params.content).toContain("brace }");
   });
@@ -99,7 +108,7 @@ describe("LayeredMemoryCapture", () => {
     const capture = new LayeredMemoryCapture(c, () => async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("offline");
-      return '{"l1":{"ok":true}}';
+      return sceneJson('ok');
     });
     const messages = [{ role: "user", content: "retry me" }];
     await capture.enqueue(ctx, messages);
@@ -111,7 +120,7 @@ describe("LayeredMemoryCapture", () => {
   it("does not recapture an already committed cursor after extension recreation", async () => {
     const c = client();
     const messages = [{ role: "user", content: "persisted" }];
-    const ask = async () => '{"l1":{"ok":true}}';
+    const ask = async () => sceneJson('ok');
     await new LayeredMemoryCapture(c, () => ask).enqueue(ctx, messages);
     const callsBefore = c.calls.length;
     await new LayeredMemoryCapture(c, () => ask).enqueue(ctx, messages);

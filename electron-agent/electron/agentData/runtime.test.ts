@@ -45,7 +45,11 @@ describe('AgentDataRuntime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-worker-'));
     const runtime = new AgentDataRuntime({
       dataPath: join(dir, 'data.db'),
-      executeServiceTask: async () => ({ l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80 }] }),
+      executeServiceTask: async (task) => {
+        if (task.kind === 'memory_scene') return { scenes: [] };
+        if (task.kind === 'memory_persona') return { content: '# Team Operating Doctrine' };
+        return { l1: [{ content: 'prefer dark mode', type: 'work_fact', priority: 80 }] };
+      },
     });
     const client = new AgentDataClient(await runtime.start());
     const params = { userId: 'u', workspace: '/a', projectId: '/a', sessionId: 's', source: 'session:s', transcript: 'user: dark mode', fingerprint: 'fp1' };

@@ -36,10 +36,13 @@ describe('ShortCallQueue', () => {
     expect(sawAbort).toEqual([true]);
   });
 
-  it('timeoutForKind：goal/wiki 60s，其余走 fallback', () => {
+  it('timeoutForKind：goal/wiki/memory 60s，未知 kind 走 fallback', () => {
     expect(timeoutForKind('goal_judge')).toBe(60_000);
     expect(timeoutForKind('wiki_page_generate')).toBe(60_000);
-    expect(timeoutForKind('memory_extract')).toBe(30_000);
-    expect(timeoutForKind('memory_extract', 5_000)).toBe(5_000);
+    expect(timeoutForKind('memory_extract')).toBe(60_000);
+    expect(timeoutForKind('memory_deduplicate')).toBe(60_000);
+    expect(timeoutForKind('memory_scene')).toBe(60_000);
+    expect(timeoutForKind('memory_persona')).toBe(60_000);
+    expect(timeoutForKind('other', 5_000)).toBe(5_000);
   });
 });

@@ -24,7 +24,7 @@ export function applyDedupDecisions(
   target: DedupTarget,
   userId: string,
   decisions: DedupDecision[],
-  records: Map<string, Pick<L1Record, 'content' | 'type' | 'priority'>>,
+  records: Map<string, Pick<L1Record, 'content' | 'type' | 'priority' | 'scene_name' | 'source_message_ids' | 'metadata'>>,
   source: string,
   scope: MemoryScope = { userId, workspace: '' },
 ): MemoryRecord[] {
@@ -38,12 +38,12 @@ export function applyDedupDecisions(
     if (decision.action === 'update' || decision.action === 'merge') {
       for (const id of decision.target_ids) target.remove(scope, id);
       const merged = {
-        content: decision.merged_content ?? record.content,
+        content: decision.merged_content?.trim() || record.content,
         type: decision.merged_type ?? record.type,
         priority: decision.merged_priority ?? record.priority,
-        scene_name: '未分类',
-        source_message_ids: [] as string[],
-        metadata: {} as Record<string, unknown>,
+        scene_name: record.scene_name || '未分类',
+        source_message_ids: record.source_message_ids ?? [],
+        metadata: record.metadata ?? {},
       };
       writes.push(target.upsert(scope, { level: 1, content: JSON.stringify(merged), source }));
       continue;
@@ -53,9 +53,9 @@ export function applyDedupDecisions(
       content: record.content,
       type: record.type,
       priority: record.priority,
-      scene_name: '未分类',
-      source_message_ids: [] as string[],
-      metadata: {} as Record<string, unknown>,
+      scene_name: record.scene_name || '未分类',
+      source_message_ids: record.source_message_ids ?? [],
+      metadata: record.metadata ?? {},
     };
     writes.push(target.upsert(scope, { level: 1, content: JSON.stringify(stored), source }));
   }

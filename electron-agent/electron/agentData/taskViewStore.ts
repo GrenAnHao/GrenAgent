@@ -4,7 +4,7 @@ import { parseJobMetadata } from './jobStore';
 import { operationResource, operationText } from './operationsProjection';
 import type { TaskDetail, TaskListInput, TaskPage, TaskRef, TaskView } from './operationsContracts';
 
-const labels: Record<string, string> = { 'wiki.sync': 'Wiki 同步', 'wiki.ingest': 'Wiki 资料提取', 'codegraph.sync': '代码索引同步', wiki_page_generate: 'Wiki 页面生成', memory_extract: '记忆提取', memory_consolidate: '记忆整理' };
+const labels: Record<string, string> = { 'wiki.sync': 'Wiki 同步', 'wiki.ingest': 'Wiki 资料提取', 'codegraph.sync': '代码索引同步', wiki_page_generate: 'Wiki 页面生成', memory_extract: '记忆提取', memory_deduplicate: '记忆去重', memory_scene: '记忆场景', memory_persona: '记忆原则', memory_consolidate: '记忆整理' };
 const stages = new Set(['已选择资料', '正在选择资料', '正在扫描', '正在读取', '正在生成', '正在发布', '已处理', '正在构建', '已完成']);
 const active = new Set(['pending', 'queued', 'running', 'blocked']);
 interface Cursor { v: 1; updatedAt: number; source: TaskRef['source']; id: string; filterHash: string; signature: string }

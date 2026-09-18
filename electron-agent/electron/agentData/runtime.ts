@@ -22,7 +22,7 @@ import type { AuditQuery, DiagnosticReport, JobMetadata, TaskListInput, TaskRef,
 import type { WikiSyncSkipInput } from '../app/wikiSyncService';
 import type { WikiDiagnostic, WikiLibrary, WikiLibraryInput, WikiLibraryView, WikiPageInput, WikiRequestContext, WikiSourceInput, WikiSourceRef, WikiTarget, WikiVersion } from './wikiContracts';
 import { JobStore, type Job } from './jobStore';
-import { MemoryService, type MemoryTaskQueue } from '../app/memoryService';
+import { MemoryService, type LayerScheduleOptions, type MemoryTaskQueue } from '../app/memoryService';
 import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
 import { TaskQueue, type QueueTaskInput } from '../app/appServer/taskQueue';
 import type { ServiceTask } from '../app/appServer/types';
@@ -61,6 +61,7 @@ export interface AgentDataRuntimeOptions {
   wikiModelLabel?: () => Promise<string>;
   /** Resolves whether a session is currently owned by the endpoint workspace. */
   resolveSession?: (workspace: string, sessionId: string) => boolean | Promise<boolean>;
+  layerSchedule?: LayerScheduleOptions;
 }
 
 export class AgentDataRuntime {
@@ -131,15 +132,19 @@ export class AgentDataRuntime {
           const output = await this.options.executeServiceTask!(task);
           if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
           if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
+          if (task.kind === 'memory_scene') this.memoryService!.completeScene(task.id, output);
+          if (task.kind === 'memory_persona') this.memoryService!.completePersona(task.id, output);
           return output;
         },
         onSettled: (task) => this.memoryService!.taskSettled(task),
       });
       this.taskQueue = queue;
-      this.memoryService = new MemoryService({ store: this.memory, queue, validateProject: this.options.validateProject });
+      this.memoryService = new MemoryService({ store: this.memory, queue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
       queue.recoverRunning();
+      this.memoryService.recoverLayerSchedules();
     } else {
-      this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue, validateProject: this.options.validateProject });
+      this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
+      this.memoryService.recoverLayerSchedules();
     }
     const wikiRoot = this.options.wikiRootDir ?? (this.options.dataPath === ':memory:'
       ? (this.temporaryWikiRoot = mkdtempSync(join(tmpdir(), 'agent-data-wiki-')))
@@ -356,6 +361,7 @@ export class AgentDataRuntime {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.memoryService?.dispose();
     if (this.taskQueue) {
       const queuedWiki = this.storage!.db.prepare("SELECT id FROM service_tasks WHERE kind='wiki_page_generate' AND status='queued'").all();
       for (const task of queuedWiki) this.taskQueue.cancel(String(task.id));

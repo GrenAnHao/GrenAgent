@@ -273,3 +273,60 @@ metadata 字段说明：
 ]
 
 请严格按上述 JSON 数组格式输出，不要输出任何额外的 Markdown 代码块修饰符（如 \`\`\`json）或解释文本。`;
+
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+/** 与 electron-agent memoryPrompts.formatExtractionPrompt 同文。 */
+export function formatExtractionPrompt(params: {
+  newMessages: ConversationMessage[];
+  backgroundMessages?: ConversationMessage[];
+  previousSceneName?: string;
+}): string {
+  const { newMessages, backgroundMessages = [], previousSceneName = '无' } = params;
+
+  const bgText = backgroundMessages.length > 0
+    ? backgroundMessages
+        .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+        .join('\n\n')
+    : '无';
+
+  const newText = newMessages
+    .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+    .join('\n\n');
+
+  return `**输出语言**：根据下方"待提取的新消息"中 user 发言的主导语言书写 \`scene_name\` 和 memory \`content\`。
+
+【上一个情境】：${previousSceneName}
+
+【背景对话】（仅供理解上下文推断关系/时间，严禁从中提取记忆）：
+${bgText}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【待提取的新消息】（务必结合 timestamp 推算时间，只从这里提取记忆！）：
+${newText}`;
+}
+
+export function messagesFromTranscript(
+  delta: string,
+  options: { now?: number; idPrefix?: string } = {},
+): ConversationMessage[] {
+  const now = options.now ?? Date.now();
+  const idPrefix = options.idPrefix ?? 'm';
+  const matches = [...delta.matchAll(/^(user|assistant|toolResult): /gm)];
+  return matches.map((match, index) => {
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index ?? delta.length) : delta.length;
+    return {
+      id: `${idPrefix}${index}`,
+      role: match[1] === 'user' ? 'user' as const : 'assistant' as const,
+      content: delta.slice(start, end).replace(/\n+$/, ''),
+      timestamp: now + index * 1000,
+    };
+  });
+}

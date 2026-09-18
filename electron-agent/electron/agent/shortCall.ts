@@ -21,6 +21,10 @@ export class ShortCallQueue {
 export const KIND_TIMEOUT_MS: Record<string, number> = {
   goal_judge: 60_000,
   wiki_page_generate: 60_000,
+  memory_extract: 60_000,
+  memory_deduplicate: 60_000,
+  memory_scene: 60_000,
+  memory_persona: 60_000,
 };
 
 export function timeoutForKind(kind: string, fallback = 30_000): number {

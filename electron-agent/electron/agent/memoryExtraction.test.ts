@@ -40,4 +40,39 @@ describe('parseMemoryExtraction', () => {
     expect(L1_TYPES_WORK).toEqual(['work_fact', 'work_task', 'work_method', 'work_artifact']);
     expect(L1_TYPES_CHAT).toEqual(['persona', 'episodic', 'instruction']);
   });
+
+  it('接受上游 scene JSON 数组并按 scene_name 摊平为 L1 记录', () => {
+    const parsed = parseMemoryExtraction([
+      {
+        scene_name: '团队在围绕 Agent Memory 群聊抽取设计共享记忆规则',
+        message_ids: ['m0', 'm1'],
+        memories: [
+          { content: '团队决定 L1 只保留少量高层类型', type: 'work_method', priority: 85, source_message_ids: ['m0'] },
+          { content: '后端需在周五前完成表结构设计', type: 'work_task', priority: 80 },
+        ],
+      },
+    ], 'work');
+    expect(parsed.l1).toEqual([
+      {
+        content: '团队决定 L1 只保留少量高层类型',
+        type: 'work_method',
+        priority: 85,
+        scene_name: '团队在围绕 Agent Memory 群聊抽取设计共享记忆规则',
+        source_message_ids: ['m0'],
+        metadata: {},
+      },
+      {
+        content: '后端需在周五前完成表结构设计',
+        type: 'work_task',
+        priority: 80,
+        scene_name: '团队在围绕 Agent Memory 群聊抽取设计共享记忆规则',
+        source_message_ids: [],
+        metadata: {},
+      },
+    ]);
+  });
+
+  it('空 memories 的情境数组视为无 L1，不抛错', () => {
+    expect(parseMemoryExtraction([{ scene_name: '闲聊', message_ids: ['m0'], memories: [] }], 'work').l1).toBeUndefined();
+  });
 });

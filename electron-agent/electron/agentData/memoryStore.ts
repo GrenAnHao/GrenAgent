@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { LayerScheduleStore } from '../app/memoryLayerSchedule';
 import type { ManagedMemoryRecord, MemoryConversation, MemoryConversationDetail, MemoryCreateInput, MemoryDraft, MemoryFilter, MemoryListInput, MemoryPage, MemoryReadInput, MemoryRecord, MemoryUpdateInput } from './memoryContracts';
 import { RpcError } from './protocol';
 
@@ -16,6 +17,8 @@ const conversationColumns = `capture_key as id,source,session_id as sourceSessio
   COALESCE(project_id,workspace) as sourceProjectId,transcript,updated_at as updatedAt`;
 
 export class MemoryStore {
+  readonly schedules: LayerScheduleStore;
+
   constructor(private readonly db: DatabaseSync) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, workspace TEXT NOT NULL, project_id TEXT, memory_scope TEXT NOT NULL DEFAULT 'project', session_id TEXT,
@@ -47,6 +50,8 @@ export class MemoryStore {
     // 健康数据库里 `project_id IS NULL` 天然匹配 0 行，是零开销的自愈检查。
     // 回填规则对齐写入时的 projectId(scope) = scope.projectId ?? scope.workspace。
     this.db.exec("UPDATE memories SET project_id = workspace WHERE project_id IS NULL AND memory_scope != 'global'");
+    this.schedules = new LayerScheduleStore(this.db);
+    this.schedules.ensure();
   }
 
   list(input: MemoryListInput): MemoryPage<ManagedMemoryRecord> {

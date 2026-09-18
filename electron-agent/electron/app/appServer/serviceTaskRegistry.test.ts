@@ -5,7 +5,7 @@ import { ServiceTaskRegistry } from './serviceTaskRegistry';
 describe('ServiceTaskRegistry', () => {
   it('registers built-in task definitions with policy metadata', () => {
     const registry = new ServiceTaskRegistry();
-    for (const kind of ['memory_extract', 'memory_deduplicate', 'memory_summarize', 'thread_title_generate', 'content_classify', 'context_summarize']) {
+    for (const kind of ['memory_extract', 'memory_deduplicate', 'memory_scene', 'memory_persona', 'memory_summarize', 'thread_title_generate', 'content_classify', 'context_summarize']) {
       expect(registry.get(kind)).toMatchObject({ kind, timeoutMs: expect.any(Number), maxAttempts: expect.any(Number), capabilities: expect.any(Array) });
     }
   });
@@ -40,5 +40,20 @@ describe('ServiceTaskRegistry', () => {
     expect(registry.validateOutput('memory_deduplicate', [{ record_id: 'r0', action: 'store' }])).toEqual([
       { record_id: 'r0', action: 'store', target_ids: [] },
     ]);
+  });
+
+  it('memory_scene / memory_persona 走 JSON 协议且超时 60s', () => {
+    const registry = new ServiceTaskRegistry();
+    expect(registry.get('memory_scene')).toMatchObject({ timeoutMs: 60_000 });
+    expect(registry.get('memory_persona')).toMatchObject({ timeoutMs: 60_000 });
+    expect(registry.validateOutput('memory_scene', {
+      scenes: [{ filename: '团队记忆-SOP与禁忌.md', action: 'write', content: '## 核心 SOP' }],
+      persona_update_request: 'SOP 已跨场景稳定',
+    })).toMatchObject({ scenes: [expect.any(Object)] });
+    expect(registry.validateOutput('memory_persona', { content: '# Team Operating Doctrine' })).toEqual({
+      content: '# Team Operating Doctrine',
+    });
+    expect(() => registry.validateOutput('memory_scene', [])).toThrow();
+    expect(() => registry.validateOutput('memory_persona', { content: '' })).toThrow();
   });
 });
