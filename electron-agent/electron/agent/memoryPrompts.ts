@@ -1,12 +1,21 @@
 /**
- * 移植自 TencentDB-Agent-Memory (MIT)
- *   MemoryCore/src/core/prompts/l1-extraction.ts
- * 仅改名导出。正文与上游逐字一致，勿在此处"顺手优化"。
+ * 移植自 TencentDB-Agent-Memory（MIT）
+ *   上游：MemoryCore/src/core/prompts/l1-extraction.ts
+ *   上游 HEAD：0468a2a5b50eaafc54758ed1e2e6609472e5b6ce
+ *   该文件最后一次变更：41444344ce11467a5b5ad6aa032f5e261da1f4d2（2026-07-22，v2.0.0-beta.1）
  *
- * 同步规则：这两个常量是 Pi 记忆抽取的唯一权威来源。
- * extensions/ 与 electron-agent/ 两个包不能互相 import，
- * 因此 extensions/memory/prompts.ts 保存一份同文镜像；
- * 锚点测试负责发现漂移。
+ * 两个常量与上游正文逐字一致，勿在此处"顺手优化"。校验值按模板字面量的运行时取值计，
+ * 不含定界反引号：
+ *   MEMORY_EXTRACT_WORK_SYSTEM_PROMPT  ← 上游 105-372 行
+ *     5269 字符，sha256=392b45852d0c08cad60d02f59d7660d3c09e1d47db78c3c4baf49bee9a3460c8
+ *   MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT  ← 上游 15-101 行
+ *     2369 字符，sha256=fae33004afa3c0b714d70b45ef5252a3cb2406b7f746e118dfc6a22519892268
+ *
+ * extensions/ 与 electron-agent/ 两个包不能互相 import，因此计划任务 8 会在
+ * extensions/memory/prompts.ts 落一份同文镜像，届时由两侧的锚点测试发现漂移；
+ * 在那之前本文件是唯一副本。
+ *
+ * 本文件的契约是"与上游逐字一致"，故不放任何本地原创的提示词片段。
  */
 
 export const MEMORY_EXTRACT_WORK_SYSTEM_PROMPT = `你是专业的"工作情境切分与团队共享记忆提取专家"。
@@ -365,11 +374,6 @@ metadata 字段说明：
 ]
 
 请严格按上述 JSON 数组格式输出，不要输出任何额外的 Markdown 代码块修饰符（如 \`\`\`json）或解释文本。`;
-
-/** 阶段一过渡：同一次调用仍需产出可选的 l2/l3 摘要字符串，见任务 4。 */
-export const MEMORY_EXTRACT_OUTPUT_TAIL = `
-### 补充输出（过渡，未来由独立的 L2/L3 阶段取代）
-在上面 JSON 数组之外，**不要**输出任何东西；l2/l3 由主进程从数组派生。`;
 
 export type MemoryPromptMode = 'work' | 'chat';
 

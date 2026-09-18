@@ -23,6 +23,20 @@ describe('memoryPrompts', () => {
     expect(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT).toContain('不应该提取的内容');
   });
 
+  it('两版都保留三个任务段与 JSON 输出协议', () => {
+    for (const prompt of [MEMORY_EXTRACT_WORK_SYSTEM_PROMPT, MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('任务一');
+      expect(prompt).toContain('任务二');
+      expect(prompt).toContain('任务三');
+      expect(prompt).toContain('```json');
+      expect(prompt).toContain('`scene_name`');
+    }
+  });
+
+  it('work 版保留反引号包裹的字段名', () => {
+    expect(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT).toContain('`type`');
+  });
+
   it('默认走 work 版', () => {
     expect(memoryExtractPrompt()).toBe(MEMORY_EXTRACT_WORK_SYSTEM_PROMPT);
     expect(memoryExtractPrompt('chat')).toBe(MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT);

@@ -104,23 +104,29 @@ describe('memoryPrompts', () => {
 
 ```ts
 /**
- * 移植自 TencentDB-Agent-Memory (MIT)
- *   MemoryCore/src/core/prompts/l1-extraction.ts
- * 仅改名导出。正文与上游逐字一致，勿在此处"顺手优化"。
+ * 移植自 TencentDB-Agent-Memory（MIT）
+ *   上游：MemoryCore/src/core/prompts/l1-extraction.ts
+ *   上游 HEAD：0468a2a5b50eaafc54758ed1e2e6609472e5b6ce
+ *   该文件最后一次变更：41444344ce11467a5b5ad6aa032f5e261da1f4d2（2026-07-22，v2.0.0-beta.1）
+ *
+ * 两个常量与上游正文逐字一致，勿在此处"顺手优化"。校验值按模板字面量的运行时取值计，
+ * 不含定界反引号：
+ *   MEMORY_EXTRACT_WORK_SYSTEM_PROMPT  ← 上游 105-372 行，5269 字符，sha256=392b4585…
+ *   MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT  ← 上游 15-101 行，2369 字符，sha256=fae33004…
  */
 
 export const MEMORY_EXTRACT_WORK_SYSTEM_PROMPT = `…`; // 逐字复制 l1-extraction.ts:105-372
 export const MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT = `…`; // 逐字复制 l1-extraction.ts:15-101
 
-/** 阶段一过渡：同一次调用仍需产出可选的 l2/l3 摘要字符串，见任务 4。 */
-export const MEMORY_EXTRACT_OUTPUT_TAIL = `
-### 补充输出（过渡，未来由独立的 L2/L3 阶段取代）
-在上面 JSON 数组之外，**不要**输出任何东西；l2/l3 由主进程从数组派生。`;
+export type MemoryPromptMode = 'work' | 'chat';
 
-export function memoryExtractPrompt(mode: 'work' | 'chat' = 'work'): string {
+/** 默认 work：Pi 是编码 / Agent 桌面场景。 */
+export function memoryExtractPrompt(mode: MemoryPromptMode = 'work'): string {
   return mode === 'chat' ? MEMORY_EXTRACT_CHAT_SYSTEM_PROMPT : MEMORY_EXTRACT_WORK_SYSTEM_PROMPT;
 }
 ```
+
+> **本文件不放任何本地原创的提示词片段。** 移植后的提示词只输出 L1 JSON 数组（TencentDB 的原生协议），因此阶段一起 `l2` / `l3` 不再由这次调用产出，写入路径对二者保持兼容但暂时为空。这与上游一致——它的 L2 场景与 L3 画像是各自独立的调用，在后续计划中恢复。
 
 - [ ] **步骤 4：运行测试验证通过**
 
@@ -832,11 +838,13 @@ git commit --allow-empty -m "test(memory): phase-1 regression green"
 **4. 执行期订正记录**
 
 - 任务 1：计划原测试断言 work 版包含 `宁缺毋滥`，实测该短语只存在于 chat 版（work 版的对应原则是"面向工作协作 / 面向团队共享"）。已把 work 版锚点改为 `不应该提取的内容` + `不提取与工作无关的个人偏好`，chat 版锚点补上 `不应该提取的内容`。提示词正文未做任何改动（已用脚本校验与上游逐字一致）。
+- 任务 1：删除了计划原稿中的 `MEMORY_EXTRACT_OUTPUT_TAIL`。它与移植后的提示词输出协议直接冲突（移植版只允许输出 JSON 数组），且是无消费者的死代码。`l2` / `l3` 的恢复交由后续 L2/L3 计划。
+- 任务 1：上游文件为 CRLF 行尾，而 JS 模板字面量在解析时把 CRLF 归一为 LF（该提示词共 269 处），因此运行时长度是 5269 / 2369 而非源文字符数 5545 / 2464。头注释中的字符数与 sha256 一律按**运行时取值**记录，以免行尾规范化被误判为漂移。
 
 **5. 已知遗留（不在本计划内，已在后续计划中登记）**
 
 - 候选召回用 `store.search`（`LIKE` 子串匹配），是阶段一的可用足量实现，非向量召回；向量召回需接入 `embedding/` 服务，另立计划。
-- `l2` / `l3` 仍由同一次 L1 调用产出字符串，属过渡；专用 L2/L3 阶段在后续计划中替代。
+- `l2` / `l3` 在阶段一**不再产出**：移植后的抽取提示词只输出 L1 数组。写入路径对二者保持兼容（字段可选，读到即写），但后续计划落地前 L2/L3 不会有新记录；历史记录仍可读可编辑。
 - `memoryDeduplicate` 的 `inputSchema` 仍为 `anyObject`，本阶段只收紧 `outputSchema`。
 
 ---
