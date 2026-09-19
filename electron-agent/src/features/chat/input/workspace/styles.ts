@@ -285,7 +285,7 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     border-radius: 6px;
 
     font-size: 13px;
-    color: ${cssVar.colorPrimary};
+    color: ${cssVar.colorText};
 
     cursor: pointer;
 
