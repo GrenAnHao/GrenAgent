@@ -28,8 +28,16 @@ describe('toProbeConfigJson', () => {
     });
   });
   it('remote config → sse', () => {
-    expect(JSON.parse(toProbeConfigJson('s', { url: 'http://x' }))).toEqual({
-      name: 's', transport: 'sse', url: 'http://x',
+    expect(JSON.parse(toProbeConfigJson('s', { url: 'http://x/sse' }))).toEqual({
+      name: 's', transport: 'sse', url: 'http://x/sse',
+    });
+  });
+  it('remote config keeps headers and uses streamable HTTP for /mcp', () => {
+    expect(JSON.parse(toProbeConfigJson('s', { url: 'http://127.0.0.1:54382/mcp', headers: { 'x-api-key': 'k' } }))).toEqual({
+      name: 's',
+      transport: 'http',
+      url: 'http://127.0.0.1:54382/mcp',
+      headers: { 'x-api-key': 'k' },
     });
   });
 });

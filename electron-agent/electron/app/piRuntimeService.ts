@@ -49,6 +49,7 @@ export interface AgentHostPort {
   open(workspace: string, cwd: string): Promise<WorkspaceHandlePort>;
   get(workspace: string): WorkspaceHandlePort | undefined;
   close(workspace: string): Promise<void>;
+  workspaces?(): string[];
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
   'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
@@ -185,7 +186,10 @@ export class PiRuntimeService {
     const session = await this.resolveSessionForCommand(workspace, command, args);
     const sourceSessionId = session.sessionId;
     const stateKey = this.sessionKey(workspace, session.sessionId);
-    if (command === 'agent_prompt' && args.streamingBehavior === 'followUp' && this.activeTurns.has(stateKey)) {
+    if (command === 'agent_prompt' && shouldFlushFollowUp(args, this.activeTurns.has(stateKey))) {
+      return this.flushFollowUp(workspace, session);
+    }
+    if (command === 'agent_prompt' && shouldEnqueuePrompt(args, this.activeTurns.has(stateKey), this.queuedTurns.get(stateKey)?.length ?? 0)) {
       const input = typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
       return this.enqueueTurn(workspace, input, typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace', session);
     }
@@ -360,8 +364,25 @@ export class PiRuntimeService {
   async refreshModelRegistry(): Promise<{ refreshed: string[]; failed: Array<{ workspace: string; error: string }> }> {
     await this.options.modelRuntimeHost.refresh();
     const result = { refreshed: [] as string[], failed: [] as Array<{ workspace: string; error: string }> };
-    for (const workspace of this.options.modelRuntimeHost.workspaces?.() ?? []) {
-      result.refreshed.push(workspace);
+    const workspaces = this.options.agentHost.workspaces?.() ?? this.options.modelRuntimeHost.workspaces?.() ?? [];
+    for (const workspace of workspaces) {
+      try {
+        const handle = this.options.agentHost.get(workspace);
+        const snapshot = handle?.session.modelRuntime.getAvailableSnapshot() ?? [];
+        const current = handle?.session.model as { provider?: string; id?: string } | undefined;
+        const stillThere = Boolean(
+          current?.provider &&
+            current.id &&
+            snapshot.some((model) => model.provider === current.provider && model.id === current.id),
+        );
+        if (handle && current && !stillThere) {
+          const next = snapshot[0];
+          if (next) await handle.session.setModel(next);
+        }
+        result.refreshed.push(workspace);
+      } catch (error) {
+        result.failed.push({ workspace, error: error instanceof Error ? error.message : String(error) });
+      }
     }
     return result;
   }
@@ -576,6 +597,17 @@ export class PiRuntimeService {
     });
   }
 
+  private async flushFollowUp(workspace: string, session: SessionContext): Promise<unknown> {
+    const handle = await this.resolveHandle(workspace);
+    if (handle.session.isStreaming) return undefined;
+    const queued = [...handle.session.getFollowUpMessages()];
+    if (queued.length === 0) return undefined;
+    const restored = handle.session.clearQueue();
+    for (const item of restored.steering) await handle.session.steer(item);
+    for (const item of restored.followUp.slice(1)) await handle.session.followUp(item);
+    return this.send(workspace, 'agent_prompt', { message: queued[0], ...session });
+  }
+
   private async drainQueuedTurn(workspace: string, session: SessionContext): Promise<void> {
     const stateKey = this.sessionKey(workspace, session.sessionId);
     if (this.activeTurns.has(stateKey)) return;
@@ -721,8 +753,22 @@ export class PiRuntimeService {
   }
 }
 
+function shouldFlushFollowUp(args: Record<string, unknown>, hasActiveTurn: boolean): boolean {
+  if (hasActiveTurn || args.streamingBehavior !== 'followUp') return false;
+  const input = typeof args.message === 'string' ? args.message : typeof args.prompt === 'string' ? args.prompt : '';
+  return !input.trim();
+}
+
+function shouldEnqueuePrompt(args: Record<string, unknown>, hasActiveTurn: boolean, queuedCount: number): boolean {
+  if (args.streamingBehavior === 'steer') return false;
+  if (shouldFlushFollowUp(args, hasActiveTurn)) return false;
+  if (queuedCount > 0) return true;
+  return args.streamingBehavior === 'followUp' && hasActiveTurn;
+}
+
 function shouldTrackTurn(command: string, args: Record<string, unknown>): boolean {
-  if (command === 'agent_abort' || command === 'agent_follow_up') return true;
+  if (command === 'agent_abort') return true;
+  if (command === 'agent_follow_up') return false;
   if (command !== 'agent_prompt') return false;
   if (args.streamingBehavior === 'steer') return false;
   if (args.streamingBehavior === 'followUp') return true;

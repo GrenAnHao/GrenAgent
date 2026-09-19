@@ -43,7 +43,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进主进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进主进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端经 `PiPackageService` 管理官方 `settings.packages`：扩展 tab 列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后 `requestResourceReload()`。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -52,14 +52,14 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | 扩展 | 职责 | 主要工具 / 命令 |
 | --- | --- | --- |
 | `safety` | 工具调用安全闸：路径保护、危险 bash 拦截、沙箱模式约束 | 策略 / 中间件，无显式工具 |
-| `approval` | 审批策略（ask / auto / full）切换与持久化 | `/approval` |
+| `approval` | 审批策略（ask / auto / full）热更新应用与 setStatus | 无 slash；宿主 `agent_set_approval` |
 | `loop-guard` | 防止相同工具死循环与单次请求工具调用发散 | 策略 / 中间件，无显式工具 |
 | `rulebook` | 声明式规则库（`.pi/rules.jsonc`），工具 / 文本规则拦截与纠正 | `/rules` |
-| `compaction-policy` | 上下文修剪与压力指示 | `/compaction` |
+| `compaction-policy` | 上下文修剪、压力指示、删任意段 | 无 slash；宿主 `agent_exclude_entry` / `agent_restore_entry` |
 | `auto-title` | 首轮结束后自动生成会话标题 | 策略 / 中间件，无显式工具 |
-| `checkpoint` | 每轮工作区 git 影子快照，可回滚文件 | `/checkpoint` |
 | `todo` | 会话内待办清单 | `todo` |
-| `agent-mode` | Agent / Ask / Debug / Plan 模式切换与 Plan 卡片 | `/mode`、`/plan`、`/plan-build`、`ask_user` |
+| `present` | 把已有文件声明为本轮产物 | `present` |
+| `agent-mode` | Agent / Ask / Debug / Plan 模式切换与 Plan 卡片 | 宿主 `agent_set_mode`；卡片仍用 `/plan-build`；`ask_user` |
 | `debug-tools` | 调试日志工具 | `debug_log` |
 | `dap` | Debug Adapter Protocol 调试 | `dap_launch`、`dap_set_breakpoints`、`dap_evaluate` 等 |
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
@@ -67,14 +67,13 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
 | `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
 | `wiki-rag` | Markdown Wiki 生成、读取与无模型索引重建 | `wiki_search`、`wiki_update`、`wiki_read`、`wiki_list`、`wiki_reindex` |
-| `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files` |
-| `session-memory` | 会话结构化工作状态，压缩后重锚 | `/session-state` |
+| `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files`、`code_status`、`code_usages`、`code_path`、`code_hierarchy`、`code_call_graph`、`code_deps`、`code_cycles`、`code_dead_code`、`code_metrics`、`code_routes`、`code_traverse`、`code_context`、`code_changed` |
+| `session-memory` | 会话结构化工作状态，压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms`、`fetch_html`、`fetch_markdown`、`fetch_txt`、`fetch_json` |
 | `web-search` | 多引擎联网搜索与站点 / GitHub 抓取 | `web_search`、`web_search_multi`、`fetch_web_content` |
 | `mcp` | 外部 MCP server 工具桥接 | `mcp__<server>__<tool>`（动态） |
 | `mcp-policy` | MCP 工具权限策略与审计 | 策略 / 中间件，无显式工具 |
 | `image-gen` | 文生图 | `generate_image` |
-| `code-review` | 结构化代码审查记录与报告 | `git_diff`、`review_note`、`/review` |
 | `diagnostics` | 环境 / 依赖诊断 | `diagnostics` |
 | `multi-agent` | 子代理委派 | `spawn_agent` |
 | `lsp` | 语言服务器：定义 / 引用 / 悬停等 | `lsp_definition`、`lsp_references` 等 |
@@ -84,8 +83,10 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `code-exec` | 持久 Python / JavaScript 执行环境 | `py_run`、`js_run` |
 | `hashline` | 行号锚点读写与编辑 | `hl_read`、`hl_edit` |
 | `tts` | 语音合成 | `speak` |
-| `im-gateway` | HTTP webhook IM 网关（Slack / Feishu 等适配） | `/imgateway` |
-| `im-platforms` | 微信 ilink bot 接入，隔离式远程遥控 | `/im` |
+| `im-gateway` | HTTP webhook IM 网关（Slack / Feishu 等适配） | 暂缓加载；内部状态命令不进 slash |
+| `im-platforms` | 微信 ilink bot 接入，隔离式远程遥控 | 暂缓加载；内部状态命令不进 slash |
+
+控制面约定：模式 / 审批 / 删段由桌面 IPC 写 `runtime-settings.json`，扩展 `watchConfig` 应用，不再经假 prompt 或 slash 命令。slash 菜单只保留发生式命令（`/goal`、`/rules`、工作流、技能、前端 `/compact`）。`/plan-build` 仍由计划卡片 `runCommand` 触发，但不出现在菜单。
 
 ### electron-agent —— 桌面应用（当前主线）
 
@@ -102,7 +103,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 **主进程（`electron-agent/electron`）：**
 
 - `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
-- `app/`：服务层——`piRuntimeService`（`agent_*` 命令到进程内 `WorkspaceHandle` 的映射，含 `/mode`、`/approval` 等伪命令与 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。
+- `app/`：服务层——`piRuntimeService`（`agent_*` 到进程内 `WorkspaceHandle`；模式 / 审批 / 删段写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
 - `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`。
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
@@ -117,7 +118,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 - `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
 - `wikiStore` / `wikiFiles`：Markdown 文件保存正文及来源快照，`wiki_documents` 保存衍生元数据，`wiki_fts` 提供全文检索；原 `wiki_pages` 留作兼容迁移来源。读取正文走文件，重建索引不调用模型。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
-- 代码检索通过主进程 `CodeGraphService` / `CodeGraphEngine` 内置的 CodeGraph 1.6.0 SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。`codeRetrieval.call` 仅允许七种只读工具，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
+- 代码检索通过主进程 `CodeGraphService` / `CodeGraphEngine` 内置的 CodeGraph 1.6.0 SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
 - `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立/同步才写索引，不启用 SDK watcher；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
 - SDK 是固定版本的应用依赖，保留 Rust 内核与 WASM 语法。`asarUnpack` 解出 SDK，`scripts/package-codegraph.cjs` 补齐平台包自带且被 builder 过滤的 `lib/node_modules`；加载器使用物理解包路径保证 worker、WASM 和原生模块可访问。没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
 

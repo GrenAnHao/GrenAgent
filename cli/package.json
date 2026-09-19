@@ -20,8 +20,8 @@
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --banner:js=\"import { createRequire as __cjsCreateRequire } from 'node:module'; const require = __cjsCreateRequire(import.meta.url);\" --external:@earendil-works/pi-coding-agent --external:@ast-grep/napi --outfile=dist/main.js"
   },
   "dependencies": {
-    "@ast-grep/napi": "^0.43.0",
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@ast-grep/napi": "^0.45.3",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
     "typebox": "*"
   },
   "devDependencies": {

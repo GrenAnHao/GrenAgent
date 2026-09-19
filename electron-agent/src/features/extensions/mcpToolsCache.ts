@@ -1,4 +1,4 @@
-import { transportOf, type McpConfig, type McpRemoteConfig, type McpStdioConfig } from './mcpConfig';
+import { remoteTransportKind, transportOf, type McpConfig, type McpRemoteConfig, type McpStdioConfig } from './mcpConfig';
 
 export interface CacheEntry {
   toolNames: string[];
@@ -57,7 +57,13 @@ export function toProbeConfigJson(name: string, config: McpConfig): string {
     return JSON.stringify({ name, transport: 'stdio', command: s.command, args: s.args ?? [], env: s.env ?? {} });
   }
   const r = config as McpRemoteConfig;
-  return JSON.stringify({ name, transport: 'sse', url: r.url });
+  const headers = r.headers && Object.keys(r.headers).length ? { headers: r.headers } : {};
+  return JSON.stringify({
+    name,
+    transport: remoteTransportKind(r.url),
+    url: r.url,
+    ...headers,
+  });
 }
 
 export function parseProbeResult(json: string): ProbeResult {

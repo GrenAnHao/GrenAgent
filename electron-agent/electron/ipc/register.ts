@@ -22,6 +22,7 @@ import type { WikiVersion, WikiSourceInput, WikiSourceRef } from '../agentData/w
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
+import type { PiPackageService } from '../app/piPackageService';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -50,6 +51,7 @@ export interface IpcServices {
   agentData?: AgentDataService;
   permissions?: PermissionManager;
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
+  piPackages?: PiPackageService;
   /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
   dev?: DevService;
 }
@@ -97,6 +99,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.permissions) registerPermissionCommands(services.permissions);
   if (services.plugins) registerPluginCommands(services.plugins);
+  if (services.piPackages) registerPiPackageCommands(services.piPackages);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
@@ -235,6 +238,41 @@ function registerPluginCommands(service: Pick<PluginManager, 'list' | 'start' | 
   registerCommand('plugin_allowed_list', () => service.allowedPluginIds());
 }
 
+function registerPiPackageCommands(service: PiPackageService): void {
+  registerCommand('package_list', (_event, args) => service.list(readOptionalWorkspace(args)));
+  registerCommand('package_search', (_event, args) => service.search(readText(args, 'query')));
+  registerCommand('package_install', (_event, args) => service.install(
+    readOptionalWorkspace(args),
+    readString(args, 'name'),
+    readString(args, 'version'),
+    readPackageScope(args),
+  ));
+  registerCommand('package_remove', (_event, args) => service.remove(
+    readOptionalWorkspace(args),
+    readString(args, 'source'),
+    readPackageScope(args),
+  ));
+  registerCommand('package_set_enabled', (_event, args) => service.setEnabled(
+    readOptionalWorkspace(args),
+    readString(args, 'source'),
+    readPackageScope(args),
+    readBoolean(args, 'enabled'),
+  ));
+}
+
+function readOptionalWorkspace(args: Record<string, unknown>): string {
+  const value = args.workspace;
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new Error('workspace must be a string');
+  return value;
+}
+
+function readPackageScope(args: Record<string, unknown>): 'user' | 'project' {
+  const value = args.scope;
+  if (value !== 'user' && value !== 'project') throw new Error('scope must be user or project');
+  return value;
+}
+
 function registerMcpPolicyCommands(service: McpPolicyService): void {
   registerCommand('read_mcp_policy', () => service.readPolicy());
   registerCommand('write_mcp_policy', (_event, args) => service.writePolicy(readText(args, 'content')));
@@ -254,6 +292,8 @@ function registerMcpConfigCommands(service: McpConfigService): void {
   registerCommand('remove_mcp_config', (_event, args) => service.remove(
     readString(args, 'workspace'), readString(args, 'scope'), readString(args, 'name'),
   ));
+  registerCommand('reload_mcp_server', (_event, args) =>
+    service.reload(readString(args, 'workspace'), readString(args, 'name')));
 }
 
 function registerPermissionCommands(service: PermissionManager): void {

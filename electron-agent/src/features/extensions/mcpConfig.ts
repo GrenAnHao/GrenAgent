@@ -49,6 +49,17 @@ export function transportOf(c: McpConfig): McpTransport {
   return '?';
 }
 
+/** `/sse` 走旧 SSE，其余 remote URL 走 Streamable HTTP。 */
+export function remoteTransportKind(url: string): 'sse' | 'http' {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, '').toLowerCase();
+    if (path === '/sse' || path.endsWith('/sse')) return 'sse';
+  } catch {
+    // 非法 URL 仍按 streamable HTTP 交给连接层报错。
+  }
+  return 'http';
+}
+
 /** 解析单个集合 JSON（标准 {mcpServers:{...}} 或裸 map）。无效时返回 []。 */
 function parseCollection(json: string): Array<{ name: string; config: McpConfig }> {
   try {

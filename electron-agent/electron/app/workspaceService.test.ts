@@ -3,11 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { __resetActivationsForTest, getActivation, installActivation } from '../../../extensions/multi-agent/activation.js';
+import { getRegistry, releaseSubagentControlPlane, __resetSubagentControlPlaneForTest } from '../../../extensions/multi-agent/controlPlane.js';
+import { __resetParentHostsForTest, registerParentSessionHost } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceService } from './workspaceService';
 
 const directories: string[] = [];
 
 afterEach(async () => {
+  __resetSubagentControlPlaneForTest();
+  __resetActivationsForTest();
+  __resetParentHostsForTest();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -15,6 +21,14 @@ async function createService(): Promise<{ service: WorkspaceService; agentDir: s
   const agentDir = await mkdtemp(join(tmpdir(), 'electron-agent-workspaces-'));
   directories.push(agentDir);
   return { service: new WorkspaceService(agentDir), agentDir };
+}
+
+function childLines(id: string, cwd: string, parentSession: string | null): string {
+  return [
+    JSON.stringify({ type: 'session', id, cwd, ...(parentSession ? { parentSession } : {}) }),
+    JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { origin: 'subagent', agentId: id, parentSession, mode: 'continuable' } }),
+    JSON.stringify({ type: 'message', message: { role: 'user', content: `task for ${id}` } }),
+  ].join('\n') + '\n';
 }
 
 describe('WorkspaceService', () => {
@@ -84,6 +98,33 @@ describe('WorkspaceService', () => {
     ]);
   });
 
+  it('untitled sessions use the first user message as the sidebar title', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'plain.jsonl');
+    await writeFile(path, [
+      JSON.stringify({ type: 'session', id: 'plain', cwd: 'C:/work', timestamp: '2026-09-17T00:00:00Z' }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: '帮我修一下登录页\n第二行' } }),
+      JSON.stringify({ type: 'message', message: { role: 'assistant', content: '好的' } }),
+    ].join('\n'));
+
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ path, name: '帮我修一下登录页 第二行' }]);
+  });
+
+  it('untitled sessions truncate a long first user message for the sidebar title', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const long = '请'.repeat(120);
+    await writeFile(join(sessionsDir, 'long.jsonl'), [
+      JSON.stringify({ type: 'session', id: 'long', cwd: 'C:/work', timestamp: '2026-09-17T00:00:00Z' }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: long }] } }),
+    ].join('\n'));
+
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '请'.repeat(80) }]);
+  });
+
   it('returns the latest renamed title on subsequent workspace listings', async () => {
     const { service, agentDir } = await createService();
     const sessionsDir = join(agentDir, 'sessions', 'hash');
@@ -97,6 +138,21 @@ describe('WorkspaceService', () => {
 
     await appendFile(path, '{"type":"session_info","name":"手动标题"}\n');
     await expect(service.listSessions('C:/work')).resolves.toMatchObject([{ name: '手动标题' }]);
+  });
+
+  it('renames a session file in place without opening its workspace', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'sidebar.jsonl');
+    await writeFile(path, [
+      JSON.stringify({ type: 'session', id: 'sidebar', cwd: 'C:/work', timestamp: '2026-09-11T00:00:00Z' }),
+      JSON.stringify({ type: 'session_info', name: '连续 Bash 执行测试审批工具' }),
+    ].join('\n') + '\n');
+
+    await service.setSessionDisplayName(path, '123');
+
+    await expect(service.listSessions('C:/work')).resolves.toMatchObject([{ path, name: '123' }]);
   });
 
   it('preserves the latest non-empty title when other entries are invalid or incomplete', async () => {
@@ -150,6 +206,24 @@ describe('WorkspaceService', () => {
     await expect(service.pruneOrphanConversations([used, kept])).resolves.toBe(0);
   });
 
+  it('prunes a conversation that only has hidden child sessions left and removes their files', async () => {
+    const { service, agentDir } = await createService();
+    const worksDir = await service.getWorksDir();
+    const orphan = join(worksDir, 'orphan');
+    await mkdir(orphan);
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const child = join(sessionsDir, 'child.jsonl');
+    await writeFile(child, [
+      JSON.stringify({ type: 'session', id: 'sa-1', cwd: orphan }),
+      JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { origin: 'subagent', agentId: 'sa-1' } }),
+    ].join('\n') + '\n');
+
+    await expect(service.pruneOrphanConversations([])).resolves.toBe(1);
+    await expect(realpath(orphan)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('does not prune a draft conversation created in the current application run', async () => {
     const { service } = await createService();
     const conversation = await service.createConversation();
@@ -179,6 +253,70 @@ describe('WorkspaceService', () => {
     await expect(readFile(join(sessions, 'conversation.jsonl'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('hides embedded subagent child sessions so the newest listed session stays the parent', async () => {
+    const { service, agentDir } = await createService();
+    const { cwd } = await service.createConversation();
+    const sessionsDir = join(agentDir, 'sessions', `--${cwd.replace(/[\\/:]/g, '-')}--`);
+    await mkdir(sessionsDir, { recursive: true });
+    const parent = join(sessionsDir, '2026-09-14T14-56-00-000Z_parent.jsonl');
+    const child = join(sessionsDir, '2026-09-14T14-57-30-000Z_sa-1.jsonl');
+    await writeFile(parent, [
+      JSON.stringify({ type: 'session', id: 'parent', cwd, timestamp: '2026-09-14T14:56:00.000Z' }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: '帮我探测一下工作区' } }),
+      JSON.stringify({ type: 'session_info', name: '探测工作区' }),
+    ].join('\n') + '\n');
+    await writeFile(child, [
+      JSON.stringify({ type: 'session', id: 'sa-1', cwd, timestamp: '2026-09-14T14:57:30.000Z', parentSession: parent }),
+      JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { origin: 'subagent', agentId: 'sa-1', parentSession: parent, mode: 'one-shot' } }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: 'You are a connectivity probe / scout.' } }),
+    ].join('\n') + '\n');
+
+    await expect(service.listSessions(cwd)).resolves.toEqual([
+      { id: 'parent', path: parent, cwd, timestamp: '2026-09-14T14:56:00.000Z', name: '探测工作区' },
+    ]);
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ path: parent }]);
+  });
+
+  it('deletes hidden child and system-worker sessions together with their conversation', async () => {
+    const { service, agentDir } = await createService();
+    const conversation = await service.createConversation();
+    const sessions = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessions, { recursive: true });
+    const parent = join(sessions, 'parent.jsonl');
+    const child = join(sessions, 'child.jsonl');
+    const worker = join(sessions, 'worker.jsonl');
+    const foreignChild = join(sessions, 'foreign-child.jsonl');
+    await writeFile(parent, `{"type":"session","id":"parent","cwd":${JSON.stringify(conversation.cwd)}}\n`);
+    await writeFile(child, [
+      JSON.stringify({ type: 'session', id: 'sa-1', cwd: conversation.cwd }),
+      JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { origin: 'subagent', agentId: 'sa-1' } }),
+    ].join('\n') + '\n');
+    await writeFile(worker, [
+      JSON.stringify({ type: 'session', id: 'worker', cwd: conversation.cwd }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Extract memory.\nTask kind: memory_extract\nInput: {}' } }),
+    ].join('\n') + '\n');
+    await writeFile(foreignChild, [
+      JSON.stringify({ type: 'session', id: 'sa-2', cwd: 'C:/project' }),
+      JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { origin: 'subagent', agentId: 'sa-2' } }),
+    ].join('\n') + '\n');
+
+    await service.deleteConversation(conversation.cwd);
+
+    await expect(readFile(parent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(worker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(foreignChild, 'utf8')).resolves.toContain('sa-2');
+  });
+
+  it('closes an in-process subagent registry before deleting the conversation directory', async () => {
+    const { service } = await createService();
+    const conversation = await service.createConversation();
+    getRegistry(conversation.cwd);
+
+    await service.deleteConversation(conversation.cwd);
+    await expect(realpath(conversation.cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('closes an active workspace before deleting its directory', async () => {
     const { service } = await createService();
     const conversation = await service.createConversation();
@@ -188,6 +326,47 @@ describe('WorkspaceService', () => {
     await service.deleteConversation(conversation.cwd);
 
     expect(close).toHaveBeenCalledWith(conversation.cwd);
+  });
+
+  it('tears down live children while the registry is still open, before the workspace closer releases it', async () => {
+    const { service, agentDir } = await createService();
+    const { cwd } = await service.createConversation();
+    const sessionsDir = join(agentDir, 'sessions', `--${cwd.replace(/[\\/:]/g, '-')}--`);
+    await mkdir(sessionsDir, { recursive: true });
+    const parent = join(sessionsDir, '2026-09-14T14-56-00-000Z_parent.jsonl');
+    const child = join(sessionsDir, '2026-09-14T14-57-30-000Z_sa-live.jsonl');
+    await writeFile(parent, `{"type":"session","id":"parent","cwd":${JSON.stringify(cwd)}}\n`);
+    await writeFile(child, childLines('sa-live', cwd, parent));
+    const session = {
+      isStreaming: true,
+      pendingMessageCount: 0,
+      messages: [],
+      prompt: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      waitForIdle: () => new Promise<void>(() => {}),
+    };
+    installActivation({
+      childId: 'sa-live', sessionPath: child, parentSessionId: 'parent', parentSessionPath: parent,
+      workspace: cwd, session, announced: true,
+    });
+    const registry = getRegistry(cwd);
+    registry.create({ id: 'sa-live', task: 't', sessionPath: child });
+    let statusAtClose: string | undefined;
+    // 与真实 onDispose 一致：closer 释放 registry；此时子级必须已收口、其 cancelled 已写进仍开着的 registry。
+    service.setWorkspaceCloser(async (workspace) => {
+      expect(session.dispose).toHaveBeenCalled();
+      statusAtClose = registry.get('sa-live')?.status;
+      releaseSubagentControlPlane(workspace);
+    });
+
+    await service.deleteConversation(cwd);
+
+    expect(statusAtClose).toBe('cancelled');
+    expect(getActivation('sa-live')).toBeUndefined();
+    await expect(realpath(cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(parent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('removes project sessions without deleting the project directory', async () => {
@@ -213,5 +392,72 @@ describe('WorkspaceService', () => {
     await service.deleteSession(workspace, owned);
     await expect(readFile(owned, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(service.deleteSession(workspace, foreign)).rejects.toThrow('session does not belong to workspace');
+  });
+
+  it('cascades a session delete to its subagent children and grandchildren only', async () => {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const parent = join(sessions, 'parent.jsonl');
+    const sibling = join(sessions, 'sibling.jsonl');
+    const child = join(sessions, 'child.jsonl');
+    const grandchild = join(sessions, 'grandchild.jsonl');
+    const siblingChild = join(sessions, 'sibling-child.jsonl');
+    const unlinked = join(sessions, 'unlinked-child.jsonl');
+    await writeFile(parent, `{"type":"session","id":"parent","cwd":${JSON.stringify(workspace)}}\n`);
+    await writeFile(sibling, `{"type":"session","id":"sibling","cwd":${JSON.stringify(workspace)}}\n`);
+    // 子会话 parentSession 按 SDK 落盘写法（分隔符 / 大小写可与调用方传入的路径不同）
+    await writeFile(child, childLines('sa-child', workspace, parent.replace(/\\/g, '/').toUpperCase()));
+    await writeFile(grandchild, childLines('sa-grandchild', workspace, child));
+    await writeFile(siblingChild, childLines('sa-sibling-child', workspace, sibling));
+    await writeFile(unlinked, childLines('sa-unlinked', workspace, null));
+
+    await service.deleteSession(workspace, parent);
+
+    await expect(readFile(parent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(grandchild, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(sibling, 'utf8')).resolves.toContain('sibling');
+    await expect(readFile(siblingChild, 'utf8')).resolves.toContain('sa-sibling-child');
+    await expect(readFile(unlinked, 'utf8')).resolves.toContain('sa-unlinked');
+  });
+
+  it('tears down a resident child before removing its file and does not settle into the deleted parent', async () => {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const parent = join(sessions, 'parent.jsonl');
+    const child = join(sessions, 'child.jsonl');
+    await writeFile(parent, `{"type":"session","id":"parent","cwd":${JSON.stringify(workspace)}}\n`);
+    await writeFile(child, childLines('sa-live', workspace, parent));
+    const sendMessage = vi.fn();
+    registerParentSessionHost({
+      sessionId: 'parent', sessionPath: parent, workspace,
+      isBusy: () => false, isDraining: () => false, sendMessage, prompt: vi.fn(),
+    });
+    // 子级正在流式输出：不这样设置的话空闲子级会自然结算并给父会话发回执，测不到删除路径本身。
+    const session = {
+      isStreaming: true,
+      pendingMessageCount: 0,
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'partial' }] }],
+      prompt: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      waitForIdle: () => new Promise<void>(() => {}),
+    };
+    installActivation({
+      childId: 'sa-live', sessionPath: child, parentSessionId: 'parent', parentSessionPath: parent,
+      workspace, session, announced: true,
+    });
+    getRegistry(workspace).create({ id: 'sa-live', task: 't', sessionPath: child });
+
+    await service.deleteSession(workspace, parent);
+
+    expect(session.dispose).toHaveBeenCalled();
+    expect(getActivation('sa-live')).toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(getRegistry(workspace).get('sa-live')?.status).toBe('cancelled');
+    await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(parent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

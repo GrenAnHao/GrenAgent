@@ -338,6 +338,19 @@ describe('ExtensionUiHost', () => {
     expect(msg.info).toHaveBeenCalledWith('已设定目标：写完测试');
   });
 
+  it('does not toast Goal receipts; bar already shows the same status', () => {
+    render(<ExtensionUiHost />);
+    emit({
+      workspace: '/ws',
+      request: { id: 'n-goal', method: 'notify', message: '已暂停的目标 · 测试子代理理 · 0/256 · disarmed' },
+    });
+    emit({
+      workspace: '/ws',
+      request: { id: 'n-clear', method: 'notify', message: '已清除目标。' },
+    });
+    expect(msg.info).not.toHaveBeenCalled();
+  });
+
   it('maps notify level to the matching toast', () => {
     render(<ExtensionUiHost />);
     emit({ workspace: '/ws', request: { id: 'n2', method: 'notify', message: '裁判不可用，已放行。', level: 'warning' } });

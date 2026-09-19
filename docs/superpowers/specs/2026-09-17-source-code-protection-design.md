@@ -16,7 +16,7 @@
 
 > **审查修正（2026-09-17，对照仓库代码与上游源码复核）**
 >
-> 1. **字节码只在 CJS 产物上生效（必须修复，见 §2）。** `electron-agent/package.json` 是 `"type": "module"`，electron-vite 据此把 main 输出格式定为 `es`（实测 `out/main/main.js` 首行是 `import ... from "./chunks/extensions-*.js"`）。字节码插件仅在 `output.format === 'cjs'` 时工作，否则只打一条 warning 就跳过——构建照样成功，产物仍是明文 ESM。
+> 1. **字节码只在 CJS 产物上生效（必须修复，见 §2）。** `electron-agent/package.json` 保持 `"type": "module"`（Pi SDK 只有 `exports.import`，`electron-vite serve` 打成 CJS 会 `require` 失败）。生产构建用 `defineConfig(({ command }) => …)` 在 `command === "build"` 时显式 `output.format: "cjs"` 并写入 `out/main/package.json` `{"type":"commonjs"}`。字节码插件仅在 `output.format === 'cjs'` 时工作，否则只打一条 warning 就跳过——构建照样成功，产物仍是明文 ESM。
 > 2. **必须解包 `out/main/bytecode-loader.cjs`（必须修复，见 §4）。** 入口存根内容是 `require("./bytecode-loader.cjs")` + `require("./<name>.jsc")`，loader 是独立文件；worker 跑在 `ELECTRON_RUN_AS_NODE` 下读不到 asar，缺它则子代理启动即崩。
 > 3. **主进程 chunk 的 `.jsc` 也在 asar 外（措辞修正 + 记为残留风险，见 §4）。** `out/main/chunks/**` 已整目录解包，而 main 依赖其中的 chunk，「完整性校验罩得到主进程」只对入口存根成立。
 > 4. **复核无误、维持原判的部分：** fuse 键名用 camelCase（核对 `app-builder-lib/src/options/FuseOptionsV1.ts`，electron-vite 文档里的 PascalCase 示例不适用于 electron-builder）；`asar.disableIntegrity` 禁忌；`removeBundleJS` / `protectedStrings` 默认值；`sandbox: true`（`mainConfig.ts:27`）与既有 `main.config.test.ts` 断言；`resolveWorkerEntry` 与 `workerEntry.test.ts`；`electron-builder.yml` 现状；仓库已有 `yaml` 解析用法（`copyPiAdjacentAssets.test.ts:36`）；`afterPack` 只写 `app.asar.unpacked`，不影响 asar 哈希。`transformArrowFunctions` 已由实现期裁决改为 `false`（见上）。
@@ -35,7 +35,7 @@
 
 ### 成功标准
 
-1. `electron.vite.config.ts` 的 `main.build.bytecode` 为 `{ transformArrowFunctions: false }`（不要布尔 `true`，也不要加 `protectedStrings` / `chunkAlias`），`main.build.rollupOptions.output.format` 为 `"cjs"`，且运行时 `out/main/*.js` 会被判定为 CJS（§2 三选一之一成立）；`preload` 与 `renderer` 的 `build` 不含 `bytecode`。
+1. `electron.vite.config.ts` 在 `command === "build"` 时 `main.build.bytecode` 为 `{ transformArrowFunctions: false }`（不要布尔 `true`，也不要加 `protectedStrings` / `chunkAlias`），`main.build.rollupOptions.output.format` 为 `"cjs"`，且 `out/main/package.json` 为 `{"type":"commonjs"}`（§2 备选 A）；`command === "serve"` 时 main **不**设 `bytecode`、**不**设 `format: "cjs"`。`preload` 与 `renderer` 的 `build` 不含 `bytecode`。
 2. `browserWindowOptions.webPreferences.sandbox` 仍为 `true`。
 3. `electron-builder.yml` 含 `electronFuses.enableEmbeddedAsarIntegrityValidation: true` 与 `onlyLoadAppFromAsar: true`；未设置 `runAsNode: false`；未设置 `asar.disableIntegrity`。
 4. `asarUnpack` 含 `out/main/pi-worker.js`、`out/main/pi-worker.jsc`、`out/main/bytecode-loader.cjs`，不含 `out/main/main.jsc`。
@@ -61,41 +61,47 @@ electron-vite 6（当前 `^6.0.0-beta.1`）用 `build.bytecode`，不用旧的 `
 `electron-agent/electron.vite.config.ts` 的 `main.build` 在现有 `rollupOptions` 旁增加字节码选项：
 
 ```ts
-main: {
-  // resolve / plugins 不变
-  build: {
-    bytecode: { transformArrowFunctions: false },
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, "electron/main.ts"),
-        "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
+export default defineConfig(({ command }) => {
+  const production = command === "build";
+  return {
+    main: {
+      // resolve 不变
+      build: {
+        ...(production ? { bytecode: { transformArrowFunctions: false } } : {}),
+        rollupOptions: {
+          input: {
+            main: resolve(__dirname, "electron/main.ts"),
+            "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
+          },
+          ...(production ? { output: { format: "cjs" as const } } : {}),
+          external: [/* 现有列表不变 */],
+        },
       },
-      // 见下节：字节码只在 CJS 产物上生效
-      output: { format: "cjs" },
-      external: [/* 现有列表不变 */],
     },
-  },
-},
+    // preload / renderer 不变
+  };
+});
 ```
 
 含义：
 
 - 必须写成对象，且**只**含 `transformArrowFunctions: false`。不要用布尔 `true`（那会走 Babel 转箭头，构建会在 undici class 字段上崩）。不要加 `protectedStrings`、不要加 `chunkAlias`（两个入口及其拆出的 JS chunk 都编；`removeBundleJS` 保持默认 `true`）。
 - `preload.build` 只保留现有 `rollupOptions`（CJS、`preload` / `webviewPreload` 两个入口），不加 `bytecode`。
-- `copy-pi-adjacent-assets` 插件仍在 `main.plugins`：它只拷 `runner.py` / `runner.mjs` / `pi-sandbox-win.exe` / `prompts`，与 `.jsc` 无关。
+- `copy-pi-adjacent-assets` 插件仍在 `main.plugins`：它拷 `runner.py` / `runner.mjs` / `pi-sandbox-win.exe` / `prompts`；生产 `closeBundle` 另外调用 `writeMainCjsPackageJson(out/main)`。
 - 第一方 `extensions/dap/client.ts` 的 `resolveInitialized` 不得再用 class 字段箭头初始化（constructor 内赋值），避免同类陷阱出现在自有代码里。
 
 ### 输出格式必须是 CJS（硬性前提）
 
 字节码插件在 `configResolved` 里判定 `supported = output.format === 'cjs' && !useInRenderer`；格式为 `es` 时它**只打一条 warning 就跳过**，不产出 `.jsc`、也不报错。也就是说配置写对了但格式没改，构建会成功、产物仍是明文——这是本方案最容易踩的静默失效，必须在成功标准和测试里卡住。
 
-electron-vite 按 `package.json` 的 `type` 决定 main / preload 的输出格式：`type === "module"` 且 Electron 支持 ESM 时为 `es`，否则 `cjs`。本仓库 `electron-agent/package.json` 是 `"type": "module"`，Electron 38 支持 ESM，所以当前 `out/main/main.js` 确实是 ESM。
+electron-vite 按 `package.json` 的 `type` 决定 main / preload 的输出格式：`type === "module"` 且 Electron 支持 ESM 时为 `es`，否则 `cjs`。根 `package.json` 必须保持 `"type": "module"`：`@earendil-works/pi-coding-agent` 的 `exports` 只有 `import`、没有 `require`。`electron-vite serve` 若把 main 打成 CJS，运行时 `require()` 该包会抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`，同时 `import.meta` 被替换成 `{}`（`[EMPTY_IMPORT_META]`）。
 
-所以除了 `output.format: "cjs"`，还要保证运行时 `out/main/*.js` 被判定为 CJS——最近的上级 `package.json` 是打进 `app.asar` 的根 `package.json`，它仍然是 `"type": "module"`。三选一：
+生产字节码仍要求 CJS。做法是 **§2 备选 A**（不要删根 `"type": "module"`）：
 
-- **推荐：删掉 `electron-agent/package.json` 的 `"type": "module"`。** 仓库里没有需要 Node 直接加载的 `.js`（`src/` 全是 TS/TSX，由 Vite 打包；`scripts/` 一律用 `.cjs` / `.mjs` 显式扩展名），渲染层构建与 `pnpm test` 不依赖这个字段。改完 main 与 preload 都回到 CJS，**所有文件名与 §4 / §8 的路径不变**，是三选一里改动面最小的。落地前跑一次 `pnpm build` + `pnpm test` + `electron-vite dev` 确认无回归。
-- 备选 A：构建时往 `out/main` 写一份 `package.json`（`{"type": "commonjs"}`）。文件名同样不变，代价是多一个构建期生成物，且必须在 `emptyOutDir` 之后写入。
-- 备选 B：产物改 `.cjs` 扩展名（同时设 `entryFileNames` 与 `chunkFileNames`）。语义最显式，但要同步改 `package.json` 的 `main`、`resolveWorkerEntry`、`asarUnpack` 与相关断言，且 `.jsc` 会变成 `.cjsc`（插件规则是 `fileName + 'c'`）。
+- `defineConfig(({ command }) => …)`：仅 `command === "build"` 时设 `output.format: "cjs"` 与 `bytecode`；`serve` 保持默认 ESM。
+- `closeBundle` 在 `emptyOutDir` 之后往 `out/main` 写 `package.json`：`{"type":"commonjs"}`。最近的上级 package 变成这份文件，Electron 把存根 `main.js` / `pi-worker.js` 当 CJS，`require("./bytecode-loader.cjs")` 才合法。根 `package.json` 仍是 `"type": "module"`，不影响开发态。
+- **不要**删根 `"type": "module"` 来换 CJS（落地后 `pnpm dev` 会在加载主进程时崩）。
+- **不要**改产物扩展名为 `.cjs`（要同步改 `package.json` 的 `main`、`resolveWorkerEntry`、`asarUnpack`，且 `.jsc` 会变成 `.cjsc`）。
 
 CJS 输出对现有源码无影响：`main.ts` / `mainConfig.ts` 用的 `__dirname` 在 CJS 下是原生变量；`codeGraphEngine.ts` 的 `import.meta.url` 由 Rollup 改写成等价 `__filename` 的形式；`copyPiAdjacentAssets` 依赖的「chunk 内 `import.meta.url` 指向 chunk」在 CJS 下由 `__filename` 同样成立。
 
@@ -208,9 +214,9 @@ electron-builder
 
 全部放在现有 Vitest，读仓库里的配置文件，不调用 `electron-vite build`，不做安装包冒烟。
 
-1. `main.build.bytecode` 深等 `{ transformArrowFunctions: false }`，且 `main.build.rollupOptions.output.format === "cjs"`。优先直接 import `electron.vite.config.ts` 的 default 导出断言（该文件无副作用）；若 vitest 加载失败再退回读源文本。
-2. `preload:` 块到 `renderer:` 之前不含 `bytecode`，`renderer:` 块不含 `bytecode`（若用 import 断言，直接查 `config.preload.build.bytecode` / `config.renderer.build.bytecode` 为 `undefined`）。
-3. `electron-agent/package.json` 不含 `"type": "module"`——这条是防「格式判定回退到 es、字节码静默失效」的兜底；若最终选 §2 的备选 A / B，这条换成断言对应产物约定。
+1. 调用 default 导出 `{ command: "build", mode: "production" }`：`main.build.bytecode` 深等 `{ transformArrowFunctions: false }`，且 `main.build.rollupOptions.output.format === "cjs"`。配置文件无副作用。
+2. 同一份 build 配置：`preload.build.bytecode` / `renderer.build.bytecode` 为 `undefined`。调用 `{ command: "serve" }` 时 `main.build.bytecode` 为 `undefined`，且 output format 不是 `"cjs"`。
+3. `electron-agent/package.json` 的 `"type"` 为 `"module"`；`writeMainCjsPackageJson` 写出 `{"type":"commonjs"}`（备选 A，防止生产存根被根 type:module 当成 ESM）。
 4. `browserWindowOptions.webPreferences.sandbox === true`（现有 `main.config.test.ts` 已有，保持）。
 5. 解析 `electron-builder.yml`（沿用 `yaml` 依赖与 `copyPiAdjacentAssets.test.ts` 已有的读法）：`electronFuses.enableEmbeddedAsarIntegrityValidation === true`；`electronFuses.onlyLoadAppFromAsar === true`；`electronFuses.runAsNode` 不是 `false`（缺省或 `true` 均可）；`asar.disableIntegrity` 不是 `true`。
 6. `asarUnpack` 含 `out/main/pi-worker.js`、`out/main/pi-worker.jsc`、`out/main/bytecode-loader.cjs`，且数组每一项都不等于 `out/main/main.jsc`。
@@ -229,11 +235,12 @@ electron-builder
 新增：
 
 - `electron-agent/electron/app/sourceCodeProtection.test.ts`（若并入现有测试文件则可不新增）
+- `electron-agent/electron/agent/writeMainCjsPackageJson.ts`（生产 `{"type":"commonjs"}`）
 
 修改：
 
-- `electron-agent/electron.vite.config.ts`（`main.build.bytecode: { transformArrowFunctions: false }` + `rollupOptions.output.format: "cjs"`）
-- `electron-agent/package.json`（删掉 `"type": "module"`，让产物回到 CJS；`main` / `scripts` 不动）
+- `electron-agent/electron.vite.config.ts`（`defineConfig(({ command }) => …)`：生产 `bytecode` + CJS，开发 ESM；`closeBundle` 写 `out/main/package.json`）
+- `electron-agent/package.json`（**保留** `"type": "module"`；`main` / `scripts` 不动）
 - `electron-agent/electron-builder.yml`（`electronFuses` + `asarUnpack` 追加 `pi-worker.jsc` 与 `bytecode-loader.cjs`）
 
 不改：

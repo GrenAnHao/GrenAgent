@@ -156,7 +156,7 @@ describe('ModelRuntimeHost 短调用', () => {
       yield { type: 'text_delta', delta: '你好' };
       yield { type: 'done', message: { usage: { totalTokens: 1 } } };
     }
-    const inner = vi.fn(streamSimple);
+    const inner = vi.fn((_model?: unknown, _context?: unknown, _options?: unknown) => streamSimple());
     const create = vi.fn().mockResolvedValue({
       completeSimple: vi.fn(),
       streamSimple: inner,

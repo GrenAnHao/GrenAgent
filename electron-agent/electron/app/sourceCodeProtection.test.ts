@@ -1,10 +1,32 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import viteConfig from '../../electron.vite.config';
+import { removeMainCjsPackageJson, writeMainCjsPackageJson } from '../agent/writeMainCjsPackageJson';
 
 const root = resolve(__dirname, '../..');
+
+type ViteCommand = 'build' | 'serve';
+
+type ViteSlice = {
+  main: {
+    build?: {
+      bytecode?: unknown;
+      rollupOptions?: { output?: unknown };
+    };
+  };
+  preload: { build?: { bytecode?: unknown } };
+  renderer?: { build?: { bytecode?: unknown } };
+};
+
+function resolveViteConfig(command: ViteCommand): ViteSlice {
+  if (typeof viteConfig !== 'function') {
+    throw new Error('electron.vite.config must export defineConfig(({ command }) => ...)');
+  }
+  return viteConfig({ command, mode: command === 'build' ? 'production' : 'development' });
+}
 
 function outputFormat(output: unknown): string | undefined {
   if (!output) return undefined;
@@ -13,20 +35,37 @@ function outputFormat(output: unknown): string | undefined {
 }
 
 describe('source code protection: electron-vite main', () => {
-  it('compiles main to CJS bytecode and leaves preload/renderer as JS', () => {
-    expect(viteConfig.main.build.bytecode).toEqual({ transformArrowFunctions: false });
-    expect(outputFormat(viteConfig.main.build.rollupOptions?.output)).toBe('cjs');
-    expect(viteConfig.preload.build.bytecode).toBeUndefined();
-    expect(viteConfig.renderer.build?.bytecode).toBeUndefined();
+  it('compiles production main to CJS bytecode and leaves preload/renderer as JS', () => {
+    const config = resolveViteConfig('build');
+    expect(config.main.build?.bytecode).toEqual({ transformArrowFunctions: false });
+    expect(outputFormat(config.main.build?.rollupOptions?.output)).toBe('cjs');
+    expect(config.preload.build?.bytecode).toBeUndefined();
+    expect(config.renderer?.build?.bytecode).toBeUndefined();
   });
 
-  it('drops package type module so Electron treats out/main JS as CJS', () => {
+  it('keeps electron-vite serve as ESM so Pi SDK import.meta.resolve works', () => {
+    const config = resolveViteConfig('serve');
+    expect(config.main.build?.bytecode).toBeUndefined();
+    expect(outputFormat(config.main.build?.rollupOptions?.output)).not.toBe('cjs');
+  });
+
+  it('keeps package type module and writes out/main as commonjs for bytecode stubs', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
       type?: string;
       main?: string;
     };
-    expect(pkg).not.toHaveProperty('type');
+    expect(pkg.type).toBe('module');
     expect(pkg.main).toBe('out/main/main.js');
+  });
+
+  it('writes out/main/package.json as commonjs after a production bundle', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-main-cjs-'));
+    writeMainCjsPackageJson(dir);
+    const written = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { type?: string };
+    expect(written).toEqual({ type: 'commonjs' });
+    removeMainCjsPackageJson(dir);
+    expect(() => readFileSync(join(dir, 'package.json'), 'utf8')).toThrow();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

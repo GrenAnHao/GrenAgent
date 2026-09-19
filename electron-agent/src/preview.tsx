@@ -185,10 +185,10 @@ function Gallery() {
           <ToolExecution toolName="read" args={{ path: '.claude/skills/tdd/SKILL.md' }} result={toolResult('# TDD\nred-green-refactor')} status="done" />
         </Item>
         <Item label="bash · done">
-          <ToolExecution toolName="bash" args={{ command: 'npx vitest run multi-agent/' }} result={toolResult('Test Files  8 passed | 1 skipped\n     Tests  88 passed | 2 skipped')} status="done" />
+          <ToolExecution toolName="bash" args={{ command: 'npx vitest run multi-agent/', description: 'Run multi-agent tests' }} result={toolResult('Test Files  8 passed | 1 skipped\n     Tests  88 passed | 2 skipped')} status="done" />
         </Item>
         <Item label="bash · error">
-          <ToolExecution toolName="bash" args={{ command: 'npm test' }} result={toolResult('Error: worker agent unavailable')} status="error" />
+          <ToolExecution toolName="bash" args={{ command: 'npm test', description: 'Run package tests' }} result={toolResult('Error: worker agent unavailable')} status="error" />
         </Item>
         <Item label="write · done">
           <ToolExecution toolName="write" args={{ path: 'src/features/dock/SubAgentLogBody.tsx', content: 'export function SubAgentLogBody() {\n  return null;\n}' }} result={toolResult('')} status="done" />
@@ -197,7 +197,7 @@ function Gallery() {
           <ToolExecution toolName="edit" args={{ path: 'src/features/tools/extensionCards.tsx' }} result={withDetails({ diff: '--- a/extensionCards.tsx\n+++ b/extensionCards.tsx\n@@\n-  font-weight: 500;\n+  font-weight: 600;' })} status="done" />
         </Item>
         <Item label="bash · running（自动展开）">
-          <ToolExecution toolName="bash" args={{ command: 'npm run build' }} result={undefined} status="running" />
+          <ToolExecution toolName="bash" args={{ command: 'npm run build', description: 'Build the package' }} result={undefined} status="running" />
         </Item>
       </Section>
 

@@ -3,6 +3,9 @@ import type { SessionStats } from './sessionStats';
 export type { SessionStats } from './sessionStats';
 import type { UsageReport } from './usageReport';
 export type { UsageReport } from './usageReport';
+import type { PackageListItem, PackageSearchResult } from '../../electron/app/piPackageModel';
+export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
+export type PackageInstallScope = 'user' | 'project';
 
 export interface PiEventEnvelope {
   workspace: string;
@@ -268,6 +271,16 @@ export const pi = {
     invoke<void>('set_settings', { settings }),
   listMcpConfigs: (workspace: string) =>
     invoke<ManagedMcpConfig[]>('list_mcp_configs', { workspace }),
+  packageList: (workspace: string) =>
+    invoke<PackageListItem[]>('package_list', { workspace }),
+  packageSearch: (query: string) =>
+    invoke<PackageSearchResult>('package_search', { query }),
+  packageInstall: (workspace: string, name: string, version: string, scope: PackageInstallScope) =>
+    invoke<void>('package_install', { workspace, name, version, scope }),
+  packageRemove: (workspace: string, source: string, scope: PackageInstallScope) =>
+    invoke<void>('package_remove', { workspace, source, scope }),
+  packageSetEnabled: (workspace: string, source: string, scope: PackageInstallScope, enabled: boolean) =>
+    invoke<void>('package_set_enabled', { workspace, source, scope, enabled }),
   upsertMcpConfig: (
     workspace: string,
     scope: McpConfigScope,
@@ -277,6 +290,8 @@ export const pi = {
   ) => invoke<void>('upsert_mcp_config', { workspace, scope, name, config, enabled }),
   removeMcpConfig: (workspace: string, scope: McpConfigScope, name: string) =>
     invoke<void>('remove_mcp_config', { workspace, scope, name }),
+  reloadMcpServer: (workspace: string, name: string) =>
+    invoke<void>('reload_mcp_server', { workspace, name }),
   getProviderConfig: () => invoke<ProviderConfigPayload>('get_provider_config'),
   setProviderConfig: (modelsJson: string, authJson: string) =>
     invoke<RefreshResult>('set_provider_config', { modelsJson, authJson }),

@@ -14,6 +14,7 @@ import { useImMessagesStore, type ImConversation } from '../../stores/imMessages
 import { useVisualStore } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
+import { isGoalReceiptNotify } from './goalReceiptNotify';
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -58,6 +59,8 @@ function parseGoalStatus(statusText: unknown, envelopeSessionId?: unknown): Pars
       maxRounds: readPositiveInteger(candidate.maxRounds) ?? 256,
       createdAt: readNonEmptyString(candidate.createdAt) ?? now,
       updatedAt: readNonEmptyString(candidate.updatedAt) ?? now,
+      ranMs: readNonnegativeInteger(candidate.ranMs) ?? 0,
+      ...(readNonEmptyString(candidate.runStartedAt) ? { runStartedAt: readNonEmptyString(candidate.runStartedAt) } : {}),
       activation: candidate.activation === 'armed' ? 'armed' : 'disarmed',
       ...(blockedReason ? { blockedReason } : {}),
       ...(Array.isArray(parsed.history) ? { history: parsed.history as GoalHistoryItem[] } : {}),
@@ -204,7 +207,9 @@ export function ExtensionUiHost() {
       // notify 是即发提示（命令执行确认 / 扩展告知），用 toast 呈现，否则用户会觉得「没反应」。
       if (method === 'notify') {
         const text = notifyText(e.request as Record<string, unknown>);
-        if (text) message[notifyLevel(e.request as Record<string, unknown>)](text);
+        if (text && !isGoalReceiptNotify(text)) {
+          message[notifyLevel(e.request as Record<string, unknown>)](text);
+        }
         return;
       }
       // ask_user 富卡：经 ctx.ui.input 载荷传来，内联渲染到消息流末尾（而非输入框上方）。

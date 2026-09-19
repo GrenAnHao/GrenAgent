@@ -1,8 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { App } from 'antd';
 afterEach(cleanup);
+// 全量并行跑时 jsdom 负载高，findBy* 默认 1000ms 偶发超时；放宽到 5s。
+configure({ asyncUtilTimeout: 5000 });
 
 // antd v6's App.useApp() only returns functional message/notification/modal when the tree
 // is wrapped in <App>. Component tests render bare, so without this stub calls like

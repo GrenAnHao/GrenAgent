@@ -1,4 +1,5 @@
 import type { ModelRuntime } from '../../../cli/src/pi-sdk.js';
+import type { ThinkingLevel } from '@earendil-works/pi-ai';
 import { formatNonStream } from '../../../extensions/_shared/oneshot.js';
 
 type Model = NonNullable<ReturnType<ModelRuntime['getModel']>>;
@@ -10,6 +11,10 @@ export interface ShortCallInput {
   provider?: string;
   modelId?: string;
   signal?: AbortSignal;
+  /** 采样温度。不传则跑在 provider 默认值上（DeepSeek 默认 1.0，改写/抽取类任务会明显加戏）。 */
+  temperature?: number;
+  /** 推理档位。改写/抽取类任务传 'minimal'，压低模型输出自我解说（改动说明/对照表）的倾向。 */
+  reasoning?: ThinkingLevel;
 }
 
 export interface ModelRuntimeHostOptions {
@@ -80,10 +85,14 @@ export class ModelRuntimeHost {
   async *streamSimple(input: ShortCallInput): AsyncGenerator<{ type: 'delta' | 'done' | 'error'; text?: string; usage?: unknown; error?: string }> {
     const runtime = await this.ensure();
     const model = await this.resolveCallModel(input, runtime);
+    // 条件透传：undefined 不覆盖 provider/模型自带的采样配置，保持「不传即默认」语义。
+    const options: { signal?: AbortSignal; temperature?: number; reasoning?: ThinkingLevel } = { signal: input.signal };
+    if (input.temperature !== undefined) options.temperature = input.temperature;
+    if (input.reasoning !== undefined) options.reasoning = input.reasoning;
     for await (const ev of runtime.streamSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
-      { signal: input.signal },
+      options,
     )) {
       if (ev.type === 'text_delta' && ev.delta) yield { type: 'delta', text: ev.delta };
       else if (ev.type === 'done') yield { type: 'done', usage: ev.message.usage };

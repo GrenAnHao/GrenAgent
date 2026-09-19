@@ -8,6 +8,7 @@
  * 对应上游版本：pi-coding-agent@0.85.1
  */
 export {
+  DefaultPackageManager,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -22,6 +23,7 @@ export type {
   AgentSessionRuntime,
   ExtensionUIContext,
   JsonAgentSessionEvent,
+  PackageSource,
   PromptOptions,
   SessionStats,
 } from "@earendil-works/pi-coding-agent";

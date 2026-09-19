@@ -3,6 +3,7 @@ import { ThemeProvider, Flexbox, ConfigProvider } from '@lobehub/ui';
 import { m } from 'motion/react';
 import { ANTD_CSS_VAR_KEY, ThemeBridge } from './components/ThemeBridge';
 import { ExtensionUiHost } from './features/extensionUi/ExtensionUiHost';
+import { FullAccessConfirmModal } from './features/chat/input/FullAccessConfirmModal';
 import { useThemeStore } from './stores/themeStore';
 import { schemePrimary, schemeTokens } from './theme/colorSchemes';
 import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
@@ -30,6 +31,7 @@ import { prewarmWorkspace } from './lib/prewarm';
 import { createStartupPerf } from './lib/startupPerf';
 import { IS_DEV } from './lib/devMode';
 import { pathsEquivalent } from './lib/pathUtils';
+import { applyOpenedProject, enterPendingNewSession } from './lib/pendingSession';
 import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
 import {
   bumpSessionMutationEpoch,
@@ -44,6 +46,9 @@ import {
 import { invalidateCachedSession } from './lib/sessionMessageCache';
 import { filterDeletedSessions, mergeAllSessions } from './lib/mergeSessions';
 import { pickAutoSelected } from './lib/sessionSelect';
+import { useCommandInputStore } from './stores/commandInputStore';
+import { useSidebarPrefsStore } from './stores/sidebarPrefsStore';
+import { useThinkingMemoryStore } from './stores/thinkingMemoryStore';
 
 // 初始工作区由 App 启动时解析（恢复最近会话所属 cwd，否则新建对话）。
 
@@ -154,6 +159,7 @@ const SidebarPanel = memo(function SidebarPanel({
   onOpenSession,
   onDeleteSession,
   onDeleteConversation,
+  onClearProjectSessions,
   onRemoveProject,
   onSubmitRename,
 }: {
@@ -164,6 +170,7 @@ const SidebarPanel = memo(function SidebarPanel({
   onOpenSession: (cwd: string, path: string) => void;
   onDeleteSession: (cwd: string, path: string) => void;
   onDeleteConversation: (cwd: string) => void;
+  onClearProjectSessions: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
 }) {
@@ -177,6 +184,7 @@ const SidebarPanel = memo(function SidebarPanel({
         onOpenSession={onOpenSession}
         onDeleteSession={onDeleteSession}
         onDeleteConversation={onDeleteConversation}
+        onClearProjectSessions={onClearProjectSessions}
         onRemoveProject={onRemoveProject}
         onSubmitRename={onSubmitRename}
       />
@@ -338,6 +346,16 @@ const Workspace = memo(function Workspace() {
         perf.end('refreshSessions');
         if (!alive) return;
 
+        const stAfter = useSessionStore.getState();
+        const alreadyDraft = Boolean(
+          stAfter.draftConversationCwd && pathsEquivalent(stAfter.draftConversationCwd, workspace),
+        );
+        if (!stAfter.activeSessionPath && !alreadyDraft) {
+          applyOpenedProject(workspace, null, () => store.reset());
+          if (alive) setWorkspaceReady(true);
+          return;
+        }
+
         const path = useSessionStore.getState().activeSessionPath;
         if (path) useSessionStore.getState().setWorkspaceSessionPath(workspace, path);
         if (path && !sessionAlreadyActive(path, openResult)) {
@@ -391,49 +409,20 @@ const Workspace = memo(function Workspace() {
     st.setActiveWorkspace(cwd);
   }, []);
 
-  const handleNewSession = useCallback(async (cwd: string) => {
-    await pi.openWorkspace(cwd);
-    const st = useSessionStore.getState();
-    st.setActiveSession('');
-    await pi.newSession(cwd);
-    // 取新会话 path：(1) 写回 workspaceSessionPaths，避免运行指示停留在上一个会话；
-    // (2) 乐观占位，让新会话立刻出现在侧栏（pi 延迟落盘，list_all_sessions 当下扫不到）。
-    try {
-      const state = (await pi.getState(cwd)) as { sessionFile?: string };
-      const path = state.sessionFile;
-      if (path) {
-        st.setActiveSession(path);
-        st.setWorkspaceSessionPath(cwd, path);
-        st.upsertOptimisticSession({
-          id: `opt-${path}`,
-          path,
-          cwd,
-          timestamp: new Date().toISOString(),
-          name: null,
-        });
-      }
-    } catch {
-      /* getState 失败则退回原有刷新路径 */
-    }
-    invalidateAllSessionsCache();
-    if (st.activeWorkspace !== cwd) {
-      st.setActiveWorkspace(cwd);
-    } else {
-      store.reset();
-      await refreshSessions(cwd);
-    }
-    void refreshAllSessions(true);
-  }, [store]);
-
-  // 会话切换的单调递增序号：每次切换自增，await 链回来后据此判断是否已被更新的切换超越（最新胜出）。
-  // 修复「同项目快速来回切时先发起的链后返回、用旧会话消息覆盖当前显示 → 点击像没生效、要连点几次」。
   const selectTokenRef = useRef(0);
+
+  const handleNewSession = useCallback((cwd: string) => {
+    ++selectTokenRef.current;
+    enterPendingNewSession(cwd, () => store.reset());
+  }, [store]);
 
   const handleOpenSession = useCallback(
     async (cwd: string, path: string) => {
       const st = useSessionStore.getState();
+      st.clearDraftConversation();
       st.setActiveSession(path);
       st.setWorkspaceSessionPath(cwd, path);
+      useThinkingMemoryStore.getState().bumpSwitch(cwd);
       if (st.activeWorkspace !== cwd) {
         // 跨项目切换：立即切 activeWorkspace，内容区即刻进入骨架屏；
         // openWorkspace / switchSession / getMessages 由切换工作区的 effect 统一完成，
@@ -520,6 +509,7 @@ const Workspace = memo(function Workspace() {
             store.loadMessages(messages, { force: true, sessionPath: nextInProject.path, uiHistory });
             st.setActiveSession(nextInProject.path);
             st.setWorkspaceSessionPath(cwd, nextInProject.path);
+            useThinkingMemoryStore.getState().bumpSwitch(cwd);
           } catch {
             /* 切换失败：保持空会话区 */
           }
@@ -552,15 +542,32 @@ const Workspace = memo(function Workspace() {
     }
   }, [store]);
 
-  const handleSubmitRename = useCallback(async (cwd: string, _path: string, name: string) => {
-    if (cwd !== useSessionStore.getState().activeWorkspace) {
-      await switchProject(cwd);
+  const handleSubmitRename = useCallback(async (cwd: string, path: string, name: string) => {
+    await pi.setSessionDisplayName(path, name);
+    const st = useSessionStore.getState();
+    const viewingTarget =
+      Boolean(st.activeWorkspace && pathsEquivalent(cwd, st.activeWorkspace)) &&
+      Boolean(path && st.activeSessionPath && pathsEquivalent(path, st.activeSessionPath));
+    if (viewingTarget) {
+      try {
+        await pi.setSessionName(cwd, name);
+      } catch {
+        /* 文件已写入；内存同步失败不回滚侧栏标题 */
+      }
     }
-    await pi.setSessionName(cwd, name);
+    const applyName = <T extends { path: string; name: string | null }>(list: T[]) =>
+      list.map((s) => (pathsEquivalent(s.path, path) ? { ...s, name } : s));
+    useSessionStore.setState((s) => ({
+      sessions: applyName(s.sessions),
+      allSessions: applyName(s.allSessions),
+      optimisticSessions: applyName(s.optimisticSessions),
+    }));
     invalidateAllSessionsCache();
-    await refreshSessions(cwd);
+    if (st.activeWorkspace && pathsEquivalent(cwd, st.activeWorkspace)) {
+      await refreshSessions(cwd, undefined, { autoSelect: false });
+    }
     void refreshAllSessions(true);
-  }, [switchProject]);
+  }, []);
 
   const goToSafeWorkspace = useCallback(async () => {
     await refreshAllSessions(true);
@@ -579,23 +586,22 @@ const Workspace = memo(function Workspace() {
 
   const handleNewConversation = useCallback(async () => {
     // 复用上一个未使用的空白对话，避免每次点「新建对话」都建一个 works 目录而堆积。
+    // 不落盘会话：首条消息或 /goal 才 newSession。
     const cwd = await acquireDraftScratch();
-    const st = useSessionStore.getState();
-    st.setActiveSession('');
-    st.setDraftConversation(cwd);
-    st.setActiveWorkspace(cwd);
-  }, []);
+    ++selectTokenRef.current;
+    enterPendingNewSession(cwd, () => store.reset());
+  }, [store]);
 
   const handleOpenProject = useCallback(async () => {
     const dir = await pickDirectory();
     if (!dir) return;
-    await pi.openWorkspace(dir);
+    const openResult = await pi.openWorkspace(dir);
     const st = useSessionStore.getState();
-    st.setActiveSession('');
     st.registerProject(dir);
-    st.setActiveWorkspace(dir);
+    useSidebarPrefsStore.getState().keepProject(dir);
+    applyOpenedProject(dir, openResult.sessionFile, () => store.reset());
     void refreshAllSessions(true);
-  }, []);
+  }, [store]);
 
   const handleDeleteConversation = useCallback(
     (cwd: string) => {
@@ -647,11 +653,54 @@ const Workspace = memo(function Workspace() {
     [handleNewConversation],
   );
 
+  const handleClearProjectSessions = useCallback(
+    async (cwd: string) => {
+      if (!window.confirm('清空该项目下的全部会话？项目会保留。')) return;
+      const st = useSessionStore.getState();
+      const pathsUnderCwd = mergeAllSessions(st.allSessions, st.optimisticSessions)
+        .filter((session) => session.cwd && pathsEquivalent(session.cwd, cwd))
+        .map((session) => session.path);
+      const wasActive = pathsEquivalent(st.activeWorkspace, cwd);
+      for (const path of pathsUnderCwd) {
+        st.hideDeletedSession(path);
+        st.removeOptimisticSession(path);
+        invalidateCachedSession(path);
+        useCommandInputStore.getState().dropSession(path);
+      }
+      bumpSessionMutationEpoch();
+      invalidateAllSessionsCache();
+      st.registerProject(cwd);
+      useSidebarPrefsStore.getState().keepProject(cwd);
+      if (wasActive) {
+        store.reset();
+        st.setActiveSession('');
+      }
+      try {
+        await pi.removeProject(cwd);
+        st.registerProject(cwd);
+        useSidebarPrefsStore.getState().keepProject(cwd);
+        for (const path of pathsUnderCwd) {
+          const histKey = sessionKeyFromPath(path);
+          if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
+        }
+        if (wasActive) {
+          await handleNewSession(cwd);
+        }
+        void refreshAllSessions(true);
+      } catch (error) {
+        for (const path of pathsUnderCwd) st.unhideDeletedSession(path);
+        st.setError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [handleNewSession, store],
+  );
+
   const handleRemoveProject = useCallback(
     async (cwd: string) => {
       await pi.removeProject(cwd);
       invalidateAllSessionsCache();
       useSessionStore.getState().unregisterProject(cwd);
+      useSidebarPrefsStore.getState().dropKeptProject(cwd);
       useSessionStore.getState().removeOptimisticByCwd(cwd);
       if (useSessionStore.getState().activeWorkspace === cwd) {
         await goToSafeWorkspace();
@@ -734,6 +783,7 @@ const Workspace = memo(function Workspace() {
                     onOpenSession={handleOpenSession}
                     onDeleteSession={handleDeleteSession}
                     onDeleteConversation={handleDeleteConversation}
+                    onClearProjectSessions={handleClearProjectSessions}
                     onRemoveProject={handleRemoveProject}
                     onSubmitRename={handleSubmitRename}
                   />
@@ -867,6 +917,7 @@ export default function App() {
       <ConfigProvider motion={m}>
         <ThemeBridge />
         <ExtensionUiHost />
+        <FullAccessConfirmModal />
         <MarkdownWarmup />
         <AgentStoreProvider workspace={activeWorkspace}>
           <Workspace />

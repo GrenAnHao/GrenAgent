@@ -42,6 +42,10 @@ export class AgentHost {
     return this.handles.get(workspace);
   }
 
+  workspaces(): string[] {
+    return [...this.handles.keys()];
+  }
+
   async open(workspace: string, cwd: string): Promise<WorkspaceHandle> {
     const inFlightClose = this.closing.get(workspace);
     if (inFlightClose) await inFlightClose;

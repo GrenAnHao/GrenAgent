@@ -15,6 +15,9 @@ electronFuses:
 asarUnpack:
   - node_modules/@colbymchenry/**
   - node_modules/@ast-grep/**
+  - node_modules/@vscode/ripgrep/**
+  - node_modules/@vscode/ripgrep-*/**
+  - node_modules/.pnpm/@vscode+ripgrep*/**
   - out/main/pi-worker.js
   - out/main/pi-worker.jsc
   - out/main/bytecode-loader.cjs

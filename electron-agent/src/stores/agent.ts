@@ -233,7 +233,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     const sanitized = processed.map((m) =>
       m.kind === 'tool' && m.status === 'running' ? { ...m, status: 'error' as const } : m,
     );
-    setFullState({ ...initialAgentState(), messages: sanitized, excluded: excludedFromAgent(msgs) });
+    const composerQueue = useStore.getState().composerQueue;
+    setFullState({ ...initialAgentState(), messages: sanitized, excluded: excludedFromAgent(msgs), composerQueue });
     // 首次（无 uiHistory / uiHistory 更短）用后端起底：写一份 UI 历史，之后运行中每轮结束再覆盖为完整。
     if (sessionPath != null && processed === backend) {
       const key = sessionKeyFromPath(sessionPath);
@@ -313,7 +314,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       loadedSessionPath = sessionPath;
       currentSig = entry.sig;
       clearQueue();
-      setFullState({ ...initialAgentState(), messages: entry.messages });
+      const composerQueue = useStore.getState().composerQueue;
+      setFullState({ ...initialAgentState(), messages: entry.messages, composerQueue });
       return true;
     },
     destroy: () => {

@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe('commandInputStore', () => {
   it('append 后按 session 分桶，dropSession 后消失', () => {
-    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '写完' });
+    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '写完', beforeCount: 0 });
 
     const rows = useCommandInputStore.getState().list('s1');
     expect(rows).toHaveLength(1);
@@ -15,6 +15,7 @@ describe('commandInputStore', () => {
       kind: 'command-input',
       command: '/goal',
       rest: '写完',
+      beforeCount: 0,
     });
     expect(rows[0].id).toBeTruthy();
     expect(useCommandInputStore.getState().list('other')).toEqual([]);
@@ -24,8 +25,8 @@ describe('commandInputStore', () => {
   });
 
   it('两次 append 的 id 非空且不重复', () => {
-    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '写完' });
-    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '再写' });
+    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '写完', beforeCount: 0 });
+    useCommandInputStore.getState().append('s1', { command: '/goal', rest: '再写', beforeCount: 2 });
     const rows = useCommandInputStore.getState().list('s1');
     expect(rows).toHaveLength(2);
     expect(rows[0].id).toBeTruthy();

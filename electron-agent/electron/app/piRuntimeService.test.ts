@@ -16,6 +16,9 @@ function fakeHandle(session: Record<string, unknown> = {}) {
       steer: vi.fn(),
       followUp: vi.fn(),
       abort: vi.fn(async () => {}),
+      isStreaming: false,
+      getFollowUpMessages: vi.fn(() => []),
+      clearQueue: vi.fn(() => ({ steering: [] as string[], followUp: [] as string[] })),
       waitForIdle: vi.fn(async () => {}),
       setModel: vi.fn(),
       cycleModel: vi.fn(),
@@ -51,6 +54,7 @@ function fakeAgentHost(handle = fakeHandle()) {
       open: vi.fn(async () => { opened = true; return handle; }),
       get: vi.fn(() => (opened ? handle : undefined)),
       close: vi.fn(async () => {}),
+      workspaces: vi.fn(() => []),
     } as AgentHostPort,
     handle,
   };
@@ -365,6 +369,25 @@ describe('PiRuntimeService', () => {
     expect(handle.prompt).toHaveBeenNthCalledWith(2, 'steer now', { images: undefined, streamingBehavior: 'steer' }, 'main');
   });
 
+  it('does not let a later prompt jump a queued follow-up', async () => {
+    const { host, handle } = fakeAgentHost();
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'first' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'queued first', streamingBehavior: 'followUp' }))
+      .resolves.toMatchObject({ status: 'queued', position: 1 });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'jumper' }))
+      .resolves.toMatchObject({ status: 'queued', position: 2 });
+
+    expect(handle.prompt).toHaveBeenCalledTimes(1);
+    expect(handle.session.followUp).not.toHaveBeenCalled();
+  });
+
   it('drains a queued follow-up when the terminal callback rejects', async () => {
     const { host, handle } = fakeAgentHost();
     const thread = {
@@ -381,8 +404,41 @@ describe('PiRuntimeService', () => {
 
     await expect(service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a')).rejects.toThrow('settled hook failed');
     expect(handle.session.followUp).toHaveBeenCalledWith('after this', undefined);
-    expect(thread.createTurn).toHaveBeenCalledTimes(2);
+    expect(thread.createTurn).toHaveBeenCalledOnce();
     expect(onTurnSettled).toHaveBeenCalledOnce();
+  });
+
+  it('idle empty followUp prompt starts the first queued follow-up as a real turn', async () => {
+    const handle = fakeHandle({
+      isStreaming: false,
+      getFollowUpMessages: vi.fn(() => ['改用 chrome 跑自动化']),
+      clearQueue: vi.fn(() => ({ steering: [], followUp: ['改用 chrome 跑自动化'] })),
+    });
+    const { host } = fakeAgentHost(handle);
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost });
+
+    await service.send('C:/work', 'agent_prompt', { message: '', streamingBehavior: 'followUp' });
+
+    expect(handle.session.clearQueue).toHaveBeenCalledTimes(1);
+    expect(handle.prompt).toHaveBeenCalledWith('改用 chrome 跑自动化', { images: undefined }, 'main');
+  });
+
+  it('follow-up after abort does not occupy the active turn and block a later prompt', async () => {
+    const { host, handle } = fakeAgentHost();
+    const thread = {
+      createThread: vi.fn(async (input) => ({ ...input, status: 'active', createdAt: 1, updatedAt: 1 })),
+      createTurn: vi.fn(async (input) => ({ ...input, status: 'queued', mode: 'interactive', createdAt: 1 })),
+      updateTurn: vi.fn(async (id, patch) => ({ id, ...patch })),
+    };
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: thread as any });
+
+    await service.send('C:/work', 'agent_prompt', { message: 'first', sessionId: 'session-a' });
+    await expect(service.send('C:/work', 'agent_prompt', { message: 'after this', streamingBehavior: 'followUp', sessionId: 'session-a' }))
+      .resolves.toMatchObject({ status: 'queued', position: 1 });
+    await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, 'session-a');
+
+    await service.send('C:/work', 'agent_prompt', { message: 'next typed', sessionId: 'session-a' });
+    expect(handle.prompt).toHaveBeenCalledWith('next typed', { images: undefined }, 'main');
   });
 
   it('writes mode/approval/exclusion to runtime settings without slash prompts', async () => {
@@ -644,5 +700,19 @@ describe('进程内宿主交互路径', () => {
     const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
     await service.send('C:/work', 'agent_abort', {});
     expect(handle.session.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshModelRegistry 在供应商消失后把会话模型切到仍可用的第一项', async () => {
+    const fallback = { provider: 'openai', id: 'gpt' };
+    const handle = fakeHandle({
+      model: { provider: 'gone', id: 'flash' },
+      modelRuntime: { getAvailableSnapshot: () => [fallback] },
+    });
+    const { host } = fakeAgentHost(handle);
+    host.workspaces = vi.fn(() => ['C:/work']);
+    host.get = vi.fn(() => handle);
+    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await expect(service.refreshModelRegistry()).resolves.toEqual({ refreshed: ['C:/work'], failed: [] });
+    expect(handle.session.setModel).toHaveBeenCalledWith(fallback);
   });
 });

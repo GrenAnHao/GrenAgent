@@ -9,6 +9,7 @@ import { FileService } from "./app/fileService";
 import { SkillService } from "./app/skillService";
 import { UsageService } from "./app/usageService";
 import { PiRuntimeService } from "./app/piRuntimeService";
+import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
 import { UiHistoryService } from "./app/uiHistoryService";
@@ -178,6 +179,10 @@ if (!process.env.VITEST) {
     const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1' });
     plugins.discover(builtinPluginDefinitions());
     await plugins.startAll();
+    const piPackages = new PiPackageService({
+      agentDir,
+      allowedPluginIds: () => plugins.allowedPluginIds(),
+    });
     const agentHost = new AgentHost({
       createHandle: async (workspace, cwd) => createWorkspaceHandle({
         workspace,
@@ -227,6 +232,7 @@ if (!process.env.VITEST) {
       subagent: new SubagentService(sandbox),
       files: new FileService(),
       skills: new SkillService(app.getPath('home')),
+      piPackages,
       usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
       pi: piRuntime = new PiRuntimeService({
         agentDir,

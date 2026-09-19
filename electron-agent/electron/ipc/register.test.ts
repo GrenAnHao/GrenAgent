@@ -166,6 +166,28 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'plugin_allowed_list' })).resolves.toEqual(['goal']);
   });
 
+  it('routes package commands onto PiPackageService', async () => {
+    const piPackages = {
+      list: vi.fn(async () => []),
+      search: vi.fn(async () => ({ objects: [], total: 0 })),
+      install: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      setEnabled: vi.fn(async () => {}),
+    };
+    registerIpcHandlers({ piPackages } as any);
+    const invoke = handler(IPC_CHANNELS.invoke);
+    await invoke({}, { command: 'package_list', args: { workspace: '' } });
+    await invoke({}, { command: 'package_search', args: { query: '' } });
+    await invoke({}, { command: 'package_install', args: { workspace: 'C:/ws', name: 'pi-demo', version: '1.0.0', scope: 'user' } });
+    await invoke({}, { command: 'package_remove', args: { workspace: 'C:/ws', source: 'npm:pi-demo@1.0.0', scope: 'user' } });
+    await invoke({}, { command: 'package_set_enabled', args: { workspace: 'C:/ws', source: 'npm:pi-demo@1.0.0', scope: 'project', enabled: false } });
+    expect(piPackages.list).toHaveBeenCalledWith('');
+    expect(piPackages.search).toHaveBeenCalledWith('');
+    expect(piPackages.install).toHaveBeenCalledWith('C:/ws', 'pi-demo', '1.0.0', 'user');
+    expect(piPackages.remove).toHaveBeenCalledWith('C:/ws', 'npm:pi-demo@1.0.0', 'user');
+    expect(piPackages.setEnabled).toHaveBeenCalledWith('C:/ws', 'npm:pi-demo@1.0.0', 'project', false);
+  });
+
   it('routes all Git commands with their contract argument names', async () => {
     const git = {
       status: vi.fn().mockResolvedValue([]), diff: vi.fn().mockResolvedValue(''), branches: vi.fn().mockResolvedValue({ current: '', branches: [] }),
