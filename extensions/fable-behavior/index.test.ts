@@ -37,7 +37,7 @@ describe("fable-behavior extension", () => {
     const res = (await handlers["before_agent_start"]({}, ctxWithMode("agent"))) as
       | { message?: { content?: string; display?: boolean; customType?: string } }
       | undefined;
-    expect(res?.message?.content?.length).toBeGreaterThan(200);
+    expect(res?.message?.content?.length).toBeGreaterThan(100);
     expect(res?.message?.content).toContain("[Fable Behavior]");
     expect(res?.message?.display).toBe(false);
     expect(res?.message?.customType).toBe("fable-behavior");
@@ -60,20 +60,20 @@ describe("fable-behavior extension", () => {
     expect(res).toBeUndefined();
   });
 
-  it("FABLE_BEHAVIOR_TIER2=0 omits tier2 modules", async () => {
-    process.env.FABLE_BEHAVIOR_TIER2 = "0";
+  it("defaults to the kernel and omits tool manuals", async () => {
     const { pi, handlers } = makePi();
     fableBehavior(pi);
     const res = (await handlers["before_agent_start"]({}, ctxWithMode("agent"))) as
       | { message?: { content?: string } }
       | undefined;
     const content = res?.message?.content ?? "";
-    expect(content).toContain("## Coding harness");
+    expect(content).toContain("Autonomy");
     expect(content).not.toContain("Tool discipline");
+    expect(content).not.toContain("Quick reference");
   });
 
-  it("FABLE_BEHAVIOR_TIER2_P1=0 omits extended tier2", async () => {
-    process.env.FABLE_BEHAVIOR_TIER2_P1 = "0";
+  it("FABLE_BEHAVIOR_TIER2=1 opts back into tool manuals", async () => {
+    process.env.FABLE_BEHAVIOR_TIER2 = "1";
     const { pi, handlers } = makePi();
     fableBehavior(pi);
     const res = (await handlers["before_agent_start"]({}, ctxWithMode("agent"))) as
@@ -81,7 +81,6 @@ describe("fable-behavior extension", () => {
       | undefined;
     const content = res?.message?.content ?? "";
     expect(content).toContain("Tool discipline");
-    expect(content).not.toContain("Delegation");
   });
 
   it("registers fable_behavior_ref by default", () => {

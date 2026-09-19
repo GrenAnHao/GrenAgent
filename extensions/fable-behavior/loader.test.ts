@@ -2,26 +2,35 @@ import { describe, expect, it } from "vitest";
 import { buildFableBehaviorPrompt, estimatePromptTokens, readTier3Module, resolveAgentModeFromEntries } from "./loader.js";
 
 describe("buildFableBehaviorPrompt", () => {
-  it("includes tier1 harness rules", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, date: "2026-06-20" });
+  it("defaults to the behavior kernel without tool manuals or tier-3 summaries", () => {
+    const p = buildFableBehaviorPrompt({ date: "2026-06-20" });
     expect(p).toContain("[Fable Behavior]");
-    expect(p).toContain("read` at least once before editing");
+    expect(p).toContain("GrenAgent");
+    expect(p).toContain("Autonomy");
+    expect(p).toContain("Refusal");
+    expect(p).toContain("index check");
     expect(p).toContain("Current date: 2026-06-20");
+    expect(p).not.toContain("Tool discipline");
+    expect(p).not.toContain("Grep and glob strategy");
+    expect(p).not.toContain("MCP collaboration");
+    expect(p).not.toContain("Delegation");
+    expect(p).not.toContain("Quick reference");
+    expect(p).not.toMatch(/expert coding agent|Your job is to help the user/i);
+    expect(p).not.toContain("ask_user");
+    expect(p).not.toContain("## Agent mode");
+    expect(p).not.toContain("mermaid");
+    expect(p).not.toMatch(/`grep`|`find`|`ls`/);
   });
 
-  it("includes tier2 when enabled", () => {
-    const p = buildFableBehaviorPrompt({ tier2: true, tier3Guidelines: false });
+  it("keeps opt-in tool manuals when tier2 is explicitly enabled", () => {
+    const p = buildFableBehaviorPrompt({ tier2: true, tier2P1: true, tier3Guidelines: false });
     expect(p).toContain("Tool discipline");
-    expect(p).toContain("Ask User");
     expect(p).toContain("Grep and glob strategy");
-    expect(p).toContain("MCP collaboration");
-    expect(p).toContain("Verify baseline");
-    expect(p).toContain("Terminal and sidecar harness");
-    expect(p).toContain("Conventions first");
+    expect(p).toContain("Delegation");
   });
 
   it("adds debug mode slice with hypothesis-first evidence steps", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "debug" });
+    const p = buildFableBehaviorPrompt({ mode: "debug" });
     expect(p).toContain("Hypothesize");
     expect(p).toContain("debug_log");
   });
@@ -33,36 +42,37 @@ describe("buildFableBehaviorPrompt", () => {
   });
 
   it("adds ask mode slice", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "ask" });
+    const p = buildFableBehaviorPrompt({ mode: "ask" });
     expect(p.toLowerCase()).toContain("read-only");
   });
 
   it("adds plan mode slice with three phases", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "plan" });
+    const p = buildFableBehaviorPrompt({ mode: "plan" });
     expect(p).toContain("Explore the repo first");
     expect(p).toContain("decision-complete");
   });
 
-  it("adds agent mode slice for ask_user", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: false, mode: "agent" });
-    expect(p).toContain("ask_user");
+  it("does not restack ask_user on the default agent kernel", () => {
+    const p = buildFableBehaviorPrompt({ mode: "agent" });
+    expect(p).not.toContain("ask_user");
+    expect(p).not.toContain("## Agent mode");
   });
 
-  it("adds tier3 summary when enabled", () => {
-    const p = buildFableBehaviorPrompt({ tier2: false, tier3Guidelines: true });
+  it("adds tier3 summary only when explicitly enabled", () => {
+    const p = buildFableBehaviorPrompt({ tier3Guidelines: true });
     expect(p).toContain("Quick reference");
     expect(p).toContain("Copyright");
   });
 
-  it("tier2P1=false omits extended tier2 modules", () => {
-    const p = buildFableBehaviorPrompt({ tier2: true, tier2P1: false, tier3Guidelines: false });
+  it("tier2 without P1 omits extended manuals", () => {
+    const p = buildFableBehaviorPrompt({ tier2: true, tier2P1: false });
     expect(p).toContain("Tool discipline");
     expect(p).not.toContain("Delegation");
     expect(p).not.toContain("Terminal and sidecar harness");
   });
 
-  it("token budget stays under 4k for default agent mode", () => {
-    expect(estimatePromptTokens({ tier2: true, tier2P1: true, tier3Guidelines: true, mode: "agent" })).toBeLessThan(4000);
+  it("token budget stays under 1.5k for the default kernel", () => {
+    expect(estimatePromptTokens({ mode: "agent" })).toBeLessThan(1500);
   });
 });
 

@@ -1,6 +1,6 @@
 ## Debug mode — find the root cause from runtime evidence before changing code
 
-Prioritize runtime evidence over speculation. Complement the `debug_log` workflow when available.
+Prioritize runtime evidence over speculation. Complement the `debug_log` workflow when available. Locate code by following this turn's index check.
 
 1. **Hypothesize** — list 2-4 plausible root causes (include non-obvious ones).
 2. **Instrument** — add minimal logging or use `debug_log` to capture variables/paths/tags per hypothesis.
