@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
-import { getMcpManager, disposeMcpManager, __resetMcpManagersForTest, createManager, managedServers, type McpClient, type McpSnapshot } from "./manager";
+import { getMcpManager, getMcpManagerFor, reloadMcpServer, disposeMcpManager, __resetMcpManagersForTest, createManager, managedServers, reconcileMcpManager, setLiveWorkspaceMcpConfig, type McpClient, type McpSnapshot } from "./manager";
 import { runInWorkspace } from "../_shared/workspace-context.js";
+import { refreshConfig, restartRuntimeConfig, __resetForTest as resetRuntimeConfig } from "../_shared/runtime-config.js";
 
 afterEach(() => {
   __resetMcpManagersForTest();
@@ -225,5 +229,319 @@ describe("getMcpManager 分键", () => {
     expect(stopped).toBe(true);
     fire();
     expect(reads.length).toBe(1);
+  });
+});
+
+describe("已启动会话中途添加 MCP", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    resetRuntimeConfig();
+    delete process.env.PI_RUNTIME_CONFIG;
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("ALS 里冻住的 PI_MCP_CONFIG 不挡住 watch 读到后来写入的 MCP_SERVERS", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-hot-"));
+    dirs.push(dir);
+    const runtime = join(dir, "runtime-settings.json");
+    writeFileSync(runtime, JSON.stringify({
+      MCP_SERVERS: JSON.stringify({ mcpServers: { frozen: { command: "frozen-cmd" } } }),
+    }));
+    process.env.PI_RUNTIME_CONFIG = runtime;
+    restartRuntimeConfig();
+
+    let fire = (): void => {};
+    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const mgr = await runInWorkspace(
+      {
+        origin: "main",
+        workspace: dir,
+        cwd: dir,
+        config: {
+          PI_MCP_CONFIG: JSON.stringify([{ name: "frozen", config: { command: "frozen-cmd" } }]),
+        },
+      },
+      async () => {
+        const created = createManager({
+          workspace: dir,
+          connect,
+          watch: (cb) => {
+            fire = cb;
+            return () => {};
+          },
+          writeCache: () => {},
+        });
+        created.init();
+        return created;
+      },
+    );
+
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("frozen")?.status === "connected");
+
+    writeFileSync(runtime, JSON.stringify({
+      MCP_SERVERS: JSON.stringify({
+        mcpServers: {
+          frozen: { command: "frozen-cmd" },
+          added: { command: "added-cmd" },
+        },
+      }),
+    }));
+    refreshConfig();
+    fire();
+
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("added")?.status === "connected");
+    expect(mgr.snapshot().servers.has("frozen")).toBe(true);
+  });
+
+  it("回合未结束（仍在 ALS）时写入 MCP_SERVERS 也能补连", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-hot-als-"));
+    dirs.push(dir);
+    const runtime = join(dir, "runtime-settings.json");
+    writeFileSync(runtime, JSON.stringify({
+      MCP_SERVERS: JSON.stringify({ mcpServers: { frozen: { command: "frozen-cmd" } } }),
+    }));
+    process.env.PI_RUNTIME_CONFIG = runtime;
+    restartRuntimeConfig();
+
+    await runInWorkspace(
+      {
+        origin: "main",
+        workspace: dir,
+        cwd: dir,
+        config: {
+          PI_MCP_CONFIG: JSON.stringify([{ name: "frozen", config: { command: "frozen-cmd" } }]),
+        },
+      },
+      async () => {
+        let fire = (): void => {};
+        const mgr = createManager({
+          workspace: dir,
+          connect: async () => fakeClient([{ name: "t" }]),
+          watch: (cb) => {
+            fire = cb;
+            return () => {};
+          },
+          writeCache: () => {},
+        });
+        mgr.init();
+        await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("frozen")?.status === "connected");
+        writeFileSync(runtime, JSON.stringify({
+          MCP_SERVERS: JSON.stringify({
+            mcpServers: {
+              frozen: { command: "frozen-cmd" },
+              added: { command: "added-cmd" },
+            },
+          }),
+        }));
+        refreshConfig();
+        fire();
+        await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("added")?.status === "connected");
+      },
+    );
+  });
+
+  it("setLiveWorkspaceMcpConfig 覆盖回合内陈旧 ALS 快照", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-hot-live-"));
+    dirs.push(dir);
+    await runInWorkspace(
+      {
+        origin: "main",
+        workspace: dir,
+        cwd: dir,
+        config: {
+          PI_MCP_CONFIG: JSON.stringify([{ name: "frozen", config: { command: "frozen-cmd" } }]),
+        },
+      },
+      async () => {
+        const mgr = createManager({
+          workspace: dir,
+          connect: async () => fakeClient([{ name: "t" }]),
+          watch: () => () => {},
+          writeCache: () => {},
+        });
+        mgr.init();
+        await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("frozen")?.status === "connected");
+        setLiveWorkspaceMcpConfig(dir, JSON.stringify([
+          { name: "frozen", config: { command: "frozen-cmd" } },
+          { name: "added", config: { command: "added-cmd" } },
+        ]));
+        mgr.reconcile();
+        await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("added")?.status === "connected");
+      },
+    );
+  });
+});
+
+describe("reconcile", () => {
+  it("显式 reconcile 与 watch 一样应用新增 server", async () => {
+    let servers = [srv("a")];
+    const mgr = createManager({
+      connect: async () => fakeClient([{ name: "t" }]),
+      readServers: () => servers,
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    servers = [srv("a"), srv("b")];
+    mgr.reconcile();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("b")?.status === "connected");
+  });
+
+  it("reconcileMcpManager 在无 manager 时是空操作", () => {
+    expect(() => reconcileMcpManager("D:/missing-ws")).not.toThrow();
+  });
+});
+
+describe("reloadServer", () => {
+  it("已连接时关旧 client 再连，中间 catalog 仍在且为 connecting", async () => {
+    let releaseSecond = () => {};
+    let connectCount = 0;
+    const close = vi.fn(async () => {});
+    const connect = vi.fn(async () => {
+      connectCount += 1;
+      if (connectCount === 1) {
+        return { ...fakeClient([{ name: "t1" }]), close };
+      }
+      await new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      return fakeClient([{ name: "t2" }]);
+    });
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+
+    const reloading = mgr.reloadServer("a");
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connecting");
+    expect(mgr.snapshot().servers.has("a")).toBe(true);
+    expect(close).toHaveBeenCalled();
+
+    releaseSecond();
+    await reloading;
+    expect(mgr.snapshot().servers.get("a")?.status).toBe("connected");
+    expect(mgr.snapshot().servers.get("a")?.tools.map((t) => t.name)).toEqual(["t2"]);
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("配置未变也会重连", async () => {
+    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    expect(connect).toHaveBeenCalledTimes(1);
+    await mgr.reloadServer("a");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("名称不在已启用列表时 reject，且文案含 server 名", async () => {
+    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    await expect(mgr.reloadServer("ghost")).rejects.toThrow(/ghost/);
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("未 init 时触发 init，目标 connect 恰好一次，resolve 时已是终态", async () => {
+    const connect = vi.fn(async () => fakeClient([{ name: "t" }]));
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a"), srv("b")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    await mgr.reloadServer("a");
+    expect(connect.mock.calls.filter(([s]) => s.name === "a")).toHaveLength(1);
+    expect(mgr.snapshot().servers.get("a")?.status).toBe("connected");
+    expect(mgr.snapshot().servers.get("b")?.status).toBe("connected");
+  });
+
+  it("重叠 reloadServer 时先发起的也等到最新终态，过期 connect 不得写回工具列表", async () => {
+    let releaseFirstReloadConnect = () => {};
+    let releaseSecondReloadConnect = () => {};
+    let resolveEnteredFirstReload = () => {};
+    let resolveEnteredSecondReload = () => {};
+    const enteredFirstReloadConnect = new Promise<void>((resolve) => {
+      resolveEnteredFirstReload = resolve;
+    });
+    const enteredSecondReloadConnect = new Promise<void>((resolve) => {
+      resolveEnteredSecondReload = resolve;
+    });
+    let connectCount = 0;
+    const connect = vi.fn(async () => {
+      connectCount += 1;
+      if (connectCount === 1) {
+        return fakeClient([{ name: "init" }]);
+      }
+      if (connectCount === 2) {
+        resolveEnteredFirstReload();
+        await new Promise<void>((resolve) => {
+          releaseFirstReloadConnect = resolve;
+        });
+        return fakeClient([{ name: "first" }]);
+      }
+      resolveEnteredSecondReload();
+      await new Promise<void>((resolve) => {
+        releaseSecondReloadConnect = resolve;
+      });
+      return fakeClient([{ name: "second" }]);
+    });
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+
+    const first = mgr.reloadServer("a");
+    await enteredFirstReloadConnect;
+    const second = mgr.reloadServer("a");
+    await enteredSecondReloadConnect;
+
+    let statusWhenFirstSettled: string | undefined;
+    const trackedFirst = first.then(() => {
+      statusWhenFirstSettled = mgr.snapshot().servers.get("a")?.status;
+    });
+
+    releaseFirstReloadConnect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(statusWhenFirstSettled).toBeUndefined();
+    expect(mgr.snapshot().servers.get("a")?.status).toBe("connecting");
+    expect(mgr.snapshot().servers.get("a")?.tools.map((t) => t.name) ?? []).not.toEqual(["first"]);
+
+    releaseSecondReloadConnect();
+    await trackedFirst;
+    await second;
+    const entry = mgr.snapshot().servers.get("a");
+    expect(statusWhenFirstSettled).not.toBe("connecting");
+    expect(["connected", "failed"]).toContain(entry?.status);
+    expect(entry?.tools.map((t) => t.name)).toEqual(["second"]);
+  });
+});
+
+describe("getMcpManagerFor", () => {
+  it("按 workspace 分键，同键返回同一实例", () => {
+    const a = getMcpManagerFor("D:/a");
+    const b = getMcpManagerFor("D:/b");
+    expect(a).not.toBe(b);
+    expect(getMcpManagerFor("D:/a")).toBe(a);
   });
 });

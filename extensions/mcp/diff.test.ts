@@ -25,4 +25,9 @@ describe("diffServers", () => {
     expect(d.removed).toEqual([]);
     expect(d.changed).toEqual([]);
   });
+  it("detects changed remote headers", () => {
+    const prev: McpServerConfig = { name: "api", transport: "http", url: "http://x/mcp", headers: { "x-api-key": "old" } };
+    const next: McpServerConfig = { name: "api", transport: "http", url: "http://x/mcp", headers: { "x-api-key": "new" } };
+    expect(diffServers([prev], [next]).changed.map((x) => x.name)).toEqual(["api"]);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectDefaultServers, parseMcpServers, sanitize } from "./config.js";
+import { expandServerVars, injectDefaultServers, parseMcpServers, remoteTransportKind, sanitize } from "./config.js";
 
 describe("parseMcpServers", () => {
   it("parses stdio servers (command present)", () => {
@@ -8,8 +8,13 @@ describe("parseMcpServers", () => {
     ]);
   });
   it("parses sse servers (url present)", () => {
-    expect(parseMcpServers('{"api":{"url":"https://m"}}')).toEqual([
-      { name: "api", transport: "sse", url: "https://m" },
+    expect(parseMcpServers('{"api":{"url":"https://m/sse"}}')).toEqual([
+      { name: "api", transport: "sse", url: "https://m/sse" },
+    ]);
+  });
+  it("parses streamable HTTP remote servers and keeps headers", () => {
+    expect(parseMcpServers('{"api":{"url":"http://127.0.0.1:54382/mcp","headers":{"x-api-key":"k","Accept":"application/json"}}}')).toEqual([
+      { name: "api", transport: "http", url: "http://127.0.0.1:54382/mcp", headers: { "x-api-key": "k", Accept: "application/json" } },
     ]);
   });
   it("parses the standard mcpServers wrapper format (.cursor/mcp.json style)", () => {
@@ -84,5 +89,23 @@ describe("sanitize", () => {
   it("replaces non-alphanumeric chars with underscore", () => {
     expect(sanitize("we!rd name")).toBe("we_rd_name");
     expect(sanitize("ok_1")).toBe("ok_1");
+  });
+});
+
+describe("remoteTransportKind", () => {
+  it("treats /sse paths as SSE and other remotes as streamable HTTP", () => {
+    expect(remoteTransportKind("http://127.0.0.1:54382/mcp")).toBe("http");
+    expect(remoteTransportKind("https://example.com/sse")).toBe("sse");
+    expect(remoteTransportKind("https://example.com/v1/sse/")).toBe("sse");
+  });
+});
+
+describe("expandServerVars", () => {
+  it("expands placeholders in remote headers", () => {
+    const out = expandServerVars(
+      [{ name: "api", transport: "http", url: "http://x/${cwd}", headers: { "X-Root": "${workspaceFolder}/k" } }],
+      "/ws",
+    );
+    expect(out[0]).toMatchObject({ url: "http://x//ws", headers: { "X-Root": "/ws/k" } });
   });
 });

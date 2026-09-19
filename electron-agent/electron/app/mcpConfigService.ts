@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { reconcileMcpManager, reloadMcpServer, setLiveWorkspaceMcpConfig } from '../../../extensions/mcp/manager.js';
 
 type Config = Record<string, unknown>;
 type Scope = 'settings' | 'global' | 'project';
@@ -20,7 +21,15 @@ export interface McpConfigEntry {
 export interface EffectiveMcpConfig { name: string; config: Config; }
 
 export class McpConfigService {
-  constructor(private readonly home: string, private readonly settings: SettingsPort) {}
+  constructor(
+    private readonly home: string,
+    private readonly settings: SettingsPort,
+    private readonly reloadFn: (workspace: string, name: string) => Promise<void> = reloadMcpServer,
+  ) {}
+
+  async reload(workspace: string, name: string): Promise<void> {
+    await this.reloadFn(workspace, name);
+  }
 
   async list(workspace: string): Promise<McpConfigEntry[]> {
     const result = new Map<string, McpConfigEntry>();
@@ -47,20 +56,21 @@ export class McpConfigService {
   async upsert(workspace: string, scope: string, name: string, config: unknown, enabled: boolean): Promise<void> {
     const validScope = validateScope(scope);
     const validConfig = validateConfig(config);
-    if (validScope === 'settings') {
-      await this.mutateSettings(name, validConfig, enabled);
-      return;
-    }
-    await this.mutateFile(workspace, validScope, name, validConfig, enabled);
+    if (validScope === 'settings') await this.mutateSettings(name, validConfig, enabled);
+    else await this.mutateFile(workspace, validScope, name, validConfig, enabled);
+    await this.hotReload(workspace);
   }
 
   async remove(workspace: string, scope: string, name: string): Promise<void> {
     const validScope = validateScope(scope);
-    if (validScope === 'settings') {
-      await this.mutateSettings(name, undefined, true);
-      return;
-    }
-    await this.mutateFile(workspace, validScope, name, undefined, true);
+    if (validScope === 'settings') await this.mutateSettings(name, undefined, true);
+    else await this.mutateFile(workspace, validScope, name, undefined, true);
+    await this.hotReload(workspace);
+  }
+
+  private async hotReload(workspace: string): Promise<void> {
+    setLiveWorkspaceMcpConfig(workspace, JSON.stringify(await this.runtime(workspace)));
+    reconcileMcpManager(workspace);
   }
 
   private async mutateSettings(name: string, config: Config | undefined, enabled: boolean): Promise<void> {

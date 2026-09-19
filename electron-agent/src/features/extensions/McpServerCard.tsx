@@ -20,7 +20,7 @@ interface McpServerCardProps {
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;
   onDelete: () => void;
-  onProbe?: () => void;
+  onReload?: () => void;
   onPermChange?: (fullName: string, perm: Perm) => void;
   onOpenRules?: (fullName: string) => void;
 }
@@ -157,7 +157,7 @@ const styles = createStaticStyles(({ css }) => ({
 
 export function McpServerCard({
   name, config, enabled, scope, cachedTools = [], runtimeStatus, runtimeToolNames, probing = false, probeError, policyRaw = {},
-  onToggle, onEdit, onDelete, onProbe, onPermChange, onOpenRules,
+  onToggle, onEdit, onDelete, onReload, onPermChange, onOpenRules,
 }: McpServerCardProps) {
   const [expanded, setExpanded] = useState(false);
   const tools = runtimeToolNames ?? cachedTools;
@@ -183,10 +183,10 @@ export function McpServerCard({
           <button
             type="button"
             className={styles.iconbtn}
-            title="测试连接"
-            data-testid={`mcp-probe-${name}`}
-            disabled={probing}
-            onClick={onProbe}
+            title="重载"
+            data-testid={`mcp-reload-${name}`}
+            disabled={!enabled || probing || runtimeStatus === 'connecting'}
+            onClick={onReload}
           >
             <RefreshCw size={14} className={probing ? styles.spin : undefined} />
           </button>
@@ -202,7 +202,7 @@ export function McpServerCard({
       {expanded ? (
         <div className={styles.tools}>
           {tools.length === 0 ? (
-            <div className={styles.hint}>{probeError ? `连接失败：${probeError}` : '点右侧「测试连接」获取工具列表'}</div>
+            <div className={styles.hint}>{probeError ? `连接失败：${probeError}` : '点右侧「重载」刷新连接与工具列表'}</div>
           ) : (
             tools.map((full) => (
               <div key={full} className={styles.toolRow} data-testid={`mcp-tool-${full}`}>

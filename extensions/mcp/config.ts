@@ -3,13 +3,25 @@
 
 export interface McpServerConfig {
   name: string;
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "http";
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
   /** stdio server 工作目录（透传给 StdioClientTransport）。 */
   cwd?: string;
+}
+
+/** `/sse` 走旧 SSE 传输，其余 remote URL 走 Streamable HTTP。 */
+export function remoteTransportKind(url: string): "sse" | "http" {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "").toLowerCase();
+    if (path === "/sse" || path.endsWith("/sse")) return "sse";
+  } catch {
+    // 非法 URL 仍按 streamable HTTP 交给连接层报错。
+  }
+  return "http";
 }
 
 
@@ -46,7 +58,13 @@ export function parseMcpServers(json: string): McpServerConfig[] {
     const url = typeof cfg.url === "string" ? cfg.url : undefined;
     const command = typeof cfg.command === "string" ? cfg.command : undefined;
     if (url) {
-      servers.push({ name, transport: "sse", url });
+      const headers = asStrRecord(cfg.headers);
+      servers.push({
+        name,
+        transport: remoteTransportKind(url),
+        url,
+        ...(Object.keys(headers).length ? { headers } : {}),
+      });
     } else if (command) {
       const cwd = typeof cfg.cwd === "string" ? cfg.cwd : undefined;
       servers.push({
@@ -114,5 +132,6 @@ export function expandServerVars(servers: McpServerConfig[], cwd: string): McpSe
     url: srv.url ? sub(srv.url) : srv.url,
     cwd: srv.cwd ? sub(srv.cwd) : srv.cwd,
     env: srv.env ? Object.fromEntries(Object.entries(srv.env).map(([k, v]) => [k, sub(v)])) : srv.env,
+    headers: srv.headers ? Object.fromEntries(Object.entries(srv.headers).map(([k, v]) => [k, sub(v)])) : srv.headers,
   }));
 }

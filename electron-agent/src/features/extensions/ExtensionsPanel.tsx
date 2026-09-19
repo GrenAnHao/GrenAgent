@@ -1,6 +1,6 @@
-import { Button, Flexbox } from '@lobehub/ui';
+import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Boxes, Plus, ScrollText, Sparkles } from 'lucide-react';
+import { Package, Plus, ScrollText, Server, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi, type McpConfigScope } from '../../lib/pi';
@@ -11,6 +11,7 @@ import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
 import { McpServerCard } from './McpServerCard';
 import { NativeSkillsPanel } from './NativeSkillsPanel';
+import { PiPackagesPanel } from './PiPackagesPanel';
 import {
   listEntries,
   type McpConfig,
@@ -158,7 +159,7 @@ export function ExtensionsPanel() {
   const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? EMPTY_SERVERS);
   const existingNames = entries.map((entry) => entry.name);
 
-  const [tab, setTab] = useState<'mcp' | 'skills'>('mcp');
+  const [tab, setTab] = useState<'mcp' | 'packages' | 'skills'>('mcp');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<(McpEntry & { scope: McpConfigScope }) | undefined>(undefined);
   const touchedRef = useRef(false);
@@ -235,6 +236,23 @@ export function ExtensionsPanel() {
     }
   };
 
+  const reloadOne = async (serverName: string) => {
+    setProbing((current) => new Set(current).add(serverName));
+    setMcpError(null);
+    try {
+      await pi.reloadMcpServer(workspace, serverName);
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      await reloadCache();
+      setProbing((current) => {
+        const next = new Set(current);
+        next.delete(serverName);
+        return next;
+      });
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -297,11 +315,15 @@ export function ExtensionsPanel() {
       <div className={styles.header}>
         <div className={styles.tabBar}>
           <button type="button" className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`} data-testid="ext-tab-mcp" onClick={() => setTab('mcp')}>
-            <Boxes size={15} />
-            插件
+            <Icon icon={Server} size={15} />
+            MCP
+          </button>
+          <button type="button" className={`${styles.tab} ${tab === 'packages' ? styles.tabActive : ''}`} data-testid="ext-tab-packages" onClick={() => setTab('packages')}>
+            <Icon icon={Package} size={15} />
+            扩展
           </button>
           <button type="button" className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`} data-testid="ext-tab-skills" onClick={() => setTab('skills')}>
-            <Sparkles size={15} />
+            <Icon icon={Sparkles} size={15} />
             技能
           </button>
         </div>
@@ -313,11 +335,13 @@ export function ExtensionsPanel() {
         <div className={styles.inner}>
           {tab === 'skills' ? (
             <NativeSkillsPanel values={values} setValue={setValue} onChanged={markChanged} />
+          ) : tab === 'packages' ? (
+            <PiPackagesPanel workspace={workspace} />
           ) : <>
           <div className={styles.heroBar}>
             <div className={styles.hero}>
               <span className={styles.heroIcon}>
-                <Boxes size={18} />
+                <Icon icon={Server} size={18} />
               </span>
               <span className={styles.heroTitle}>
                 MCP 服务器
@@ -348,12 +372,12 @@ export function ExtensionsPanel() {
             </Flexbox>
           </div>
           <div className={styles.heroDesc}>
-            连接外部 MCP server，其工具以 <code className={styles.code}>mcp__server__tool</code> 暴露给 agent。点「测试连接」获取工具并配置权限（即时生效）。
+            连接外部 MCP server，其工具以 <code className={styles.code}>mcp__server__tool</code> 暴露给 agent。点「重载」重新连接并刷新工具（即时生效）。
           </div>
 
           {!mcpLoading && entries.length === 0 ? (
             <div className={styles.empty} data-testid="mcp-empty">
-              <Boxes size={22} />
+              <Icon icon={Server} size={22} />
               <span>未配置 MCP server，点右上「添加 MCP」</span>
             </div>
           ) : (
@@ -376,7 +400,7 @@ export function ExtensionsPanel() {
                   setModalOpen(true);
                 }}
                 onDelete={() => handleDeleteMcp(entry)}
-                onProbe={() => void probeOne(entry.name, entry.config)}
+                onReload={() => void reloadOne(entry.name)}
                 onPermChange={onPermChange}
                 onOpenRules={(fullName) => setRulesTarget(fullName)}
               />

@@ -1,8 +1,7 @@
 // 一次性探测：连接单个 MCP server、listTools、回传/缓存工具名。复用 mcp 扩展同款 SDK + 名称规则。
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { sanitize, type McpServerConfig } from "./config.js";
+import { createMcpTransport } from "./transport.js";
 import { writeToolsCacheEntry } from "./toolsCache.js";
 
 export interface ProbeResult {
@@ -48,15 +47,7 @@ export function killProbeChild(pid: number): void {
 
 export async function probeServer(s: McpServerConfig, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
   const client = new Client({ name: "grenagent-probe", version: "0.1.0" });
-  const transport =
-    s.transport === "sse"
-      ? new SSEClientTransport(new URL(s.url ?? ""))
-      : new StdioClientTransport({
-          command: s.command ?? "",
-          args: s.args ?? [],
-          ...(s.cwd ? { cwd: s.cwd } : {}),
-          env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
-        });
+  const transport = createMcpTransport(s);
   let timedOut = false;
   const markTimeout = () => { timedOut = true; };
   try {

@@ -52,6 +52,7 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
         name: full,
         label: `${server}: ${t.name}`,
         description: t.description ?? `MCP tool "${t.name}" from server "${server}".`,
+        promptSnippet: t.description?.trim() || `MCP tool "${t.name}" from server "${server}".`,
         parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
         async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
           if (control) {

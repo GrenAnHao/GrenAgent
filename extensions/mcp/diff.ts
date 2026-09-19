@@ -7,7 +7,7 @@ export interface ServerDiff {
 }
 
 function sig(s: McpServerConfig): string {
-  return JSON.stringify({ t: s.transport, c: s.command, a: s.args, u: s.url, e: s.env, w: s.cwd });
+  return JSON.stringify({ t: s.transport, c: s.command, a: s.args, u: s.url, e: s.env, w: s.cwd, h: s.headers });
 }
 
 export function diffServers(prev: McpServerConfig[], next: McpServerConfig[]): ServerDiff {

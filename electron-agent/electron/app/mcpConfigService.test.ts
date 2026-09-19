@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { McpConfigService } from './mcpConfigService';
 import { SettingsService } from './settingsService';
 
@@ -143,5 +143,17 @@ describe('McpConfigService', () => {
 
     await expect(service.effective(workspace)).resolves.toEqual(expect.arrayContaining([{ name: 'secure', config: { command: 'server', env: { API_TOKEN: { credentialRef: 'mcp/secure/env/API_TOKEN' } } } }]));
     await expect(service.runtime(workspace)).resolves.toEqual(expect.arrayContaining([{ name: 'secure', config: { command: 'server', env: { API_TOKEN: 'secret' } } }]));
+  });
+
+  it('reload 按 workspace 与 name 转发，不写配置文件', async () => {
+    const { home, workspace, settings, currentSettings } = await fixture();
+    const reload = vi.fn(async () => {});
+    const before = JSON.stringify(currentSettings());
+    const service = new McpConfigService(home, settings, reload);
+
+    await service.reload(workspace, 'settings');
+
+    expect(reload).toHaveBeenCalledWith(workspace, 'settings');
+    expect(JSON.stringify(currentSettings())).toBe(before);
   });
 });
