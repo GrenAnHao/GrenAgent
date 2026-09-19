@@ -17,6 +17,9 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorFillQuaternary};
     font-size: 12.5px;
     cursor: pointer;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     transition: border-color 0.12s ease;
 
     &:hover {
@@ -27,14 +30,16 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
   `,
   title: css`
     flex: none;
     font-weight: 600;
     color: ${cssVar.colorText};
+    white-space: nowrap;
   `,
   role: css`
-    flex: none;
+    flex: 1 1 0;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -53,6 +58,8 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 8px;
   `,
   model: css`
+    max-width: 40%;
+    overflow: hidden;
     font-family: ${cssVar.fontFamilyCode};
     font-size: 11px;
     color: ${cssVar.colorTextSecondary};
@@ -60,11 +67,13 @@ const styles = createStaticStyles(({ css }) => ({
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 4px;
     background: ${cssVar.colorFillTertiary};
+    text-overflow: ellipsis;
     white-space: nowrap;
   `,
   l2: css`
     padding-inline-start: 22px;
     overflow: hidden;
+    min-width: 0;
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
     text-overflow: ellipsis;
@@ -115,10 +124,17 @@ export const ConvStrip = memo(function ConvStrip({
         {role != null ? (
           <>
             <span style={{ flex: 'none', color: cssVar.colorTextQuaternary }}>·</span>
-            <span className={styles.role}>{role}</span>
+            <span
+              className={styles.role}
+              data-testid="conv-strip-role"
+              title={typeof role === 'string' ? role : undefined}
+            >
+              {role}
+            </span>
           </>
-        ) : null}
-        <span className={styles.spacer} />
+        ) : (
+          <span className={styles.spacer} />
+        )}
         <div className={styles.right} onClick={stop}>
           {actions}
           {model != null ? <span className={styles.model}>{model}</span> : null}

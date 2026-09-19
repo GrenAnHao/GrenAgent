@@ -33,7 +33,7 @@ export type DisplayMessage =
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
   | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error' }
   | { kind: 'notice'; id: string; customType: string; content: string }
-  | { kind: 'command-input'; id: string; command: string; rest: string };
+  | { kind: 'command-input'; id: string; command: string; rest: string; beforeCount: number };
 
 export type CommandInputMessage = Extract<DisplayMessage, { kind: 'command-input' }>;
 
@@ -124,4 +124,24 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
   }
   flush();
   return out;
+}
+
+/**
+ * 把本地 `/goal` 行按发送时的会话位置插回列表。
+ * DSH 用 command/run.seq 做 anchor，续跑消息排在后面；我们没有这条事件，用发送当下的 grouped 长度。
+ */
+export function mergeCommandInputs(
+  grouped: DisplayMessage[],
+  commands: CommandInputMessage[],
+): DisplayMessage[] {
+  if (commands.length === 0) return grouped;
+  const next = [...grouped];
+  const ordered = [...commands].sort((a, b) => a.beforeCount - b.beforeCount);
+  let inserted = 0;
+  for (const command of ordered) {
+    const index = Math.min(Math.max(0, command.beforeCount) + inserted, next.length);
+    next.splice(index, 0, command);
+    inserted += 1;
+  }
+  return next;
 }

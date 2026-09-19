@@ -10,6 +10,9 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 7px;
+    overflow: hidden;
+    min-width: 0;
+    max-width: 100%;
     height: 26px;
     padding: 0 7px;
     margin: 0 -7px;
@@ -55,6 +58,8 @@ const styles = createStaticStyles(({ css }) => ({
     font-variant-numeric: tabular-nums;
   `,
   body: css`
+    min-width: 0;
+    max-width: 100%;
     margin: 2px 0 8px 24px;
   `,
 }));

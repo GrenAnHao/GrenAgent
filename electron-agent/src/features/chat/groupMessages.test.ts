@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupMessages } from './groupMessages';
+import { groupMessages, mergeCommandInputs } from './groupMessages';
 import type { ChatMessage } from '../../stores/agentReducer';
 
 const assistant = (id: string, over: Partial<Extract<ChatMessage, { kind: 'assistant' }>> = {}): ChatMessage => ({
@@ -117,5 +117,39 @@ describe('groupMessages', () => {
     if (first.kind !== 'turn' || second.kind !== 'turn') throw new Error('expected turns');
     expect(first.segments.find((s) => s.kind === 'tool')).toMatchObject({ id: 'a1-todo' });
     expect(second.segments.find((s) => s.kind === 'tool')).toMatchObject({ id: 'a2-todo' });
+  });
+});
+
+describe('mergeCommandInputs', () => {
+  const cmd = (rest: string, beforeCount: number) => ({
+    kind: 'command-input' as const,
+    id: rest,
+    command: '/goal',
+    rest,
+    beforeCount,
+  });
+
+  it('keeps a first-message /goal ahead of later turns', () => {
+    const display = mergeCommandInputs(
+      [
+        { kind: 'turn', id: 't1', segments: [] },
+        { kind: 'turn', id: 't2', segments: [] },
+      ],
+      [cmd('写完', 0)],
+    );
+    expect(display.map((item) => item.kind)).toEqual(['command-input', 'turn', 'turn']);
+    expect(display[0]).toMatchObject({ rest: '写完' });
+  });
+
+  it('inserts a mid-conversation /goal after the messages that already existed', () => {
+    const display = mergeCommandInputs(
+      [
+        { kind: 'user', id: 'u1', text: 'hi' },
+        { kind: 'turn', id: 't1', segments: [] },
+        { kind: 'turn', id: 't2', segments: [] },
+      ],
+      [cmd('继续', 2)],
+    );
+    expect(display.map((item) => item.id)).toEqual(['u1', 't1', '继续', 't2']);
   });
 });

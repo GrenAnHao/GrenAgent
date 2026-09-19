@@ -1,6 +1,7 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { MessageCircleQuestion } from 'lucide-react';
 import { memo, useState } from 'react';
+import { parseAnswerBlock } from '../../components/QuestionSelector/answers';
 import { ConvCard } from '../chat/conv/ConvCard';
 import { OptionRow } from '../chat/conv/OptionRow';
 import { Disclosure } from '../chat/conv/Disclosure';
@@ -33,6 +34,28 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
     text-overflow: ellipsis;
     white-space: nowrap;
+  `,
+  extraLabel: css`
+    font-size: 11px;
+    color: ${cssVar.colorTextTertiary};
+  `,
+  extra: css`
+    font-size: 13px;
+    line-height: 1.5;
+    color: ${cssVar.colorTextSecondary};
+    white-space: pre-wrap;
+  `,
+  thumbs: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  `,
+  thumb: css`
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    display: block;
   `,
   // 其余题的折叠容器（grid-rows 高度过渡，与原卡一致的顺滑收展）。
   rest: css`
@@ -89,15 +112,19 @@ function extractQData(args: unknown): QData[] {
 }
 
 export function parseAnswers(result: unknown): string[] {
-  const text = extractText(result);
-  if (!text) return [];
-  const chunks = text
-    .replace(/^\[我的选择\]\n?/, '')
-    .split(/(?=^\d+\.\s)/m)
-    .filter((s) => /^\d+\./.test(s.trimStart()));
-  return chunks.map((chunk) => {
-    const colonIdx = chunk.lastIndexOf('：');
-    return colonIdx >= 0 ? chunk.slice(colonIdx + 1).trim() : chunk.replace(/^\d+\.\s*/, '').trim();
+  return parseAnswerBlock(extractText(result)).choices;
+}
+
+function extractResultImages(result: unknown): Array<{ mimeType: string; data: string }> {
+  if (!result || typeof result !== 'object') return [];
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block) => {
+    if (!block || typeof block !== 'object') return [];
+    const img = block as { type?: unknown; mimeType?: unknown; data?: unknown };
+    if (img.type !== 'image' || typeof img.data !== 'string' || !img.data) return [];
+    const mimeType = typeof img.mimeType === 'string' && img.mimeType ? img.mimeType : 'image/png';
+    return [{ mimeType, data: img.data }];
   });
 }
 
@@ -119,7 +146,9 @@ export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
 }) {
   const [open, setOpen] = useState(false);
   const qdata = extractQData(args);
-  const answers = parseAnswers(result);
+  const parsed = parseAnswerBlock(extractText(result));
+  const answers = parsed.choices;
+  const extraImages = extractResultImages(result);
 
   const count = Math.max(qdata.length, answers.length);
   if (count === 0) return null;
@@ -167,6 +196,27 @@ export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
                 <Disclosure open={open} />
               </button>
             </>
+          ) : null}
+          {parsed.extraNote ? (
+            <div>
+              <div className={styles.extraLabel}>补充说明</div>
+              <div className={styles.extra} data-testid="answered-questions-extra">
+                {parsed.extraNote}
+              </div>
+            </div>
+          ) : null}
+          {extraImages.length > 0 ? (
+            <div className={styles.thumbs}>
+              {extraImages.map((img, i) => (
+                <img
+                  alt={`补充图片 ${i + 1}`}
+                  className={styles.thumb}
+                  data-testid={`answered-questions-image-${i}`}
+                  key={`${img.mimeType}-${i}`}
+                  src={`data:${img.mimeType};base64,${img.data}`}
+                />
+              ))}
+            </div>
           ) : null}
         </div>
       </ConvCard>

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { Icon } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
@@ -12,12 +12,15 @@ import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
 import type { TranscriptScrollHandle } from './VirtualizedMessageList';
 import type { PromptImage } from './input/ChatInputContext';
+import { createComposerItem, removeComposerItem } from './input/composerQueue';
+import type { UserImage } from '../../stores/agentReducer';
 import { isExecutiveCommandMessage } from './input/commandClassification';
 import { parseCommandToken } from './input/editor/commandPaste';
-import { peekComposerModel } from './input/actions/ModelThinkingAction';
+import { commitComposerModelToSession, peekComposerModel } from './input/actions/ModelThinkingAction';
 import { useCommandInputStore } from '../../stores/commandInputStore';
 import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
+import { needsSessionCreateOnSend } from '../../lib/pendingSession';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
 import { markScratchUsed } from '../../lib/startupConversation';
 import { createStartupPerf } from '../../lib/startupPerf';
@@ -97,7 +100,16 @@ const EMPTY_TURN_MSG =
   '本轮没有返回任何内容：模型/供应商可能返回为空或出错。请检查该供应商的 Base URL、模型 ID 与 API Key；也可在启动 app 的终端查看 [pi stderr] 日志。';
 /** 重试退避：第 n 次重试前等待，线性增长并封顶 4s。 */
 const retryDelayMs = (attempt: number) => Math.min(800 * attempt, 4000);
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function toUserImages(images?: PromptImage[]): UserImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map(({ mimeType, data }) => ({ mimeType, data }));
+}
+
+function toPromptImages(images?: UserImage[]): PromptImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map(({ mimeType, data }) => ({ type: 'image', mimeType, data }));
+}
 
 export function ChatView() {
   const { workspace, store, workspaceReady } = useAgentStoreContext();
@@ -109,12 +121,32 @@ export function ChatView() {
   const lastError = store.useStore((s) => s.lastError);
   const retrying = store.useStore((s) => s.retrying);
   const compacting = store.useStore((s) => s.compacting);
+  const isStreaming = store.useStore((s) => s.isStreaming);
+  const awaitingResponse = store.useStore((s) => s.awaitingResponse);
+  const composerQueue = store.useStore((s) => s.composerQueue) ?? [];
   const isEmpty = messages.length === 0;
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
   const isDraftConversation = Boolean(draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace));
   const showEmptyLayout = isEmpty && workspaceReady;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
+  const cancelSleepRef = useRef<(() => void) | null>(null);
+  const sleepOrAbort = (ms: number) =>
+    new Promise<void>((resolve) => {
+      if (userAbortedRef.current) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
+        cancelSleepRef.current = null;
+        resolve();
+      }, ms);
+      cancelSleepRef.current = () => {
+        clearTimeout(timer);
+        cancelSleepRef.current = null;
+        resolve();
+      };
+    });
   const [seatHeight, setSeatHeight] = useState(0);
   const [gutter, setGutter] = useState(0);
   const transcriptRef = useRef<TranscriptScrollHandle>(null);
@@ -175,13 +207,42 @@ export function ChatView() {
     }
   }, [activeWorkspaceView, store, workspace]);
 
+  const flushingIdRef = useRef<string | null>(null);
+  const flushComposerItem = useCallback(async (id: string) => {
+    if (flushingIdRef.current === id) return;
+    const item = store.useStore.getState().composerQueue.find((entry) => entry.id === id);
+    if (!item) return;
+    flushingIdRef.current = id;
+    store.useStore.setState((s) => ({ composerQueue: removeComposerItem(s.composerQueue ?? [], id) }));
+    try {
+      store.pushUserMessage(item.text, item.images);
+      store.useStore.setState({ awaitingResponse: true, lastError: undefined });
+      await pi.prompt(workspace, item.text, undefined, toPromptImages(item.images));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!userAbortedRef.current && !/abort/i.test(msg)) {
+        store.useStore.setState({ lastError: msg, awaitingResponse: false });
+      }
+    } finally {
+      if (flushingIdRef.current === id) flushingIdRef.current = null;
+    }
+  }, [store, workspace]);
+
+  useEffect(() => {
+    if (isStreaming || awaitingResponse) return;
+    const first = composerQueue[0];
+    if (!first) return;
+    void flushComposerItem(first.id);
+  }, [awaitingResponse, composerQueue, flushComposerItem, isStreaming]);
+
   const handleSend = async (
     message: string,
     images?: PromptImage[],
     behavior?: 'steer' | 'followUp',
   ) => {
     const text = message.trim();
-    if (!text && !images?.length) return;
+    const hasContent = Boolean(text || images?.length);
+    if (!hasContent && behavior !== 'followUp') return;
     // 新一轮发送：清掉上一轮可能遗留的「用户中断」标记。
     userAbortedRef.current = false;
 
@@ -206,20 +267,41 @@ export function ChatView() {
       return;
     }
 
-    // 执行中发送：引导（steer）当前回合或排队（followUp）下一轮。乐观插入用户消息
-    // （live 事件流不回显 user 消息），交给 pi 把消息注入正在跑的回合；不跑「无返回」兜底检查。
-    if (behavior) {
+    // 执行中发送：先落成跟进条。点条上的引导才注入当前回合；否则本轮结束后自动跟进。
+    if (behavior === 'followUp' && hasContent) {
+      const st = store.useStore.getState();
+      if (st.isStreaming || st.awaitingResponse) {
+        store.useStore.setState((s) => ({
+          composerQueue: [...(s.composerQueue ?? []), createComposerItem(text, toUserImages(images))],
+        }));
+        return;
+      }
+    } else if (behavior === 'followUp' && !hasContent) {
+      const first = store.useStore.getState().composerQueue?.[0];
+      if (first) {
+        await flushComposerItem(first.id);
+        return;
+      }
+      try {
+        await pi.prompt(workspace, '', 'followUp');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!userAbortedRef.current && !/abort/i.test(msg)) {
+          store.useStore.setState({ lastError: msg });
+        }
+      }
+      return;
+    } else if (behavior === 'steer') {
       store.useStore.setState({ lastError: undefined, retrying: undefined });
-      // steering=true：标记为引导消息，避免误触发「准备响应中」占位（AI 已在响应中）。
-      store.pushUserMessage(text, images, behavior === 'steer');
+      if (!hasContent) return;
+      store.pushUserMessage(text, images, true);
       for (let attempt = 0; attempt <= MAX_SEND_RETRIES; attempt++) {
         try {
-          await pi.prompt(workspace, text, behavior, images);
+          await pi.prompt(workspace, text, 'steer', images);
           store.useStore.setState({ retrying: undefined });
           return;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          // 用户主动中断（abort）不算错误，不弹错误条。
           if (userAbortedRef.current || /abort/i.test(msg)) {
             store.useStore.setState({ retrying: undefined, aborting: false });
             return;
@@ -235,7 +317,11 @@ export function ChatView() {
             retrying: { attempt: attempt + 1, max: MAX_SEND_RETRIES },
             lastError: undefined,
           });
-          await sleep(retryDelayMs(attempt + 1));
+          await sleepOrAbort(retryDelayMs(attempt + 1));
+          if (userAbortedRef.current) {
+            store.useStore.setState({ retrying: undefined, aborting: false });
+            return;
+          }
         }
       }
       return;
@@ -250,13 +336,15 @@ export function ChatView() {
     const sendPerf = createStartupPerf(`send:${workspace}`);
 
     const ensureSessionForSend = async () => {
-      if (!isDraftConversation && activeSessionPath) return;
-      if (!isConversation) return;
+      const needsCreate = needsSessionCreateOnSend({ workspace, activeSessionPath, draftConversationCwd });
+      const peekBefore = peekComposerModel(workspace);
+      if (!needsCreate) return;
       const st = useSessionStore.getState();
       sendPerf.start('openWorkspace');
       const openResult = await pi.openWorkspace(workspace);
       sendPerf.end('openWorkspace');
-      if (!openResult.sessionFile) {
+      // 项目草稿的 openWorkspace 会带回 last_session；必须新建，不能把首发写进上一会话。
+      if (isDraftConversation || !openResult.sessionFile) {
         sendPerf.start('newSession');
         await pi.newSession(workspace);
         sendPerf.end('newSession');
@@ -276,6 +364,10 @@ export function ChatView() {
       sendPerf.end('getState');
       const path = state.sessionFile ?? openResult.sessionFile;
       if (path) {
+        // 必须先于 setActiveSession：否则 loadState 会读到 SDK 默认模型并盖掉输入栏点选。
+        // 用发送瞬间的 peek，不用 await 之后再读：openWorkspace/newSession 期间草稿 loadState
+        // 可能把缓存套回设置默认。
+        commitComposerModelToSession(workspace, path, peekBefore);
         st.setActiveSession(path);
         st.setWorkspaceSessionPath(workspace, path);
         st.upsertOptimisticSession({
@@ -287,8 +379,7 @@ export function ChatView() {
         });
       }
       st.clearDraftConversation(workspace);
-      const selected = peekComposerModel(workspace);
-      if (selected) await pi.setModel(workspace, selected.provider, selected.id);
+      if (peekBefore) await pi.setModel(workspace, peekBefore.provider, peekBefore.id);
       // 该空白对话已被使用（已落盘会话）→ 清除复用记忆，下次「新建对话」改为新建而非复用它。
       markScratchUsed(workspace);
     };
@@ -375,7 +466,11 @@ export function ChatView() {
         isStreaming: false,
         lastError: undefined,
       });
-      await sleep(retryDelayMs(attempt));
+      await sleepOrAbort(retryDelayMs(attempt));
+      if (userAbortedRef.current) {
+        result = { ok: false, error: 'aborted', aborted: true, retryable: false };
+        break;
+      }
       result = await runOnce();
       retriesDone = attempt;
     }
@@ -414,6 +509,9 @@ export function ChatView() {
       <span style={{ flex: 1, minWidth: 0 }}>
         发送失败，正在重试（{retrying.attempt}/{retrying.max}）…
       </span>
+      <button type="button" aria-label="取消" data-testid="send-retry-cancel" onClick={() => void handleAbort()} style={errorCloseStyle}>
+        取消
+      </button>
     </div>
   ) : null;
 
@@ -427,8 +525,10 @@ export function ChatView() {
   const handleAbort = async () => {
     // 标记用户主动中断：runOnce 据此把本轮判为中断（不报错、不重试），无论中断如何体现。
     userAbortedRef.current = true;
+    cancelSleepRef.current?.();
     // 置 aborting：reducer 据此丢弃 abort 触发的 "request aborted" 类报错，避免红条闪一下。
-    store.useStore.setState({ aborting: true });
+    // 同时清掉重试条和「准备响应中」，失败等待期间停止必须立刻生效。
+    store.useStore.setState({ aborting: true, retrying: undefined, awaitingResponse: false });
     await pi.abort(workspace);
   };
 
@@ -501,21 +601,9 @@ export function ChatView() {
                 right: gutter,
                 bottom: 0,
                 zIndex: 3,
-                background: cssVar.colorBgLayout,
+                background: `var(--gren-content-bg, ${cssVar.colorBgContainer})`,
               }}
             >
-              <div
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  top: -36,
-                  height: 36,
-                  pointerEvents: 'none',
-                  background: `linear-gradient(transparent, ${cssVar.colorBgLayout})`,
-                }}
-              />
               <div style={COMPOSE_COLUMN}>
                 {retryIndicator}
                 {compactingIndicator}

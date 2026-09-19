@@ -12,6 +12,7 @@ const styles = createStaticStyles(({ css }) => ({
     padding: 0 9px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 6px;
+    background: ${cssVar.colorFillTertiary};
     color: ${cssVar.colorTextSecondary};
     font-size: 12.5px;
     cursor: pointer;

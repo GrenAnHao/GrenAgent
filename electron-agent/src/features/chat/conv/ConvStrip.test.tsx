@@ -57,4 +57,21 @@ describe('ConvStrip', () => {
     expect(onStop).toHaveBeenCalled();
     expect(onToggle).not.toHaveBeenCalled();
   });
+
+  it('ellipsis-truncates a long role instead of expanding the strip', () => {
+    render(
+      <div style={{ width: 160 }}>
+        <ConvStrip
+          status="done"
+          icon={Bot}
+          title="子代理 #3"
+          role="任务: 本工作目录 (cwd) 目前是很长很长很长很长很长"
+          line2="已完成 · 任务: 本工作目录 (cwd) 目前是很长很长很长"
+        />
+      </div>,
+    );
+    const role = screen.getByTestId('conv-strip-role');
+    expect(role).toHaveStyle({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    expect(role.getAttribute('title')).toContain('本工作目录');
+  });
 });
