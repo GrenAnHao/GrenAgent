@@ -3,12 +3,18 @@ import { Type } from 'typebox';
 import { WikiClient } from './client.js';
 import { WikiSync, readWorkspaceSource } from './sync.js';
 import { authorizeDesktopOperation } from '../_shared/desktop-control.js';
+import { toolPrompt } from '../_shared/toolPrompt.js';
+
+const WIKI_PROMPT_GUIDELINES = [
+  'Use wiki_search, wiki_list, wiki_read, wiki_reindex, or wiki_update for project Wiki; pass kbId and pageId from list/search results, do not guess ids.',
+];
 
 export default function wikiRag(pi: ExtensionAPI): void {
   const client = new WikiClient();
   const sync = new WikiSync(client);
   pi.registerTool({
     name: 'wiki_search', label: 'Wiki Search', description: 'Search Wiki libraries explicitly associated with the current project. Results provide kbId and pageId for reading.',
+    ...toolPrompt('Search project-associated Wiki libraries.', WIKI_PROMPT_GUIDELINES),
     parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 4000 }), kbId: Type.Optional(Type.String({ minLength: 1 })), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params, _signal, _update, ctx) {
       const result = await client.request('wiki.pages.search', { workspace: ctx.cwd, query: params.query, ...(params.kbId ? { kbId: params.kbId } : {}), limit: params.limit ?? 20 });
@@ -17,6 +23,7 @@ export default function wikiRag(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: 'wiki_read', label: 'Wiki Read', description: 'Read a Markdown page by the exact kbId and pageId returned by wiki_list or wiki_search. Do not guess library IDs.',
+    ...toolPrompt('Read a Wiki page by kbId and pageId.'),
     parameters: Type.Object({ kbId: Type.String({ minLength: 1 }), pageId: Type.String({ minLength: 1, maxLength: 2000 }) }),
     async execute(_id, params, _signal, _update, ctx) {
       const result = await client.request<{ content: string } | undefined>('wiki.pages.read', { workspace: ctx.cwd, kbId: params.kbId, pageId: params.pageId });
@@ -25,6 +32,7 @@ export default function wikiRag(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: 'wiki_list', label: 'Wiki List', description: 'List the current project’s associated Wiki libraries, or pages in one listed library when kbId is provided.',
+    ...toolPrompt('List associated Wiki libraries or pages in one library.'),
     parameters: Type.Object({ kbId: Type.Optional(Type.String({ minLength: 1 })), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params, _signal, _update, ctx) {
       const result = params.kbId
@@ -35,6 +43,7 @@ export default function wikiRag(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: 'wiki_reindex', label: 'Wiki Reindex', description: 'Rebuild the original legacy workspace Wiki index without calling a model. New named libraries are managed in the application.',
+    ...toolPrompt('Rebuild the legacy workspace Wiki index.'),
     parameters: Type.Object({}),
     async execute(_id, _params, signal, _update, ctx) {
       if (signal?.aborted || ctx.signal?.aborted) return { content: [{ type: 'text', text: 'Wiki reindex cancelled.' }], details: { reindexed: false } };
@@ -49,6 +58,7 @@ export default function wikiRag(pi: ExtensionAPI): void {
   });
   pi.registerTool({
     name: 'wiki_update', label: 'Wiki Update', description: 'Generate a page only in the original legacy workspace Wiki mapping. Named libraries are read-only for Agents and edited or ingested in the application.',
+    ...toolPrompt('Update a page in the legacy workspace Wiki mapping.'),
     parameters: Type.Object({ page: Type.String({ minLength: 1, maxLength: 2000 }), sourcePath: Type.String({ minLength: 1, maxLength: 2000 }) }),
     async execute(_id, params, signal, _update, ctx) {
       let updateSignal = signal ?? ctx.signal;

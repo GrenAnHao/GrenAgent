@@ -65,6 +65,11 @@ function collectFacts(
   };
 }
 
+/** 硬拒绝：block 且 terminate，让本批工具结束后不再自动再调一轮模型。 */
+function refuse(reason: string) {
+  return { block: true as const, reason, terminate: true as const };
+}
+
 /** 「总是允许」写成尽可能窄的规则：bash 按命令前缀，写类工具按目录，其余按工具名。 */
 function draftRule(facts: ToolCallFacts): ToolRuleDraft {
   const base = { scope: "workspace" as const, scopeKey: facts.workspace, tool: facts.tool, effect: "allow" as const };
@@ -90,7 +95,7 @@ export default function (pi: ExtensionAPI) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (denyTools.includes(event.toolName)) {
-      return { block: true, reason: `能力档案禁用工具：${event.toolName}` };
+      return refuse(`能力档案禁用工具：${event.toolName}`);
     }
     const readonly = on(process.env.SAFETY_READONLY ?? getConfig("SAFETY_READONLY"));
     const writeAllow = (process.env.SAFETY_WRITE_ALLOW ?? getConfig("SAFETY_WRITE_ALLOW") ?? "")
@@ -101,16 +106,16 @@ export default function (pi: ExtensionAPI) {
       // ast_edit/hl_edit 直接 writeFileSync 写盘，不经下面的 write/edit 白名单检查 → 只读下直接禁，
       // 否则 fs 隔离（reviewer/explore 子代理、im-platforms 受限会话）可被它们绕过。
       if (WRITE_BYPASS_TOOLS.has(event.toolName)) {
-        return { block: true, reason: `只读模式：禁止 ${event.toolName}（绕过写白名单的写盘工具）` };
+        return refuse(`只读模式：禁止 ${event.toolName}（绕过写白名单的写盘工具）`);
       }
       if (event.toolName === "write" || event.toolName === "edit") {
         const p = extractPath((event.input ?? {}) as Record<string, unknown>);
         if (!p || !matchWriteAllowed(p, writeAllow)) {
-          return { block: true, reason: `只读模式：仅允许写 ${writeAllow.join(", ") || "(无)"}` };
+          return refuse(`只读模式：仅允许写 ${writeAllow.join(", ") || "(无)"}`);
         }
       }
       if (event.toolName === "bash" && isMutatingBash(String(event.input?.command ?? ""))) {
-        return { block: true, reason: "只读模式：禁止会改动文件系统的命令" };
+        return refuse("只读模式：禁止会改动文件系统的命令");
       }
     }
 
@@ -124,7 +129,7 @@ export default function (pi: ExtensionAPI) {
     if (verdict.decision === "allow") return undefined;
     if (verdict.decision === "deny") {
       if (verdict.ruleId === SUBAGENT_ASK_PINNED_RULE_ID) return { block: true, reason: DELEGATION_DENY_REASON };
-      return { block: true, reason: `已被授权规则拒绝：${event.toolName}` };
+      return refuse(`已被授权规则拒绝：${event.toolName}`);
     }
 
     // ask：无 UI 时不能就地询问，审计行保持 queued 等人处理。
@@ -133,17 +138,22 @@ export default function (pi: ExtensionAPI) {
     }
 
     const detail = facts.command ?? facts.path ?? event.toolName;
-    let choice: string;
+    let choice: string | undefined;
     try {
+      // 0.85+：用户取消 select 返回 undefined，不再保证抛错。
       choice = await ctx.ui.select(`请求批准：\n\n  ${detail}`, ["允许本次", "总是允许", "拒绝"]);
     } catch {
       await settleToolCall(control, verdict.auditId, "aborted");
-      return { block: true, reason: "授权请求已取消" };
+      return refuse("授权请求已取消");
+    }
+    if (choice == null) {
+      await settleToolCall(control, verdict.auditId, "aborted");
+      return refuse("授权请求已取消");
     }
 
     if (choice === "拒绝") {
       await settleToolCall(control, verdict.auditId, "user_deny");
-      return { block: true, reason: `用户拒绝：${event.toolName}` };
+      return refuse(`用户拒绝：${event.toolName}`);
     }
     if (choice === "总是允许") await rememberToolRule(control, draftRule(facts));
     await settleToolCall(control, verdict.auditId, "user_allow");

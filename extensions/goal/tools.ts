@@ -13,6 +13,7 @@ import {
   sessionIdOf,
 } from "./session.js";
 import { GOAL_BLOCKED_MIN_ROUNDS } from "./types.js";
+import { toolPrompt } from "../_shared/toolPrompt.js";
 
 const condition = Type.String({ minLength: 1, maxLength: 4000 });
 const revision = Type.Integer({ minimum: 1 });
@@ -56,6 +57,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     name: "get_goal",
     label: "Get Goal",
     description: "Read the Goal for the current session.",
+    ...toolPrompt("Read the current session Goal."),
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _update, ctx) {
       return result(currentStatusSnapshot(ctx));
@@ -66,6 +68,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     name: "create_goal",
     label: "Create Goal",
     description: "Create a session Goal for continuous work.",
+    ...toolPrompt("Create a session Goal for continuous work."),
     parameters: Type.Object({
       condition,
       maxRounds: Type.Optional(revision),
@@ -85,6 +88,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     name: "update_goal",
     label: "Update Goal",
     description: "Update the current session Goal.",
+    ...toolPrompt("Update the current session Goal."),
     parameters: Type.Object({
       goalId: Type.String({ minLength: 1 }),
       revision,

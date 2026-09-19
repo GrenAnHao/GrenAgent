@@ -96,6 +96,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Read a background job by id. Final-output jobs return their output once finished; stream jobs return output since the previous read. " +
       "Set `wait: true` to block until the job settles or `timeout_ms` expires (a timed-out wait returns [status: running] and leaves the job alive).",
+    promptSnippet: "Read a background job by id.",
     promptGuidelines: [
       "Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one.",
       "Before giving a final answer, collect every still-relevant job with job_output (wait: true only when genuinely blocked), and job_kill jobs that stopped mattering.",
@@ -122,6 +123,7 @@ export default function (pi: ExtensionAPI) {
     name: "job_list",
     label: "Job List",
     description: "List your background jobs (running and finished) with their ids, kinds, and statuses.",
+    promptSnippet: "List background jobs and their statuses.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const rows = jobs.list(callerId(ctx));
@@ -135,6 +137,7 @@ export default function (pi: ExtensionAPI) {
     name: "job_kill",
     label: "Job Kill",
     description: "Request cancellation of a running background job by id. Returns immediately; the job settles as killed once its work actually stops.",
+    promptSnippet: "Cancel a running background job by id.",
     parameters: Type.Object({
       job_id: Type.String({ description: "Job id returned by the tool that started the background work." }),
       reason: Type.Optional(Type.String({ description: "Optional short reason, forwarded to the job." })),

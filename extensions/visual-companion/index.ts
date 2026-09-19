@@ -14,6 +14,7 @@ export default function (pi: ExtensionAPI) {
       "【重要】生成选项 HTML 时必须使用 data-choice 属性（不是 data-value），例如：\n" +
       '<div class="option" data-choice="a" onclick="toggleSelect(this)">' +
       '<div class="letter">A</div><div class="content"><h3>选项标题</h3></div></div>',
+    promptSnippet: "Show HTML visual content in the UI.",
     parameters: Type.Object({
       html: Type.String({ description: "HTML 片段或完整文档（支持 frame-template CSS 类）" }),
       mode: Type.Optional(
@@ -56,6 +57,7 @@ export default function (pi: ExtensionAPI) {
     label: "Read Visual Choice",
     description:
       "阻塞等待用户在视觉伴侣中点击选项，返回选择结果。必须在 show_visual 之后调用。",
+    promptSnippet: "Wait for the user's visual choice after show_visual.",
     parameters: Type.Object({
       timeout: Type.Optional(
         Type.Number({ description: "超时秒数（默认 300）", default: 300 }),

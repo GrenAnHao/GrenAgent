@@ -67,6 +67,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "启动调试会话（一期 Python/debugpy）：运行 program 并进入可断点调试。" +
       "stopOnEntry=true 在首行暂停。随后用 dap_set_breakpoints/continue/step/stack_trace/variables/evaluate 排查。",
+    promptSnippet: "Launch a Python debug session.",
     parameters: Type.Object({
       program: Type.String({ description: "要调试的脚本路径（相对工作区或绝对）" }),
       args: Type.Optional(Type.Array(Type.String(), { description: "程序参数" })),
@@ -96,6 +97,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_set_breakpoints",
     label: "Debug Breakpoints",
     description: "为某文件设置断点（替换该文件已有断点）。",
+    promptSnippet: "Set breakpoints in a debug session file.",
     parameters: Type.Object({
       path: Type.String({ description: "源文件路径" }),
       lines: Type.Array(Type.Number(), { description: "断点行号（1-based）" }),
@@ -118,6 +120,7 @@ export default function (pi: ExtensionAPI) {
       name,
       label,
       description,
+      promptSnippet: description,
       parameters: Type.Object({}),
       async execute(_id, _params, _signal, _onUpdate, ctx) {
         const client = sessionFor(ctx.cwd);
@@ -141,6 +144,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_stack_trace",
     label: "Debug Stack",
     description: "查看当前停驻线程的调用栈（含 frameId，用于 scopes/evaluate）。",
+    promptSnippet: "Get the current debug stack trace.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
@@ -157,6 +161,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_scopes",
     label: "Debug Scopes",
     description: "列出某栈帧的作用域（含 variablesReference，用于 dap_variables）。",
+    promptSnippet: "List scopes for a debug stack frame.",
     parameters: Type.Object({ frameId: Type.Number({ description: "栈帧 id（来自 dap_stack_trace）" }) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);
@@ -173,6 +178,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_variables",
     label: "Debug Variables",
     description: "展开某 variablesReference 下的变量（来自 dap_scopes/dap_variables）。",
+    promptSnippet: "Read variables from a debug scope.",
     parameters: Type.Object({
       variablesReference: Type.Number({ description: "变量引用句柄" }),
     }),
@@ -191,6 +197,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_evaluate",
     label: "Debug Evaluate",
     description: "在当前停驻上下文求值表达式（可指定 frameId）。",
+    promptSnippet: "Evaluate an expression in the debug session.",
     parameters: Type.Object({
       expression: Type.String({ description: "要求值的表达式" }),
       frameId: Type.Optional(Type.Number({ description: "栈帧 id（默认顶帧上下文）" })),
@@ -214,6 +221,7 @@ export default function (pi: ExtensionAPI) {
     name: "dap_terminate",
     label: "Debug Terminate",
     description: "结束当前调试会话并清理被调试进程。",
+    promptSnippet: "Terminate the current debug session.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const client = sessionFor(ctx.cwd);

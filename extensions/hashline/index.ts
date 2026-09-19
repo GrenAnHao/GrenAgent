@@ -30,6 +30,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "读取文件并返回带 #TAG 内容快照与行号的视图（[path#TAG] 头 + `N:TEXT` 行），" +
       "作为 hl_edit 的编辑锚点。编辑已存在文件前先用它拿到当前 #TAG。",
+    promptSnippet: "Read a file with hashline #TAG anchors.",
     parameters: Type.Object({
       path: Type.String({ description: "文件路径（相对工作区或绝对）" }),
       offset: Type.Optional(Type.Number({ description: "起始行（1-based），默认 1" })),
@@ -54,6 +55,7 @@ export default function (pi: ExtensionAPI) {
     name: "hl_edit",
     label: "Edit (hashline)",
     description: HASHLINE_PROMPT,
+    promptSnippet: "Edit a file with hashline patches.",
     parameters: Type.Object({
       patch: Type.String({ description: "hashline 补丁文本（可含多个 [PATH#TAG] 段）" }),
     }),

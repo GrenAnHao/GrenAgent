@@ -6,21 +6,21 @@ export type FableAgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "prompts");
 
-const TIER1 = [
-  "identity",
-  "tone",
-  "mistakes",
-  "file-verify",
-  "coding-harness",
-  "autonomy",
-] as const;
+const KERNEL: ReadonlyArray<{ dir: "tier1" | "tier2"; name: string }> = [
+  { dir: "tier1", name: "identity" },
+  { dir: "tier1", name: "tone" },
+  { dir: "tier1", name: "mistakes" },
+  { dir: "tier1", name: "file-verify" },
+  { dir: "tier1", name: "coding-harness" },
+  { dir: "tier1", name: "autonomy" },
+  { dir: "tier2", name: "refusal" },
+];
 
 const TIER2_P0 = [
   "tool-discipline",
   "ask-user",
   "grep-strategy",
   "mcp-collaboration",
-  "refusal",
   "skills-first",
   "file-workflow",
 ] as const;
@@ -35,9 +35,7 @@ const TIER2_P1 = [
   "knowledge-search-triggers",
 ] as const;
 
-// 始终注入的一行式提示。前 6 条各对应一个可经 fable_behavior_ref 取全文的 tier3 模块；
-// 最后一条 review 是无独立模块的独立行为提示。grep/ask-user/mcp/security 的一行式已删除——
-// 它们的完整内容已在 tier2 P0（grep-strategy/ask-user/mcp-collaboration/refusal）常驻注入，再放摘要纯属重复。
+// Opt-in 一行式摘要。前 6 条对应 fable_behavior_ref 的 tier3 模块；review 无独立全文。
 const TIER3_SUMMARY_LINES = [
   "Web search: paraphrase by default; one short quote per source max; scale searches to task complexity.",
   "Copyright: never reproduce lyrics/poems/long verbatim passages from web sources.",
@@ -76,9 +74,11 @@ function readModeSlice(mode: FableAgentMode): string {
 }
 
 export interface BuildPromptOptions {
+  /** Opt-in leftover tool manuals. Default off — those belong on promptSnippet / promptGuidelines. */
   tier2?: boolean;
-  /** When false, inject only Tier-2 P0 (core harness); skip P1 extended modules. */
+  /** When tier2 is on, also include P1 extended manuals. */
   tier2P1?: boolean;
+  /** Opt-in Tier-3 one-line summaries. Default off — full text is fable_behavior_ref. */
   tier3Guidelines?: boolean;
   mode?: FableAgentMode;
   date?: string;
@@ -91,13 +91,13 @@ export function estimatePromptTokens(opts: BuildPromptOptions = {}): number {
 
 /** Assemble the fable-behavior injection block for before_agent_start. */
 export function buildFableBehaviorPrompt(opts: BuildPromptOptions = {}): string {
-  const tier2 = opts.tier2 !== false;
+  const tier2 = opts.tier2 === true;
   const tier2P1 = opts.tier2P1 !== false;
-  const tier3 = opts.tier3Guidelines !== false;
+  const tier3 = opts.tier3Guidelines === true;
   const mode = opts.mode ?? "agent";
   const parts: string[] = ["[Fable Behavior]"];
 
-  for (const name of TIER1) parts.push(readModule("tier1", name));
+  for (const mod of KERNEL) parts.push(readModule(mod.dir, mod.name));
 
   if (tier2) {
     for (const name of TIER2_P0) parts.push(readModule("tier2", name));

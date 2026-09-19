@@ -1,7 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig } from "../_shared/runtime-config.js";
+import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { requestResourceReload } from "../_shared/resource-reload.js";
+import { reconcileMcpManager } from "../mcp/manager.js";
 import { probeServer } from "../mcp/probe.js";
 import { installSkill, prepareSkill, commitPreparedSkill, discardPreparedSkill } from "./skill-store.js";
 import { writeMcpServer } from "./mcp-store.js";
@@ -55,6 +57,7 @@ export default function resourceManager(pi: ExtensionAPI) {
           return result("MCP 探测失败: " + error, { status: "error", resource: "mcp", error });
         }
         const path = await writeMcpServer(input, ctx.cwd, undefined, getConfig("MCP_SERVERS") ?? "");
+        reconcileMcpManager(currentWorkspaceContext()?.workspace ?? ctx.cwd);
         ctx.ui.notify("MCP " + input.name + " 已添加");
         return result("已添加 MCP " + input.name, { status: "saved", resource: "mcp", name: input.name, scope: input.scope, path, connection: "connected", tools: probe.toolNames });
       } catch (e) {

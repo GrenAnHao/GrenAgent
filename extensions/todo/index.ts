@@ -26,6 +26,7 @@ export default function (pi: ExtensionAPI) {
     label: "Todo",
     description:
       "Replace the entire todo list on each call. Submit the full list every time; mark active work in_progress (multiple allowed for parallel tasks); mark completed as soon as a step finishes. Skip the tool for trivial single-step work.",
+    promptSnippet: "Replace the full todo list.",
     promptGuidelines: [
       "Submit the complete todo list on every todo tool call; never partial updates.",
       "Mark the step you are working on as in_progress; you may mark multiple items in_progress when working in parallel.",

@@ -112,6 +112,7 @@ export default function (pi: ExtensionAPI) {
       name,
       label: name,
       description,
+      promptSnippet: description,
       parameters: withPos
         ? POS_PARAMS
         : Type.Object({ path: Type.String({ description: "文件路径（相对工作区或绝对）" }) }),

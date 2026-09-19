@@ -25,6 +25,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "只读 GitHub（经 gh CLI）：pr_view/pr_diff/issue_view/repo_view/pr_list/issue_list/code_search。" +
       "repo 默认当前仓库；pr/issue 的 view/diff 需 number；code_search 需 query。需系统装 gh 并 `gh auth login`。",
+    promptSnippet: "Read GitHub via gh (PRs, issues, repos, code search).",
     parameters: Type.Object({
       action: Type.Union(
         ACTIONS.map((a) => Type.Literal(a)),

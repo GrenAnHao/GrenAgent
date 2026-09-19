@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getApprovalPolicy } from "../_shared/approval.js";
-import { claimImBinding } from "../_shared/im-binding.js";
+import { claimImBinding, notifyImBoundElsewhere } from "../_shared/im-binding.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { CODE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
 import { spawnPiAgent } from "../multi-agent/runner.js";
@@ -552,7 +552,7 @@ export default function (pi: ExtensionAPI) {
     if (!claim.claimed) {
       if (ctx.hasUI) {
         try {
-          ctx.ui.notify(`IM 已绑定到 ${claim.owner.workspace}`, "warning");
+          notifyImBoundElsewhere((msg, level) => ctx.ui.notify(msg, level), claim.owner);
         } catch {
           /* best-effort */
         }

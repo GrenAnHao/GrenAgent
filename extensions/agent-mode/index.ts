@@ -33,7 +33,7 @@ import {
   toolWhitelist,
 } from "./modes.js";
 import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
-import { makeQuestionsId, normalizeQuestions, type RawAskUserParams } from "./questions.js";
+import { decodeAskUserAnswer, makeQuestionsId, normalizeQuestions, type RawAskUserParams } from "./questions.js";
 import { type TodoItem, extractTodoItems, markCompletedSteps } from "./utils.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -181,6 +181,7 @@ export default function (pi: ExtensionAPI) {
       "当你需要用户在若干选项中做决策（选方案 / 测验答题 / 确认方向 / 风险操作前确认等）时调用。" +
       "禁止在 assistant 正文里写 A/B/C/D 纯文本选项——必须用本工具。" +
       "本工具会阻塞直到用户作答，并把用户的选择作为工具结果返回（形如 [我的选择] …）——不要替用户作答，也不要预测答案。",
+    promptSnippet: "Ask the user a clickable multiple-choice question.",
     promptGuidelines: [
       "When a decision has 2+ concrete viable options for the user to pick — approach/scope/tradeoff, framework or file-path choice, quiz answer, plan-mode clarification, or confirmation before a risky/irreversible action — call ask_user instead of deciding silently.",
       "This is the ONLY way to surface choices: never write A/B/C/D (or numbered) option lists in your reply text — plain-text options are not clickable and the user cannot answer them.",
@@ -241,8 +242,15 @@ export default function (pi: ExtensionAPI) {
       if (ctx.hasUI) {
         const payload = JSON.stringify({ __askUser: 1, data });
         const answer = await ctx.ui.input(payload, undefined, { signal });
-        if (typeof answer === "string" && answer.trim()) {
-          return { content: [{ type: "text", text: answer }], details: undefined };
+        const decoded = decodeAskUserAnswer(answer);
+        if (decoded.text.trim() || decoded.images.length > 0) {
+          return {
+            content: [
+              ...(decoded.text.trim() ? [{ type: "text" as const, text: decoded.text }] : []),
+              ...decoded.images,
+            ],
+            details: undefined,
+          };
         }
         return { content: [{ type: "text", text: "用户取消了 ask_user 选择（未作答）。" }], details: undefined };
       }

@@ -69,6 +69,7 @@ export default function (pi: ExtensionAPI) {
       "instrument code to POST diagnostics (variable values, execution paths, timing), have the user reproduce " +
       "the bug, then read back the captured runtime data to pinpoint the root cause and make a minimal fix. " +
       "Actions: start | instrument | read | status | clear | stop.",
+    promptSnippet: "Instrument code and collect runtime debug logs.",
     promptGuidelines: [
       "In Debug mode prefer evidence over guessing: debug_log(start) → instrument hypotheses → user reproduces → debug_log(read) → minimal fix → remove instrumentation → debug_log(stop).",
     ],

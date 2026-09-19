@@ -40,6 +40,7 @@ export default function (pi: ExtensionAPI) {
       "Pick size and count yourself based on the request — e.g. a portrait poster (1024x1792), " +
       `or several options/variations at once (count up to ${MAX_COUNT}). ` +
       "Pass reference_images (image-to-image / edit) to guide the result with existing images.",
+    promptSnippet: "Generate images from a text prompt.",
     parameters: Type.Object({
       prompt: Type.String({ description: "Description of the image to generate" }),
       size: Type.Optional(

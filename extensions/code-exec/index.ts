@@ -48,6 +48,7 @@ export default function (pi: ExtensionAPI) {
       "在常驻 Python 内核中执行代码，变量与已导入模块跨调用保留——适合多步数据分析/计算。" +
       "返回 stdout、最后一个表达式的值（=> 回显）与异常 traceback。" +
       "一次性 shell 命令请用 bash；需要清空状态用 py_reset。",
+    promptSnippet: "Execute Python in a persistent kernel.",
     parameters: Type.Object({
       code: Type.String({ description: "要执行的 Python 代码（可多行）" }),
       timeout_ms: Type.Optional(Type.Number({ description: "执行超时（毫秒），默认 30000" })),
@@ -74,6 +75,7 @@ export default function (pi: ExtensionAPI) {
     name: "py_reset",
     label: "Python Reset",
     description: "重置常驻 Python 内核：清空所有变量与已导入模块，下次 py_run 从干净命名空间开始。",
+    promptSnippet: "Reset the persistent Python kernel.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const kernel = kernels.get(ctx.cwd);
@@ -104,6 +106,7 @@ export default function (pi: ExtensionAPI) {
       "在常驻 Node(vm) 内核执行 JS，变量跨调用保留——适合多步计算/数据处理。" +
       "跨 cell 持久请用 var 或全局赋值（x = 1）；顶层 let/const 块级不跨 cell。" +
       "返回 console 输出与末尾表达式的值（=> 回显）。需 await 请用 .then（top-level await 暂不支持）；需清空状态用 js_reset。",
+    promptSnippet: "Execute JavaScript in a persistent kernel.",
     parameters: Type.Object({
       code: Type.String({ description: "要执行的 JS 代码（可多行）" }),
       timeout_ms: Type.Optional(Type.Number({ description: "执行超时（毫秒），默认 30000" })),
@@ -126,6 +129,7 @@ export default function (pi: ExtensionAPI) {
     name: "js_reset",
     label: "JavaScript Reset",
     description: "重置常驻 JS 内核：清空所有变量，下次 js_run 从干净上下文开始。",
+    promptSnippet: "Reset the persistent JavaScript kernel.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const kernel = jsKernels.get(ctx.cwd);

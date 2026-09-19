@@ -11,14 +11,13 @@ import { Type } from "typebox";
 import { isSafeUrl } from "./html.js";
 import { fetchHtml, fetchJson, fetchMarkdown, fetchTxt } from "./fetcher.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
-import { headTailSlice, isUsableLlmsBody } from "./truncate.js";
+import { headTailSlice, isUsableLlmsBody, resolveFetchMaxChars } from "./truncate.js";
 import { getConfig } from "../_shared/runtime-config.js";
 
-// 0 / unset = no truncation: return the full crawled content. Set FETCH_MAX_CHARS>0
-// to cap how much enters the model context — when capped we keep a head+tail preview
-// and spill the FULL page to <cwd>/.pi/web-fetch/<id>.md, so the model can read the
-// omitted middle back on demand (read/grep) instead of losing it.
-const maxChars = () => Number(getConfig("FETCH_MAX_CHARS") ?? "0") || 0;
+// Default FETCH_MAX_CHARS is the DSH read budget. Set 0 to disable truncation.
+// When capped we keep a head+tail preview and spill the FULL page to
+// <cwd>/.pi/web-fetch/<id>.md so the model can read the omitted middle on demand.
+const maxChars = () => resolveFetchMaxChars(getConfig("FETCH_MAX_CHARS"));
 
 // Spilled full-content files older than this are pruned on the next fetch.
 const SPILL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;

@@ -14,6 +14,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Synthesize speech from text using an OpenAI-compatible audio API. " +
       "Saves an audio file under .pi/audio/ and returns its path (play it with your OS player).",
+    promptSnippet: "Synthesize speech from text.",
     parameters: Type.Object({
       text: Type.String({ description: "Text to speak" }),
       voice: Type.Optional(Type.String({ description: "Voice name (default from TTS_VOICE, e.g. alloy/echo/nova)" })),

@@ -24,6 +24,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Run the project's type-check / lint commands (tsc/eslint) and return structured {file,line,severity,message} " +
       "diagnostics. Configure via diagnostics.commands in .pi/settings.json, or rely on tsconfig.json/eslint auto-detect.",
+    promptSnippet: "Run project type-check/lint and return structured diagnostics.",
     parameters: Type.Object({
       paths: Type.Optional(Type.Array(Type.String(), { description: "Optional path substrings to filter results" })),
     }),

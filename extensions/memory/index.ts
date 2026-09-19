@@ -5,6 +5,11 @@ import { LayeredMemoryCapture } from './capture.js';
 import { buildMemoryContext } from './context.js';
 import { scopeFromContext } from './store.js';
 import { getConfig } from '../_shared/runtime-config.js';
+import { toolPrompt } from '../_shared/toolPrompt.js';
+
+const MEMORY_PROMPT_GUIDELINES = [
+  'Use memory_search or conversation_search for local layered memory and captured conversations; pass query and optional limit.',
+];
 
 function automaticMemoryEnabled(): boolean {
   return process.env.PI_IS_SUBAGENT !== '1' && process.env.PI_SYSTEM_WORKER !== '1' && getConfig('PI_SYSTEM_WORKER') !== '1';
@@ -30,11 +35,13 @@ export default function memory(pi: ExtensionAPI) {
   });
   pi.registerTool({
     name: 'memory_search', label: 'Memory Search', description: 'Search local layered memory.',
+    ...toolPrompt('Search local layered memory.', MEMORY_PROMPT_GUIDELINES),
     parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params, _signal, _update, ctx) { const result = await client.request('memory.search', { ...scopeFromContext(ctx), query: params.query, limit: params.limit ?? 20 }); return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result }; },
   });
   pi.registerTool({
     name: 'conversation_search', label: 'Conversation Search', description: 'Search captured local conversations and return matching text snippets with their sources.',
+    ...toolPrompt('Search captured local conversations.'),
     parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
     async execute(_id, params, _signal, _update, ctx) { const result = await client.request('memory.conversations.search', { ...scopeFromContext(ctx), query: params.query, limit: params.limit ?? 20 }); return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result }; },
   });

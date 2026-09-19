@@ -6,9 +6,9 @@ import { buildFableBehaviorPrompt, readTier3Module, resolveAgentModeFromEntries,
 import { seedFableAgents } from "./seed.js";
 
 const enabled = () => (getConfig("FABLE_BEHAVIOR") ?? "1") !== "0";
-const tier2 = () => (getConfig("FABLE_BEHAVIOR_TIER2") ?? "1") !== "0";
+const tier2 = () => getConfig("FABLE_BEHAVIOR_TIER2") === "1";
 const tier2P1 = () => (getConfig("FABLE_BEHAVIOR_TIER2_P1") ?? "1") !== "0";
-const tier3 = () => (getConfig("FABLE_BEHAVIOR_TIER3_GUIDELINES") ?? "1") !== "0";
+const tier3 = () => getConfig("FABLE_BEHAVIOR_TIER3_GUIDELINES") === "1";
 const tier3Tool = () => (getConfig("FABLE_BEHAVIOR_TIER3_TOOL") ?? "1") !== "0";
 
 // topic 单一真相源在 loader.ts（TIER3_TOPICS）；此处直接复用，避免两处枚举漂移失配。
@@ -29,8 +29,9 @@ export default function (pi: ExtensionAPI) {
       label: "Fable behavior reference",
       description:
         "Fetch full Tier-3 behavior reference text (search, copyright, code citations, frontend design, etc.).",
+      promptSnippet: "Fetch a full Tier-3 behavior reference.",
       promptGuidelines: [
-        "Tier-3 one-line summaries are already in context; call fable_behavior_ref when you need the full reference (e.g. exact code citation fence format or copyright limits).",
+        "Call fable_behavior_ref for full reference text such as code citation fence format, copyright limits, frontend-design, or wellbeing.",
       ],
       parameters: RefParams,
       async execute(_id, params) {

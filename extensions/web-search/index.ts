@@ -23,12 +23,14 @@ import {
   type BuiltinEngine,
 } from "./engines/index.js";
 import {
+  clampWebSearchLimit,
   formatResults,
   parseBing,
   parseBrave,
   parseDuckDuckGo,
   parseSogou,
   parseTavily,
+  retainSearchResults,
   resolveProvider,
   type ParsedSearch,
   type SearchResult,
@@ -274,12 +276,13 @@ async function fetchBodies(results: SearchResult[], signal: AbortSignal | undefi
 }
 
 function searchDetails(query: string, provider: string, parsed: ParsedSearch, engines?: string[]) {
+  const { results } = retainSearchResults(parsed.results);
   return {
     query,
     provider,
     engines,
-    count: parsed.results.length,
-    results: parsed.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet })),
+    count: results.length,
+    results: results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet })),
   };
 }
 
@@ -292,7 +295,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     promptSnippet: "Search the web; returns summary + result links.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
-      maxResults: Type.Optional(Type.Number({ description: "Max results (default 5, max 10)" })),
+      maxResults: Type.Optional(Type.Number({ description: "Max sources (default 8, hard cap 8)" })),
       fetchTop: Type.Optional(Type.Number({ description: "Also fetch the body of the top N results as markdown (default 0, max 3)" })),
     }),
     async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
@@ -307,7 +310,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       }
 
       const query = params.query.trim();
-      const maxResults = Math.max(1, Math.min(params.maxResults ?? 5, 10));
+      const maxResults = clampWebSearchLimit(params.maxResults);
       let parsed: ParsedSearch;
       let usedEngine: string = choice.provider;
       try {
@@ -355,7 +358,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     promptSnippet: "Multi-engine web search (open-webSearch compatible).",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
-      limit: Type.Optional(Type.Number({ description: "Max total results (default 10, max 50)" })),
+      limit: Type.Optional(Type.Number({ description: "Max sources (default 8, hard cap 8)" })),
       engines: Type.Optional(
         Type.Array(Type.String(), {
           description: `Engines to use (default: bing,baidu). Supported: ${SUPPORTED_SEARCH_ENGINES.join(", ")}`,
@@ -366,7 +369,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       const denied = await requireNetwork(control, 'web_search_multi', toolCwd(ctx));
       if (denied) return denied;
       const query = params.query.trim();
-      const limit = Math.max(1, Math.min(params.limit ?? 10, 50));
+      const limit = clampWebSearchLimit(params.limit);
       const engines = resolveSearchEngines(params.engines, ["bing", "baidu"]);
       const out = await executeMultiEngineSearch(
         query,
@@ -384,7 +387,11 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
           engines: out.engines,
           count: out.results.length,
           partialFailures: out.partialFailures,
-          results: out.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet })),
+          results: retainSearchResults(out.results).results.map((r) => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+          })),
         },
       };
     },
@@ -491,7 +498,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     promptSnippet: "Fetch readable web page text.",
     parameters: Type.Object({
       url: Type.String({ description: "Public HTTP(S) URL" }),
-      maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 200000)" })),
+      maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 51200)" })),
     }),
     async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
       const denied = await requireNetwork(control, 'fetch_web_content', toolCwd(ctx), params.url);
@@ -504,7 +511,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
           details: { url, error: safe.reason },
         };
       }
-      const maxChars = Math.max(1000, Math.min(params.maxChars ?? 30000, 200000));
+      const maxChars = Math.max(1000, Math.min(params.maxChars ?? 30000, 50 * 1024));
       try {
         const out = await fetchWebContent(url, maxChars, signal ?? undefined, TIMEOUT_MS);
         return {
