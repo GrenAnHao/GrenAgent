@@ -10,6 +10,7 @@ import {
   useApprovalStore,
 } from '../../../../stores/approvalStore';
 import { useModeStore } from '../../../../stores/modeStore';
+import { enableFullAccess } from '../../../../stores/fullAccessConfirmStore';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 
 /** 每个审批策略的 lucide 图标（仅查看 / 请求批准 / 替我审批 / 工作区编辑 / 完全权限）。 */
@@ -34,6 +35,10 @@ export default function ApprovalAction() {
 
   const onChange = (next: string) => {
     const target = next as ApprovalPolicy;
+    if (target === 'full') {
+      void enableFullAccess(workspace);
+      return;
+    }
     useApprovalStore.getState().setLevel(workspace, target);
     void pi.setApproval(workspace, target);
   };
