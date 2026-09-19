@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_ALIASES,
   builtinDefaultAgents,
+  inferNamedAgentProfile,
   resolveAgent,
   suggestAgent,
   withBuiltinDefaults,
@@ -91,6 +92,39 @@ describe("AGENT_ALIASES", () => {
     expect(AGENT_ALIASES.scout).toContain("explorer");
     expect(AGENT_ALIASES.scout).toContain("explore");
   });
+
+  it("maps ask onto the scout agent when no disk ask.md exists", () => {
+    expect(AGENT_ALIASES.scout).toContain("ask");
+    expect(resolveAgent(defaults, "ask")?.name).toBe("scout");
+  });
+});
+
+describe("inferNamedAgentProfile", () => {
+  it("maps canonical roles and aliases onto capability presets", () => {
+    expect(inferNamedAgentProfile("scout")).toBe("explore");
+    expect(inferNamedAgentProfile("ask")).toBe("explore");
+    expect(inferNamedAgentProfile("explorer")).toBe("explore");
+    expect(inferNamedAgentProfile("reviewer")).toBe("reviewer");
+    expect(inferNamedAgentProfile("planner")).toBe("planner");
+    expect(inferNamedAgentProfile("worker")).toBe("default");
+  });
+
+  it("infers explore when a custom agent tools list has no write/edit", () => {
+    expect(inferNamedAgentProfile("custom-ask", ["read", "grep", "find", "ls", "ask_user"])).toBe("explore");
+    expect(inferNamedAgentProfile(undefined, ["read", "grep"])).toBe("explore");
+  });
+
+  it("does not infer readonly when tools include write/edit", () => {
+    expect(inferNamedAgentProfile("custom-worker", ["read", "write", "edit", "bash"])).toBeUndefined();
+    expect(inferNamedAgentProfile("ask", ["read", "write"])).toBeUndefined();
+    expect(inferNamedAgentProfile(undefined, ["write"])).toBeUndefined();
+  });
+
+  it("returns undefined without a name or tools", () => {
+    expect(inferNamedAgentProfile()).toBeUndefined();
+    expect(inferNamedAgentProfile("   ")).toBeUndefined();
+    expect(inferNamedAgentProfile("totally-unrelated")).toBeUndefined();
+  });
 });
 
 describe("builtinDefaultAgents", () => {
@@ -103,6 +137,17 @@ describe("builtinDefaultAgents", () => {
       expect(a.description).toBeTruthy();
       expect(a.systemPrompt.trim()).toBeTruthy();
     }
+  });
+
+  it("gives read-only defaults CodeGraph tools so they do not fall back to bash search", () => {
+    const byName = Object.fromEntries(builtinDefaultAgents().map((a) => [a.name, a]));
+    for (const name of ["scout", "planner", "reviewer"]) {
+      expect(byName[name]?.tools).toEqual(
+        expect.arrayContaining(["code_search", "code_explore", "code_node", "code_files"]),
+      );
+      expect(byName[name]?.systemPrompt).toMatch(/code_\*/);
+    }
+    expect(byName.worker?.tools).toEqual(expect.arrayContaining(["code_search", "code_explore"]));
   });
 });
 

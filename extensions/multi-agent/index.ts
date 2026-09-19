@@ -15,7 +15,7 @@ import type { JobOutcome } from "../jobs/types.js";
 import { normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
-import { discoverAgents, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
+import { discoverAgents, inferNamedAgentProfile, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
 import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
 import { cancelSubAgent } from "./cancel.js";
@@ -305,12 +305,16 @@ export default function (pi: ExtensionAPI) {
     description:
       "Delegate a task to an isolated sub-agent (a separate pi process with its own context window). " +
       "Modes: `task` (single) | `tasks` (parallel) | `chain` (sequential, with {previous} placeholder). " +
-      "`agent` picks a named agent (system prompt + tools + model) from ~/.pi/agent/agents/*.md. " +
+      "`agent` picks a named agent (system prompt + tools + model) from ~/.pi/agent/agents/*.md: " +
+      "scout/ask/reviewer are read-only, planner is restricted-write, worker is writable. " +
+      "`profile` (explore|planner|executor|reviewer|default) sets filesystem/MCP/isolation; omitted profile still follows the named agent. " +
       "Returns the sub-agent output(s).",
+    promptSnippet: "Delegate a task to an isolated sub-agent.",
     promptGuidelines: [
       "Use spawn_agent to parallelize independent sub-tasks or to isolate a large exploration from the main context.",
       "Each sub-agent starts fresh — include all context it needs in the task text.",
-      "Use `agent` for a specialized role (e.g. scout/planner/reviewer); use `chain` to pipe one step's output into the next via {previous}.",
+      "Use `agent` for a specialized role: scout/ask (readonly recon), planner, reviewer, worker (writable). Use `chain` to pipe one step's output into the next via {previous}.",
+      "Omit `profile` and the named role still selects explore/planner/reviewer/default. For an unnamed read-only child pass `profile: \"explore\"`.",
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
       "After a background spawn settles you will receive a notice; do not wait just to collect the conclusion.",
       "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
@@ -571,28 +575,6 @@ export default function (pi: ExtensionAPI) {
         sessionSpawnCount.set(sessionKey, already + requested);
       }
 
-      const profile = resolveProfile(params.profile as ProfileInput | undefined);
-      if (params.fork) {
-        if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
-        if (!canUseEmbeddedSubagent(profile)) throw new Error("fork 需要 Electron 进程内子会话");
-      }
-      const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
-      const wantWorktree = profile.isolation === "worktree";
-      // chain has its own worktree guard below; only the single/parallel path is gated here.
-      if (wantWorktree && !hasChain && list.length !== 1) {
-        throw new Error("worktree 隔离仅支持单任务（不支持并行 tasks）");
-      }
-      const profileModel = profileToModel(profile, getConfig);
-      const profileEnv: Record<string, string> = params.profile ? profileToEnv(profile) : {};
-      // 子代理继承 owner 审批策略，但把 `full` / `workspace` 下调为 `auto`：自主 spawn 的子代理
-      // 对用户可见性低，不应连 safety 的危险命令确认 / 受保护路径拦截（④）都跳过。能力硬限
-      // （① readonly/deny）与 owner 自身会话不受影响——这里只收紧"模型自动起的子代理"。
-      // headless 下 ask 仍在 safety 内降级为 auto 行为（不全拦），故 auto 是安全且足够的下限。
-      const ownerPolicy = getApprovalPolicy();
-      profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
-      profileEnv.SUBAGENT_DEPTH = String(childDepth);
-      const limits = profileLimits(profile);
-
       // Named-agent resolution (markdown agents in ~/.pi/agent/agents + .pi/agents).
       // A named agent contributes its system prompt + tool allowlist + model.
       const agentScope = (params.agentScope as AgentScope | undefined) ?? "user";
@@ -628,6 +610,48 @@ export default function (pi: ExtensionAPI) {
         return { systemPrompt: a.systemPrompt, tools: a.tools, model: a.model };
       };
 
+      const chainHead = Array.isArray(params.chain)
+        ? (params.chain[0] as { agent?: unknown } | undefined)
+        : undefined;
+      const hintAgent =
+        (typeof params.agent === "string" && params.agent.trim()) ||
+        list[0]?.agent ||
+        (typeof chainHead?.agent === "string" ? chainHead.agent.trim() : "");
+      let hintTools: string[] | undefined;
+      if (hintAgent) {
+        try {
+          hintTools = agentLayer(hintAgent).tools;
+        } catch {
+          /* 未知名留给后面各路径抛错；名字表仍可用于推断只读/可写档 */
+        }
+      }
+      const profile = resolveProfile(
+        (params.profile as ProfileInput | undefined) ?? inferNamedAgentProfile(hintAgent || undefined, hintTools),
+      );
+      if (params.fork) {
+        if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
+        if (!canUseEmbeddedSubagent(profile)) throw new Error("fork 需要 Electron 进程内子会话");
+      }
+      const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
+      const wantWorktree = profile.isolation === "worktree";
+      // chain has its own worktree guard below; only the single/parallel path is gated here.
+      if (wantWorktree && !hasChain && list.length !== 1) {
+        throw new Error("worktree 隔离仅支持单任务（不支持并行 tasks）");
+      }
+      const profileModel = profileToModel(profile, getConfig);
+      // 显式 profile 与按命名角色推断的 profile 都要落到 env + registry，否则 UI 一律显示「工作」、
+      // 只读档的 SAFETY_READONLY / deny 也不会生效。
+      const profileEnv: Record<string, string> = profileToEnv(profile);
+      // 子代理继承 owner 审批策略，但把 `full` / `workspace` 下调为 `auto`：自主 spawn 的子代理
+      // 对用户可见性低，不应连 safety 的危险命令确认 / 受保护路径拦截（④）都跳过。能力硬限
+      // （① readonly/deny）与 owner 自身会话不受影响——这里只收紧"模型自动起的子代理"。
+      // headless 下 ask 仍在 safety 内降级为 auto 行为（不全拦），故 auto 是安全且足够的下限。
+      const ownerPolicy = getApprovalPolicy();
+      profileEnv.APPROVAL_POLICY = ownerPolicy === "full" || ownerPolicy === "workspace" ? "auto" : ownerPolicy;
+      profileEnv.SUBAGENT_DEPTH = String(childDepth);
+      const limits = profileLimits(profile);
+      const profileJson = JSON.stringify(profile);
+
       // Chain mode: run steps sequentially; each step's {previous} is replaced by
       // the prior step's output. Stops at the first failing step.
       if (params.chain && params.chain.length > 0) {
@@ -656,7 +680,7 @@ export default function (pi: ExtensionAPI) {
           registry.create({
             id,
             task: taskText,
-            profile: params.profile ? JSON.stringify(profile) : null,
+            profile: profileJson,
             model: chosenModel ?? null,
             parentId: parentSid ?? null, depth: childDepth,
           });
@@ -726,7 +750,7 @@ export default function (pi: ExtensionAPI) {
         const spawnedText = `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`;
         const spawnMode = params.mode === "one-shot" ? "one-shot" : "continuable";
         const startOneShotJob = (): { jobId: string } => {
-          registry.create({ id, task, profile: params.profile ? JSON.stringify(profile) : null, model: chosenModel ?? null, parentId: parentSid ?? null, depth: childDepth });
+          registry.create({ id, task, profile: profileJson, model: chosenModel ?? null, parentId: parentSid ?? null, depth: childDepth });
           const controller = new AbortController();
           inflight.set(id, controller);
           const jobId = jobs.start({
@@ -784,7 +808,7 @@ export default function (pi: ExtensionAPI) {
           registry.create({
             id,
             task,
-            profile: params.profile ? JSON.stringify(profile) : null,
+            profile: profileJson,
             model: chosenModel ?? null,
             parentId: parentSid ?? null, depth: childDepth,
           });
@@ -878,7 +902,7 @@ export default function (pi: ExtensionAPI) {
         registry.create({
           id,
           task,
-          profile: params.profile ? JSON.stringify(profile) : null,
+          profile: profileJson,
           model: chosenModel ?? null,
           parentId: parentSid ?? null, depth: childDepth,
         });
@@ -978,7 +1002,7 @@ export default function (pi: ExtensionAPI) {
           registry.create({
             id: subId,
             task: t.task,
-            profile: params.profile ? JSON.stringify(profile) : null,
+            profile: profileJson,
             model: chosenModel ?? null,
             parentId: parentSid ?? null, depth: childDepth,
           });

@@ -170,11 +170,43 @@ export function withBuiltinDefaults(discovered: AgentConfig[]): AgentConfig[] {
 // target is actually present among the discovered agents, so user customizations
 // (renames/deletions) never get silently overridden.
 export const AGENT_ALIASES: Record<string, string[]> = {
-  scout: ["explorer", "explore", "exploration", "researcher", "research", "recon", "finder", "search", "investigator"],
+  scout: ["explorer", "explore", "exploration", "researcher", "research", "recon", "finder", "search", "investigator", "ask"],
   planner: ["plan", "planning", "architect", "designer", "design"],
   reviewer: ["review", "code-reviewer", "code_reviewer", "codereviewer", "critic", "qa", "auditor"],
   worker: ["executor", "execute", "implementer", "implement", "general", "builder", "build", "coder", "developer", "dev"],
 };
+
+/** Canonical named agent → capability preset when spawn omits `profile`. */
+const NAMED_AGENT_PRESET: Record<string, string> = {
+  scout: "explore",
+  planner: "planner",
+  reviewer: "reviewer",
+  worker: "default",
+};
+
+/** Frontmatter tools that imply a writable worker; their absence infers explore (readonly). */
+const WRITE_TOOL_HINTS = new Set(["write", "edit", "ast_edit", "hl_edit", "wiki_update", "wiki_reindex"]);
+
+/**
+ * Infer a capability preset from a named agent when spawn_agent omits `profile`.
+ * Canonical names first, then a custom tools allowlist (no write/edit → explore),
+ * then role aliases (ask/explorer → explore). Returns undefined so the caller keeps default.
+ */
+export function inferNamedAgentProfile(agentName?: string, tools?: string[]): string | undefined {
+  const n = agentName?.trim().toLowerCase();
+  if (n && NAMED_AGENT_PRESET[n]) return NAMED_AGENT_PRESET[n];
+  if (tools && tools.length > 0) {
+    const names = tools.map((t) => t.trim().toLowerCase()).filter(Boolean);
+    if (names.length > 0 && !names.some((t) => WRITE_TOOL_HINTS.has(t))) return "explore";
+    if (names.some((t) => WRITE_TOOL_HINTS.has(t))) return undefined;
+  }
+  if (n) {
+    for (const [canonical, aliases] of Object.entries(AGENT_ALIASES)) {
+      if (aliases.includes(n) && NAMED_AGENT_PRESET[canonical]) return NAMED_AGENT_PRESET[canonical];
+    }
+  }
+  return undefined;
+}
 
 /** Classic Levenshtein edit distance (small inputs — agent names). */
 function editDistance(a: string, b: string): number {

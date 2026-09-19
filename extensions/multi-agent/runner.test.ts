@@ -10,6 +10,7 @@ import {
   buildSubagentSkillArgs,
   extractFinalText,
   isAgentEndLine,
+  parentModelSpec,
   resolvePiCommand,
   resolveSubagentModel,
 } from "./runner.js";
@@ -17,6 +18,7 @@ import {
 const origPiBin = process.env.PI_BIN;
 const origWorkerEntry = process.env.PI_WORKER_ENTRY;
 const origSubagentModel = process.env.SUBAGENT_MODEL;
+const origSubagentMode = process.env.SUBAGENT_MODE;
 const origRuntimeConfig = process.env.PI_RUNTIME_CONFIG;
 beforeEach(() => {
   process.env.PI_WORKER_ENTRY = origWorkerEntry ?? "C:/app/out/main/pi-worker.js";
@@ -28,6 +30,8 @@ afterEach(() => {
   else process.env.PI_WORKER_ENTRY = origWorkerEntry;
   if (origSubagentModel === undefined) delete process.env.SUBAGENT_MODEL;
   else process.env.SUBAGENT_MODEL = origSubagentModel;
+  if (origSubagentMode === undefined) delete process.env.SUBAGENT_MODE;
+  else process.env.SUBAGENT_MODE = origSubagentMode;
   if (origRuntimeConfig === undefined) delete process.env.PI_RUNTIME_CONFIG;
   else process.env.PI_RUNTIME_CONFIG = origRuntimeConfig;
 });
@@ -154,6 +158,24 @@ describe("resolveSubagentModel", () => {
     expect(resolveSubagentModel()).toBeUndefined();
     process.env.SUBAGENT_MODEL = "   ";
     expect(resolveSubagentModel()).toBeUndefined();
+  });
+  it("inherit mode ignores SUBAGENT_MODEL so the caller can pass the parent model", () => {
+    process.env.SUBAGENT_MODE = "inherit";
+    process.env.SUBAGENT_MODEL = "other/model";
+    expect(resolveSubagentModel()).toBeUndefined();
+  });
+});
+
+describe("parentModelSpec", () => {
+  it("joins provider/id", () => {
+    expect(parentModelSpec({ provider: "custom-mtwuh2s5", id: "deepseek-flash" })).toBe(
+      "custom-mtwuh2s5/deepseek-flash",
+    );
+  });
+  it("returns undefined when either side is missing", () => {
+    expect(parentModelSpec({ provider: "x" })).toBeUndefined();
+    expect(parentModelSpec({ id: "y" })).toBeUndefined();
+    expect(parentModelSpec(undefined)).toBeUndefined();
   });
 });
 
@@ -319,8 +341,21 @@ describe("extractFinalText", () => {
     ].join("\n");
     expect(extractFinalText(jsonl)).toBe("final answer");
   });
-  it("falls back to a tail slice when no assistant message is present", () => {
-    expect(extractFinalText("not json at all")).toBe("not json at all");
+  it("accumulates json-mode text_delta when message_end content is empty", () => {
+    const jsonl = [
+      JSON.stringify({ type: "session", version: 3, id: "sess" }),
+      JSON.stringify({ type: "agent_start" }),
+      JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }),
+      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "RESULT:" } }),
+      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "c=5" } }),
+      JSON.stringify({ type: "message_end", message: { role: "assistant", content: [] } }),
+      JSON.stringify({ type: "agent_end" }),
+    ].join("\n");
+    expect(extractFinalText(jsonl)).toBe("RESULT:c=5");
+  });
+  it("does not treat a session header as assistant output", () => {
+    expect(extractFinalText(JSON.stringify({ type: "session", version: 3, id: "x", cwd: "/ws" }))).toBe("");
+    expect(extractFinalText("not json at all")).toBe("");
   });
 });
 

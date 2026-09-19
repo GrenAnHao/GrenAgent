@@ -20,6 +20,7 @@ export function createStructuredCapture(schema: object): StructuredCapture {
         name: STRUCTURED_OUTPUT_TOOL,
         label: "Structured Output",
         description: "Deliver your final result. Call exactly once with arguments matching the schema.",
+        promptSnippet: "Deliver the final structured result.",
         parameters: schema as never,
         async execute(_id, params) {
           const replaced = captured !== undefined;

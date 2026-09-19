@@ -244,6 +244,7 @@ export function registerAdjacentTools(pi: ExtensionAPI): void {
       "Send a message to an adjacent agent: the direct parent or a direct child. " +
       "Siblings, skip-generation relatives, and self are rejected. " +
       "Only parent-to-child may cold-resume a continuable JSONL session.",
+    promptSnippet: "Send a message to a parent or child agent.",
     promptGuidelines: [
       "Use send_message to talk to your direct parent or a child you spawned.",
       "The recipient does not automatically see your transcript or tool output — include a self-contained message.",
@@ -265,6 +266,7 @@ export function registerAdjacentTools(pi: ExtensionAPI): void {
       "Interrupt a resident agent's current turn. The target may be your direct child or any deeper agent created under you. " +
       "Only the current turn stops; queued messages stay parked and agents it started keep running. " +
       "If the target is not resident, the request is recorded without error.",
+    promptSnippet: "Interrupt a resident descendant agent.",
     promptGuidelines: [
       "Use interrupt_agent to stop a resident descendant you (directly or indirectly) spawned.",
       "Interrupting yourself, a sibling, or a non-descendant is rejected.",

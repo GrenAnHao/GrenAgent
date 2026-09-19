@@ -390,6 +390,20 @@ describe("outputSchema", () => {
     );
   });
 
+  it("hides extension tools via setActiveTools when the child has a named-agent allowlist", async () => {
+    const session = fakeSession({ provider: "a", id: "b" });
+    const setActiveTools = vi.fn();
+    (session as unknown as { setActiveTools: ReturnType<typeof vi.fn> }).setActiveTools = setActiveTools;
+    createAgentSessionFromServices.mockResolvedValue({ session });
+    await runEmbeddedSubagent({
+      cwd: "/ws",
+      task: "t",
+      agentId: "sa-allow",
+      tools: ["read", "grep", "ask_user"],
+    });
+    expect(setActiveTools).toHaveBeenCalledWith(["read", "grep", "ask_user"]);
+  });
+
   it("adds a per-child factory registering structured_output with the schema, and appends the instruction", async () => {
     const { factories, getAppend } = captureFactories();
     createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });

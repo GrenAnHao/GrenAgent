@@ -396,6 +396,14 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     shutdownHandler: () => {},
   });
 
+  // Named-agent `--tools` is an allowlist. SDK `tools` covers builtins; extension
+  // tools (MCP, spawn_agent, …) stay registered unless the session can hide them.
+  const allow = opts.tools?.map((t) => t.trim()).filter(Boolean) ?? [];
+  const setActive = (session as { setActiveTools?: (names: string[]) => void }).setActiveTools;
+  if (allow.length && typeof setActive === "function") {
+    setActive([...new Set(allow)]);
+  }
+
   const unsub = session.subscribe((event: AgentSessionEvent) => {
     const line = eventToJsonLine(event);
     if (line) transcript += line;

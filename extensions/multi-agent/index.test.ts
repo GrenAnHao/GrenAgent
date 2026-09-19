@@ -15,12 +15,13 @@ vi.mock("./cancel.js", () => ({
   cancelSubAgent: () => {},
 }));
 vi.mock("./worktree.js", () => ({ createWorktree: vi.fn(async () => null), worktreeDiff: vi.fn(async () => "") }));
-vi.mock("./agents.js", () => ({
-  discoverAgents: () => ({ agents: [], projectAgentsDir: null }),
-  resolveAgent: () => undefined,
-  suggestAgent: () => undefined,
-  withBuiltinDefaults: (agents: unknown) => agents,
-}));
+vi.mock("./agents.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./agents.js")>();
+  return {
+    ...actual,
+    discoverAgents: () => ({ agents: [], projectAgentsDir: null }),
+  };
+});
 const registryRows = vi.hoisted(() => {
   const rows = new Map<string, Record<string, unknown>>();
   return {
@@ -224,6 +225,34 @@ describe("spawn_agent · approval policy injected into sub-agent (B)", () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("auto");
     await loadSpawnAgent()("t6", { task: "do x" }, null, null, ctx);
     expect(injectedPolicy()).toBe("auto");
+  });
+});
+
+describe("spawn_agent · named agent infers capability profile", () => {
+  const storedProfile = () => JSON.parse(String(registryRows.rows.get("sa_test")?.profile ?? "null"));
+  const injectedEnv = () => vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.env as Record<string, string>;
+
+  it("unnamed spawn persists default writable profile", async () => {
+    await loadSpawnAgent()("t", { task: "do x" }, null, null, ctx);
+    expect(storedProfile().fs).toBe("workspace");
+    expect(storedProfile().name).toBe("default");
+    expect(injectedEnv().SAFETY_READONLY).toBeUndefined();
+  });
+
+  it("agent ask/scout without profile is readonly explore", async () => {
+    await loadSpawnAgent()("t", { task: "recon", agent: "ask" }, null, null, ctx);
+    expect(storedProfile().fs).toBe("readonly");
+    expect(storedProfile().name).toBe("explore");
+    expect(injectedEnv().SAFETY_READONLY).toBe("1");
+    expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.tools).toEqual(
+      expect.arrayContaining(["read", "grep", "find", "ls"]),
+    );
+  });
+
+  it("explicit profile wins over named-agent inference", async () => {
+    await loadSpawnAgent()("t", { task: "recon", agent: "ask", profile: "default" }, null, null, ctx);
+    expect(storedProfile().fs).toBe("workspace");
+    expect(injectedEnv().SAFETY_READONLY).toBeUndefined();
   });
 });
 

@@ -19,6 +19,7 @@ export function registerListSubagentModels(pi: ExtensionAPI, policy: ModelSelect
     description:
       "List the model routes you may pick for a sub-agent (`spawn_agent` `model`), with each route's supported thinking levels. " +
       "Omit `provider` to list every authorized route.",
+    promptSnippet: "List authorized model routes for spawn_agent.",
     parameters: Type.Object({
       provider: Type.Optional(Type.String({ description: "Only list routes of this provider id." })),
     }),
