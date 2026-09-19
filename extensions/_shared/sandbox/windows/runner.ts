@@ -10,6 +10,16 @@ const RUNNER_FAILURE_RULES = [
     exitCodes: [163],
     signatures: ["pi-sandbox-win:"],
   },
+  {
+    kind: "runner-launch-failed" as const,
+    // WSL bash CreateInstance → 1; MSYS signal pipe → STATUS_DLL_INIT_FAILED.
+    exitCodes: [1, 3221225794, -1073741502],
+    signatures: [
+      "bash/service/createinstance",
+      "couldn't create signal pipe",
+      "createfilemapping",
+    ],
+  },
 ];
 
 export function windowsHelperArgv(

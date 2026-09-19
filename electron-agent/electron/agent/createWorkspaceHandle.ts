@@ -3,7 +3,7 @@ import { makeGrenRuntimeFactory } from '../../../cli/src/gren-runtime.js';
 import { releaseImBinding } from '../../../extensions/_shared/im-binding.js';
 import { runInWorkspace } from '../../../extensions/_shared/workspace-context.js';
 import { disposeMcpManager } from '../../../extensions/mcp/manager.js';
-import { killSubagentsFor } from '../../../extensions/multi-agent/subagentProcessRegistry.js';
+import { releaseSubagentControlPlane } from '../../../extensions/multi-agent/controlPlane.js';
 import { WorkspaceHandle, type WorkspaceHandleOptions } from './workspaceHandle.js';
 
 export interface CreateWorkspaceHandleInput {
@@ -40,7 +40,8 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
       // IM 在 session_start 用 ctx.cwd 声明；workspace ≠ resolved 时两键都释放。
       releaseImBinding(workspace);
       if (cwd !== workspace) releaseImBinding(cwd);
-      killSubagentsFor(cwd);
+      releaseSubagentControlPlane(cwd);
+      if (cwd !== workspace) releaseSubagentControlPlane(workspace);
     },
   });
   try {

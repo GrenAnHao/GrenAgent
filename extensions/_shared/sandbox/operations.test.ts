@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SandboxUnavailableError } from "./errors.js";
-import { createSandboxedBashOperations } from "./operations.js";
+import { createSandboxedBashOperations, PS_UTF8_PREFIX } from "./operations.js";
 import {
   consumePendingDenial,
   __resetPendingDenialsForTest,
@@ -380,9 +380,7 @@ describe("createSandboxedBashOperations", () => {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        expect.stringMatching(
-          /^\[Console\]::OutputEncoding=\[System\.Text\.Encoding\]::UTF8;\necho hi$/,
-        ),
+        `${PS_UTF8_PREFIX}echo hi`,
       ],
       expect.objectContaining({ cwd: CWD }),
     );
@@ -401,12 +399,47 @@ describe("createSandboxedBashOperations", () => {
     const handed = confine.mock.calls[0]?.[0] as string[];
     expect(handed[0]).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
     expect(handed.slice(1, 4)).toEqual(["-NoProfile", "-NonInteractive", "-Command"]);
-    expect(handed[4]).toBe("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\necho hi");
+    expect(handed[4]).toBe(`${PS_UTF8_PREFIX}echo hi`);
     expect(spawnImpl).toHaveBeenCalledWith(
       "runner",
       ["--", ...handed],
       expect.objectContaining({ cwd: CWD }),
     );
+  });
+
+  it("PowerShell prefix only sets Console.OutputEncoding in FullLanguage", () => {
+    expect(PS_UTF8_PREFIX).toContain("LanguageMode");
+    expect(PS_UTF8_PREFIX).toContain("FullLanguage");
+    expect(PS_UTF8_PREFIX).toContain("$env:NO_COLOR");
+    expect(PS_UTF8_PREFIX).toMatch(
+      /if\s*\(\s*\$ExecutionContext\.SessionState\.LanguageMode -eq 'FullLanguage'\s*\)/,
+    );
+  });
+
+  it("sets NO_COLOR on the spawned shell", async () => {
+    const { ops, spawnImpl } = makeOps({ mode: "danger-full-access" });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      SHELL,
+      ["-c", COMMAND],
+      expect.objectContaining({ env: expect.objectContaining({ NO_COLOR: "1" }) }),
+    );
+  });
+
+  it("strips ANSI from streamed bash output", async () => {
+    const { ops } = makeOps({
+      mode: "danger-full-access",
+      spawnImpl: vi.fn(() =>
+        fakeChild({
+          exitCode: 0,
+          stdout: Buffer.from("\x1b[31;1mCannot set property\x1b[0m\n"),
+        }),
+      ),
+    });
+    const { onData, text } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(text()).toBe("Cannot set property\n");
   });
 
   it("refuses Windows bash.exe under the restricted-token helper", async () => {
@@ -460,5 +493,29 @@ describe.skipIf(process.platform !== "win32")("PowerShell UTF-8 prefix live", ()
     const buf = Buffer.concat(text);
     expect(buf.toString("hex")).toContain("e4b8ade69687");
     expect(buf.toString("hex")).not.toContain("d6d0cec4");
+  }, 15000);
+
+  it("encoding prefix is silent under ConstrainedLanguage", async () => {
+    const { spawn } = await import("node:child_process");
+    const { resolveShellPath } = await import("./shellPath.js");
+    const { PS_UTF8_PREFIX } = await import("./operations.js");
+    const shell = await resolveShellPath();
+    const script =
+      `$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; ${PS_UTF8_PREFIX}Write-Output 'hello-clm'`;
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      child.stdout.on("data", (d: Buffer) => chunks.push(d));
+      child.stderr.on("data", (d: Buffer) => chunks.push(d));
+      child.on("error", reject);
+      child.on("close", () => resolve());
+    });
+    const text = Buffer.concat(chunks).toString("utf8");
+    expect(text).toContain("hello-clm");
+    expect(text).not.toMatch(/Cannot set property/i);
+    expect(text).not.toMatch(/language mode/i);
   }, 15000);
 });

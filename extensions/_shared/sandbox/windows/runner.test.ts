@@ -43,6 +43,15 @@ describe("windowsHelperArgv", () => {
         exitCodes: [163],
         signatures: ["pi-sandbox-win:"],
       },
+      {
+        kind: "runner-launch-failed",
+        exitCodes: [1, 3221225794, -1073741502],
+        signatures: [
+          "bash/service/createinstance",
+          "couldn't create signal pipe",
+          "createfilemapping",
+        ],
+      },
     ]);
   });
 

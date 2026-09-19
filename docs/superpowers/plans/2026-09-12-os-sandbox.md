@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 用官方 `createBashTool({ operations })` + `user_bash` 接管 Agent 的 bash，按五档审批做 `confine(argv)`；无 runner 失败关闭；三平台（Windows ACL / Linux bwrap / macOS Seatbelt）同期交付。
+**目标：** 用官方 `createBashToolDefinition({ operations })` + `user_bash` 接管 Agent 的 bash，按五档审批做 `confine(argv)`；无 runner 失败关闭；三平台（Windows ACL / Linux bwrap / macOS Seatbelt）同期交付。
 
 **架构：** 纯函数与 runner 放 `extensions/_shared/sandbox/`。扩展 `extensions/sandbox` 在 pi-worker 里注册包装后的 bash、`bash_escalate`，并覆盖 `user_bash`。审批五档键在 `_shared/approval`、渲染层 store、`piRuntimeService`、`toolPermission` 四处同步。`SandboxManager.prepare()` 仍只服务 PTY / 子代理路径校验，不引入失败关闭。
 
@@ -31,11 +31,27 @@
 **bash 在 pi-worker 里跑，** 不是 Electron 主进程。注入点只有：
 
 ```ts
-import { createBashTool } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 // 若包根未导出：从 @earendil-works/pi-coding-agent/dist/core/tools/bash.js 深导入，并在该任务 commit message 写明。
 ```
 
+`registerTool(tool: ToolDefinition)`（`dist/core/extensions/types.d.ts:944`）。`createBashTool()` 返回 `AgentTool`，**不要用**；用 `createBashToolDefinition()`——它返回 `ToolDefinition`，才是 `registerTool` 的一等公民。官方 `examples/extensions/sandbox/index.ts` 用 `createBashTool` + 展开是权宜写法，不抄。
+
+**`ExtensionAPI` 上没有 `cwd`，也没有 `sessionManager`。** 只能从 `ExtensionContext` 取：
+
+- 工具 `execute` 的第 5 参 `ctx`（`types.d.ts:372`）——含 `cwd`、`hasUI`、`ui`、`sessionManager`；
+- `session_start` / `session_shutdown` 的 handler ctx。
+
+`ctx.sessionManager.getSessionId()` 可用（`ReadonlySessionManager` 含该方法，见 `dist/core/session-manager.d.ts:140`）。**不要退化到 `process.cwd()`**，多工作区会把错误的工作区当可写根。
+
 禁止 `spawnHook`。禁止复用 `createLocalBashOperations()`。禁止官方示例那种 `if (!ready) return localBash.execute(...)`。
+
+**每个任务 commit 前必跑（类型门槛，不是可选项）：**
+
+```powershell
+cd extensions; npx tsc --noEmit
+cd electron-agent; npx tsc --noEmit
+```
 
 **`SandboxManager.prepare()` 不得改成抛 UNAVAILABLE。** PTY 与子代理取消仍走它。bash 不经过这个类。
 
@@ -94,6 +110,9 @@ cd cli; node --test src/extension-profile.test.ts
 | `electron-agent/electron/app/toolPermission/types.ts` | `ApprovalPreset` |
 | `electron-agent/electron/app/toolPermission/builtinRules.ts` | `readonly` / `workspace` |
 | `electron-agent/electron/app/sandbox/sandboxManager.ts` | 注释：bash 不走此类；行为不变 |
+| `electron-agent/electron-builder.yml` | helper 与扩展目录进 `files` / `asarUnpack`（任务 13） |
+| `.gitignore` | helper 二进制若入仓则移除对应排除（任务 13） |
+| `.github/workflows/*.yml` | 三平台 live 作业 + linux 负向 job（任务 14） |
 
 ---
 
@@ -361,6 +380,11 @@ describe("attributeRun", () => {
   it("allows signature fallback only when exit is nonzero and not a runner failure", () => {
     expect(attributeRun({ exitCode: 1, stderr: "Read-only file system\n" }, confined).kind).toBe("denial");
   });
+  it("treats a spawn error as a runner failure", () => {
+    // runner 可执行文件缺失时 spawn 走 error 事件：exitCode 为 null、无输出。
+    // 不能兜成 code=1 再判成 command，否则「runner 没装」会被当成命令自己失败。
+    expect(attributeRun({ exitCode: null, spawnError: "ENOENT" }, confined).kind).toBe("runner-failure");
+  });
 });
 ```
 
@@ -403,28 +427,43 @@ import type { ConfinedArgv } from "./types.js";
 
 export type RunKind = "runner-failure" | "denial" | "command";
 
+export interface RunResult {
+  exitCode: number | null;
+  stdout?: string;
+  stderr?: string;
+  /** spawn 自身的 error（ENOENT / EACCES）——runner 根本没起来 */
+  spawnError?: string;
+}
+
 export function attributeRun(
-  result: { exitCode: number | null; stdout?: string; stderr?: string },
+  result: RunResult,
   confined: Pick<ConfinedArgv, "denialExitCodes" | "denialSignatures" | "runnerFailureRules">,
 ): { kind: RunKind } {
+  // 1) runner 没起来优先判：此时退出码与输出都不可信。
+  if (result.spawnError) return { kind: "runner-failure" };
+
   const code = result.exitCode ?? 1;
-  const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.toLowerCase();
+  const outText = (result.stdout ?? "").toLowerCase();
+  const errText = (result.stderr ?? "").toLowerCase();
+
+  // 2) runner 规则看全部输出（启动器也可能把错误打到 stdout）。
+  const allText = `${outText}\n${errText}`;
   for (const rule of confined.runnerFailureRules) {
-    if (rule.exitCodes.includes(code) && rule.signatures.some((s) => text.includes(s.toLowerCase()))) {
+    if (rule.exitCodes.includes(code) && rule.signatures.some((s) => allText.includes(s.toLowerCase()))) {
       return { kind: "runner-failure" };
     }
   }
+  // 3) 结构化拒写退出码。
   if (confined.denialExitCodes.includes(code)) return { kind: "denial" };
-  if (code !== 0 && confined.denialSignatures.some((s) => text.includes(s.toLowerCase()))) {
+  // 4) 签名兜底**只看 stderr**：stdout 里的同名文字可能是命令回显，会误触发升权。
+  if (code !== 0 && confined.denialSignatures.some((s) => errText.includes(s.toLowerCase()))) {
     return { kind: "denial" };
   }
   return { kind: "command" };
 }
 ```
 
-签名回显误命中：退出码 1 且签名只在 stdout、语义上仍可能被判 denial。任务 3 测试要求「stdout 回显 + exit 1」为 `command`。因此 **签名兜底只看 stderr**：
-
-把 `text` 拆开：runner 规则看 stdout+stderr；`denialSignatures` **只匹配 stderr**。
+`operations` 的 `run()` 必须把 `spawn` 的 `error` 事件落成 `RunResult.spawnError`（见任务 7），否则第 1 步拿不到。
 
 - [ ] **步骤 4：跑测试确认通过**
 
@@ -453,7 +492,7 @@ git commit -m "feat(sandbox): 升权加宽、pending denial 与退出归因"
 
 - [ ] **步骤 1：写失败测试**
 
-`linux/bwrap.test.ts`：断言 `read-only` 含 `--ro-bind / /`、`--die-with-parent`、`--unshare-pid`，**不含** `--unshare-net`；`workspace-write` 另有 `--bind` 工作区与临时目录。分隔符 `--` 之后是调用方 argv。
+`linux/bwrap.test.ts`：断言 `read-only` 含 `--ro-bind / /`、`--die-with-parent`、`--unshare-pid`、`--bind <tempDir> <tempDir>`，**不含** `--unshare-net`、不含工作区 bind；`workspace-write` 另有 `--bind` 工作区（临时目录两种模式都要有，否则 `mktemp` / `git` 会直接失败）。分隔符 `--` 之后是调用方 argv。
 
 `provider.test.ts`：
 
@@ -527,10 +566,10 @@ export function bwrapArgv(
     "--dev", "/dev",
     "--ro-bind", "/", "/",
   ];
+  // 两种模式都要有可写临时目录：mktemp / git / 多数构建工具在 read-only 下也要写 /tmp 类目录。
+  prefix.push("--bind", tempDir, tempDir);
   if (policy.mode === "workspace-write") {
-    prefix.push("--bind", policy.workspaceRoot, policy.workspaceRoot, "--bind", tempDir, tempDir);
-  } else {
-    prefix.push("--bind", "/dev/null", "/dev/null");
+    prefix.push("--bind", policy.workspaceRoot, policy.workspaceRoot);
   }
   return [...prefix, "--", ...argv];
 }
@@ -600,7 +639,7 @@ cd extensions; npx vitest run _shared/sandbox/darwin/seatbelt.test.ts
 
 `workspace-write` 追加 `(allow file-write* (subpath "ROOT"))` 与临时目录的同样一条。路径用绝对 POSIX 形式。探测：`/usr/bin/sandbox-exec` 存在。
 
-探测：`/usr/bin/sandbox-exec` 存在。`createSandboxProvider` 在 `darwin` 上走这条。`enforcement: "full"`。`denialSignatures`: `["operation not permitted", "sandbox"]`。
+探测：`/usr/bin/sandbox-exec` 存在。`createSandboxProvider` 在 `darwin` 上走这条。`enforcement: "full"`。`denialSignatures`: `["operation not permitted", "read-only file system"]`——**不要放 `sandbox` 这类泛词**，普通输出极易命中，会误触发升权（签名只看 stderr 也挡不住正常调试输出）。
 
 - [ ] **步骤 4：跑测试确认通过**
 
@@ -655,7 +694,7 @@ SID：`sha256(\`${kind}:${resolvedPath.toLowerCase()}\`)` 取前 8 个 uint32 �
 
 `provider` 在 `win32`：helper 文件不存在 → `SANDBOX_UNAVAILABLE`。存在则 `enforcement: "partial"`。
 
-win32 CI 用 `cl` 或 `gcc` 编 helper，输出到 `extensions/_shared/sandbox/windows/bin/pi-sandbox-win.exe`。该路径加入 `.gitignore`，源码入仓。任务 12 的真隔离测试在编不出 helper 时 skip，不得改成裸跑。
+**本任务只交付 `helper.c` 源码**（入仓）。二进制的构建方式、产物进包路径、以及「编不出来时的发布决策」统一由**任务 13** 负责——`electron-agent/electron-builder.yml` 的 `files` 目前只有 `dist/**`、`out/**`、`package.json`，不做处理的话 exe 不会进产物，Windows 生产环境必然 `SANDBOX_UNAVAILABLE`、受限档位全废。任务 12 的真隔离测试在 helper 不可用时 skip，不得改成裸跑。
 
 - [ ] **步骤 4：跑测试确认通过**
 
@@ -743,7 +782,7 @@ async exec(command, cwd, { onData, signal, timeout, env }) {
 }
 ```
 
-`run`：`spawn(argv[0], argv.slice(1), { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" })`。Windows 终止：`spawn("taskkill", ["/pid", String(pid), "/t", "/f"])`。POSIX：`process.kill(-pid, "SIGTERM")`。超时与 `signal` 都走终止。
+`run`：`spawn(argv[0], argv.slice(1), { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" })`，返回 `RunResult`。**必须监听 `child.on("error")`**：把 `err.code ?? err.message` 写进 `RunResult.spawnError` 并 `{ exitCode: null }` 结束——否则 runner 缺失会被归因成命令失败（见任务 3 第 1 步）。Windows 终止：`spawn("taskkill", ["/pid", String(pid), "/t", "/f"])`。POSIX：`process.kill(-pid, "SIGTERM")`。超时与 `signal` 都走终止。
 
 - [ ] **步骤 4：跑测试确认通过**
 
@@ -783,6 +822,9 @@ git commit -m "feat(sandbox): 自持 spawn 的 BashOperations"
 7. 档位 `auto` + 合法加宽 → 调用 `ui.select`；选允许则再 exec 一次（mock operations）。
 8. `ui.select` 返回 `undefined` 或抛错 → 失败，pending 作废，不得再 spawn。
 9. `session_shutdown` 调用 `dispose`。
+10. **完整权限档（`full`）下没有 pending** → `bash_escalate` 直接拒绝，不调 `ui.select`。
+11. **Ask + 审批档 `workspace`**：`resolvePreset` 强制 `read-only`，`bash_escalate` 应走「问人」而不是被第 6 条误拒。
+12. **cwd 回归**：`session_start` 给 `ctx.cwd = "D:/a"` 后，`getPolicy` 解析的 `workspaceRoot` 是 `"D:/a"`，不是 `process.cwd()`；`sessionId` 取自 `ctx.sessionManager.getSessionId()`。
 
 同时先改 `agent-mode` 的测试会在任务 10 做；本任务不要改 ASK_TOOLS。
 
@@ -800,7 +842,7 @@ cd extensions; npx vitest run sandbox/index.test.ts
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashTool } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getAgentMode } from "../agent-mode/modes.js";
@@ -813,22 +855,35 @@ import type { FileSandboxMode } from "../_shared/sandbox/types.js";
 
 export default function (pi: ExtensionAPI) {
   const provider = createSandboxProvider();
-  const getPolicy = (cwd: string) =>
-    resolvePreset({
-      approval: getApprovalPolicy(cwd),
-      agentMode: getAgentMode(cwd),
-      workspaceRoot: cwd,
-      sessionId: pi.sessionManager?.getSessionId?.(),
+
+  // ExtensionAPI 上没有 cwd / sessionManager（见「动工前必读」）：只能从 ExtensionContext 取，存闭包。
+  // 不要退化到 process.cwd() —— 多工作区会把错误的工作区当可写根。
+  let cwd = process.cwd();
+  let sessionId: string | undefined;
+
+  const getPolicy = (override?: string) => {
+    const root = override ?? cwd;
+    return resolvePreset({
+      approval: getApprovalPolicy(root),
+      agentMode: getAgentMode(root),
+      workspaceRoot: root,
+      ...(sessionId ? { sessionId } : {}),
     });
+  };
 
   const operations = createSandboxedBashOperations({
-    getPolicy: () => getPolicy(pi.cwd ?? process.cwd()),
+    getPolicy: () => getPolicy(),
     confine: (argv, policy) => provider.confine(argv, policy),
   });
 
-  let cwd = process.cwd();
-  pi.on("session_start", (_e, ctx) => { cwd = ctx.cwd; });
-  pi.registerTool(createBashTool(cwd, { operations }));
+  pi.on("session_start", (_e, ctx) => {
+    cwd = ctx.cwd;
+    sessionId = ctx.sessionManager.getSessionId();
+  });
+
+  // createBashToolDefinition 返回 ToolDefinition，才是 registerTool 要的类型（createBashTool 返回 AgentTool）。
+  // 这里的 cwd 只是构造期兜底；每次执行由 SDK 用 ctx?.cwd || cwd 覆盖（bash.js resolveSpawnContext）。
+  pi.registerTool(createBashToolDefinition(cwd, { operations }));
 
   pi.on("user_bash", () => ({ operations }));
 
@@ -850,7 +905,11 @@ export default function (pi: ExtensionAPI) {
       if (!pending) return fail("bash_escalate: no pending denial for that command.");
       if (!justifyOk(params.justification)) return fail("bash_escalate: justification must be at least 20 characters.");
       if (!isStrictWidening(pending.mode, params.targetMode)) return fail("bash_escalate: targetMode is not a strict widening.");
-      if (getApprovalPolicy(cwd) === "workspace") return fail("bash_escalate: workspace-edit preset rejects escalation.");
+      // 按**解析后的 mode** 裁决，不只看审批档：Ask 会把 mode 强制成 read-only，
+      // 此时即使审批档是 workspace，也应走「问人」而不是直接拒（规格 §5 第 7 步）。
+      if (policy.mode === "workspace-write" && getApprovalPolicy(cwd) === "workspace") {
+        return fail("bash_escalate: workspace-edit preset rejects escalation.");
+      }
       if (!ctx.hasUI) return fail("bash_escalate: UI unavailable; denied.");
       let choice: string | undefined;
       try {
@@ -874,15 +933,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    const id = pi.sessionManager?.getSessionId?.();
-    if (id) await provider.dispose?.(id);
+    if (sessionId) await provider.dispose?.(sessionId);
   });
 }
 ```
 
 `operations.exec` 必须读 `PI_SANDBOX_MODE_ONCE`：若合法且比当前更宽，用完即删（只一次）。不要把它做成会话默认档。
 
-`createBashTool` 若类型不兼容 `registerTool`，改用 `createBashToolDefinition`。以能通过 tsc / 单测为准。
+`getPolicy(override)` 的 `override` 只给 `bash_escalate` 在 `ctx.cwd` 与闭包 cwd 可能不一致时用；常规调用走闭包。
 
 `extensions/index.ts`：`import sandbox from "./sandbox/index.js"`，插入 `allExtensions` 与 `namedExtensions`，紧挨 `approval` 之后。
 
@@ -971,14 +1029,24 @@ full: '关闭 OS 沙箱，不询问（子代理能力限制仍生效）',
 `BUILTIN_RULES`：
 
 ```ts
+const PROTECTED_PATH: BuiltinRule = {
+  id: 'builtin.protected-path', effect: 'deny', match: (c) => c.flags.write && c.flags.protectedPath,
+};
+const DANGEROUS_COMMAND: BuiltinRule = {
+  id: 'builtin.dangerous-command', effect: 'ask', match: (c) => c.flags.dangerousCommand,
+};
+const GUARDS: BuiltinRule[] = [PROTECTED_PATH, DANGEROUS_COMMAND];
+
 export const BUILTIN_RULES: Record<ApprovalPreset, readonly BuiltinRule[]> = {
   full: [],
-  workspace: [GUARDS[0]], // protected-path only
+  workspace: [PROTECTED_PATH], // 按名引用，不靠 GUARDS[0] 这种下标
   auto: GUARDS,
   ask: [...GUARDS, ...ASK_EXTRA],
   readonly: [...GUARDS, ...ASK_EXTRA],
 };
 ```
+
+原有 `GUARDS` / `ASK_EXTRA` 的声明改为引用这两个常量，数组内容与顺序保持原样（顺序进 `ruleId`，是对外契约）。
 
 未知 preset 仍收敛到 `ask`。
 
@@ -1059,12 +1127,13 @@ git commit -m "feat(mode): Ask 放开 bash，写由 read-only 沙箱拦"
 
 ---
 
-### 任务 11：`SandboxManager` 隔离与导出收口
+### 任务 11：`SandboxManager` 隔离、导出收口与范围负向断言
 
 **文件：**
 - 修改：`electron-agent/electron/app/sandbox/sandboxManager.ts`（只加注释，不改 `prepare` 语义）
 - 修改：`electron-agent/electron/app/sandbox/sandboxManager.test.ts`（钉住「degraded 仍返回、不抛」）
-- 创建：`extensions/_shared/sandbox/index.ts`（若任务 8 未写全）
+- 修改：`extensions/_shared/sandbox/index.ts`（导出收口，任务 8 已建）
+- 创建：`extensions/_shared/sandbox/scope.test.ts`（范围负向断言，对应自检表最后一行）
 
 - [ ] **步骤 1：加测试**
 
@@ -1075,6 +1144,22 @@ git commit -m "feat(mode): Ask 放开 bash，写由 read-only 沙箱拦"
     const manager = new SandboxManager({});
     expect(() => manager.prepare({ profile: 'workspace' })).not.toThrow();
   });
+```
+
+`scope.test.ts` 钉住「本规格不做什么」，否则回归时无从发现越界：
+
+```ts
+it('index.ts 不导出 runner 内部符号', async () => {
+  const mod = await import("./index.js");
+  for (const internal of ["bwrapArgv", "seatbeltProfile", "windowsHelperArgv", "makeSid"]) {
+    expect(Object.keys(mod)).not.toContain(internal);
+  }
+});
+it('策略类型里没有网络强制字段（规格 5 才做）', () => {
+  const policy = resolvePreset({ approval: "auto", agentMode: "agent", workspaceRoot: "/w" });
+  expect(Object.keys(policy).sort()).toEqual(["mode", "network", "sessionId", "workspaceRoot"]);
+  expect(policy.network).toBe("enabled"); // 无 allowedDomains / proxy / 端口字段
+});
 ```
 
 - [ ] **步骤 2：跑测试确认通过（红灯只应来自你若误改了 throw）**
@@ -1162,23 +1247,97 @@ git commit -m "test(sandbox): 三平台真隔离 live 套件"
 
 ---
 
+### 任务 13：Windows helper 的构建与进包（P3）
+
+**文件：**
+- 修改：`electron-agent/electron-builder.yml`
+- 修改：`.gitignore`
+- 可能新建：`scripts/build-sandbox-helper.mjs`
+- 验证：打包产物内 helper 可达
+
+- [ ] **步骤 1：先查清 extensions 目录怎么进产物**
+
+`electron-builder.yml` 的 `files` 目前只有 `dist/**`、`out/**`、`package.json`，但 `cli/src/pi-worker.ts:26` 又动态 `import("../../extensions/index.js")`。先确认打包后扩展代码的落点，再决定 helper 放哪——helper 必须与扩展代码**同时可达**，否则 `provider` 探测必然失败、Windows 受限档位全废。
+
+- [ ] **步骤 2：二选一并把结论写进注释**
+
+推荐 **A**：
+
+- **A · 预编译入仓**：把 `pi-sandbox-win.exe` 提交进 `extensions/_shared/sandbox/windows/bin/`（从 `.gitignore` 移除该路径）。免 CI 装 MSVC，产物可复现。
+- **B · CI 编译**：新增 `scripts/build-sandbox-helper.mjs`，用 `cl` 或 `gcc` 编 `helper.c`，产物随构建流程传给 electron-builder。
+
+- [ ] **步骤 3：改 `electron-builder.yml`**
+
+把 helper（以及所需的扩展目录）加进 `files`，二进制加进 `asarUnpack`。`asar: true` 下 exe 必须 unpack，否则无法 spawn。
+
+- [ ] **步骤 4：冒烟验证**
+
+`npm run package` 后确认 `resources/` 下 helper 存在且可执行；结论写进 commit message。若 CI 有打包 job，则加断言而非人工验证。
+
+- [ ] **步骤 5：Commit**
+
+```powershell
+git add electron-agent/electron-builder.yml .gitignore
+git commit -m "build(sandbox): Windows helper 进产物"
+```
+
+---
+
+### 任务 14：三平台 CI 作业（H3）
+
+**文件：**
+- 新建/修改：`.github/workflows/*.yml`（按仓库现有 CI 约定的位置）
+
+- [ ] **步骤 1：三个 job + 变量**
+
+`windows` / `linux` / `macos` 各一个 job，各自装依赖后**设置 `PI_SANDBOX_LIVE=1`** 跑任务 12 的 live 套件：
+
+- windows：helper 可用（依赖任务 13 的构建方式）
+- linux：`apt-get install -y bubblewrap`
+- macos：自带 `/usr/bin/sandbox-exec`
+
+不设变量时套件 skip，等于没跑——这是本任务唯一的目的。
+
+- [ ] **步骤 2：linux 负向 job**
+
+临时把 `bwrap` 移出 PATH 再跑同一套件，断言抛 `SANDBOX_UNAVAILABLE`——**不得降级裸跑**。
+
+- [ ] **步骤 3：windows job 不得 skip 通过**
+
+helper 编不出来时 job 失败，不允许「skip 即绿」。
+
+- [ ] **步骤 4：每个 job 都跑类型门槛**
+
+`cd extensions; npx tsc --noEmit` 与 `cd electron-agent; npx tsc --noEmit`。
+
+- [ ] **步骤 5：Commit**
+
+```powershell
+git add .github/workflows
+git commit -m "ci(sandbox): 三平台真隔离作业与负向 job"
+```
+
+---
+
 ## 规格覆盖自检
 
 | 规格条目 | 任务 |
 | --- | --- |
 | 五档 + Ask 锁 read-only | 1、2、9、10 |
-| `network` 恒 enabled | 2 |
+| `network` 恒 enabled | 2、11 |
 | `confine` 异步、失败关闭、禁止透传 | 4 |
 | Linux bwrap、无 unshare-net | 4 |
 | macOS Seatbelt | 5 |
-| Windows ACL partial + helper | 6、12 |
-| `createBashTool` + `user_bash` | 7、8 |
+| Windows ACL partial + helper | 6、**13** |
+| `createBashToolDefinition` + `user_bash` | 7、8 |
 | 禁止 spawnHook / localBash 降级 | 7、8 |
 | `bash_escalate` + pending + 工作区拒升权 | 3、8 |
+| cwd / sessionId 取 ExtensionContext | 8 |
+| runner 缺失（spawn error）不误判 | 3、7 |
 | UI / IPC / builtinRules 四处同步 | 9 |
 | Ask 放开 bash | 10 |
 | SandboxManager 不波及 PTY | 11 |
-| 真隔离 gating | 12 |
-| 不实现规格 2–5 | 未列任务 |
+| 真隔离 gating | 12、**14** |
+| 不实现规格 2–5（负向断言） | **11**（`scope.test.ts`） |
 
 无 TODO / 「适当处理」占位。类型名与规格 §4.1 一致：`FileSandboxMode`、`SandboxUnavailableError.code === "SANDBOX_UNAVAILABLE"`、`bash_escalate`。

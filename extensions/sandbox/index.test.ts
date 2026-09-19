@@ -23,6 +23,13 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     description: "Execute a bash command.",
     promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
     promptGuidelines: ["Do not leak PI_* environment variables."],
+    parameters: {
+      properties: {
+        command: { type: "string" },
+        timeout: { type: "number" },
+      },
+      required: ["command"],
+    },
     ...opts,
   }),
 }));
@@ -159,11 +166,15 @@ describe("sandbox extension", () => {
         promptSnippet?: string;
         description?: string;
         promptGuidelines?: string[];
+        parameters?: { properties?: { description?: unknown }; required?: string[] };
       };
       expect(bash.promptSnippet).toContain("PowerShell");
       expect(bash.promptSnippet).not.toContain("ls, grep, find");
       expect(bash.description).toContain("exit $LASTEXITCODE");
       expect(bash.promptGuidelines?.some((g) => g.includes("PowerShell"))).toBe(true);
+      expect(bash.parameters?.properties?.description).toBeTruthy();
+      expect(bash.parameters?.required).toContain("description");
+      expect(bash.promptGuidelines?.some((g) => g.includes("shown in the UI"))).toBe(true);
     } finally {
       if (original) Object.defineProperty(process, "platform", original);
     }

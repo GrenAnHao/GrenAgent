@@ -53,7 +53,13 @@ function isWindowsBashExe(path: string): boolean {
   return /(?:^|[\\/])(?:bash|sh)\.exe$/i.test(path);
 }
 
-export const PS_UTF8_PREFIX = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n";
+// Constrained Language Mode (OS sandbox / AppContainer) forbids setting
+// [Console]::OutputEncoding — a bare assignment prints a VT-colored
+// InvalidOperation on every command. Only set it in FullLanguage; always
+// export NO_COLOR so pwsh $PSStyle stays plaintext even when the property set
+// is illegal.
+export const PS_UTF8_PREFIX =
+  "if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' } }\n$env:NO_COLOR = '1'\n";
 
 export function shellArgv(platform: NodeJS.Platform, shell: string, command: string): string[] {
   if (platform === "win32") {
@@ -187,6 +193,7 @@ export function createSandboxedBashOperations(
         policy.mode = once;
       }
       delete env.PI_SANDBOX_MODE_ONCE;
+      if (!env.NO_COLOR) env.NO_COLOR = "1";
 
       const shell = await (deps.resolveShell ?? resolveShellPath)();
       const base = shellArgv(platform, shell, command);
