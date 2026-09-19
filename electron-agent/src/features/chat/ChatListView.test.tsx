@@ -26,6 +26,9 @@ vi.mock('virtua', async () => {
 const mockState: {
   messages: ChatMessage[];
   isStreaming: boolean;
+  awaitingResponse?: boolean;
+  retrying?: { attempt: number; max: number };
+  runActive?: boolean;
   excluded: Set<number>;
   waitingUiPrompt?: { kind: 'select' | 'confirm' | 'input' | 'editor' | 'custom'; title?: string };
 } = {
@@ -43,6 +46,9 @@ vi.mock('../../stores/AgentStoreContext', () => {
   };
 });
 
+vi.mock('../dock/openLauncherTab', () => ({ openTurnReview: vi.fn() }));
+vi.mock('../../platform/runtime', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }));
+
 import { ChatListView } from './ChatListView';
 import { useSessionStore } from '../../store/session';
 import { useCommandInputStore } from '../../stores/commandInputStore';
@@ -52,6 +58,9 @@ afterEach(() => {
   cleanup();
   mockState.messages = [];
   mockState.isStreaming = false;
+  delete mockState.awaitingResponse;
+  delete mockState.retrying;
+  delete mockState.runActive;
   mockState.excluded = new Set();
   delete mockState.waitingUiPrompt;
   useSessionStore.setState({ activeSessionPath: null });
@@ -231,6 +240,134 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(screen.getByText('等待批准…')).toBeTruthy();
     expect(screen.queryByTestId('ui-prompt-pending')).toBeNull();
     expect(screen.queryByText('等待你选择')).toBeNull();
+  });
+
+  it('hides 已编辑 on the current turn while the agent run is still in flight', () => {
+    mockState.isStreaming = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '写好了', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w1',
+        toolCallId: 'w1',
+        toolName: 'write',
+        args: { path: 'a.txt', content: 'hello' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByText(/已编辑/)).toBeNull();
+  });
+
+  it('hides 已编辑 after agent_end until agent_settled', () => {
+    mockState.isStreaming = false;
+    mockState.runActive = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '写好了', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w1',
+        toolCallId: 'w1',
+        toolName: 'write',
+        args: { path: 'a.txt', content: 'hello' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByText(/已编辑/)).toBeNull();
+  });
+
+  it('shows 已编辑 after the agent run has ended', () => {
+    mockState.isStreaming = false;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '写好了', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w1',
+        toolCallId: 'w1',
+        toolName: 'write',
+        args: { path: 'a.txt', content: 'hello' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText(/已编辑/)).toBeTruthy();
+  });
+
+  it('keeps 已编辑 on a previous turn while waiting for the next reply', () => {
+    mockState.awaitingResponse = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '写好了', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w1',
+        toolCallId: 'w1',
+        toolName: 'write',
+        args: { path: 'a.txt', content: 'hello' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+      { kind: 'user', id: 'u2', text: '再写' } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText(/已编辑/)).toBeTruthy();
+  });
+
+  it('keeps 已编辑 on a previous settled turn while the live turn is still running', () => {
+    mockState.isStreaming = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'assistant', id: 'a1', text: '写好了', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w1',
+        toolCallId: 'w1',
+        toolName: 'write',
+        args: { path: 'a.txt', content: 'hello' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+      { kind: 'user', id: 'u2', text: '再写' } as ChatMessage,
+      { kind: 'assistant', id: 'a2', text: '继续', thinking: '', streaming: false } as ChatMessage,
+      {
+        kind: 'tool',
+        id: 'w2',
+        toolCallId: 'w2',
+        toolName: 'write',
+        args: { path: 'b.txt', content: 'world' },
+        result: { content: [] },
+        status: 'done',
+      } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getAllByText(/已编辑/).length).toBe(1);
   });
 
   it('does not show overlay pending for approval selects', () => {

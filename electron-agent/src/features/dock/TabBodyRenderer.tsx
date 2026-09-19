@@ -4,10 +4,10 @@ import { PageBody } from './PageBody';
 import { BrowserBody } from './BrowserBody';
 import { FileTreeBody } from './FileTreeBody';
 import { ProjectContextBody } from './ProjectContextBody';
-import { ReviewPlaceholderBody } from './ReviewPlaceholderBody';
 import { SubAgentBody } from './SubAgentBody';
 import { SubAgentLogBody } from './SubAgentLogBody';
 import { TerminalBody } from './TerminalBody';
+import { TurnReviewBody } from './TurnReviewBody';
 
 export interface DockBodyProps {
   tab: DockTab;
@@ -22,7 +22,7 @@ const BODY_RENDERERS: Record<DockTabKind, ComponentType<DockBodyProps>> = {
   subagentLog: SubAgentLogBody,
   projectContext: ProjectContextBody,
   file: FileTreeBody,
-  review: ReviewPlaceholderBody,
+  review: TurnReviewBody,
 };
 
 export function TabBodyRenderer({ tab, active }: DockBodyProps) {

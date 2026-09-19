@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
+import type { WaitingUiPrompt } from './waitingUiPrompt';
 
 /** 用户消息里的图片（base64），用于在气泡中回显发送的图片。 */
 export interface UserImage {
@@ -39,6 +40,8 @@ export interface AgentState {
   isStreaming: boolean;
   steering: string[];
   followUp: string[];
+  /** 执行中发送后停在输入栏的跟进条；点引导才注入当前回合，否则本轮结束后自动跟进。 */
+  composerQueue: Array<{ id: string; text: string; images?: UserImage[] }>;
   lastError?: string;
   /** 发送失败自动重试中的进度（attempt 从 1 起，max 为总重试次数）；非重试时为 undefined。 */
   retrying?: { attempt: number; max: number };
@@ -51,10 +54,17 @@ export interface AgentState {
   /** 上下文压缩进行中：由 pi 的 compaction_start/compaction_end 事件驱动，UI 据此显示「正在压缩上下文…」。
    * 此前这两个事件被前端丢弃，压缩（手动 /compact 或自动）全程无任何状态反馈。 */
   compacting?: boolean;
+  /** 扩展正在等 ctx.ui 提示（批准 / 确认 / 输入）。由 setStatus('ui-prompt') 写入，agent_end 清掉。 */
+  waitingUiPrompt?: WaitingUiPrompt;
+  /**
+   * 一次 prompt 仍占用 session：agent_start 置位，直到 agent_settled 才清。
+   * 中间的 turn_end / agent_end(willRetry) 都还不算空闲（自动重试、compaction、排队续跑仍可能发生）。
+   */
+  runActive?: boolean;
 }
 
 export function initialAgentState(): AgentState {
-  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [] };
+  return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [], composerQueue: [] };
 }
 
 let counter = 0;
@@ -228,7 +238,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
       // 并清掉「准备响应中」占位（由 isStreaming 接管等待指示，无缝过渡）。
-      return { ...state, isStreaming: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false };
+      return { ...state, isStreaming: true, runActive: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false };
 
     case 'agent_end': {
       // 只克隆仍处于 streaming 的 assistant（通常 0~1 条），其余保留引用，避免每轮克隆整段历史。
@@ -246,6 +256,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         awaitingResponse: false,
         aborting: false,
         compacting: false,
+        waitingUiPrompt: undefined,
         messages: touched ? messages : state.messages,
       };
     }
@@ -265,9 +276,11 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return {
         ...state,
         isStreaming: false,
+        runActive: false,
         awaitingResponse: false,
         aborting: false,
         compacting: false,
+        waitingUiPrompt: undefined,
         messages: touched ? messages : state.messages,
       };
     }
@@ -332,19 +345,21 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         }
       } else {
         const cur = messages[idx] as Extract<ChatMessage, { kind: 'assistant' }>;
-        // 终态消息可能不含 thinking 块（推理只在流式 delta 里给），保留流式累积的 thinking，避免完成后丢失。
+        // 终态消息可能不含 thinking / text 块（推理和正文只在流式 delta 里给），
+        // 保留流式累积，避免 `--mode json` 的空 message_end 把子代理回复抹掉。
         const finalThinking = thinking || cur.thinking;
+        const finalText = text || cur.text;
         // 仅含 tool call、无可见文本/思考的 assistant 消息不展示（否则会叠成多条灰线）
-        if (!text && !finalThinking) {
+        if (!finalText && !finalThinking) {
           messages.splice(idx, 1);
         } else {
           messages[idx] = {
             ...cur,
-            text,
+            text: finalText,
             thinking: finalThinking,
             streaming: false,
             timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
-            ...thinkingTiming(cur, finalThinking, text, true),
+            ...thinkingTiming(cur, finalThinking, finalText, true),
           };
         }
       }

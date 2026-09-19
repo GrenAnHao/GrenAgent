@@ -15,6 +15,8 @@ import type { TimelineSegment } from './groupMessages';
 import { buildTurnRows } from './turnRows';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
+import { changesForTurn, presentedForTurn, turnSettled } from './turnDeliverables';
+import { TurnTail } from './TurnTail';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   excludedTag: css`
@@ -30,6 +32,10 @@ interface TurnTimelineProps {
   segments: TimelineSegment[];
   /** 该轮首条 assistant 消息的 pi 毫秒 timestamp：启用「移出上下文 / 回退到此」与排除标记。 */
   timestamp?: number;
+  showDeliverables?: boolean;
+  turnId?: string;
+  /** 本轮仍是当前 agent run 的 live turn：工具间隙不要挂「已编辑」。 */
+  live?: boolean;
 }
 
 function SegmentItem({ segment }: { segment: TimelineSegment }) {
@@ -109,6 +115,10 @@ function renderTurn(
   segments: TimelineSegment[],
   timestamp: number | undefined,
   excluded: boolean,
+  showDeliverables: boolean,
+  turnId: string | undefined,
+  live: boolean,
+  workspace: string,
 ): ReactNode {
   const rows = buildTurnRows(segments);
   const text = segments
@@ -138,6 +148,14 @@ function renderTurn(
           <MemoSegment key={row.id} segment={row.segment} />
         ),
       )}
+      {showDeliverables && turnId && !live && turnSettled(segments) ? (
+        <TurnTail
+          turnId={turnId}
+          workspace={workspace}
+          changes={changesForTurn(segments)}
+          presented={presentedForTurn(segments)}
+        />
+      ) : null}
     </ChatItemShell>
   );
 }
@@ -147,19 +165,38 @@ function ExcludableTurn({
   segments,
   timestamp,
   store,
+  showDeliverables,
+  turnId,
+  live,
+  workspace,
 }: {
   segments: TimelineSegment[];
   timestamp: number;
   store: AgentStoreApi;
+  showDeliverables: boolean;
+  turnId?: string;
+  live: boolean;
+  workspace: string;
 }) {
   const excluded = store.useStore((s) => s.excluded.has(timestamp));
-  return renderTurn(segments, timestamp, excluded);
+  return renderTurn(segments, timestamp, excluded, showDeliverables, turnId, live, workspace);
 }
 
-export function TurnTimeline({ segments, timestamp }: TurnTimelineProps) {
+export function TurnTimeline({ segments, timestamp, showDeliverables, turnId, live }: TurnTimelineProps) {
   const storeCtx = useOptionalAgentStoreContext();
+  const workspace = storeCtx?.workspace ?? '';
   if (storeCtx && timestamp != null) {
-    return <ExcludableTurn segments={segments} timestamp={timestamp} store={storeCtx.store} />;
+    return (
+      <ExcludableTurn
+        segments={segments}
+        timestamp={timestamp}
+        store={storeCtx.store}
+        showDeliverables={Boolean(showDeliverables)}
+        turnId={turnId}
+        live={Boolean(live)}
+        workspace={workspace}
+      />
+    );
   }
-  return renderTurn(segments, timestamp, false);
+  return renderTurn(segments, timestamp, false, Boolean(showDeliverables), turnId, Boolean(live), workspace);
 }

@@ -3,6 +3,8 @@ vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
   useOptionalAgentStoreContext: () => undefined,
 }));
+vi.mock('../dock/openLauncherTab', () => ({ openTurnReview: vi.fn() }));
+vi.mock('../../platform/runtime', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }));
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
@@ -26,11 +28,27 @@ const toolOnly: TimelineSegment[] = [
   },
 ];
 
-const wrap = (segments: TimelineSegment[]) =>
+const writeSettled: TimelineSegment[] = [
+  {
+    kind: 'tool',
+    id: 'w',
+    toolCallId: 'w1',
+    toolName: 'write',
+    args: { path: 'a.txt', content: 'hello' },
+    result: { content: [] },
+    status: 'done',
+  },
+  { kind: 'text', id: 't', content: '写好了', streaming: false },
+];
+
+const wrap = (
+  segments: TimelineSegment[],
+  props?: { showDeliverables?: boolean; turnId?: string; live?: boolean },
+) =>
   render(
     <App>
       <ThemeProvider themeMode="dark">
-        <TurnTimeline segments={segments} />
+        <TurnTimeline segments={segments} {...props} />
       </ThemeProvider>
     </App>,
   );
@@ -61,5 +79,22 @@ describe('TurnTimeline 助手复制', () => {
     const pre = screen.getByTestId('structured-pre');
     expect(pre.textContent).toContain('"l1"');
     expect(pre.textContent).toContain('claude-opus-5');
+  });
+});
+
+describe('TurnTimeline 产物尾栏', () => {
+  it('showDeliverables 且回合已结束时展示已编辑', () => {
+    wrap(writeSettled, { showDeliverables: true, turnId: 'turn-1' });
+    expect(screen.getByText(/已编辑/)).toBeTruthy();
+  });
+
+  it('默认不传 showDeliverables 时不展示已编辑', () => {
+    wrap(writeSettled, { turnId: 'turn-1' });
+    expect(screen.queryByText(/已编辑/)).toBeNull();
+  });
+
+  it('does not show 已编辑 on the live turn while the session is still running', () => {
+    wrap(writeSettled, { showDeliverables: true, turnId: 'turn-1', live: true });
+    expect(screen.queryByText(/已编辑/)).toBeNull();
   });
 });

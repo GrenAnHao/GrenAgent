@@ -64,6 +64,8 @@ export interface FilePayload {
 
 export interface ReviewPayload {
   workspace?: string;
+  turnId?: string;
+  fileIndex?: number;
 }
 
 export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload;
@@ -77,15 +79,32 @@ export interface DockTab {
   /** 同 region 内排序。 */
   order: number;
   payload: DockTabPayload;
+  /** 最近一次打开或激活，标签列表用相对时间。 */
+  touchedAt?: number;
 }
+
+/** 关掉后可从标签列表恢复的快照。子代理 tab 不入列。 */
+export interface ClosedDockTab {
+  id: string;
+  kind: DockTabKind;
+  region: DockRegion;
+  title: string;
+  closable: boolean;
+  payload: DockTabPayload;
+  closedAt: number;
+}
+
+export const MAX_CLOSED_TABS = 20;
 
 interface DockState {
   tabs: DockTab[];
+  closedTabs: ClosedDockTab[];
   activeByRegion: Record<DockRegion, string | null>;
 
   addTab: (input: Omit<DockTab, 'order'> & { order?: number }) => void;
   updateTab: (id: string, patch: Partial<Pick<DockTab, 'title' | 'payload'>>) => void;
   closeTab: (id: string) => void;
+  restoreClosedTab: (id: string, closedAt: number) => void;
   setActive: (region: DockRegion, id: string) => void;
   setTerminalStatus: (id: string, status: TerminalStatus, shellId?: string) => void;
   reorderTabs: (region: DockRegion, fromIndex: number, toIndex: number) => void;
@@ -139,23 +158,60 @@ function collapseEmptyRegion(region: DockRegion, tabs: DockTab[]): void {
   else useLayoutStore.getState().setTerminalOpen(false);
 }
 
+function revealRegion(region: DockRegion): void {
+  if (region === 'right') useLayoutStore.getState().setRightPanelOpen(true);
+  else useLayoutStore.getState().setTerminalOpen(true);
+}
+
+function snapshotClosedTab(tab: DockTab): ClosedDockTab | null {
+  if (tab.kind === 'subagent' || tab.kind === 'subagentLog') return null;
+  return {
+    id: tab.id,
+    kind: tab.kind,
+    region: tab.region,
+    title: tab.title,
+    closable: tab.closable,
+    payload: tab.kind === 'terminal' ? { status: 'idle' } : tab.payload,
+    closedAt: Date.now(),
+  };
+}
+
+function findLiveForRestore(tabs: DockTab[], entry: ClosedDockTab): DockTab | undefined {
+  const byId = tabs.find((t) => t.id === entry.id);
+  if (byId) return byId;
+  if (entry.kind === 'file') {
+    const workspace = (entry.payload as FilePayload).workspace;
+    return tabs.find(
+      (t) => t.region === entry.region && t.kind === 'file' && (t.payload as FilePayload).workspace === workspace,
+    );
+  }
+  if (entry.kind === 'review') {
+    return tabs.find((t) => t.region === entry.region && t.kind === 'review');
+  }
+  return undefined;
+}
+
+function pushClosed(list: ClosedDockTab[] | undefined, snap: ClosedDockTab): ClosedDockTab[] {
+  return [snap, ...(list ?? []).filter((c) => c.id !== snap.id)].slice(0, MAX_CLOSED_TABS);
+}
+
 export const useDockStore = create<DockState>()(
   persist(
     (set, get) => ({
       tabs: [],
+      closedTabs: [],
       activeByRegion: { right: null, bottom: null },
 
       addTab: (input) => {
         set((s) => {
           const order = input.order ?? nextOrder(s.tabs, input.region);
-          const tab: DockTab = { ...input, order };
+          const tab: DockTab = { ...input, order, touchedAt: input.touchedAt ?? Date.now() };
           return {
             tabs: [...s.tabs, tab],
             activeByRegion: { ...s.activeByRegion, [input.region]: tab.id },
           };
         });
-        if (input.region === 'right') useLayoutStore.getState().setRightPanelOpen(true);
-        else useLayoutStore.getState().setTerminalOpen(true);
+        revealRegion(input.region);
       },
 
       updateTab: (id, patch) =>
@@ -165,6 +221,7 @@ export const useDockStore = create<DockState>()(
         const target = get().tabs.find((t) => t.id === id);
         if (!target) return;
         const region = target.region;
+        const snap = snapshotClosedTab(target);
         set((s) => {
           const regionTabs = s.tabs.filter((t) => t.region === region).sort((a, b) => a.order - b.order);
           const index = regionTabs.findIndex((t) => t.id === id);
@@ -175,13 +232,42 @@ export const useDockStore = create<DockState>()(
             const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0] ?? null;
             activeByRegion[region] = fallback ? fallback.id : null;
           }
-          return { tabs, activeByRegion };
+          return {
+            tabs,
+            activeByRegion,
+            closedTabs: snap ? pushClosed(s.closedTabs, snap) : s.closedTabs,
+          };
         });
         collapseEmptyRegion(region, get().tabs);
       },
 
+      restoreClosedTab: (id, closedAt) => {
+        const entry = get().closedTabs.find((c) => c.id === id && c.closedAt === closedAt);
+        if (!entry) return;
+        set((s) => ({
+          closedTabs: s.closedTabs.filter((c) => !(c.id === id && c.closedAt === closedAt)),
+        }));
+        const live = findLiveForRestore(get().tabs, entry);
+        if (live) {
+          get().setActive(live.region, live.id);
+          revealRegion(live.region);
+          return;
+        }
+        get().addTab({
+          id: entry.id,
+          kind: entry.kind,
+          region: entry.region,
+          title: entry.title,
+          closable: entry.closable,
+          payload: entry.kind === 'terminal' ? { status: 'idle' } : entry.payload,
+        });
+      },
+
       setActive: (region, id) =>
-        set((s) => ({ activeByRegion: { ...s.activeByRegion, [region]: id } })),
+        set((s) => ({
+          activeByRegion: { ...s.activeByRegion, [region]: id },
+          tabs: s.tabs.map((t) => (t.id === id ? { ...t, touchedAt: Date.now() } : t)),
+        })),
 
       setTerminalStatus: (id, status, shellId) =>
         set((s) => ({
@@ -240,7 +326,7 @@ export const useDockStore = create<DockState>()(
         set((s) => {
           const exists = s.tabs.some((t) => t.id === id);
           const tabs = exists
-            ? s.tabs.map((t) => (t.id === id ? { ...t, title, payload: { ...page } } : t))
+            ? s.tabs.map((t) => (t.id === id ? { ...t, title, payload: { ...page }, touchedAt: Date.now() } : t))
             : [
                 ...s.tabs,
                 {
@@ -251,6 +337,7 @@ export const useDockStore = create<DockState>()(
                   closable: true,
                   order: nextOrder(s.tabs, 'right'),
                   payload: { ...page },
+                  touchedAt: Date.now(),
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
@@ -359,6 +446,9 @@ export const useDockStore = create<DockState>()(
       // 由 messages 同步或浮动列表点击重建，不持久化（output 可能很大）。
       partialize: (s) => ({
         tabs: s.tabs
+          .filter((t) => t.kind !== 'subagent' && t.kind !== 'subagentLog')
+          .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t)),
+        closedTabs: (s.closedTabs ?? [])
           .filter((t) => t.kind !== 'subagent' && t.kind !== 'subagentLog')
           .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t)),
         activeByRegion: s.activeByRegion,

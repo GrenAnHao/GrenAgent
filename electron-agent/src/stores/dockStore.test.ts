@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useDockStore, defaultTerminalTitle, subAgentTabId } from './dockStore';
+import { useDockStore, defaultTerminalTitle, subAgentTabId, MAX_CLOSED_TABS } from './dockStore';
 import { useLayoutStore } from './layoutStore';
 
 function reset() {
   localStorage.clear();
-  useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
+  useDockStore.setState({ tabs: [], closedTabs: [], activeByRegion: { right: null, bottom: null } });
   useLayoutStore.setState({ rightPanelOpen: false, terminalOpen: false });
 }
 
@@ -203,5 +203,97 @@ describe('dockStore', () => {
     expect(useDockStore.getState().activeByRegion.bottom).toBe('term-keep');
     expect(useLayoutStore.getState().terminalOpen).toBe(true);
     expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('closeTab records a recently closed snapshot and restoreClosedTab reopens it', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://a', content: 'body', title: 'A' });
+    s.closeTab('page:https://a');
+    const closed = useDockStore.getState().closedTabs;
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).toMatchObject({
+      id: 'page:https://a',
+      kind: 'page',
+      region: 'right',
+      title: 'A',
+    });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+
+    s.restoreClosedTab(closed[0].id, closed[0].closedAt);
+    const tabs = useDockStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].id).toBe('page:https://a');
+    expect((tabs[0].payload as { content: string }).content).toBe('body');
+    expect(useDockStore.getState().closedTabs).toHaveLength(0);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('does not record subagent tabs as recently closed', () => {
+    const s = useDockStore.getState();
+    s.openSubAgent({ messageId: 't1', toolCallId: 'c1', subIndex: null, title: '#1 first' });
+    s.closeTab('t1');
+    expect(useDockStore.getState().closedTabs).toHaveLength(0);
+  });
+
+  it('records a terminal as idle without shellId and restores it idle', () => {
+    const s = useDockStore.getState();
+    s.addTab({
+      id: 'term-1',
+      kind: 'terminal',
+      region: 'bottom',
+      title: 'T',
+      closable: true,
+      payload: { status: 'running', shellId: 'sh1' },
+    });
+    s.closeTab('term-1');
+    expect(useDockStore.getState().closedTabs[0].payload).toEqual({ status: 'idle' });
+    const { id, closedAt } = useDockStore.getState().closedTabs[0];
+    s.restoreClosedTab(id, closedAt);
+    const term = useDockStore.getState().tabs[0];
+    expect(term.kind).toBe('terminal');
+    expect(term.payload).toEqual({ status: 'idle' });
+    expect(useLayoutStore.getState().terminalOpen).toBe(true);
+  });
+
+  it('restoreClosedTab activates a live file tab instead of duplicating', () => {
+    const s = useDockStore.getState();
+    s.addTab({
+      id: 'file:right:/repo',
+      kind: 'file',
+      region: 'right',
+      title: '文件',
+      closable: true,
+      payload: { workspace: '/repo' },
+    });
+    s.closeTab('file:right:/repo');
+    const closed = useDockStore.getState().closedTabs[0];
+    s.addTab({
+      id: 'file:right:/repo#2',
+      kind: 'file',
+      region: 'right',
+      title: '文件',
+      closable: true,
+      payload: { workspace: '/repo' },
+    });
+    s.restoreClosedTab(closed.id, closed.closedAt);
+    const files = useDockStore.getState().tabs.filter((t) => t.kind === 'file');
+    expect(files).toHaveLength(1);
+    expect(files[0].id).toBe('file:right:/repo#2');
+    expect(useDockStore.getState().activeByRegion.right).toBe('file:right:/repo#2');
+    expect(useDockStore.getState().closedTabs).toHaveLength(0);
+  });
+
+  it(`keeps at most ${MAX_CLOSED_TABS} recently closed tabs, newest first`, () => {
+    const s = useDockStore.getState();
+    for (let i = 0; i < MAX_CLOSED_TABS + 1; i++) {
+      s.openPage({ url: `https://u${i}`, content: '' });
+    }
+    for (let i = 0; i < MAX_CLOSED_TABS + 1; i++) {
+      s.closeTab(`page:https://u${i}`);
+    }
+    const closed = useDockStore.getState().closedTabs;
+    expect(closed).toHaveLength(MAX_CLOSED_TABS);
+    expect(closed[0].id).toBe(`page:https://u${MAX_CLOSED_TABS}`);
+    expect(closed.at(-1)?.id).toBe('page:https://u1');
   });
 });

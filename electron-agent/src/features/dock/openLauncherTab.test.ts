@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useDockStore, defaultTerminalTitle } from '../../stores/dockStore';
 import { useLayoutStore } from '../../stores/layoutStore';
-import { fileTabId, openLauncherTab, reviewTabId } from './openLauncherTab';
+import { fileTabId, openLauncherTab, openTurnReview, reviewTabId } from './openLauncherTab';
 
 function reset() {
   localStorage.clear();
-  useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
+  useDockStore.setState({ tabs: [], closedTabs: [], activeByRegion: { right: null, bottom: null } });
   useLayoutStore.setState({ rightPanelOpen: false, terminalOpen: false });
 }
 
@@ -81,5 +81,30 @@ describe('openLauncherTab', () => {
     const reviews = useDockStore.getState().tabs.filter((t) => t.kind === 'review');
     expect(reviews).toHaveLength(2);
     expect(new Set(reviews.map((t) => t.id)).size).toBe(2);
+  });
+
+  it('openTurnReview reuses the right review tab and writes the turn', () => {
+    openLauncherTab({ region: 'right', kind: 'review', workspace: '/repo' });
+    openTurnReview({ turnId: 'turn-1', fileIndex: 2, workspace: '/repo' });
+    const tabs = useDockStore.getState().tabs.filter((t) => t.kind === 'review');
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.region).toBe('right');
+    expect(tabs[0]?.payload).toMatchObject({ turnId: 'turn-1', fileIndex: 2, workspace: '/repo' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('openTurnReview creates a right review tab when none exists', () => {
+    openTurnReview({ turnId: 't', fileIndex: 0, workspace: '/ws' });
+    expect(useDockStore.getState().tabs.map((t) => t.kind)).toEqual(['review']);
+    expect(useDockStore.getState().tabs[0]?.region).toBe('right');
+  });
+
+  it('launcher reuse clears the previous turn target', () => {
+    openTurnReview({ turnId: 'turn-1', fileIndex: 2, workspace: '/repo' });
+    openLauncherTab({ region: 'right', kind: 'review' });
+    const payload = useDockStore.getState().tabs[0]?.payload as { turnId?: string; fileIndex?: number; workspace?: string };
+    expect(payload.turnId).toBeUndefined();
+    expect(payload.fileIndex).toBeUndefined();
+    expect(payload.workspace).toBe('/repo');
   });
 });

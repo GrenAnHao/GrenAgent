@@ -35,7 +35,10 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
   const messages = useStore((s) => s.messages);
   const isStreaming = useStore((s) => s.isStreaming);
   const awaitingResponse = useStore((s) => s.awaitingResponse);
+  const retrying = useStore((s) => s.retrying);
+  const runActive = useStore((s) => s.runActive);
   const waitingLabel = waitingUiPromptLabel(useStore((s) => s.waitingUiPrompt));
+  const sessionLive = isStreaming || Boolean(awaitingResponse) || Boolean(retrying) || Boolean(runActive);
 
   // streaming 中 100ms 节流，避免每 token 触发整列重算（详见 useThrottledValue 契约）。
   const throttledMessages = useThrottledValue(messages, 100, { enabled: isStreaming });
@@ -78,6 +81,8 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
       scrollRef={scrollRef}
       onGutterChange={onGutterChange}
       data-testid="chat-scroll"
+      showDeliverables
+      sessionLive={sessionLive}
     />
   );
 }

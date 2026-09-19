@@ -1,18 +1,22 @@
-import { Flexbox } from '@lobehub/ui';
-import { Globe, ListChecks, Search, Sparkles, type LucideIcon } from 'lucide-react';
+import { cssVar } from 'antd-style';
+import { FilePlus, Globe, ListChecks, Search, Sparkles, type LucideIcon } from 'lucide-react';
 import { normalizeTodos, todoSummary } from '@extensions/_shared/todo-model';
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
+import { TerminalBlock } from '../chat/conv/TerminalBlock';
+import { bashRowSummary } from './bashCardModel';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
 import { todoRowCopy } from '../chat/input/todoRow';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
+import { FileDiffBlock } from './FileDiffBlock';
+import { FileReadBlock } from './FileReadBlock';
+import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, mutationPath } from './fileDiffModel';
 import { LazyHighlighter } from './LazyHighlighter';
-import { EditPreview } from './EditPreview';
 import { GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
 import { renderExtensionCard } from './extensionCards';
@@ -23,8 +27,6 @@ import {
   getArgString,
   getDetails,
   getDiff,
-  getEditTexts,
-  langByPath,
   skillNameFromRead,
   stringifyJson,
   toolMeta,
@@ -49,6 +51,34 @@ function queryFrag(query: string, fallback: string): ReactNode {
   );
 }
 
+function DiffMeta({ added, deleted }: { added: number; deleted: number }) {
+  return (
+    <>
+      <span style={{ color: cssVar.colorSuccess }}>+{added}</span>{' '}
+      <span style={{ color: cssVar.colorError }}>-{deleted}</span>
+    </>
+  );
+}
+
+function presentedFiles(args: unknown, result: unknown): { path: string; description?: string }[] {
+  const details = getDetails(result);
+  const fromDetails = details?.files;
+  const fromArgs = args && typeof args === 'object' ? (args as { files?: unknown }).files : undefined;
+  const raw = Array.isArray(fromDetails) ? fromDetails : Array.isArray(fromArgs) ? fromArgs : [];
+  const out: { path: string; description?: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const path = (item as { path?: unknown }).path;
+    if (typeof path !== 'string' || !path) continue;
+    const description = (item as { description?: unknown }).description;
+    out.push({
+      path,
+      ...(typeof description === 'string' ? { description } : {}),
+    });
+  }
+  return out;
+}
+
 /**
  * 由工具名/参数/结果推导 ConvRow 的标题片段：富标题（技能/搜索/检索/读页）整体放进 `name`
  * （保留「搜索：词（N）」「使用技能 X」等既有格式），通用工具走「name=工具名 + args=摘要」。
@@ -58,7 +88,7 @@ function toolTitle(
   args: unknown,
   result: unknown,
   status: ConvStatus,
-): { icon: LucideIcon; name: ReactNode; args?: ReactNode } {
+): { icon: LucideIcon; name: ReactNode; args?: ReactNode; meta?: ReactNode } {
   const c = cardStyles;
   const lname = toolName.toLowerCase();
 
@@ -120,18 +150,40 @@ function toolTitle(
       ),
     };
   }
-  // bash 类：命令进 args（去掉终端卡的 $ 提示符与命令重复）。
+  // bash 类：外层显示「这条命令在做什么」，展开卡片才给真实命令。
   if (lname === 'bash' || lname === 'shell' || lname === 'run_terminal_cmd') {
-    return { icon: toolMeta(toolName).icon, name: toolName, args: getArgString(args, 'command') || undefined };
+    return { icon: toolMeta(toolName).icon, name: toolName, args: bashRowSummary(args) || undefined };
   }
 
   const { icon } = toolMeta(toolName);
-  if (lname === 'edit' || lname === 'search_replace' || lname === 'str_replace') {
-    const path = getArgString(args, 'path');
+  const verb = fileCardVerb(toolName);
+  if (verb && !skillNameFromRead(toolName, args)) {
+    const path = mutationPath(args);
+    const diff = verb === '读取' ? null : fileDiffModel(toolName, args, result, status);
     return {
       icon,
-      name: toolName,
-      args: path ? <span data-tooltip={path} aria-label={path}>{fileNameFromPath(path)}</span> : undefined,
+      name: verb,
+      args: path ? fileNameFromPath(path) : undefined,
+      meta: diff ? <DiffMeta added={diff.added} deleted={diff.deleted} /> : undefined,
+    };
+  }
+  if (lname === 'present') {
+    const files = presentedFiles(args, result);
+    const label = files[0] ? fileNameFromPath(files[0].path) : undefined;
+    const details = getDetails(result);
+    const errorRaw = extractText(result) || (details?.error != null ? String(details.error) : '');
+    const errorLine = errorRaw.trim().split(/\r?\n/, 1)[0] || undefined;
+    return {
+      icon: FilePlus,
+      name: status === 'error' ? '交付失败' : '交付文件',
+      args:
+        status === 'error'
+          ? errorLine
+          : status === 'running'
+            ? '正在交付'
+            : files.length > 1
+              ? `${files.length} 个文件`
+              : label,
     };
   }
   return { icon, name: toolName, args: argSummary(args) || undefined };
@@ -147,13 +199,14 @@ function ToolDetail({
   args,
   result,
   status,
+  workspace,
 }: {
   toolName: string;
   args: unknown;
   result: unknown;
   status: ConvStatus;
+  workspace?: string;
 }) {
-  const styles = cardStyles;
   const extensionCard = renderExtensionCard({ toolName, args, result, status });
   if (extensionCard) {
     return (
@@ -164,61 +217,31 @@ function ToolDetail({
   }
   const name = toolName.toLowerCase();
   const text = extractText(result);
-  const diff = getDiff(result);
   const isError = status === 'error';
 
-  // bash：命令已在行内，body 只放输出（去冗余）。
+  // bash：展开卡 = 命令横幅 + 流式输出（外层摘要是 description，不在这里重复命令）。
   if (name === 'bash' || name === 'shell' || name === 'run_terminal_cmd') {
-    if (status === 'running' && !text) return <CodeSurface>运行中…</CodeSurface>;
-    return <CodeSurface isError={isError}>{text || '(无输出)'}</CodeSurface>;
-  }
-
-  if (name === 'read' || name === 'read_file') {
-    const path = getArgString(args, 'path');
-    const lang = langByPath(path);
     return (
-      <Flexbox gap={8}>
-        {path && <div className={styles.pathLabel}>{path}</div>}
-        {text ? (
-          <LazyHighlighter language={lang} copyable style={{ maxHeight: 320 }}>
-            {text}
-          </LazyHighlighter>
-        ) : (
-          <TerminalOutput text={stringifyJson(result)} isError={isError} />
-        )}
-      </Flexbox>
-    );
-  }
-
-  if (name === 'write' || name === 'write_file') {
-    const path = getArgString(args, 'path');
-    const content = getArgString(args, 'content') || text;
-    const lang = langByPath(path);
-    return (
-      <Flexbox gap={8}>
-        {path && <div className={styles.pathLabel}>{path}</div>}
-        {content && (
-          <LazyHighlighter language={lang} copyable style={{ maxHeight: 320 }}>
-            {content}
-          </LazyHighlighter>
-        )}
-      </Flexbox>
-    );
-  }
-
-  if (name === 'edit' || name === 'search_replace' || name === 'str_replace') {
-    const path = getArgString(args, 'path');
-    const { oldText, newText } = getEditTexts(args);
-    return (
-      <EditPreview
-        path={path}
-        diff={diff}
-        oldText={oldText}
-        newText={newText}
-        resultText={text || stringifyJson(result)}
+      <TerminalBlock
+        command={getArgString(args, 'command')}
+        cwd={workspace}
+        output={text}
+        running={status === 'running'}
         isError={isError}
       />
     );
+  }
+
+  if (isFileRead(name)) {
+    if (!text) return status === 'running' ? null : <TerminalOutput text={stringifyJson(result)} isError={isError} />;
+    return <FileReadBlock path={mutationPath(args)} text={text} />;
+  }
+  if (isFileMutation(name)) {
+    const diff = fileDiffModel(toolName, args, result, status);
+    if (!diff) {
+      return text || isError ? <TerminalOutput text={text || stringifyJson(result)} isError={isError} /> : null;
+    }
+    return <FileDiffBlock path={diff.path} rows={diff.rows} added={diff.added} deleted={diff.deleted} />;
   }
 
   if (name === 'grep' || name === 'ripgrep') {
@@ -250,12 +273,15 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
   const [expanded, setExpanded] = useState(status === 'running');
-  const hasDetail = useMemo(() => {
-    if (status === 'running') return true;
-    return Boolean(extractText(result) || getDiff(result) || stringifyJson(result));
-  }, [result, status]);
-
   const bareName = toolName.toLowerCase();
+  const isShell = bareName === 'bash' || bareName === 'shell' || bareName === 'run_terminal_cmd';
+  const hasDetail = useMemo(() => {
+    if (isFileRead(toolName) && status === 'running' && !extractText(result)) return false;
+    if (isFileMutation(toolName) && fileDiffModel(toolName, args, result, status)) return true;
+    if (status === 'running') return true;
+    if (isShell && getArgString(args, 'command')) return true;
+    return Boolean(extractText(result) || getDiff(result) || stringifyJson(result));
+  }, [args, isShell, result, status, toolName]);
 
   // ask_user：运行中 → 工具行占位；完成 → 紧凑问答摘要。浮层由 ComposerPromptOverlay 渲染。
   if (bareName === 'ask_user') {
@@ -282,6 +308,21 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
           icon={vtitle.icon}
           name={vtitle.name}
           args={vtitle.args}
+        />
+      </div>
+    );
+  }
+
+  if (bareName === 'present') {
+    const ptitle = toolTitle(toolName, args, result, status);
+    return (
+      <div className={cardStyles.toolRow}>
+        <ConvRow
+          data-testid="tool-execution"
+          status={status}
+          icon={ptitle.icon}
+          name={ptitle.name}
+          args={ptitle.args}
         />
       </div>
     );
@@ -319,7 +360,7 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
   }
 
   const title = toolTitle(toolName, args, result, status);
-  const canExpand = hasDetail || status === 'running';
+  const canExpand = hasDetail;
 
   return (
     <div className={cardStyles.toolRow}>
@@ -329,12 +370,19 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
         icon={title.icon}
         name={title.name}
         args={title.args}
+        meta={title.meta}
         open={expanded}
         onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
         body={
           canExpand ? (
             <ErrorBoundary>
-              <ToolDetail toolName={toolName} args={args} result={result} status={status} />
+              <ToolDetail
+                toolName={toolName}
+                args={args}
+                result={result}
+                status={status}
+                workspace={workspace}
+              />
             </ErrorBoundary>
           ) : undefined
         }

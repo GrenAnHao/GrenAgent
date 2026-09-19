@@ -92,10 +92,38 @@ export function openLauncherTab(input: {
 
   const existing = findExisting(region, 'review');
   if (existing) {
+    const prev = existing.payload as ReviewPayload;
+    useDockStore.getState().updateTab(existing.id, {
+      payload: { workspace: workspace ?? prev.workspace },
+    });
     activateExisting(existing, region);
     return;
   }
   const payload: ReviewPayload = { workspace };
+  useDockStore.getState().addTab({
+    id: uniqueId(reviewTabId(region)),
+    kind: 'review',
+    region,
+    title: '审查',
+    closable: true,
+    payload,
+  });
+}
+
+export function openTurnReview(input: { turnId: string; fileIndex: number; workspace?: string }): void {
+  const region = 'right';
+  const payload: ReviewPayload = {
+    workspace: input.workspace,
+    turnId: input.turnId,
+    fileIndex: input.fileIndex,
+  };
+  const existing = useDockStore.getState().tabs.find((t) => t.region === region && t.kind === 'review');
+  if (existing) {
+    useDockStore.getState().updateTab(existing.id, { payload });
+    useDockStore.getState().setActive(region, existing.id);
+    useLayoutStore.getState().setRightPanelOpen(true);
+    return;
+  }
   useDockStore.getState().addTab({
     id: uniqueId(reviewTabId(region)),
     kind: 'review',

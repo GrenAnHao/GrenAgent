@@ -51,6 +51,21 @@ interface ChatMessageItemsProps {
   scrollRef?: Ref<TranscriptScrollHandle>;
   onGutterChange?: (px: number) => void;
   'data-testid'?: string;
+  showDeliverables?: boolean;
+  /** 当前会话仍在跑（流式 / 等首包 / 重试）。仅压住仍挂在列表末尾的那一轮。 */
+  sessionLive?: boolean;
+}
+
+/** 会话仍在跑时，压住当前这一轮。通知 / spawn_agent / 引导消息不把上一截当成已结束。 */
+export function liveTurnId(messages: DisplayMessage[], sessionLive: boolean): string | undefined {
+  if (!sessionLive) return undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const item = messages[i];
+    if (item.kind === 'command-input') continue;
+    if (item.kind === 'user' && !item.steering) return undefined;
+    if (item.kind === 'turn') return item.id;
+  }
+  return undefined;
 }
 
 /** 单条消息渲染器：user/assistant(turn)/tool/notice 分发；主对话与子代理对话共用。 */
@@ -58,12 +73,22 @@ export function renderMessageBody(
   msg: DisplayMessage,
   unitsByMessage: Map<string, NumberedUnit[]>,
   answeredQuestions: Set<string>,
+  showDeliverables = false,
+  liveTurn = false,
 ): ReactNode {
   switch (msg.kind) {
     case 'user':
       return <UserMessage text={msg.text} images={msg.images} timestamp={msg.timestamp} />;
     case 'turn':
-      return <TurnTimeline segments={msg.segments} timestamp={msg.timestamp} />;
+      return (
+        <TurnTimeline
+          segments={msg.segments}
+          timestamp={msg.timestamp}
+          turnId={msg.id}
+          showDeliverables={showDeliverables}
+          live={liveTurn}
+        />
+      );
     case 'tool':
       if (msg.toolName === 'spawn_agent') {
         const numbered = unitsByMessage.get(msg.id) ?? [];
@@ -140,7 +165,10 @@ export function ChatMessageItems({
   scrollRef,
   onGutterChange,
   'data-testid': testId,
+  showDeliverables,
+  sessionLive,
 }: ChatMessageItemsProps) {
+  const liveId = liveTurnId(messages, Boolean(sessionLive));
   return (
     <VirtualizedMessageList
       display={messages}
@@ -153,7 +181,15 @@ export function ChatMessageItems({
       scrollRef={scrollRef}
       onGutterChange={onGutterChange}
       data-testid={testId}
-      renderItem={(msg) => renderMessageBody(msg, unitsByMessage, answeredQuestions)}
+      renderItem={(msg) =>
+        renderMessageBody(
+          msg,
+          unitsByMessage,
+          answeredQuestions,
+          showDeliverables,
+          Boolean(liveId && msg.kind === 'turn' && msg.id === liveId),
+        )
+      }
     />
   );
 }
