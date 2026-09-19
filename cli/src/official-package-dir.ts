@@ -34,6 +34,16 @@ function walkNodeModules(fromDir: string): string | undefined {
   return undefined;
 }
 
+function thisModuleDir(): string | undefined {
+  const metaUrl = import.meta.url;
+  if (typeof metaUrl !== "string" || metaUrl.length === 0) return undefined;
+  try {
+    return dirname(fileURLToPath(metaUrl));
+  } catch {
+    return undefined;
+  }
+}
+
 export function resolveInstalledPiPackageDir(): string | undefined {
   try {
     const resolved = import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -42,7 +52,7 @@ export function resolveInstalledPiPackageDir(): string | undefined {
   } catch {
     /* CJS/exports or compiled binary: fall through to node_modules walk */
   }
-  return walkNodeModules(dirname(fileURLToPath(import.meta.url)));
+  return walkNodeModules(thisModuleDir() ?? process.cwd());
 }
 
 /**
