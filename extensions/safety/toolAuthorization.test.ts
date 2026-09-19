@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type CallFacts = {
+  origin?: string;
+  flags: { dangerousCommand?: boolean; mcp?: boolean; codeExec?: boolean; protectedPath?: boolean };
+};
+
 const mocks = vi.hoisted(() => ({
-  evaluateToolCall: vi.fn(async () => ({ decision: 'allow' as const, auditId: 'a1' })),
+  evaluateToolCall: vi.fn(async (_control: unknown, _facts: CallFacts) => ({
+    decision: 'allow' as 'allow' | 'ask' | 'deny',
+    auditId: 'a1',
+  })),
   rememberToolRule: vi.fn(async () => true),
   settleToolCall: vi.fn(async () => undefined),
   getApprovalPolicy: vi.fn(() => 'auto' as const),
-  getConfig: vi.fn(() => undefined as string | undefined),
+  getConfig: vi.fn((_k: unknown) => undefined as string | undefined),
 }));
 
 // resolveToolOrigin 保留真实实现：origin 的测试靠设置 PI_IS_SUBAGENT 等环境变量驱动。
@@ -35,6 +43,12 @@ function loadToolCall(): Handler {
   return handler;
 }
 
+function lastFacts(): CallFacts {
+  const facts = mocks.evaluateToolCall.mock.calls.at(-1)?.[1];
+  if (!facts) throw new Error('evaluateToolCall was not called');
+  return facts;
+}
+
 function ctx(over: Record<string, unknown> = {}) {
   return {
     cwd: 'D:/repo',
@@ -60,14 +74,14 @@ describe('safety tool_call · capability hard limits still come first', () => {
   it('blocks a denied tool without asking the host', async () => {
     process.env.SAFETY_DENY_TOOLS = 'bash';
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx());
-    expect(result).toMatchObject({ block: true });
+    expect(result).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
   });
 
   it('blocks a write tool in readonly mode without asking the host', async () => {
     process.env.SAFETY_READONLY = '1';
     const result = await loadToolCall()({ toolName: 'ast_edit', input: { path: 'a.ts' } }, ctx());
-    expect(result).toMatchObject({ block: true });
+    expect(result).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
   });
 });
@@ -75,7 +89,7 @@ describe('safety tool_call · capability hard limits still come first', () => {
 describe('safety tool_call · host decision', () => {
   it('passes the extracted facts to the host', async () => {
     await loadToolCall()({ toolName: 'bash', toolCallId: 'c1', input: { command: 'rm -rf /' } }, ctx());
-    const call = mocks.evaluateToolCall.mock.calls[0][1];
+    const call = lastFacts();
     expect(call).toMatchObject({
       tool: 'bash', workspace: 'D:/repo', origin: 'main', preset: 'auto', toolCallId: 'c1', sessionId: 's1',
     });
@@ -84,27 +98,27 @@ describe('safety tool_call · host decision', () => {
 
   it('marks mcp, network and code exec flags', async () => {
     await loadToolCall()({ toolName: 'mcp__github__x', input: {} }, ctx());
-    expect(mocks.evaluateToolCall.mock.calls[0][1].flags.mcp).toBe(true);
+    expect(lastFacts().flags.mcp).toBe(true);
     await loadToolCall()({ toolName: 'py_run', input: {} }, ctx());
-    expect(mocks.evaluateToolCall.mock.calls[1][1].flags.codeExec).toBe(true);
+    expect(lastFacts().flags.codeExec).toBe(true);
   });
 
   it('reports the process origin for a sub-agent', async () => {
     process.env.PI_IS_SUBAGENT = '1';
     await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx({ hasUI: false }));
-    expect(mocks.evaluateToolCall.mock.calls[0][1].origin).toBe('subagent');
+    expect(lastFacts().origin).toBe('subagent');
   });
 
   it('honours SAFETY_BASH_CONFIRM=0 by withholding the dangerous flag', async () => {
-    mocks.getConfig.mockImplementation((k: string) => (k === 'SAFETY_BASH_CONFIRM' ? '0' : undefined));
+    mocks.getConfig.mockImplementation((k: unknown) => (k === 'SAFETY_BASH_CONFIRM' ? '0' : undefined));
     await loadToolCall()({ toolName: 'bash', input: { command: 'rm -rf /' } }, ctx());
-    expect(mocks.evaluateToolCall.mock.calls[0][1].flags.dangerousCommand).toBe(false);
+    expect(lastFacts().flags.dangerousCommand).toBe(false);
   });
 
   it('honours SAFETY_PROTECT_PATHS=0 by withholding the protected-path flag', async () => {
-    mocks.getConfig.mockImplementation((k: string) => (k === 'SAFETY_PROTECT_PATHS' ? '0' : undefined));
+    mocks.getConfig.mockImplementation((k: unknown) => (k === 'SAFETY_PROTECT_PATHS' ? '0' : undefined));
     await loadToolCall()({ toolName: 'write', input: { path: 'C:/Windows/System32/x.dll' } }, ctx());
-    expect(mocks.evaluateToolCall.mock.calls[0][1].flags.protectedPath).toBe(false);
+    expect(lastFacts().flags.protectedPath).toBe(false);
   });
 
   it('allows the call through when the host says allow', async () => {
@@ -114,7 +128,7 @@ describe('safety tool_call · host decision', () => {
   it('blocks when the host says deny', async () => {
     mocks.evaluateToolCall.mockResolvedValue({ decision: 'deny', auditId: 'a1' });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx());
-    expect(result).toMatchObject({ block: true });
+    expect(result).toMatchObject({ block: true, terminate: true });
   });
 });
 
@@ -150,7 +164,7 @@ describe('safety tool_call · ask flow', () => {
     mocks.evaluateToolCall.mockResolvedValue({ decision: 'ask', auditId: 'a1' });
     const c = ctx({ ui: { select: vi.fn(async () => '拒绝') } });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'rm -rf x' } }, c);
-    expect(result).toMatchObject({ block: true });
+    expect(result).toMatchObject({ block: true, terminate: true });
     expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), 'a1', 'user_deny');
   });
 
@@ -159,6 +173,7 @@ describe('safety tool_call · ask flow', () => {
     const c = ctx({ hasUI: false });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'rm -rf x' } }, c);
     expect(result).toMatchObject({ block: true });
+    expect(result).not.toHaveProperty('terminate', true);
     expect(c.ui.select).not.toHaveBeenCalled();
     expect(mocks.settleToolCall).not.toHaveBeenCalled();
   });
@@ -167,7 +182,15 @@ describe('safety tool_call · ask flow', () => {
     mocks.evaluateToolCall.mockResolvedValue({ decision: 'ask', auditId: 'a1' });
     const c = ctx({ ui: { select: vi.fn(async () => { throw new Error('aborted'); }) } });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'rm -rf x' } }, c);
-    expect(result).toMatchObject({ block: true });
+    expect(result).toMatchObject({ block: true, terminate: true });
+    expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), 'a1', 'aborted');
+  });
+
+  it('settles as aborted when select returns undefined (Pi 0.85 cancel)', async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: 'ask', auditId: 'a1' });
+    const c = ctx({ ui: { select: vi.fn(async () => undefined) } });
+    const result = await loadToolCall()({ toolName: 'bash', input: { command: 'rm -rf x' } }, c);
+    expect(result).toMatchObject({ block: true, reason: '授权请求已取消', terminate: true });
     expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), 'a1', 'aborted');
   });
 });

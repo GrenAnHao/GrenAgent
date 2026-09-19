@@ -64,6 +64,7 @@ cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "
 | --- | --- |
 | `types.ts` | 跨模块共享类型：`ToolCallFacts`、`ToolRule`、`ToolDecision`、`ToolOrigin` |
 | `effectRank.ts` | `EFFECT_RANK` 的单一真相源，被 `rules` / `builtinRules` / `toolDecisionService` 三处共用 |
+| `paths.ts` | 路径比较用的规范化函数，被 `rules` 与 `ruleStore` 共用；两处必须逐字一致，否则规则会被静默丢弃 |
 | `rules.ts` | 纯函数 `matchUserRules`，无 I/O，可完全单测 |
 | `builtinRules.ts` | 三档预设的内置规则常量，基于特征谓词 |
 | `argsDigest.ts` | 纯函数，按工具名裁剪参数为审计摘要 |
@@ -82,7 +83,9 @@ cd electron-agent; npx tsc -p tsconfig.node.json --noEmit 2>&1 | Select-String "
 
 拆分理由：`rules.ts`、`builtinRules.ts`、`argsDigest.ts` 是纯函数，与数据库和网络隔离，测试不需要任何 fixture；`ruleStore` 与 `auditStore` 各管一张表；`toolDecisionService` 只做编排，不含判定逻辑。这样每个文件都能一次读完，决策逻辑的测试也不必搭数据库。
 
-`effectRank.ts` 只有一张三行的常量表，单独成文件的理由不是省代码行数：`rules`、`builtinRules`、`toolDecisionService` 三处都要按同一顺序比较 effect 强度，一旦某处漏改（例如将来新增一档 effect），`EFFECT_RANK[effect]` 得到 `undefined`、比较恒为假，会静默选出错误的规则而不报任何错——「冲突时取最强」这条不变量就失真了。让三处 import 同一张表，漂移在编译期就暴露。
+`effectRank.ts` 只有一张三行的常量表，单独成文件的理由不是省代码行数，但也**不是**「防止漏改导致缺键」——每份拷贝都标注了 `Record<ToolEffect, number>`，新增一档 effect 时所有拷贝都会编译失败，缺键这一类由类型系统兜住了。
+
+它挡住的是类型系统管不到的那一类：多份拷贝各自键齐全、全部通过编译，但**数值或顺序不一致**。`{deny:3,ask:2,allow:1}` 与 `{deny:1,ask:3,allow:2}` 放在一起编译毫无告警，而 `rules`、`builtinRules`、`toolDecisionService` 三处都靠这个顺序取最强，一处被改动就会让「冲突时取最强」静默失真、不报任何错。让三处 import 同一张表，这种分歧根本无从产生。
 
 ---
 
@@ -953,11 +956,8 @@ describe('ToolRuleStore', () => {
 ```typescript
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { normalizeComparablePath } from './paths';
 import type { MatcherKind, RuleScope, ToolEffect, ToolRule, ToolRuleInput } from './types';
-
-function normalizeWorkspace(value: string): string {
-  return value.replace(/\\/g, '/').toLowerCase();
-}
 
 function mapRow(row: Record<string, unknown>): ToolRule {
   return {
@@ -1001,12 +1001,16 @@ export class ToolRuleStore {
   /**
    * 取出对这次调用可能适用的规则：全部 global，加上匹配当前工作区与会话的那些。
    * 工作区比较在 SQL 之外做，因为 scope_key 里可能存着不同分隔符或大小写的同一路径。
+   *
+   * 规范化必须与 rules.ts 的 scopeApplies 用同一个 normalizeComparablePath：这里是
+   * 预筛，比那边更严就会把本该匹配的规则提前丢掉，而且丢得无声无息。历史上就差在
+   * 尾部分隔符——scopeKey 写成 D:/repo/ 的工作区规则会在这一步被滤掉。
    */
   applicable(workspace: string, sessionId: string | undefined): ToolRule[] {
-    const target = normalizeWorkspace(workspace);
+    const target = normalizeComparablePath(workspace);
     return this.list().filter((rule) => {
       if (rule.scope === 'global') return true;
-      if (rule.scope === 'workspace') return normalizeWorkspace(rule.scopeKey) === target;
+      if (rule.scope === 'workspace') return normalizeComparablePath(rule.scopeKey) === target;
       return sessionId !== undefined && rule.scopeKey === sessionId;
     });
   }

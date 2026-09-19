@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  evaluateToolCall: vi.fn(async () => ({ decision: "allow" as const, auditId: "a1" })),
+  evaluateToolCall: vi.fn(async (): Promise<{ decision: "allow" | "ask" | "deny"; auditId: string }> => ({
+    decision: "allow",
+    auditId: "a1",
+  })),
   rememberToolRule: vi.fn(async () => true),
   settleToolCall: vi.fn(async () => undefined),
 }));
@@ -53,7 +56,7 @@ describe("safety approval gating", () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("full");
     vi.mocked(getConfig).mockImplementation((k: string) => (k === "SAFETY_DENY_TOOLS" ? "spawn_agent" : undefined));
     const r = await setup()({ toolName: "spawn_agent", input: {} }, { hasUI: true, cwd, ui: {} });
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
   });
 
@@ -63,7 +66,7 @@ describe("safety approval gating", () => {
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "write", input: { path: "../escape.txt" } }, { hasUI: true, cwd, ui });
     expect(ui.select).toHaveBeenCalled();
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("ask: allows in-cwd write without prompting", async () => {
@@ -80,7 +83,7 @@ describe("safety approval gating", () => {
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "fetch_url", input: { url: "http://x" } }, { hasUI: true, cwd, ui });
     expect(ui.select).toHaveBeenCalled();
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("ask: confirms MCP tools (mcp__*, e.g. fetch) and blocks on decline", async () => {
@@ -89,7 +92,7 @@ describe("safety approval gating", () => {
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "mcp__user_fetch__fetch", input: {} }, { hasUI: true, cwd, ui });
     expect(ui.select).toHaveBeenCalled();
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("auto: does NOT confirm MCP tools (minimal prompts)", async () => {
@@ -106,7 +109,7 @@ describe("safety approval gating", () => {
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "bash", input: { command: "rm foo" } }, { hasUI: true, cwd, ui });
     expect(ui.select).toHaveBeenCalled();
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("ask headless (no UI) queues the call instead of degrading to auto", async () => {
@@ -116,6 +119,7 @@ describe("safety approval gating", () => {
     const r = await setup()({ toolName: "write", input: { path: "../escape.txt" } }, { hasUI: false, cwd, ui });
     expect(ui.select).not.toHaveBeenCalled();
     expect(r?.block).toBe(true);
+    expect(r).not.toHaveProperty("terminate", true);
     expect(mocks.settleToolCall).not.toHaveBeenCalled();
   });
 
@@ -131,10 +135,10 @@ describe("safety approval gating", () => {
     vi.mocked(getApprovalPolicy).mockReturnValue("auto");
     vi.mocked(getConfig).mockImplementation((k: string) => (k === "SAFETY_READONLY" ? "1" : undefined));
     const r1 = await setup()({ toolName: "ast_edit", input: {} }, { hasUI: true, cwd, ui: {} });
-    expect(r1?.block).toBe(true);
+    expect(r1).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
     const r2 = await setup()({ toolName: "hl_edit", input: {} }, { hasUI: true, cwd, ui: {} });
-    expect(r2?.block).toBe(true);
+    expect(r2).toMatchObject({ block: true, terminate: true });
   });
 
   it("ask: confirms host code execution (py_run)", async () => {
@@ -143,7 +147,7 @@ describe("safety approval gating", () => {
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "py_run", input: { code: "x=1" } }, { hasUI: true, cwd, ui });
     expect(ui.select).toHaveBeenCalled();
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("ask: confirms dap_launch (host execution)", async () => {
@@ -151,7 +155,7 @@ describe("safety approval gating", () => {
     mocks.evaluateToolCall.mockResolvedValue({ decision: "ask", auditId: "a1" });
     const ui = { select: vi.fn().mockResolvedValue("拒绝") };
     const r = await setup()({ toolName: "dap_launch", input: { program: "x.py" } }, { hasUI: true, cwd, ui });
-    expect(r?.block).toBe(true);
+    expect(r).toMatchObject({ block: true, terminate: true });
   });
 
   it("uses the delegation deny reason when the pinned subagent rule fires", async () => {
