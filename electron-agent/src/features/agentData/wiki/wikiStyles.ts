@@ -70,28 +70,9 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
   `,
   tabs: css`
     display: flex;
-    gap: 0;
+    align-items: center;
+    gap: 8px;
     margin-block-end: 12px;
-    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
-    button {
-      padding: 10px 16px;
-      border: none;
-      background: transparent;
-      color: ${cssVar.colorTextSecondary};
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      transition: all 0.2s;
-      &[aria-selected='true'] {
-        color: ${cssVar.colorPrimary};
-        border-bottom-color: ${cssVar.colorPrimary};
-      }
-      &:hover {
-        color: ${cssVar.colorPrimary};
-      }
-    }
   `,
   muted: css`color: ${cssVar.colorTextSecondary}; font-size: 12px; overflow-wrap: anywhere;`,
   listHeader: css`
@@ -100,11 +81,6 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     justify-content: space-between;
     gap: 20px;
     margin-block-end: 16px;
-    h3 {
-      margin: 0 0 4px;
-      font-size: 18px;
-      font-weight: 600;
-    }
   `,
   listToolbar: css`
     display: flex;
@@ -117,37 +93,12 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     flex-direction: column;
     gap: 12px;
   `,
-  library: css`
-    padding: 16px 18px;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorBgContainer};
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    cursor: pointer;
-    transition: all 0.2s;
-    &:hover {
-      border-color: ${cssVar.colorPrimary};
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    }
-  `,
   libraryHeader: css`
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
     margin-block-end: 8px;
-  `,
-  libraryName: css`
-    padding: 0;
-    border: none;
-    background: transparent;
-    font-size: 15px;
-    font-weight: 600;
-    color: ${cssVar.colorText};
-    cursor: pointer;
-    text-align: left;
-    &:hover {
-      color: ${cssVar.colorPrimary};
-    }
   `,
   libraryMeta: css`
     display: flex;
@@ -202,29 +153,31 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     margin: -4px;
     padding: 4px;
   `,
+  /**
+   * antd Button 充当两行列表项：只覆盖布局方向与高度，外观交给 antd；
+   * 选中态用 aria-pressed 驱动，避免切换 Button type（会重挂载节点、丢失焦点恢复引用）。
+   * antd 给 .ant-btn 写死了 white-space: nowrap 与 align-items: center，长标题必须显式放开换行并靠左。
+   */
   resource: css`
-    text-align: start;
-    padding: 10px 12px;
+    height: auto;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding-block: 8px;
     border: 1px solid transparent;
-    border-radius: ${cssVar.borderRadius};
-    color: ${cssVar.colorText};
-    background: transparent;
-    font: inherit;
-    cursor: pointer;
+    white-space: normal;
+    text-align: start;
     overflow-wrap: anywhere;
-    transition: all .15s;
     &[aria-pressed='true'] {
       background: ${cssVar.colorPrimaryBg};
       border-color: ${cssVar.colorPrimaryBorder};
     }
-    &:hover {
-      background: ${cssVar.colorFillTertiary};
-    }
     small {
       display: block;
-      margin-block-start: 6px;
-      color: ${cssVar.colorTextSecondary};
+      margin-block-start: 4px;
       font-size: 11px;
+      opacity: 0.75;
     }
   `,
   detail: css`
@@ -244,7 +197,6 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     text-align: center;
     font-size: 13px;
   `,
-  properties: css`display: none;`,
   propertyButton: css`display: inline-flex;`,
   document: css`width: 100%; max-width: 760px; margin-inline: auto; line-height: 1.65; overflow-wrap: anywhere; pre { white-space: pre-wrap; overflow-wrap: anywhere; } img { max-width: 100%; }`,
   editor: css`display: flex; flex-direction: column; gap: 12px; min-width: 0;`,

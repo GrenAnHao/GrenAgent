@@ -56,16 +56,37 @@ export class TaskViewStore {
     if (ref.source === 'system') {
       const input = "CASE WHEN json_valid(input) THEN input ELSE '{}' END";
       const output = "CASE WHEN json_valid(output) THEN output ELSE '{}' END";
-      const row = this.db.prepare(`SELECT json_extract(${input},'$.kbId') AS kbId,json_extract(${input},'$.sourceId') AS sourceId,
+      const scenes = `json_extract(${output},'$.scenes')`;
+      const row = this.db.prepare(`SELECT kind,json_extract(${input},'$.kbId') AS kbId,json_extract(${input},'$.sourceId') AS sourceId,
         json_extract(${input},'$.sourceRevision') AS sourceRevision,json_extract(${input},'$.expectedModel') AS model,
+        json_extract(${input},'$.mode') AS mode,json_extract(${input},'$.source') AS memorySource,
+        json_extract(${input},'$.sessionId') AS sessionId,json_extract(${input},'$.userId') AS userId,
+        json_extract(${input},'$.generation') AS generation,json_extract(${input},'$.maxScenes') AS maxScenes,
+        json_array_length(json_extract(${input},'$.memories')) AS memoryCount,
+        COALESCE(json_array_length(json_extract(${input},'$.scenes')),json_extract(${input},'$.sceneCount')) AS sceneCount,
+        json_extract(${input},'$.changedSceneCount') AS changedSceneCount,json_extract(${input},'$.totalProcessed') AS totalProcessed,
         json_extract(${output},'$.succeeded') AS succeeded,json_extract(${output},'$.skipped') AS skipped,
-        json_extract(${output},'$.failed') AS failed,json_extract(${output},'$.generated') AS generated FROM service_tasks WHERE id=?`).get(ref.id) as Row;
+        json_extract(${output},'$.failed') AS failed,json_extract(${output},'$.generated') AS generated,
+        json_array_length(json_extract(${output},'$.l1')) AS l1Count,json_array_length(${output}) AS decisionCount,
+        (SELECT COUNT(*) FROM json_each(${scenes}) WHERE COALESCE(json_extract(value,'$.action'),'write')!='delete' AND COALESCE(json_extract(value,'$.content'),'')!='[DELETED]') AS written,
+        (SELECT COUNT(*) FROM json_each(${scenes}) WHERE json_extract(value,'$.action')='delete' OR json_extract(value,'$.content')='[DELETED]') AS deleted,
+        CASE WHEN json_type(${output},'$.persona_update_request')='text' AND length(trim(json_extract(${output},'$.persona_update_request')))>0 THEN 1 ELSE 0 END AS personaUpdateRequested,
+        CASE WHEN json_type(${output},'$.content')='text' AND length(trim(json_extract(${output},'$.content')))>0 THEN 1 ELSE 0 END AS wrotePersona
+        FROM service_tasks WHERE id=?`).get(ref.id) as Row;
       if (this.hasTable('wiki_task_targets')) {
         const target = this.db.prepare("SELECT kb_id,source_id FROM wiki_task_targets WHERE task_source='service_task' AND task_id=? ORDER BY kb_id,source_id LIMIT 1").get(ref.id);
         if (target) { row.kbId = target.kb_id; if (target.source_id) row.sourceId = target.source_id; }
       }
-      detail.inputSummary = safeSummary(row, ['kbId', 'sourceId', 'model'], ['sourceRevision']);
-      detail.outputSummary = safeSummary(row, [], ['succeeded', 'skipped', 'failed', 'generated']);
+      const kind = String(row.kind ?? view.kind);
+      if (kind.startsWith('memory_')) {
+        detail.inputSummary = memoryInputSummary(row);
+        detail.outputSummary = memoryOutputSummary(kind, row);
+        const processed = memoryProcessed(kind, detail.outputSummary);
+        if (processed !== undefined && view.status === 'completed') { detail.processed = processed; detail.total = processed; }
+      } else {
+        detail.inputSummary = safeSummary(row, ['kbId', 'sourceId', 'model'], ['sourceRevision']);
+        detail.outputSummary = safeSummary(row, [], ['succeeded', 'skipped', 'failed', 'generated']);
+      }
     } else {
       const row = this.db.prepare('SELECT metadata FROM agent_jobs WHERE id=?').get(ref.id);
       const metadata = parseJobMetadata(row?.metadata);
@@ -127,8 +148,9 @@ export class TaskViewStore {
     else if (row.error) error = safeError(row.error);
     else if (metadata?.cancellationError) error = '取消请求失败，可再次尝试';
     return { ref: { source, id: String(row.id) }, key: `${source}:${row.id}`, kind, label: String(row.label), status, workspace, resource,
-      resourceName: operationText(metadata?.resourceName, 'text'), stage: safeStage(metadata?.stage) ?? (source === 'user' && kind === 'codegraph.sync' && status === 'running' ? '正在构建' : undefined),
-      progress: measurable ? Math.round(metadata.processed! / metadata.total! * 100) : undefined,
+      resourceName: operationText(metadata?.resourceName, 'text'),
+      stage: safeStage(metadata?.stage) ?? (source === 'user' && kind === 'codegraph.sync' && status === 'running' ? '正在构建' : undefined) ?? systemStage(source, status),
+      progress: measurable ? Math.round(metadata.processed! / metadata.total! * 100) : source === 'system' && status === 'completed' ? 100 : undefined,
       processed: source === 'user' ? metadata?.processed : undefined, total: source === 'user' ? metadata?.total : undefined,
       cancellationRequested: source === 'user' && metadata?.cancellationRequested === true, retryOf: operationText(metadata?.retryOf, 'identifier'),
       attempts: source === 'system' ? Number(row.attempts) : undefined,
@@ -156,6 +178,36 @@ export class TaskViewStore {
 }
 
 function assertRef(ref: TaskRef): void { if (!ref || !['user', 'system'].includes(ref.source) || typeof ref.id !== 'string' || !ref.id) throw new Error('INVALID_TASK_REF'); }
+function systemStage(source: TaskRef['source'], status: string): string | undefined {
+  if (source !== 'system') return undefined;
+  if (status === 'running') return '正在生成';
+  if (status === 'completed') return '已完成';
+  return undefined;
+}
+function memoryInputSummary(row: Row): Record<string, unknown> {
+  const summary = safeSummary(row, ['mode', 'sessionId', 'userId', 'generation'], ['maxScenes', 'memoryCount', 'sceneCount', 'changedSceneCount', 'totalProcessed']);
+  const source = operationText(row.memorySource, 'identifier');
+  if (source !== undefined) summary.source = source;
+  return summary;
+}
+function memoryOutputSummary(kind: string, row: Row): Record<string, unknown> {
+  if (kind === 'memory_extract') return safeSummary(row, [], ['l1Count']);
+  if (kind === 'memory_scene') {
+    const summary = safeSummary(row, [], ['written', 'deleted']);
+    if (Number(row.personaUpdateRequested) === 1) summary.personaUpdateRequested = true;
+    return summary;
+  }
+  if (kind === 'memory_persona') return Number(row.wrotePersona) === 1 ? { wrotePersona: true } : {};
+  if (kind === 'memory_deduplicate') return safeSummary(row, [], ['decisionCount']);
+  return {};
+}
+function memoryProcessed(kind: string, summary: Record<string, unknown>): number | undefined {
+  if (kind === 'memory_scene') return Number(summary.written ?? 0) + Number(summary.deleted ?? 0);
+  if (kind === 'memory_extract' && summary.l1Count !== undefined) return Number(summary.l1Count);
+  if (kind === 'memory_deduplicate' && summary.decisionCount !== undefined) return Number(summary.decisionCount);
+  if (kind === 'memory_persona' && summary.wrotePersona === true) return 1;
+  return undefined;
+}
 function safeStage(value: unknown): string | undefined { return typeof value === 'string' && stages.has(value) ? value : undefined; }
 function safeError(value: unknown): string {
   const code = typeof value === 'string' ? value.match(/^(MODEL_UNAVAILABLE|MODEL_CHANGED|WIKI_INGEST_INTERRUPTED|SOURCE_CHANGED|VERSION_CONFLICT)\b/)?.[1] : undefined;

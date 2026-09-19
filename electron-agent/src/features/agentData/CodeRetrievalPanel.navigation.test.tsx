@@ -12,6 +12,7 @@ import { files } from '../../lib/files';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
 import { deferred } from './memoryTestData';
 import { task } from './operationsTestData';
+import { expectSelectDisplay, pickSelectOption } from './antdSelectTestUtils';
 
 describe('CodeRetrievalPanel resource navigation', () => {
   beforeEach(() => {
@@ -26,7 +27,7 @@ describe('CodeRetrievalPanel resource navigation', () => {
   it('selects the equivalent real project and file line without inventing a symbol', async () => {
     render(<CodeRetrievalPanel navigation={{ view: 'code', workspace: 'd:\\B\\', file: 'src/a.ts', line: 2 }} navigationRequest={1} />);
     await screen.findByText('target');
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('D:/b');
+    expectSelectDisplay('项目', /^B ·/);
     expect(files.read).toHaveBeenCalledWith('D:/b', 'src/a.ts');
     expect(screen.getByTestId('code-source-line-2').getAttribute('aria-current')).toBe('location');
     expect(agentDataApi.code.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'codegraph_node' }));
@@ -81,7 +82,7 @@ describe('CodeRetrievalPanel resource navigation', () => {
     await screen.findByText('target');
     await act(async () => old.resolve({ structuredContent: [{ file: 'stale.ts' }] }));
     expect(screen.queryByText('stale.ts')).toBeNull();
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/a' } });
+    await pickSelectOption('项目', /^A ·/);
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('alpha query');
   });
 

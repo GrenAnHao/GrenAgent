@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Alert, Button, Input, Select, Typography } from 'antd';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryDraft, type MemoryLevel } from '../../lib/agentData';
 import { memoryLevelLabels } from './memoryPresentation';
 import { memoryStyles as m } from './memoryStyles';
-import { styles } from './agentDataStyles';
 
 interface Props { userId: string; record?: ManagedMemoryRecord; projects: Array<{ cwd: string; name: string }>; unavailable?: boolean; onUnavailable?(): void; onSaved(record: ManagedMemoryRecord): void; onCancel(): void }
 export interface MemoryEditorHandle { confirmLeave(): boolean }
@@ -107,26 +107,26 @@ export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function Memor
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   }}>
     <div className={m.toolbar}>
-      <button type="button" className={m.button} disabled={!!busy} onClick={close}>关闭编辑</button>
-      <button type="button" className={`${m.button} ${m.primary}`} disabled={!canSave} onClick={() => void save()}>保存记忆</button>
-      {draft.base || targetMismatch ? <button type="button" className={m.button} disabled={!!busy} onClick={() => void reload()}>{targetMismatch ? '载入当前记录' : '重新载入'}</button> : null}
-      {dirty ? <span role="status">未保存修改</span> : null}
-      {busy ? <span role="status">{busy === 'save' ? '正在保存…' : '正在重新载入…'}</span> : null}
+      <Button disabled={!!busy} onClick={close}>关闭编辑</Button>
+      <Button type="primary" disabled={!canSave} onClick={() => void save()}>保存记忆</Button>
+      {draft.base || targetMismatch ? <Button disabled={!!busy} onClick={() => void reload()}>{targetMismatch ? '载入当前记录' : '重新载入'}</Button> : null}
+      {dirty ? <Typography.Text role="status">未保存修改</Typography.Text> : null}
+      {busy ? <Typography.Text role="status">{busy === 'save' ? '正在保存…' : '正在重新载入…'}</Typography.Text> : null}
     </div>
-    {error ? <p role="alert" className={styles.inlineError}>{error}</p> : null}
-    {unavailable && !deleted ? <p role="alert" className={styles.inlineError}>原记录不可写；草稿内容仍可复制。</p> : null}
-    {targetMismatch ? <p role="status" className={m.notice}>当前用户或记录已变化，原草稿仍保留；载入当前记录前不会写入其它目标。</p> : backgroundUpdated && dirty ? <p role="status" className={m.notice}>数据已更新，你的草稿未改变。保存时会检查原版本。</p> : null}
-    <label className={m.field}>记忆正文<textarea className={m.control} aria-label="记忆正文" rows={12} value={draft.content} readOnly={!!busy} onChange={(event) => change('content', event.target.value)} /></label>
-    <label className={m.field}>记忆层级<select className={m.control} aria-label="编辑记忆层级" value={draft.level} disabled={!!busy || draft.base?.level === 0} onChange={(event) => change('level', Number(event.target.value) as MemoryLevel)}>
-      {draft.base?.level === 0 ? <option value="0">{memoryLevelLabels[0]}</option> : null}
-      {[1, 2, 3].map((value) => <option key={value} value={value}>{memoryLevelLabels[value as 1 | 2 | 3]}</option>)}
-    </select></label>
-    <label className={m.field}>归属范围<select className={m.control} aria-label="归属范围" value={draft.owner} disabled={!!busy} onChange={(event) => change('owner', event.target.value)}>
-      <option value="" disabled>请选择归属范围</option><option value="global">全局</option>
-      {unavailableProject ? <option value={draft.owner}>原项目已不可用 · {draft.owner.slice('project:'.length)}</option> : null}
-      {projects.map((project) => <option key={project.cwd} value={`project:${project.cwd}`}>{project.name}</option>)}
-    </select></label>
-    <p className={styles.hint}>{draft.owner === 'global' ? '全局记忆可在本用户所有项目中召回。' : draft.owner ? '项目记忆仅在所选项目中召回，不会改变原来源会话。' : '保存前请选择全局或一个真实项目。'}</p>
-    <label className={m.field}>来源说明（可选）<input className={m.control} aria-label="来源说明" value={draft.source} readOnly={!!busy} onChange={(event) => change('source', event.target.value)} /></label>
+    {error ? <Alert type="error" showIcon title={error} /> : null}
+    {unavailable && !deleted ? <Alert type="error" showIcon title="原记录不可写；草稿内容仍可复制。" /> : null}
+    {targetMismatch ? <Typography.Text role="status" type="secondary">当前用户或记录已变化，原草稿仍保留；载入当前记录前不会写入其它目标。</Typography.Text> : backgroundUpdated && dirty ? <Typography.Text role="status" type="secondary">数据已更新，你的草稿未改变。保存时会检查原版本。</Typography.Text> : null}
+    <label className={m.field}>记忆正文<Input.TextArea aria-label="记忆正文" rows={12} value={draft.content} readOnly={!!busy} onChange={(event) => change('content', event.target.value)} /></label>
+    <label className={m.field}>记忆层级<Select aria-label="编辑记忆层级" value={draft.level} disabled={!!busy || draft.base?.level === 0} onChange={(value) => change('level', Number(value) as MemoryLevel)} options={[
+      ...(draft.base?.level === 0 ? [{ value: 0, label: memoryLevelLabels[0] }] : []),
+      ...[1, 2, 3].map((value) => ({ value, label: memoryLevelLabels[value as 1 | 2 | 3] })),
+    ]} /></label>
+    <label className={m.field}>归属范围<Select aria-label="归属范围" value={draft.owner || undefined} placeholder="请选择归属范围" disabled={!!busy} onChange={(value) => change('owner', value)} options={[
+      { value: 'global', label: '全局' },
+      ...(unavailableProject ? [{ value: draft.owner, label: `原项目已不可用 · ${draft.owner.slice('project:'.length)}` }] : []),
+      ...projects.map((project) => ({ value: `project:${project.cwd}`, label: project.name })),
+    ]} /></label>
+    <Typography.Text type="secondary" style={{ fontSize: 12 }}>{draft.owner === 'global' ? '全局记忆可在本用户所有项目中召回。' : draft.owner ? '项目记忆仅在所选项目中召回，不会改变原来源会话。' : '保存前请选择全局或一个真实项目。'}</Typography.Text>
+    <label className={m.field}>来源说明（可选）<Input aria-label="来源说明" value={draft.source} readOnly={!!busy} onChange={(event) => change('source', event.target.value)} /></label>
   </section>;
 });

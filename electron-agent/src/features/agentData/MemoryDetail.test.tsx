@@ -12,7 +12,7 @@ describe('MemoryDetail', () => {
   it('renders JSON as readable fields and arrays with collapsed raw JSON', async () => {
     render(<MemoryDetail value={{ kind: 'memory', record: { ...memoryRecord, content: '{"偏好":"中文","语言":["TypeScript","Rust"]}' } }} onEdit={vi.fn()} onDelete={vi.fn()} />);
     expect(screen.getByText('偏好')).toBeTruthy(); expect(screen.getByText('中文')).toBeTruthy();
-    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByText('原始 JSON').closest('details')?.open).toBe(false);
     expect(screen.getByRole('button', { name: '编辑记忆' })).toBeTruthy();
     await screen.findByText('已有来源会话');

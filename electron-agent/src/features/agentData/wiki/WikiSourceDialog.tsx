@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Input, Modal, Tabs } from 'antd';
+import { Alert, Button, Input, Modal, Select, Tabs } from 'antd';
 import { agentDataApi } from '../../../lib/agentData';
 import type { WikiImportPreview, WikiSource } from '../../../../electron/agentData/wikiContracts';
 import { LazyMarkdown } from '../../chat/LazyMarkdown';
-import { styles } from '../agentDataStyles';
 import { wikiStyles as w } from './wikiStyles';
 
 interface Props { open: boolean; visible?: boolean; kbId: string; bindings: string[]; source?: WikiSource; onClose(): void; onSaved(): void }
@@ -107,7 +106,7 @@ export function WikiSourceDialog({ open, visible = true, kbId, bindings, source,
     <p className={w.muted}>保存资料不会调用模型；回到知识库后可显式开始抽取。</p>
     {error ? <Alert type="error" title={error} showIcon /> : null}
     {saved ? <Alert type="success" title={source ? '资料已更新' : '资料已添加'} /> : null}
-    <Tabs activeKey={tab} onChange={setTab} items={[
+    <Tabs id="wiki-source" activeKey={tab} onChange={setTab} items={[
       ...(!source ? [{ key: 'upload', label: '上传文件', children: <>
         <label className={w.field}>上传 Markdown 或文本<input type="file" multiple accept=".md,.txt" aria-label="上传资料" disabled={busy} onChange={(event) => { void upload(Array.from(event.target.files ?? [])); event.target.value = ''; }} /></label>
         <ul aria-live="polite">{uploads.map((result, index) => <li key={index}>{result.name} · {result.state === 'saved' ? '资料已添加' : result.state === 'saving' ? '正在添加' : result.error}</li>)}</ul>
@@ -120,7 +119,7 @@ export function WikiSourceDialog({ open, visible = true, kbId, bindings, source,
       </> },
       ...(!source ? [{ key: 'project', label: '从项目导入', children: <>
         {!bindings.length ? <Alert type="info" title="请先在知识库属性中关联项目" /> : null}
-        <label className={w.field}>关联项目<select className={styles.select} aria-label="导入项目" disabled={busy} value={project} onChange={(event) => { setProject(event.target.value); setPreview(undefined); setSaved(false); }}>{bindings.map((binding) => <option key={binding} value={binding}>{binding}</option>)}</select></label>
+        <label className={w.field}>关联项目<Select aria-label="导入项目" disabled={busy} value={project} style={{ width: '100%' }} onChange={(value) => { setProject(value); setPreview(undefined); setSaved(false); }} options={bindings.map((binding) => ({ value: binding, label: binding }))} /></label>
         <label className={w.field}>项目相对路径<Input aria-label="项目相对路径" placeholder="docs/README.md" value={path} disabled={busy} onChange={(event) => { setPath(event.target.value); setPreview(undefined); setSaved(false); }} /></label>
         <Button disabled={!project || !path.trim() || busy} onClick={() => void previewImport()}>预览导入</Button>
         {preview ? <div className={w.preview}><p>{preview.projectWorkspace}</p><p>{preview.relativePath} · {preview.bytes} 字节</p><Button type="primary" loading={busy} onClick={() => void importProject()}>确认导入</Button></div> : null}

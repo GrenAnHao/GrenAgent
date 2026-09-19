@@ -8,6 +8,7 @@ vi.mock('../../lib/agentData', () => ({
   agentDataApi: { jobs: { list: vi.fn(), cancel: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
 }));
 import { agentDataApi } from '../../lib/agentData';
+import { pickSelectOption } from './antdSelectTestUtils';
 
 const jobs = [
   { id: 'job-1', kind: 'wiki.sync', workspace: 'D:/proj/alpha', state: 'running' as const, progress: 40, createdAt: 1, updatedAt: 2 },
@@ -92,9 +93,9 @@ describe('JobsPanel', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
-  it('filters by state', () => {
+  it('filters by state', async () => {
     render(<JobsPanel jobs={jobs} />);
-    fireEvent.change(screen.getByLabelText('任务状态'), { target: { value: 'failed' } });
+    await pickSelectOption('任务状态', '失败');
     expect(screen.queryByText('wiki.sync')).toBeNull();
     expect(screen.getByText('codegraph.sync')).toBeTruthy();
   });
@@ -144,7 +145,7 @@ describe('JobsPanel', () => {
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[...activeJobs, ...terminalJobs, matchingJob]} onRefresh={onRefresh} />);
     fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'alpha' } });
-    fireEvent.change(screen.getByLabelText('任务状态'), { target: { value: 'failed' } });
+    await pickSelectOption('任务状态', '失败');
     fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
 
     await waitFor(() => expect(screen.queryByText(matchingJob.kind)).toBeNull());
@@ -160,7 +161,7 @@ describe('JobsPanel', () => {
     expect(agentDataApi.jobs.list).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('任务状态'), { target: { value: 'all' } });
+    await pickSelectOption('任务状态', '全部状态');
     for (const job of [...activeJobs, ...terminalJobs]) expect(screen.getByText(job.kind)).toBeTruthy();
   });
 
@@ -204,11 +205,11 @@ describe('JobsPanel', () => {
     expect(agentDataApi.jobs.clear).not.toHaveBeenCalled();
   });
 
-  it('disables bulk cleanup when the current filter has no terminal records', () => {
+  it('disables bulk cleanup when the current filter has no terminal records', async () => {
     render(<JobsPanel jobs={[...activeJobs, ...terminalJobs]} />);
-    fireEvent.change(screen.getByLabelText('任务状态'), { target: { value: 'running' } });
+    await pickSelectOption('任务状态', '运行中');
     expect((screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('任务状态'), { target: { value: 'all' } });
+    await pickSelectOption('任务状态', '全部状态');
     fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'no-such-workspace' } });
     expect((screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement).disabled).toBe(true);
   });

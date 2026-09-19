@@ -98,7 +98,7 @@ describe('AgentDataCenter', () => {
     const panel = screen.getByRole('tabpanel', { name: 'Memory' });
     panel.scrollTop = 150;
     fireEvent.click(screen.getByRole('tab', { name: 'Wiki' }));
-    expect(panel.hidden).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '刷新 Agent 数据' }));
     await waitFor(() => expect(agentDataApi.status).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('tab', { name: 'Memory' }));
@@ -167,7 +167,9 @@ describe('AgentDataCenter', () => {
     expect(screen.getByRole('tab', { name: 'Wiki' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(show);
     const panel = screen.getByRole('tabpanel', { name: '任务' });
-    await waitFor(() => expect(within(panel).getByRole('row', { name: /wiki.sync/ }).getAttribute('aria-selected')).toBe('true'), { timeout: 10000 });
+    // 用 data-row-key 直接定位：按 role+name 查询会对整行做可访问名计算，
+    // 在 jsdom + antd 大样式表下单次耗时可达 20s 以上。
+    await waitFor(() => expect(panel.querySelector('tr[data-row-key="user:wiki-job"]')?.getAttribute('aria-selected')).toBe('true'), { timeout: 10000 });
   });
 
   it('supports keyboard tab navigation without mounting unseen panels', async () => {
@@ -176,9 +178,13 @@ describe('AgentDataCenter', () => {
     expect(screen.queryByTestId('wiki-panel')).toBeNull();
     const overview = screen.getByRole('tab', { name: '概览' });
     overview.focus();
-    fireEvent.keyDown(overview, { key: 'ArrowRight' });
-    const memory = screen.getByRole('tab', { name: 'Memory' });
-    expect(memory.getAttribute('aria-selected')).toBe('true');
+    // antd Tabs 键盘语义：方向键移动焦点，Enter 选中；rc-tabs 读 event.code。
+    fireEvent.keyDown(overview, { key: 'ArrowRight', code: 'ArrowRight' });
+    // 焦点落到的 tab 内会出现隐藏的 aria-live 定位文本（"Tab 2 of 6"），name 需用部分匹配。
+    const memory = screen.getByRole('tab', { name: /Memory/ });
     expect(document.activeElement).toBe(memory);
+    fireEvent.keyDown(memory, { key: 'Enter', code: 'Enter' });
+    expect(memory.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByTestId('wiki-panel')).toBeNull();
   });
 });

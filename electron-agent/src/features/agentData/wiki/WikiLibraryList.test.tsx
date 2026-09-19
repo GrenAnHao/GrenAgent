@@ -6,6 +6,7 @@ import { agentDataApi } from '../../../lib/agentData';
 import { WikiLibraryList } from './WikiLibraryList';
 import { library, deferred } from './wikiTestData';
 import { mockWikiApi, renderWiki as render } from './wikiTestSupport';
+import { expectSelectDisplay, pickSelectOption } from '../antdSelectTestUtils';
 vi.mock('../useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/a', name: 'A' }, { cwd: 'D:/b', name: 'B' }] }));
 beforeEach(mockWikiApi);
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -27,7 +28,7 @@ it('invalidates in-flight reads while hidden and refreshes once with retained fi
   const { rerender } = render(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} />);
   await screen.findByText('团队说明');
   vi.mocked(agentDataApi.wiki.libraries.list).mockReturnValueOnce(pending.promise);
-  fireEvent.change(screen.getByLabelText('关联项目筛选'), { target: { value: 'D:/a' } });
+  await pickSelectOption('关联项目筛选', 'A');
   await waitFor(() => expect(agentDataApi.wiki.libraries.list).toHaveBeenCalledTimes(2));
   rerender(<WikiLibraryList visible={false} onOpen={vi.fn()} refreshVersion={5} />);
   await act(async () => pending.resolve([{ ...library, name: '迟到结果' }]));
@@ -35,7 +36,7 @@ it('invalidates in-flight reads while hidden and refreshes once with retained fi
   expect(agentDataApi.wiki.libraries.list).toHaveBeenCalledTimes(2);
   rerender(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={5} />);
   await waitFor(() => expect(agentDataApi.wiki.libraries.list).toHaveBeenCalledTimes(3));
-  expect(screen.getByLabelText('关联项目筛选')).toHaveValue('D:/a');
+  expectSelectDisplay('关联项目筛选', 'A');
 });
 
 it('debounces queries and distinguishes filtered emptiness', async () => {

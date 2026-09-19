@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentDataApi, type ManagedMemoryRecord } from '../../lib/agentData';
 import { MemoryEditor } from './MemoryEditor';
 import { deferred, memoryRecord } from './memoryTestData';
+import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { memory: { create: vi.fn(), update: vi.fn(), read: vi.fn() } } }));
 const projects = [{ cwd: 'D:/proj/alpha', name: 'alpha' }, { cwd: 'D:/proj/beta', name: 'beta' }];
@@ -26,15 +27,17 @@ describe('MemoryEditor', () => {
     const { onSaved } = setup();
     fireEvent.change(contentInput(), { target: { value: '  新记忆  ' } });
     expect(saveButton().disabled).toBe(true);
-    expect((screen.getByLabelText('归属范围') as HTMLSelectElement).value).toBe('');
-    fireEvent.change(screen.getByLabelText('归属范围'), { target: { value: 'global' } });
+    expectSelectDisplay('归属范围', '请选择归属范围');
+    await pickSelectOption('归属范围', '全局');
     fireEvent.click(saveButton());
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(agentDataApi.memory.create).toHaveBeenCalledWith({ userId: 'user-a', draft: { content: '新记忆', level: 1, owner: { scope: 'global' } } });
+    await openSelect('编辑记忆层级');
     expect(screen.queryByRole('option', { name: '历史记录 · L0' })).toBeNull();
   });
   it('preserves missing project ownership, historical L0 and source on update', async () => {
     setup({ ...memoryRecord, level: 0, scope: 'project', sourceProjectId: 'D:/removed' });
+    await openSelect('归属范围');
     expect(screen.getByRole('option', { name: /原项目已不可用/ })).toBeTruthy();
     fireEvent.change(contentInput(), { target: { value: ' 修订历史记忆 ' } });
     fireEvent.click(saveButton());
@@ -53,7 +56,7 @@ describe('MemoryEditor', () => {
     setup(memoryRecord);
     vi.mocked(agentDataApi.memory.update).mockRejectedValueOnce({ code: 'VERSION_CONFLICT' });
     fireEvent.change(contentInput(), { target: { value: '冲突草稿' } });
-    fireEvent.change(screen.getByLabelText('归属范围'), { target: { value: 'project:D:/proj/beta' } });
+    await pickSelectOption('归属范围', 'beta');
     fireEvent.click(saveButton());
     expect((await screen.findByRole('alert')).textContent).toContain('记录已被修改，你的草稿已保留');
     expect(contentInput().value).toBe('冲突草稿');

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Empty, Input, Select, Spin, Tabs, Typography } from 'antd';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryFilter, type MemoryItem, type MemoryLevel, type MemoryOverview, type ResourceNavigation } from '../../lib/agentData';
 import { pathsEquivalent } from '../../lib/pathUtils';
 import { styles } from './agentDataStyles';
@@ -177,39 +178,38 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   const overviewValue = overview.userId === userId ? overview : undefined;
   const editorRecord = editor?.record && activeDetail?.value?.kind === 'memory' && editor.record.id === activeDetail.value.record.id ? activeDetail.value.record : editor?.record;
   return <section ref={root} className={m.root} data-testid="memory-panel">
-    <div className={styles.sectionHeading}><h3 className={styles.heading}>Memory</h3><span className={styles.hint}>本用户记忆总数：{overviewValue?.value?.total ?? '—'}</span></div>
-    <div className={m.tabs} role="tablist" aria-label="Memory 类型">
-      {(['memory', 'conversation'] as const).map((tab) => <button key={tab} type="button" className={m.button} role="tab" aria-selected={kind === tab} disabled={locked} onClick={() => { setKind(tab); clearSelection(); }}>{tab === 'memory' ? '记忆' : '对话记录'}</button>)}
-    </div>
+    <div className={styles.sectionHeading}><Typography.Title level={5} style={{ margin: 0 }}>Memory</Typography.Title><Typography.Text type="secondary">本用户记忆总数：{overviewValue?.value?.total ?? '—'}</Typography.Text></div>
+    <Tabs id="memory-browser" size="small" activeKey={kind} onChange={(next) => { setKind(next as MemoryItem['kind']); clearSelection(); }} items={(['memory', 'conversation'] as const).map((tab) => ({ key: tab, label: tab === 'memory' ? '记忆' : '对话记录', disabled: locked }))} />
     <div className={styles.toolbar}>
-      <input className={styles.input} aria-label="搜索记忆" placeholder={kind === 'memory' ? '搜索记忆内容' : '搜索对话记录'} value={query} disabled={locked} onChange={(event) => { setQuery(event.target.value); clearSelection(); }} />
-      <select className={styles.select} aria-label="项目范围" value={project} disabled={locked} onChange={(event) => { setProject(event.target.value); clearSelection(); }}>
-        <option value="">全部项目</option><option value="global">全局</option>
-        {project.startsWith('project:') && !projects.some((option) => `project:${option.cwd}` === project) ? <option value={project} disabled>所选项目已不可用</option> : null}
-        {projects.map((option) => <option key={option.cwd} value={`project:${option.cwd}`}>{option.name}</option>)}
-      </select>
-      {kind === 'memory' ? <select className={styles.select} aria-label="记忆层级" value={level} disabled={locked} onChange={(event) => { setLevel(event.target.value as typeof level); clearSelection(); }}><option value="all">全部层级</option>{([1, 2, 3, 0] as const).map((value) => <option key={value} value={value}>{memoryLevelLabels[value]}</option>)}</select> : null}
-      <button type="button" className={m.button} aria-label="刷新 Memory" onClick={refresh} disabled={deleting || browser.refreshing || browser.loading}>刷新</button>
-      {kind === 'memory' ? <button type="button" data-memory-new className={`${m.button} ${m.primary}`} disabled={locked} onClick={() => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); setFocusRequest({ kind: 'detail' }); }}>新增记忆</button> : null}
+      <Input aria-label="搜索记忆" placeholder={kind === 'memory' ? '搜索记忆内容' : '搜索对话记录'} value={query} disabled={locked} onChange={(event) => { setQuery(event.target.value); clearSelection(); }} style={{ flex: 1, minWidth: 220 }} />
+      <Select aria-label="项目范围" value={project} disabled={locked} onChange={(value) => { setProject(value); clearSelection(); }} options={[
+        { value: '', label: '全部项目' },
+        { value: 'global', label: '全局' },
+        ...(project.startsWith('project:') && !projects.some((option) => `project:${option.cwd}` === project) ? [{ value: project, label: '所选项目已不可用', disabled: true }] : []),
+        ...projects.map((option) => ({ value: `project:${option.cwd}`, label: option.name })),
+      ]} />
+      {kind === 'memory' ? <Select aria-label="记忆层级" value={level} disabled={locked} onChange={(value) => { setLevel(value as typeof level); clearSelection(); }} options={[{ value: 'all', label: '全部层级' }, ...([1, 2, 3, 0] as const).map((value) => ({ value: String(value), label: memoryLevelLabels[value] }))]} /> : null}
+      <Button aria-label="刷新 Memory" onClick={refresh} disabled={deleting || browser.refreshing || browser.loading}>刷新</Button>
+      {kind === 'memory' ? <Button type="primary" data-memory-new disabled={locked} onClick={() => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); setFocusRequest({ kind: 'detail' }); }}>新增记忆</Button> : null}
     </div>
-    {kind === 'conversation' ? <p className={styles.hint}>对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。</p> : null}
-    {monitor.error ? <p role="alert" className={styles.inlineError}>任务状态读取失败：{monitor.error}</p> : null}
-    {overviewValue?.error ? <p role="alert" className={styles.inlineError}>记忆总数：{overviewValue.error}</p> : null}
-    {notice ? <p role="status" className={m.notice}>{notice}</p> : null}
+    {kind === 'conversation' ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。</Typography.Text> : null}
+    {monitor.error ? <Alert type="error" showIcon title={`任务状态读取失败：${monitor.error}`} /> : null}
+    {overviewValue?.error ? <Alert type="error" showIcon title={`记忆总数：${overviewValue.error}`} /> : null}
+    {notice ? <Typography.Text role="status">{notice}</Typography.Text> : null}
     <div className={m.layout} data-detail-open={!!activeSelection || !!editor}>
       <div data-memory-list-pane>
-        {browser.error ? <p role="alert" className={styles.inlineError}>{browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}{browser.error}</p> : null}
-        {browser.loading && !browser.loaded ? <p className={styles.state}>正在加载 Memory…</p> : !browser.loaded ? <p className={styles.state}>{kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'}</p> : items.length === 0 ? <p className={styles.state}>{query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'}</p> : null}
-        {browser.refreshing ? <p role="status" className={styles.hint}>正在刷新列表…</p> : null}
+        {browser.error ? <Alert type="error" showIcon title={`${browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}${browser.error}`} /> : null}
+        {browser.loading && !browser.loaded ? <Spin description="正在加载 Memory…" /> : !browser.loaded ? <Empty description={kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'} /> : items.length === 0 ? <Empty description={query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'} /> : null}
+        {browser.refreshing ? <Typography.Text role="status" type="secondary" style={{ fontSize: 12 }}>正在刷新列表…</Typography.Text> : null}
         <MemoryList items={items} selectedId={activeSelection?.id} nextCursor={browser.nextCursor} refreshing={browser.refreshing} onSelect={choose} onLoadMore={browser.loadMore} />
       </div>
       <div className={m.detail} data-memory-detail-pane>
         {editor ? <MemoryEditor ref={editorHandle} key={JSON.stringify([editor.userId, editor.record?.id, editorVersion])} userId={userId} record={editorRecord} projects={projects} unavailable={editor.userId === userId && editor.unavailable} onUnavailable={() => { setSelected(undefined); setEditor((previous) => previous ? { ...previous, unavailable: true } : undefined); }} onSaved={saved} onCancel={() => { setFocusRequest({ kind: editor.trigger }); setEditor(undefined); }} /> : activeSelection ? <>
-          <div className={m.toolbar}><button type="button" data-memory-back className={m.button} disabled={deleting} onClick={closeDetail}>返回记忆列表</button>{activeDetail?.error ? <button type="button" className={m.button} onClick={refresh}>重试详情</button> : null}{deleting ? <span role="status">正在删除…</span> : null}</div>
-          {deleteError ? <p role="alert" className={styles.inlineError}>{deleteError}</p> : null}
-          {activeDetail?.error ? <p role="alert" className={styles.inlineError}>{activeDetail.error}</p> : null}
-          {activeDetail?.value ? <MemoryDetail value={activeDetail.value} visible={visible} onEdit={deleting ? undefined : () => { if (activeDetail.value?.kind === 'memory') { setEditor({ userId, record: activeDetail.value.record, trigger: 'edit' }); setFocusRequest({ kind: 'detail' }); } }} onDelete={deleting ? undefined : () => void remove()} onOpenSession={onOpenSession} /> : <p className={styles.state}>{activeDetail?.loading ? '正在读取详情…' : '详情尚未读取成功'}</p>}
-        </> : <p className={styles.state}>选择一条记录查看全文和来源</p>}
+          <div className={m.toolbar}><Button data-memory-back disabled={deleting} onClick={closeDetail}>返回记忆列表</Button>{activeDetail?.error ? <Button onClick={refresh}>重试详情</Button> : null}{deleting ? <Typography.Text role="status">正在删除…</Typography.Text> : null}</div>
+          {deleteError ? <Alert type="error" showIcon title={deleteError} /> : null}
+          {activeDetail?.error ? <Alert type="error" showIcon title={activeDetail.error} /> : null}
+          {activeDetail?.value ? <MemoryDetail value={activeDetail.value} visible={visible} onEdit={deleting ? undefined : () => { if (activeDetail.value?.kind === 'memory') { setEditor({ userId, record: activeDetail.value.record, trigger: 'edit' }); setFocusRequest({ kind: 'detail' }); } }} onDelete={deleting ? undefined : () => void remove()} onOpenSession={onOpenSession} /> : <Typography.Text type="secondary">{activeDetail?.loading ? '正在读取详情…' : '详情尚未读取成功'}</Typography.Text>}
+        </> : <Empty description="选择一条记录查看全文和来源" />}
       </div>
     </div>
   </section>;

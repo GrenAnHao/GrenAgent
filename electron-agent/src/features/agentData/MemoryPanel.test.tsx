@@ -6,6 +6,7 @@ import { agentDataApi, type ManagedMemoryRecord, type MemoryConversationDetail, 
 import { conversationRecord, deferred, memoryRecord } from './memoryTestData';
 import { pi } from '../../lib/pi';
 import { StrictMode } from 'react';
+import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 
 const monitor = vi.hoisted(() => ({ watchedTaskVersion: 0, error: undefined as string | undefined }));
 vi.mock('./AgentDataTaskProvider', () => ({ useAgentDataTaskMonitor: () => monitor }));
@@ -42,7 +43,7 @@ describe('MemoryPanel', () => {
     rerender(<MemoryPanel userId="u" visible navigation={navigation} navigationRequest={1} />);
     expect((await screen.findByRole('article', { name: '记忆详情' })).textContent).toContain(record2.content);
     expect(agentDataApi.memory.read).toHaveBeenCalledWith({ userId: 'u', id: record2.id });
-    expect((screen.getByLabelText('项目范围') as HTMLSelectElement).value).toBe('');
+    expectSelectDisplay('项目范围', '全部项目');
     rerender(<MemoryPanel userId="u" navigation={{ ...navigation }} navigationRequest={1} />);
     expect(agentDataApi.memory.read).toHaveBeenCalledTimes(1);
     rerender(<MemoryPanel userId="u" navigation={navigation} navigationRequest={2} />);
@@ -70,9 +71,9 @@ describe('MemoryPanel', () => {
     vi.mocked(agentDataApi.memory.create).mockReturnValueOnce(pending.promise);
     const { rerender } = render(<MemoryPanel initialProject="D:/proj/alpha" navigation={{ view: 'memory', mode: 'create' }} navigationRequest={1} />);
     const input = await screen.findByLabelText('记忆正文') as HTMLTextAreaElement;
-    expect((screen.getByLabelText('归属范围') as HTMLSelectElement).value).toBe('');
+    expectSelectDisplay('归属范围', '请选择归属范围');
     fireEvent.change(input, { target: { value: '保存中的草稿' } });
-    fireEvent.change(screen.getByLabelText('归属范围'), { target: { value: 'global' } });
+    await pickSelectOption('归属范围', '全局');
     fireEvent.click(screen.getByRole('button', { name: '保存记忆' }));
     rerender(<MemoryPanel navigation={{ view: 'memory', id: record2.id }} navigationRequest={2} />);
     expect(input.value).toBe('保存中的草稿');
@@ -101,16 +102,17 @@ describe('MemoryPanel', () => {
     expect(recent.getAttribute('title')).toBe(memoryRecord.content);
     expect(agentDataApi.memory.list).toHaveBeenCalledWith({ userId: 'local', filter: { scope: 'all' }, limit: 50 });
     expect(screen.getByText('本用户记忆总数：2')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('项目范围'), { target: { value: 'global' } });
+    await pickSelectOption('项目范围', '全局');
     await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'local', filter: { scope: 'global' }, limit: 50 }));
     expect(agentDataApi.memory.overview).toHaveBeenCalledTimes(1);
   });
   it('retains the selected project across unrelated chat changes and ignores non-project initial workspaces', async () => {
     const { rerender } = render(<MemoryPanel userId="u" initialProject="D:/temporary/works/session" />);
     await screen.findByText('本用户记忆总数：2');
-    expect((screen.getByLabelText('项目范围') as HTMLSelectElement).value).toBe('');
+    expectSelectDisplay('项目范围', '全部项目');
+    await openSelect('项目范围');
     expect(screen.queryByRole('option', { name: /temporary/ })).toBeNull();
-    fireEvent.change(screen.getByLabelText('项目范围'), { target: { value: 'project:D:/proj/alpha' } });
+    await pickSelectOption('项目范围', 'alpha');
     rerender(<MemoryPanel userId="u" initialProject="D:/proj/beta" />);
     await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'project', projectId: 'D:/proj/alpha' }, limit: 50 }));
   });
@@ -240,10 +242,10 @@ describe('MemoryPanel', () => {
   });
   it('does not append a newly saved record outside the active ownership filter', async () => {
     render(<MemoryPanel userId="u" />); await screen.findByText('本用户记忆总数：2');
-    fireEvent.change(screen.getByLabelText('项目范围'), { target: { value: 'global' } });
+    await pickSelectOption('项目范围', '全局');
     fireEvent.click(screen.getByRole('button', { name: '新增记忆' }));
     fireEvent.change(screen.getByLabelText('记忆正文'), { target: { value: '其它项目记忆' } });
-    fireEvent.change(screen.getByLabelText('归属范围'), { target: { value: 'project:D:/proj/beta' } });
+    await pickSelectOption('归属范围', 'beta');
     fireEvent.click(screen.getByRole('button', { name: '保存记忆' }));
     await screen.findByText(/已保存，但当前筛选不包含这条记忆/);
     expect(screen.queryByRole('button', { name: /其它项目记忆/ })).toBeNull();
@@ -280,7 +282,7 @@ describe('MemoryPanel', () => {
     monitor.watchedTaskVersion++; rerender(<MemoryPanel userId="u" />);
     fireEvent.click(screen.getByRole('button', { name: '新增记忆' }));
     fireEvent.change(screen.getByLabelText('记忆正文'), { target: { value: '与原记录无关的新草稿' } });
-    fireEvent.change(screen.getByLabelText('归属范围'), { target: { value: 'global' } });
+    await pickSelectOption('归属范围', '全局');
     screen.getByLabelText('记忆正文').focus();
     await act(async () => pending.reject({ code: 'NOT_FOUND' }));
     expect((screen.getByLabelText('记忆正文') as HTMLTextAreaElement).value).toBe('与原记录无关的新草稿');

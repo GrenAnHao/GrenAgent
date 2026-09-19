@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Alert, Badge, Button, Tabs, Typography } from 'antd';
 import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import { agentDataApi, type AgentDataStatus, type MemoryOverview, type WikiOverview, type ResourceNavigation, type WorkbenchOverview } from '../../lib/agentData';
 import { MemoryPanel } from './MemoryPanel';
@@ -45,7 +46,6 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   const [workbench, setWorkbench] = useState<ResourceState<WorkbenchOverview>>({ loading: true });
   const [navigation, setNavigation] = useState<{ target: ResourceNavigation; request: number }>();
   const requestEpoch = useRef(0);
-  const tabButtons = useRef<Partial<Record<AgentDataTab, HTMLButtonElement | null>>>({});
 
   const refreshResources = useCallback(async () => {
     if (!visible) return;
@@ -88,21 +88,24 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     selectTab(target.view);
   }
 
-  function moveTab(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
-    let next: number;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = tabs.length - 1;
-    else return;
-    event.preventDefault();
-    selectTab(tabs[next].id);
-    tabButtons.current[tabs[next].id]?.focus();
-  }
-
-  function panel(id: AgentDataTab, content: ReactNode): ReactNode {
-    if (!visited.has(id)) return null;
-    return <section key={id} role="tabpanel" id={`agent-data-${id}`} aria-labelledby={`agent-data-tab-${id}`} hidden={tab !== id} className={styles.panel}>{content}</section>;
+  function panelContent(id: AgentDataTab): ReactNode {
+    switch (id) {
+      case 'overview':
+        return <OverviewPanel memory={memory} wiki={wiki} jobs={monitor.jobs} tasks={monitor.tasks} workbench={workbench} jobsLoading={monitor.loading} jobsLoaded={monitor.loaded} jobsError={monitor.error} onNavigate={selectTab} onOpenTask={openTask} onOpenResource={navigate} />;
+      case 'memory':
+        return <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />;
+      case 'wiki':
+        return <WikiPanel initialProject={initialProject} visible={visible && tab === 'wiki'} onOpenTask={openTask} navigation={navigation?.target.view === 'wiki' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'wiki' ? navigation.request : undefined} />;
+      case 'code':
+        return <CodeRetrievalPanel initialProject={initialProject} visible={visible && tab === 'code'} onOpenTask={openTask} navigation={navigation?.target.view === 'code' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'code' ? navigation.request : undefined} />;
+      case 'jobs':
+        return <>
+          {monitor.error ? <Alert type="error" showIcon title={monitor.error} /> : null}
+          <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
+        </>;
+      case 'audit':
+        return <AuditDiagnosticsPanel visible={visible && tab === 'audit'} navigation={navigation?.target.view === 'audit' ? { resource: navigation.target.resource, request: navigation.request } : undefined} onNavigate={navigate} onRefresh={async () => { await monitor.refresh(); await refreshResources(); }} />;
+    }
   }
 
   const refreshing = status.loading || memory.loading || wiki.loading;
@@ -114,36 +117,33 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   return <section className={styles.root} data-testid="agent-data-center">
     <header className={styles.header}>
       <div className={styles.identity}><span className={styles.icon}><BrainCircuit size={18} /></span><div>
-        <h2 className={styles.title}>Agent 数据</h2>
-        <div className={styles.subtitle}>全部项目 · {monitor.loaded ? `已加载 ${monitor.tasks.length} 个任务` : '任务未获取'}</div>
+        <Typography.Title level={5} className={styles.title}>Agent 数据</Typography.Title>
+        <Typography.Text type="secondary" className={styles.subtitle}>全部项目 · {monitor.loaded ? `已加载 ${monitor.tasks.length} 个任务` : '任务未获取'}</Typography.Text>
       </div></div>
       <div className={styles.headerActions}>
-        <span className={styles.runtime} data-testid="agent-data-runtime" data-state={runtimeState}>
-          <span className={`${styles.runtimeDot} ${runtimeState === 'ready' ? styles.runtimeDotReady : ''} ${runtimeState === 'closed' || runtimeState === 'error' ? styles.runtimeDotClosed : ''}`} />
-          {runtimeLabel}
-        </span>
-        <button type="button" className={styles.iconButton} aria-label="刷新 Agent 数据" title="刷新 Agent 数据" onClick={() => { void refreshResources(); void monitor.refresh(); }} disabled={!visible || refreshing}>
-          <RefreshCw size={15} />
-        </button>
+        <Badge
+          status={runtimeState === 'ready' ? 'success' : runtimeState === 'closed' || runtimeState === 'error' ? 'warning' : 'default'}
+          text={runtimeLabel}
+          data-testid="agent-data-runtime"
+          data-state={runtimeState}
+        />
+        <Button type="text" aria-label="刷新 Agent 数据" title="刷新 Agent 数据" icon={<RefreshCw size={15} />} disabled={!visible || refreshing} onClick={() => { void refreshResources(); void monitor.refresh(); }} />
       </div>
     </header>
-    <nav className={styles.nav} role="tablist" aria-label="Agent 数据模块">
-      {tabs.map(({ id, label, Icon }, index) => <button key={id} ref={(button) => { tabButtons.current[id] = button; }} id={`agent-data-tab-${id}`} role="tab" aria-controls={`agent-data-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} type="button" className={`${styles.tab} ${tab === id ? styles.tabActive : ''}`} onClick={() => selectTab(id)} onKeyDown={(event) => moveTab(event, index)}>
-        <Icon size={14} />{label}
-      </button>)}
-    </nav>
-    {status.error ? <div className={styles.error} role="alert">运行时：{status.error}</div> : null}
-    <div className={styles.body}>
-      {panel('overview', <OverviewPanel memory={memory} wiki={wiki} jobs={monitor.jobs} tasks={monitor.tasks} workbench={workbench} jobsLoading={monitor.loading} jobsLoaded={monitor.loaded} jobsError={monitor.error} onNavigate={selectTab} onOpenTask={openTask} onOpenResource={navigate} />)}
-      {panel('memory', <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />)}
-      {panel('wiki', <WikiPanel initialProject={initialProject} visible={visible && tab === 'wiki'} onOpenTask={openTask} navigation={navigation?.target.view === 'wiki' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'wiki' ? navigation.request : undefined} />)}
-      {panel('code', <CodeRetrievalPanel initialProject={initialProject} visible={visible && tab === 'code'} onOpenTask={openTask} navigation={navigation?.target.view === 'code' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'code' ? navigation.request : undefined} />)}
-      {panel('jobs', <>
-        {monitor.error ? <div className={styles.inlineError} role="alert">{monitor.error}</div> : null}
-        <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
-      </>)}
-      {panel('audit', <AuditDiagnosticsPanel visible={visible && tab === 'audit'} navigation={navigation?.target.view === 'audit' ? { resource: navigation.target.resource, request: navigation.request } : undefined} onNavigate={navigate} onRefresh={async () => { await monitor.refresh(); await refreshResources(); }} />)}
-    </div>
+    {status.error ? <Alert type="error" showIcon title={`运行时：${status.error}`} /> : null}
+    <Tabs
+      id="agent-data"
+      activeKey={tab}
+      onChange={(key) => selectTab(key as AgentDataTab)}
+      className={styles.bodyTabs}
+      tabBarStyle={{ paddingInline: 24 }}
+      items={tabs.map(({ id, label, Icon }) => ({
+        key: id,
+        label: <><Icon size={14} /> {label}</>,
+        forceRender: visited.has(id),
+        children: <div className={styles.panel}>{visited.has(id) ? panelContent(id) : null}</div>,
+      }))}
+    />
   </section>;
 }
 

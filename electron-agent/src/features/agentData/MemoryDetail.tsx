@@ -1,18 +1,18 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Descriptions, Divider, Listy, Typography } from 'antd';
 import type { ManagedMemoryRecord, MemoryConversationDetail } from '../../lib/agentData';
 import { pi, type SessionInfo } from '../../lib/pi';
 import { findSourceSession, memoryLevelLabels, sourceSessionId } from './memoryPresentation';
 import { memoryStyles as m } from './memoryStyles';
-import { styles } from './agentDataStyles';
 export interface MemoryDetailProps {
   value: { kind: 'memory'; record: ManagedMemoryRecord } | { kind: 'conversation'; record: MemoryConversationDetail };
   visible?: boolean;
   onEdit?(): void; onDelete?(): void; onOpenSession?(cwd: string, path: string): void | Promise<void>;
 }
 function StructuredContent({ value }: { value: unknown }) {
-  if (Array.isArray(value)) return <ol>{value.map((item, index) => <li key={index}><StructuredContent value={item} /></li>)}</ol>;
-  if (value !== null && typeof value === 'object') return <dl>{Object.entries(value).map(([key, item]) => <Fragment key={key}><dt>{key}</dt><dd><StructuredContent value={item} /></dd></Fragment>)}</dl>;
-  return <span>{value === null ? 'null' : String(value)}</span>;
+  if (Array.isArray(value)) return <Listy items={value.map((item, index) => ({ item, index }))} rowKey={(entry) => entry.index} itemRender={(entry) => <div role="listitem"><StructuredContent value={entry.item} /></div>} />;
+  if (value !== null && typeof value === 'object') return <Descriptions size="small" column={1} items={Object.entries(value).map(([key, item]) => ({ key, label: key, children: <StructuredContent value={item} /> }))} />;
+  return <Typography.Text>{value === null ? 'null' : String(value)}</Typography.Text>;
 }
 
 function MemoryContent({ content }: { content: string }) {
@@ -60,20 +60,20 @@ export function MemoryDetail({ value, visible = true, onEdit, onDelete, onOpenSe
   const status = lookup.key === key ? lookup : { key, state: 'loading' as const };
   return <article className={m.document} aria-label={value.kind === 'memory' ? '记忆详情' : '对话记录详情'}>
     <div className={m.toolbar}>
-      <h4 className={m.heading}>{value.kind === 'memory' ? memoryLevelLabels[value.record.level] : '对话记录 · 只读'}</h4>
-      {value.kind === 'memory' && onEdit ? <button data-memory-edit className={m.button} type="button" onClick={onEdit}>编辑记忆</button> : null}
-      {value.kind === 'memory' && onDelete ? <button className={`${m.button} ${m.danger}`} type="button" onClick={onDelete}>删除记忆</button> : null}
+      <Typography.Title level={5} style={{ margin: 0 }}>{value.kind === 'memory' ? memoryLevelLabels[value.record.level] : '对话记录 · 只读'}</Typography.Title>
+      {value.kind === 'memory' && onEdit ? <Button data-memory-edit onClick={onEdit}>编辑记忆</Button> : null}
+      {value.kind === 'memory' && onDelete ? <Button danger onClick={onDelete}>删除记忆</Button> : null}
     </div>
     <div className={m.meta}>
-      <span>更新时间：{new Date(value.record.updatedAt).toLocaleString()}</span>
-      <span>归属：{value.kind === 'memory' ? value.record.scope === 'global' ? '全局' : value.record.sourceProjectId : value.record.workspace}</span>
-      {value.kind === 'memory' ? <span>版本 r{value.record.revision} · {value.record.origin === 'manual' ? '人工记忆' : '自动提炼'}</span> : null}
+      <Typography.Text type="secondary">更新时间：{new Date(value.record.updatedAt).toLocaleString()}</Typography.Text>
+      <Typography.Text type="secondary">归属：{value.kind === 'memory' ? value.record.scope === 'global' ? '全局' : value.record.sourceProjectId : value.record.workspace}</Typography.Text>
+      {value.kind === 'memory' ? <Typography.Text type="secondary">版本 r{value.record.revision} · {value.record.origin === 'manual' ? '人工记忆' : '自动提炼'}</Typography.Text> : null}
     </div>
-    {value.kind === 'memory' ? <MemoryContent content={value.record.content} /> : <><h5>命中片段</h5><p>{value.record.snippet}</p><h5>完整对话</h5><pre>{value.record.transcript}</pre></>}
-    <hr className={m.divider} /><h5>来源</h5>
-    {!id ? <p>{source.source || '未记录来源'}</p> : status.state === 'error' ? <div><p className={styles.inlineError} role="alert">来源状态未获取</p><button type="button" className={m.button} onClick={() => setRetry((version) => version + 1)}>重试来源查询</button></div>
-      : status.state === 'loading' ? <p role="status">正在核对来源会话…</p>
-      : status.session ? <div><p>{status.session.name ?? status.session.id}</p><p className={m.meta}>{status.session.cwd}</p>{onOpenSession ? <button type="button" className={m.button} onClick={() => void open()} disabled={opening}>打开来源会话</button> : null}</div>
-      : <p>会话已移除</p>}
+    {value.kind === 'memory' ? <MemoryContent content={value.record.content} /> : <><Typography.Title level={5}>命中片段</Typography.Title><Typography.Paragraph>{value.record.snippet}</Typography.Paragraph><Typography.Title level={5}>完整对话</Typography.Title><pre>{value.record.transcript}</pre></>}
+    <Divider /><Typography.Title level={5}>来源</Typography.Title>
+    {!id ? <Typography.Paragraph>{source.source || '未记录来源'}</Typography.Paragraph> : status.state === 'error' ? <div><Alert type="error" showIcon title="来源状态未获取" /><Button style={{ marginTop: 8 }} onClick={() => setRetry((version) => version + 1)}>重试来源查询</Button></div>
+      : status.state === 'loading' ? <Typography.Paragraph role="status">正在核对来源会话…</Typography.Paragraph>
+      : status.session ? <div><Typography.Paragraph>{status.session.name ?? status.session.id}</Typography.Paragraph><Typography.Paragraph type="secondary">{status.session.cwd}</Typography.Paragraph>{onOpenSession ? <Button onClick={() => void open()} disabled={opening}>打开来源会话</Button> : null}</div>
+      : <Typography.Paragraph>会话已移除</Typography.Paragraph>}
   </article>;
 }

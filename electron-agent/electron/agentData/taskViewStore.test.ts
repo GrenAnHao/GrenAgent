@@ -113,4 +113,52 @@ describe('TaskViewStore', () => {
     const job = f.jobs.create({ kind: 'codegraph.sync', workspace: 'D:/项目 Files/源码', metadata: { resourceName: '索引：研发 Wiki / 说明' } });
     expect(f.views.readDetail({ source: 'user', id: job.id })).toMatchObject({ resource: { type: 'project', id: 'D:/项目 Files/源码' }, resourceName: '索引：研发 Wiki / 说明' });
   });
+
+  it('summarizes completed memory_scene with status stage and counts, never scene or transcript bodies', () => {
+    const f = fixture();
+    f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,output,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
+      'scene-1', 'memory_scene', 'D:/System Dir/Downloads/Python代码', 'completed',
+      JSON.stringify({
+        mode: 'work', source: 'session:s1', sessionId: 's1', userId: 'local', maxScenes: 15,
+        memories: [{ content: 'SECRET_L1', type: 'work_method' }],
+        scenes: [{ filename: 'sop.md', content: 'SECRET_SCENE' }],
+        sceneSummaries: 'SECRET_SUMMARIES',
+      }),
+      JSON.stringify({
+        scenes: [
+          { filename: 'sop.md', action: 'write', content: 'SECRET_OUT' },
+          { filename: 'old.md', action: 'delete' },
+        ],
+        persona_update_request: 'SECRET_HINT',
+      }),
+      1, 1, 10,
+    );
+    const detail = f.views.readDetail({ source: 'system', id: 'scene-1' })!;
+    expect(detail).toMatchObject({
+      status: 'completed',
+      stage: '已完成',
+      progress: 100,
+      processed: 2,
+      total: 2,
+      resource: { type: 'project', id: 'D:/System Dir/Downloads/Python代码' },
+      inputSummary: { mode: 'work', source: 'session:s1', sessionId: 's1', userId: 'local', maxScenes: 15, memoryCount: 1, sceneCount: 1 },
+      outputSummary: { written: 1, deleted: 1, personaUpdateRequested: true },
+    });
+    expect(JSON.stringify(detail)).not.toMatch(/SECRET/);
+    expect(detail.inputSummary).not.toHaveProperty('memories');
+    expect(detail.outputSummary).not.toHaveProperty('scenes');
+  });
+
+  it('marks running memory extract as generating without leaking the transcript delta', () => {
+    const f = fixture();
+    f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,output,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(
+      'extract-1', 'memory_extract', '/repo', 'running',
+      JSON.stringify({ mode: 'work', delta: 'SECRET_DELTA', previousSceneName: 'sop.md', userId: 'local' }),
+      '{}', 0, 1, 10,
+    );
+    const detail = f.views.readDetail({ source: 'system', id: 'extract-1' })!;
+    expect(detail).toMatchObject({ status: 'running', stage: '正在生成', progress: undefined, inputSummary: { mode: 'work', userId: 'local' }, outputSummary: {} });
+    expect(JSON.stringify(detail)).not.toMatch(/SECRET/);
+    expect(detail.inputSummary).not.toHaveProperty('delta');
+  });
 });

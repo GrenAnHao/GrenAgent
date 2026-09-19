@@ -11,6 +11,7 @@ vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 import { agentDataApi, type CodeGraphStatus } from '../../lib/agentData';
 import { files } from '../../lib/files';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
+import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (cause: Error) => void;
@@ -26,7 +27,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     const calls = vi.mocked(agentDataApi.code.call).mock.calls.length;
     options.value = [{ cwd: 'D:/b', name: 'B' }];
     rerender(<CodeRetrievalPanel initialProject="D:/a" />);
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('');
+    expectSelectDisplay('项目', '请选择项目');
     expect(screen.queryByText('src/a.ts')).toBeNull();
     expect(screen.queryByLabelText('搜索代码')).toBeNull();
     expect(screen.queryByRole('button', { name: '同步索引' })).toBeNull();
@@ -41,7 +42,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalled());
     options.value = [{ cwd: 'd:\\A\\', name: 'A' }];
     rerender(<CodeRetrievalPanel initialProject="D:/a" />);
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('d:\\A\\');
+    expectSelectDisplay('项目', /d:\\A\\/);
   });
 
   beforeEach(() => {
@@ -59,9 +60,10 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([{ workspace: 'D:/works/temporary', indexed: true }]);
     render(<CodeRetrievalPanel initialProject="D:/works/temporary" />);
     await waitFor(() => expect(agentDataApi.code.projects).toHaveBeenCalled());
-    expect(screen.getAllByRole('option')).toHaveLength(52);
-    expect(screen.getByRole('option', { name: /group-50/ })).toBeTruthy();
-    expect(screen.queryByRole('option', { name: /temporary/ })).toBeNull();
+    await openSelect('项目');
+    expect(document.querySelectorAll('.ant-select-item-option')).toHaveLength(52);
+    expect(screen.getByTitle(/group-50/)).toBeTruthy();
+    expect(screen.queryByTitle(/temporary/)).toBeNull();
     expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('');
     expect(agentDataApi.code.status).not.toHaveBeenCalled();
   });
@@ -89,14 +91,14 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     await screen.findByText('src/a.ts');
     const pending = deferred<CodeGraphStatus>();
     vi.mocked(agentDataApi.code.status).mockReturnValueOnce(pending.promise);
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/b' } });
+    await pickSelectOption('项目', /^B ·/);
     expect(screen.queryByText('src/a.ts')).toBeNull();
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('');
     await act(async () => { pending.resolve({ workspace: 'D:/b', connected: true, indexed: true }); });
     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'beta query' } });
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/a' } });
+    await pickSelectOption('项目', /^A ·/);
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('alpha query');
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/b' } });
+    await pickSelectOption('项目', /^B ·/);
     expect((screen.getByLabelText('搜索代码') as HTMLInputElement).value).toBe('beta query');
   });
 
@@ -142,7 +144,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     vi.mocked(agentDataApi.code.call).mockReturnValueOnce(oldQuery.promise).mockResolvedValue(rows('beta.ts'));
     monitor.watchedTaskVersion++;
     rerender(<CodeRetrievalPanel />);
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/b' } });
+    await pickSelectOption('项目', /^B ·/);
     await screen.findByText('beta.ts');
     await act(async () => { oldStatus.resolve({ workspace: 'D:/a', connected: true, indexed: true, files: 99 }); oldQuery.resolve(rows('stale.ts')); });
     expect(screen.queryByText('stale.ts')).toBeNull();
@@ -219,6 +221,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     });
     expect(screen.getByText('12 / 未提供 / 未提供')).toBeTruthy();
     expect(screen.queryByText('该项目尚未建立 CodeGraph 索引')).toBeNull();
+    await openSelect('项目');
     expect(screen.getByRole('option', { name: /B.*未检查/ })).toBeTruthy();
   });
 

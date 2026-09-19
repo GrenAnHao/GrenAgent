@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Empty, Input, Progress, Select, Space, Table, Tag, Typography } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { Trash2, X } from 'lucide-react';
 import { agentDataApi, type AgentJob } from '../../lib/agentData';
 import type { ResourceNavigation, TaskRef, TaskStatus, TaskView } from '../../../electron/agentData/operationsContracts';
 import { styles } from './agentDataStyles';
 import { operationsStyles as ops } from './operationsStyles';
-import { isTerminalTask, redact, taskKey, taskStatusLabels } from './operationsPresentation';
+import { isTerminalTask, redact, taskKey, taskStatusColors, taskStatusLabels, uniqueTaskKindOptions, workspaceFilterLabel } from './operationsPresentation';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 
 interface JobsPanelProps {
@@ -17,6 +19,9 @@ interface JobsPanelProps {
 }
 const deletionWarning = '删除后不可恢复；仅删除任务记录，不会影响 Wiki、索引或审计记录。';
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+// antd 会为「恰好两个汉字且无图标」的按钮插入空格（重试 → 重 试），改变可访问名称。
+// 带图标的按钮不受影响，纯文字按钮显式关掉插入以保持标签原文。
+const autoInsertSpace = false;
 function legacyTaskView(job: AgentJob): TaskView {
   return { ref: { source: 'user', id: job.id }, key: `user:${job.id}`, kind: job.kind, label: job.kind,
     status: job.state, workspace: job.workspace, progress: job.progress, error: job.error,
@@ -42,8 +47,7 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
   const [detailOpen, setDetailOpen] = useState(false);
   const [retryRequest, setRetryRequest] = useState(0);
   const retrySequence = useRef(0);
-  const selectedRow = useRef<HTMLTableRowElement>(null);
-  const triggerRow = useRef<HTMLButtonElement | null>(null);
+  const triggerRow = useRef<HTMLElement | null>(null);
   const pendingFocus = useRef(false);
   const pendingScroll = useRef(false);
   const external = selectedTask ?? (selectedJobId ? { source: 'user' as const, id: selectedJobId } : undefined);
@@ -78,12 +82,19 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
   }), [tasks, query, status, group, kind, workspace]);
   const userTasks = filtered.filter((task) => task.ref.source === 'user');
   const systemTasks = filtered.filter((task) => task.ref.source === 'system');
+  const kindOptions = useMemo(() => [{ value: '', label: '全部类型' }, ...uniqueTaskKindOptions(tasks)], [tasks]);
+  const workspaceOptions = useMemo(() => {
+    const paths = [...new Set(tasks.map((task) => task.workspace).filter(Boolean) as string[])];
+    return [{ value: '', label: '全部工作区' }, ...paths.map((value) => ({ value, label: workspaceFilterLabel(value, paths), title: value }))];
+  }, [tasks]);
   const removable = userTasks.filter((task) => task.capabilities.remove && isTerminalTask(task.status) && !task.cancellationRequested);
 
   useEffect(() => {
-    if (!visible || query || status !== 'all' || group !== 'all' || kind || workspace || !pendingScroll.current || !selectedRow.current) return;
+    if (!visible || query || status !== 'all' || group !== 'all' || kind || workspace || !pendingScroll.current) return;
     if (selection?.source === 'system' && !systemOpen) return;
-    selectedRow.current.scrollIntoView?.({ block: 'nearest' }); pendingScroll.current = false;
+    const row = selectionKey ? document.querySelector<HTMLElement>(`tr[data-row-key="${selectionKey}"]`) : null;
+    if (!row) return;
+    row.scrollIntoView?.({ block: 'nearest' }); pendingScroll.current = false;
   }, [filtered, selectionKey, selectionRequest, visible, query, status, group, kind, workspace, systemOpen]);
   useEffect(() => {
     if (!detailOpen && pendingFocus.current) { pendingFocus.current = false; triggerRow.current?.focus(); }
@@ -125,47 +136,86 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
     } catch (cause) { if (context === mutationContext.current) setError(message(cause)); }
     finally { busyRef.current = false; setBusy(false); }
   };
-  const openTask = (task: TaskView, trigger: HTMLButtonElement, retry = false) => {
+  const openTask = (task: TaskView, trigger: HTMLElement, retry = false) => {
     triggerRow.current = trigger; setSelection(task.ref); setDetailOpen(true);
     setRetryRequest(retry ? ++retrySequence.current : 0);
   };
-  const renderTable = (items: TaskView[]) => <div className={styles.panelCard}><table className={`${styles.table} ${ops.table}`}><thead><tr><th>任务</th><th>工作区 / 资源</th><th>状态</th><th>进度</th><th>操作</th></tr></thead><tbody>{items.map((task) => {
-    const selected = taskKey(task.ref) === selectionKey;
-    return <tr key={taskKey(task.ref)} ref={selected ? selectedRow : undefined} aria-selected={selected} className={selected ? styles.selectedRow : undefined}>
-      <td>{task.label}{task.error ? <div className={styles.hint}>{String(redact(task.error))}</div> : null}</td>
-      <td><div className={styles.pathSummary} title={task.workspace || undefined}>{task.workspace || '—'}</div>{task.resourceName ? <div className={`${styles.hint} ${styles.pathSummary}`} title={task.resourceName}>{task.resourceName}</div> : null}</td>
-      <td><span className={`${styles.statusTag} ${task.status === 'running' ? styles.statusRunning : ''} ${task.status === 'failed' ? styles.statusFailed : ''}`}>{task.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[task.status]}</span>{task.stage ? <div className={styles.hint}>{task.stage}</div> : null}</td>
-      <td>{task.progress === undefined || !Number.isFinite(task.progress) ? <span className={styles.hint}>未提供百分比</span> : <span className={styles.progress}><span className={styles.progressTrack}><span className={styles.progressBar} style={{ display: 'block', width: `${Math.max(0, Math.min(100, task.progress))}%` }} /></span>{task.progress}%</span>}{task.processed !== undefined || task.total !== undefined ? <div className={styles.hint}>{task.processed ?? '—'} / {task.total ?? '—'}</div> : null}</td>
-      <td><div className={ops.actions}>
-        {modern ? <button type="button" className={styles.actionButton} disabled={busy} onClick={(event) => openTask(task, event.currentTarget)}>详情</button> : null}
-        {task.ref.source === 'system' ? <span className={styles.hint}>系统只读</span> : <>
-          {modern || task.capabilities.cancel ? <button type="button" className={styles.actionButton} disabled={busy || !task.capabilities.cancel} onClick={() => void mutate(task, 'cancel')}><X size={12} aria-hidden="true" />取消</button> : null}
-          {modern ? <button type="button" className={styles.actionButton} disabled={busy || !task.capabilities.retry} onClick={(event) => openTask(task, event.currentTarget, true)}>重试</button> : null}
-          {modern || task.capabilities.remove ? <button type="button" className={`${styles.actionButton} ${styles.dangerButton}`} disabled={busy || !task.capabilities.remove || task.cancellationRequested} onClick={() => void mutate(task, 'remove')}><Trash2 size={12} aria-hidden="true" />删除</button> : null}
-        </>}
-      </div></td>
-    </tr>;
-  })}</tbody></table></div>;
 
-  if (loading) return <div className={styles.state}>正在加载任务...</div>;
-  if (!dataReady) return <div className={styles.state}>等待获取任务</div>;
+  const columns: TableColumnsType<TaskView> = [
+    { title: '任务', key: 'label', width: '28%', render: (_, task) => (
+      <div>{task.label}{task.error ? <div><Typography.Text type="secondary">{String(redact(task.error))}</Typography.Text></div> : null}</div>
+    ) },
+    { title: '工作区 / 资源', key: 'workspace', width: '24%', render: (_, task) => (
+      <>
+        <div className={styles.pathSummary} title={task.workspace || undefined}>{task.workspace || '—'}</div>
+        {task.resourceName ? <div className={styles.pathSummary} title={task.resourceName}><Typography.Text type="secondary">{task.resourceName}</Typography.Text></div> : null}
+      </>
+    ) },
+    { title: '状态', key: 'status', width: '14%', render: (_, task) => (
+      <>
+        <Tag color={taskStatusColors[task.status]}>{task.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[task.status]}</Tag>
+        {task.stage ? <div><Typography.Text type="secondary">{task.stage}</Typography.Text></div> : null}
+      </>
+    ) },
+    { title: '进度', key: 'progress', width: 160, render: (_, task) => (
+      <>
+        {task.progress === undefined || !Number.isFinite(task.progress)
+          ? <Typography.Text type="secondary">未提供百分比</Typography.Text>
+          : <Progress percent={task.progress} size="small" />}
+        {task.processed !== undefined || task.total !== undefined
+          ? <div><Typography.Text type="secondary">{task.processed ?? '—'} / {task.total ?? '—'}</Typography.Text></div> : null}
+      </>
+    ) },
+    { title: '操作', key: 'actions', width: 190, render: (_, task) => (
+      <Space size={4} wrap>
+        {modern ? <Button size="small" autoInsertSpace={autoInsertSpace} disabled={busy} onClick={(event) => openTask(task, event.currentTarget)}>详情</Button> : null}
+        {task.ref.source === 'system' ? <Typography.Text type="secondary">系统只读</Typography.Text> : <>
+          {modern || task.capabilities.cancel ? <Button size="small" icon={<X size={12} aria-hidden="true" />} disabled={busy || !task.capabilities.cancel} onClick={() => void mutate(task, 'cancel')}>取消</Button> : null}
+          {modern ? <Button size="small" autoInsertSpace={autoInsertSpace} disabled={busy || !task.capabilities.retry} onClick={(event) => openTask(task, event.currentTarget, true)}>重试</Button> : null}
+          {modern || task.capabilities.remove ? <Button size="small" danger icon={<Trash2 size={12} aria-hidden="true" />} disabled={busy || !task.capabilities.remove || task.cancellationRequested} onClick={() => void mutate(task, 'remove')}>删除</Button> : null}
+        </>}
+      </Space>
+    ) },
+  ];
+  // antd 会给「恰好两个汉字」的按钮插入空格（取消 → 取 消），会改变可访问名称；
+  // 这里保持标签原文，便于断言与读屏一致。
+  const renderTable = (items: TaskView[]) => <Table<TaskView>
+    rowKey={(task) => taskKey(task.ref)}
+    size="small"
+    tableLayout="fixed"
+    pagination={false}
+    columns={columns}
+    dataSource={items}
+    onRow={(task) => {
+      const selected = taskKey(task.ref) === selectionKey;
+      return { 'aria-selected': selected, className: selected ? styles.selectedRow : undefined };
+    }}
+    locale={{ emptyText: '暂无匹配任务' }}
+  />;
+
+  if (loading) return <Empty className={ops.root} description="正在加载任务..." />;
+  if (!dataReady) return <Empty className={ops.root} description="等待获取任务" />;
   return <section data-testid="jobs-panel" className={ops.root}>
-    <div className={styles.sectionHeading}><h3 className={styles.heading}>任务队列</h3><span className={styles.hint}>已加载 {tasks.length} 项，当前筛选 {filtered.length} 项</span></div>
+    <div className={styles.sectionHeading}><h3 className={styles.heading}>任务队列</h3><Typography.Text type="secondary">已加载 {tasks.length} 项，当前筛选 {filtered.length} 项</Typography.Text></div>
     <div className={styles.toolbar}>
-      <input className={styles.input} aria-label="搜索任务" placeholder="搜索任务、资源或工作区" value={query} onChange={(event) => setQuery(event.target.value)} />
-      <select className={styles.select} aria-label="任务状态" value={status} onChange={(event) => setStatus(event.target.value as 'all' | TaskStatus)}><option value="all">全部状态</option>{Object.entries(taskStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      <Input aria-label="搜索任务" placeholder="搜索任务、资源或工作区" value={query} onChange={(event) => setQuery(event.target.value)} style={{ minWidth: 220, flex: 1 }} />
+      <Select aria-label="任务状态" value={status} style={{ minWidth: 120 }} onChange={(value) => setStatus(value as 'all' | TaskStatus)}
+        options={[{ value: 'all', label: '全部状态' }, ...Object.entries(taskStatusLabels).map(([value, label]) => ({ value, label }))]} />
       {modern ? <>
-        <select className={styles.select} aria-label="任务分组" value={group} onChange={(event) => setGroup(event.target.value)}><option value="all">活动与历史</option><option value="active">活动任务</option><option value="history">历史任务</option></select>
-        <select className={styles.select} aria-label="任务类型" value={kind} onChange={(event) => setKind(event.target.value)}><option value="">全部类型</option>{[...new Set(tasks.map((task) => task.kind))].map((value) => <option key={value}>{value}</option>)}</select>
-        <select className={styles.select} aria-label="任务工作区" value={workspace} onChange={(event) => setWorkspace(event.target.value)}><option value="">全部工作区</option>{[...new Set(tasks.map((task) => task.workspace).filter(Boolean))].map((value) => <option key={value}>{value}</option>)}</select>
+        <Select aria-label="任务分组" value={group} style={{ minWidth: 120 }} onChange={(value) => setGroup(value)}
+          options={[{ value: 'all', label: '活动与历史' }, { value: 'active', label: '活动任务' }, { value: 'history', label: '历史任务' }]} />
+        <Select aria-label="任务类型" value={kind} popupMatchSelectWidth={false} classNames={{ popup: { root: ops.filterPopup } }} style={{ minWidth: 148 }} onChange={(value) => setKind(value)}
+          options={kindOptions} />
+        <Select aria-label="任务工作区" value={workspace} popupMatchSelectWidth={false} classNames={{ popup: { root: ops.filterPopup } }} style={{ minWidth: 168 }} onChange={(value) => setWorkspace(value)}
+          options={workspaceOptions} />
       </> : null}
-      <button type="button" className={`${styles.actionButton} ${styles.dangerButton}`} onClick={() => void clear()} disabled={busy || !removable.length}><Trash2 size={12} aria-hidden="true" />清理已结束</button>
+      <Button danger icon={<Trash2 size={12} aria-hidden="true" />} onClick={() => void clear()} disabled={busy || !removable.length}>清理已结束</Button>
     </div>
-    {modern ? <p className={styles.hint}>筛选与清理仅作用于已加载的用户任务；系统后台任务只读。</p> : null}
-    {error ? <div className={styles.error} role="alert">{String(redact(error))}</div> : null}
-    {!userTasks.length ? <div className={styles.state}>暂无匹配任务</div> : renderTable(userTasks)}
-    {modern ? <div className={ops.section}><button type="button" className={styles.actionButton} aria-expanded={systemOpen} disabled={busy} onClick={() => setSystemOpen((value) => !value)}>系统后台任务（{systemTasks.length}）{systemOpen ? ' · 收起' : ' · 展开'}</button>{systemOpen ? systemTasks.length ? renderTable(systemTasks) : <p className={styles.hint}>暂无匹配的系统任务</p> : null}</div> : null}
-    {nextCursor ? <div className={ops.section}><button type="button" className={styles.actionButton} disabled={loadingMore || busy} onClick={() => void (onLoadMore ?? loadMore)?.()}>{loadingMore ? '正在加载…' : '加载更多任务'}</button></div> : null}
+    {modern ? <div><Typography.Text type="secondary">筛选与清理仅作用于已加载的用户任务；系统后台任务只读。</Typography.Text></div> : null}
+    {error ? <Alert type="error" showIcon title={String(redact(error))} /> : null}
+    {!userTasks.length ? <Empty description="暂无匹配任务" /> : renderTable(userTasks)}
+    {modern ? <div className={ops.section}><Button aria-expanded={systemOpen} disabled={busy} onClick={() => setSystemOpen((value) => !value)}>系统后台任务（{systemTasks.length}）{systemOpen ? ' · 收起' : ' · 展开'}</Button>{systemOpen ? systemTasks.length ? renderTable(systemTasks) : <Typography.Text type="secondary">暂无匹配的系统任务</Typography.Text> : null}</div> : null}
+    {nextCursor ? <div className={ops.section}><Button disabled={loadingMore || busy} onClick={() => void (onLoadMore ?? loadMore)?.()}>{loadingMore ? '正在加载…' : '加载更多任务'}</Button></div> : null}
     {modern ? <TaskDetailDrawer taskRef={detailOpen ? selection : undefined} taskView={tasks.find((task) => taskKey(task.ref) === selectionKey)} visible={visible} retryRequest={retryRequest} onClose={() => { pendingFocus.current = true; setDetailOpen(false); }} onRefresh={onRefresh} onTrack={onTrack} onNavigate={onNavigate} onSelect={(ref) => { setRetryRequest(0); setSelection(ref); }} /> : null}
   </section>;
 }

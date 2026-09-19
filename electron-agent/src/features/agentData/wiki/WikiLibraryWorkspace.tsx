@@ -64,7 +64,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
   const ingestSequence = useRef(0);
   const editor = useRef<WikiPageEditorHandle>(null);
   const pageTrigger = useRef<HTMLElement | null>(null);
-  const sourceTrigger = useRef<HTMLButtonElement | null>(null);
+  const sourceTrigger = useRef<HTMLElement | null>(null);
   const pendingListFocus = useRef<HTMLElement | null>(null);
   const mounted = useRef(true);
   const currentKb = useRef(kbId);
@@ -280,7 +280,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
     {jobId && monitor.error ? <Alert type="error" title={`任务状态刷新失败：${monitor.error}`} /> : null}
     {reindexResult ? <div className={w.diagnostics} role="status"><p>索引扫描：{reindexResult.pages} 个页面{reindexResult.diagnostics.length ? '；索引保留，正文读取异常' : '；重建完成'}</p>{reindexResult.diagnostics.map((item, index) => <div key={index}><p>{item.code} · {item.message}</p><p>{item.path}</p><Button size="small" onClick={() => { void revealItemInDir(item.path).catch(reportPathError); }}>打开问题文件位置</Button></div>)}</div> : null}
     {!library && loading ? <p role="status">正在加载知识库…</p> : null}
-    <div className={w.tabs} role="tablist" aria-label="知识库内容"><Button role="tab" aria-selected={tab === 'sources'} onClick={() => setTab('sources')}>原始资料 ({sourcesLoaded ? sources.length : '未获取'})</Button><Button role="tab" aria-selected={tab === 'pages'} onClick={() => setTab('pages')}>知识页面 ({pagesLoaded ? pages.length : '未获取'})</Button></div>
+    <div className={w.tabs} role="tablist" aria-label="知识库内容"><Button role="tab" type={tab === 'sources' ? 'primary' : 'text'} aria-selected={tab === 'sources'} onClick={() => setTab('sources')}>原始资料 ({sourcesLoaded ? sources.length : '未获取'})</Button><Button role="tab" type={tab === 'pages' ? 'primary' : 'text'} aria-selected={tab === 'pages'} onClick={() => setTab('pages')}>知识页面 ({pagesLoaded ? pages.length : '未获取'})</Button></div>
     <div className={w.workspace} data-detail={tab === 'sources' ? !!selectedSourceId : showPage}>
       <aside className={w.sidebar} data-wiki-list>
         <div className={w.sidebarActions}>
@@ -290,7 +290,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
         <div hidden={tab !== 'sources'}>
           <Input aria-label="搜索原始资料" placeholder="搜索资料" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} size="small" />
           <div className={w.resourceList} aria-label="原始资料列表">
-            {sources.filter((item) => `${item.name} ${item.projectWorkspace ?? ''}`.toLowerCase().includes(sourceQuery.toLowerCase())).map((item) => <button type="button" key={item.sourceId} className={w.resource} aria-label={`查看资料 ${item.name}`} aria-pressed={selectedSourceId === item.sourceId} onClick={(event) => { sourceTrigger.current = event.currentTarget; if (selectedSourceId !== item.sourceId) setSourceDetail(undefined); setSelectedSourceId(item.sourceId); }}>{item.name}<small>{sourceLabels[item.status]} · r{item.revision}{item.projectWorkspace ? ` · ${item.projectWorkspace}` : ''}</small></button>)}
+            {sources.filter((item) => `${item.name} ${item.projectWorkspace ?? ''}`.toLowerCase().includes(sourceQuery.toLowerCase())).map((item) => <Button key={item.sourceId} block className={w.resource} aria-label={`查看资料 ${item.name}`} aria-pressed={selectedSourceId === item.sourceId} onClick={(event) => { sourceTrigger.current = event.currentTarget; if (selectedSourceId !== item.sourceId) setSourceDetail(undefined); setSelectedSourceId(item.sourceId); }}>{item.name}<small>{sourceLabels[item.status]} · r{item.revision}{item.projectWorkspace ? ` · ${item.projectWorkspace}` : ''}</small></Button>)}
           </div>
           {sourcesLoaded && !sources.length && !loading && !unavailable ? <p className={w.muted}>添加原始资料后可开始抽取。</p> : null}
           {!sourcesLoaded && !loading ? <p className={w.muted}>原始资料尚未获取</p> : null}
@@ -298,7 +298,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
         <div hidden={tab !== 'pages'}>
           <Input aria-label="搜索知识页面" placeholder="搜索页面" value={pageQuery} onChange={(event) => setPageQuery(event.target.value)} size="small" />
           <div className={w.resourceList} aria-label="知识页面列表">
-            {pages.filter((item) => item.title.toLowerCase().includes(pageQuery.toLowerCase())).map((item) => <button type="button" key={item.pageId} className={w.resource} aria-label={`查看页面 ${item.title}`} aria-pressed={selectedPageId === item.pageId} onClick={(event) => void choosePage(item.pageId, event.currentTarget)}>{item.title}<small>{item.locked ? '人工锁定' : '未声明人工锁定'} · r{item.revision}</small></button>)}
+            {pages.filter((item) => item.title.toLowerCase().includes(pageQuery.toLowerCase())).map((item) => <Button key={item.pageId} block className={w.resource} aria-label={`查看页面 ${item.title}`} aria-pressed={selectedPageId === item.pageId} onClick={(event) => void choosePage(item.pageId, event.currentTarget)}>{item.title}<small>{item.locked ? '人工锁定' : '未声明人工锁定'} · r{item.revision}</small></Button>)}
           </div>
           {pagesLoaded && !pages.length && !loading && !unavailable ? <p className={w.muted}>还没有知识页面。</p> : null}
           {!pagesLoaded && !loading ? <p className={w.muted}>知识页面尚未获取</p> : null}

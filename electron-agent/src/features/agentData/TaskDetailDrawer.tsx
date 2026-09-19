@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Drawer } from 'antd';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Alert, Button, Card, Collapse, Descriptions, Drawer, Flex, Space, Tag, Timeline, Typography } from 'antd';
 import { agentDataApi } from '../../lib/agentData';
 import type { ResourceNavigation, TaskDetail, TaskRef, TaskRetryPreview, TaskView } from '../../../electron/agentData/operationsContracts';
-import { styles } from './agentDataStyles';
-import { operationsStyles as ops } from './operationsStyles';
-import { redact, resourceNavigation, taskKey, taskStatusLabels } from './operationsPresentation';
+import { redact, resourceNavigation, taskKey, taskStatusColors, taskStatusLabels } from './operationsPresentation';
 
 interface Props {
   taskRef?: TaskRef; taskView?: TaskView; visible?: boolean; retryRequest?: number; onClose(): void;
@@ -12,6 +10,12 @@ interface Props {
   onNavigate?(navigation: ResourceNavigation): void; onSelect?(ref: TaskRef): void;
 }
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+function resourceTarget(detail: TaskDetail): string {
+  if (detail.resourceName) return detail.resourceName;
+  if (detail.resource?.type === 'project') return detail.resource.id;
+  if (detail.resource) return `资源已移除（${detail.resource.id}）`;
+  return '未关联资源';
+}
 
 export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryRequest, onClose, onRefresh, onTrack, onNavigate, onSelect }: Props) {
   const [readDetail, setDetail] = useState<TaskDetail>();
@@ -88,50 +92,75 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
     finally { if (valid(request)) { busyRef.current = false; setBusy(false); } }
   };
 
+  const summaries = [
+    detail?.inputSummary ? { key: 'input', label: '输入摘要', children: <pre>{JSON.stringify(redact(detail.inputSummary), null, 2)}</pre> } : null,
+    detail?.outputSummary ? { key: 'output', label: '结果摘要', children: <pre>{JSON.stringify(redact(detail.outputSummary), null, 2)}</pre> } : null,
+  ].filter(Boolean) as { key: string; label: string; children: ReactNode }[];
+
   return <Drawer open={visible && !!selected} title="任务详情" size="min(560px, 100vw)" closable={!busy} keyboard={!busy} maskClosable={!busy}
     onClose={() => { if (!busyRef.current) onClose(); }} styles={{ wrapper: { maxWidth: '100vw' }, header: { padding: '16px clamp(16px, 3vw, 24px)' }, body: { minWidth: 0, padding: '20px clamp(16px, 3vw, 24px) 32px' } }}>
-    <div className={ops.detail}>
-      {loading ? <p>正在读取任务详情…</p> : null}
-      {readError ? <div role="alert" className={styles.error}>{readError}<button type="button" className={styles.actionButton} onClick={() => setLoadRequest((value) => value + 1)}>重新读取</button></div> : null}
-      {!loading && !readError && !detail ? <p>任务记录已移除</p> : null}
+    <Space orientation="vertical" size={20} style={{ width: '100%' }}>
+      {loading ? <Typography.Text type="secondary">正在读取任务详情…</Typography.Text> : null}
+      {readError ? <Alert type="error" showIcon title={<Flex justify="space-between" align="center" gap={12}><span>{readError}</span><Button size="small" onClick={() => setLoadRequest((value) => value + 1)}>重新读取</Button></Flex>} /> : null}
+      {!loading && !readError && !detail ? <Typography.Text type="secondary">任务记录已移除</Typography.Text> : null}
       {detail ? <>
-        <div className={ops.detailHeader}>
-          <div><p className={ops.eyebrow}>任务详情</p><h3>{detail.label}</h3></div>
-          <span className={`${styles.statusTag} ${detail.status === 'running' ? styles.statusRunning : ''} ${detail.status === 'failed' ? styles.statusFailed : ''}`}>{detail.cancellationRequested ? '正在取消' : taskStatusLabels[detail.status]}</span>
-        </div>
-        <section className={ops.detailSection} aria-labelledby="task-info-heading">
-          <h4 id="task-info-heading">任务信息</h4>
-          <dl><dt>类型</dt><dd>{detail.kind}</dd><dt>ID</dt><dd>{detail.ref.id}</dd><dt>来源</dt><dd>{detail.ref.source === 'system' ? '系统后台（只读）' : '用户任务'}</dd><dt>创建时间</dt><dd>{new Date(detail.createdAt).toLocaleString()}</dd><dt>更新时间</dt><dd>{new Date(detail.updatedAt).toLocaleString()}</dd></dl>
+        <Flex justify="space-between" align="flex-start" gap={16}>
+          <div><Typography.Text type="secondary">任务详情</Typography.Text><Typography.Title level={4} style={{ margin: 0 }}>{detail.label}</Typography.Title></div>
+          <Tag color={taskStatusColors[detail.status]}>{detail.cancellationRequested ? '正在取消' : taskStatusLabels[detail.status]}</Tag>
+        </Flex>
+        <section aria-labelledby="task-info-heading">
+          <Typography.Title level={5} id="task-info-heading">任务信息</Typography.Title>
+          <Descriptions column={1} size="small" items={[
+            { key: 'kind', label: '类型', children: detail.kind },
+            { key: 'id', label: 'ID', children: detail.ref.id },
+            { key: 'source', label: '来源', children: detail.ref.source === 'system' ? '系统后台（只读）' : '用户任务' },
+            { key: 'created', label: '创建时间', children: new Date(detail.createdAt).toLocaleString() },
+            { key: 'updated', label: '更新时间', children: new Date(detail.updatedAt).toLocaleString() },
+          ]} />
         </section>
-        <section className={ops.detailSection} aria-labelledby="task-resource-heading">
-          <h4 id="task-resource-heading">资源信息</h4>
-          <dl><dt>目标</dt><dd>{detail.resourceName ?? (detail.resource ? `资源已移除（${detail.resource.id}）` : '未关联资源')}</dd><dt>工作区</dt><dd>{detail.workspace || '—'}</dd></dl>
-          {detail.resource && onNavigate ? <button type="button" className={styles.actionButton} disabled={busy} onClick={() => onNavigate(resourceNavigation(detail.resource!))}>查看关联资源</button> : null}
+        <section aria-labelledby="task-resource-heading">
+          <Typography.Title level={5} id="task-resource-heading">资源信息</Typography.Title>
+          <Descriptions column={1} size="small" items={[
+            { key: 'target', label: '目标', children: resourceTarget(detail) },
+            { key: 'workspace', label: '工作区', children: detail.workspace || '—' },
+          ]} />
+          {detail.resource && onNavigate ? <Button disabled={busy} onClick={() => onNavigate(resourceNavigation(detail.resource!))}>查看关联资源</Button> : null}
         </section>
-        <section className={ops.detailSection} aria-labelledby="task-execution-heading">
-          <h4 id="task-execution-heading">执行摘要</h4>
-          <dl><dt>状态</dt><dd>{detail.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[detail.status]}</dd><dt>阶段</dt><dd>{detail.stage || '未提供阶段'}</dd><dt>进度</dt><dd>{detail.progress === undefined || !Number.isFinite(detail.progress) ? '未提供百分比' : `${detail.progress}%`}</dd><dt>处理数量</dt><dd>{detail.processed === undefined && detail.total === undefined ? '未提供计数' : `${detail.processed ?? '—'} / ${detail.total ?? '—'}`}</dd><dt>尝试次数</dt><dd>{detail.attempts ?? '未提供'}</dd>{detail.retryOf ? <><dt>重试来源</dt><dd>{detail.retryOf}</dd></> : null}</dl>
-          {detail.inputSummary ? <details className={ops.detailDisclosure}><summary>输入摘要</summary><pre>{JSON.stringify(redact(detail.inputSummary), null, 2)}</pre></details> : null}
-          {detail.outputSummary ? <details className={ops.detailDisclosure}><summary>结果摘要</summary><pre>{JSON.stringify(redact(detail.outputSummary), null, 2)}</pre></details> : null}
-          {detail.error ? <div className={styles.inlineError}>{String(redact(detail.error))}</div> : null}
-          {detail.ref.source === 'user' ? <button type="button" className={styles.actionButton} disabled={busy || !detail.capabilities.retry} onClick={() => void prepareRetry()}>重试任务</button> : null}
+        <section aria-labelledby="task-execution-heading">
+          <Typography.Title level={5} id="task-execution-heading">执行摘要</Typography.Title>
+          <Descriptions column={1} size="small" items={[
+            { key: 'status', label: '状态', children: detail.cancellationRequested ? '正在取消，等待确认' : taskStatusLabels[detail.status] },
+            { key: 'stage', label: '阶段', children: detail.stage || '未提供阶段' },
+            { key: 'progress', label: '进度', children: detail.progress === undefined || !Number.isFinite(detail.progress) ? '未提供百分比' : `${detail.progress}%` },
+            { key: 'count', label: '处理数量', children: detail.processed === undefined && detail.total === undefined ? '未提供计数' : `${detail.processed ?? '—'} / ${detail.total ?? '—'}` },
+            { key: 'attempts', label: '尝试次数', children: detail.attempts ?? '未提供' },
+            ...(detail.retryOf ? [{ key: 'retryOf', label: '重试来源', children: detail.retryOf }] : []),
+          ]} />
+          {summaries.length ? <Collapse size="small" ghost defaultActiveKey={summaries.map((item) => item.key)} items={summaries} /> : null}
+          {detail.error ? <Typography.Text type="danger">{String(redact(detail.error))}</Typography.Text> : null}
+          {detail.ref.source === 'user' ? <Button disabled={busy || !detail.capabilities.retry} onClick={() => void prepareRetry()}>重试任务</Button> : null}
         </section>
-        <section className={ops.detailSection} aria-labelledby="task-events-heading">
-          <h4 id="task-events-heading">任务事件</h4>
-          {detail.events.length === 0 ? <p className={styles.hint}>暂无任务事件</p> : <ol className={ops.timeline}>{detail.events.map((event) => <li key={event.id}><div>{String(redact(event.message))}</div><small>{event.action} · {new Date(event.createdAt).toLocaleString()}</small></li>)}</ol>}
+        <section aria-labelledby="task-events-heading">
+          <Typography.Title level={5} id="task-events-heading">任务事件</Typography.Title>
+          {detail.events.length === 0 ? <Typography.Text type="secondary">暂无任务事件</Typography.Text> : <Timeline items={detail.events.map((event) => ({
+            key: event.id,
+            content: <><div>{String(redact(event.message))}</div><Typography.Text type="secondary">{event.action} · {new Date(event.createdAt).toLocaleString()}</Typography.Text></>,
+          }))} />}
         </section>
       </> : null}
-      {mutationError ? <div role="alert" className={styles.error}>{mutationError}</div> : null}
-      {preview ? <div className={ops.confirm} aria-label="重试确认">
-        <p>新建任务，保留旧记录。旧任务的失败状态和审计历史不会更改。</p>
-        {preview.callsModel ? <><p>将调用模型：<strong>{preview.model}</strong></p><p>本次处理 {preview.targetCount} 份来源，可能产生模型费用。</p></> : <p>此任务不调用模型。</p>}
-        <div className={ops.actions}>
-          <button type="button" className={styles.actionButton} disabled={busy} onClick={() => setPreview(undefined)}>取消重试</button>
-          <button type="button" className={styles.actionButton} disabled={busy} onClick={() => void prepareRetry()}>重新读取重试范围</button>
-          <button type="button" className={styles.actionButton} disabled={busy} onClick={() => void retry()}>确认重试</button>
-        </div>
-      </div> : null}
-      {newTask ? <p>已创建新任务 <button type="button" className={styles.actionButton} disabled={busy} onClick={() => { onSelect?.(newTask); setLocalRef(newTask); }}>查看新任务（{newTask.id}）</button></p> : null}
-    </div>
+      {mutationError ? <Alert type="error" showIcon title={mutationError} /> : null}
+      {preview ? <Card size="small" title="重试确认">
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+          <p>新建任务，保留旧记录。旧任务的失败状态和审计历史不会更改。</p>
+          {preview.callsModel ? <><p>将调用模型：<strong>{preview.model}</strong></p><p>本次处理 {preview.targetCount} 份来源，可能产生模型费用。</p></> : <p>此任务不调用模型。</p>}
+          <Space size={8} wrap>
+            <Button disabled={busy} onClick={() => setPreview(undefined)}>取消重试</Button>
+            <Button disabled={busy} onClick={() => void prepareRetry()}>重新读取重试范围</Button>
+            <Button disabled={busy} onClick={() => void retry()}>确认重试</Button>
+          </Space>
+        </Space>
+      </Card> : null}
+      {newTask ? <Typography.Text>已创建新任务 <Button disabled={busy} onClick={() => { onSelect?.(newTask); setLocalRef(newTask); }}>查看新任务（{newTask.id}）</Button></Typography.Text> : null}
+    </Space>
   </Drawer>;
 }

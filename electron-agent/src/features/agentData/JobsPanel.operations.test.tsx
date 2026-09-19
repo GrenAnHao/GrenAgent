@@ -3,6 +3,8 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsPanel } from './JobsPanel';
+import { openSelect } from './antdSelectTestUtils';
+import { uniqueTaskKindOptions, workspaceFilterLabel } from './operationsPresentation';
 import { deferred, systemTask, task, taskDetail } from './operationsTestData';
 import { agentDataApi } from '../../lib/agentData';
 vi.mock('../../lib/agentData', () => ({ agentDataApi: {
@@ -155,5 +157,44 @@ describe('统一任务操作', () => {
     const row = screen.getByRole('row', { name: /生成知识页面/ });
     const path = within(row).getByTitle(workspace);
     expect(path).toHaveTextContent(workspace);
+  });
+
+  it('uniqueTaskKindOptions 用中文 label 去重 kind', () => {
+    expect(uniqueTaskKindOptions([
+      task,
+      { ...task, kind: 'memory_extract', label: '记忆提取' },
+      { ...task, kind: 'memory_extract', label: '记忆提取' },
+    ])).toEqual([
+      { value: 'wiki.ingest', label: '生成知识页面' },
+      { value: 'memory_extract', label: '记忆提取' },
+    ]);
+  });
+
+  it('workspaceFilterLabel 显示目录名，重名时带上父路径', () => {
+    const paths = ['D:/alpha', 'D:/other/alpha', 'C:\\Users\\rxstudio\\Temp\\evox'];
+    expect(workspaceFilterLabel('C:\\Users\\rxstudio\\Temp\\evox', paths)).toBe('evox');
+    expect(workspaceFilterLabel('D:/alpha', paths)).toBe('alpha · D:');
+    expect(workspaceFilterLabel('D:/other/alpha', paths)).toBe('alpha · D:/other');
+  });
+
+  it('类型和工作区筛选下拉显示可读名称，工作区选项保留完整路径', async () => {
+    render(<JobsPanel tasks={[
+      task,
+      { ...task, ref: { source: 'user', id: 'mem' }, key: 'user:mem', kind: 'memory_extract', label: '记忆提取', workspace: 'C:\\Users\\rxstudio\\Temp\\evox' },
+      { ...task, ref: { source: 'user', id: 'twin' }, key: 'user:twin', kind: 'wiki_page_generate', label: 'Wiki 页面生成', workspace: 'D:/other/alpha' },
+    ]} />);
+    await openSelect('任务类型');
+    const typeTexts = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'))
+      .map((item) => item.textContent?.trim());
+    expect(typeTexts).toEqual(expect.arrayContaining(['全部类型', '记忆提取', '生成知识页面', 'Wiki 页面生成']));
+    expect(typeTexts.join('\n')).not.toMatch(/memory_extract|wiki\.ingest|wiki_page_generate/);
+
+    fireEvent.mouseDown(screen.getByLabelText('任务类型').closest('.ant-select')!);
+    await openSelect('任务工作区');
+    const workspaceItems = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'));
+    const workspaceTexts = workspaceItems.map((item) => item.textContent?.trim());
+    expect(workspaceTexts).toEqual(expect.arrayContaining(['全部工作区', 'evox', 'alpha · D:', 'alpha · D:/other']));
+    expect(workspaceItems.some((item) => item.getAttribute('title') === 'C:\\Users\\rxstudio\\Temp\\evox')).toBe(true);
+    expect(workspaceItems.some((item) => item.getAttribute('title') === 'D:/alpha')).toBe(true);
   });
 });

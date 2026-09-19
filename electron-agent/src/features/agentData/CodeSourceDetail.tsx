@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Input, Typography } from 'antd';
 import { files } from '../../lib/files';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { openPath } from '../../platform/runtime';
@@ -84,26 +85,26 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, onClos
   }
 
   return <section className={styles.card} aria-label="源码预览">
-    <div className={styles.heading}><h4>{currentSource?.relative ?? file}</h4>{onClose ? <button type="button" className={styles.button} onClick={onClose}>关闭源码</button> : null}</div>
-    <div className={styles.hint}>项目根目录：{workspace}</div>
+    <div className={styles.heading}><Typography.Title level={5} style={{ margin: 0 }}>{currentSource?.relative ?? file}</Typography.Title>{onClose ? <Button onClick={onClose}>关闭源码</Button> : null}</div>
+    <Typography.Text type="secondary" style={{ fontSize: 12 }}>项目根目录：{workspace}</Typography.Text>
     <div className={styles.toolbar}>
-      <button type="button" className={styles.button} disabled={!visible || state?.loading} onClick={() => setRefreshVersion((value) => value + 1)}>重新读取源码</button>
+      <Button disabled={!visible || state?.loading} onClick={() => setRefreshVersion((value) => value + 1)}>重新读取源码</Button>
       {validatedSource ? <>
-        <button type="button" className={styles.button} onClick={() => void copyPath()}>复制相对路径</button>
-        <button type="button" className={styles.button} onClick={() => void openFile()}>使用系统打开文件</button>
+        <Button onClick={() => void copyPath()}>复制相对路径</Button>
+        <Button onClick={() => void openFile()}>使用系统打开文件</Button>
       </> : null}
     </div>
-    <p className={styles.hint}>行号定位在本预览中完成；系统打开文件不保证定位行号。</p>
-    {state?.error ? <div className={styles.error} role="alert">{state.error}{currentSource ? ' 当前显示上次成功读取的内容。' : ''}</div> : null}
-    {actionError?.key === key ? <div className={styles.error} role="alert">{actionError.message}</div> : null}
-    {state?.loading ? <div className={styles.hint} role="status">{currentSource ? '正在重新读取源码…' : '正在读取源码…'}</div> : null}
-    {!hasLine ? <p className={styles.hint}>未提供行号</p> : null}
-    {hasLine && currentSource && !target ? <p className={styles.hint}>索引行号已超出文件范围</p> : null}
+    <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>行号定位在本预览中完成；系统打开文件不保证定位行号。</Typography.Paragraph>
+    {state?.error ? <Alert type="error" showIcon title={`${state.error}${currentSource ? ' 当前显示上次成功读取的内容。' : ''}`} /> : null}
+    {actionError?.key === key ? <Alert type="error" showIcon title={actionError.message} /> : null}
+    {state?.loading ? <Typography.Text type="secondary" role="status">{currentSource ? '正在重新读取源码…' : '正在读取源码…'}</Typography.Text> : null}
+    {!hasLine ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>未提供行号</Typography.Text> : null}
+    {hasLine && currentSource && !target ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>索引行号已超出文件范围</Typography.Text> : null}
     {currentSource ? <>
       <div className={styles.toolbar}>
-        <input className={styles.input} style={{ flex: '0 1 120px' }} aria-label="行号" inputMode="numeric" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') jumpToLine(); }} />
-        <button type="button" className={styles.button} onClick={jumpToLine}>跳转到行</button>
-        <span className={styles.hint}>{lines.length} 行 · 只读</span>
+        <Input style={{ flex: '0 1 120px' }} aria-label="行号" inputMode="numeric" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') jumpToLine(); }} />
+        <Button onClick={jumpToLine}>跳转到行</Button>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{lines.length} 行 · 只读</Typography.Text>
       </div>
       <pre className={styles.source} aria-label="源码内容">{lines.map((text, index) => <div key={index} data-testid={`code-source-line-${index + 1}`} aria-current={target === index + 1 ? 'location' : undefined} ref={target === index + 1 ? targetElement : undefined}>
         <span data-line-number aria-hidden="true">{index + 1}</span><code>{text || ' '}</code>

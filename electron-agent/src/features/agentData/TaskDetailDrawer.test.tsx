@@ -93,6 +93,30 @@ it('navigates to the related resource with the typed reference', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '查看关联资源' }));
   expect(onNavigate).toHaveBeenCalledWith({ view: 'wiki', kbId: 'kb-a' });
 });
+it('shows a project resource path as the target instead of calling it removed', async () => {
+  const memory = {
+    ...systemTask,
+    kind: 'memory_scene',
+    label: '记忆场景',
+    status: 'completed' as const,
+    resource: { type: 'project' as const, id: 'D:/System Dir/Downloads/Python代码' },
+    resourceName: undefined,
+    workspace: 'D:/System Dir/Downloads/Python代码',
+    stage: '已完成',
+    progress: 100,
+    inputSummary: { mode: 'work', memoryCount: 1 },
+    outputSummary: { written: 1, deleted: 0 },
+    events: [],
+  };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue(memory);
+  render(<TaskDetailDrawer taskRef={memory.ref} onClose={vi.fn()} />);
+  expect(await screen.findByRole('heading', { name: '记忆场景' })).toBeInTheDocument();
+  expect(screen.getAllByText('D:/System Dir/Downloads/Python代码').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/资源已移除/)).toBeNull();
+  expect(screen.getByText(/"memoryCount": 1/)).toBeInTheDocument();
+  expect(screen.queryByText('未提供阶段')).toBeNull();
+  expect(screen.queryByText('未提供百分比')).toBeNull();
+});
 it('shows task creation and update timestamps separately from event timestamps', async () => {
   const createdAt = Date.UTC(2026, 8, 3, 3, 4, 5);
   const updatedAt = Date.UTC(2026, 8, 5, 6, 7, 8);

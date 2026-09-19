@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Input, Tag } from 'antd';
+import { Alert, Button, Card, Empty, Input, Select, Tag, Typography } from 'antd';
 import { RefreshCw } from 'lucide-react';
 import { agentDataApi } from '../../../lib/agentData';
 import type { WikiLibraryView, WikiTarget } from '../../../../electron/agentData/wikiContracts';
 import { useProjectOptions } from '../useProjectOptions';
-import { styles } from '../agentDataStyles';
 import { WikiLibraryDialog } from './WikiLibraryDialog';
 import { WikiDeleteDialog } from './WikiDeleteDialog';
 import { wikiStyles as w } from './wikiStyles';
@@ -40,25 +39,28 @@ export function WikiLibraryList({ visible, onOpen, refreshVersion, onBeforeDelet
   const projectName = (cwd: string) => projects.find((item) => item.cwd === cwd)?.name ?? cwd;
   const filtered = !!debounced || !!project;
   return <section className={w.root} hidden={!visible} aria-label="知识库列表">
-    <header className={w.listHeader}><div><h3>知识库</h3><p className={w.muted}>管理原始资料与知识页面，按需关联到多个项目。</p></div><Button type="primary" onClick={() => setDialog({})}>新建知识库</Button></header>
+    <header className={w.listHeader}>
+      <div><Typography.Title level={5} style={{ margin: 0 }}>知识库</Typography.Title><Typography.Text type="secondary">管理原始资料与知识页面，按需关联到多个项目。</Typography.Text></div>
+      <Button type="primary" onClick={() => setDialog({})}>新建知识库</Button>
+    </header>
     <div className={w.listToolbar}>
       <Input aria-label="搜索知识库" placeholder="搜索名称或用途" value={query} onChange={(event) => setQuery(event.target.value)} style={{ flex: 1, minWidth: 180 }} />
-      <select className={styles.select} aria-label="关联项目筛选" value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部项目</option>{projects.map((item) => <option key={item.cwd} value={item.cwd}>{item.name}</option>)}</select>
-      <select className={styles.select} aria-label="知识库排序" value={order} onChange={(event) => setOrder(event.target.value)}><option value="updated">最近更新</option><option value="name">名称排序</option></select>
+      <Select aria-label="关联项目筛选" value={project} style={{ minWidth: 140 }} onChange={(value) => setProject(value)} options={[{ value: '', label: '全部项目' }, ...projects.map((item) => ({ value: item.cwd, label: item.name }))]} />
+      <Select aria-label="知识库排序" value={order} style={{ minWidth: 130 }} onChange={(value) => setOrder(value)} options={[{ value: 'updated', label: '最近更新' }, { value: 'name', label: '名称排序' }]} />
       <Button aria-label="刷新知识库" icon={<RefreshCw size={14} />} disabled={loading} onClick={() => setRefresh((value) => value + 1)} />
     </div>
     {error ? <Alert type="error" title={error} showIcon /> : null}
-    {!loaded && loading ? <p role="status">正在加载知识库…</p> : null}
-    {loaded && !rows.length ? <div className={styles.state}>{filtered ? '没有匹配知识库' : '还没有知识库，从新建知识库开始。'}</div> : null}
-    <div className={w.list} aria-label="知识库浏览结果">{sorted.map((row) => <article key={row.kbId} className={w.library} tabIndex={0} aria-label={`知识库 ${row.name}`} onClick={() => onOpen(row.kbId)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(row.kbId); } }}>
+    {!loaded && loading ? <Typography.Text type="secondary" role="status">正在加载知识库…</Typography.Text> : null}
+    {loaded && !rows.length ? <Empty description={filtered ? '没有匹配知识库' : '还没有知识库，从新建知识库开始。'} /> : null}
+    <div className={w.list} aria-label="知识库浏览结果">{sorted.map((row) => <Card key={row.kbId} hoverable tabIndex={0} aria-label={`知识库 ${row.name}`} onClick={() => onOpen(row.kbId)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(row.kbId); } }}>
       <div className={w.libraryHeader}>
-        <button type="button" className={w.libraryName} aria-label={`打开知识库 ${row.name}`} onClick={(event) => { event.stopPropagation(); onOpen(row.kbId); }}>{row.name}</button>
+        <Button type="link" aria-label={`打开知识库 ${row.name}`} onClick={(event) => { event.stopPropagation(); onOpen(row.kbId); }}>{row.name}</Button>
         <div onClick={(event) => event.stopPropagation()}><Button size="small" onClick={() => setDialog({ library: row })}>属性</Button> <Button size="small" danger onClick={async () => { if (!onBeforeDelete || await onBeforeDelete(row.kbId)) setDeleteTarget({ kind: 'library', kbId: row.kbId }); }}>删除</Button></div>
       </div>
-      <p className={w.muted}>{row.description || '未填写用途'}</p>
+      <Typography.Text type="secondary">{row.description || '未填写用途'}</Typography.Text>
       <div className={w.libraryMeta}><span>{row.sourceCount} 份资料 · {row.pageCount} 个页面</span><span>{row.bindings.map(projectName).join('、') || '未关联项目'}</span><Tag>{({ draft: '草稿', pending: '待抽取', available: '可用' })[row.availability]}</Tag><span>{row.pendingSourceCount} 份待抽取</span>{row.activeJobId ? <span>活动任务：{row.activeJobId}</span> : null}{row.lifecycle !== 'active' ? <span>正在删除</span> : null}</div>
-      {row.lastError ? <p className={styles.inlineError}>{row.lastError}</p> : null}
-    </article>)}</div>
+      {row.lastError ? <Typography.Text type="danger">{row.lastError}</Typography.Text> : null}
+    </Card>)}</div>
     <WikiLibraryDialog open={!!dialog} visible={visible} library={dialog?.library} onClose={() => setDialog(undefined)} onSaved={(saved) => { const created = !dialog?.library; setDialog(undefined); setRefresh((value) => value + 1); if (created) onOpen(saved.kbId); }} />
     <WikiDeleteDialog target={visible ? deleteTarget : undefined} onClose={() => setDeleteTarget(undefined)} onDeleted={(target) => { setRefresh((value) => value + 1); onDeleted?.(target.kbId); }} onWaiting={() => setRefresh((value) => value + 1)} />
   </section>;

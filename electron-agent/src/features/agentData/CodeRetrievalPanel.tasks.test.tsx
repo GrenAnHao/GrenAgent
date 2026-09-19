@@ -9,6 +9,7 @@ vi.mock('../../lib/files', () => ({ files: { read: vi.fn() } }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn() }));
 import { agentDataApi, type AgentJob } from '../../lib/agentData';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
+import { expectSelectDisplay, pickSelectOption } from './antdSelectTestUtils';
 const job: AgentJob = { id: 'job-1', workspace: 'D:/a', kind: 'codegraph.sync', state: 'pending', progress: 0, createdAt: 1, updatedAt: 1 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -71,14 +72,14 @@ describe('CodeRetrievalPanel task ownership', () => {
     const oldTrack = monitor.track;
     const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.click(await screen.findByRole('button', { name: '同步索引' }));
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/b' } });
+    await pickSelectOption('项目', /^B ·/);
     monitor.track = vi.fn();
     rerender(<CodeRetrievalPanel visible={false} />);
     await act(async () => { pending.resolve(job); });
     expect(oldTrack).toHaveBeenCalledWith('job-1');
     expect(monitor.track).not.toHaveBeenCalled();
     expect(agentDataApi.jobs.create).toHaveBeenCalledWith({ kind: 'codegraph.sync', workspace: 'D:/a' });
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('D:/b');
+    expectSelectDisplay('项目', /^B ·/);
     expect(screen.getByText(/已加入任务.*A.*D:\/a/)).toBeTruthy();
   });
 
@@ -87,7 +88,7 @@ describe('CodeRetrievalPanel task ownership', () => {
     render(<CodeRetrievalPanel initialProject="D:/a" />);
     fireEvent.click(await screen.findByRole('button', { name: '同步索引' }));
     expect(await screen.findByText(/已加入任务.*B.*D:\/b/)).toBeTruthy();
-    expect((screen.getByLabelText('项目') as HTMLSelectElement).value).toBe('D:/a');
+    expectSelectDisplay('项目', /^A ·/);
   });
 
   it('labels delayed failures with the original target without tracking or opening a task', async () => {
@@ -96,7 +97,7 @@ describe('CodeRetrievalPanel task ownership', () => {
     const onOpenTask = vi.fn();
     render(<CodeRetrievalPanel initialProject="D:/a" onOpenTask={onOpenTask} />);
     fireEvent.click(await screen.findByRole('button', { name: '同步索引' }));
-    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'D:/b' } });
+    await pickSelectOption('项目', /^B ·/);
     await act(async () => { pending.reject(new Error('Cannot create index job')); });
     expect(screen.getByRole('alert').textContent).toMatch(/A.*D:\/a.*Cannot create index job/);
     expect(monitor.track).not.toHaveBeenCalled();

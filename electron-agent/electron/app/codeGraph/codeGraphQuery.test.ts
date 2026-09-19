@@ -95,4 +95,78 @@ describe('SDK structured queries', () => {
       await rm(outside, { recursive: true, force: true });
     }
   });
+
+  it('forwards SearchOptions and lookup modes to the SDK', async () => {
+    const filtered = await executeCodeGraphTool(graph, workspace, 'codegraph_search', {
+      query: 'parse', kinds: ['function'], languages: ['typescript'], includePatterns: ['**/parser.ts'],
+    });
+    expect(filtered.structuredContent.rows).toEqual([expect.objectContaining({ symbol: 'parse', file: 'src/parser.ts' })]);
+    const byKind = await executeCodeGraphTool(graph, workspace, 'codegraph_search', { mode: 'kind', kinds: ['function'] });
+    expect(byKind.structuredContent.rows.every((row) => row.kind === 'function')).toBe(true);
+    expect(byKind.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: 'parse' })]));
+    const prefix = await executeCodeGraphTool(graph, workspace, 'codegraph_search', { query: 'mai', mode: 'prefix' });
+    expect(prefix.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: 'main' })]));
+  });
+
+  it('forwards FindRelevantContextOptions instead of only limit', async () => {
+    const result = await executeCodeGraphTool(graph, workspace, 'codegraph_explore', {
+      query: 'parse', searchLimit: 5, traversalDepth: 2, maxNodes: 12, minScore: 0, nodeKinds: ['function'], edgeKinds: ['calls'],
+    });
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent.nodes.length).toBeGreaterThan(0);
+    expect(JSON.parse(JSON.stringify(result)).structuredContent.nodes.length).toBeGreaterThan(0);
+  });
+
+  it('exposes the remaining SDK query methods with serializable results', async () => {
+    const usages = await executeCodeGraphTool(graph, workspace, 'codegraph_usages', { symbol: 'parse', file: 'src/parser.ts' });
+    expect(usages.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: 'main', file: 'src/main.ts' })]));
+
+    const path = await executeCodeGraphTool(graph, workspace, 'codegraph_path', {
+      from: 'main', to: 'parse', fromFile: 'src/main.ts', toFile: 'src/parser.ts', edgeKinds: ['calls'],
+    });
+    expect(path.structuredContent.rows.map((row) => row.symbol)).toEqual(expect.arrayContaining(['main', 'parse']));
+
+    const deps = await executeCodeGraphTool(graph, workspace, 'codegraph_deps', { file: 'src/main.ts', direction: 'dependencies' });
+    expect(deps.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ file: 'src/parser.ts' })]));
+
+    const status = await executeCodeGraphTool(graph, workspace, 'codegraph_status', {});
+    expect(status.structuredContent.extra).toMatchObject({ stats: expect.objectContaining({ fileCount: expect.any(Number) }) });
+    expect((status.structuredContent.extra?.stats as { fileCount: number }).fileCount).toBeGreaterThanOrEqual(3);
+
+    const metrics = await executeCodeGraphTool(graph, workspace, 'codegraph_metrics', { symbol: 'parse', file: 'src/parser.ts' });
+    expect(metrics.structuredContent.extra).toMatchObject({ metrics: expect.objectContaining({ incomingEdgeCount: expect.any(Number) }) });
+
+    const node = await executeCodeGraphTool(graph, workspace, 'codegraph_node', { symbol: 'parse', file: 'src/parser.ts', includeMetrics: true });
+    expect(node.structuredContent.extra).toMatchObject({ metrics: expect.objectContaining({ callerCount: expect.any(Number) }) });
+
+    const graphView = await executeCodeGraphTool(graph, workspace, 'codegraph_call_graph', { symbol: 'main', depth: 2 });
+    expect(graphView.structuredContent.nodes.some((entry) => entry.name === 'parse')).toBe(true);
+
+    const traverse = await executeCodeGraphTool(graph, workspace, 'codegraph_traverse', {
+      symbol: 'main', direction: 'outgoing', maxDepth: 2, edgeKinds: ['calls'], includeStart: true,
+    });
+    expect(traverse.structuredContent.nodes.some((entry) => entry.name === 'main' || entry.name === 'parse')).toBe(true);
+
+    const context = await executeCodeGraphTool(graph, workspace, 'codegraph_context', {
+      query: 'parse', maxNodes: 8, maxCodeBlocks: 2, includeCode: false,
+    });
+    expect(context.isError).toBe(false);
+    expect(() => JSON.stringify(context)).not.toThrow();
+    expect(context.structuredContent.nodes.length + context.structuredContent.rows.length).toBeGreaterThan(0);
+    expect(context.content[0].text).toMatch(/parse/i);
+    const formatted = await executeCodeGraphTool(graph, workspace, 'codegraph_context', { query: 'parse', format: 'markdown', maxNodes: 8 });
+    expect(formatted.content[0].text.length).toBeGreaterThan(10);
+
+    for (const [tool, args] of [
+      ['codegraph_hierarchy', { symbol: 'parse', file: 'src/parser.ts' }],
+      ['codegraph_cycles', {}],
+      ['codegraph_dead_code', { kinds: ['function'] }],
+      ['codegraph_routes', { limit: 10 }],
+      ['codegraph_changed', {}],
+    ] as const) {
+      const result = await executeCodeGraphTool(graph, workspace, tool, args);
+      expect(result.isError).toBe(false);
+      expect(() => JSON.stringify(result)).not.toThrow();
+    }
+  });
 });

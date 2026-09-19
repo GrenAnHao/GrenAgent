@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Empty, Input, Typography, type InputRef } from 'antd';
 import { RefreshCw, Search } from 'lucide-react';
 import { agentDataApi, type CodeGraphProject, type CodeGraphStatus, type CodeRetrievalRequest, type ResourceNavigation } from '../../lib/agentData';
 import { pathsEquivalent } from '../../lib/pathUtils';
@@ -55,8 +56,8 @@ export function CodeRetrievalPanel({ initialProject, visible = true, navigation,
   const queryEpoch = useRef(0);
   const nodeEpoch = useRef(0);
   const mounted = useRef(false);
-  const resultTrigger = useRef<HTMLButtonElement | null>(null);
-  const queryInput = useRef<HTMLInputElement>(null);
+  const resultTrigger = useRef<HTMLElement | null>(null);
+  const queryInput = useRef<InputRef>(null);
   const restoreFocus = useRef(false);
   const currentStatus = status && pathsEquivalent(status.workspace, project) ? status : undefined;
   const canQuery = Boolean(project && currentStatus?.indexed && currentStatus.sdkAvailable !== false && currentStatus.state !== 'indexing');
@@ -193,7 +194,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, navigation,
     queries.current.set(projectKey(project), next);
   }
 
-  function selectResult(row: CodeResultRow, trigger: HTMLButtonElement) {
+  function selectResult(row: CodeResultRow, trigger: HTMLElement) {
     nodeEpoch.current++;
     resultTrigger.current = trigger;
     setNodeState(undefined);
@@ -241,50 +242,50 @@ export function CodeRetrievalPanel({ initialProject, visible = true, navigation,
   if (checking) statusLabel = '正在检查 CodeGraph…';
 
   return <section data-testid="code-retrieval-panel" className={styles.root}>
-    <div className={styles.heading}><h3>Code Retrieval</h3><span className={styles.hint}>项目内只读检索</span></div>
+    <div className={styles.heading}><Typography.Title level={5} style={{ margin: 0 }}>Code Retrieval</Typography.Title><Typography.Text type="secondary">项目内只读检索</Typography.Text></div>
     <CodeProjectList options={options} project={project} indexState={indexState} status={statusError ? undefined : currentStatus} onSelect={selectProject} />
     {createdTask ? <div className={styles.card} role="status">
       <div title={createdTask.workspace}>已加入任务 · {nameOf(createdTask.workspace)} · {createdTask.workspace}</div>
       <div className={styles.toolbar}>
-        {taskSummary ? <span className={styles.hint}>{monitor.error ? '上次获取：' : ''}{taskSummary}</span> : <span className={styles.hint}>任务状态未获取</span>}
-        <button type="button" className={styles.button} onClick={() => onOpenTask?.(createdTask.id)} disabled={!onOpenTask}>查看任务</button>
+        {taskSummary ? <Typography.Text type="secondary">{monitor.error ? '上次获取：' : ''}{taskSummary}</Typography.Text> : <Typography.Text type="secondary">任务状态未获取</Typography.Text>}
+        <Button onClick={() => onOpenTask?.(createdTask.id)} disabled={!onOpenTask}>查看任务</Button>
       </div>
     </div> : null}
-    {createdTask && monitor.error ? <div className={styles.error} role="alert">任务状态刷新失败：{monitor.error}；显示的旧状态不是最新结果。</div> : null}
-    {taskError ? <div className={styles.error} role="alert">{taskError}</div> : null}
-    {indexError ? <div className={styles.error} role="alert">{indexError}</div> : null}
-    {statusError ? <div className={styles.error} role="alert">{statusError}{currentStatus ? ' 当前保留上次成功读取的索引状态。' : ''}</div> : null}
-    {!project ? <div className={styles.state}>请选择一个项目</div> : <>
+    {createdTask && monitor.error ? <Alert type="error" showIcon title={`任务状态刷新失败：${monitor.error}；显示的旧状态不是最新结果。`} /> : null}
+    {taskError ? <Alert type="error" showIcon title={taskError} /> : null}
+    {indexError ? <Alert type="error" showIcon title={indexError} /> : null}
+    {statusError ? <Alert type="error" showIcon title={`${statusError}${currentStatus ? ' 当前保留上次成功读取的索引状态。' : ''}`} /> : null}
+    {!project ? <Empty description="请选择一个项目" /> : <>
       <div className={styles.toolbar}>
-        <button type="button" className={styles.button} disabled={!visible || checking} onClick={() => setRefreshVersion((value) => value + 1)}><RefreshCw size={12} />刷新代码工作区</button>
-        {currentStatus && !statusError ? <button type="button" className={styles.button} disabled={!visible || syncing || checking} onClick={() => void sync()}>{currentStatus.indexed ? '同步索引' : '建立索引'}</button> : null}
-        <span className={styles.hint}>{statusLabel}</span>
+        <Button icon={<RefreshCw size={12} />} disabled={!visible || checking} onClick={() => setRefreshVersion((value) => value + 1)}>刷新代码工作区</Button>
+        {currentStatus && !statusError ? <Button type="primary" disabled={!visible || syncing || checking} onClick={() => void sync()}>{currentStatus.indexed ? '同步索引' : '建立索引'}</Button> : null}
+        <Typography.Text type="secondary">{statusLabel}</Typography.Text>
       </div>
-      {!currentStatus ? <div className={styles.state}>尚未获取 CodeGraph 索引状态</div> : null}
-      {currentStatus?.message ? <div className={styles.error} role="alert">{currentStatus.message}</div> : null}
-      {currentStatus && !currentStatus.indexed ? <div className={styles.state}><strong>该项目尚未建立 CodeGraph 索引</strong><div>点「建立索引」创建该项目的索引任务。</div></div> : null}
-      {currentStatus ? <div className={styles.card}><div className={styles.hint}>文件 / 节点 / 边</div><div>{currentStatus.files ?? '未提供'} / {currentStatus.nodes ?? '未提供'} / {currentStatus.edges ?? '未提供'}</div></div> : null}
+      {!currentStatus ? <Typography.Text type="secondary">尚未获取 CodeGraph 索引状态</Typography.Text> : null}
+      {currentStatus?.message ? <Alert type="error" showIcon title={currentStatus.message} /> : null}
+      {currentStatus && !currentStatus.indexed ? <Alert type="warning" showIcon title="该项目尚未建立 CodeGraph 索引" description="点「建立索引」创建该项目的索引任务。" /> : null}
+      {currentStatus ? <div className={styles.card}><Typography.Text type="secondary">文件 / 节点 / 边</Typography.Text><div>{currentStatus.files ?? '未提供'} / {currentStatus.nodes ?? '未提供'} / {currentStatus.edges ?? '未提供'}</div></div> : null}
       <div className={styles.layout} data-detail={Boolean(selected)}>
         <div className={styles.column} data-code-list>
           <div className={styles.toolbar}>
             <Search size={14} />
-            <input ref={queryInput} className={styles.input} aria-label="搜索代码" placeholder="搜索文件或符号；留空浏览文件" value={query} onChange={(event) => changeQuery(event.target.value)} disabled={!canQuery} />
+            <Input ref={queryInput} aria-label="搜索代码" placeholder="搜索文件或符号；留空浏览文件" value={query} onChange={(event) => changeQuery(event.target.value)} disabled={!canQuery} style={{ flex: 1 }} />
           </div>
           <div className={styles.toolbar}>
-            <button type="button" className={styles.button} aria-pressed={mode === 'search'} disabled={!canQuery} onClick={() => changeMode('search')}>符号搜索</button>
-            <button type="button" className={styles.button} aria-pressed={mode === 'explore'} disabled={!canQuery || !query.trim()} onClick={() => changeMode('explore')}>相关上下文</button>
+            <Button size="small" aria-pressed={mode === 'search'} disabled={!canQuery} onClick={() => changeMode('search')}>符号搜索</Button>
+            <Button size="small" aria-pressed={mode === 'explore'} disabled={!canQuery || !query.trim()} onClick={() => changeMode('explore')}>相关上下文</Button>
           </div>
-          {currentResult?.loading ? <p className={styles.hint} role="status">正在查询代码…</p> : null}
-          {currentResult?.error ? <div className={styles.error} role="alert">{currentResult.error}{currentResult.result ? ' 当前显示上次成功读取的结果。' : ''}</div> : null}
+          {currentResult?.loading ? <Typography.Text type="secondary" role="status">正在查询代码…</Typography.Text> : null}
+          {currentResult?.error ? <Alert type="error" showIcon title={`${currentResult.error}${currentResult.result ? ' 当前显示上次成功读取的结果。' : ''}`} /> : null}
           {currentResult?.result ? <CodeResultContent result={currentResult.result} retained={currentResult.retained} onSelect={selectResult} selected={selected} tool={queryTool} /> : null}
         </div>
         {selected ? <div className={styles.column} aria-label="代码详情">
-          <div className={styles.heading}><h4>{selected.symbol ?? selected.file ?? '代码详情'}</h4><button type="button" className={styles.button} onClick={closeDetail}>返回结果列表</button></div>
-          {selected.file ? <CodeSourceDetail workspace={project} file={selected.file} line={selected.line} visible={visible && canQuery} /> : <div className={styles.state}>未提供文件位置，无法打开源码。</div>}
-          {currentNode?.loading ? <p className={styles.hint} role="status">正在读取符号上下文…</p> : null}
-          {currentNode?.error ? <div className={styles.error} role="alert">{currentNode.error}</div> : null}
-          {currentNode?.result ? <details className={styles.raw} open={currentNode.result.isError || undefined}><summary>符号上下文</summary><CodeResultContent result={currentNode.result} retained={currentNode.retained} /></details> : null}
-          {selected.symbol ? <CodeRelations workspace={project} symbol={selected.symbol} nodeId={selected.id} file={selected.file} visible={visible && canQuery} reloadVersion={monitor.watchedTaskVersion} /> : <div className={styles.state}>未提供符号，无法查询调用关系。</div>}
+          <div className={styles.heading}><Typography.Title level={5} style={{ margin: 0 }}>{selected.symbol ?? selected.file ?? '代码详情'}</Typography.Title><Button onClick={closeDetail}>返回结果列表</Button></div>
+          {selected.file ? <CodeSourceDetail workspace={project} file={selected.file} line={selected.line} visible={visible && canQuery} /> : <Typography.Text type="secondary">未提供文件位置，无法打开源码。</Typography.Text>}
+          {currentNode?.loading ? <Typography.Text type="secondary" role="status">正在读取符号上下文…</Typography.Text> : null}
+          {currentNode?.error ? <Alert type="error" showIcon title={currentNode.error} /> : null}
+          {currentNode?.result ? <details open={currentNode.result.isError || undefined}><summary>符号上下文</summary><CodeResultContent result={currentNode.result} retained={currentNode.retained} /></details> : null}
+          {selected.symbol ? <CodeRelations workspace={project} symbol={selected.symbol} nodeId={selected.id} file={selected.file} visible={visible && canQuery} reloadVersion={monitor.watchedTaskVersion} /> : <Typography.Text type="secondary">未提供符号，无法查询调用关系。</Typography.Text>}
         </div> : null}
       </div>
     </>}

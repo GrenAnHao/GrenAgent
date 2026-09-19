@@ -15,12 +15,16 @@ describe('embedded CodeGraph packaging', () => {
     expect(manifest.dependencies.electron).toBeUndefined();
     expect(manifest.devDependencies.electron).toBe('^38.0.0');
     expect(config.asarUnpack).toContain('node_modules/@colbymchenry/**');
+    expect(config.asarUnpack).toContain('node_modules/@vscode/ripgrep/**');
+    expect(config.asarUnpack).toContain('node_modules/@vscode/ripgrep-*/**');
+    expect(config.asarUnpack).toContain('node_modules/.pnpm/@vscode+ripgrep*/**');
     expect(config.afterPack).toBe('./scripts/package-codegraph.cjs');
   });
 
   it('keeps the SDK external so native, grammar and worker paths survive the build', () => {
     const config = readFileSync(resolve('electron.vite.config.ts'), 'utf8');
     expect(config).toContain('"@colbymchenry/codegraph"');
+    expect(config).toContain('"@vscode/ripgrep"');
   });
 
   it('restores the SDK bundled dependencies excluded by the app dependency collector', async () => {

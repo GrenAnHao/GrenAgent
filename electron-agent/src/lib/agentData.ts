@@ -17,16 +17,29 @@ export interface WikiSearchResult { workspace: string; page: string; title: stri
 export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number }
 export interface CodeGraphProject { workspace: string; indexed: boolean }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
-export type CodeKind='function'|'method'|'class'|'interface'|'type'|'variable'|'route'|'component';
-export type CodeSymbolArgs={symbol:string;file?:string;limit?:number;depth?:number};
+export type CodeKind = 'file'|'module'|'class'|'struct'|'interface'|'trait'|'protocol'|'function'|'method'|'property'|'field'|'variable'|'constant'|'enum'|'enum_member'|'type_alias'|'namespace'|'parameter'|'import'|'export'|'route'|'component'|'union'|'type';
+export type CodeSymbolArgs={symbol:string;file?:string;limit?:number;depth?:number;line?:number};
 export type CodeNodeArgs=({symbol:string;file?:string}|{file:string;symbol?:string}) &
-  {includeCode?:boolean;offset?:number;limit?:number;symbolsOnly?:boolean;line?:number;depth?:number};
+  {includeCode?:boolean;offset?:number;limit?:number;symbolsOnly?:boolean;line?:number;depth?:number;includeMetrics?:boolean};
 export interface CodeArgsByTool {
-  codegraph_search:{query:string;kind?:CodeKind;limit?:number};
-  codegraph_explore:{query:string;maxFiles?:number;limit?:number};
+  codegraph_search:{query?:string;kind?:CodeKind;kinds?:CodeKind[];languages?:string[];includePatterns?:string[];excludePatterns?:string[];limit?:number;offset?:number;caseSensitive?:boolean;mode?:string;excludePrefix?:boolean;words?:string[]};
+  codegraph_explore:{query:string;maxFiles?:number;limit?:number;searchLimit?:number;traversalDepth?:number;maxNodes?:number;minScore?:number;edgeKinds?:string[];nodeKinds?:CodeKind[];seedNames?:string[]};
   codegraph_callers:CodeSymbolArgs; codegraph_callees:CodeSymbolArgs;
   codegraph_impact:CodeSymbolArgs; codegraph_node:CodeNodeArgs;
   codegraph_files:{path?:string;pattern?:string;format?:'tree'|'flat'|'grouped';includeMetadata?:boolean;maxDepth?:number};
+  codegraph_status:Record<string, never>;
+  codegraph_usages:CodeSymbolArgs;
+  codegraph_path:{from:string;to:string;fromFile?:string;toFile?:string;edgeKinds?:string[];limit?:number};
+  codegraph_hierarchy:CodeSymbolArgs;
+  codegraph_call_graph:CodeSymbolArgs;
+  codegraph_deps:{file:string;direction?:'dependencies'|'dependents'|'both'};
+  codegraph_cycles:{limit?:number};
+  codegraph_dead_code:{kinds?:CodeKind[];limit?:number};
+  codegraph_metrics:CodeSymbolArgs;
+  codegraph_routes:{limit?:number};
+  codegraph_traverse:{symbol?:string;file?:string;maxDepth?:number;depth?:number;edgeKinds?:string[];nodeKinds?:CodeKind[];direction?:'outgoing'|'incoming'|'both';limit?:number;includeStart?:boolean};
+  codegraph_context:{query?:string;title?:string;description?:string;maxNodes?:number;maxCodeBlocks?:number;maxCodeBlockSize?:number;includeCode?:boolean;format?:'markdown'|'json';searchLimit?:number;traversalDepth?:number;minScore?:number;limit?:number};
+  codegraph_changed:Record<string, never>;
 }
 export type CodeTool=keyof CodeArgsByTool;
 export type CodeRetrievalRequest={

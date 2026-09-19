@@ -18,5 +18,6 @@ export interface CodeRetrievalResult {
     rows: CodeRetrievalRow[];
     nodes: Node[];
     edges: Edge[];
+    extra?: Record<string, unknown>;
   };
 }
