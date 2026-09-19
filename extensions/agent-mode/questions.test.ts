@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CUSTOM_OPTION_ID,
+  decodeAskUserAnswer,
   makeQuestionsId,
   normalizeQuestions,
   type RawQuestion,
@@ -109,6 +110,30 @@ describe("normalizeQuestions", () => {
     const out = normalizeQuestions(raw, "q-1");
     expect(out?.questions).toHaveLength(8);
     expect(out?.questions[7].title).toBe("Q8");
+  });
+});
+
+describe("decodeAskUserAnswer", () => {
+  it("keeps plain [我的选择] text", () => {
+    expect(decodeAskUserAnswer("[我的选择]\n1. T：乙")).toEqual({
+      text: "[我的选择]\n1. T：乙",
+      images: [],
+    });
+  });
+
+  it("unpacks the vision envelope into image content parts", () => {
+    expect(
+      decodeAskUserAnswer(
+        JSON.stringify({
+          __askUserAnswer: 1,
+          text: "[我的选择]\n1. T：乙\n补充说明：看图",
+          images: [{ mimeType: "image/png", data: "abc" }],
+        }),
+      ),
+    ).toEqual({
+      text: "[我的选择]\n1. T：乙\n补充说明：看图",
+      images: [{ type: "image", mimeType: "image/png", data: "abc" }],
+    });
   });
 });
 

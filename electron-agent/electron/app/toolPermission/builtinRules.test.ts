@@ -51,6 +51,10 @@ describe('matchBuiltinRules', () => {
     expect(matchBuiltinRules(facts('ask', { write: true }))).toBeUndefined();
   });
 
+  it('ask allows a read-only bash call with no extra flags', () => {
+    expect(matchBuiltinRules(facts('ask'))).toBeUndefined();
+  });
+
   it('collapses an unrecognised preset to the strictest tier instead of throwing', () => {
     // 普通未知值与 Object.prototype 上的键都要收敛，后者用 ?? 兜不住：
     // BUILTIN_RULES['toString'] 拿到的是继承来的函数，非 nullish。

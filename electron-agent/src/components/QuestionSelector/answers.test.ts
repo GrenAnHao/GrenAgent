@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CUSTOM_OPTION_ID } from './constants';
-import { formatAnswers, parseAskUserPayload, type QSData } from './answers';
+import { encodeAskUserAnswer, formatAnswers, parseAnswerBlock, parseAskUserPayload, type QSData } from './answers';
 
 const data: QSData = {
   kind: 'questions',
@@ -45,5 +45,50 @@ describe('parseAskUserPayload', () => {
   it('returns null for plain input title', () => {
     expect(parseAskUserPayload('输入名称')).toBeNull();
     expect(parseAskUserPayload(undefined)).toBeNull();
+  });
+});
+
+describe('parseAnswerBlock', () => {
+  it('keeps the chosen option when extra note is also present', () => {
+    expect(
+      parseAnswerBlock(
+        '[我的选择]\n1. 选项卡已弹出。你想让我接下来做什么？：只是测试选项卡能不能正常显示\n补充说明：你能看到图片吗',
+      ),
+    ).toEqual({
+      choices: ['只是测试选项卡能不能正常显示'],
+      extraNote: '你能看到图片吗',
+    });
+  });
+
+  it('splits extra note and image count from numbered answers', () => {
+    expect(
+      parseAnswerBlock(
+        formatAnswers(data, { q1: ['o1', 'o2'], q2: ['y'] }, undefined, '请看截图', 2),
+      ),
+    ).toEqual({
+      choices: ['A、B', '是'],
+      extraNote: '请看截图',
+      imageCount: 2,
+    });
+  });
+});
+
+describe('encodeAskUserAnswer', () => {
+  it('returns plain text when there are no images', () => {
+    expect(encodeAskUserAnswer('[我的选择]\n1. T：乙')).toBe('[我的选择]\n1. T：乙');
+  });
+
+  it('wraps text plus images so the tool result can carry vision parts', () => {
+    expect(
+      encodeAskUserAnswer('[我的选择]\n1. T：乙\n补充说明：看图', [
+        { mimeType: 'image/png', data: 'abc' },
+      ]),
+    ).toBe(
+      JSON.stringify({
+        __askUserAnswer: 1,
+        text: '[我的选择]\n1. T：乙\n补充说明：看图',
+        images: [{ mimeType: 'image/png', data: 'abc' }],
+      }),
+    );
   });
 });

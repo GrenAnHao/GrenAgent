@@ -50,7 +50,8 @@ export function __resetAgentModeForTest(): void {
 //   - 联网只读：fetch_url / fetch_llms / fetch_html / fetch_markdown / fetch_txt / fetch_json（web-fetch）、
 //     web_search / web_search_multi / fetch_web_content / fetch_github_readme（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
-//     memory_search / conversation_search、git_diff（code-review）
+//     memory_search / conversation_search、git_diff（code-review）、
+//     code_*（code-retrieval，只读 CodeGraph 查询）
 //   - 交互/只读视图（不改文件）：ask_user（agent-mode 提问卡）、hl_read（hashline 带 #TAG 的只读视图）
 // 写类(write/edit/review_note/todo/generate_image/speak)、
 // 子代理(spawn_agent/explore_context)、外部命令(diagnostics)、MCP(<server>__*) 一律不在白名单，
@@ -77,6 +78,26 @@ export const ASK_TOOLS: readonly string[] = [
   "memory_search",
   "conversation_search",
   "git_diff",
+  "code_search",
+  "code_explore",
+  "code_callers",
+  "code_callees",
+  "code_impact",
+  "code_node",
+  "code_files",
+  "code_status",
+  "code_usages",
+  "code_path",
+  "code_hierarchy",
+  "code_call_graph",
+  "code_deps",
+  "code_cycles",
+  "code_dead_code",
+  "code_metrics",
+  "code_routes",
+  "code_traverse",
+  "code_context",
+  "code_changed",
   "lsp_definition",
   "lsp_references",
   "lsp_hover",
@@ -84,6 +105,7 @@ export const ASK_TOOLS: readonly string[] = [
   "lsp_document_symbols",
   "hl_read",
   "ask_user",
+  "present",
 ];
 
 // plan：与 ask 共用白名单（已含 bash / bash_escalate）；bash 再由 isSafeCommand 限定为只读命令。

@@ -48,4 +48,58 @@ describe('QuestionSelector', () => {
     );
     expect((screen.getByTestId('question-selector-next') as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it('fullWidth lays out against the composer instead of the 600px cap', () => {
+    const { rerender } = render(
+      <QuestionSelector questions={single} selected={{}} onToggle={() => {}} />,
+    );
+    expect(screen.getByTestId('question-selector').getAttribute('data-full-width')).toBeNull();
+    rerender(
+      <QuestionSelector fullWidth questions={single} selected={{}} onToggle={() => {}} />,
+    );
+    expect(screen.getByTestId('question-selector').getAttribute('data-full-width')).toBe('true');
+  });
+
+  it('extra note has no add-image button and no parenthetical placeholder', () => {
+    render(
+      <QuestionSelector
+        allowExtra
+        extraText=""
+        onContinue={() => {}}
+        onExtraImagesChange={() => {}}
+        onExtraTextChange={() => {}}
+        onToggle={() => {}}
+        questions={multiQ}
+        selected={{ q1: ['a'], q2: ['c'] }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('question-selector-next'));
+    expect(screen.getByTestId('question-selector-extra')).toBeTruthy();
+    expect(screen.queryByTestId('question-selector-extra-add-image')).toBeNull();
+    expect((screen.getByTestId('question-selector-extra-text') as HTMLTextAreaElement).placeholder).not.toMatch(
+      /[()（）]/,
+    );
+  });
+
+  it('keeps extra note inside the options scroll and footer buttons outside it', () => {
+    render(
+      <QuestionSelector
+        allowExtra
+        extraText=""
+        fullWidth
+        onContinue={() => {}}
+        onExtraImagesChange={() => {}}
+        onExtraTextChange={() => {}}
+        onToggle={() => {}}
+        questions={multiQ}
+        selected={{ q1: ['a'], q2: ['c'] }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('question-selector-next'));
+    const scroll = screen.getByTestId('question-selector-scroll');
+    expect(scroll.contains(screen.getByTestId('question-selector-extra'))).toBe(true);
+    expect(scroll.contains(screen.getByText('第二题'))).toBe(true);
+    expect(scroll.contains(screen.getByTestId('question-selector-submit'))).toBe(false);
+    expect(scroll.contains(screen.getByTestId('question-selector-prev'))).toBe(false);
+  });
 });

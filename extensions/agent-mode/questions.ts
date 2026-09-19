@@ -91,3 +91,35 @@ export function normalizeQuestions(raw: RawQuestion[], id: string, card?: Omit<R
     ...(card?.extraPlaceholder?.trim() ? { extraPlaceholder: card.extraPlaceholder.trim() } : {}),
   };
 }
+
+export interface AskUserAnswerImage {
+  type: "image";
+  mimeType: string;
+  data: string;
+}
+
+/** 前端有贴图时会把回包装成 `{ __askUserAnswer, text, images }`；无图仍是纯 `[我的选择]` 文本。 */
+export function decodeAskUserAnswer(raw: unknown): { text: string; images: AskUserAnswerImage[] } {
+  if (typeof raw !== "string") return { text: "", images: [] };
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const obj = JSON.parse(trimmed) as { __askUserAnswer?: unknown; text?: unknown; images?: unknown };
+      if (obj && obj.__askUserAnswer && typeof obj.text === "string") {
+        const images = Array.isArray(obj.images)
+          ? obj.images.flatMap((item) => {
+              if (!item || typeof item !== "object") return [];
+              const img = item as { mimeType?: unknown; data?: unknown };
+              if (typeof img.mimeType !== "string" || !img.mimeType) return [];
+              if (typeof img.data !== "string" || !img.data) return [];
+              return [{ type: "image" as const, mimeType: img.mimeType, data: img.data }];
+            })
+          : [];
+        return { text: obj.text, images };
+      }
+    } catch {
+      /* 不是哨兵信封，当纯文本 */
+    }
+  }
+  return { text: raw, images: [] };
+}

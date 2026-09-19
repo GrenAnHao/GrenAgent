@@ -37,10 +37,20 @@ describe('InlineQuestionCard', () => {
     expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toBeUndefined();
   });
 
-  it('cancels with { cancelled: true }', () => {
-    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u2', data });
-    render(<InlineQuestionCard />);
-    fireEvent.click(screen.getByTestId('inline-question-skip'));
-    expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u2', cancelled: true });
+    it('includes extra note in the submitted value', () => {
+      useInlineQuestionStore.getState().setRequest({
+        workspace: '/ws',
+        id: 'u3',
+        data: { ...data, allowExtra: true },
+      });
+      render(<InlineQuestionCard />);
+      fireEvent.click(screen.getByText('乙'));
+      fireEvent.change(screen.getByTestId('inline-question-extra-text'), { target: { value: '你能看到图片吗' } });
+      fireEvent.click(screen.getByTestId('inline-question-continue'));
+      expect(respond).toHaveBeenCalledWith('/ws', {
+        type: 'extension_ui_response',
+        id: 'u3',
+        value: '[我的选择]\n1. T：乙\n补充说明：你能看到图片吗',
+      });
+    });
   });
-});

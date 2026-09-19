@@ -54,6 +54,51 @@ export function formatAnswers(
   return `[我的选择]\n${lines.join('\n')}`;
 }
 
+export interface ParsedAnswerBlock {
+  choices: string[];
+  extraNote?: string;
+  imageCount?: number;
+}
+
+/** 从 formatAnswers 文本里拆出各题选项，不把「补充说明」误当成最后一题的答案。 */
+export function parseAnswerBlock(text: string): ParsedAnswerBlock {
+  const body = text.replace(/^\s*\[我的选择\]\n?/, '');
+  const extraAt = body.search(/^补充说明：/m);
+  const imageAt = body.search(/^补充图片：/m);
+  const cuts = [extraAt, imageAt].filter((i) => i >= 0);
+  const headEnd = cuts.length > 0 ? Math.min(...cuts) : body.length;
+  const head = body.slice(0, headEnd);
+  const tail = body.slice(headEnd);
+
+  const chunks = head.split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\./.test(s.trimStart()));
+  const choices = chunks.map((chunk) => {
+    const colonIdx = chunk.indexOf('：');
+    return colonIdx >= 0 ? chunk.slice(colonIdx + 1).trim() : chunk.replace(/^\d+\.\s*/, '').trim();
+  });
+
+  const extraMatch = tail.match(/^补充说明：([\s\S]*?)(?=^补充图片：)/m) ?? tail.match(/^补充说明：([\s\S]*)/);
+  const extraNote = extraMatch?.[1]?.trim() || undefined;
+  const imageMatch = tail.match(/^补充图片：(\d+)/m);
+  const parsedCount = imageMatch ? Number(imageMatch[1]) : NaN;
+  const imageCount = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : undefined;
+
+  return extraNote || imageCount ? { choices, ...(extraNote ? { extraNote } : {}), ...(imageCount ? { imageCount } : {}) } : { choices };
+}
+
+/** ask_user 回传：无图保持纯文本；有图包一层哨兵，扩展端拆成 text + image content。 */
+export function encodeAskUserAnswer(
+  text: string,
+  images?: Array<{ mimeType: string; data: string }>,
+): string {
+  const imgs = (images ?? []).filter((img) => img.mimeType && img.data);
+  if (imgs.length === 0) return text;
+  return JSON.stringify({
+    __askUserAnswer: 1,
+    text,
+    images: imgs.map((img) => ({ mimeType: img.mimeType, data: img.data })),
+  });
+}
+
 /** 解析 ask_user 经 ctx.ui.input 传来的载荷（哨兵 __askUser）。非该载荷返回 null。 */
 export function parseAskUserPayload(title: unknown): QSData | null {
   if (typeof title !== 'string' || title[0] !== '{') return null;

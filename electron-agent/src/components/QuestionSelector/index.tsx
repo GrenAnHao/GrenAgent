@@ -43,14 +43,32 @@ export interface QuestionSelectorProps {
   skipLabel?: string;
   headerTitle?: string;
   className?: string;
+  /** 对齐 Composer 宽度：取消 600px 封顶，卡面用输入框同一套抬升底。 */
+  fullWidth?: boolean;
   'data-testid'?: string;
 }
 
 const styles = createStaticStyles(({ css }) => ({
-  // 外层：统一设计封顶 600px、左对齐随内容（窄屏自适应）。
+  // 外层：对话流里封顶 600px；浮层用 fullWidth 铺满锚定宽度。
   wrap: css`
     width: 100%;
     max-width: 600px;
+  `,
+  wrapFull: css`
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    max-width: none;
+    max-height: inherit;
+    background: transparent;
+  `,
+  // 题目 + 选项 + 补充说明一起滚；卡头/页脚留在 ConvCard 上不跟着走。
+  scroll: css`
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-block-end: 8px;
   `,
   body: css`
     padding: 10px 12px;
@@ -62,13 +80,17 @@ const styles = createStaticStyles(({ css }) => ({
     line-height: 1.45;
     color: ${cssVar.colorText};
   `,
-  // 选项多时卡内滚动，卡头/页脚（ConvCard 提供）固定。
+  // 对话流里选项多时卡内滚动；浮层由 scroll 统一承载，避免套一层 260px。
   options: css`
     display: flex;
     flex-direction: column;
     gap: 6px;
     max-height: 260px;
     overflow-y: auto;
+  `,
+  optionsUncapped: css`
+    max-height: none;
+    overflow: visible;
   `,
   // 自定义项（选中「其他」）内联输入框，贴在该选项行下方。
   customInput: css`
@@ -80,6 +102,7 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorFillSecondary};
     color: ${cssVar.colorText};
     font-size: 13px;
+    font-family: inherit;
     outline: none;
 
     &::placeholder {
@@ -117,7 +140,7 @@ function questionSatisfied(
 
 /**
  * 通用选择题 UI（对齐对话项统一视觉：ConvCard 卡壳 + OptionRow 选项行）。
- * 支持单选 / 多选、自定义项（内联输入）、补充说明（可贴图）；多题时分页步骤呈现。
+ * 支持单选 / 多选、自定义项（内联输入）、补充说明；多题时分页步骤呈现。
  */
 export const QuestionSelector = memo(function QuestionSelector({
   questions,
@@ -140,6 +163,7 @@ export const QuestionSelector = memo(function QuestionSelector({
   skipLabel = '取消',
   headerTitle = '请选择',
   className,
+  fullWidth = false,
   'data-testid': testId = 'question-selector',
 }: QuestionSelectorProps) {
   const [step, setStep] = useState(0);
@@ -200,67 +224,79 @@ export const QuestionSelector = memo(function QuestionSelector({
     ) : undefined;
 
   return (
-    <div className={cx(styles.wrap, className)} data-testid={testId}>
-      <ConvCard footer={footer} icon={MessageCircleQuestion} label={headerTitle} tag={tag}>
-        {q ? (
-          <div className={styles.body}>
-            <div className={styles.question}>
-              {/`/.test(q.title) ? (
-                <LazyMarkdown enableMermaid={false} variant="chat">
-                  {q.title}
-                </LazyMarkdown>
-              ) : (
-                q.title
-              )}
-            </div>
-            <div className={styles.options}>
-              {q.options.map((o, oi) => {
-                const isSel = picked.includes(o.id);
-                const isCustom = o.id === CUSTOM_OPTION_ID;
-                return (
-                  <div key={o.id} data-testid={`${testId}-opt-${q.id}-${o.id}`}>
-                    <OptionRow
-                      index={String.fromCharCode(65 + oi)}
-                      label={o.label}
-                      multi={Boolean(q.allowMultiple)}
-                      onClick={() => {
-                        if (!disabled) onToggle(q.id, o.id, Boolean(q.allowMultiple));
-                      }}
-                      selected={isSel}
-                    />
-                    {isCustom && isSel && onCustomTextChange ? (
-                      <input
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        autoFocus
-                        className={styles.customInput}
-                        data-testid={`${testId}-custom-${q.id}`}
-                        onChange={(e) => onCustomTextChange(q.id, e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        placeholder="请输入自定义答案"
-                        type="text"
-                        value={customTexts[q.id] ?? ''}
+    <div
+      className={cx(styles.wrap, fullWidth && styles.wrapFull, className)}
+      data-full-width={fullWidth ? 'true' : undefined}
+      data-testid={testId}
+    >
+      <ConvCard
+        elevated={fullWidth}
+        footer={footer}
+        icon={MessageCircleQuestion}
+        label={headerTitle}
+        tag={tag}
+      >
+        <div className={styles.scroll} data-testid={`${testId}-scroll`}>
+          {q ? (
+            <div className={styles.body}>
+              <div className={styles.question}>
+                {/`/.test(q.title) ? (
+                  <LazyMarkdown enableMermaid={false} variant="chat">
+                    {q.title}
+                  </LazyMarkdown>
+                ) : (
+                  q.title
+                )}
+              </div>
+              <div className={cx(styles.options, fullWidth && styles.optionsUncapped)}>
+                {q.options.map((o, oi) => {
+                  const isSel = picked.includes(o.id);
+                  const isCustom = o.id === CUSTOM_OPTION_ID;
+                  return (
+                    <div key={o.id} data-testid={`${testId}-opt-${q.id}-${o.id}`}>
+                      <OptionRow
+                        index={String.fromCharCode(65 + oi)}
+                        label={o.label}
+                        multi={Boolean(q.allowMultiple)}
+                        onClick={() => {
+                          if (!disabled) onToggle(q.id, o.id, Boolean(q.allowMultiple));
+                        }}
+                        selected={isSel}
                       />
-                    ) : null}
-                  </div>
-                );
-              })}
+                      {isCustom && isSel && onCustomTextChange ? (
+                        <input
+                          // eslint-disable-next-line jsx-a11y/no-autofocus
+                          autoFocus
+                          className={styles.customInput}
+                          data-testid={`${testId}-custom-${q.id}`}
+                          onChange={(e) => onCustomTextChange(q.id, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="请输入自定义答案"
+                          type="text"
+                          value={customTexts[q.id] ?? ''}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {showExtra && isLast ? (
-          <ExtraContent
-            allowImages={allowExtraImages}
-            data-testid={`${testId}-extra`}
-            images={extraImages}
-            onImagesChange={onExtraImagesChange ?? (() => {})}
-            onTextChange={onExtraTextChange}
-            placeholder={extraPlaceholder}
-            text={extraText}
-          />
-        ) : null}
+          {showExtra && isLast ? (
+            <ExtraContent
+              allowImages={allowExtraImages}
+              data-testid={`${testId}-extra`}
+              images={extraImages}
+              onImagesChange={onExtraImagesChange ?? (() => {})}
+              onTextChange={onExtraTextChange}
+              placeholder={extraPlaceholder}
+              text={extraText}
+            />
+          ) : null}
 
-        {doneLabel ? <div className={styles.doneText}>{doneLabel}</div> : null}
+          {doneLabel ? <div className={styles.doneText}>{doneLabel}</div> : null}
+        </div>
       </ConvCard>
     </div>
   );

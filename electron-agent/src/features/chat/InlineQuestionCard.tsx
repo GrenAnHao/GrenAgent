@@ -1,17 +1,10 @@
 import { memo, useEffect, useState } from 'react';
-import { createStaticStyles } from 'antd-style';
 import { QuestionSelector } from '../../components/QuestionSelector';
-import { formatAnswers } from '../../components/QuestionSelector/answers';
+import { encodeAskUserAnswer, formatAnswers } from '../../components/QuestionSelector/answers';
 import type { ImageAttachment } from './input/ChatInputContext';
 import { extensionUiRespond } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
-
-const styles = createStaticStyles(({ css }) => ({
-  wrap: css`
-    margin-block: 6px 2px;
-  `,
-}));
 
 /**
  * 阻塞式 ask_user 富卡，由 `ComposerPromptOverlay` 渲染。
@@ -50,24 +43,30 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
     });
 
   return (
-    <div className={styles.wrap}>
-      <QuestionSelector
-        allowExtra={Boolean(data.allowExtra)}
-        allowExtraImages={data.allowExtraImages !== false}
-        customTexts={customTexts}
-        data-testid="inline-question"
-        extraImages={extraImages}
-        extraPlaceholder={data.extraPlaceholder}
-        extraText={extraText}
-        onContinue={() => respond({ value: formatAnswers(data, selected, customTexts, extraText) })}
-        onCustomTextChange={(qid, v) => setCustomTexts((p) => ({ ...p, [qid]: v }))}
-        onExtraImagesChange={setExtraImages}
-        onExtraTextChange={setExtraText}
-        onSkip={() => respond({ cancelled: true })}
-        onToggle={toggle}
-        questions={data.questions}
-        selected={selected}
-      />
-    </div>
+    <QuestionSelector
+      allowExtra={Boolean(data.allowExtra)}
+      allowExtraImages={data.allowExtraImages !== false}
+      customTexts={customTexts}
+      data-testid="inline-question"
+      extraImages={extraImages}
+      extraPlaceholder={data.extraPlaceholder}
+      extraText={extraText}
+      fullWidth
+      onContinue={() =>
+        respond({
+          value: encodeAskUserAnswer(
+            formatAnswers(data, selected, customTexts, extraText, extraImages.length),
+            extraImages,
+          ),
+        })
+      }
+      onCustomTextChange={(qid, v) => setCustomTexts((p) => ({ ...p, [qid]: v }))}
+      onExtraImagesChange={setExtraImages}
+      onExtraTextChange={setExtraText}
+      onSkip={() => respond({ cancelled: true })}
+      onToggle={toggle}
+      questions={data.questions}
+      selected={selected}
+    />
   );
 });
