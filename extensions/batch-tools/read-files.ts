@@ -5,6 +5,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getConfig } from "../_shared/runtime-config.js";
+import { READ_MAX_BYTES, truncateReadLine } from "../_shared/output-retention.js";
 import { formatReadResult, type ReadSegment } from "./format.js";
 
 export interface FileReq {
@@ -63,12 +64,13 @@ export function sliceLines(
   const kept: string[] = [];
   let bytes = 0;
   for (const ln of slice) {
-    bytes += Buffer.byteLength(ln, "utf8") + 1;
+    const clipped = truncateReadLine(ln);
+    bytes += Buffer.byteLength(clipped, "utf8") + 1;
     if (bytes > opts.maxBytes) {
       truncated = true;
       break;
     }
-    kept.push(ln);
+    kept.push(clipped);
   }
   const startLine = offset;
   const endLine = startLine + kept.length - 1;
@@ -91,6 +93,7 @@ export function registerReadFiles(pi: ExtensionAPI): void {
     description:
       "Read MULTIPLE files (or line ranges) in one call and get a single merged result. " +
       "Prefer this over calling read repeatedly: it collapses N reads into one tool result and keeps the conversation compact.",
+    promptSnippet: "Read multiple files or line ranges in one call.",
     promptGuidelines: [
       "When you need to look at several files or several snippets, call read_files once instead of issuing many separate read calls.",
       "Give each file its own offset/limit to fetch only the lines you need.",
@@ -117,7 +120,7 @@ export function registerReadFiles(pi: ExtensionAPI): void {
       const maxLines = params.maxLinesPerFile && params.maxLinesPerFile > 0
         ? params.maxLinesPerFile
         : Number(getConfig("READ_FILES_MAX_LINES") ?? "400") || 400;
-      const maxBytes = Number(getConfig("READ_FILES_MAX_BYTES") ?? "51200") || 51200;
+      const maxBytes = Number(getConfig("READ_FILES_MAX_BYTES") ?? String(READ_MAX_BYTES)) || READ_MAX_BYTES;
       const segs: ReadSegment[] = reqs.map((req) => {
         const abs = isAbsolute(req.path) ? req.path : join(ctx.cwd, req.path);
         const disp = relative(ctx.cwd, abs) || req.path;

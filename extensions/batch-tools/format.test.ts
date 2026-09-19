@@ -41,4 +41,16 @@ describe("formatSearchGroups", () => {
     });
     expect(capped).toContain("capped at 100");
   });
+  it("clips megabyte-scale match lines so one tsbuildinfo hit cannot explode context", () => {
+    const bomb = `{"version":"7.0.2","root":[${"1,".repeat(80_000)}"ask_user"]}`;
+    expect(bomb.length).toBeGreaterThan(100_000);
+    const out = formatSearchGroups(
+      [{ file: "tsconfig.node.tsbuildinfo", hits: [{ line: 1, text: bomb, isMatch: true }] }],
+      { total: 1, files: 1, capped: false, limit: 40 },
+    );
+    expect(out.length).toBeLessThan(3000);
+    expect(out).toContain("tsconfig.node.tsbuildinfo");
+    expect(out).toContain("(line truncated)");
+    expect(out).not.toContain(bomb.slice(-40));
+  });
 });

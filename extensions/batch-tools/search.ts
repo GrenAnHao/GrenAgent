@@ -1,9 +1,12 @@
-// search：一次多正则 pattern(OR) + glob 过滤的纯 JS 检索，分组合并一条结果。
+// search：一次多正则 pattern(OR) + glob 过滤。优先打包 ripgrep（gitignore + 流式匹配），
+// 二进制缺失时降级到纯 JS walk。
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getConfig } from "../_shared/runtime-config.js";
+import { GREP_MAX_MATCHES, previewLine } from "../_shared/output-retention.js";
+import { grepWithRg } from "../_shared/ripgrep.js";
 import { walkFiles } from "./walk.js";
 import { formatSearchGroups, type Hit } from "./format.js";
 
@@ -43,6 +46,144 @@ export function searchInText(text: string, regexes: RegExp[], contextLines: numb
     .map((i) => ({ line: i + 1, text: lines[i], isMatch: include.get(i) === true }));
 }
 
+export const SEARCH_HARD_MAX_RESULTS = GREP_MAX_MATCHES;
+const DEFAULT_MAX_RESULTS = GREP_MAX_MATCHES;
+
+/** Clamp caller maxResults: missing/invalid → fallback; never above SEARCH_HARD_MAX_RESULTS. */
+export function clampSearchMaxResults(raw: number | undefined, fallback = DEFAULT_MAX_RESULTS): number {
+  const n = raw && raw > 0 ? Math.floor(raw) : fallback;
+  const base = n >= 1 ? n : fallback;
+  return Math.min(SEARCH_HARD_MAX_RESULTS, base);
+}
+
+export interface SearchWorkspaceOpts {
+  dir: string;
+  cwd: string;
+  patterns: string[];
+  globs?: string[];
+  ignoreCase?: boolean;
+  literal?: boolean;
+  contextLines: number;
+  maxResults: number;
+  maxFiles: number;
+  maxFileBytes: number;
+  signal?: AbortSignal;
+  engine?: "rg" | "js";
+}
+
+function searchViaJs(opts: SearchWorkspaceOpts): {
+  groups: { file: string; hits: Hit[] }[];
+  matchCount: number;
+  capped: boolean;
+  invalid: string[];
+  error?: string;
+} {
+  const { regexes, invalid } = compilePatterns(opts.patterns, { literal: opts.literal, ignoreCase: opts.ignoreCase });
+  if (!regexes.length) {
+    return { groups: [], matchCount: 0, capped: false, invalid, error: `search: no valid patterns.${invalid.length ? ` (invalid: ${invalid.join(", ")})` : ""}` };
+  }
+  const files = walkFiles(opts.dir, { globs: opts.globs, maxFiles: opts.maxFiles, maxFileBytes: opts.maxFileBytes });
+  const groups: { file: string; hits: Hit[] }[] = [];
+  let matchCount = 0;
+  let capped = false;
+  for (const f of files) {
+    if (opts.signal?.aborted) break;
+    let text: string;
+    try {
+      text = readFileSync(f, "utf8");
+    } catch {
+      continue;
+    }
+    const hits = searchInText(text, regexes, opts.contextLines).map((h) => ({ ...h, text: previewLine(h.text) }));
+    const fileMatches = hits.filter((h) => h.isMatch).length;
+    if (!fileMatches) continue;
+    const rel = relative(opts.cwd, f) || f;
+    if (matchCount + fileMatches > opts.maxResults) {
+      const remaining = opts.maxResults - matchCount;
+      const trimmed: Hit[] = [];
+      let used = 0;
+      for (const h of hits) {
+        if (h.isMatch) {
+          if (used >= remaining) break;
+          used++;
+        }
+        trimmed.push(h);
+      }
+      groups.push({ file: rel, hits: trimmed });
+      matchCount += used;
+      capped = true;
+      break;
+    }
+    groups.push({ file: rel, hits });
+    matchCount += fileMatches;
+    if (matchCount >= opts.maxResults) {
+      capped = true;
+      break;
+    }
+  }
+  return { groups, matchCount, capped, invalid };
+}
+
+/** Prefer packaged ripgrep (DSH engine). Fall back to JS walk only when the binary is missing. */
+export async function searchWorkspace(opts: SearchWorkspaceOpts): Promise<{
+  groups: { file: string; hits: Hit[] }[];
+  matchCount: number;
+  capped: boolean;
+  invalid: string[];
+  error?: string;
+}> {
+  const forceJs = opts.engine === "js" || (getConfig("SEARCH_ENGINE") ?? "rg") === "js";
+  if (!forceJs && opts.patterns.length) {
+    const rg = await grepWithRg({
+      patterns: opts.patterns,
+      path: opts.dir,
+      cwd: opts.cwd,
+      globs: opts.globs,
+      ignoreCase: opts.ignoreCase,
+      literal: opts.literal,
+      contextLines: opts.contextLines,
+      maxFilesize: opts.maxFileBytes,
+      maxMatches: opts.maxResults,
+      signal: opts.signal,
+    });
+    if (rg) {
+      if (rg.error) return { groups: [], matchCount: 0, capped: false, invalid: [], error: `search: ${rg.error}` };
+      return { groups: rg.groups, matchCount: rg.total, capped: rg.capped, invalid: [] };
+    }
+  }
+  return searchViaJs(opts);
+}
+
+function toToolResult(
+  groups: { file: string; hits: Hit[] }[],
+  matchCount: number,
+  capped: boolean,
+  maxResults: number,
+  invalid: string[],
+  error?: string,
+) {
+  if (error && !groups.length) {
+    return {
+      content: [{ type: "text" as const, text: error }],
+      details: { matches: [], total: 0, files: 0, capped: false, invalidPatterns: invalid },
+    };
+  }
+  return {
+    content: [{
+      type: "text" as const,
+      text: formatSearchGroups(groups, {
+        total: matchCount, files: groups.length, capped, limit: maxResults,
+        invalidPatterns: invalid.length ? invalid : undefined,
+      }),
+    }],
+    details: {
+      matches: groups.flatMap((g) => g.hits.filter((h) => h.isMatch).map((h) => ({ file: g.file, line: h.line, text: h.text }))),
+      total: matchCount, files: groups.length, capped,
+      invalidPatterns: invalid.length ? invalid : undefined,
+    },
+  };
+}
+
 /** 注册 search 工具。 */
 export function registerSearch(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -50,7 +191,9 @@ export function registerSearch(pi: ExtensionAPI): void {
     label: "Search",
     description:
       "Search the codebase with one or more regex patterns (OR) and optional glob filters, in one call. " +
-      "Returns matches grouped by file (file:line). Use this instead of running grep/rg/find/ls via bash.",
+      "Uses packaged ripgrep (respects .gitignore). Returns matches grouped by file (file:line). " +
+      "Use this instead of running grep/rg/find/ls via bash.",
+    promptSnippet: "Search the codebase with regex and optional globs.",
     promptGuidelines: [
       "To search code by keyword/regex or find files by glob, call search instead of running grep/rg/find/ls in bash.",
       "Pass multiple patterns (OR) and multiple globs at once; results come back merged.",
@@ -62,78 +205,28 @@ export function registerSearch(pi: ExtensionAPI): void {
       ignoreCase: Type.Optional(Type.Boolean()),
       literal: Type.Optional(Type.Boolean({ description: "Treat patterns as literal strings, not regex." })),
       contextLines: Type.Optional(Type.Number({ description: "Lines of context around each match (default 0)." })),
-      maxResults: Type.Optional(Type.Number({ description: "Max total matches (default 100)." })),
+      maxResults: Type.Optional(Type.Number({ description: "Max total matches (default 250, hard cap 250)." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const dir = params.path
         ? (isAbsolute(params.path) ? params.path : join(ctx.cwd, params.path))
         : ctx.cwd;
-      const maxResults = params.maxResults && params.maxResults > 0
-        ? params.maxResults
-        : Number(getConfig("SEARCH_MAX_RESULTS") ?? "100") || 100;
+      const maxResults = clampSearchMaxResults(
+        params.maxResults,
+        Number(getConfig("SEARCH_MAX_RESULTS") ?? String(DEFAULT_MAX_RESULTS)) || DEFAULT_MAX_RESULTS,
+      );
       const maxFiles = Number(getConfig("SEARCH_MAX_FILES") ?? "5000") || 5000;
       const maxFileBytes = Number(getConfig("SEARCH_MAX_FILE_BYTES") ?? "1048576") || 1048576;
       const ctxLines = params.contextLines && params.contextLines > 0 ? params.contextLines : 0;
-      const { regexes, invalid } = compilePatterns(params.patterns, { literal: params.literal, ignoreCase: params.ignoreCase });
-      if (!regexes.length) {
-        return {
-          content: [{ type: "text", text: `search: no valid patterns.${invalid.length ? ` (invalid: ${invalid.join(", ")})` : ""}` }],
-          details: { matches: [], total: 0, files: 0, capped: false, invalidPatterns: invalid },
-        };
+      if (!params.patterns?.length) {
+        return toToolResult([], 0, false, maxResults, [], "search: no valid patterns.");
       }
-      const files = walkFiles(dir, { globs: params.globs, maxFiles, maxFileBytes });
-      const groups: { file: string; hits: Hit[] }[] = [];
-      let matchCount = 0;
-      let capped = false;
-      for (const f of files) {
-        if (signal?.aborted) break;
-        let text: string;
-        try {
-          text = readFileSync(f, "utf8");
-        } catch {
-          continue;
-        }
-        const hits = searchInText(text, regexes, ctxLines);
-        const fileMatches = hits.filter((h) => h.isMatch).length;
-        if (!fileMatches) continue;
-        const rel = relative(ctx.cwd, f) || f;
-        if (matchCount + fileMatches > maxResults) {
-          const remaining = maxResults - matchCount;
-          const trimmed: Hit[] = [];
-          let used = 0;
-          for (const h of hits) {
-            if (h.isMatch) {
-              if (used >= remaining) break;
-              used++;
-            }
-            trimmed.push(h);
-          }
-          groups.push({ file: rel, hits: trimmed });
-          matchCount += used;
-          capped = true;
-          break;
-        }
-        groups.push({ file: rel, hits });
-        matchCount += fileMatches;
-        if (matchCount >= maxResults) {
-          capped = true;
-          break;
-        }
-      }
-      return {
-        content: [{
-          type: "text",
-          text: formatSearchGroups(groups, {
-            total: matchCount, files: groups.length, capped, limit: maxResults,
-            invalidPatterns: invalid.length ? invalid : undefined,
-          }),
-        }],
-        details: {
-          matches: groups.flatMap((g) => g.hits.filter((h) => h.isMatch).map((h) => ({ file: g.file, line: h.line, text: h.text }))),
-          total: matchCount, files: groups.length, capped,
-          invalidPatterns: invalid.length ? invalid : undefined,
-        },
-      };
+      const out = await searchWorkspace({
+        dir, cwd: ctx.cwd, patterns: params.patterns, globs: params.globs,
+        ignoreCase: params.ignoreCase, literal: params.literal, contextLines: ctxLines,
+        maxResults, maxFiles, maxFileBytes, signal,
+      });
+      return toToolResult(out.groups, out.matchCount, out.capped, maxResults, out.invalid, out.error);
     },
   });
 }

@@ -35,6 +35,18 @@ export function matchesAnyGlob(relPath: string, globs: RegExp[]): boolean {
   return globs.some((g) => g.test(p));
 }
 
+/** 跳过单行巨型产物：tsbuildinfo / source map / 压缩 bundle。DSH 靠 gitignore+rg；我们用扩展名兜底。 */
+export function isSkippedSearchFile(path: string): boolean {
+  const lower = path.replace(/\\/g, "/").toLowerCase();
+  return (
+    lower.endsWith(".tsbuildinfo") ||
+    lower.endsWith(".map") ||
+    lower.endsWith(".min.js") ||
+    lower.endsWith(".min.css") ||
+    lower.endsWith(".min.mjs")
+  );
+}
+
 /** 递归枚举 root 下文件（glob 过滤、跳过 SKIP_DIRS/隐藏目录、文件数与单文件字节上限）。 */
 export function walkFiles(
   root: string,
@@ -48,6 +60,7 @@ export function walkFiles(
     root,
     (full) => {
       if (out.length >= maxFiles) return;
+      if (isSkippedSearchFile(full)) return;
       if (!matchesAnyGlob(relative(root, full), globs)) return;
       try {
         if (statSync(full).size > maxFileBytes) return;

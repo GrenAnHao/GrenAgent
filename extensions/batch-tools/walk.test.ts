@@ -56,4 +56,26 @@ describe("walkFiles", () => {
     expect(out).toContain("/small.ts");
     expect(out).not.toContain("/big.ts");
   });
+  it("skips tsbuildinfo and source-map artifacts even when they are under the byte cap", () => {
+    const root = join(tmpdir(), `bt-walk3-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "app.ts"), "export {}");
+    writeFileSync(join(root, "tsconfig.node.tsbuildinfo"), `{"root":["ask_user"]}`);
+    writeFileSync(join(root, "bundle.js.map"), `{"sources":["ask_user.ts"]}`);
+    const out = walkFiles(root).map((p) => p.replace(root, "").replace(/\\/g, "/"));
+    expect(out).toContain("/app.ts");
+    expect(out).not.toContain("/tsconfig.node.tsbuildinfo");
+    expect(out).not.toContain("/bundle.js.map");
+  });
+  it("skips minified bundles even when they are under the byte cap", () => {
+    const root = join(tmpdir(), `bt-walk4-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "app.ts"), "export {}");
+    writeFileSync(join(root, "vendor.min.js"), `ask_user${"x".repeat(100)}`);
+    writeFileSync(join(root, "app.min.css"), `.ask_user{${"x".repeat(100)}}`);
+    const out = walkFiles(root).map((p) => p.replace(root, "").replace(/\\/g, "/"));
+    expect(out).toContain("/app.ts");
+    expect(out).not.toContain("/vendor.min.js");
+    expect(out).not.toContain("/app.min.css");
+  });
 });

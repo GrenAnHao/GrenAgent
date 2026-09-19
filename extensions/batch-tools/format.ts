@@ -1,4 +1,5 @@
 // 纯函数：把 read_files 的分段与 search 的分组渲染成紧凑文本。
+import { previewLine } from "../_shared/output-retention.js";
 
 export interface ReadSegment {
   path: string;
@@ -45,7 +46,7 @@ export function formatSearchGroups(
     return `No matches.${inv}`;
   }
   const blocks = groups.map(
-    (g) => g.file + "\n" + g.hits.map((h) => `  ${h.line}${h.isMatch ? ":" : "-"} ${h.text}`).join("\n"),
+    (g) => g.file + "\n" + g.hits.map((h) => `  ${h.line}${h.isMatch ? ":" : "-"} ${previewLine(h.text)}`).join("\n"),
   );
   const cap = opts.capped ? `; capped at ${opts.limit}` : "";
   const inv = opts.invalidPatterns?.length ? `; invalid patterns: ${opts.invalidPatterns.join(", ")}` : "";

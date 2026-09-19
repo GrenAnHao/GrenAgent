@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compilePatterns, searchInText } from "./search.js";
+import { clampSearchMaxResults, compilePatterns, SEARCH_HARD_MAX_RESULTS, searchInText } from "./search.js";
 
 describe("compilePatterns", () => {
   it("compiles regex patterns and collects invalid ones", () => {
@@ -13,6 +13,16 @@ describe("compilePatterns", () => {
     expect(regexes[0].test("axb")).toBe(false);
     const ci = compilePatterns(["foo"], { ignoreCase: true }).regexes[0];
     expect(ci.test("FOO")).toBe(true);
+  });
+});
+
+describe("clampSearchMaxResults", () => {
+  it("caps model-supplied maxResults so a huge request cannot dump the tree", () => {
+    expect(SEARCH_HARD_MAX_RESULTS).toBe(250);
+    expect(clampSearchMaxResults(1_000_000)).toBe(SEARCH_HARD_MAX_RESULTS);
+    expect(clampSearchMaxResults(40)).toBe(40);
+    expect(clampSearchMaxResults(undefined)).toBe(250);
+    expect(clampSearchMaxResults(0)).toBe(250);
   });
 });
 

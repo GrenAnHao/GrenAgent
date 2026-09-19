@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runAstGrep } from "./grep.js";
+import { clipAstGrepText, runAstGrep } from "./grep.js";
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), "ast-grep-"));
@@ -27,5 +27,15 @@ describe("runAstGrep", () => {
     const none = await runAstGrep({ pat: "nope($A)", paths: ["a.ts"], skip: 0, cwd: root });
     expect(none.totalMatches).toBe(0);
     expect(none.matches).toHaveLength(0);
+  });
+});
+
+describe("clipAstGrepText", () => {
+  it("keeps only the first line and applies the DSH grep preview cap", () => {
+    const bomb = `{"root":[${"1,".repeat(80_000)}"ask_user"]}`;
+    const out = clipAstGrepText(`${bomb}\nsecond`);
+    expect(out).not.toContain("second");
+    expect(out).toContain("(line truncated)");
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThan(2100);
   });
 });

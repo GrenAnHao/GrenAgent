@@ -10,7 +10,6 @@
     "memory",
     "web",
     "image",
-    "code-review",
     "multi-agent"
   ],
   "license": "MIT",
@@ -19,25 +18,25 @@
       "./web-fetch/index.ts",
       "./image-gen/index.ts",
       "./multi-agent/index.ts",
-      "./tts/index.ts",
-      "./im-gateway/index.ts"
+      "./tts/index.ts"
     ]
   },
   "peerDependencies": {
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "^0.84.4",
-    "@earendil-works/pi-ai": "^0.84.4",
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@ast-grep/napi": "^0.43.0",
+    "@ast-grep/napi": "^0.45.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@vscode/ripgrep": "^1.18.0",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
     "tinyglobby": "^0.2.17",
-    "typebox": "1.3.7"
+    "typebox": "^1.3.34"
   }
 }

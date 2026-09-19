@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parse } from "@ast-grep/napi";
+import { GREP_MAX_MATCHES, previewLine } from "../_shared/output-retention.js";
 import { collectFiles } from "./lang.js";
 
 export interface AstGrepMatch {
@@ -19,11 +20,16 @@ export interface AstGrepArgs {
   paths: string[];
   skip: number;
   cwd: string;
-  limit?: number; // 默认 200
+  limit?: number;
+}
+
+/** First line only, then the DSH grep preview cap — a minified node must not dump megabytes. */
+export function clipAstGrepText(text: string): string {
+  return previewLine(text.split("\n")[0] ?? "");
 }
 
 export async function runAstGrep(args: AstGrepArgs): Promise<AstGrepResult> {
-  const limit = args.limit ?? 200;
+  const limit = Math.min(args.limit ?? GREP_MAX_MATCHES, GREP_MAX_MATCHES);
   const files = await collectFiles(args.paths, args.cwd);
   const all: AstGrepMatch[] = [];
   const parseErrors: string[] = [];
@@ -39,7 +45,12 @@ export async function runAstGrep(args: AstGrepArgs): Promise<AstGrepResult> {
       const nodes = parse(f.lang, src).root().findAll(args.pat);
       for (const n of nodes) {
         const r = n.range();
-        all.push({ rel: f.rel, line: r.start.line + 1, column: r.start.column + 1, text: n.text() });
+        all.push({
+          rel: f.rel,
+          line: r.start.line + 1,
+          column: r.start.column + 1,
+          text: clipAstGrepText(n.text()),
+        });
       }
     } catch (err) {
       parseErrors.push(`${f.rel}: ${(err as Error).message}`);

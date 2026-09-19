@@ -39,4 +39,12 @@ describe("sliceLines", () => {
     expect(r.endLine).toBe(2);
     expect(r.truncated).toBe(false);
   });
+  it("clips a giant single line the way DSH read does, so tsbuildinfo cannot fill the window", () => {
+    const bomb = "x".repeat(20_000);
+    const r = sliceLines([bomb], { maxLines: 400, maxBytes: 51200 });
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0].length).toBeLessThan(2100);
+    expect(r.lines[0]).toContain("(line truncated to 2000 chars)");
+    expect(r.truncated).toBe(false);
+  });
 });

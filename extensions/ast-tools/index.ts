@@ -13,6 +13,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "按语法结构跨文件查询（ast-grep pattern，如 `console.log($A)`、`foo($$$ARGS)`），比文本 grep 精确。" +
       "paths 支持文件/目录/glob；skip 分页。仅 js/jsx/ts/tsx/css/html。结构化重写用 ast_edit。",
+    promptSnippet: "Search code by AST pattern.",
     parameters: Type.Object({
       pat: Type.String({ description: "ast-grep pattern（元变量 $VAR / $$$ARGS）" }),
       paths: Type.Array(Type.String(), { description: "文件/目录/glob（>=1）", minItems: 1 }),
@@ -22,7 +23,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const { runAstGrep } = await import("./grep.js");
         const res = await runAstGrep({ pat: params.pat, paths: params.paths, skip: params.skip ?? 0, cwd: ctx.cwd });
-        const lines = res.matches.map((m) => `${m.rel}:${m.line}:${m.column}  ${m.text.split("\n")[0]}`);
+        const lines = res.matches.map((m) => `${m.rel}:${m.line}:${m.column}  ${m.text}`);
         const head =
           `${res.totalMatches} 个匹配（${res.filesSearched} 文件）` +
           (res.matches.length < res.totalMatches ? `，显示 ${res.matches.length}` : "");
@@ -44,6 +45,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "按语法结构批量重写：ops 每项 {pat, out}，out 模板用 $VAR/$$$ARGS 引用 pat 捕获的内容。" +
       "默认直接写盘；dryRun=true 只报告不写。paths 支持文件/目录/glob；仅 js/jsx/ts/tsx/css/html。",
+    promptSnippet: "Rewrite code by AST pattern.",
     parameters: Type.Object({
       ops: Type.Array(Type.Object({ pat: Type.String(), out: Type.String() }), {
         description: "重写对：pat 匹配，out 替换模板（$VAR/$$$ARGS）",

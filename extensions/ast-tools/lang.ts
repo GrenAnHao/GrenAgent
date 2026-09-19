@@ -4,6 +4,8 @@
 import { statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { glob } from "tinyglobby";
+import { SKIP_DIRS } from "../_shared/fs-walk.js";
+import { listFilesWithRg } from "../_shared/ripgrep.js";
 
 export type CoreLang = "JavaScript" | "TypeScript" | "Tsx" | "Css" | "Html";
 
@@ -20,6 +22,8 @@ const EXT_TO_LANG: Record<string, CoreLang> = {
   html: "Html",
   htm: "Html",
 };
+
+const GLOB_IGNORE = [...SKIP_DIRS].map((d) => `**/${d}/**`);
 
 export function extToLang(filename: string): CoreLang | null {
   const dot = filename.lastIndexOf(".");
@@ -48,18 +52,25 @@ function toPattern(p: string, cwd: string): string {
   return p.replace(/\\/g, "/");
 }
 
-export async function collectFiles(paths: string[], cwd: string): Promise<CollectedFile[]> {
-  const patterns = paths.map((p) => toPattern(p, cwd));
-  const hits = await glob(patterns, { cwd, absolute: true, onlyFiles: true, dot: false });
+function toCollected(absPaths: string[], cwd: string): CollectedFile[] {
   const out: CollectedFile[] = [];
   const seen = new Set<string>();
-  for (const abs of hits) {
-    if (seen.has(abs)) continue;
-    seen.add(abs);
+  for (const abs of absPaths) {
+    const norm = abs.replace(/\\/g, "/");
+    if (seen.has(norm)) continue;
+    seen.add(norm);
     const lang = extToLang(abs);
     if (lang === null) continue;
     out.push({ abs, rel: relative(cwd, abs).replace(/\\/g, "/"), lang });
   }
   out.sort((a, b) => a.rel.localeCompare(b.rel));
   return out;
+}
+
+export async function collectFiles(paths: string[], cwd: string): Promise<CollectedFile[]> {
+  const listed = await listFilesWithRg({ cwd, targets: paths });
+  if (listed) return toCollected(listed, cwd);
+  const patterns = paths.map((p) => toPattern(p, cwd));
+  const hits = await glob(patterns, { cwd, absolute: true, onlyFiles: true, dot: false, ignore: GLOB_IGNORE });
+  return toCollected(hits, cwd);
 }
