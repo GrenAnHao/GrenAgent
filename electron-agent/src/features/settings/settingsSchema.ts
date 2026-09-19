@@ -97,7 +97,7 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         label: '自动生成对话标题',
         type: 'boolean',
         default: '1',
-        description: '首轮对话结束后生成简短标题（默认开）',
+        description: '关闭后侧栏用首条消息作标题（默认开）',
       },
       {
         key: 'COMPACTION_PREVIEW',

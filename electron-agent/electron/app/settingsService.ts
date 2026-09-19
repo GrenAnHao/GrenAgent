@@ -21,8 +21,16 @@ export function isContextExclusionConfigKey(key: string): boolean {
   return key.startsWith('CONTEXT_EXCLUSION_OP:');
 }
 
+export function agentModeConfigKey(workspace: string): string {
+  return `AGENT_MODE:${workspaceConfigSuffix(workspace)}`;
+}
+
+export function isAgentModeConfigKey(key: string): boolean {
+  return key === 'AGENT_MODE' || key.startsWith('AGENT_MODE:');
+}
+
 export function isPreservedRuntimeConfigKey(key: string): boolean {
-  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key);
+  return isApprovalPolicyConfigKey(key) || isContextExclusionConfigKey(key) || isAgentModeConfigKey(key);
 }
 
 const runtimeFileWrites = new Map<string, Promise<void>>();

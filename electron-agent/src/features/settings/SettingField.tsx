@@ -8,12 +8,13 @@ import { ModelSelectField } from './ModelSelectField';
 const useStyles = createStyles(({ css, token }) => ({
   row: css`
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
     padding-block: 10px;
   `,
   meta: css`
+    flex: 1 1 auto;
     min-width: 0;
   `,
   label: css`
@@ -27,6 +28,10 @@ const useStyles = createStyles(({ css, token }) => ({
   `,
   control: css`
     flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    min-height: calc(22px + var(--pi-font-delta, 0px));
   `,
   wide: css`
     flex: 1 1 auto;

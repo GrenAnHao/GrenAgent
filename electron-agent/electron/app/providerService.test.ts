@@ -73,6 +73,18 @@ describe('ProviderService', () => {
     }));
   });
 
+  it('resolves {sessionId} in custom headers for the model probe', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 }));
+    const service = new ProviderService({ agentDir: 'C:/agent', fetch });
+
+    await service.fetchModels('https://provider.example', 'secret', 'openai-completions', {
+      'x-opencode-session': '{sessionId}',
+    });
+    expect(fetch).toHaveBeenCalledWith('https://provider.example/v1/models', expect.objectContaining({
+      headers: { 'x-opencode-session': 'settings-probe', authorization: 'Bearer secret' },
+    }));
+  });
+
   it('sends custom headers alongside x-api-key for anthropic-messages', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }), { status: 200 }));
     const service = new ProviderService({ agentDir: 'C:/agent', fetch });

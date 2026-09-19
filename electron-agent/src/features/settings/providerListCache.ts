@@ -14,6 +14,18 @@ export interface ProviderListItem {
 
 let cache: ProviderListItem[] | null = null;
 let inflight: Promise<ProviderListItem[]> | null = null;
+const cacheListeners = new Set<() => void>();
+
+function notifyProviderList(): void {
+  for (const listener of cacheListeners) listener();
+}
+
+export function subscribeProviderList(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
+}
 
 export function getCachedProviderList(): ProviderListItem[] | null {
   return cache;
@@ -40,16 +52,19 @@ export async function loadProviderList(force = false): Promise<ProviderListItem[
 export function invalidateProviderList(): void {
   cache = null;
   inflight = null;
+  notifyProviderList();
 }
 
 /** 读供应商列表：初始同步返回缓存（无闪动），后台校验刷新。 */
 export function useProviderList(): ProviderListItem[] {
   const [list, setList] = useState<ProviderListItem[]>(() => getCachedProviderList() ?? []);
+  const [rev, setRev] = useState(0);
+  useEffect(() => subscribeProviderList(() => setRev((n) => n + 1)), []);
   useEffect(() => {
     const cached = getCachedProviderList();
     if (cached) setList(cached);
     let alive = true;
-    void loadProviderList()
+    void loadProviderList(rev > 0)
       .then((l) => {
         if (alive) setList(l);
       })
@@ -57,6 +72,6 @@ export function useProviderList(): ProviderListItem[] {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [rev]);
   return list;
 }

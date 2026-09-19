@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  interpolateHeaderPlaceholders,
+  SETTINGS_PROBE_SESSION_ID,
+} from '../../../extensions/_shared/header-placeholders.js';
 
 export interface RefreshResult {
   refreshed: string[];
@@ -13,7 +17,7 @@ export interface ProviderServiceOptions {
   refresh?: () => Promise<RefreshResult>;
   fetch?: typeof fetch;
   activeModel?: (workspace: string) => Promise<{ provider: string; modelId: string }>;
-  oneshot?: (request: Record<string, unknown>, onLine?: (line: string) => void) => Promise<void>;
+  oneshot?: (request: Record<string, unknown>, onLine?: (line: string) => void, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface DiagnoseResult {
@@ -77,6 +81,7 @@ export class ProviderService {
     // 否则探测请求会因「看起来不像真实客户端」被拒（表现为供应商侧返回的 401/Invalid token，
     // 密钥本身其实有效）。认证头（authorization/x-api-key）不可被自定义 headers 覆盖。
     const extra = withoutAuthHeaders(headers);
+    interpolateHeaderPlaceholders(extra, { sessionId: SETTINGS_PROBE_SESSION_ID });
     if (api === 'anthropic-messages') {
       const data = await this.getJson(`${base.endsWith('/v1') ? base : `${base}/v1`}/models`, {
         ...extra, 'x-api-key': key, 'anthropic-version': '2023-06-01',

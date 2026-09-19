@@ -2,6 +2,13 @@ import { Input, Select } from 'antd';
 import { useEffect, useState } from 'react';
 import { useProviderModelData } from './providerModelData';
 
+/** 固定像素，避免 placeholder / 选中项把两行下拉撑成不同宽度。 */
+export const MODEL_SELECT_PROVIDER_WIDTH = 130;
+export const MODEL_SELECT_MODEL_WIDTH = 240;
+export const MODEL_SELECT_GAP = 8;
+export const MODEL_SELECT_ROW_WIDTH =
+  MODEL_SELECT_PROVIDER_WIDTH + MODEL_SELECT_GAP + MODEL_SELECT_MODEL_WIDTH;
+
 interface ModelSelectFieldProps {
   value: string;
   placeholder?: string;
@@ -39,7 +46,7 @@ export function ModelSelectField({ value, placeholder, testId, onChange }: Model
         data-testid={testId}
         value={value}
         placeholder={placeholder}
-        style={{ minWidth: 220 }}
+        style={{ width: MODEL_SELECT_ROW_WIDTH }}
         onChange={(e) => onChange(e.target.value)}
       />
     );
@@ -61,13 +68,13 @@ export function ModelSelectField({ value, placeholder, testId, onChange }: Model
   const modelValue = provider === parsed.provider ? parsed.id : '';
 
   return (
-    <div style={{ display: 'flex', gap: 8 }}>
+    <div style={{ display: 'flex', gap: MODEL_SELECT_GAP, flex: '0 0 auto' }}>
       <Select
         data-testid={testId ? `${testId}-provider` : undefined}
         value={provider || undefined}
         options={provOpts}
         placeholder="供应商"
-        style={{ minWidth: 130 }}
+        style={{ width: MODEL_SELECT_PROVIDER_WIDTH }}
         allowClear
         showSearch
         optionFilterProp="label"
@@ -83,7 +90,7 @@ export function ModelSelectField({ value, placeholder, testId, onChange }: Model
         value={modelValue || undefined}
         options={modelOpts}
         placeholder={placeholder ?? '模型'}
-        style={{ minWidth: 200 }}
+        style={{ width: MODEL_SELECT_MODEL_WIDTH }}
         disabled={!provider}
         allowClear
         showSearch

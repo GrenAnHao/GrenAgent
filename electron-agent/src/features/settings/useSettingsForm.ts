@@ -16,6 +16,13 @@ export interface SettingsForm {
   save: () => Promise<void>;
 }
 
+const hydrates = new Set<(next: Record<string, string>) => void>();
+
+/** 供应商删除等外部写盘后，把设置表单内存值对齐到已落盘结果。 */
+export function hydrateSettingsValues(next: Record<string, string>): void {
+  for (const hydrate of hydrates) hydrate(next);
+}
+
 export function useSettingsForm(): SettingsForm {
   const { workspace } = useAgentStoreContext();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -47,6 +54,18 @@ export function useSettingsForm(): SettingsForm {
       });
     return () => {
       alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const hydrate = (next: Record<string, string>) => {
+      valuesRef.current = next;
+      setValues(next);
+      setDirty(false);
+    };
+    hydrates.add(hydrate);
+    return () => {
+      hydrates.delete(hydrate);
     };
   }, []);
 

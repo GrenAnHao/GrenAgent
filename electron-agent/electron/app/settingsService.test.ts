@@ -32,6 +32,18 @@ describe('SettingsService runtime control keys', () => {
     });
   });
 
+  it('keeps workspace agent mode keys when replacing unrelated settings', async () => {
+    const { service, directory } = await createService();
+    await writeFile(
+      join(directory, 'runtime-settings.json'),
+      `${JSON.stringify({ 'AGENT_MODE:c:/work': 'plan', OPENAI_API_KEY: 'old' }, null, 2)}\n`,
+    );
+    await service.replace({ OPENAI_API_KEY: 'new' });
+    const runtime = JSON.parse(await readFile(join(directory, 'runtime-settings.json'), 'utf8')) as Record<string, string>;
+    expect(runtime['AGENT_MODE:c:/work']).toBe('plan');
+    expect(runtime.OPENAI_API_KEY).toBe('new');
+  });
+
   it('keeps pending context-exclusion pulses when replacing unrelated settings', async () => {
     const { service, directory } = await createService();
     const pulse = JSON.stringify({ op: 'add', ts: 42, rev: 9 });

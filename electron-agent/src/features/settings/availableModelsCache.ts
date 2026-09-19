@@ -8,6 +8,18 @@ import { parseModels, type ModelInfo } from '../chat/input/modelUtils';
 
 const cache = new Map<string, ModelInfo[]>();
 const inflight = new Map<string, Promise<ModelInfo[]>>();
+const cacheListeners = new Set<() => void>();
+
+function notifyAvailableModels(): void {
+  for (const listener of cacheListeners) listener();
+}
+
+export function subscribeAvailableModels(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
+}
 
 // 项目无关的全局模型枚举（SP-1 probe-models）用的缓存键：与任何真实 workspace 路径不冲突。
 export const GLOBAL_MODELS_KEY = '__global__';
@@ -71,6 +83,7 @@ export async function loadAvailableModels(workspace: string, force = false): Pro
 export function invalidateAvailableModels(): void {
   cache.clear();
   inflight.clear();
+  notifyAvailableModels();
 }
 
 export interface AvailableModelsState {
@@ -90,6 +103,8 @@ export function useAvailableModelsState(workspace: string | undefined): Availabl
   const [loading, setLoading] = useState<boolean>(
     () => getCachedAvailableModels(workspace ?? GLOBAL_MODELS_KEY) === undefined,
   );
+  const [rev, setRev] = useState(0);
+  useEffect(() => subscribeAvailableModels(() => setRev((n) => n + 1)), []);
   useEffect(() => {
     if (!workspace) {
       // 无项目：走项目无关的全局枚举（SP-1），让选择器冷启动 / 真对话模式下也有模型。
@@ -153,7 +168,7 @@ export function useAvailableModelsState(workspace: string | undefined): Availabl
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [workspace]);
+  }, [workspace, rev]);
   return { models, loading };
 }
 
