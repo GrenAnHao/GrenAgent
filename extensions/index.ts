@@ -1,6 +1,8 @@
 // Aggregate export of all extension factories, for embedding them directly
 // into a branded CLI via DefaultResourceLoader's `extensionFactories` option
 // (no -e / no pi install needed — they're compiled into the product).
+//
+// IM（im-gateway / im-platforms）源码仍在仓库，但不进本清单。接回见 docs/im-reintroduction.md。
 
 import autoTitle from "./auto-title/index.js";
 import compactionPolicy from "./compaction-policy/index.js";
@@ -11,8 +13,7 @@ import github from "./github/index.js";
 import batchTools from "./batch-tools/index.js";
 import diagnostics from "./diagnostics/index.js";
 import afterToolFeedback from "./after-tool-feedback/index.js";
-import imGateway from "./im-gateway/index.js";
-import imPlatforms from "./im-platforms/index.js";
+import headerPlaceholders from "./header-placeholders/index.js";
 import goal, { pluginManifest as goalManifest } from "./goal/index.js";
 import imageGen from "./image-gen/index.js";
 import sessionMemory from "./session-memory/index.js";
@@ -32,6 +33,7 @@ import safety from "./safety/index.js";
 import approval from "./approval/index.js";
 import sandbox from "./sandbox/index.js";
 import todo from "./todo/index.js";
+import present from "./present/index.js";
 import tts from "./tts/index.js";
 import visualCompanion from "./visual-companion/index.js";
 import webFetch from "./web-fetch/index.js";
@@ -46,10 +48,11 @@ export {
   safety,
   approval,
   sandbox,
+  headerPlaceholders,
   loopGuard,
   rulebook,
   compactionPolicy,
-  autoTitle,  todo,
+  autoTitle,  todo, present,
   agentMode,
   debugTools,
   dap,
@@ -73,8 +76,6 @@ export {
   hashline,
   tts,
   visualCompanion,
-  imGateway,
-  imPlatforms,
   afterToolFeedback,
   memory,
   codeRetrieval,
@@ -86,10 +87,11 @@ export const allExtensions = [
   safety,
   approval,
   sandbox,
+  headerPlaceholders,
   loopGuard,
   rulebook,
   compactionPolicy,
-  autoTitle,  todo,
+  autoTitle,  todo, present,
   agentMode,
   debugTools,
   dap,
@@ -113,8 +115,6 @@ export const allExtensions = [
   hashline,
   tts,
   visualCompanion,
-  imGateway,
-  imPlatforms,
   afterToolFeedback,
   memory,
   codeRetrieval,
@@ -127,11 +127,13 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "safety", factory: safety },
   { name: "approval", factory: approval },
   { name: "sandbox", factory: sandbox },
+  { name: "header-placeholders", factory: headerPlaceholders },
   { name: "loop-guard", factory: loopGuard },
   { name: "rulebook", factory: rulebook },
   { name: "compaction-policy", factory: compactionPolicy },
   { name: "auto-title", factory: autoTitle },
   { name: "todo", factory: todo },
+  { name: "present", factory: present },
   { name: "agent-mode", factory: agentMode },
   { name: "debug-tools", factory: debugTools },
   { name: "dap", factory: dap },
@@ -156,8 +158,6 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "hashline", factory: hashline },
   { name: "tts", factory: tts },
   { name: "visual-companion", factory: visualCompanion },
-  { name: "im-gateway", factory: imGateway },
-  { name: "im-platforms", factory: imPlatforms },
   { name: "after-tool-feedback", factory: afterToolFeedback },
   { name: "memory", factory: memory },
   { name: "code-retrieval", factory: codeRetrieval },

@@ -12,6 +12,37 @@ export const CHAT_EXCLUDED = new Set<string>([
   "after-tool-feedback",
 ]);
 
+/**
+ * Electron 产品常驻：无 manifest 也要加载。
+ * 重型 / 危险扩展（与 CHAT_EXCLUDED 对齐）不在此列，须登记为托管插件后才进入白名单。
+ */
+export const CORE_ALWAYS_ON = new Set<string>([
+  "safety",
+  "approval",
+  "sandbox",
+  "header-placeholders",
+  "loop-guard",
+  "rulebook",
+  "compaction-policy",
+  "auto-title",
+  "todo",
+  "present",
+  "agent-mode",
+  "diagram-hint",
+  "fable-behavior",
+  "session-memory",
+  "web-fetch",
+  "resource-manager",
+  "mcp-policy",
+  "image-gen",
+  "jobs",
+  "multi-agent",
+  "github",
+  "batch-tools",
+  "tts",
+  "visual-companion",
+]);
+
 export type ExtensionProfile = "project" | "chat";
 
 export function filterExtensionsByProfile<T extends { name: string }>(
@@ -21,9 +52,6 @@ export function filterExtensionsByProfile<T extends { name: string }>(
   if (profile !== "chat") return exts;
   return exts.filter((e) => e.name === "safety" || !CHAT_EXCLUDED.has(e.name));
 }
-
-/** Electron 产品常驻：无 manifest 也要加载。 */
-export const CORE_ALWAYS_ON = new Set<string>(["safety", "auto-title", "sandbox", "jobs"]);
 
 export function filterManagedExtensions<T extends { name: string; manifest?: { id: string } }>(
   extensions: T[],

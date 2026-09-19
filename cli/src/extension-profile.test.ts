@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CHAT_EXCLUDED, filterExtensionsByProfile, filterManagedExtensions } from "./extension-profile.js";
+import { CHAT_EXCLUDED, CORE_ALWAYS_ON, filterExtensionsByProfile, filterManagedExtensions } from "./extension-profile.js";
 
 const has = (arr: { name: string }[], n: string) => arr.some((e) => e.name === n);
 
@@ -60,4 +60,29 @@ test("Electron empty allowed ids retain only safety, auto-title and sandbox", ()
     { name: "code-exec" },
   ];
   assert.deepEqual(filterManagedExtensions(extensions, '[]'), extensions.slice(0, 3));
+});
+
+test("Electron allowlist keeps product-core extensions and still drops heavy tools", () => {
+  const extensions = [
+    { name: "safety" },
+    { name: "approval" },
+    { name: "multi-agent" },
+    { name: "todo" },
+    { name: "web-fetch" },
+    { name: "goal", manifest: { id: "goal" } },
+    { name: "mcp", manifest: { id: "mcp" } },
+    { name: "code-exec" },
+    { name: "lsp" },
+  ];
+  const loaded = filterManagedExtensions(extensions, '["goal"]');
+  assert.deepEqual(
+    loaded.map((e) => e.name),
+    ["safety", "approval", "multi-agent", "todo", "web-fetch", "goal"],
+  );
+});
+
+test("product core and chat-excluded sets do not overlap", () => {
+  for (const name of CORE_ALWAYS_ON) {
+    assert.equal(CHAT_EXCLUDED.has(name), false, `${name} cannot be both core and chat-excluded`);
+  }
 });

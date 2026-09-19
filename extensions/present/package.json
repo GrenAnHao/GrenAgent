@@ -1,0 +1,20 @@
+{
+  "name": "pi-present",
+  "version": "0.1.0",
+  "description": "Present existing workspace files as this turn's deliverables.",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "present"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "vitest": "^4.1.8"
+  }
+}
