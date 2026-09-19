@@ -2,6 +2,18 @@
 // head+tail truncation preview and the llms.txt-response validation can be tested
 // directly without pulling in the crawler or hitting the network.
 
+import { READ_MAX_BYTES } from "../_shared/output-retention.js";
+
+/** Default FETCH_MAX_CHARS: DSH read byte budget. 0 in config still disables truncation. */
+export const FETCH_DEFAULT_MAX_CHARS = READ_MAX_BYTES;
+
+export function resolveFetchMaxChars(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return FETCH_DEFAULT_MAX_CHARS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return FETCH_DEFAULT_MAX_CHARS;
+  return Math.floor(n);
+}
+
 // Keep a head and a tail slice (70/30) so the model sees both the intro and the
 // conclusion / examples that often live at the end of a page.
 export function headTailSlice(text: string, budget: number): { head: string; tail: string; omitted: number } {

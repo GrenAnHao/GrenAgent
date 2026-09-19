@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { headTailSlice, isUsableLlmsBody } from "./truncate.js";
+import { FETCH_DEFAULT_MAX_CHARS, headTailSlice, isUsableLlmsBody, resolveFetchMaxChars } from "./truncate.js";
+
+describe("resolveFetchMaxChars", () => {
+  it("defaults to the DSH read byte budget so uncapped crawl cannot explode context", () => {
+    expect(FETCH_DEFAULT_MAX_CHARS).toBe(50 * 1024);
+    expect(resolveFetchMaxChars(undefined)).toBe(FETCH_DEFAULT_MAX_CHARS);
+    expect(resolveFetchMaxChars("")).toBe(FETCH_DEFAULT_MAX_CHARS);
+  });
+  it("honors an explicit config, including 0 to disable truncation", () => {
+    expect(resolveFetchMaxChars("12000")).toBe(12000);
+    expect(resolveFetchMaxChars("0")).toBe(0);
+  });
+});
 
 describe("headTailSlice", () => {
   it("splits the budget 70/30 and reports the omitted count", () => {

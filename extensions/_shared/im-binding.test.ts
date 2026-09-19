@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   claimImBinding,
   currentImBinding,
+  notifyImBoundElsewhere,
   releaseImBinding,
   __resetImBindingForTest,
 } from "./im-binding.js";
@@ -42,5 +43,20 @@ describe("ImBinding", () => {
     claimImBinding("D:/a", "s1");
     releaseImBinding("D:/b");
     expect(currentImBinding()).toEqual({ workspace: "D:/a", sessionId: "s1" });
+  });
+
+  it("斜杠和大小写不同的同一目录视为同一 workspace", () => {
+    expect(claimImBinding("C:\\Users\\rxstudio\\.pi\\agent\\works\\a", "s1")).toEqual({ claimed: true });
+    expect(claimImBinding("C:/Users/rxstudio/.pi/agent/works/a", "s2")).toEqual({ claimed: true });
+    expect(currentImBinding()?.sessionId).toBe("s2");
+  });
+
+  it("冲突提示按 owner 去重，重绑不再弹", () => {
+    claimImBinding("D:/a", "s1");
+    const notify = vi.fn();
+    notifyImBoundElsewhere(notify, currentImBinding()!);
+    notifyImBoundElsewhere(notify, currentImBinding()!);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("IM 已绑定到 D:/a", "warning");
   });
 });

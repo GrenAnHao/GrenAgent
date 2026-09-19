@@ -24,6 +24,12 @@ describe("renderRead", () => {
     expect(out).toContain("前 1 行省略");
     expect(out).toContain("后 1 行省略");
   });
+  it("clips a giant single line so hl_read cannot explode context", () => {
+    const bomb = "x".repeat(20_000);
+    const out = renderRead("a.ts", "/abs/a.ts", bomb);
+    expect(out.length).toBeLessThan(2300);
+    expect(out).toContain("(line truncated to 2000 chars)");
+  });
 });
 
 describe("parsePatch", () => {

@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 describe("compaction-policy factory", () => {
-  it("registers context/turn_end/agent_end hooks and /compaction command", () => {
+  it("registers context/turn_end/agent_end hooks and no slash commands", () => {
     const commands: string[] = [];
     const events: string[] = [];
     factory({
@@ -25,7 +25,7 @@ describe("compaction-policy factory", () => {
       on: (e: string) => events.push(e),
       appendEntry: () => {},
     } as never);
-    expect(commands).toContain("compaction");
+    expect(commands).toEqual([]);
     expect(events).toEqual(expect.arrayContaining(["context", "turn_end", "agent_end"]));
   });
 

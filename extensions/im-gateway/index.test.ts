@@ -93,5 +93,11 @@ describe("ImBinding", () => {
     );
     expect(notify).toHaveBeenCalledWith("IM 已绑定到 D:/a", "warning");
     expect(startGateway).toHaveBeenCalledTimes(1);
+    notify.mockClear();
+    await handlers.session_start?.(
+      {},
+      { hasUI: true, cwd: "D:/b", sessionManager: { getSessionId: () => "s-b2" }, ui: { notify } },
+    );
+    expect(notify).not.toHaveBeenCalled();
   });
 });

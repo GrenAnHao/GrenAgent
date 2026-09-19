@@ -7,7 +7,7 @@ import type { McpServerConfig } from "../mcp/config.js";
 import { parseMcpServers } from "../mcp/config.js";
 import type { AddMcpServerInput, McpScope } from "./validation.js";
 
-export interface McpFileServer { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; }
+export interface McpFileServer { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; headers?: Record<string, string>; }
 export interface McpDocument { mcpServers: Record<string, McpFileServer>; disabledMcpServers: Record<string, McpFileServer>; }
 const empty = (): McpDocument => ({ mcpServers: {}, disabledMcpServers: {} });
 const asMap = (v: unknown): Record<string, McpFileServer> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, McpFileServer> : {};
@@ -27,9 +27,7 @@ export async function readMcpDocument(path: string): Promise<McpDocument> {
   return { mcpServers: asMap(root.mcpServers), disabledMcpServers: asMap(root.disabledMcpServers) };
 }
 function toConfig(name: string, c: McpFileServer): McpServerConfig | undefined {
-  if (typeof c.url === "string") return { name, transport: "sse", url: c.url };
-  if (typeof c.command === "string") return { name, transport: "stdio", command: c.command, args: c.args ?? [], env: c.env, cwd: c.cwd };
-  return undefined;
+  return parseMcpServers(JSON.stringify({ mcpServers: { [name]: c } }))[0];
 }
 export async function readLayeredMcpServers(cwd: string, desktopJson: string, home = homedir()): Promise<McpServerConfig[]> {
   const result = new Map<string, McpServerConfig>();

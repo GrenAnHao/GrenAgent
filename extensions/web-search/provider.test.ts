@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampWebSearchLimit,
   formatResults,
   parseBing,
   parseBrave,
@@ -7,6 +8,8 @@ import {
   parseSogou,
   parseTavily,
   resolveProvider,
+  WEB_SEARCH_MAX_RESULTS,
+  WEB_SEARCH_SNIPPET_CHARS,
 } from "./provider.js";
 
 describe("resolveProvider", () => {
@@ -130,13 +133,38 @@ describe("parseSogou", () => {
 });
 
 describe("formatResults", () => {
-  it("renders answer + source list", () => {
+  it("renders answer + DSH-style markdown source list", () => {
     const out = formatResults("q", { answer: "A", results: [{ title: "T", url: "https://u", snippet: "s" }] });
     expect(out).toContain("A");
-    expect(out).toContain("https://u");
-    expect(out).toContain("T");
+    expect(out).toContain("- [T](https://u) — s");
   });
   it("handles empty results", () => {
-    expect(formatResults("q", { results: [] })).toContain("（无结果）");
+    expect(formatResults("q", { results: [] })).toContain("无结果");
+  });
+  it("clips a huge HTML-scrape snippet so one result cannot explode context", () => {
+    const bomb = `${"x".repeat(80_000)}UNIQUE_TAIL`;
+    const out = formatResults("q", { results: [{ title: "T", url: "https://u", snippet: bomb }] });
+    expect(out.length).toBeLessThan(WEB_SEARCH_SNIPPET_CHARS + 200);
+    expect(out).toContain("…");
+    expect(out).not.toContain("UNIQUE_TAIL");
+  });
+  it("caps the source list at the DSH default of 8 and notes the cut", () => {
+    const results = Array.from({ length: 20 }, (_, i) => ({
+      title: `T${i}`,
+      url: `https://u/${i}`,
+      snippet: "s",
+    }));
+    const out = formatResults("q", { results });
+    expect(out.match(/^- \[/gm)?.length).toBe(WEB_SEARCH_MAX_RESULTS);
+    expect(out).toContain("仅显示前 8 条");
+  });
+});
+
+describe("clampWebSearchLimit", () => {
+  it("matches DSH: default and hard cap are 8, the model cannot raise it", () => {
+    expect(WEB_SEARCH_MAX_RESULTS).toBe(8);
+    expect(clampWebSearchLimit(undefined)).toBe(8);
+    expect(clampWebSearchLimit(50)).toBe(8);
+    expect(clampWebSearchLimit(3)).toBe(3);
   });
 });

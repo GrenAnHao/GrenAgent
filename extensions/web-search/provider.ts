@@ -13,6 +13,33 @@ export interface ParsedSearch {
   results: SearchResult[];
 }
 
+/** DSH `searchMaxResults`: the product, not the model, owns how many sources enter context. */
+export const WEB_SEARCH_MAX_RESULTS = 8;
+
+/** HTML scrapes can dump a whole caption block; keep one source to a short excerpt. */
+export const WEB_SEARCH_SNIPPET_CHARS = 500;
+
+export function clipSnippet(text: string, max = WEB_SEARCH_SNIPPET_CHARS): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
+export function clampWebSearchLimit(raw: number | undefined, fallback = WEB_SEARCH_MAX_RESULTS): number {
+  const n = raw && raw > 0 ? Math.floor(raw) : fallback;
+  const base = n >= 1 ? n : fallback;
+  return Math.min(WEB_SEARCH_MAX_RESULTS, base);
+}
+
+function sourceLabel(url: string, title: string): string {
+  if (title.length > 0) return title;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 export type ProviderChoice =
   | { ok: true; provider: "tavily" | "brave"; apiKey: string }
   | { ok: true; provider: "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" }
@@ -176,14 +203,32 @@ export function parseSogou(html: string): ParsedSearch {
   return { results };
 }
 
+export function retainSearchResults(results: SearchResult[]): { results: SearchResult[]; truncated: boolean } {
+  const truncated = results.length > WEB_SEARCH_MAX_RESULTS;
+  return {
+    results: results.slice(0, WEB_SEARCH_MAX_RESULTS).map((r) => ({
+      ...r,
+      snippet: clipSnippet(r.snippet),
+    })),
+    truncated,
+  };
+}
+
 export function formatResults(query: string, parsed: ParsedSearch): string {
-  const lines: string[] = [];
-  if (parsed.answer) lines.push(parsed.answer, "");
-  lines.push(`搜索「${query}」结果：`);
-  for (const r of parsed.results) {
-    lines.push(`- ${r.title || r.url}`, `  ${r.url}`);
-    if (r.snippet) lines.push(`  ${r.snippet}`);
+  const { results: retained, truncated } = retainSearchResults(parsed.results);
+  const parts: string[] = [];
+  if (parsed.answer) parts.push(clipSnippet(parsed.answer, 2000));
+  if (retained.length > 0) {
+    const lines = retained.map((r) => {
+      const label = sourceLabel(r.url, r.title);
+      const suffix = r.snippet ? ` — ${r.snippet}` : "";
+      return `- [${label}](${r.url})${suffix}`;
+    });
+    parts.push(`搜索「${query}」结果：\n${lines.join("\n")}`);
+  } else if (!parsed.answer) {
+    parts.push(`搜索「${query}」无结果`);
   }
-  if (parsed.results.length === 0) lines.push("（无结果）");
-  return lines.join("\n");
+  if (truncated) parts.push(`（仅显示前 ${WEB_SEARCH_MAX_RESULTS} 条来源，缩小查询可看更多。）`);
+  if (retained.length > 0) parts.push("请在回答中用 markdown 链接引用上述 URL。");
+  return parts.join("\n\n");
 }
