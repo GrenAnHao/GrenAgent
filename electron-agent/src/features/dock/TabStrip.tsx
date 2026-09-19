@@ -13,16 +13,31 @@ interface TabStripProps {
   toneOf: (tab: DockTab) => DotTone;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
-  /** 右对齐的操作区（＋ 菜单 / 折叠按钮）。 */
+  /** 标签左侧（标签列表下拉）。 */
+  leading?: ReactNode;
+  /** 紧挨最后一个标签（新建菜单）。 */
+  trailing?: ReactNode;
+  /** 右对齐的操作区（折叠按钮）。 */
   actions?: ReactNode;
 }
 
-export function TabStrip({ region, tabs, activeId, toneOf, onActivate, onClose, actions }: TabStripProps) {
+export function TabStrip({
+  region,
+  tabs,
+  activeId,
+  toneOf,
+  onActivate,
+  onClose,
+  leading,
+  trailing,
+  actions,
+}: TabStripProps) {
   // 区域级 droppable：拖到 tab 之间空白处也能落入本坞（跨坞互拖需要）。
   const { setNodeRef } = useDroppable({ id: `dock:${region}` });
 
   return (
     <div className={dockTabStyles.header}>
+      {leading != null ? <div className={dockTabStyles.stripChrome}>{leading}</div> : null}
       <div ref={setNodeRef} className={dockTabStyles.tabs} role="tablist" data-testid={`dock-strip-${region}`}>
         <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
           {tabs.map((tab) => (
@@ -37,6 +52,7 @@ export function TabStrip({ region, tabs, activeId, toneOf, onActivate, onClose, 
           ))}
         </SortableContext>
       </div>
+      {trailing != null ? <div className={dockTabStyles.stripChrome}>{trailing}</div> : null}
       {actions != null ? <div className={dockTabStyles.actions}>{actions}</div> : null}
     </div>
   );

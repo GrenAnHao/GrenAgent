@@ -1,14 +1,15 @@
 import { useCallback, useMemo } from 'react';
 import { ActionIcon, Flexbox } from '@lobehub/ui';
 import { cx } from 'antd-style';
-import { Globe, PanelRightClose, Plus } from 'lucide-react';
+import { PanelRightClose } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import { useDockStore, type DockRegion, type DockTab, type SubAgentPayload } from '../../stores/dockStore';
 import { dockTabStyles, resolveTone } from './dockTabStyles';
 import { TabStrip } from './TabStrip';
 import { TabBodyStack } from './TabBodyStack';
 import { DockLauncher } from './DockLauncher';
-import { openLauncherTab } from './openLauncherTab';
+import { DockStripAddMenu } from './DockStripAddMenu';
+import { DockTabSwitcher } from './DockTabSwitcher';
 
 interface DockPanelProps {
   region: DockRegion;
@@ -46,42 +47,17 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     [subAgentStatus],
   );
 
-  const actions = (
-    <>
-      {region === 'bottom' ? (
-        <span title="新建终端">
-          <ActionIcon
-            icon={Plus}
-            size="small"
-            title="新建终端"
-            aria-label="新建终端"
-            onClick={() => openLauncherTab({ region, kind: 'terminal' })}
-          />
-        </span>
-      ) : (
-        <span title="打开浏览器">
-          <ActionIcon
-            icon={Globe}
-            size="small"
-            title="打开浏览器"
-            aria-label="打开浏览器"
-            onClick={() => openLauncherTab({ region, kind: 'browser' })}
-          />
-        </span>
-      )}
-      {onCollapse ? (
-        <span title="Collapse panel">
-          <ActionIcon
-            icon={PanelRightClose}
-            size="small"
-            title="Collapse panel"
-            aria-label="Collapse panel"
-            onClick={onCollapse}
-          />
-        </span>
-      ) : null}
-    </>
-  );
+  const actions = onCollapse ? (
+    <span title="Collapse panel">
+      <ActionIcon
+        icon={PanelRightClose}
+        size="small"
+        title="Collapse panel"
+        aria-label="Collapse panel"
+        onClick={onCollapse}
+      />
+    </span>
+  ) : null;
 
   if (tabs.length === 0) {
     return (
@@ -89,17 +65,7 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
         {onCollapse ? (
           <div className={dockTabStyles.header}>
             <div className={dockTabStyles.tabs} />
-            <div className={dockTabStyles.actions}>
-              <span title="Collapse panel">
-                <ActionIcon
-                  icon={PanelRightClose}
-                  size="small"
-                  title="Collapse panel"
-                  aria-label="Collapse panel"
-                  onClick={onCollapse}
-                />
-              </span>
-            </div>
+            <div className={dockTabStyles.actions}>{actions}</div>
           </div>
         ) : null}
         <DockLauncher region={region} />
@@ -116,6 +82,8 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
         toneOf={toneOf}
         onActivate={(id) => setActive(region, id)}
         onClose={closeTab}
+        leading={<DockTabSwitcher region={region} tabs={tabs} onActivate={(id) => setActive(region, id)} onClose={closeTab} />}
+        trailing={<DockStripAddMenu region={region} />}
         actions={actions}
       />
       <TabBodyStack tabs={tabs} activeId={activeId} emptyHint="" />

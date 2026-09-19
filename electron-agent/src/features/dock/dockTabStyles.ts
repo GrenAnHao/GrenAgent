@@ -154,24 +154,97 @@ export const dockTabStyles = createStaticStyles(({ css }) => ({
   launcher: css`
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
     flex: 1;
+    gap: 20px;
     min-height: 0;
-    gap: 2px;
-    padding: 8px;
+    padding: 24px 16px;
     overflow: auto;
   `,
-  launcherRow: css`
+  launcherCompact: css`
+    gap: 0;
+    padding: 12px;
+  `,
+  launcherHeading: css`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+  `,
+  launcherTitle: css`
+    margin: 0;
+    color: ${cssVar.colorText};
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+  `,
+  launcherHint: css`
+    margin: 0;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 12px;
+    line-height: 1.4;
+  `,
+  launcherCards: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 96px));
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 336px;
+  `,
+  launcherCard: css`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 80px;
+    padding: 14px 8px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 10px;
+    background: ${cssVar.colorFillTertiary};
+    color: ${cssVar.colorText};
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: ${cssVar.colorFillSecondary};
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+  `,
+  stripChrome: css`
+    display: flex;
+    flex: none;
+    align-items: center;
+  `,
+  menuPanel: css`
+    min-width: 220px;
+    padding: 4px;
+  `,
+  switcherPanel: css`
+    min-width: 280px;
+    padding: 4px;
+  `,
+  menuRow: css`
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
-    height: 32px;
-    padding: 0 10px;
+    padding: 6px 8px;
     border: 0;
-    border-radius: 7px;
+    border-radius: 6px;
     background: transparent;
     color: ${cssVar.colorText};
+    font: inherit;
     font-size: 13px;
+    line-height: 1.4;
     text-align: left;
     cursor: pointer;
 
@@ -180,14 +253,67 @@ export const dockTabStyles = createStaticStyles(({ css }) => ({
     }
 
     &:disabled {
-      color: ${cssVar.colorTextTertiary};
+      opacity: 0.45;
       cursor: not-allowed;
     }
   `,
-  launcherShortcut: css`
-    margin-inline-start: auto;
+  menuLabel: css`
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  menuMeta: css`
+    flex: none;
     color: ${cssVar.colorTextTertiary};
-    font-size: 11px;
+    font-size: 12px;
+  `,
+  menuSearch: css`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    color: ${cssVar.colorTextTertiary};
+  `,
+  menuSearchInput: css`
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: ${cssVar.colorText};
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+
+    &::placeholder {
+      color: ${cssVar.colorTextQuaternary};
+    }
+  `,
+  menuSection: css`
+    padding: 6px 8px 2px;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 12px;
+  `,
+  menuClose: css`
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: ${cssVar.colorTextTertiary};
+    cursor: pointer;
+
+    &:hover {
+      background: ${cssVar.colorFillSecondary};
+      color: ${cssVar.colorText};
+    }
   `,
 }));
 

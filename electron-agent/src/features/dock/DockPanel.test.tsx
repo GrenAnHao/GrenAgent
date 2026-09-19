@@ -26,7 +26,7 @@ function renderPanel(region: 'right' | 'bottom' = 'right', onCollapse?: () => vo
 describe('DockPanel empty launcher', () => {
   beforeEach(() => {
     localStorage.clear();
-    useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
+    useDockStore.setState({ tabs: [], closedTabs: [], activeByRegion: { right: null, bottom: null } });
     useLayoutStore.setState({ rightPanelOpen: true, terminalOpen: true });
     useSessionStore.setState({ worksDir: '/home/.pi/agent/works' });
     ctx.workspace = '/repo';
@@ -39,10 +39,12 @@ describe('DockPanel empty launcher', () => {
     expect(screen.queryByTestId('dock-strip-right')).toBeNull();
     expect(screen.queryByText(/暂无内容/)).toBeNull();
     expect(screen.queryByTitle('打开浏览器')).toBeNull();
+    expect(screen.queryByTitle('新建标签')).toBeNull();
+    expect(screen.queryByTitle('搜索标签页')).toBeNull();
     expect(screen.getByTitle('Collapse panel')).toBeTruthy();
   });
 
-  it('shows the tab strip and globe once a tab exists', () => {
+  it('shows the tab strip with list and add buttons once a tab exists', () => {
     useDockStore.getState().addTab({
       id: 'browser-1',
       kind: 'browser',
@@ -54,13 +56,16 @@ describe('DockPanel empty launcher', () => {
     renderPanel('right', () => undefined);
     expect(screen.queryByTestId('dock-launcher-right')).toBeNull();
     expect(screen.getByTestId('dock-strip-right')).toBeTruthy();
-    expect(screen.getByTitle('打开浏览器')).toBeTruthy();
+    expect(screen.getByTitle('搜索标签页')).toBeTruthy();
+    expect(screen.getByTitle('新建标签')).toBeTruthy();
+    expect(screen.queryByTitle('打开浏览器')).toBeNull();
   });
 
-  it('hides the plus button on an empty bottom dock', () => {
+  it('hides strip chrome on an empty bottom dock', () => {
     renderPanel('bottom');
     expect(screen.getByTestId('dock-launcher-bottom')).toBeTruthy();
     expect(screen.queryByTitle('新建终端')).toBeNull();
+    expect(screen.queryByTitle('新建标签')).toBeNull();
     expect(screen.queryByTestId('dock-strip-bottom')).toBeNull();
   });
 });

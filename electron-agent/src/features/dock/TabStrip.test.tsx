@@ -49,4 +49,13 @@ describe('TabStrip', () => {
     fireEvent.click(closeBtn!);
     expect(onClose).toHaveBeenCalledWith('page:u');
   });
+
+  it('renders leading and trailing chrome around the tab list', () => {
+    renderStrip({
+      leading: <button type="button">列表</button>,
+      trailing: <button type="button">添加</button>,
+    });
+    expect(screen.getByText('列表')).toBeTruthy();
+    expect(screen.getByText('添加')).toBeTruthy();
+  });
 });

@@ -29,7 +29,7 @@ function resetStores() {
   localStorage.clear();
   ctx.workspace = '/repo';
   useSessionStore.setState({ worksDir: '/home/.pi/agent/works' });
-  useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
+  useDockStore.setState({ tabs: [], closedTabs: [], activeByRegion: { right: null, bottom: null } });
   useLayoutStore.setState({ rightPanelOpen: false, terminalOpen: false });
 }
 
@@ -48,11 +48,12 @@ describe('DockLauncher', () => {
       'dock-launcher-file',
     ]);
     expect(screen.getByTestId('dock-launcher-review').textContent).toContain('审查');
-    expect(screen.getByTestId('dock-launcher-review').textContent).toContain('Ctrl+Shift+G');
+    expect(screen.getByTestId('dock-launcher-review').getAttribute('title')).toBe('Ctrl+Shift+G');
     expect(screen.getByTestId('dock-launcher-terminal').textContent).toContain('终端');
     expect(screen.getByTestId('dock-launcher-browser').textContent).toContain('浏览器');
     expect(screen.getByTestId('dock-launcher-file').textContent).toContain('文件');
     expect(screen.getByTestId('dock-launcher-bottom').textContent).not.toContain('占位');
+    expect(screen.queryByText('打开标签页')).toBeNull();
 
     fireEvent.click(screen.getByTestId('dock-launcher-browser'));
     const tabs = useDockStore.getState().tabs;
@@ -66,6 +67,8 @@ describe('DockLauncher', () => {
     ctx.workspace = '/home/.pi/agent/works/u1';
     renderLauncher('right');
 
+    expect(screen.getByText('打开标签页')).toBeTruthy();
+    expect(screen.getByText('选择要在侧边面板中打开的标签。')).toBeTruthy();
     expect(screen.getByTestId('dock-launcher-browser')).toBeTruthy();
     expect(screen.getByTestId('dock-launcher-terminal')).toBeTruthy();
     expect(screen.queryByTestId('dock-launcher-review')).toBeNull();
