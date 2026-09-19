@@ -38,13 +38,24 @@ export interface ChatInputContextValue {
   removePastedText: (id: string) => void;
   isStreaming: boolean;
   /** 是否正在「生成」（存在流式中的 assistant 消息）。区别于 isStreaming（整段 agent run）：
-   * 回合文字完成后的收尾窗口 / 工具执行间隙，isStreaming 仍为 true 但 isGenerating 为 false。
+   * 回合文字完成后的收尾窗口，isStreaming 仍为 true 但 isGenerating 为 false。
    * 发送路由据此区分 steer（打断当前生成）与 followUp（排队为跟进），避免回合刚结束的紧跟消息被当引导。 */
   isGenerating: boolean;
+  /** 当前有工具卡片在 running（如 bash）。工具执行中发送走引导，等工具结束后注入当前回合。 */
+  hasRunningTool: boolean;
   /** 已排队的引导消息（注入当前回合）；来自 pi 的 queue_update 事件。 */
   steering: string[];
   /** 已排队的跟进消息（当前回合结束后执行）；来自 pi 的 queue_update 事件。 */
   followUp: string[];
+  /** 把跟进条立刻作为引导注入当前回合。 */
+  steerQueued: (id: string) => void;
+  /** 输入栏本地跟进条是否还有未发出的条目。 */
+  hasComposerQueue: boolean;
+  /**
+   * 本轮尚未结束：流式中、发送失败自动重试、或仍在等首个 agent_start。
+   * 停止按钮用这个，而不是只看 isStreaming——否则失败重试时会只剩发送、无法取消。
+   */
+  inFlight: boolean;
   send: () => void | Promise<void>;
   stop: () => void;
   /** 草稿滚到边缘时把滚轮交给对话列表；空会话不传。 */

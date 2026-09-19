@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isExecutiveCommand, isExecutiveCommandMessage } from './commandClassification';
+import { isExecutiveCommand, isExecutiveCommandMessage, sidebarTitleForPrompt } from './commandClassification';
 
 describe('isExecutiveCommand', () => {
   it('命中已知动作命令（忽略大小写）', () => {
@@ -33,5 +33,17 @@ describe('isExecutiveCommandMessage', () => {
     expect(isExecutiveCommandMessage('please run dream')).toBe(false);
     expect(isExecutiveCommandMessage('/goal 写完')).toBe(true);
     expect(isExecutiveCommandMessage('/skill:goal')).toBe(false);
+  });
+});
+
+describe('sidebarTitleForPrompt', () => {
+  it('uses the goal condition instead of the slash command', () => {
+    expect(sidebarTitleForPrompt('/goal 测试子代理理')).toBe('测试子代理理');
+    expect(sidebarTitleForPrompt('/GOAL 写完')).toBe('写完');
+  });
+
+  it('keeps ordinary prompts (trimmed, 80 chars)', () => {
+    expect(sidebarTitleForPrompt('  hello world  ')).toBe('hello world');
+    expect(sidebarTitleForPrompt('/goal')).toBe('/goal');
   });
 });

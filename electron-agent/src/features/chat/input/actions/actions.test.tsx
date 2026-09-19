@@ -62,6 +62,7 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
 import CompactAction from './CompactAction';
 import NewSessionAction from './NewSessionAction';
 import { ChatInputProvider, type ChatInputContextValue } from '../ChatInputContext';
+import { useSessionStore } from '../../../../store/session';
 
 const ctx: ChatInputContextValue = {
   editor: {} as ChatInputContextValue['editor'],
@@ -76,8 +77,12 @@ const ctx: ChatInputContextValue = {
   removePastedText: vi.fn(),
   isStreaming: false,
   isGenerating: false,
+  hasRunningTool: false,
+  inFlight: false,
   steering: [],
   followUp: [],
+  steerQueued: vi.fn(),
+  hasComposerQueue: false,
   send: vi.fn(),
   stop: vi.fn(),
   readDraft: () => '',
@@ -98,17 +103,25 @@ describe('chat input actions', () => {
     expect(piMock.compact).toHaveBeenCalledWith('/ws');
   });
 
-  it('NewSessionAction starts a new session, resets store and clears input', async () => {
+  it('NewSessionAction 不立刻 newSession，只进入待发送草稿并清空输入', async () => {
+    useSessionStore.setState({
+      activeWorkspace: '/ws',
+      activeSessionPath: '/ws/old.jsonl',
+      draftConversationCwd: null,
+    });
     render(
       <ChatInputProvider value={ctx}>
         <NewSessionAction />
       </ChatInputProvider>,
     );
     fireEvent.click(screen.getByRole('button'));
-    expect(piMock.newSession).toHaveBeenCalledWith('/ws');
+    expect(piMock.newSession).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(resetMock).toHaveBeenCalled();
       expect(setValueMock).toHaveBeenCalledWith('');
     });
+    const st = useSessionStore.getState();
+    expect(st.activeSessionPath).toBe('');
+    expect(st.draftConversationCwd).toBe('/ws');
   });
 });

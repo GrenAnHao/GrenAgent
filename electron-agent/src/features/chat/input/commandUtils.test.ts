@@ -7,6 +7,7 @@ import {
   parseSlashMenuValue,
   slashMenuValue,
   toSlashMenuItems,
+  visibleSlashCommands,
 } from './commandUtils';
 import type { PiCommand } from './commandTypes';
 
@@ -75,12 +76,25 @@ describe('mergeCommands', () => {
   });
 });
 
+describe('visibleSlashCommands', () => {
+  it('隐藏控制面与内部命令，保留发生式命令', () => {
+    const commands: PiCommand[] = [
+      { name: 'approval', description: '切换审批策略', source: 'api', apiSource: 'extension' },
+      { name: 'mode', description: '切换模式', source: 'api', apiSource: 'extension' },
+      { name: 'plan-build', description: '执行计划', source: 'api', apiSource: 'extension' },
+      { name: 'goal', description: '创建目标', source: 'api', apiSource: 'extension' },
+      { name: 'rules', description: '查看规则', source: 'api', apiSource: 'extension' },
+    ];
+    expect(visibleSlashCommands(commands).map((c) => c.name)).toEqual(['goal', 'rules']);
+  });
+});
+
 describe('toSlashMenuItems', () => {
   it('groups commands by source', () => {
     const items = toSlashMenuItems([
       { name: 'compact', source: 'frontend' },
       { name: 'review', source: 'api', apiSource: 'extension' },
-      { name: 'model', source: 'api', apiSource: 'builtin' },
+      { name: 'help', source: 'api', apiSource: 'builtin' },
     ]);
 
     expect(items).toHaveLength(3);

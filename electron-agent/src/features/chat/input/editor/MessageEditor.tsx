@@ -127,7 +127,7 @@ interface MessageEditorProps {
 
 export function MessageEditor({ leftActions, rightActions }: MessageEditorProps) {
   const { workspace } = useAgentStoreContext();
-  const { editor, send, addAttachments, addPastedText, setEmpty, attachments, pastedTexts, isGenerating, scrollTranscript } =
+  const { editor, send, addAttachments, addPastedText, setEmpty, attachments, pastedTexts, isGenerating, hasRunningTool, scrollTranscript } =
     useChatInput();
   const zoneRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -221,7 +221,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
             enablePasteMarkdown={false}
             markdownOption={false}
             slashPlacement="top"
-            placeholder={isGenerating ? STREAMING_PLACEHOLDER : PLACEHOLDER}
+            placeholder={isGenerating || hasRunningTool ? STREAMING_PLACEHOLDER : PLACEHOLDER}
             plugins={[ReactChatTagPlugin]}
             mentionOption={{
               items: mentionItems,

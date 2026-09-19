@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoalSnapshot } from '../../../stores/goalStore';
 
-const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt } = vi.hoisted(() => ({
+const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abortEnhancePrompt } = vi.hoisted(() => ({
   chatInput: {
     empty: true,
     readDraft: vi.fn(() => ''),
@@ -12,6 +12,7 @@ const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt } = v
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   getState: vi.fn(() => Promise.resolve({} as Record<string, unknown>)),
   enhancePrompt: vi.fn(() => Promise.resolve({ ok: true, content: '美化' })),
+  abortEnhancePrompt: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('@lobehub/ui', () => ({
@@ -50,7 +51,7 @@ vi.mock('./ModelThinkingAction', () => ({
 }));
 
 vi.mock('../../../../lib/pi', () => ({
-  pi: { getSettings, getState, enhancePrompt },
+  pi: { getSettings, getState, enhancePrompt, abortEnhancePrompt },
 }));
 
 vi.mock('../../../../stores/AgentStoreContext', () => ({
@@ -103,6 +104,8 @@ beforeEach(() => {
   getState.mockResolvedValue({});
   enhancePrompt.mockReset();
   enhancePrompt.mockResolvedValue({ ok: true, content: '美化' });
+  abortEnhancePrompt.mockReset();
+  abortEnhancePrompt.mockResolvedValue(undefined);
   useInlineQuestionStore.setState({ byWorkspace: {} });
   useUiPromptStore.setState({ byWorkspace: {} });
   useGoalStore.setState({ bySession: {}, goal: undefined });
@@ -204,5 +207,48 @@ describe('EnhancePromptAction', () => {
     const slot = useEnhancePromptStore.getState().byWorkspace['/ws'];
     expect(slot.seq).toBeGreaterThan(seq1);
     expect(slot.status).toBe('streaming');
+  });
+
+  it('主进程久不返回时看门狗置错并 abort，不再停在生成中', async () => {
+    vi.useFakeTimers();
+    try {
+      chatInput.empty = false;
+      chatInput.readDraft.mockReturnValue('草稿');
+      enhancePrompt.mockImplementation(() => new Promise(() => {}));
+      render(<EnhancePromptAction />);
+      await act(async () => { await Promise.resolve(); });
+      fireEvent.click(screen.getByTestId('composer-enhance-prompt'));
+      await act(async () => { await Promise.resolve(); });
+      expect(enhancePrompt).toHaveBeenCalled();
+      expect(useEnhancePromptStore.getState().byWorkspace['/ws']?.status).toBe('streaming');
+      await act(async () => { await vi.advanceTimersByTimeAsync(75_000); });
+      expect(useEnhancePromptStore.getState().byWorkspace['/ws']).toMatchObject({
+        status: 'error',
+        error: '增强超时，请重试',
+      });
+      expect(abortEnhancePrompt).toHaveBeenCalledWith('/ws');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('实验开关开时看门狗用 105s 窗口', async () => {
+    vi.useFakeTimers();
+    try {
+      chatInput.empty = false;
+      chatInput.readDraft.mockReturnValue('草稿');
+      getSettings.mockResolvedValue({ enhancePromptUseProjectContext: '1' });
+      enhancePrompt.mockImplementation(() => new Promise(() => {}));
+      render(<EnhancePromptAction />);
+      await act(async () => { await Promise.resolve(); });
+      fireEvent.click(screen.getByTestId('composer-enhance-prompt'));
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(75_000); });
+      expect(useEnhancePromptStore.getState().byWorkspace['/ws']?.status).toBe('streaming');
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(useEnhancePromptStore.getState().byWorkspace['/ws']).toMatchObject({ status: 'error' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

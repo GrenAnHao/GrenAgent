@@ -28,7 +28,7 @@ import { levelDisplayLabel, levelOptions, mergeModelCatalog, resolveLevelForMode
  *  - 底部档位分段：当前推理模型的档位，点选即切、面板不关；
  *  - 选模型也不关面板，可接着调档位，一次打开搞定（对齐 Cursor）。
  *
- * 底层行为与拆分时一致：模型按 workspace 记忆、档位按模型记忆、切模型自动套用「记忆/默认」档位。
+ * 底层行为：模型按会话记忆（草稿默认只写输入栏，不覆盖已有会话）、档位按模型记忆、切模型自动套用「记忆/默认」档位。
  */
 
 const styles = createStaticStyles(({ css }) => ({
@@ -186,31 +186,91 @@ interface WsCache {
   level: string;
   model: RpcModel | null;
   loaded: boolean;
+  /** 用户在本轮草稿点过模型；发送中的 loadState 不得再用设置默认盖掉。 */
+  userPicked?: boolean;
 }
 const cacheByWorkspace = new Map<string, WsCache>();
+const memoryBySession = new Map<string, WsCache>();
 let lastGlobalModelKey = '';
 
 export function resetModelThinkingCacheForTests(): void {
   cacheByWorkspace.clear();
+  memoryBySession.clear();
   lastGlobalModelKey = '';
 }
 
+function readMapByPath(map: Map<string, WsCache>, path: string | null | undefined): WsCache | undefined {
+  if (!path) return undefined;
+  const direct = map.get(path);
+  if (direct) return direct;
+  for (const [key, value] of map) {
+    if (pathsEquivalent(key, path)) return value;
+  }
+  return undefined;
+}
+
+function readSessionMemory(path: string | null | undefined): WsCache | undefined {
+  return readMapByPath(memoryBySession, path);
+}
+
+function writeSessionMemory(path: string, patch: Partial<WsCache>): void {
+  if (!path) return;
+  const prev = readSessionMemory(path) ?? { modelKey: '', level: 'off', model: null, loaded: false };
+  memoryBySession.set(path, { ...prev, ...patch });
+}
+
+function readWorkspaceCache(workspace: string): WsCache | undefined {
+  return readMapByPath(cacheByWorkspace, workspace);
+}
+
 export function peekComposerModel(workspace: string): { provider: string; id: string } | null {
-  const key = cacheByWorkspace.get(workspace)?.modelKey;
+  const key = readWorkspaceCache(workspace)?.modelKey;
   if (!key) return null;
   const parsed = parseModelKey(key);
   if (!parsed.provider || !parsed.id) return null;
   return parsed;
 }
 
+/** 点「新建对话」时清掉上一轮草稿的点选，让新草稿重新套设置默认。 */
+export function clearComposerUserPick(workspace: string): void {
+  if (!workspace || !readWorkspaceCache(workspace)?.userPicked) return;
+  writeCache(workspace, { userPicked: false });
+}
+
+/** 草稿首发落盘前把输入栏选型钉进该会话，避免 getState 的设置默认盖掉点选。 */
+export function commitComposerModelToSession(
+  workspace: string,
+  sessionPath: string,
+  selected?: { provider: string; id: string } | null,
+): void {
+  if (!workspace || !sessionPath) return;
+  if (selected?.provider && selected.id) {
+    const prev = readWorkspaceCache(workspace);
+    const key = modelKey(selected.provider, selected.id);
+    const model =
+      prev?.model && prev.model.provider === selected.provider && prev.model.id === selected.id
+        ? prev.model
+        : { provider: selected.provider, id: selected.id };
+    writeCache(workspace, { modelKey: key, model, loaded: true, userPicked: true });
+  }
+  const cached = readWorkspaceCache(workspace);
+  if (!cached?.modelKey) return;
+  writeSessionMemory(sessionPath, { ...cached, loaded: true });
+}
+
 function writeCache(workspace: string, patch: Partial<WsCache>): void {
-  const prev = cacheByWorkspace.get(workspace) ?? { modelKey: '', level: 'off', model: null, loaded: false };
-  cacheByWorkspace.set(workspace, { ...prev, ...patch });
+  const prev = readWorkspaceCache(workspace) ?? { modelKey: '', level: 'off', model: null, loaded: false };
+  const next = { ...prev, ...patch };
+  cacheByWorkspace.set(workspace, next);
+  for (const key of cacheByWorkspace.keys()) {
+    if (key !== workspace && pathsEquivalent(key, workspace)) cacheByWorkspace.set(key, next);
+  }
 }
 
 export default function ModelThinkingAction() {
   const { workspace, workspaceReady } = useAgentStoreContext();
   const draftConversationCwd = useSessionStore((s) => s.draftConversationCwd);
+  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const isDraftConversation = Boolean(
     draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace),
   );
@@ -242,19 +302,25 @@ export default function ModelThinkingAction() {
   const wasDraftRef = useRef(false);
   const prevModelsLenRef = useRef(0);
   const switchSeq = useThinkingMemoryStore((s) => s.switchSeq[workspace] ?? 0);
+  const prevSwitchSeqRef = useRef(switchSeq);
 
-  const applySelection = useCallback((key: string, nextModel: RpcModel | null, nextLevel?: string) => {
+  const applySelection = useCallback((key: string, nextModel: RpcModel | null, nextLevel?: string, userPicked?: boolean) => {
     lastGlobalModelKey = key;
     setValue(key);
     setModel(nextModel);
     if (nextLevel) setLevel(nextLevel);
     setReady(true);
-    writeCache(workspace, {
+    const patch: Partial<WsCache> = {
       modelKey: key,
       model: nextModel,
       loaded: true,
       ...(nextLevel ? { level: nextLevel } : {}),
-    });
+      ...(userPicked !== undefined ? { userPicked } : {}),
+    };
+    writeCache(workspace, patch);
+    const st = useSessionStore.getState();
+    const isDraft = Boolean(st.draftConversationCwd && pathsEquivalent(st.draftConversationCwd, workspace));
+    if (!isDraft && st.activeSessionPath) writeSessionMemory(st.activeSessionPath, patch);
   }, [workspace]);
 
   const applyFallback = useCallback((bind: boolean, preferred = lastGlobalModelKey): boolean => {
@@ -270,12 +336,14 @@ export default function ModelThinkingAction() {
     return true;
   }, [applySelection, workspace]);
 
-  // 切换对话（workspace 变化）时 render 期对齐 state：不闪上一个对话的值。
+  // 切换对话（workspace / 会话路径变化）时 render 期对齐 state：不闪上一个对话的值。
   const prevWorkspaceRef = useRef(workspace);
+  const prevPathRef = useRef(activeSessionPath);
   if (prevWorkspaceRef.current !== workspace) {
     prevWorkspaceRef.current = workspace;
     wasDraftRef.current = false;
-    const cached = cacheByWorkspace.get(workspace);
+    const mem = activeSessionPath ? readSessionMemory(activeSessionPath) : undefined;
+    const cached = mem ?? cacheByWorkspace.get(workspace);
     setValue(cached?.modelKey ?? '');
     setLevel(cached?.level ?? 'off');
     setModel(cached?.model ?? null);
@@ -284,6 +352,19 @@ export default function ModelThinkingAction() {
     setModels(nextModels);
     prevModelsLenRef.current = nextModels.length;
     canBindSession.current = true;
+  }
+  if (prevPathRef.current !== activeSessionPath) {
+    prevPathRef.current = activeSessionPath;
+    if (activeSessionPath) {
+      const mem = readSessionMemory(activeSessionPath);
+      if (mem?.modelKey) {
+        setValue(mem.modelKey);
+        setLevel(mem.level);
+        setModel(mem.model);
+        setReady(mem.loaded);
+        writeCache(workspace, mem);
+      }
+    }
   }
 
   useEffect(() => {
@@ -297,6 +378,7 @@ export default function ModelThinkingAction() {
     const isDraft = Boolean(draft && pathsEquivalent(draft, workspace));
     if (isDraft) {
       canBindSession.current = false;
+      if (readWorkspaceCache(workspace)?.userPicked) return 'ok';
       try {
         const settings = await pi.getSettings();
         if (seq !== loadSeq.current) return 'ok';
@@ -327,13 +409,35 @@ export default function ModelThinkingAction() {
       const sessionFile = typeof (state as { sessionFile?: unknown })?.sessionFile === 'string'
         ? (state as { sessionFile: string }).sessionFile
         : '';
-      canBindSession.current = Boolean(sessionFile);
+      const viewingPath = useSessionStore.getState().activeSessionPath || '';
+      const mismatched = Boolean(sessionFile && viewingPath && !pathsEquivalent(sessionFile, viewingPath));
+      canBindSession.current = Boolean(sessionFile) && !mismatched;
+      const mem = readSessionMemory(viewingPath || sessionFile);
+      const bindRemembered = (remembered: WsCache) => {
+        applySelection(remembered.modelKey, remembered.model, remembered.level);
+        if (!canBindSession.current || !remembered.modelKey) return;
+        const parsed = parseModelKey(remembered.modelKey);
+        if (parsed.provider && parsed.id) void pi.setModel(workspace, parsed.provider, parsed.id);
+      };
+      if (mismatched) {
+        if (mem?.modelKey) applySelection(mem.modelKey, mem.model, mem.level);
+        return 'ok';
+      }
+      if (mem?.modelKey && mem.modelKey !== key) {
+        bindRemembered(mem);
+        return 'ok';
+      }
       if (key) {
         applySelection(key, nextModel, state?.thinkingLevel);
+        if (sessionFile) writeSessionMemory(sessionFile, readWorkspaceCache(workspace) ?? { modelKey: key, level: state?.thinkingLevel ?? 'off', model: nextModel, loaded: true });
+        return 'ok';
+      }
+      if (mem?.modelKey) {
+        bindRemembered(mem);
         return 'ok';
       }
       if (state?.thinkingLevel) setLevel(state.thinkingLevel);
-      return applyFallback(canBindSession.current) ? 'ok' : 'empty';
+      return applyFallback(canBindSession.current, '') ? 'ok' : 'empty';
     } catch (error) {
       if (String(error).includes('SESSION_WORKSPACE_MISMATCH')) {
         canBindSession.current = false;
@@ -354,10 +458,13 @@ export default function ModelThinkingAction() {
     );
     const enteredDraft = !wasDraftRef.current && isDraftNow;
     const leftDraft = wasDraftRef.current && !isDraftNow;
+    const switchSeqChanged = prevSwitchSeqRef.current !== switchSeq;
+    prevSwitchSeqRef.current = switchSeq;
     const modelsJustArrived = prevModelsLenRef.current === 0 && models.length > 0;
     wasDraftRef.current = isDraftNow;
     prevModelsLenRef.current = models.length;
-    if (leftDraft) return;
+    // 首发落盘清草稿时保留输入栏（即将 setModel）；点开已有会话会 bumpSwitch，必须重读该会话模型。
+    if (leftDraft && !switchSeqChanged) return;
     if (isDraftNow && !enteredDraft && !modelsJustArrived && models.length > 0) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -423,7 +530,7 @@ export default function ModelThinkingAction() {
     const remembered = useThinkingMemoryStore.getState().byModel[modelKey(provider, id)];
     const target = resolveLevelForModel(nextModel, remembered);
     loadSeq.current++;
-    applySelection(key, nextModel, target);
+    applySelection(key, nextModel, target, true);
     if (isDraftConversation) return;
     void (async () => {
       try {

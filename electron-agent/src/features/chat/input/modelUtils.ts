@@ -1,9 +1,13 @@
+import type { ThinkingLevelMap } from '../../settings/providerConfigAdapter';
+
 export interface ModelInfo {
   id: string;
   name?: string;
   provider: string;
   api?: string;
   baseUrl?: string;
+  reasoning?: boolean;
+  thinkingLevelMap?: ThinkingLevelMap;
 }
 
 // NUL 分隔，避免 model id 自身含 ':' 时解析歧义。

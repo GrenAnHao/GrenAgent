@@ -15,10 +15,20 @@ const chatInput = vi.hoisted(() => ({
   followUp: [] as string[],
 }));
 
+const agentState = vi.hoisted(() => ({
+  messages: [] as unknown[],
+  composerQueue: [] as Array<{ id: string; text: string }>,
+}));
+
 vi.mock('../../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/repo' }),
   useAgentStore: () => ({
-    useStore: (sel: (s: { messages: unknown[] }) => unknown) => sel({ messages: [] }),
+    useStore: Object.assign((sel: (s: typeof agentState) => unknown) => sel(agentState), {
+      setState: (partial: Partial<typeof agentState> | ((s: typeof agentState) => Partial<typeof agentState>)) => {
+        const patch = typeof partial === 'function' ? partial(agentState) : partial;
+        Object.assign(agentState, patch);
+      },
+    }),
   }),
 }));
 vi.mock('../../../../lib/pi', () => ({ pi: { getState, prompt } }));
@@ -36,8 +46,11 @@ vi.mock('../ChatInputContext', () => ({
     attachments: [],
     pastedTexts: [],
     isGenerating: false,
+    hasRunningTool: false,
     steering: chatInput.steering,
     followUp: chatInput.followUp,
+    steerQueued: vi.fn(),
+    hasComposerQueue: false,
   }),
 }));
 vi.mock('../workspace/WorkspaceBar', () => ({
@@ -109,6 +122,8 @@ beforeEach(() => {
   prompt.mockResolvedValue(undefined);
   chatInput.steering = [];
   chatInput.followUp = [];
+  agentState.messages = [];
+  agentState.composerQueue = [];
 });
 
 afterEach(() => {
@@ -157,7 +172,7 @@ describe('MessageEditor project context citations', () => {
   });
 
   it('keeps the steer queue in the dock, outside the composer surface', async () => {
-    chatInput.steering = ['先改测试'];
+    agentState.composerQueue = [{ id: 'cq-1', text: '先改测试' }];
     render(<MessageEditor leftActions={[]} rightActions={[]} />);
 
     const surface = await screen.findByTestId('composer-surface');

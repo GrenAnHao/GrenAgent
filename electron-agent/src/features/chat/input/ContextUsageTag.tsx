@@ -2,8 +2,9 @@ import { Popover } from '@lobehub/ui';
 import { TokenTag } from '@lobehub/ui/chat';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
+import { useSessionStore } from '../../../store';
 import { useSessionStats } from '../../../hooks/useSessionStats';
-import { buildContextBreakdown, formatTokens, type ContextStats } from '../../../lib/sessionStats';
+import { buildContextBreakdown, displayContextStats, formatTokens, type ContextStats } from '../../../lib/sessionStats';
 
 // pi exposes context-window occupancy + cumulative session tokens, not Cursor's
 // per-category split. Honest render: a used/free window bar + a breakdown list
@@ -154,7 +155,9 @@ export function ContextUsageTag() {
   // 打开 / 切换会话时历史异步加载进 store；消息数变化即触发 stats 重拉，
   // 解决「打开旧会话首拉为 0（sidecar 会话尚未就绪）后再不更新」。
   const messageCount = store.useStore((s) => s.messages.length);
-  const { stats } = useSessionStats(workspace, messageCount);
+  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
+  const { stats: fetched } = useSessionStats(workspace, messageCount);
+  const stats = displayContextStats(fetched, !activeSessionPath);
 
   if (!stats) return null;
 

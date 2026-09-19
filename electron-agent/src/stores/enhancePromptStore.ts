@@ -9,6 +9,8 @@ export interface EnhancePromptSlot {
   seq: number;
   awaitingContext: boolean;
   source: string;
+  /** 本次开始时间（ms）。浮层据此显示已等待时长，区分「模型慢」与「卡住」。 */
+  startedAt: number;
 }
 
 interface EnhancePromptState {
@@ -22,7 +24,7 @@ interface EnhancePromptState {
 }
 
 const empty = (): EnhancePromptSlot => ({
-  status: 'idle', preview: '', error: '', seq: 0, awaitingContext: false, source: '',
+  status: 'idle', preview: '', error: '', seq: 0, awaitingContext: false, source: '', startedAt: 0,
 });
 
 function isStreamingSeq(cur: EnhancePromptSlot | undefined, seq: number): cur is EnhancePromptSlot {
@@ -44,6 +46,7 @@ export const useEnhancePromptStore = create<EnhancePromptState>((set, get) => ({
           seq,
           awaitingContext: Boolean(opts?.awaitingContext),
           source: opts?.source ?? '',
+          startedAt: Date.now(),
         },
       },
     });

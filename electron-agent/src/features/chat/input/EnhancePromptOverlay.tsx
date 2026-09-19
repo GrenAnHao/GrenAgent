@@ -75,10 +75,27 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 function statusLabel(slot: EnhancePromptSlot): string {
+  if (slot.status === 'error') return '失败';
   if (slot.awaitingContext) return '正在结合项目上下文…';
-  if (slot.status === 'streaming') return '生成中';
+  if (slot.status === 'streaming') return slot.preview ? '生成中' : '等待模型响应…';
   if (slot.status === 'done') return '完成';
   return '';
+}
+
+/** 只在流式期间走秒，让「模型慢」和「卡死」在界面上可区分。 */
+function useElapsedSeconds(startedAt: number, active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!active || !startedAt) {
+      setSeconds(0);
+      return;
+    }
+    const tick = () => setSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [startedAt, active]);
+  return seconds;
 }
 
 /**
@@ -95,6 +112,7 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
   const { setValue } = useChatInput();
   const slot = useEnhancePromptStore((s) => s.byWorkspace[workspace]);
   const visible = Boolean(slot && slot.status !== 'idle');
+  const elapsed = useElapsedSeconds(slot?.startedAt ?? 0, slot?.status === 'streaming');
   const [pos, setPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const prevWorkspaceRef = useRef(workspace);
 
@@ -187,6 +205,7 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
           <span className={styles.headTitle}>增强提示词</span>
           <span className={styles.status} data-testid="enhance-prompt-status">
             {statusLabel(slot)}
+            {slot.status === 'streaming' && elapsed > 0 ? ` · ${elapsed}s` : ''}
           </span>
           <ActionIcon
             data-testid="enhance-prompt-close"

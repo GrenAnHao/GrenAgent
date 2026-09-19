@@ -2,7 +2,7 @@ import { ActionIcon } from '@lobehub/ui';
 import { SquarePen } from 'lucide-react';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useChatInput } from '../ChatInputContext';
-import { pi } from '../../../../lib/pi';
+import { enterPendingNewSession } from '../../../../lib/pendingSession';
 
 export default function NewSessionAction() {
   const { workspace, store } = useAgentStoreContext();
@@ -12,9 +12,8 @@ export default function NewSessionAction() {
       icon={SquarePen}
       size="small"
       title="新会话"
-      onClick={async () => {
-        await pi.newSession(workspace);
-        store.reset();
+      onClick={() => {
+        enterPendingNewSession(workspace, () => store.reset());
         setValue('');
       }}
     />

@@ -17,9 +17,11 @@ const styles = createStaticStyles(({ css }) => ({
     z-index: 1050;
     box-sizing: border-box;
 
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 
     max-height: min(60vh, 480px);
+    background: transparent;
   `,
 }));
 

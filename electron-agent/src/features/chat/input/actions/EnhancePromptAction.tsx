@@ -16,6 +16,14 @@ import { peekComposerModel } from './ModelThinkingAction';
 
 const MAX_DRAFT_CHARS = 16000;
 const MAX_GOAL_CHARS = 2000;
+/**
+ * 渲染层看门狗：主进程若被拖住（同步 I/O、原生模块），它的定时器不会跑，
+ * 而 invoke 也不会 reject——界面就会永远停在「生成中」。渲染进程独立于主进程，
+ * 超时后主动 abort + 置错，保证按钮和浮层一定能恢复。
+ * 取值比主进程超时（60s / 90s）各留 15s 余量。
+ */
+const DEFAULT_WATCHDOG_MS = 75_000;
+const PROJECT_WATCHDOG_MS = 105_000;
 
 export default function EnhancePromptAction() {
   const { workspace } = useAgentStoreContext();
@@ -52,7 +60,10 @@ export default function EnhancePromptAction() {
       message.warning('正文过长，请缩短后再增强');
       return;
     }
-    const useProjectContext = settings.enhancePromptUseProjectContext === '1';
+    // 挂载时那次 getSettings 可能还没回来（settings 仍是 {}），此时读实验开关会读成关：
+    // 界面上写「生成中」而主进程走项目路径，goalText 也会被丢掉。这里按需补一次。
+    const snapshot = Object.keys(settings).length ? settings : await pi.getSettings().catch(() => settings);
+    const useProjectContext = snapshot.enhancePromptUseProjectContext === '1';
     let goalText: string | undefined;
     if (useProjectContext) {
       const sessionId = readSessionId(await pi.getState(workspace));
@@ -70,10 +81,24 @@ export default function EnhancePromptAction() {
     onChunk.onmessage = (chunk) => {
       useEnhancePromptStore.getState().append(workspace, seq, chunk);
     };
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
     try {
-      const result = useProjectContext
-        ? await pi.enhancePrompt(workspace, text, onChunk, goalText)
-        : await pi.enhancePrompt(workspace, text, onChunk);
+      const result = await Promise.race([
+        useProjectContext
+          ? pi.enhancePrompt(workspace, text, onChunk, goalText)
+          : pi.enhancePrompt(workspace, text, onChunk),
+        new Promise<null>((resolve) => {
+          watchdog = setTimeout(
+            () => resolve(null),
+            useProjectContext ? PROJECT_WATCHDOG_MS : DEFAULT_WATCHDOG_MS,
+          );
+        }),
+      ]);
+      if (!result) {
+        void pi.abortEnhancePrompt(workspace);
+        useEnhancePromptStore.getState().fail(workspace, seq, '增强超时，请重试');
+        return;
+      }
       if (result.cancelled) {
         if (useEnhancePromptStore.getState().byWorkspace[workspace]?.seq === seq) {
           useEnhancePromptStore.getState().clear(workspace);
@@ -88,6 +113,8 @@ export default function EnhancePromptAction() {
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       useEnhancePromptStore.getState().fail(workspace, seq, messageText || '增强失败');
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
     }
   }, [workspace, readDraft, message, settings]);
 

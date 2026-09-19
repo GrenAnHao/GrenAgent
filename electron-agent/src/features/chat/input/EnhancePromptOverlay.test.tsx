@@ -156,6 +156,21 @@ describe('EnhancePromptOverlay', () => {
     expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('生成中');
   });
 
+  it('首包未到显示等待模型响应，error 显示失败', () => {
+    useEnhancePromptStore.getState().start('/ws', { source: '原文' });
+    renderOverlay();
+    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('等待模型响应');
+    act(() => {
+      useEnhancePromptStore.getState().fail(
+        '/ws',
+        useEnhancePromptStore.getState().byWorkspace['/ws'].seq,
+        '增强超时，请重试',
+      );
+    });
+    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('失败');
+    expect(screen.getByTestId('enhance-prompt-error').textContent).toContain('增强超时，请重试');
+  });
+
   it('error 或 preview 空时应用禁用；生成中且预览非空可应用', () => {
     const seq = useEnhancePromptStore.getState().start('/ws', { source: '原文' });
     renderOverlay();

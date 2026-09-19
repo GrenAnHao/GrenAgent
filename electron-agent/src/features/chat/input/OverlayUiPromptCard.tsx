@@ -10,11 +10,12 @@ import { appendUiPromptReceipt, shouldRenderUiPromptInOverlay, type UiPromptRece
 
 const styles = createStaticStyles(({ css }) => ({
   card: css`
-    margin-bottom: 8px;
+    width: 100%;
     padding: 10px 12px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: ${cssVar.borderRadiusLG};
     background: ${cssVar.colorBgElevated};
+    box-shadow: ${cssVar.boxShadowSecondary};
   `,
   head: css`
     display: flex;
@@ -74,7 +75,7 @@ const styles = createStaticStyles(({ css }) => ({
     resize: vertical;
   `,
   selectWrap: css`
-    margin-bottom: 8px;
+    width: 100%;
   `,
 }));
 
@@ -133,6 +134,7 @@ export const OverlayUiPromptCard = memo(function OverlayUiPromptCard() {
         className={styles.selectWrap}
         continueLabel="确定"
         data-testid="prompt-request-select"
+        fullWidth
         headerTitle="请选择"
         onContinue={() => {
           if (chosenLabel) {

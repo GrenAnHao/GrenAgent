@@ -25,3 +25,13 @@ export function isExecutiveCommandMessage(text: string): boolean {
   const parsed = parseCommandToken(text);
   return parsed ? isExecutiveCommand(parsed.name) : false;
 }
+
+/** 侧栏占位标题：/goal 用条件，避免把命令串当成会话名。 */
+export function sidebarTitleForPrompt(text: string): string {
+  const trimmed = text.trim();
+  const parsed = parseCommandToken(trimmed);
+  if (parsed?.name.toLowerCase() === 'goal' && parsed.rest.trim()) {
+    return parsed.rest.trim().slice(0, 80);
+  }
+  return trimmed.slice(0, 80);
+}

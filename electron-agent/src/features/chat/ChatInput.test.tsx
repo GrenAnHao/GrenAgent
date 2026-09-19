@@ -1,13 +1,14 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { onSend, cancelPendingOverlay, getDocument, cleanDocument, toastError, abortEnhancePrompt } = vi.hoisted(() => ({
+const { onSend, cancelPendingOverlay, getDocument, cleanDocument, toastError, abortEnhancePrompt, chatState } = vi.hoisted(() => ({
   onSend: vi.fn(() => Promise.resolve()),
   cancelPendingOverlay: vi.fn(() => Promise.resolve('cancelled' as const)),
   getDocument: vi.fn(() => 'hello'),
   cleanDocument: vi.fn(),
   toastError: vi.fn(),
   abortEnhancePrompt: vi.fn(() => Promise.resolve()),
+  chatState: { isStreaming: false, messages: [] as unknown[], steering: [] as string[], followUp: [] as string[], composerQueue: [] as unknown[] },
 }));
 
 // App.useApp() 在 <App> 外会退化成静态实例并告警，这里直接给掉，顺带能断言失败 toast。
@@ -27,8 +28,7 @@ vi.mock('@lobehub/editor/react', () => ({
 }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStore: () => ({
-    useStore: (sel: (s: Record<string, unknown>) => unknown) =>
-      sel({ isStreaming: false, messages: [], steering: false, followUp: false }),
+    useStore: (sel: (s: Record<string, unknown>) => unknown) => sel(chatState),
   }),
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
@@ -57,6 +57,11 @@ afterEach(() => {
   cleanDocument.mockClear();
   abortEnhancePrompt.mockClear();
   getDocument.mockReturnValue('hello');
+  chatState.isStreaming = false;
+  chatState.messages = [];
+  chatState.steering = [];
+  chatState.followUp = [];
+  chatState.composerQueue = [];
 });
 
 describe('ChatInput send overlay cancel', () => {
@@ -85,6 +90,23 @@ describe('ChatInput send overlay cancel', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('empty send with queued follow-up after stop flushes follow-up', async () => {
+    getDocument.mockReturnValue('');
+    chatState.followUp = ['改用 chrome 跑自动化'];
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledWith('', undefined, 'followUp'));
+    expect(cancelPendingOverlay).toHaveBeenCalledWith('/ws');
+  });
+
+  it('bash 执行中发送为跟进，先落成条而不是立刻引导', async () => {
+    chatState.isStreaming = true;
+    chatState.messages = [{ kind: 'tool', id: 't1', toolCallId: 'c1', toolName: 'bash', args: {}, result: {}, status: 'running' }];
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledWith('hello', undefined, 'followUp'));
+  });
+
   it('aborts enhance prompt before overlay cancel and keeps original draft', async () => {
     render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
     fireEvent.click(screen.getByTestId('do-send'));
@@ -106,5 +128,25 @@ describe('ChatInput send overlay cancel', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(cleanDocument).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(toastError).toHaveBeenCalled());
+  });
+});
+
+describe('ChatInput send markdown unescape', () => {
+  it('sends email without gfm autolink brackets', async () => {
+    getDocument.mockReturnValue('hello <user@gmail.com>');
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('hello user@gmail.com', undefined, undefined),
+    );
+  });
+
+  it('sends email without a backslash before at-sign', async () => {
+    getDocument.mockReturnValue('hello user\\@gmail.com');
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('hello user@gmail.com', undefined, undefined),
+    );
   });
 });

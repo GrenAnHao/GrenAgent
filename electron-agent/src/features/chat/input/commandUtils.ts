@@ -78,6 +78,29 @@ export function getFrontendCommands(): PiCommand[] {
   ];
 }
 
+/**
+ * slash 菜单只列发生式命令（用户打字即发起一轮工作）。
+ * 控制面（模式 / 审批 / 删段）已走 IPC + runtime config；状态查询与卡片内部命令不进菜单。
+ */
+const SLASH_HIDDEN_NAMES = new Set([
+  'approval',
+  'mode',
+  'plan',
+  'ctx-exclude',
+  'ctx-restore',
+  'compaction',
+  'plan-build',
+  'brainstorm-deliver',
+  'session-state',
+  'im',
+  'imgateway',
+  'model',
+]);
+
+export function visibleSlashCommands(commands: PiCommand[]): PiCommand[] {
+  return commands.filter((command) => !SLASH_HIDDEN_NAMES.has(command.name));
+}
+
 export function mergeCommands(apiCommands: PiCommand[], frontendCommands: PiCommand[]): PiCommand[] {
   const frontendNames = new Set(frontendCommands.map((c) => c.name));
   frontendNames.add('new');
@@ -150,7 +173,7 @@ function toMenuOption(command: PiCommand): EditorSlashMenuOption {
 export function toSlashMenuItems(commands: PiCommand[]): EditorSlashMenuItems {
   const buckets = new Map<CommandApiSource | 'frontend', EditorSlashMenuOption[]>();
 
-  for (const command of commands) {
+  for (const command of visibleSlashCommands(commands)) {
     const key = groupKey(command);
     const bucket = buckets.get(key) ?? [];
     bucket.push(toMenuOption(command));

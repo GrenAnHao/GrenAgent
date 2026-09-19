@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEnhancePrompt,
+  createResultTagEmitter,
+  ENHANCE_TEMPERATURE,
   MAX_ENHANCE_CHARS,
   DEFAULT_ENHANCE_SYSTEM,
   PROJECT_ENHANCE_SYSTEM,
   buildEnhanceSystemPrompt,
+  buildDraftUserMessage,
   sanitizeEnhanceOutput,
 } from './enhancePrompt.js';
 
@@ -23,6 +26,101 @@ describe('sanitizeEnhanceOutput', () => {
     expect(sanitizeEnhanceOutput('```\n  \n```')).toEqual({ ok: false, error: '模型返回为空' });
     expect(sanitizeEnhanceOutput('   ')).toEqual({ ok: false, error: '模型返回为空' });
   });
+
+  it('剥掉整段包裹引号', () => {
+    expect(sanitizeEnhanceOutput('"请分析这段代码"')).toEqual({ ok: true, content: '请分析这段代码' });
+    expect(sanitizeEnhanceOutput('“请分析这段代码”')).toEqual({ ok: true, content: '请分析这段代码' });
+  });
+
+  it('只取〈改写稿〉标签内的内容，标签外的改动说明被丢弃', () => {
+    const raw = '〈改写稿〉\n深度分析当前项目：先摸结构，再逐层深入。\n〈/改写稿〉\n\n改动点：把草稿拆成了三段……';
+    expect(sanitizeEnhanceOutput(raw)).toEqual({ ok: true, content: '深度分析当前项目：先摸结构，再逐层深入。' });
+  });
+
+  it('不守标签契约但用「改写后的提示词」标题+围栏时，取第一个围栏块', () => {
+    const raw = [
+      '**改写后的提示词**',
+      '```markdown',
+      '请对这个仓库做一次结构化分析。',
+      '【硬性要求】每个结论附 file:line 证据。',
+      '```',
+      '',
+      '**改动点**',
+      '| 草稿 | 问题 | 改后 |',
+      '**轻量变体**（只想快速摸底时）',
+      '```markdown',
+      '用 400 字以内讲清这个项目。',
+      '```',
+    ].join('\n');
+    expect(sanitizeEnhanceOutput(raw)).toEqual({
+      ok: true,
+      content: '请对这个仓库做一次结构化分析。\n【硬性要求】每个结论附 file:line 证据。',
+    });
+  });
+
+  it('改写稿正文自带围栏但无引导标题时，不误判为外壳', () => {
+    const raw = '先做：\n```ts\nconst x = 1;\n```\n然后提交';
+    expect(sanitizeEnhanceOutput(raw)).toEqual({ ok: true, content: raw });
+  });
+
+  it('裸正文后尾随「主要改动：」解说时，从该行起整体截断', () => {
+    const raw = [
+      '你在当前仓库中做一次工程层面的项目分析，不是泛泛介绍。',
+      '先读代码再下结论：从 src/ 开始梳理目录结构。',
+      '按以下维度输出：',
+      '1. 项目定位与运行方式',
+      '2. 架构与模块地图',
+      '',
+      '主要改动：原句缺三样东西——读什么、按什么维度拆、输出要什么形态。',
+      '把 <入口文件> 换成你的实际值；如果只想快速摸底，删掉第 3 条即可。',
+    ].join('\n');
+    expect(sanitizeEnhanceOutput(raw)).toEqual({
+      ok: true,
+      content: [
+        '你在当前仓库中做一次工程层面的项目分析，不是泛泛介绍。',
+        '先读代码再下结论：从 src/ 开始梳理目录结构。',
+        '按以下维度输出：',
+        '1. 项目定位与运行方式',
+        '2. 架构与模块地图',
+      ].join('\n'),
+    });
+  });
+
+  it('正文里合法出现「改动路径」等词时不误截断', () => {
+    const raw = '分析这个仓库。\n上手建议：新人先读入口文件；最常见的三类改动路径也要列出。';
+    expect(sanitizeEnhanceOutput(raw)).toEqual({ ok: true, content: raw });
+  });
+});
+
+describe('createResultTagEmitter（流式预览剥标签）', () => {
+  function collect() {
+    const out: string[] = [];
+    return { out, emitter: createResultTagEmitter((c) => out.push(c)) };
+  }
+
+  it('剥掉头尾标签，吞掉闭标签后的解说（标签跨 chunk）', () => {
+    const { out, emitter } = collect();
+    emitter.push('〈改写稿〉\n第一段');
+    emitter.push('第二段〈/改写');
+    emitter.push('稿〉\n\n改动点：补了结构和约束。');
+    emitter.end();
+    expect(out.join('')).toBe('第一段第二段');
+  });
+
+  it('无标签的模型输出原样透传、零扣留', () => {
+    const { out, emitter } = collect();
+    emitter.push('改');
+    emitter.push('写稿');
+    emitter.end();
+    expect(out.join('')).toBe('改写稿');
+  });
+
+  it('有开标签但流中断：end 放行扣留的尾部', () => {
+    const { out, emitter } = collect();
+    emitter.push('〈改写稿〉\n只有正文没闭合');
+    emitter.end();
+    expect(out.join('')).toBe('只有正文没闭合');
+  });
 });
 
 describe('buildEnhanceSystemPrompt', () => {
@@ -37,6 +135,25 @@ describe('buildEnhanceSystemPrompt', () => {
     expect(buildEnhanceSystemPrompt({ useProjectContext: true, goalText: '状态: active\n条件: 完工' })).toBe(
       `${DEFAULT_ENHANCE_SYSTEM}\n\n${PROJECT_ENHANCE_SYSTEM}状态: active\n条件: 完工`,
     );
+  });
+});
+
+describe('buildDraftUserMessage（实质增强，草稿不是任务）', () => {
+  it('把草稿放进 USER INPUT，并声明不要执行', () => {
+    const msg = buildDraftUserMessage('深度分析一下该项目');
+    expect(msg).toContain('USER INPUT:\n深度分析一下该项目');
+    expect(msg).toContain('不是给你的任务');
+    expect(msg).toContain('请解释这段代码的主要功能、执行流程和关键逻辑');
+  });
+
+  it('系统提示词要求实质增强，禁止执行、提问与扩成写作课', () => {
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('实质增强');
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('不要回答或执行');
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('不要向用户提问');
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('800');
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('自行探索获取');
+    expect(DEFAULT_ENHANCE_SYSTEM).toContain('〈改写稿〉');
+    expect(DEFAULT_ENHANCE_SYSTEM).not.toContain('不要新增需求、不要扩大范围');
   });
 });
 
@@ -86,7 +203,7 @@ describe('createEnhancePrompt 默认路径', () => {
       .resolves.toEqual({ ok: true, content: '改写稿' });
     expect(getModel).toHaveBeenCalledWith('openai', 'gpt-x');
     expect(streamSimple.mock.calls[0][0]).toMatchObject({
-      user: '帮我改 README',
+      user: buildDraftUserMessage('帮我改 README'),
       model,
     });
     expect(chunks).toEqual(['改', '写稿']);
@@ -100,7 +217,7 @@ describe('createEnhancePrompt 默认路径', () => {
       getModel: (p, id) => (p === 'anthropic' && id === 'claude' ? other : undefined),
     });
     await service.run({ workspace: '/ws', text: 'x' }, () => {});
-    expect(streamSimple.mock.calls[0][0].model).toBe(other);
+    expect((streamSimple.mock.calls[0]![0] as { model?: unknown }).model).toBe(other);
   });
 
   it('有设置但未命中 → 失败不回退', async () => {
@@ -128,7 +245,7 @@ describe('createEnhancePrompt 默认路径', () => {
     await service.run({ workspace: '/ws', text: 'x', goalText: '状态: active\n条件: 完工' }, () => {});
     expect(stream).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
-    expect(streamSimple.mock.calls[0][0].systemPrompt).toBe(DEFAULT_ENHANCE_SYSTEM);
+    expect((streamSimple.mock.calls[0]![0] as { systemPrompt?: string }).systemPrompt).toBe(DEFAULT_ENHANCE_SYSTEM);
   });
 
   it('abort 后不把后续 delta 当成功', async () => {
@@ -150,6 +267,28 @@ describe('createEnhancePrompt 默认路径', () => {
     expect(chunks).toEqual(['a']);
   });
 
+  it('默认路径固定 temperature=0.3、reasoning=minimal（压低自由发挥与自我解说）', async () => {
+    const { service, streamSimple } = setup({ sessionModel: model });
+    await service.run({ workspace: '/ws', text: 'x' }, () => {});
+    const input = streamSimple.mock.calls[0]![0] as { temperature?: number; reasoning?: string };
+    expect(input.temperature).toBe(ENHANCE_TEMPERATURE);
+    expect(input.reasoning).toBe('minimal');
+  });
+
+  it('标签包裹的输出：预览不含标签与改动说明，最终内容只取标签内', async () => {
+    async function* tagged() {
+      yield { type: 'delta', text: '〈改写稿〉\n深度分析当前项目：' };
+      yield { type: 'delta', text: '先摸结构再逐层深入。' };
+      yield { type: 'delta', text: '〈/改写稿〉\n\n改动点：补了结构。' };
+      yield { type: 'done' };
+    }
+    const { service } = setup({ sessionModel: model, streamSimple: tagged });
+    const chunks: string[] = [];
+    await expect(service.run({ workspace: '/ws', text: '深度分析一下该项目' }, (c) => chunks.push(c)))
+      .resolves.toEqual({ ok: true, content: '深度分析当前项目：先摸结构再逐层深入。' });
+    expect(chunks.join('')).toBe('深度分析当前项目：先摸结构再逐层深入。');
+  });
+
   it('超时返回增强超时，请重试', async () => {
     vi.useFakeTimers();
     async function* hang() {
@@ -164,7 +303,7 @@ describe('createEnhancePrompt 默认路径', () => {
 
 describe('createEnhancePrompt 实验路径', () => {
   function projectSetup(streamImpl: (context: { tools?: unknown[] }) => AsyncGenerator<unknown>, request = vi.fn()) {
-    const stream = vi.fn(async function* (model: unknown, context: { tools?: unknown[] }) {
+    const stream = vi.fn(async function* (model: unknown, context: { tools?: unknown[] }, options?: unknown) {
       yield* streamImpl(context);
     });
     const getModel = vi.fn(() => model);
@@ -181,7 +320,20 @@ describe('createEnhancePrompt 实验路径', () => {
     return { service, stream, request, streamSimple: host.streamSimple };
   }
 
-  it('只允许五个只读工具；wiki.replace / codegraph_impact 回错误字符串且不 request', async () => {
+  it('首条 user 消息是 USER INPUT 包裹后的草稿', async () => {
+    async function* impl() {
+      yield { type: 'delta', text: '改写稿' };
+      yield { type: 'done' };
+    }
+    const { service, stream } = projectSetup(impl);
+    await service.run({ workspace: '/ws', text: '深度分析一下该项目' }, () => {});
+    const context = stream.mock.calls[0]![1] as { messages: Array<{ content: unknown }> };
+    expect(context.messages[0]!.content).toBe(buildDraftUserMessage('深度分析一下该项目'));
+    const options = stream.mock.calls[0]![2] as { temperature?: number };
+    expect(options.temperature).toBe(ENHANCE_TEMPERATURE);
+  });
+
+  it('只允许五个只读工具；wiki_replace / codegraph_impact 回错误字符串且不 request', async () => {
     const request = vi.fn();
     let round = 0;
     async function* impl() {
@@ -192,9 +344,8 @@ describe('createEnhancePrompt 实验路径', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'toolCall', id: '1', name: 'wiki.replace', arguments: { page: 'x' } },
-              { type: 'toolCall', id: '2', name: 'codegraph_impact', arguments: { symbol: 'Foo' } },
-            ],
+              { type: 'toolCall', id: '1', name: 'wiki_replace', arguments: { page: 'x' } },
+              { type: 'toolCall', id: '2', name: 'codegraph_impact', arguments: { symbol: 'Foo' } },            ],
             stopReason: 'toolUse',
           },
         };
@@ -223,7 +374,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki.search', arguments: { query: '登录' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: '登录' } }],
             reason: 'toolUse',
           },
         };
@@ -251,8 +402,8 @@ describe('createEnhancePrompt 实验路径', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'toolCall', id: `a${round}`, name: 'memory.search', arguments: { query: 'q' } },
-              { type: 'toolCall', id: `b${round}`, name: 'memory.search', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `a${round}`, name: 'memory_search', arguments: { query: 'q' } },
+              { type: 'toolCall', id: `b${round}`, name: 'memory_search', arguments: { query: 'q' } },
             ],
             reason: 'toolUse',
           },
@@ -276,8 +427,8 @@ describe('createEnhancePrompt 实验路径', () => {
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: '1', name: 'memory.search', arguments: { query: 'q' } },
-            { type: 'toolCall', id: '2', name: 'memory.search', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '1', name: 'memory_search', arguments: { query: 'q' } },
+            { type: 'toolCall', id: '2', name: 'memory_search', arguments: { query: 'q' } },
           ],
           reason: 'toolUse',
         },
@@ -305,7 +456,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki.read', arguments: { page: 'p' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'wiki_read', arguments: { page: 'p' } }],
             reason: 'toolUse',
           },
         };
@@ -335,7 +486,7 @@ describe('createEnhancePrompt 实验路径', () => {
         type: 'done',
         message: {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: '1', name: 'wiki.search', arguments: { query: 'q' } }],
+          content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } }],
           reason: 'toolUse',
         },
       };
@@ -356,7 +507,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'wiki.search', arguments: { query: 'q' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: 'q' } }],
             reason: 'toolUse',
           },
         };
@@ -374,8 +525,7 @@ describe('createEnhancePrompt 实验路径', () => {
     }
   });
 
-  it('codegraph_search 走 codeRetrieval.call', async () => {
-    const request = vi.fn().mockResolvedValue({ hits: [] });
+  it('codegraph_search 走 codeRetrieval.call', async () => {    const request = vi.fn().mockResolvedValue({ hits: [] });
     let round = 0;
     async function* impl() {
       round += 1;
@@ -400,5 +550,60 @@ describe('createEnhancePrompt 实验路径', () => {
       tool: 'codegraph_search',
       args: expect.objectContaining({ query: 'Login' }),
     }));
+  });
+
+  it('暴露给模型的工具名不含点号，且 wiki_search 映射回 wiki.search', async () => {
+    const request = vi.fn().mockResolvedValue([]);
+    const toolNames: string[][] = [];
+    let round = 0;
+    async function* impl(context: { tools?: unknown[] }) {
+      toolNames.push((context.tools ?? []).map((tool) => (tool as { name: string }).name));
+      round += 1;
+      if (round === 1) {
+        yield {
+          type: 'done',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: '1', name: 'wiki_search', arguments: { query: '登录' } }],
+            reason: 'toolUse',
+          },
+        };
+        return;
+      }
+      yield { type: 'text_delta', delta: '稿' };
+      yield { type: 'done', message: { role: 'assistant', content: [{ type: 'text', text: '稿' }], reason: 'stop' } };
+    }
+    const { service, request: req } = projectSetup(impl, request);
+    await expect(service.run({ workspace: '/ws', text: 'x' }, () => {})).resolves.toMatchObject({ ok: true });
+    // 网关/上游会拒绝带 `.` 的工具名（实测 400 → 503），所以对外必须是无点号名。
+    expect(toolNames[0]!.length).toBeGreaterThan(0);
+    for (const name of toolNames.flat()) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(req).toHaveBeenCalledWith('wiki.search', expect.objectContaining({ query: '登录' }));
+  });
+});
+
+describe('createEnhancePrompt 准备阶段', () => {
+  it('读设置挂起时也会超时返回，不会永远停在生成中', async () => {
+    vi.useFakeTimers();
+    try {
+      const streamSimple = vi.fn(async function* () { yield { type: 'done' }; });
+      const host = {
+        streamSimple,
+        ensure: vi.fn(async () => ({ stream: vi.fn(), complete: vi.fn(), getModel: vi.fn(() => model) })),
+      };
+      const agentHost = { get: () => ({ session: { model } }) };
+      const service = createEnhancePrompt({
+        host: host as never,
+        agentHost: agentHost as never,
+        settings: () => new Promise<Record<string, string>>(() => {}),
+        agentData: { request: vi.fn() } as never,
+      });
+      const pending = service.run({ workspace: '/ws', text: 'x' }, () => {});
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(pending).resolves.toMatchObject({ ok: false, error: '增强超时，请重试' });
+      expect(streamSimple).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

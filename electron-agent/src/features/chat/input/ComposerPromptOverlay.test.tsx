@@ -70,8 +70,34 @@ describe('ComposerPromptOverlay', () => {
       },
     });
     renderOverlay();
-    expect(screen.getByTestId('composer-prompt-overlay')).toBeTruthy();
+    expect(screen.getByTestId('composer-prompt-overlay')).toHaveStyle({ width: '480px' });
     expect(screen.getByTestId('inline-question')).toBeTruthy();
+    expect(screen.getByTestId('inline-question').getAttribute('data-full-width')).toBe('true');
+  });
+
+  it('keeps overlay extra content in the card scroll, not the overlay itself', () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'u1',
+      data: {
+        kind: 'questions',
+        id: 'q1',
+        allowExtra: true,
+        questions: [
+          { id: 'q1', title: '第一题', options: [{ id: 'a', label: '甲' }] },
+          { id: 'q2', title: '第二题', options: [{ id: 'c', label: '丙' }] },
+        ],
+      },
+    });
+    renderOverlay();
+    fireEvent.click(screen.getByText('甲'));
+    fireEvent.click(screen.getByTestId('inline-question-next'));
+    const overlay = screen.getByTestId('composer-prompt-overlay');
+    const scroll = screen.getByTestId('inline-question-scroll');
+    expect(overlay.contains(scroll)).toBe(true);
+    expect(scroll.contains(screen.getByTestId('inline-question-extra'))).toBe(true);
+    expect(scroll.contains(screen.getByTestId('inline-question-submit'))).toBe(false);
+    expect(getComputedStyle(overlay).overflowY).not.toBe('auto');
   });
 
   it('portals the question card outside the composer so seat height stays put', () => {
@@ -100,6 +126,7 @@ describe('ComposerPromptOverlay', () => {
     renderOverlay();
     expect(screen.getByTestId('composer-prompt-overlay')).toBeTruthy();
     expect(screen.getByTestId('prompt-request-select')).toBeTruthy();
+    expect(screen.getByTestId('prompt-request-select').getAttribute('data-full-width')).toBe('true');
 
     cleanup();
     useUiPromptStore.getState().setRequest({

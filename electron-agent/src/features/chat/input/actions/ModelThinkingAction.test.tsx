@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 
 // 自定义选择器用 @lobehub/ui 的 Popover + Icon。mock 成直接渲染 children(触发器) + content(面板)，
 // 这样面板里的搜索框 / 模型项 / 档位分段都能在测试里直接访问、点击。
@@ -34,7 +34,10 @@ const { piMock, sessionState, modelsState } = vi.hoisted(() => ({
     setThinkingLevel: vi.fn(() => Promise.resolve()),
     getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   },
-  sessionState: { draftConversationCwd: null as string | null },
+  sessionState: {
+    draftConversationCwd: null as string | null,
+    activeSessionPath: null as string | null,
+  },
   modelsState: {
     list: [
       { id: 'm', name: 'My Model', provider: 'anthropic' },
@@ -67,9 +70,12 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws', workspaceReady: true }),
 }));
 vi.mock('../../../../store/session', () => {
-  const useSessionStore = (sel: (s: { draftConversationCwd: string | null }) => unknown) =>
-    sel({ draftConversationCwd: sessionState.draftConversationCwd });
-  useSessionStore.getState = () => ({ draftConversationCwd: sessionState.draftConversationCwd });
+  const snapshot = () => ({
+    draftConversationCwd: sessionState.draftConversationCwd,
+    activeSessionPath: sessionState.activeSessionPath,
+  });
+  const useSessionStore = (sel: (s: ReturnType<typeof snapshot>) => unknown) => sel(snapshot());
+  useSessionStore.getState = snapshot;
   return { useSessionStore };
 });
 vi.mock('../../../settings/availableModelsCache', () => ({
@@ -85,12 +91,19 @@ vi.mock('../../../settings/providerListCache', () => ({
     ]),
 }));
 
-import ModelThinkingAction, { peekComposerModel, resetModelThinkingCacheForTests } from './ModelThinkingAction';
+import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
+import ModelThinkingAction, {
+  clearComposerUserPick,
+  commitComposerModelToSession,
+  peekComposerModel,
+  resetModelThinkingCacheForTests,
+} from './ModelThinkingAction';
 
 beforeEach(() => {
   vi.clearAllMocks();
   resetModelThinkingCacheForTests();
   sessionState.draftConversationCwd = null;
+  sessionState.activeSessionPath = null;
   modelsState.list = DEFAULT_MODELS.map((item) => ({ ...item }));
   piMock.getSettings.mockResolvedValue({});
   piMock.getState.mockResolvedValue({
@@ -230,6 +243,7 @@ describe('ModelThinkingAction', () => {
     expect(piMock.setModel).toHaveBeenCalledWith('/ws', 'openai', 'g');
     piMock.setModel.mockClear();
     first.unmount();
+    clearComposerUserPick('/ws');
     sessionState.draftConversationCwd = '/ws';
     piMock.getSettings.mockClear();
     piMock.getSettings.mockResolvedValue({});
@@ -248,6 +262,7 @@ describe('ModelThinkingAction', () => {
     fireEvent.click(await screen.findByText('GPT'));
     piMock.setModel.mockClear();
     first.unmount();
+    clearComposerUserPick('/ws');
     sessionState.draftConversationCwd = '/ws';
     piMock.getState.mockResolvedValue({
       thinkingLevel: 'off',
@@ -361,6 +376,30 @@ describe('ModelThinkingAction', () => {
     expect(piMock.setModel).not.toHaveBeenCalled();
   });
 
+  it('同工作区从已有会话进入草稿时，StrictMode 下仍套用设置默认模型', async () => {
+    const view = render(
+      <StrictMode>
+        <ModelThinkingAction />
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    piMock.setModel.mockClear();
+    view.rerender(
+      <StrictMode>
+        <ModelThinkingAction />
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    expect(piMock.setModel).not.toHaveBeenCalled();
+  });
+
   it('草稿点选后列表变长不套回设置默认', async () => {
     sessionState.draftConversationCwd = '/ws';
     piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'anthropic/m' });
@@ -383,6 +422,228 @@ describe('ModelThinkingAction', () => {
       expect(piMock.getSettings).not.toHaveBeenCalled();
     });
     expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    expect(piMock.setModel).not.toHaveBeenCalled();
+  });
+
+  it('草稿点选后组件重挂仍保持点选，不套回设置默认', async () => {
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'anthropic/m' });
+    const first = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    fireEvent.click(await screen.findByText('GPT'));
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    first.unmount();
+    piMock.getSettings.mockClear();
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'anthropic/m' });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    expect(piMock.getSettings).not.toHaveBeenCalled();
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+  });
+
+  it('草稿点选后首发建会话，getState 仍是设置默认时保持点选并写回会话', async () => {
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'anthropic/m' });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    fireEvent.click(await screen.findByText('GPT'));
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    piMock.setModel.mockClear();
+
+    commitComposerModelToSession('/ws', '/ws/created.jsonl');
+    sessionState.draftConversationCwd = null;
+    sessionState.activeSessionPath = '/ws/created.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/created.jsonl',
+    });
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    await waitFor(() => {
+      expect(piMock.setModel).toHaveBeenCalledWith('/ws', 'openai', 'g');
+    });
+    expect(piMock.setModel).not.toHaveBeenCalledWith('/ws', 'anthropic', 'm');
+  });
+
+  it('从草稿切回已有会话时恢复该会话模型，不套设置默认', async () => {
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    piMock.setModel.mockClear();
+
+    sessionState.draftConversationCwd = '/ws';
+    sessionState.activeSessionPath = '';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    expect(piMock.setModel).not.toHaveBeenCalled();
+
+    piMock.getState.mockClear();
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    sessionState.draftConversationCwd = null;
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'anthropic', id: 'm' });
+    expect(piMock.setModel).not.toHaveBeenCalled();
+  });
+
+  it('切回已有会话时 getState 变成设置默认，仍恢复该会话模型并写回', async () => {
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    piMock.setModel.mockClear();
+
+    sessionState.draftConversationCwd = '/ws';
+    sessionState.activeSessionPath = '';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'g', provider: 'openai', api: 'openai-completions', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    sessionState.draftConversationCwd = null;
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'anthropic', id: 'm' });
+    await waitFor(() => {
+      expect(piMock.setModel).toHaveBeenCalledWith('/ws', 'anthropic', 'm');
+    });
+    expect(piMock.setModel).not.toHaveBeenCalledWith('/ws', 'openai', 'g');
+  });
+
+  it('已有会话 getState 无模型时不套用刚进草稿用过的设置默认', async () => {
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    piMock.setModel.mockClear();
+
+    sessionState.draftConversationCwd = null;
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: null,
+      sessionFile: '/ws/a.jsonl',
+    });
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+    await waitFor(() => {
+      expect(piMock.setModel).toHaveBeenCalledWith('/ws', 'anthropic', 'm');
+    });
+    expect(piMock.setModel).not.toHaveBeenCalledWith('/ws', 'openai', 'g');
+  });
+
+  it('同工作区切换会话时输入栏跟随目标会话模型', async () => {
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'g', provider: 'openai', api: 'openai-completions', reasoning: true },
+      sessionFile: '/ws/b.jsonl',
+    });
+    sessionState.activeSessionPath = '/ws/b.jsonl';
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+  });
+
+  it('切到其它会话但 getState 仍是原会话时，不把记忆模型写进正在执行的 handle', async () => {
+    sessionState.activeSessionPath = '/ws/a.jsonl';
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('My Model');
+    });
+
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'g', provider: 'openai', api: 'openai-completions', reasoning: true },
+      sessionFile: '/ws/b.jsonl',
+    });
+    sessionState.activeSessionPath = '/ws/b.jsonl';
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+    });
+    piMock.setModel.mockClear();
+
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'off',
+      model: { id: 'm', provider: 'anthropic', api: 'anthropic-messages', reasoning: true },
+      sessionFile: '/ws/a.jsonl',
+    });
+    useThinkingMemoryStore.getState().bumpSwitch('/ws');
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
+      expect(peekComposerModel('/ws')).toEqual({ provider: 'openai', id: 'g' });
+    });
     expect(piMock.setModel).not.toHaveBeenCalled();
   });
 });

@@ -15,6 +15,8 @@ import { composeMessage } from './input/editor/composeMessage';
 import type { PastedText } from './input/editor/types';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
 import { cancelPendingOverlay } from './input/overlayPrompt';
+import { composerCanSend, composerSendBehavior } from './input/sendBehavior';
+import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
 import { pi } from '../../lib/pi';
 import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
 
@@ -45,20 +47,27 @@ export function ChatInput({
   const draftKey = activeSessionPath || workspace;
 
   const isStreaming = useStore((s) => s.isStreaming);
-  // 「正在生成」：存在流式中的 assistant 消息。回合文字完成后的收尾窗口 / 工具执行间隙里，
+  // 「正在生成」：存在流式中的 assistant 消息。回合文字完成后的收尾窗口里，
   // isStreaming（整段 run）仍为 true 但 isGenerating 为 false——据此把"回合刚结束的紧跟消息"
   // 路由为 followUp(跟进) 而非 steer(引导)，且不去动并发关键的 isStreaming。
   const isGenerating = useStore((s) => s.messages.some((m) => m.kind === 'assistant' && m.streaming));
+  const hasRunningTool = useStore((s) => s.messages.some((m) => m.kind === 'tool' && m.status === 'running'));
+  const retrying = useStore((s) => s.retrying);
+  const awaitingResponse = useStore((s) => s.awaitingResponse);
+  const inFlight = isStreaming || Boolean(retrying) || Boolean(awaitingResponse);
   const steering = useStore((s) => s.steering);
   const followUp = useStore((s) => s.followUp);
+  const composerQueue = useStore((s) => s.composerQueue) ?? [];
   const editor = useEditor();
   const [empty, setEmpty] = useState(true);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
 
-  // 读当前编辑器正文（markdown）。
-  // @lobehub/editor 的 markdown 序列化会把 _ 转义成 \_，对 AI 消息无意义，这里还原。
-  const readDraft = useCallback(() => String(editor.getDocument('markdown') || '').replace(/\\_/g, '_'), [editor]);
+  // 读当前编辑器正文（markdown）。remark-gfm 会转义 _ / @、并把邮箱包成 <a@b.com>，发出前还原。
+  const readDraft = useCallback(
+    () => unescapeComposerMarkdown(String(editor.getDocument('markdown') || '')),
+    [editor],
+  );
 
   const sendingRef = useRef(false);
   // 草稿持久化：debounce 写，避免每键都落 localStorage。
@@ -78,7 +87,16 @@ export function ChatInput({
       mimeType,
       data,
     }));
-    if (!text && images.length === 0) return;
+    if (
+      !composerCanSend({
+        empty: !text,
+        hasAttachments: images.length > 0,
+        hasFollowUp: followUp.length > 0,
+        hasComposerQueue: composerQueue.length > 0,
+        isStreaming,
+      })
+    )
+      return;
     if (sendingRef.current) return;
     sendingRef.current = true;
     try {
@@ -97,22 +115,45 @@ export function ChatInput({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
       requestAnimationFrame(() => editor.focus());
-      // 路由：正在生成中发送 = 引导当前回合（steer）；run 进行中但已停笔（收尾/工具间隙）发送 =
-      // 跟进（followUp，回合结束后作为新一轮跑）；完全空闲 = 新一轮提示。这样回合刚答完紧跟的消息
-      // 不会被误当引导，且不触碰并发关键的 isStreaming。
+      // 路由：正在生成或工具执行中发送 = 引导当前回合（steer，工具结束后注入）；
+      // run 进行中但已停笔且无工具（收尾窗口）发送 = 跟进（followUp，回合结束后作为新一轮跑）；
+      // 已有跟进排队时即使已停流也继续跟进，避免插队。
       void onSend(
         text,
         images.length ? images : undefined,
-        isGenerating ? 'steer' : isStreaming ? 'followUp' : undefined,
+        composerSendBehavior({
+          isGenerating,
+          isStreaming,
+          hasFollowUp: followUp.length > 0,
+          hasRunningTool,
+          hasComposerQueue: composerQueue.length > 0,
+        }),
       );
     } finally {
       sendingRef.current = false;
     }
-  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, onSend, draftKey, workspace, message]);
+  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, hasRunningTool, followUp.length, composerQueue.length, onSend, draftKey, workspace, message]);
 
   const stop = useCallback(() => {
     void onAbort();
   }, [onAbort]);
+
+  const steerQueued = useCallback(
+    (id: string) => {
+      const item = useStore.getState().composerQueue?.find((entry) => entry.id === id);
+      if (!item) return;
+      useStore.setState((s) => ({
+        composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== id),
+      }));
+      const images = item.images?.map(({ mimeType, data }) => ({
+        type: 'image' as const,
+        mimeType,
+        data,
+      }));
+      void onSend(item.text, images, 'steer');
+    },
+    [onSend, useStore],
+  );
 
   const setValue = useCallback(
     (text: string) => {
@@ -164,7 +205,6 @@ export function ChatInput({
       // ctx.setEmpty 给 MessageEditor 的 onChange 用：在更新空态的同时安排草稿持久化。
       setEmpty: handleChange,
       setValue,
-      readDraft,
       attachments,
       addAttachments: (items) => setAttachments((prev) => [...prev, ...items]),
       removeAttachment: (index) => setAttachments((prev) => prev.filter((_, i) => i !== index)),
@@ -173,11 +213,16 @@ export function ChatInput({
       removePastedText: (id) => setPastedTexts((prev) => prev.filter((p) => p.id !== id)),
       isStreaming,
       isGenerating,
+      hasRunningTool,
+      inFlight,
       steering,
       followUp,
+      steerQueued,
+      hasComposerQueue: composerQueue.length > 0,
       send,
       stop,
       scrollTranscript,
+      readDraft,
     }),
     [
       editor,
@@ -189,8 +234,12 @@ export function ChatInput({
       pastedTexts,
       isStreaming,
       isGenerating,
+      hasRunningTool,
+      inFlight,
       steering,
       followUp,
+      steerQueued,
+      composerQueue.length,
       send,
       stop,
       scrollTranscript,
