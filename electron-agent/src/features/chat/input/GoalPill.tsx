@@ -169,10 +169,10 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
   }, [snapshot?.goalId, snapshot?.condition]);
 
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot?.runStartedAt) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [snapshot?.goalId]);
+  }, [snapshot?.goalId, snapshot?.runStartedAt]);
 
   const runCommand = useCallback(async (message: string) => {
     if (!workspace || inflight.current) return;
@@ -259,9 +259,9 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
           <>
             <span className={styles.sentence}>{statusSentence(snapshot)}</span>
             <span className={styles.condition} title={rowTitle ? undefined : snapshot.condition}>
-              {snapshot.condition}
+              · {snapshot.condition}
             </span>
-            <span className={styles.elapsed}>· {formatGoalElapsed(snapshot.updatedAt, now)}</span>
+            <span className={styles.elapsed}>· {formatGoalElapsed(snapshot.ranMs ?? 0, snapshot.runStartedAt, now)}</span>
             <div className={styles.actions}>
               {canToggle(snapshot) ? (
                 <ActionIcon

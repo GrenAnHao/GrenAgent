@@ -25,6 +25,10 @@ export interface GoalSnapshot {
   maxRounds: number;
   createdAt: string;
   updatedAt: string;
+  /** Completed running segments in ms. Pause / blocked / complete freeze this. */
+  ranMs: number;
+  /** Current running segment start; absent while frozen. */
+  runStartedAt?: string;
   activation?: GoalActivation;
   blockedReason?: GoalBlockedReason;
 }

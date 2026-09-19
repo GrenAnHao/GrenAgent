@@ -114,6 +114,35 @@ describe("foldGoal", () => {
     });
   });
 
+  it("freezes running duration on pause and continues after resume", () => {
+    const created = "2026-09-13T00:00:00.000Z";
+    const paused = "2026-09-13T00:01:00.000Z";
+    const resumed = "2026-09-13T00:02:00.000Z";
+    const later = "2026-09-13T00:02:30.000Z";
+    const snapshot = foldGoal([
+      ev({ kind: "create", goalId: "g", revision: 1, at: created, payload: { condition: "写完" } }),
+      ev({ kind: "edit", goalId: "g", revision: 2, at: "2026-09-13T00:00:20.000Z", payload: { condition: "写完测试" } }),
+      ev({ kind: "pause", goalId: "g", revision: 3, at: paused, payload: {} }),
+      ev({ kind: "round", goalId: "g", revision: 4, at: later, payload: { round: 1 } }),
+    ]);
+    expect(snapshot).toMatchObject({
+      status: "paused",
+      ranMs: 60_000,
+    });
+    expect(snapshot?.runStartedAt).toBeUndefined();
+
+    const running = foldGoal([
+      ev({ kind: "create", goalId: "g", revision: 1, at: created, payload: { condition: "写完" } }),
+      ev({ kind: "pause", goalId: "g", revision: 2, at: paused, payload: {} }),
+      ev({ kind: "resume", goalId: "g", revision: 3, at: resumed, payload: {} }),
+    ]);
+    expect(running).toMatchObject({
+      status: "active",
+      ranMs: 60_000,
+      runStartedAt: resumed,
+    });
+  });
+
   it("does not let create after an illegal complete replace a paused goal", () => {
     const snapshot = foldGoal([
       ev({ kind: "create", goalId: "g1", revision: 1, at, payload: { condition: "旧" } }),

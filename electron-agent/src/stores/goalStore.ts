@@ -29,6 +29,8 @@ export interface GoalSnapshot {
   maxRounds: number;
   createdAt: string;
   updatedAt: string;
+  ranMs: number;
+  runStartedAt?: string;
   activation: 'armed' | 'disarmed';
   blockedReason?: { code: string; message: string };
   history?: GoalHistoryItem[];

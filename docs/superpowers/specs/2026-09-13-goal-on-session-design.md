@@ -1,7 +1,7 @@
 # Goal 回到 Pi 会话（脱离 AgentData）
 
 - 日期：2026-09-13
-- 状态：设计已确认，待审阅书面规格
+- 状态：已按同日审查更正（状态事件与续跑正文的 JSONL 通道区分、appendEntry 写失败局限降级、重入钩子改 `agent_settled` 并写死中止/错误判定、Goal Round 来源判定机制、达上限提示、配置序列化、blocked resume 不对称依据、complete 后 create 放行标注、单写者假设）
 - 主题：Goal 的权威源迁回当前 Pi 会话事件流；拆除 AgentData Goal 领域；完成由工作模型自报，续跑只在本会话。
 
 本规格取代 `docs/superpowers/specs/2026-09-06-session-goal-design.md` 的权威源与调度（AgentData + Coordinator + headless worker + 独立裁判）。条的视觉与 `CHAT_CONTENT_WIDTH` 仍以 `docs/superpowers/specs/2026-09-13-goal-bar-and-chat-width-design.md` 为准，但其中 CAS `edit`、project 通道放行、`judging`、AgentData 历史等条款作废，改按本文。
@@ -14,7 +14,7 @@ Goal 是绑在**当前 Pi 会话**上的长期完成条件。`/goal`、条、模
 
 1. `/goal` 与条能创建、查询、编辑、暂停、恢复、清除；不进模型轮次。
 2. 工作模型在真人回合或当前 Goal Round 里可 `complete` / `blocked`；创建 / 编辑 / 暂停 / 恢复必须本轮有真人消息。人暂停过的，模型不能 `resume`。
-3. `active` 且进程内 `armed` 时，一轮自然结束后在**同一会话**重入，并注入 Codex 式完成审计提示词。
+3. `active` 且进程内 `armed` 时，一轮自然结束后在**同一会话**重入，并注入 Codex 式完成审计提示词。斜杠 `/goal` 的 `create` / `resume`（含只武装、不写 resume 事件）在会话已存在且空闲时**立刻**开 Round 1，不等下一轮 `agent_settled`。
 4. 重开 / fork 默认 `disarmed`。应用设置「Goal 重开后自动继续」默认关；打开后仅 `active` 在 `session_start` 打成 `armed`。
 5. AgentData 上的 Goal 表、RPC、Coordinator、GoalHost 删除。旧 AgentData Goal **不迁**，打开即视为无目标。
 
@@ -22,7 +22,7 @@ Goal 是绑在**当前 Pi 会话**上的长期完成条件。`/goal`、条、模
 
 ### 2.1 存储
 
-权威源是当前会话 JSONL。每次获准变更追加一条 `type: "custom"`、`customType: "goal"` 的事件，字段至少：
+权威源是当前会话 JSONL。每次获准变更经 `pi.appendEntry("goal", event)` 追加一条 `type: "custom"`、`customType: "goal"` 的条目（不进 LLM 上下文），`data` 即事件，字段至少：
 
 ```ts
 {
@@ -35,6 +35,8 @@ Goal 是绑在**当前 Pi 会话**上的长期完成条件。`/goal`、条、模
 ```
 
 `session_start` 与每次写入后按 `revision` 升序折成当前快照。没有第二份库，没有跨会话 CAS。`revision` 只在本会话事件流里单调加一。
+
+通道区分写死：`customType: "goal"` 只承载上述带 `kind` 的状态事件；续跑正文走 `customType: "goal-round"` 的自定义消息（§4，进 LLM 上下文，`details` 带 `{ goalId, revision, round }`）。折叠器只认 `customType: "goal"` 且 `data.kind` 为八种 kind 之一的条目，其余条目一律忽略；抽屉历史两类都读（§5）。单写者假设：同一会话文件同一时刻只由一个进程打开续写（Electron 会话页或 CLI 其一），规格不支持两进程并发写同一会话的 Goal 事件（见 §8）。
 
 `clear` 之后投影为「当前无 Goal」；此前事件留在日志里供抽屉历史。新的 `create` 使用新 `goalId`，revision 从 1 起。
 
@@ -55,7 +57,7 @@ Goal 是绑在**当前 Pi 会话**上的长期完成条件。`/goal`、条、模
 | `session_start` / 进程起来 / fork 后的新进程 | 默认 `disarmed`；若设置 `goal.autoContinueOnOpen === true` 且阶段为 `active`，则为 `armed` |
 | `complete` / `clear` | 无续跑 |
 
-设置键写死为 `goal.autoContinueOnOpen`，布尔，默认 `false`，**应用级一项**。Electron 写进现有设置并经 ALS / `getConfig` 注入扩展；CLI 读同一配置键。所有会话共用。
+设置键写死为 `goal.autoContinueOnOpen`，布尔，默认 `false`，**应用级一项**。Electron 写进现有设置并经 ALS / `getConfig` 注入扩展；CLI 读同一配置键。所有会话共用。配置通道是字符串键值表（`_shared/runtime-config.ts`），序列化写死：值 `"true"` 为开，其余（含缺失）为关；扩展侧封装唯一读取函数，不散落裸比较。
 
 ### 2.3 快照
 
@@ -69,6 +71,8 @@ interface GoalSnapshot {
   maxRounds: number; // 默认 256；首版不提供独立改上限命令
   createdAt: string;
   updatedAt: string;
+  ranMs: number;
+  runStartedAt?: string;
   activation: 'armed' | 'disarmed';
   blockedReason?: { code: string; message: string };
 }
@@ -95,7 +99,7 @@ interface GoalSnapshot {
 
 ### 3.1 `/goal`
 
-扩展注册 `goal`。桌面把它标成执行性命令：不进模型、不 `awaitingResponse`；对话列表可插本地 `{ kind: 'command-input'; id; command: '/goal'; rest }`，按 `sessionId` 内存索引，不写 JSONL，切会话或重载消失。`ChatView` 既有「已执行 /goal」toast 保留，与 `ctx.ui.notify` 并存。
+扩展注册 `goal`。桌面把它标成执行性命令：不进模型、不 `awaitingResponse`；对话列表可插本地 `{ kind: 'command-input'; id; command: '/goal'; rest; beforeCount }`，按 `sessionId` 内存索引，不写 JSONL，切会话或重载消失。`beforeCount` 是发送当下已分组消息数：空会话为 0，行停在对话开头，后续 Goal Round 排在后面（对齐 DSH `command/run.seq`）。`ChatView` 既有「已执行 /goal」toast 保留，与 `ctx.ui.notify` 并存。
 
 解析（`args.trim()` 后，控制词大小写不敏感的整段相等用小写比较）：
 
@@ -106,7 +110,7 @@ interface GoalSnapshot {
 | 整段 `edit` | 错误：缺条件 |
 | `edit` + 条件但无 Goal | 错误：当前没有生效的目标 |
 | `edit` + 空白 + 条件 | `edit` |
-| 其它非空 | `create`；已有未 `complete` 的 Goal 则拒绝，提示先 edit 或 clear |
+| 其它非空 | `create`；已有未 `complete` 的 Goal 则拒绝，提示先 edit 或 clear（`complete` 视为已结案：直接创建新目标，旧目标留事件史；有意行为，非遗漏） |
 
 `/goal pause after verify` 为创建。条件 trim 后长度 0 或 >4000 拒绝（扩展预检错误码 `INVALID_PARAMS`）。
 
@@ -130,7 +134,7 @@ interface GoalSnapshot {
 
 - `get_goal()` → 当前快照或 `null`（含 `activation`）。
 - `create_goal({ condition, maxRounds? })` → 新 Goal，`armed`。
-- `update_goal({ goalId, revision, action, condition?, blocked_reason? })`，`action` 为 `edit` | `pause` | `resume` | `complete` | `blocked`。
+- `update_goal({ goalId, revision, action, condition?, blockedReason? })`，`action` 为 `edit` | `pause` | `resume` | `complete` | `blocked`。
 
 权限在执行时认轮次来源：
 
@@ -138,7 +142,14 @@ interface GoalSnapshot {
 - `create` / `edit` / `pause` / `resume`：本轮已有来源为用户的消息。
 - `complete` / `blocked`：上述真人权限，**或**本轮有来源为 Goal 且 `goalId` / `revision` / `round === roundsStarted` 的 Goal Round 消息。
 - 持久 `paused` 的 `resume`：一律拒绝（`GOAL_TOOL_RESUME_PAUSED`），只走命令 / 条。
-- `blocked`：`roundsStarted >= 3` 且 `blocked_reason` 非空；是否同一障碍由模型判断。阈值常量 `3`。
+- `blocked`：`roundsStarted >= 3` 且 `blockedReason` 非空；是否同一障碍由模型判断。阈值常量 `3`。
+
+判定依据写死：
+
+- 「根 agent、开放轮次」沿用 `_shared/workspace-context` 的 origin 解析（`subagent` origin 一律拒绝）；`tools.ts` 里 `PI_GOAL_WORKER` / `PI_SYSTEM_WORKER` env 回退随 sidecar 拆除一并删除（§6）。
+- 「本轮已有来源为用户的消息」沿用 `input` 事件通道（`InputSource` 只覆盖 interactive / rpc / extension，真人输入必然经过它）：`input` 时记录，`agent_settled` 时清除。
+- 「Goal Round 消息」不经 `input`（`sendMessage` 不触发该事件）：扩展发送续跑正文时记录进程内 pending 标记 `{ goalId, revision, round }`，`agent_settled` 时清除；工具执行时与参数比对，旧 round 或清除后的 `complete` / `blocked` 一律拒绝。两处判定都在扩展进程内存，不写 JSONL。
+- `paused` 的模型 `resume` 一律拒绝而 `blocked` 放行（真人轮内）是有意的：`blocked` 的语义是「同一障碍连续 3 轮」，人回到对话发消息即代表给出新信息，模型可据此恢复；`paused` 是人的显式暂停，恢复权保留给人。
 
 `complete` / `blocked` 的工具结果不结束轮次；模型仍可对用户说一句收尾（对齐 DSH wrap-up）。
 
@@ -148,15 +159,26 @@ interface GoalSnapshot {
 
 ## 4. 续跑
 
-只在当前可见会话。`agent_end` 且非用户中止时：
+只在当前可见会话。重入钩子写死为 `agent_settled`（语义为「重试、compaction、排队续跑均不再发生」，晚于 `agent_end`，避开与用户末刻 steer 消息的竞态）。命中时：
 
 1. 无 Goal，或 `status !== 'active'`，或 `activation !== 'armed'` → 结束。
-2. `roundsStarted >= maxRounds` → 不重入，阶段保持 `active`，不标 `complete`。
-3. 否则追加 `round`（`roundsStarted + 1`），对同一会话 `sendMessage(续跑正文, { triggerTurn: true })`，来源标 Goal Round（当前 `goalId` / `revision` / 新 round）。不出现用户气泡。
+2. 本轮任一 assistant 消息 `stopReason === 'aborted'`（用户中止）或 `'error'`（运行故障）→ 不重入。中止**不等于** `pause`，armed 不变；`error` 同样不改阶段、不计数，防止网络/凭据类故障原地空转。
+3. `roundsStarted >= maxRounds` → 不重入，阶段保持 `active`，不标 `complete`；本次从「未达」进入「已达」时 `notify` 一次「已达轮次上限」，进程内去重，重开进程后允许再提示一次。
+4. 否则追加 `round`（`roundsStarted + 1`），对同一会话 `sendMessage(续跑正文, { triggerTurn: true })`，正文 `customType: "goal-round"`，`details` 带 `{ goalId, revision, round }`（即 §3.2 的 Goal Round 来源）。不出现用户气泡。
 
-用户 Esc / 中止：不重入，**不等于** `pause`，armed 不变。
+`/goal create` 与 `/goal resume` 在命令 handler 成功后立刻走同一套重入（`startArmedGoalRound`）。模型工具里的 create / resume 仍等当前轮 `agent_settled`，避免套娃开轮。
 
-`goal.autoContinueOnOpen === true` 且 `session_start` 时阶段为 `active`：设 `armed`；若会话空闲，立即按上面第 3 步重入一次。fork 出的新会话重放事件，新进程仍先走默认 `disarmed`（除非该设置打开且阶段 `active`）。
+会话前置：
+
+| 状态 | 有没有会话 | Goal |
+| --- | --- | --- |
+| 初屏默认草稿 | 无。只有 works 目录 | 第一条 `/goal` 或普通消息才 `ensureSession` 转正 |
+| 侧栏「新建对话」或项目「新建会话」 | 无。空白草稿，与初屏相同 | 第一条 `/goal` 或普通消息才 `ensureSession` 转正 |
+| 已有会话 | 有 | 直接写 |
+
+`agent_settled` 与用户输入并发时，重入正文按 steer 进入当轮，可接受，不做额外协调。
+
+`goal.autoContinueOnOpen === true` 且 `session_start` 时阶段为 `active`：设 `armed`；若会话空闲，立即按上面第 4 步重入一次。fork 出的新会话重放事件，新进程仍先走默认 `disarmed`（除非该设置打开且阶段 `active`）。
 
 不引入 token 预算。轮次上限是唯一自动上限。
 
@@ -168,7 +190,7 @@ interface GoalSnapshot {
 - 动作：调用与 `/goal` 相同的扩展 handler（不经模型）。
 - 去掉 `judging` / `error` 行。`active`+`disarmed` 用「未运行的目标」+ 灰灯 + 恢复。
 - `blocked` 的整行 `title` 为 `blockedReason.message`。
-- 抽屉历史读本会话 `customType: "goal"` 事件，不读 `admin.goal.history`。
+- 抽屉历史读本会话两类条目：`customType: "goal"` 状态事件 + `customType: "goal-round"` 续跑正文（按轮次记录展示），不读 `admin.goal.history`。
 
 按钮：
 
@@ -193,21 +215,21 @@ interface GoalSnapshot {
 
 保留：AgentData 的 Memory / Wiki / CodeGraph / 任务 / 工具审批。
 
-`extensions/goal`：事件折算、命令、三个工具、`agent_end` 续跑、完成审计提示词。`tools.ts` 不再暴露 `block` / `begin_judging`。
+`extensions/goal`：事件折算、命令、三个工具、`agent_settled` 续跑、完成审计提示词。`tools.ts` 不再暴露 `block` / `begin_judging`，并删除 `PI_GOAL_WORKER` / `PI_SYSTEM_WORKER` env 回退。
 
 前端 zustand 快照改为 §2.3。不改 `tauri-agent` 的 Goal UI；若它仍调用已删 IPC，切断引用，避免挂死。
 
-写 JSONL 失败：变更不成，`notify` 失败，不回退到任何库。工具权限失败用稳定错误码（`GOAL_TOOL_*` / `GOAL_TOOL_RESUME_PAUSED`）。
+写 JSONL 走 `pi.appendEntry`（返回 `void`），扩展无法感知落盘失败，也没有其它写通道：状态写入按 best-effort 实现，**不提供**失败回执，不得伪造。丢失条目的后果是投影未推进而调用方以为成功；快照一律以折叠结果为准，工具结果回带的 `goalId` / `revision` 仅用于请求比对。此为已知局限，待 pi 提供可感知错误的写入 API 再升级。工具权限失败用稳定错误码（`GOAL_TOOL_*` / `GOAL_TOOL_RESUME_PAUSED`）。
 
 ## 7. 测试
 
 只测 Electron + `extensions/goal`（及拆除后主进程不再导出 Goal RPC）。
 
-- 折算：create→edit→pause→resume→round→complete；clear 后投影空；revision 单调。
-- `/goal` 解析表 §3.1，含裸查询、`pause after verify` 创建。
-- 工具权限：无真人不能 create；Goal Round 能 complete；paused 不能被模型 resume；blocked 轮次不足拒绝。
-- `agent_end`：armed 重入并写出 `round`；disarmed / paused / 中止 / 达上限不重入。
-- `goal.autoContinueOnOpen` 开关：默认 session_start 不重入；打开且 active 则 armed（空闲则重入）。
+- 折算：create→edit→pause→resume→round→complete；clear 后投影空；revision 单调；折叠器忽略 `goal-round` 正文与无 `kind` 的条目。
+- `/goal` 解析表 §3.1，含裸查询、`pause after verify` 创建、`complete` 后免 clear 直建新目标。
+- 工具权限：无真人不能 create；Goal Round 能 complete；paused 不能被模型 resume；blocked 轮次不足拒绝；pending 标记在 `agent_settled` 后失效（旧 round 的 complete / blocked 被拒）；`PI_GOAL_WORKER` 不再影响判定。
+- `agent_settled` 续跑：armed 重入并写出 `round`；disarmed / paused / 中止（`stopReason === 'aborted'`）/ `error` 结束 / 达上限不重入；达上限 notify 一次且去重。
+- `goal.autoContinueOnOpen` 开关：默认 session_start 不重入；打开且 active 则 armed（空闲则重入）；落盘值仅 `"true"` 生效。
 - 条：armed / disarmed / complete / 无目标；编辑走 `edit`；清除确认。
 - 主进程：Goal RPC 通道不存在；Memory/Wiki 回归仍过。
 
@@ -220,9 +242,11 @@ interface GoalSnapshot {
 - 不迁 AgentData 旧 Goal。
 - 不升级 tauri Goal 条。
 - 不加 Goal 快捷键。
+- 不支持两进程并发写同一会话的 Goal 事件（单写者假设，§2.1）。
+- 不感知 `appendEntry` 落盘失败（§6 已知局限，待内核提供可感知错误的写入 API）。
 
 ## 9. 规格自检
 
-- 权威源、阶段、activation、设置键、事件 kind、工具权限、续跑条件、条按钮、拆除清单、不迁数据均已写死。
+- 权威源、阶段、activation、设置键（含序列化）、事件 kind、通道区分（`goal` vs `goal-round`）、工具权限判定依据（origin / `input` / pending 标记）、续跑钩子与中止/错误判定（`agent_settled` + `stopReason`）、达上限提示、条按钮、拆除清单、写失败局限、单写者假设、不迁数据均已写死。
 - 与 9 月 6 日规格矛盾处（AgentData 权威、独立裁判、持久 disarmed、headless worker）以本文为准。
 - 范围可收进一份实现计划：扩展领域 + 桌面命令/条接线 + 拆除 AgentData Goal。宽度常量可同计划末任务。

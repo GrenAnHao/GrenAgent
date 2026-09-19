@@ -38,6 +38,8 @@ const makeSnapshot = (overrides: Partial<GoalSnapshot> = {}): GoalSnapshot => ({
   maxRounds: 256,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-01T00:00:01.000Z',
+  ranMs: 0,
+  runStartedAt: '2026-09-01T00:00:00.000Z',
   activation: 'armed',
   ...overrides,
 });
@@ -70,7 +72,7 @@ describe('GoalPill', () => {
     await renderGoal();
 
     expect(screen.getByText('执行中的目标')).toBeTruthy();
-    expect(screen.getByText('写完测试')).toBeTruthy();
+    expect(screen.getByText('· 写完测试')).toBeTruthy();
     expect(lampStyle()).toContain('#3dd68c');
     expect(lampStyle()).toMatch(/box-shadow/i);
     expect(screen.getByRole('button', { name: '暂停目标' })).toBeTruthy();
@@ -214,5 +216,15 @@ describe('GoalPill', () => {
   it('never shows the round budget on the bar', async () => {
     await renderGoal({ roundsStarted: 12, maxRounds: 256 });
     expect(screen.queryByText(/\/256/)).toBeNull();
+  });
+
+  it('keeps the elapsed label after pause instead of resetting to 1s', async () => {
+    await renderGoal({
+      status: 'paused',
+      activation: 'disarmed',
+      ranMs: 125_000,
+      runStartedAt: undefined,
+    });
+    expect(screen.getByText('· 2m')).toBeTruthy();
   });
 });

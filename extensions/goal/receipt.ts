@@ -18,5 +18,5 @@ export function formatGoalReceipt(snapshot: GoalSnapshot): string {
   if (snapshot.status === "blocked" && snapshot.blockedReason?.message) {
     lines.push(snapshot.blockedReason.message);
   }
-  return lines.join("\n");
+  return lines.join(" · ");
 }

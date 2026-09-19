@@ -1,12 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { setGoalHumanInput } from "./auth.js";
 import {
-  decideGoalContinuation,
-  notifyMaxRoundsReached,
   onAgentSettled,
   recordRunStopReasons,
-  reenterGoalRound,
-  wasMaxRoundsNotified,
+  startArmedGoalRound,
 } from "./continue.js";
 import { parseGoalArgs } from "./parse.js";
 import { formatGoalReceipt } from "./receipt.js";
@@ -15,11 +12,9 @@ import {
   createGoal,
   currentStatusSnapshot,
   editGoal,
-  getActivation,
   onSessionStart,
   pauseGoal,
   pushStatus,
-  readSnapshot,
   resumeGoal,
   sessionIdOf,
 } from "./session.js";
@@ -74,6 +69,7 @@ export default function (pi: ExtensionAPI) {
         }
         if (parsed.type === "create") {
           ctx.ui.notify(receiptOf(ctx, createGoal(pi, ctx, parsed.condition)), "info");
+          await startArmedGoalRound(pi, ctx);
           return;
         }
         if (parsed.type === "edit") {
@@ -86,6 +82,7 @@ export default function (pi: ExtensionAPI) {
         }
         if (parsed.type === "resume") {
           ctx.ui.notify(receiptOf(ctx, resumeGoal(pi, ctx)), "info");
+          await startArmedGoalRound(pi, ctx);
           return;
         }
         clearGoal(pi, ctx);
@@ -114,24 +111,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     onSessionStart(ctx);
-    const snapshot = readSnapshot(ctx);
-    const sessionId = sessionIdOf(ctx);
-    if (getActivation(sessionId) !== "armed" || snapshot?.status !== "active") {
-      return;
-    }
-    const decision = decideGoalContinuation({
-      snapshot,
-      activation: "armed",
-      assistantStops: [],
-      alreadyNotifiedMaxRounds: wasMaxRoundsNotified(sessionId, snapshot),
-    });
-    if (decision.action === "max-rounds") {
-      notifyMaxRoundsReached(ctx, snapshot);
-      return;
-    }
-    if (decision.action === "reenter") {
-      await reenterGoalRound(pi, ctx, snapshot);
-    }
+    await startArmedGoalRound(pi, ctx);
   });
 
   pi.on("agent_end", async (event, ctx) => {

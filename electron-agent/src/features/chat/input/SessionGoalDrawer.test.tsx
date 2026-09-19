@@ -29,6 +29,7 @@ const snapshot: GoalSnapshot = {
   maxRounds: 12,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-01T00:00:01.000Z',
+  ranMs: 0,
   activation: 'disarmed',
   blockedReason: { code: 'model-reported', message: '等待外部依赖' },
   history: [

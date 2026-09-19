@@ -12,6 +12,7 @@ function snap(over: Partial<GoalSnapshot> = {}): GoalSnapshot {
     maxRounds: 256,
     createdAt: "2026-09-13T00:00:00.000Z",
     updatedAt: "2026-09-13T00:00:00.000Z",
+    ranMs: 0,
     ...over,
   };
 }

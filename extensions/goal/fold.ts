@@ -44,6 +44,18 @@ function parseCondition(value: unknown): string | undefined {
   return trimmed;
 }
 
+function parseAt(at: string): number | undefined {
+  const value = Date.parse(at);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function freezeRun(snapshot: GoalSnapshot, at: string): Pick<GoalSnapshot, "ranMs"> {
+  const start = snapshot.runStartedAt ? parseAt(snapshot.runStartedAt) : undefined;
+  const end = parseAt(at);
+  const extra = start !== undefined && end !== undefined ? Math.max(0, end - start) : 0;
+  return { ranMs: (snapshot.ranMs ?? 0) + extra };
+}
+
 function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalSnapshot | undefined {
   switch (event.kind) {
     case "create": {
@@ -59,6 +71,8 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
         maxRounds: parseMaxRounds(event.payload.maxRounds),
         createdAt: event.at,
         updatedAt: event.at,
+        ranMs: 0,
+        runStartedAt: event.at,
       };
     }
     case "edit": {
@@ -74,11 +88,13 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
     }
     case "pause": {
       if (!snapshot || snapshot.status !== "active") return snapshot;
+      const { runStartedAt: _, ...rest } = snapshot;
       return {
-        ...snapshot,
+        ...rest,
         revision: event.revision,
         status: "paused",
         updatedAt: event.at,
+        ...freezeRun(snapshot, event.at),
       };
     }
     case "resume": {
@@ -89,27 +105,33 @@ function applyEvent(snapshot: GoalSnapshot | undefined, event: GoalEvent): GoalS
         revision: event.revision,
         status: "active",
         updatedAt: event.at,
+        ranMs: snapshot.ranMs ?? 0,
+        runStartedAt: event.at,
       };
     }
     case "complete": {
       if (!snapshot || snapshot.status !== "active") return snapshot;
+      const { runStartedAt: _, ...rest } = snapshot;
       return {
-        ...snapshot,
+        ...rest,
         revision: event.revision,
         status: "complete",
         updatedAt: event.at,
+        ...freezeRun(snapshot, event.at),
       };
     }
     case "blocked": {
       if (!snapshot || snapshot.status !== "active") return snapshot;
       const message = event.payload.message;
       if (typeof message !== "string" || message.trim() === "") return snapshot;
+      const { runStartedAt: _, ...rest } = snapshot;
       return {
-        ...snapshot,
+        ...rest,
         revision: event.revision,
         status: "blocked",
         blockedReason: { code: "model-reported", message },
         updatedAt: event.at,
+        ...freezeRun(snapshot, event.at),
       };
     }
     case "clear":

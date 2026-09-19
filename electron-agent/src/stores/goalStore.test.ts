@@ -12,6 +12,7 @@ const snapshot = (sessionId: string, revision: number, status: GoalSnapshot['sta
   maxRounds: 256,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: `2026-09-01T00:00:0${revision}.000Z`,
+  ranMs: 0,
   activation: 'disarmed',
 });
 

@@ -4,6 +4,7 @@ import { buildGoalRoundPrompt } from "./prompt.js";
 import {
   getActivation,
   nextRevision,
+  pushStatus,
   readSnapshot,
   sessionIdOf,
   writeEvent,
@@ -102,6 +103,28 @@ export async function onAgentSettled(
   await reenterGoalRound(pi, ctx, snapshot);
 }
 
+export async function startArmedGoalRound(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const snapshot = readSnapshot(ctx);
+  const sessionId = sessionIdOf(ctx);
+  const activation = getActivation(sessionId);
+  const decision = decideGoalContinuation({
+    snapshot,
+    activation,
+    assistantStops: [],
+    alreadyNotifiedMaxRounds: snapshot ? wasMaxRoundsNotified(sessionId, snapshot) : false,
+  });
+  if (decision.action === "max-rounds" && snapshot) {
+    notifyMaxRoundsReached(ctx, snapshot);
+    return;
+  }
+  if (decision.action === "reenter" && snapshot) {
+    await reenterGoalRound(pi, ctx, snapshot);
+  }
+}
+
 export async function reenterGoalRound(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -139,4 +162,5 @@ export async function reenterGoalRound(
     },
     { triggerTurn: true },
   );
+  pushStatus(ctx);
 }

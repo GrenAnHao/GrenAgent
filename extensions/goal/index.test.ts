@@ -135,7 +135,14 @@ describe("goal extension factory", () => {
         revision: 1,
         payload: { condition: "写完" },
       }),
+      expect.objectContaining({ kind: "round", revision: 2, payload: { round: 1 } }),
     ]);
+    expect(calls.send[0]?.[0]).toMatchObject({
+      customType: "goal-round",
+      display: false,
+      details: { round: 1 },
+    });
+    expect(calls.send[0]?.[1]).toEqual({ triggerTurn: true });
 
     const envelope = lastEnvelope(calls);
     expect(envelope).toMatchObject({
@@ -145,6 +152,7 @@ describe("goal extension factory", () => {
     });
     expect(envelope.history).toEqual([
       expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
+      expect.objectContaining({ source: "event", kind: "round", payload: { round: 1 } }),
     ]);
     expect(envelope.snapshot).toMatchObject({ status: "active", activation: "armed", condition: "写完" });
 
@@ -161,7 +169,7 @@ describe("goal extension factory", () => {
     const before = entries.length;
     await handler("另一条", ctx);
     expect(entries.length).toBe(before);
-    expect(goalEvents(entries).every((event) => event.kind === "create")).toBe(true);
+    expect(goalEvents(entries).filter((event) => event.kind === "create")).toHaveLength(1);
     const [text, level] = lastNotify(calls);
     expect(level).toBe("error");
     expect(text).toMatch(/edit|clear/i);
@@ -177,7 +185,7 @@ describe("goal extension factory", () => {
       data: {
         kind: "complete",
         goalId: created.goalId,
-        revision: 2,
+        revision: 3,
         at: "2026-09-13T00:00:00.000Z",
         payload: {},
       },
@@ -185,7 +193,7 @@ describe("goal extension factory", () => {
 
     await handler("新目标", ctx);
     const events = goalEvents(entries);
-    const next = events.at(-1);
+    const next = events.findLast((event) => event.kind === "create");
     expect(next).toMatchObject({
       kind: "create",
       revision: 1,
@@ -219,22 +227,25 @@ describe("goal extension factory", () => {
     await handler("写完", ctx);
     await handler("pause", ctx);
     await handler("resume", ctx);
-    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "resume" });
+    expect(goalEvents(entries).at(-1)).toMatchObject({ kind: "round" });
+    expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(true);
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
     expect(lastNotify(calls)[1]).toBe("info");
+    expect(calls.send.at(-1)?.[0]).toMatchObject({ customType: "goal-round" });
   });
 
   it("re-arms an active disarmed goal on resume without writing a resume event", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
-    const kindsBefore = goalEvents(entries).map((event) => event.kind);
     await handlers.session_start?.({}, ctx);
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
 
+    const sendBefore = calls.send.length;
     await handler("resume", ctx);
-    expect(goalEvents(entries).map((event) => event.kind)).toEqual(kindsBefore);
     expect(goalEvents(entries).some((event) => event.kind === "resume")).toBe(false);
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
+    expect(calls.send.length).toBeGreaterThan(sendBefore);
+    expect(calls.send.at(-1)?.[0]).toMatchObject({ customType: "goal-round" });
   });
 
   it("clears the goal and pushes a null snapshot", async () => {
@@ -246,6 +257,7 @@ describe("goal extension factory", () => {
     expect(envelope.snapshot).toBeNull();
     expect(envelope.history).toEqual([
       expect.objectContaining({ source: "event", kind: "create", revision: 1, payload: { condition: "写完" } }),
+      expect.objectContaining({ source: "event", kind: "round", payload: { round: 1 } }),
       expect.objectContaining({ source: "event", kind: "clear" }),
     ]);
     expect(lastNotify(calls)[1]).toBe("info");
@@ -299,19 +311,19 @@ describe("goal extension factory", () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     const created = goalEvents(entries)[0];
+    const sendBefore = calls.send.length;
 
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
     await handlers.agent_settled?.({}, ctx);
 
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
-    expect(calls.send).toHaveLength(1);
-    const [message, options] = calls.send[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(calls.send).toHaveLength(sendBefore + 1);
+    const [message, options] = calls.send.at(-1) as [Record<string, unknown>, Record<string, unknown>];
     expect(message.customType).toBe("goal-round");
     expect(message.display).toBe(false);
     expect(message.details).toEqual({
       goalId: created.goalId,
-      revision: 2,
-      round: 1,
+      revision: 3,
+      round: 2,
     });
     expect(options).toEqual({ triggerTurn: true });
   });
@@ -320,11 +332,12 @@ describe("goal extension factory", () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     const kindsBefore = goalEvents(entries).map((event) => event.kind);
+    const sendBefore = calls.send.length;
 
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason }] }, ctx);
     await handlers.agent_settled?.({}, ctx);
 
-    expect(calls.send).toEqual([]);
+    expect(calls.send).toHaveLength(sendBefore);
     expect(goalEvents(entries).map((event) => event.kind)).toEqual(kindsBefore);
     expect(getActivation("session-a")).toBe("armed");
   });
@@ -332,12 +345,13 @@ describe("goal extension factory", () => {
   it("treats settle without a prior agent_end as a normal end and reenters", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
+    const sendBefore = calls.send.length;
 
     await handlers.agent_settled?.({}, ctx);
 
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
-    expect(calls.send).toHaveLength(1);
-    const [message] = calls.send[0] as [Record<string, unknown>];
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
+    expect(calls.send).toHaveLength(sendBefore + 1);
+    const [message] = calls.send.at(-1) as [Record<string, unknown>];
     expect(message.customType).toBe("goal-round");
   });
 
@@ -345,13 +359,14 @@ describe("goal extension factory", () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     const created = goalEvents(entries)[0];
+    const sendBefore = calls.send.length;
     entries.push({
       type: "custom",
       customType: "goal",
       data: {
         kind: "round",
         goalId: created.goalId,
-        revision: 2,
+        revision: 3,
         at: "2026-09-13T00:00:00.000Z",
         payload: { round: DEFAULT_MAX_ROUNDS },
       },
@@ -360,8 +375,8 @@ describe("goal extension factory", () => {
     const before = calls.notify.length;
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
     await handlers.agent_settled?.({}, ctx);
-    expect(calls.send).toEqual([]);
-    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(1);
+    expect(calls.send).toHaveLength(sendBefore);
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
     const first = calls.notify.slice(before) as [string, string][];
     expect(first.some(([text, level]) => text.includes("已达轮次上限") && (level === "warning" || level === "info"))).toBe(true);
 
@@ -369,7 +384,7 @@ describe("goal extension factory", () => {
     await handlers.agent_settled?.({}, ctx);
     const second = calls.notify.slice(mid) as [string, string][];
     expect(second.some(([text]) => text.includes("已达轮次上限"))).toBe(false);
-    expect(calls.send).toEqual([]);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 
   it("clears the previous pending mark and sets the folded one on reenter", async () => {
@@ -402,74 +417,76 @@ describe("goal extension factory", () => {
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
     await handlers.agent_settled?.({}, ctx);
 
-    expect(calls.send).toEqual([]);
+    expect(calls.send).toHaveLength(1);
     expect(hasGoalRound("session-a", oldRef)).toBe(false);
   });
 
   it("disarms on session_start by default and does not reenter", async () => {
-    const { handler, ctx, calls, handlers, entries } = setup();
+    const { handler, ctx, calls, handlers } = setup();
     await handler("写完", ctx);
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+    const sendBefore = calls.send.length;
 
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
-    expect(calls.send).toEqual([]);
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 
   it("arms and reenters on session_start when autoContinueOnOpen is true", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
+    const sendBefore = calls.send.length;
+    const roundsBefore = goalEvents(entries).filter((event) => event.kind === "round").length;
     process.env["goal.autoContinueOnOpen"] = "true";
 
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
-    expect(calls.send).toHaveLength(1);
-    const [message, options] = calls.send[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(goalEvents(entries).filter((event) => event.kind === "round").length).toBe(roundsBefore + 1);
+    expect(calls.send).toHaveLength(sendBefore + 1);
+    const [message, options] = calls.send.at(-1) as [Record<string, unknown>, Record<string, unknown>];
     expect(message.customType).toBe("goal-round");
     expect(message.display).toBe(false);
     expect(options).toEqual({ triggerTurn: true });
   });
 
   it("treats autoContinueOnOpen=1 like the default and does not reenter", async () => {
-    const { handler, ctx, calls, handlers, entries } = setup();
+    const { handler, ctx, calls, handlers } = setup();
     await handler("写完", ctx);
+    const sendBefore = calls.send.length;
     process.env["goal.autoContinueOnOpen"] = "1";
 
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "disarmed" });
-    expect(calls.send).toEqual([]);
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 
   it("does not arm or reenter a paused goal even when autoContinueOnOpen is true", async () => {
-    const { handler, ctx, calls, handlers, entries } = setup();
+    const { handler, ctx, calls, handlers } = setup();
     await handler("写完", ctx);
     await handler("pause", ctx);
+    const sendBefore = calls.send.length;
     process.env["goal.autoContinueOnOpen"] = "true";
 
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "paused", activation: "disarmed" });
-    expect(calls.send).toEqual([]);
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(false);
+    expect(calls.send).toHaveLength(sendBefore);
   });
 
   it("notifies max rounds on open without writing a new round", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
     const created = goalEvents(entries)[0];
+    const sendBefore = calls.send.length;
     entries.push({
       type: "custom",
       customType: "goal",
       data: {
         kind: "round",
         goalId: created.goalId,
-        revision: 2,
+        revision: 3,
         at: "2026-09-13T00:00:00.000Z",
         payload: { round: DEFAULT_MAX_ROUNDS },
       },
@@ -480,8 +497,8 @@ describe("goal extension factory", () => {
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(calls.send).toEqual([]);
-    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(1);
+    expect(calls.send).toHaveLength(sendBefore);
+    expect(goalEvents(entries).filter((event) => event.kind === "round")).toHaveLength(2);
     const opened = calls.notify.slice(before) as [string, string][];
     expect(opened.some(([text, level]) => text.includes("已达轮次上限") && (level === "warning" || level === "info"))).toBe(true);
   });
@@ -489,14 +506,15 @@ describe("goal extension factory", () => {
   it("reenters on open even if a leftover aborted stop is still captured", async () => {
     const { handler, ctx, calls, handlers, entries } = setup();
     await handler("写完", ctx);
+    const sendBefore = calls.send.length;
     await handlers.agent_end?.({ messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
     process.env["goal.autoContinueOnOpen"] = "true";
 
     await handlers.session_start?.({}, ctx);
 
     expect(lastEnvelope(calls).snapshot).toMatchObject({ status: "active", activation: "armed" });
-    expect(goalEvents(entries).some((event) => event.kind === "round")).toBe(true);
-    expect(calls.send).toHaveLength(1);
+    expect(goalEvents(entries).filter((event) => event.kind === "round").length).toBeGreaterThan(1);
+    expect(calls.send).toHaveLength(sendBefore + 1);
   });
 });
 
