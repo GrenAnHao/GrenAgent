@@ -50,6 +50,7 @@ export interface ProjectItemProps {
   onReveal: () => void;
   onRename: () => void;
   onHide: () => void;
+  onClearSessions: () => void;
   onRemove: () => void;
 }
 
@@ -60,6 +61,7 @@ export function ProjectItem(p: ProjectItemProps) {
     onReveal: p.onReveal,
     onRename: p.onRename,
     onHide: p.onHide,
+    onClearSessions: p.onClearSessions,
     onRemove: p.onRemove,
   });
 

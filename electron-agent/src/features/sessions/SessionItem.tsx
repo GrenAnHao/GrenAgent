@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState } from 'react';
-import { Dropdown, Input } from 'antd';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Dropdown, Input, Modal } from 'antd';
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Hand, LoaderCircle } from 'lucide-react';
@@ -95,7 +95,13 @@ export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
   } = props;
   const [draft, setDraft] = useState(title);
   const [hovered, setHovered] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestDelete = useCallback(() => setDeleteOpen(true), []);
+  const confirmDelete = useCallback(() => {
+    setDeleteOpen(false);
+    onDelete();
+  }, [onDelete]);
 
   useEffect(() => {
     if (editing) {
@@ -131,27 +137,42 @@ export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
     pinned,
     onPinToggle,
     onRename: onRequestRename,
-    onDelete,
+    onDelete: requestDelete,
     onReveal,
   });
 
   return (
-    <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
-      <div
-        className={cx('pi-session-row', styles.row, active && styles.active)}
-        onClick={onClick}
-        onMouseEnter={() => {
-          if (!hovered) setHovered(true);
-        }}
+    <>
+      <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
+        <div
+          className={cx('pi-session-row', styles.row, active && styles.active)}
+          onClick={onClick}
+          onMouseEnter={() => {
+            if (!hovered) setHovered(true);
+          }}
+        >
+          <span className={styles.title}>{title}</span>
+          {running && (
+            <span data-testid="session-running" className={styles.spin}>
+              <Icon icon={waiting ? Hand : LoaderCircle} size="small" />
+            </span>
+          )}
+          <span className={styles.acts}>{hovered && <RowActions menuItems={menuItems} />}</span>
+        </div>
+      </Dropdown>
+      <Modal
+        open={deleteOpen}
+        title="删除会话"
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true, 'data-testid': 'session-delete-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'session-delete-cancel' }}
+        onOk={confirmDelete}
+        onCancel={() => setDeleteOpen(false)}
+        centered
       >
-        <span className={styles.title}>{title}</span>
-        {running && (
-          <span data-testid="session-running" className={styles.spin}>
-            <Icon icon={waiting ? Hand : LoaderCircle} size="small" />
-          </span>
-        )}
-        <span className={styles.acts}>{hovered && <RowActions menuItems={menuItems} />}</span>
-      </div>
-    </Dropdown>
+        确定删除「{title}」吗？此操作不可恢复。
+      </Modal>
+    </>
   );
 });

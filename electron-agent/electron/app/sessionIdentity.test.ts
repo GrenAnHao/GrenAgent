@@ -36,6 +36,20 @@ describe('readSessionIdentity', () => {
     await expect(readSessionIdentity(file, 'C:/other')).rejects.toThrow('SESSION_WORKSPACE_MISMATCH');
   });
 
+  it('does not treat UUID hyphens in a conversation cwd as path separators', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'session-identity-')); roots.push(root);
+    const workspace = 'C:/Users/me/.pi/agent/works/3778c198-1830-4aa9-a0eb-78549e8c4456';
+    const directory = join(root, '--C--Users-me-.pi-agent-works-3778c198-1830-4aa9-a0eb-78549e8c4456--');
+    const file = join(directory, '2026-09-05T00-00-00-000Z_draft-session.jsonl');
+    await mkdir(directory, { recursive: true });
+    await writeFile(file, '{}\n');
+    await expect(readSessionIdentity(file, workspace)).resolves.toMatchObject({
+      sessionId: 'draft-session',
+      sessionPath: file,
+      workspace,
+    });
+  });
+
   it('rejects paths that do not contain the timestamp and id filename shape', async () => {
     const root = await mkdtemp(join(tmpdir(), 'session-identity-')); roots.push(root);
     await expect(readSessionIdentity(join(root, '--tmp-repo--', 'session.jsonl'))).rejects.toThrow('INVALID_SESSION_IDENTITY');

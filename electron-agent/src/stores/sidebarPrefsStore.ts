@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { pathsEquivalent } from '../lib/pathUtils';
 
 interface SidebarPrefsState {
   pinnedProjects: string[]; // 按 cwd
   pinnedConversations: string[]; // 按 conversation cwd
   pinnedSessions: string[]; // 按 session.path
   hiddenProjects: string[]; // 按 cwd
+  keptProjects: string[]; // 清空会话后仍留在侧栏的项目 cwd（重启后仍在）
   aliases: Record<string, string>; // cwd -> 别名
   collapsed: Record<string, boolean>; // cwd -> 是否折叠（仅存非默认值）
 
@@ -14,6 +16,8 @@ interface SidebarPrefsState {
   togglePinnedSession: (path: string) => void;
   hideProject: (cwd: string) => void;
   unhideProject: (cwd: string) => void;
+  keepProject: (cwd: string) => void;
+  dropKeptProject: (cwd: string) => void;
   setAlias: (cwd: string, alias: string) => void;
   toggleCollapsed: (cwd: string, defaultCollapsed: boolean) => void;
   isCollapsed: (cwd: string, defaultCollapsed: boolean) => boolean;
@@ -29,6 +33,7 @@ export const useSidebarPrefsStore = create<SidebarPrefsState>()(
       pinnedConversations: [],
       pinnedSessions: [],
       hiddenProjects: [],
+      keptProjects: [],
       aliases: {},
       collapsed: {},
 
@@ -46,6 +51,16 @@ export const useSidebarPrefsStore = create<SidebarPrefsState>()(
         })),
       unhideProject: (cwd) =>
         set((s) => ({ hiddenProjects: s.hiddenProjects.filter((x) => x !== cwd) })),
+      keepProject: (cwd) =>
+        set((s) =>
+          s.keptProjects.some((p) => pathsEquivalent(p, cwd))
+            ? s
+            : { keptProjects: [...s.keptProjects, cwd] },
+        ),
+      dropKeptProject: (cwd) =>
+        set((s) => ({
+          keptProjects: s.keptProjects.filter((p) => !pathsEquivalent(p, cwd)),
+        })),
       setAlias: (cwd, alias) =>
         set((s) => {
           const next = { ...s.aliases };
@@ -62,6 +77,16 @@ export const useSidebarPrefsStore = create<SidebarPrefsState>()(
         return v === undefined ? defaultCollapsed : v;
       },
     }),
-    { name: 'pi-sidebar' },
+    {
+      name: 'pi-sidebar',
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<SidebarPrefsState>;
+        return {
+          ...current,
+          ...stored,
+          keptProjects: stored.keptProjects ?? current.keptProjects,
+        };
+      },
+    },
   ),
 );

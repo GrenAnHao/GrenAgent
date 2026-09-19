@@ -1,5 +1,5 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal, Webhook } from 'lucide-react';
+import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
 import { IS_DEV } from '../../lib/devMode';
 
@@ -13,9 +13,9 @@ interface ModuleDef {
 }
 
 // 全局 Agent Data 中心统一管理本地 CodeGraph、Wiki 与 Memory。
+// IM（微信 / HTTP 网关）已从产品路径卸下，侧栏不再露「连接」。接回见 docs/im-reintroduction.md。
 const MODULES: ModuleDef[] = [
   { id: 'chat', label: '对话', Icon: MessageSquare },
-  { id: 'connections', label: '连接', Icon: Webhook },
   { id: 'extensions', label: '扩展', Icon: Plug },
   { id: 'usage', label: '用量', Icon: BarChart3 },
   { id: 'agentData', label: 'Agent 数据', Icon: BrainCircuit },

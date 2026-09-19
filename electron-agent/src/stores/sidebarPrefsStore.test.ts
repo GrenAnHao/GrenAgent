@@ -6,6 +6,7 @@ const reset = () =>
     pinnedProjects: [],
     pinnedSessions: [],
     hiddenProjects: [],
+    keptProjects: [],
     aliases: {},
     collapsed: {},
   });
@@ -35,6 +36,15 @@ describe('sidebarPrefsStore', () => {
     expect(useSidebarPrefsStore.getState().aliases['/ws/a']).toBe('My Project');
     setAlias('/ws/a', '   ');
     expect(useSidebarPrefsStore.getState().aliases['/ws/a']).toBeUndefined();
+  });
+
+  it('keeps an empty project across drop/keep', () => {
+    const s = useSidebarPrefsStore.getState();
+    s.keepProject('/ws/c');
+    s.keepProject('/ws/c');
+    expect(useSidebarPrefsStore.getState().keptProjects).toEqual(['/ws/c']);
+    s.dropKeptProject('/ws/c');
+    expect(useSidebarPrefsStore.getState().keptProjects).toEqual([]);
   });
 
   it('hides a project idempotently and can unhide', () => {

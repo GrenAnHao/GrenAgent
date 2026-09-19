@@ -3,7 +3,7 @@ import { pathsEquivalent } from './pathUtils';
 
 /** 合并磁盘扫描结果与尚未落盘的 optimistic 会话（按 path 去重）。 */
 export function mergeAllSessions(allSessions: SessionInfo[], optimistic: SessionInfo[]): SessionInfo[] {
-  const merged = [...allSessions];
+  const merged = overlayUntitledNames(allSessions, optimistic);
   for (const o of optimistic) {
     if (!o.path || !o.cwd) continue;
     if (merged.some((m) => pathsEquivalent(m.path, o.path))) continue;
@@ -12,9 +12,22 @@ export function mergeAllSessions(allSessions: SessionInfo[], optimistic: Session
   return merged;
 }
 
-/** 磁盘已出现同 path 的会话后，移除对应 optimistic 占位。 */
+/** AUTO_TITLE 关闭时磁盘会话常无 session_info.name；保留发送瞬间写下的首条消息标题。 */
+function overlayUntitledNames(disk: SessionInfo[], optimistic: SessionInfo[]): SessionInfo[] {
+  return disk.map((session) => {
+    if (session.name?.trim()) return session;
+    const named = optimistic.find((o) => pathsEquivalent(o.path, session.path) && o.name?.trim());
+    return named ? { ...session, name: named.name } : session;
+  });
+}
+
+/** 磁盘已出现同 path 的会话后，移除对应 optimistic 占位。磁盘仍未命名时保留带标题的占位。 */
 export function pruneOptimisticSessions(allSessions: SessionInfo[], optimistic: SessionInfo[]): SessionInfo[] {
-  return optimistic.filter((o) => !allSessions.some((r) => pathsEquivalent(r.path, o.path)));
+  return optimistic.filter((o) => {
+    const disk = allSessions.find((r) => pathsEquivalent(r.path, o.path));
+    if (!disk) return true;
+    return !disk.name?.trim() && Boolean(o.name?.trim());
+  });
 }
 
 /** 过滤掉已乐观删除（等待后台清理完成）的会话 path，供侧栏列表即时移除。 */

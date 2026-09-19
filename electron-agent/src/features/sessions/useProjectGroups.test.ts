@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectGroups } from './useProjectGroups';
+import { buildProjectGroups, mergeProjectRegistrations } from './useProjectGroups';
 import type { SessionInfo } from '../../lib/pi';
 
 const s = (cwd: string, ts: string): SessionInfo => ({
@@ -39,6 +39,13 @@ describe('buildProjectGroups worksDir filter', () => {
     expect(groups[0].cwd).toBe('/proj/new');
     expect(groups[0].sessions).toHaveLength(0);
     expect(groups[0].isCurrent).toBe(true);
+  });
+
+  it('merges persisted empty projects without duplicating runtime ones', () => {
+    expect(mergeProjectRegistrations(['/proj/a'], ['/proj/a', '/proj/empty'])).toEqual([
+      '/proj/a',
+      '/proj/empty',
+    ]);
   });
 
   it('does not bump the current project to the top (stable order on open)', () => {

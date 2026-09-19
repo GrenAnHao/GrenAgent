@@ -26,6 +26,15 @@ interface BuildParams {
 
 const basename = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
+/** 运行时注册 + 持久保留的空项目 cwd，去重后供侧栏画空组。 */
+export function mergeProjectRegistrations(runtime: string[], kept: string[]): string[] {
+  const out = [...runtime];
+  for (const cwd of kept) {
+    if (!out.some((p) => pathsEquivalent(p, cwd))) out.push(cwd);
+  }
+  return out;
+}
+
 export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams): ProjectGroup[] {
   const { current, pinnedProjects, hiddenProjects, aliases, keyword, worksDir, registeredProjects } =
     params;
@@ -96,6 +105,7 @@ export function useProjectGroups(): ProjectGroup[] {
   const optimisticSessions = useSessionStore((s) => s.optimisticSessions);
   const deletedSessionPaths = useSessionStore((s) => s.deletedSessionPaths);
   const registeredProjects = useSessionStore((s) => s.registeredProjects);
+  const keptProjects = useSidebarPrefsStore((s) => s.keptProjects);
   const current = useSessionStore((s) => s.activeWorkspace);
   const keyword = useSessionStore((s) => s.searchKeyword);
   const worksDir = useSessionStore((s) => s.worksDir);
@@ -114,7 +124,7 @@ export function useProjectGroups(): ProjectGroup[] {
           aliases,
           keyword,
           worksDir,
-          registeredProjects,
+          registeredProjects: mergeProjectRegistrations(registeredProjects, keptProjects),
         },
       ),
     [
@@ -122,6 +132,7 @@ export function useProjectGroups(): ProjectGroup[] {
       optimisticSessions,
       deletedSessionPaths,
       registeredProjects,
+      keptProjects,
       current,
       pinnedProjects,
       hiddenProjects,

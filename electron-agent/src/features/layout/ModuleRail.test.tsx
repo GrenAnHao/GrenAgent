@@ -17,9 +17,10 @@ afterEach(() => {
 describe('ModuleRail', () => {
   it('renders only global module buttons', () => {
     render(<ModuleRail />);
-    for (const id of ['chat', 'connections', 'extensions', 'usage', 'settings']) {
+    for (const id of ['chat', 'extensions', 'usage', 'settings']) {
       expect(screen.getByTestId(`module-${id}`)).toBeTruthy();
     }
+    expect(screen.queryByTestId('module-connections')).toBeNull();
   });
 
   it('does not render retired memory or project-scoped modules', () => {
@@ -55,9 +56,9 @@ describe('ModuleRail', () => {
   });
 
   it('marks the active module with aria-pressed', () => {
-    useModuleStore.setState({ activeModule: 'connections' });
+    useModuleStore.setState({ activeModule: 'usage' });
     render(<ModuleRail />);
-    expect(screen.getByTestId('module-connections').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('module-usage').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('module-chat').getAttribute('aria-pressed')).toBe('false');
   });
 });

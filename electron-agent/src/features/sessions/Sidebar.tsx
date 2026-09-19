@@ -80,6 +80,7 @@ export interface SidebarProps {
   onOpenSession: (cwd: string, path: string) => void;
   onDeleteSession: (cwd: string, path: string) => void;
   onDeleteConversation: (cwd: string) => void;
+  onClearProjectSessions: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
 }
@@ -200,6 +201,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               onRevealProject={handleRevealProject}
               onRenameProject={handleRenameProject}
               onHideProject={hideProject}
+              onClearProjectSessions={props.onClearProjectSessions}
               onRemoveProject={props.onRemoveProject}
             />
           );
@@ -238,6 +240,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
       props.onOpenSession,
       props.onDeleteConversation,
       props.onNewSession,
+      props.onClearProjectSessions,
       props.onRemoveProject,
       props.onDeleteSession,
       handleSubmitRename,

@@ -9,7 +9,8 @@ export interface ProjectMenuParams {
   onReveal: () => void; // 在资源管理器中打开
   onRename: () => void; // 重命名（别名）
   onHide: () => void; // 从列表隐藏
-  onRemove: () => void; // 移除项目（清空其全部对话，不删真实目录）
+  onClearSessions: () => void; // 清空该项目全部会话，项目留在侧栏
+  onRemove: () => void; // 移除项目（清空会话并从列表拿掉，不删真实目录）
 }
 
 type Items = NonNullable<MenuProps['items']>;
@@ -42,9 +43,16 @@ export function buildProjectMenuItems(p: ProjectMenuParams): Items {
       onClick: p.onHide,
     },
     {
+      key: 'clear-sessions',
+      icon: createElement(Icon, { icon: Trash2, size: 'small' }),
+      label: '清空会话',
+      danger: true,
+      onClick: p.onClearSessions,
+    },
+    {
       key: 'remove',
       icon: createElement(Icon, { icon: Trash2, size: 'small' }),
-      label: '移除项目（清空对话）',
+      label: '移除项目',
       danger: true,
       onClick: p.onRemove,
     },

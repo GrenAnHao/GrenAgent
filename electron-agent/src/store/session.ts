@@ -12,7 +12,7 @@ interface SessionStore {
   registeredProjects: string[]; // 已打开但可能尚无 session 文件的项目 cwd
   worksDir: string; // ~/.pi/agent/works 的 canonical 前缀（区分对话/项目）
   activeWorkspace: string; // 当前选中项目 cwd（替代常量 WORKSPACE，默认 '.'）
-  draftConversationCwd: string | null; // 新建但尚未首发落盘 session 的空白对话 cwd
+  draftConversationCwd: string | null; // 点了新建但尚未首发落盘的 cwd（对话 scratch 或项目）
   activeSessionPath: string | null;
   workspaceSessionPaths: Record<string, string>; // workspace(cwd) → 该 ws 当前活跃 sessionPath
   searchKeyword: string;

@@ -11,6 +11,7 @@ interface ProjectHeaderRowProps {
   onRevealProject: (cwd: string) => void;
   onRenameProject: (group: ProjectGroup) => void;
   onHideProject: (cwd: string) => void;
+  onClearProjectSessions: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
 }
 
@@ -23,6 +24,7 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
   onRevealProject,
   onRenameProject,
   onHideProject,
+  onClearProjectSessions,
   onRemoveProject,
 }: ProjectHeaderRowProps) {
   const cwd = group.cwd;
@@ -32,6 +34,7 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
   const handleReveal = useCallback(() => onRevealProject(cwd), [onRevealProject, cwd]);
   const handleRename = useCallback(() => onRenameProject(group), [onRenameProject, group]);
   const handleHide = useCallback(() => onHideProject(cwd), [onHideProject, cwd]);
+  const handleClearSessions = useCallback(() => onClearProjectSessions(cwd), [onClearProjectSessions, cwd]);
   const handleRemove = useCallback(() => onRemoveProject(cwd), [onRemoveProject, cwd]);
 
   return (
@@ -45,6 +48,7 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
       onReveal={handleReveal}
       onRename={handleRename}
       onHide={handleHide}
+      onClearSessions={handleClearSessions}
       onRemove={handleRemove}
     />
   );

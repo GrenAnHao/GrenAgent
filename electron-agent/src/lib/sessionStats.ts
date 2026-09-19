@@ -69,6 +69,28 @@ export function mapSessionStats(stats: SessionStats): ContextStats {
   };
 }
 
+export function emptyContextStats(): ContextStats {
+  return {
+    contextUsed: null,
+    contextLimit: 0,
+    contextPercent: 0,
+    contextKnown: false,
+    contextStatus: 'unknown',
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+    sessionId: '',
+    userMessages: 0,
+    assistantMessages: 0,
+    toolCalls: 0,
+  };
+}
+
+/** 新开草稿尚未落盘会话：sidecar 仍挂着上一会话，不能把那份用量画到空草稿上。 */
+export function displayContextStats(stats: ContextStats | null, isDraft: boolean): ContextStats | null {
+  if (isDraft) return emptyContextStats();
+  return stats;
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;

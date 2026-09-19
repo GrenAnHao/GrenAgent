@@ -44,18 +44,28 @@ describe('buildSessionMenuItems', () => {
 });
 
 describe('buildProjectMenuItems', () => {
-  it('has pin/reveal/rename/hide/remove and remove is danger', () => {
+  it('has pin/reveal/rename/hide/clear/remove and danger items fire', () => {
+    const onClearSessions = vi.fn();
+    const onRemove = vi.fn();
     const items = buildProjectMenuItems({
       pinned: false,
       onPinToggle: vi.fn(),
       onReveal: vi.fn(),
       onRename: vi.fn(),
       onHide: vi.fn(),
-      onRemove: vi.fn(),
+      onClearSessions,
+      onRemove,
     }) as ClickItem[];
     const keys = items.map((i) => i.key).filter(Boolean);
-    expect(keys).toEqual(['pin', 'reveal', 'rename', 'hide', 'remove']);
+    expect(keys).toEqual(['pin', 'reveal', 'rename', 'hide', 'clear-sessions', 'remove']);
+    expect(items.find((i) => i.key === 'clear-sessions')!.label).toBe('清空会话');
+    expect(items.find((i) => i.key === 'clear-sessions')!.danger).toBe(true);
+    expect(items.find((i) => i.key === 'remove')!.label).toBe('移除项目');
     expect(items.find((i) => i.key === 'remove')!.danger).toBe(true);
+    items.find((i) => i.key === 'clear-sessions')!.onClick!();
+    items.find((i) => i.key === 'remove')!.onClick!();
+    expect(onClearSessions).toHaveBeenCalledOnce();
+    expect(onRemove).toHaveBeenCalledOnce();
   });
 
   it('reveal fires its callback', () => {
@@ -66,6 +76,7 @@ describe('buildProjectMenuItems', () => {
       onReveal,
       onRename: vi.fn(),
       onHide: vi.fn(),
+      onClearSessions: vi.fn(),
       onRemove: vi.fn(),
     }) as ClickItem[];
     items.find((i) => i.key === 'reveal')!.onClick!();

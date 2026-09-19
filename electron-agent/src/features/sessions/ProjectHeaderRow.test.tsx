@@ -25,6 +25,7 @@ describe('ProjectHeaderRow', () => {
         onRevealProject={vi.fn()}
         onRenameProject={vi.fn()}
         onHideProject={vi.fn()}
+        onClearProjectSessions={vi.fn()}
         onRemoveProject={vi.fn()}
       />,
     );

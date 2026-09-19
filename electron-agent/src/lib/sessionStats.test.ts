@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildContextBreakdown, mapSessionStats, type SessionStats } from './sessionStats';
+import { buildContextBreakdown, displayContextStats, mapSessionStats, type SessionStats } from './sessionStats';
 
 const base: SessionStats = {
   sessionId: 'sid-1',
@@ -54,6 +54,29 @@ describe('mapSessionStats', () => {
     const r = mapSessionStats({ ...base, contextUsage: undefined });
     expect(r.contextKnown).toBe(false);
     expect(r.contextLimit).toBe(0);
+  });
+});
+
+describe('displayContextStats', () => {
+  it('drops previous-session occupancy when the composer is a new draft', () => {
+    const live = mapSessionStats(base);
+    const shown = displayContextStats(live, true);
+    expect(shown?.contextKnown).toBe(false);
+    expect(shown?.contextUsed).toBeNull();
+    expect(shown?.tokens.cacheRead).toBe(0);
+    expect(shown?.tokens.input).toBe(0);
+    expect(shown?.sessionId).toBe('');
+  });
+
+  it('keeps live stats for an existing session', () => {
+    const live = mapSessionStats(base);
+    expect(displayContextStats(live, false)).toBe(live);
+  });
+
+  it('still renders an empty card when a draft has no fetch yet', () => {
+    const shown = displayContextStats(null, true);
+    expect(shown?.contextKnown).toBe(false);
+    expect(shown?.contextLimit).toBe(0);
   });
 });
 
