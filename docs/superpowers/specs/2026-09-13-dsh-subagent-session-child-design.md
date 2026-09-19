@@ -3,7 +3,7 @@
 - 日期：2026-09-13
 - 状态：第一期已落地
 - 主题：对齐 DeepSeek Harness（DSH）子代理的「真 Session」语义；在 **sidecar + Electron** 内用进程内子会话替代默认子进程 JSONL，父模型只收最后一条助手正文，详情面板绑定子会话 JSONL（只读）。
-- 关联：`extensions/multi-agent/`、`electron-agent/src/features/panels/SubAgentConversation.tsx`、`docs/superpowers/specs/2026-06-15-unified-subagent-system-design.md`（P5 embedded 备选，本期落地）。
+- 关联：`extensions/multi-agent/`、`electron-agent/src/features/panels/SubAgentConversation.tsx`、`docs/superpowers/archive/specs/2026-06-15-unified-subagent-system-design.md`（P5 embedded 备选，本期落地）。
 
 ---
 

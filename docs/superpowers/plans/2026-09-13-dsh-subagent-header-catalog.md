@@ -26,10 +26,14 @@
 - IPC 的 `sessionPath` 必须落在**当场** `foldCatalog(parentPath)` 的白名单里，不信渲染层。
 - `activity`：`running | idle | ready | settled | unavailable`。one-shot 文件还在是 `settled`，不是 `unavailable`。
 - 规格 4 落地前采样 `inheritedEventCount` 缺省 0。本计划采样函数先预留 `slice(inherited)`，用 0 即可。
-- 测试：
+- 提交前类型检查（**注意路径**）：
 
 ```powershell
-cd "D:\OneDrive\Project Files\Pi\extensions"; npx vitest run multi-agent/catalog.test.ts
+cd "D:\OneDrive\Project Files\Pi\cli"; npx tsc --noEmit
+```
+
+`extensions/` 下没有 tsconfig；检查由 `cli/tsconfig.json`（`include: ["src", "../extensions"]`，target `ES2022`）承担。Electron 任务另加 `cd "D:\OneDrive\Project Files\Pi\electron-agent"; npx tsc --noEmit`。
+- 测试目录：
 cd "D:\OneDrive\Project Files\Pi\electron-agent"; npx vitest run src/features/subagents
 ```
 
@@ -122,7 +126,27 @@ describe("foldCatalogFromEntries", () => {
 });
 ```
 
-leaf 路径测试：构造两份 entries，`foldCatalogFromEntries` 只接收「当前 leaf」那份。再写一条集成测试：若能 `SessionManager.create` + `branch` 出另一条目录事实，`foldCatalog(path)` 看不到它。实现时 `foldCatalog` **必须**调用 `buildContextEntries`；单测可用 `vi.spyOn` 断言（有真实 SM 时）。
+**leaf 路径必须有真用例，不能靠「传两份 entries 进去」假装测过。** 那条只是调用了两次 fold，什么也没锁。写成这样：
+
+```ts
+it("drops catalog facts on abandoned branches", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cat-"));
+  // 第二参数必须是 tmpdir —— 不传就写进 ~/.pi/agent/sessions，污染用户目录
+  const sm = SessionManager.create("/ws", dir);
+  const sm2 = SessionManager.open(sm.getSessionFile()!, dir);
+  // 用另一个实例写，避免测自己的内存状态
+  ...
+});
+```
+
+更直接的写法（推荐）：
+
+1. `const sm = SessionManager.create(cwd, tmpdir)`，记下 `sm.appendCustomEntry("subagent_catalog", {...sa-old})` 返回的 entryId；
+2. `sm.branch(那个 id 之前的某个 id)`（或直接 `sm.branch(第一个 entry 的 id)`）；
+3. `sm.appendCustomEntry("subagent_catalog", {...sa-new})`；
+4. `foldCatalog(sm.getSessionFile()!)` → 只有 `sa-new`。
+
+`sa-old` 在文件里、不在 leaf 路径上，这条用例才真的锁住「`foldCatalog` 内部必须是 `buildContextEntries()` 而不是 `getEntries()`」。补一条反向断言：`getEntries().length > buildContextEntries().length`，防止有人图省事改回去。
 
 `establishCatalogChild` 测试：传入 mock `appendEntry`，断言只调一次、payload 含 `version: 0`。失败启动的路径在 index 测试里断言「不调用」。
 
@@ -219,7 +243,17 @@ try {
 
 continuable 写入失败必须拆除 Activation（规格 §3.1）。one-shot 失败只缺目录行。
 
-用户 rewind 写 `subagent_catalog_base`：听 `session_before_fork`，若即将拷贝的 leaf 上下文里已有 `subagent_catalog`，在新会话 `session_start`（同一 fork 结果）写一条 base。实现：`session_before_fork` 记下 `pendingForkBase = parentSessionPath`；下一次 `session_start` 若 `getSessionFile()` 不同且旧文件折出来非空，则 `pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" })`。没有目录事实不写。
+用户 rewind / fork 写 `subagent_catalog_base`。
+
+**为什么需要（已核实）**：SDK 注释明确 `fork()` 会**新建一个 session 文件**（`agent-session.d.ts:609`「Unlike fork() which creates a new session file, this stays in the same file」指的是 `navigateTree`）。新文件把旧 leaf 路径整段拷过去，那些 `subagent_catalog` 事实在新文件里同样位于 leaf 路径上，所以 §3.2 的 leaf 规则挡不住它们，必须有 base 这第二把刀。反过来，`navigateTree`（同文件分支）不需要 base，leaf 规则已经排除。
+
+**怎么检测 fork（事件里没有目标文件名）**：`session_before_fork` 的 payload 只有 `{ type, entryId, position }`——没有 targetSessionFile。所以：
+
+1. `pi.on("session_before_fork", ...)`（factory 作用域注册一次）：记下 `pendingForkBase = ctx.sessionManager.getSessionFile()`；
+2. 下一次 `session_start`：若 `pendingForkBase` 有值 **且** `ctx.sessionManager.getSessionFile() !== pendingForkBase` **且** `foldCatalog(当前路径).entries.length > 0` → `pi.appendEntry("subagent_catalog_base", { version: 0, reason: "user-fork" })`；
+3. 无论写没写，都要清 `pendingForkBase`（否则下一次普通切会话会误触发）。
+
+拷贝集里没有目录事实就不写 base（避免空标记）。测试用「fork 后新文件里有旧 catalog 行」的夹具断言折叠为空。
 
 - [ ] **步骤 5：Commit** `feat(multi-agent): 成功创建后写入父目录事实`
 
@@ -257,6 +291,8 @@ it("slices inheritedEventCount for tokens", () => {
 
 `tokens` = 四段之和，只扫 `messages.slice(inheritedEventCount)`。无 usage 字段则 undefined。`durationMs`：slice 后第一条 user timestamp 到最后一条 assistant/tool timestamp；running 时终点 `Date.now()`。
 
+**字段名以 SDK 为准**：pi-ai 的 `Usage` 是 `{ input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, totalTokens, cost }`（`pi-ai/dist/types.d.ts:265`）。**没有 `uncachedInput`**——规格 §3.4 里那个名字是笔误。四段用 `input + output + cacheRead + cacheWrite`；别再单独加 `reasoning`（它是 `output` 的子集）和 `cacheWrite1h`（`cacheWrite` 的子集），否则重复计数。想省事就直接用 `totalTokens`，但那样和别处的口径要一并对齐。
+
 - [ ] **步骤 5：Commit** `feat(multi-agent): 目录行现场采样`
 
 ---
@@ -278,7 +314,9 @@ promptChild(workspace: string, parentSessionPath: string, sessionPath: string, m
 interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): void
 ```
 
-`prompt` / `interrupt`：先 `foldCatalog(parent)`，白名单 = entries + 已展开后代（本版后代用对 `hasChildren` 再 fold 一层的 id 集合；未展开则只有直接孩子）。不在名单 → throw `sessionPath is not in the parent catalog`。one-shot 的 prompt → throw。通过后调规格 2 的 `deliverToChild` / `interruptChild`（按 sessionPath 找 Activation，没有则冷恢复）。
+`prompt` / `interrupt`：先 `foldCatalog(parent)` 算出白名单，**一次算到深度 2**（直接孩子 ∪ 每个孩子的目录里的直接孩子），随请求一起缓存进这次调用。不要按「前端有没有展开过」决定——那样用户第一次点开孙级时发消息会被拒，行为不可预测。不在名单 → throw `sessionPath is not in the parent catalog`。one-shot 的 prompt → throw。通过后调规格 2 的 `deliverToChild` / `interruptChild`（按 sessionPath 找 Activation，没有则 `coldResumeAndDeliver`）。
+
+孙级再深（曾孙）本期不支持：目录 `hasChildren` 展开也只到一层，白名单到深度 2 正好对齐。
 
 `sessionMessages` 已有，照抄 open。
 
@@ -315,6 +353,8 @@ interruptChild(workspace: string, parentSessionPath: string, sessionPath: string
 - 点行调用 `onOpen(entry)`（本任务用 mock，不挂覆层）
 
 下拉：360px 宽，`role="tree"`，Esc 关闭。放在 `WorkspaceTabs` 与 `PlanModeBadge` 之间。
+
+**父 sessionPath 从哪来（本任务先定死）**：页头要 `foldCatalog` 就得知道当前父会话文件。用现有 workspace 会话状态里已有的会话路径字段（主进程广播的 `getState().sessionFile` 落到前端 store 的那一份），不要新开一条轮询、也不要为目录单独加 IPC。若该字段在打开覆层时会被子会话覆盖，就在打开覆层前先存一份父路径到 overlay store 的 `parentSessionPath`。
 
 - [ ] **步骤 5：Commit** `feat(electron): 主列页头子代理目录`
 

@@ -20,6 +20,11 @@ import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
 
 const styles = createStaticStyles(({ css }) => ({
+  root: css`
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  `,
   body: css`
     display: flex;
     flex-direction: column;
@@ -238,7 +243,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
         .join(' · ');
 
   return (
-    <div data-testid="subagent-inline">
+    <div className={styles.root} data-testid="subagent-inline">
       <ConvStrip
         status={effectiveStatus}
         icon={Bot}

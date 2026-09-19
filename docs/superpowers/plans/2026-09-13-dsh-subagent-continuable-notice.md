@@ -22,8 +22,10 @@
 - 每个任务 commit 前：
 
 ```powershell
-cd "D:\OneDrive\Project Files\Pi\extensions"; npx tsc --noEmit
+cd "D:\OneDrive\Project Files\Pi\cli"; npx tsc --noEmit
 ```
+
+`extensions/` 下**没有** tsconfig.json，在那里跑 `tsc --noEmit` 什么也检查不到。类型检查由 `cli/tsconfig.json` 承担（`include: ["src", "../extensions"]`，`target: ES2022`，`strict: true`）。
 
 涉及 Electron 的任务再加：
 
@@ -39,6 +41,14 @@ cd "D:\OneDrive\Project Files\Pi\electron-agent"; npx tsc --noEmit
 - parent-host 按 **`sessionPath`** 分桶，表项带 `workspace`。子→父时 `activation.workspace === host.workspace`，否则当父不可用。
 - `WorkspaceHandle.prompt` 的 origin 只能 `'main' | 'goal'`。本计划 notice 不走这条（`sendMessage` 已核实认 `deliverAs`）。
 - `WorkspaceContext.origin` 现在声明成 `"main" | "goal"`，但 `embedded-runner.ts` 已传 `"subagent"`。任务 1 先把类型扩成 `"main" | "goal" | "subagent"`。
+- **ES2022 基线**：`Promise.withResolvers`（ES2024）与 `Array.prototype.findLastIndex` / `findLast`（ES2023）不在 target 的 lib 里。本计划任务 2 / 4 用到 `Promise.withResolvers`。动手前先跑一次探针（在 `cli/src` 下临时加一行 `const _p = Promise.withResolvers<void>()` 跑 tsc，确认后立即删）；不通过就一律手写 deferred：
+
+  ```ts
+  let resolve!: () => void; let reject!: (e: unknown) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+  ```
+
+  不要为了让 `withResolvers` 通过去改 `cli/tsconfig.json` 的 target。
 - 现有后台 spawn 在 `extensions/multi-agent/index.ts` 约 492–568 行。改造点就在这一段。
 - `reapOrphans` 现在把所有 `running` 打成 `orphaned: process restarted`。continuable + JSONL 在时必须改成 `done` + `sidecar restarted`，**不** `sendNotice`。
 - 测试：
@@ -575,8 +585,11 @@ export function interruptChild(childId: string): void
 export function disposeActivation(childId: string, reason: "settled" | "cancel" | "rollback"): Promise<void>
 export function drainByParent(parentSessionPath: string): Promise<void>
 export function authorizeParent(activation: Activation, workspace: string): void
+export function coldResumeAndDeliver(childId: string, sessionPath: string, text: string, delivery: Delivery): Promise<void>
 export function __resetActivationsForTest(): void
 ```
+
+`coldResumeAndDeliver` 必须在本任务导出：任务 6 的 `send_message` 冷恢复与规格 4 计划任务 5 都直接调它。它内部走 `SessionManager.open(childPath)` → `createAgentSessionServices` → `createAgentSessionFromServices` → `bindExtensions` → `inbox.deliver`，四步缺一不可；并先读 `subagent_meta`，`mode !== "continuable"` 或 `tornDown` 直接抛 `NOT_RESUMABLE`。
 
 `installActivation` 在 `announced: true` 时启动 `watchSettlement`。`watchSettlement` 循环：`waitForIdle` → lock 内看 `closing` / `hasPending` / `ownedChildren` → 再 poke 检查 → `extractAssistantOutput(session.messages)` → `inbox.close` + `session.dispose()`（不删 JSONL）→ 若 announced 则 `sendSettlementToParent`。
 
@@ -591,7 +604,7 @@ export function __resetActivationsForTest(): void
 - 修改：`extensions/multi-agent/registry.ts`
 - 修改：`extensions/multi-agent/registry.test.ts`
 - 修改：`extensions/multi-agent/restart-reap.test.ts`
-- 新建：`extensions/multi-agent/reap-continuable.ts`（读 JSONL `subagent_meta`，避免 registry 依赖 SessionManager 循环）
+- 新建：`extensions/multi-agent/reap-continuable.ts`（把「continuable 孤儿」的判定从 `registry.ts` 挪出来，registry 不认识 JSONL，也不该认识）
 
 - [ ] **步骤 1：测试**
 
@@ -629,7 +642,9 @@ it("still errors a running row with no jsonl", () => {
 
 `reapOrphans()` **不要**再一刀切。改成：对每条 `running`，若 `sessionPath` 指向的文件里 `subagent_meta.mode === "continuable"` 且没有后续 `tornDown: true` → `finish(id, { status: "done", error: "sidecar restarted", output: "" })`；否则维持现在的 `orphaned: process restarted`。
 
-读 meta：用 `SessionManager.open` + `buildContextEntries()` 找 `customType === "subagent_meta"` 的最后一条。打不开文件就当孤儿。
+读 meta 用 `SessionManager.open(path).getEntries()`，**不要**用 `buildContextEntries()`：`subagent_meta` 写在子会话创建时，子级一旦 compaction 就不在 leaf 上下文里了，用 leaf 路径会把它读丢、把可续聊子级误判成孤儿。这里要的是「文件里最后一条 `subagent_meta`」，是全文件语义。（目录折叠反过来必须用 leaf 路径——那是规格 3 的语义，别混。）
+
+打不开文件、或文件里没有 `subagent_meta`，都当孤儿走现有分支。
 
 - [ ] **步骤 5：Commit** `fix(multi-agent): 重启不把可续聊子级当已取消`
 
@@ -661,7 +676,9 @@ it("still errors a running row with no jsonl", () => {
 prompt(text: string, delivery: "followUp" | "steer"): void;
 ```
 
-任务 8 在 `session_start` 把 `prompt` 接到父 `pi`：idle 用 `pi.sendUserMessage(text)`，busy 用 `pi.sendUserMessage(text, { deliverAs: "steer" })`。Agent 消息前缀仍是 `Agent <senderId> sent a message: …`，**不要**走 `subagent-settled`。本任务测试 mock `prompt`。
+`host.prompt` 只负责把**已经拼好的正文**按 delivery 投递。前缀 `Agent <senderId> sent a message: ` 由 `adjacent-tools.ts` 在调用前拼好——host 不知道 senderId，让它拼必然拼错。任务 8 里 `WorkspaceHandle` 的 `prompt` 实现也是这个契约（收到什么投什么）。
+
+不要用 `subagent-settled` 这个 customType，那是运行时结算专用。本任务测试 mock `prompt`。
 
 `send_message` 成功 `details.messageId`：优先 `session.messages` 最后一条 user 的 `id`（若有）；否则省略。
 
@@ -719,6 +736,10 @@ it("createEmbeddedChildSession does not dispose", async () => { ... });
 
 `startContinuableEmbedded(opts)` = create + `installActivation` + `inbox.deliver(task + 返回指引, "followUp")` + `announced=true`。**不要**在首次 idle 后 dispose。
 
+首次 `inbox.deliver` 必须包 `try/catch`：`session.prompt` 会在「没选模型 / 没配 API key / 流式且没给 streamingBehavior」时抛错（SDK 已注明）。抛了就走 `disposeActivation(id, "rollback")` + 删不写目录 + 工具 `isError`，不能让 Activation 卡在「已安装但从没跑起来」。这条要有单测：mock session 的 `prompt` reject → 断言没有驻留残留、没有 notice。
+
+`announced` 的置位点：在 `prompt` **成功返回之后**，不是调用之前——否则「投递失败但已宣布」会发出一条没有正文的 notice。
+
 `index.ts` `action==="spawn"` 且 `canUseEmbeddedSubagent`：走 `startContinuableEmbedded`，`onUpdate` 仍 `registry.progress`；自然结算在 activation watcher 里 `registry.finish`。子进程回退：现有 `executeSubagent` + `.then` 里 `sendSettlementToParent`（host 在才发），`details.sessionPath` 可缺。
 
 `promptGuidelines` 加一句：后台 spawn 结算后会收到 notice，不必为结论再 `wait`。
@@ -745,33 +766,36 @@ it("createEmbeddedChildSession does not dispose", async () => { ... });
 - `dispose()` 之后 lookup 为空
 - `dispose` 调用 `drainByParent`（mock activation 模块）
 
-锁死：**只在** `extensions/multi-agent/index.ts` 的父 `session_start` 注册 host（`pi` 每会话一份）。不要在 WorkspaceHandle 再注册一份。
+**parent host 由 `WorkspaceHandle` 注册，不由扩展注册。** 规格 §4 模块表就是这么定的，而且 `WorkspaceHandle` 手里正好有全部四样东西：`session.sessionFile`、`session.sessionId`、`options.workspace`、`session.sendCustomMessage`。不需要 `pi`，也就不存在「`pi` 每会话一份、模块级变量被覆盖」的问题。
 
 ```ts
-let draining = false;
-const sessionPath = ctx.sessionManager.getSessionFile();
-const sessionId = ctx.sessionManager.getSessionId();
+// start() 末尾，bindAndSubscribe 之后
+const sessionPath = this.session.sessionFile;
+const sessionId = this.session.sessionId;
 if (sessionPath && sessionId) {
-  const unsub = registerParentSessionHost({
+  this.unregisterParentHost = registerParentSessionHost({
     sessionId,
     sessionPath,
-    workspace: ctx.cwd,
-    isBusy: () => false,
-    isDraining: () => draining,
-    sendMessage: (m, o) => pi.sendMessage(m, o),
+    workspace: this.options.workspace,
+    isBusy: () => this.session.isStreaming,
+    isDraining: () => this.disposed,
+    sendMessage: (msg, opts) => { void this.session.sendCustomMessage(msg, opts); },
     prompt: (text, delivery) => {
-      pi.sendUserMessage(text, delivery === "steer" ? { deliverAs: "steer" } : undefined);
+      void this.prompt(text, this.session.isStreaming ? { streamingBehavior: delivery } : {}, "main");
     },
   });
-  // session_before_switch / session_before_fork / 下一次 session_start 先 draining=true，drainByParent(sessionPath)，再 unsub
 }
 ```
 
-`isBusy` 本步恒 `false`：notice 的 busy/idle 由 `pi.sendMessage` 的 `deliverAs` 在任务 3 已按 host.isBusy 分支。要让 busy 准确，在同一 `session_start` 里 `pi.on("message_start", () => { busy = true })` 与 `pi.on("agent_settled", () => { busy = false })`，`isBusy: () => busy`。
+`dispose()` 顺序：`this.disposed = true` → `await drainByParent(this.parentSessionPath)`（内部给已宣布的发 `aborted`）→ `this.unregisterParentHost?.()` → 现有清理。`isDraining()` 依赖 `this.disposed`，所以置位必须最先。
 
-`WorkspaceHandle.dispose` **只**调 `drainByParent(当前 sessionPath)`。host 注销仍由扩展的 switch/fork/start 处理。
+`sessionPath` 要在 `start()` 里顺手存成私有字段 `parentSessionPath`，`dispose()` 直接用——dispose 阶段 `this.session` 可能已经被 runtime teardown，届时再读 `sessionFile` 拿到的可能是空值。
 
-- [ ] **步骤 3：** 按上面实现。换会话顺序：`draining = true` → `drainByParent` → `unsub` → 新 `session_start` 注册新 path。
+`sendCustomMessage` 是 `AgentSession` 的现成方法（`agent-session.d.ts:403`），签名与 `pi.sendMessage` 一致；不需要走 `pi`。
+
+**若将来改成用 `pi` 注册**：`pi.on(...)` 必须在 **factory 作用域注册一次**，不要写在 `pi.on("session_start", ...)` 里——`session_start` 每次切会话 / fork / resume 都触发，在里面 `pi.on` 会每切一次多挂一个 handler。
+
+- [ ] **步骤 3：** 按上面实现。换会话由 `AgentSession` 自己 replace，`WorkspaceHandle` 不感知；host 的生命周期跟着 handle 走。
 - [ ] **步骤 5：Commit** `feat(multi-agent): 父会话注册 host 并在拆除时 drain`
 
 ---
@@ -834,7 +858,22 @@ cd "D:\OneDrive\Project Files\Pi\electron-agent"; npx tsc --noEmit
 - 修改：`extensions/multi-agent/cancel.test.ts`
 - 修改：`extensions/multi-agent/activation.ts`（`coldResume` 读 tornDown）
 
-- [ ] **步骤 1：** `cancel` 在能打开子 JSONL 时 `appendCustomEntry("subagent_meta", { ...上一份, tornDown: true })`。冷恢复见到 `tornDown` 抛 `NOT_RESUMABLE`。
+- [ ] **步骤 1：** `cancel` 除了现有 `inflight.abort()` + `registry.finish(cancelled)`，还要：
+
+  1. `disposeActivation(id, "cancel")`——关 inbox、发 `aborted` notice（规格 §6.4）。**这一步别漏**，否则 cancel 之后父会话等不到任何回执。
+  2. 写 `tornDown: true` 到子 `subagent_meta`。
+
+第 2 步的写入通道分两种，**优先用第一种**：
+
+- 驻留中（有 Activation）：用该 Activation 自己的 `sessionManager.appendCustomEntry("subagent_meta", { ...上一份, tornDown: true })`。
+- 无驻留（子进程 / 已结算 / 重启后）：才 `SessionManager.open(childPath)` 写。
+
+原因：驻留子级的 `SessionManager` 在内存里持有 `fileEntries` 并会继续 append；父进程另开一个 `SessionManager.open` 写同一个文件，两边各自 persist 会互相覆盖。同一份 `SessionManager` 写才安全。
+
+`childPath` 来自任务 5 给 registry 加的 `sessionPath` 列；拿不到就跳过写 `tornDown`（此时 Activation 也已不存在，冷恢复本来就无从谈起）。
+
+冷恢复见到 `tornDown` 抛 `NOT_RESUMABLE`。
+
 - [ ] **步骤 5：Commit** `feat(multi-agent): cancel 后禁止冷恢复`
 
 ---

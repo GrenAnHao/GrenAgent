@@ -25,6 +25,14 @@
 - 空种子：成功、等同普通 spawn，**不写** `subagent_catalog_base`。有种子：**一律**写 base，再写一条完整 `subagent_meta`（不要写两次 meta）。
 - 「在子级里」：`resolveToolOrigin() === "subagent"`，不要只看 `PI_IS_SUBAGENT`。
 - `WorkspaceContext.origin` 在规格 2 任务 1 已扩成含 `subagent`。本计划不要再改类型，除非那次漏了。
+- 提交前类型检查（**注意路径**）：
+
+```powershell
+cd "D:\OneDrive\Project Files\Pi\cli"; npx tsc --noEmit
+```
+
+`extensions/` 下没有 tsconfig；检查由 `cli/tsconfig.json`（`include: ["src", "../extensions"]`，**target `ES2022`**）承担。
+- **ES2022 基线**：`Array.prototype.findLastIndex` / `findLast`（ES2023）与 `Promise.withResolvers`（ES2024）不在 lib 里。本计划任务 1 的实现示例用了 `findLastIndex`，改成倒序 `for` 循环。不要为此改 `cli/tsconfig.json` 的 target。
 - 测试：
 
 ```powershell
@@ -118,7 +126,14 @@ describe("completedPrefix", () => {
 });
 ```
 
-`toolCallId` 匹配：在 assistant `content` 数组里找 `id === toolCallId` 或 `toolCallId === toolCallId` 的元素。实现不要假设 content 形状只有一种，兼容 `{ type: "toolCall", id }` 与 SDK 实际字段（先在测试夹具里按 `embedded-runner` / 真实 message 打印一次；字段名以 SDK 为准，本任务落地时改夹具与匹配函数，不要改 message）。
+`toolCallId` 匹配：**字段形状已核实**，不用再打印探测。pi-ai 的 `ToolCall` 是 `{ type: "toolCall"; id: string; name: string; arguments: Record<string, any> }`（`pi-ai/dist/types.d.ts:256`），assistant 的 `content` 是这些内容块组成的数组。匹配函数就一条：
+
+```ts
+const blocks = Array.isArray(m.content) ? m.content : [];
+const hit = blocks.some((b) => b && b.type === "toolCall" && b.id === toolCallId);
+```
+
+上面测试夹具的 `{ type: "toolCall", id, name: "spawn_agent", arguments: {} }` 与 SDK 一致，可以直接用。别去兼容不存在的第二形状，也别改 message。
 
 - [ ] **步骤 3：实现**
 
@@ -128,8 +143,10 @@ export function completedPrefix(messages: unknown[], toolCallId: string): unknow
     const role = (m as { role?: string }).role;
     return role === "user" || role === "assistant" || role === "toolResult";
   });
-  const idx = list.findLastIndex((m) => roleOf(m) === "assistant" && hasToolCall(m, toolCallId));
-  if (idx >= 0) return list.slice(0, idx);
+  // 倒序 for：findLastIndex 是 ES2023，不在 target ES2022 的 lib 里
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (roleOf(list[i]) === "assistant" && hasToolCall(list[i], toolCallId)) return list.slice(0, i);
+  }
   if (list.length && roleOf(list[list.length - 1]) === "assistant") return list.slice(0, -1);
   return list;
 }
@@ -244,7 +261,7 @@ write 顺序锁死（有种子时）：
 
 `index.ts` `execute` 第一个参数改名为 `toolCallId`，传给 `completedPrefix`。现在是 `_toolCallId`，本任务启用它。
 
-拒绝条件（写在 `executeSubagent` 之前）：
+**拒绝条件的位置**：`list`（`normalizeTasks`）与 `hasChain` 在 `index.ts` 里要到 338–339 行才算出来，fork 校验必须放在**那之后**、`executeSubagent` 调用之前。放到 `execute` 开头会因为 `list` 还未定义而编译不过。
 
 ```ts
 const inChild = resolveToolOrigin() === "subagent";
@@ -256,6 +273,10 @@ if (params.fork) {
 }
 ```
 
+`resolveToolOrigin` 要从 `../_shared/workspace-context.js` 引入（`index.ts` 目前还没引）。
+
+测试「`resolveToolOrigin()==="subagent"` 时拒绝」：用 `runInWorkspace({ origin: "subagent", workspace, cwd, config: {} }, () => execute(...))` 包一层。这里是唯一一处可以直接传 `origin: "subagent"` 的地方——规格 2 任务 1 已经把类型扩开了。
+
 `promptGuidelines` 加一句：接着当前对话用 `fork: true`。
 
 - [ ] **步骤 5：Commit** `feat(multi-agent): spawn_agent fork 写入种子并拒绝子进程`
@@ -266,9 +287,9 @@ if (params.fork) {
 
 **文件：** `activation.ts` 冷恢复路径（规格 2 已有）+ 测试
 
-- [ ] **步骤 1：** 创建带种子的子 JSONL 夹具 → `coldResume` → 再给父 session 追加一条新 user → 断言子 `messages` 前缀仍是旧种子（不含新 user）。冷恢复只 `SessionManager.open(childPath)`，禁止再读父 `buildContextEntries`。
+- [ ] **步骤 1：** 创建带种子的子 JSONL 夹具 → `coldResumeAndDeliver`（规格 2 任务 4 导出）→ 再给父 session 追加一条新 user → 断言子 `messages` 前缀仍是旧种子（不含新 user）。冷恢复只 `SessionManager.open(childPath)`，禁止再读父 `buildContextEntries`。
 
-若规格 2 的 cold resume 已经只 open 子文件，本任务加一条回归测试即可，不改实现。
+若规格 2 的冷恢复已经只 open 子文件，本任务加一条回归测试即可，不改实现。**但要先确认 `coldResumeAndDeliver` 真的导出了**——规格 2 任务 4 的导出清单原本漏了它，本计划任务 5 与规格 2 任务 6 都依赖。若落地时还没补，在规格 2 任务 4 里补上再继续。
 
 - [ ] **步骤 5：Commit** `test(multi-agent): fork 冷恢复不重拍父前缀`
 
