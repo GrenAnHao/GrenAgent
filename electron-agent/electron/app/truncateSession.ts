@@ -14,11 +14,19 @@ function parseLine(line: string): SessionLine {
   return JSON.parse(line) as SessionLine;
 }
 
+/** Session header is not part of the parentId tree; all other id+parentId rows are. */
+function isSessionTreeEntry(parsed: SessionLine): parsed is SessionLine & { id: string; parentId: string | null } {
+  if (parsed.type === 'session') return false;
+  if (parsed.id == null) return false;
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'parentId')) return false;
+  return true;
+}
+
 function collectDescendantIds(lines: string[], targetId: string): Set<string> {
   const childrenByParent = new Map<string, string[]>();
   for (const line of lines) {
     const parsed = parseLine(line);
-    if (parsed.type !== 'message' || parsed.id == null || parsed.parentId == null) continue;
+    if (!isSessionTreeEntry(parsed) || parsed.parentId == null) continue;
     const siblings = childrenByParent.get(parsed.parentId) ?? [];
     siblings.push(parsed.id);
     childrenByParent.set(parsed.parentId, siblings);
@@ -40,7 +48,7 @@ function collectDescendantIds(lines: string[], targetId: string): Set<string> {
 function findTargetIndex(lines: string[], targetId: string): number {
   return lines.findIndex((line) => {
     const parsed = parseLine(line);
-    return parsed.type === 'message' && parsed.id === targetId;
+    return isSessionTreeEntry(parsed) && parsed.id === targetId;
   });
 }
 
@@ -58,7 +66,7 @@ export function truncateSessionLines(
 
   for (let i = targetIndex + 1; i < lines.length; i++) {
     const parsed = parseLine(lines[i]!);
-    if (parsed.type !== 'message' || parsed.id == null) continue;
+    if (!isSessionTreeEntry(parsed)) continue;
     if (parsed.id !== targetId && !descendants.has(parsed.id)) {
       return { ok: false, reason: 'branched' };
     }
@@ -71,7 +79,7 @@ export function truncateSessionLines(
 
   const nextLines = lines.filter((line) => {
     const parsed = parseLine(line);
-    if (parsed.type !== 'message' || parsed.id == null) return true;
+    if (!isSessionTreeEntry(parsed)) return true;
     return !removeIds.has(parsed.id);
   });
 

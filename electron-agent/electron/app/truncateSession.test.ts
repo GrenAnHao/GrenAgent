@@ -6,6 +6,10 @@ const user = (id: string, parentId: string | null) =>
   JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
 const assistant = (id: string, parentId: string) =>
   JSON.stringify({ type: 'message', id, parentId, message: { role: 'assistant', content: [{ type: 'text', text: id }], timestamp: 2 } });
+const modelChange = (id: string, parentId: string) =>
+  JSON.stringify({ type: 'model_change', id, parentId, model: 'test-model' });
+const custom = (id: string, parentId: string | null) =>
+  JSON.stringify({ type: 'custom', id, parentId, data: {} });
 
 describe('truncateSessionLines', () => {
   it('删除目标及其后的活动链，保留 header 和更早的消息', () => {
@@ -28,5 +32,21 @@ describe('truncateSessionLines', () => {
     const lines = [header, user('u1', null), user('other', null)];
     const result = truncateSessionLines(lines, 'u1', 'drop-target');
     expect(result).toEqual({ ok: false, reason: 'branched' });
+  });
+
+  it('drop-target 从 user 截断时删除 model_change 与 assistant 链，保留 header', () => {
+    const lines = [header, user('u1', null), modelChange('mc1', 'u1'), assistant('a1', 'mc1')];
+    const result = truncateSessionLines(lines, 'u1', 'drop-target');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.lines).toEqual([header]);
+  });
+
+  it('user 之后出现 parentId 不在该链上的 custom 时返回 branched 且不改输入', () => {
+    const lines = [header, user('u1', null), custom('c1', null)];
+    const before = [...lines];
+    const result = truncateSessionLines(lines, 'u1', 'drop-target');
+    expect(result).toEqual({ ok: false, reason: 'branched' });
+    expect(lines).toEqual(before);
   });
 });
