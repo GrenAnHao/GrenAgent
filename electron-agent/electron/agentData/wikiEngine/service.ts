@@ -5,12 +5,14 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createWikiGraph, graphMultiHopSearch } from './graph';
 import {
   cascadeDeleteWikiPagesWithRefs,
   deleteSourceFiles,
@@ -176,6 +178,175 @@ function extractWikilinks(content: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
     links.push(match[1].trim());
+  }
+  return links;
+}
+
+const HOP_LIMIT = 5;
+const DEFAULT_LIMIT = 20;
+const DEFAULT_HOP = 0;
+const DEFAULT_DECAY = 0.5;
+const DEFAULT_MIN_SCORE = 0.1;
+const RELATED_CAP = 10;
+const EXPANSION_CAP = 200;
+const HIDDEN_TYPES = new Set(['query']);
+
+export type WikiSearchOptions = {
+  hop?: number;
+  decay?: number;
+  minScore?: number;
+  limit?: number;
+};
+
+export type WikiRelatedPage = {
+  title: string;
+  path: string;
+  type: string;
+  direction: 'out' | 'in' | 'both';
+};
+
+export type WikiResultLink = {
+  source: string;
+  target: string;
+  weight: number;
+};
+
+export type WikiSearchHit = {
+  path: string;
+  title: string;
+  snippet: string;
+  score: number;
+  type: string;
+  hop: number;
+  via?: string;
+  related: WikiRelatedPage[];
+};
+
+export type WikiSearchResponse = {
+  results: WikiSearchHit[];
+  links: WikiResultLink[];
+  count: number;
+};
+
+type PageMeta = {
+  id: string;
+  title: string;
+  type: string;
+  relPath: string;
+  snippet: string;
+};
+
+type PageGraphAdj = {
+  outAdj: Map<string, Set<string>>;
+  inAdj: Map<string, Set<string>>;
+  degree: Map<string, number>;
+};
+
+function idFromPath(relPath: string): string {
+  return relPath.replace(/^wiki\//, '').replace(/\.md$/, '');
+}
+
+function validateSearchOptions(options: WikiSearchOptions = {}): {
+  hop: number;
+  decay: number;
+  minScore: number;
+  limit: number;
+} {
+  const hop = options.hop ?? DEFAULT_HOP;
+  const decay = options.decay ?? DEFAULT_DECAY;
+  const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
+  const limit = options.limit ?? DEFAULT_LIMIT;
+
+  if (!Number.isInteger(hop) || hop < 0 || hop > HOP_LIMIT) {
+    throw new Error(`invalid hop: must be integer 0..${HOP_LIMIT}`);
+  }
+  if (typeof decay !== 'number' || Number.isNaN(decay) || decay < 0 || decay > 1) {
+    throw new Error('invalid decay: must be number in 0..1');
+  }
+  if (typeof minScore !== 'number' || Number.isNaN(minScore) || minScore < 0) {
+    throw new Error('invalid minScore: must be number >= 0');
+  }
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error('invalid limit: must be positive integer');
+  }
+  return { hop, decay, minScore, limit };
+}
+
+function loadPageGraph(
+  metaById: Map<string, PageMeta>,
+  edgeRows: Array<{ source_id: string; target_id: string }>,
+): PageGraphAdj {
+  const outAdj = new Map<string, Set<string>>();
+  const inAdj = new Map<string, Set<string>>();
+  const degree = new Map<string, number>();
+
+  for (const m of metaById.values()) {
+    if (HIDDEN_TYPES.has(m.type)) continue;
+    outAdj.set(m.id, new Set());
+    inAdj.set(m.id, new Set());
+    degree.set(m.id, 0);
+  }
+
+  for (const { source_id: s, target_id: t } of edgeRows) {
+    if (!outAdj.has(s) || !inAdj.has(t)) continue;
+    outAdj.get(s)!.add(t);
+    inAdj.get(t)!.add(s);
+    degree.set(s, (degree.get(s) ?? 0) + 1);
+    degree.set(t, (degree.get(t) ?? 0) + 1);
+  }
+  return { outAdj, inAdj, degree };
+}
+
+function buildRelated(
+  pageId: string,
+  pg: PageGraphAdj,
+  metaById: Map<string, PageMeta>,
+): WikiRelatedPage[] {
+  const out = pg.outAdj.get(pageId) ?? new Set<string>();
+  const inn = pg.inAdj.get(pageId) ?? new Set<string>();
+  const all = new Set<string>([...out, ...inn]);
+  const items: WikiRelatedPage[] = [];
+  for (const nbId of all) {
+    const nbMeta = metaById.get(nbId);
+    if (!nbMeta) continue;
+    const isOut = out.has(nbId);
+    const isIn = inn.has(nbId);
+    const direction: WikiRelatedPage['direction'] =
+      isOut && isIn ? 'both' : isOut ? 'out' : 'in';
+    items.push({ title: nbMeta.title, path: nbMeta.relPath, type: nbMeta.type, direction });
+  }
+  items.sort((a, b) => {
+    const da = pg.degree.get(idFromPath(a.path)) ?? 0;
+    const db = pg.degree.get(idFromPath(b.path)) ?? 0;
+    return db - da;
+  });
+  return items.slice(0, RELATED_CAP);
+}
+
+function buildResultLinks(
+  resultIds: string[],
+  pg: PageGraphAdj,
+  metaById: Map<string, PageMeta>,
+): WikiResultLink[] {
+  const inResults = new Set(resultIds);
+  const seen = new Set<string>();
+  const links: WikiResultLink[] = [];
+  for (const id of resultIds) {
+    const meta = metaById.get(id);
+    if (!meta) continue;
+    const out = pg.outAdj.get(id) ?? new Set<string>();
+    for (const target of out) {
+      if (!inResults.has(target)) continue;
+      const key = [id, target].sort().join(':::');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const targetMeta = metaById.get(target);
+      links.push({
+        source: meta.relPath,
+        target: targetMeta ? targetMeta.relPath : target,
+        weight: 1,
+      });
+    }
   }
   return links;
 }
@@ -660,6 +831,19 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
 
   readPage(wikiId: string, ref: string): string {
     const asset = this.requireAsset(wikiId);
+
+    if (ref.startsWith('raw/')) {
+      const rawRoot = resolve(join(asset.dir, 'raw'));
+      const rawWithSep = rawRoot.endsWith(sep) ? rawRoot : rawRoot + sep;
+      const candidates = ref.endsWith('.md') || ref.endsWith('.txt') ? [ref] : [ref, `${ref}.md`];
+      for (const c of candidates) {
+        const full = resolve(asset.dir, c);
+        if (full !== rawRoot && !full.startsWith(rawWithSep)) throw new Error('not_found');
+        if (existsSync(full) && statSync(full).isFile()) return readFileSync(full, 'utf8');
+      }
+      throw new Error('not_found');
+    }
+
     const wikiDir = join(asset.dir, 'wiki');
     const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
     return readFileSync(safe, 'utf8');
@@ -717,10 +901,84 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     this.rebuildPageIndex(asset);
   }
 
-  search(wikiId: string, query: string): Array<{ id: string; score: number }> {
+  search(wikiId: string, query: string, options?: WikiSearchOptions): WikiSearchResponse {
+    const empty: WikiSearchResponse = { results: [], links: [], count: 0 };
     const asset = this.requireAsset(wikiId);
-    if (asset.status !== 'ready') return [];
-    return ftsSearch(asset.dir, query, 20);
+    if (asset.status !== 'ready') return empty;
+
+    const { hop, decay, minScore, limit } = validateSearchOptions(options);
+    const seedPoolSize = Math.max(limit, hop > 0 ? limit * 2 : limit);
+    const rawSeeds = ftsSearch(asset.dir, query, seedPoolSize);
+    if (rawSeeds.length === 0) return empty;
+
+    const db = new DatabaseSync(join(asset.dir, 'index.db'));
+    try {
+      const metaRows = db
+        .prepare('SELECT page_id, title, type, rel_path, snippet FROM page_meta')
+        .all() as Array<{
+        page_id: string;
+        title: string;
+        type: string;
+        rel_path: string;
+        snippet: string;
+      }>;
+      const metaById = new Map<string, PageMeta>();
+      for (const row of metaRows) {
+        metaById.set(row.page_id, {
+          id: row.page_id,
+          title: row.title,
+          type: row.type,
+          relPath: row.rel_path,
+          snippet: row.snippet,
+        });
+      }
+      const edgeRows = db
+        .prepare('SELECT source_id, target_id FROM graph_edge')
+        .all() as Array<{ source_id: string; target_id: string }>;
+      const pg = loadPageGraph(metaById, edgeRows);
+
+      let hits: Array<{ id: string; score: number; hop: number; via?: string }>;
+      if (hop === 0) {
+        hits = rawSeeds.slice(0, limit).map((s) => ({ id: s.id, score: s.score, hop: 0 }));
+      } else {
+        const graph = createWikiGraph(
+          [...metaById.values()]
+            .filter((m) => !HIDDEN_TYPES.has(m.type))
+            .map((m) => ({ id: m.id, label: m.title })),
+          edgeRows.map((e) => ({ source: e.source_id, target: e.target_id })),
+        );
+        hits = graphMultiHopSearch(graph, rawSeeds, {
+          hop,
+          decay,
+          minScore,
+          maxNodes: EXPANSION_CAP,
+        }).slice(0, limit);
+      }
+
+      const results: WikiSearchHit[] = [];
+      const resultIds: string[] = [];
+      for (const hit of hits) {
+        const meta = metaById.get(hit.id);
+        if (!meta) continue;
+        const result: WikiSearchHit = {
+          path: meta.relPath,
+          title: meta.title,
+          snippet: meta.snippet,
+          score: hit.score,
+          type: meta.type,
+          hop: hit.hop,
+          related: buildRelated(meta.id, pg, metaById),
+        };
+        if (hit.hop > 0 && hit.via) result.via = hit.via;
+        results.push(result);
+        resultIds.push(meta.id);
+      }
+
+      const links = buildResultLinks(resultIds, pg, metaById);
+      return { results, links, count: results.length };
+    } finally {
+      db.close();
+    }
   }
 
   graph(wikiId: string): Array<{ source_id: string; target_id: string }> {
@@ -734,6 +992,55 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     } finally {
       db.close();
     }
+  }
+
+  /**
+   * Delete a wiki in any status. processing/pending marks cancel so the worker
+   * skips ready/failed and finishes with an idempotent cleanup.
+   */
+  remove(wikiId: string): void {
+    assertSafeWikiId(wikiId);
+    const row = this.db
+      .prepare('SELECT wiki_id, status FROM wiki_assets WHERE wiki_id = ?')
+      .get(wikiId) as { wiki_id: string; status: string } | undefined;
+    if (!row) throw new Error(`not_found: wiki ${wikiId}`);
+
+    if (row.status === 'pending' || row.status === 'processing') {
+      this.cancelled.add(wikiId);
+    }
+    this.cleanupResources(wikiId);
+  }
+
+  private cleanupResources(wikiId: string): void {
+    try {
+      evictWikiDb(wikiId);
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.db.prepare('DELETE FROM wiki_assets WHERE wiki_id = ?').run(wikiId);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const sources = this.readSources();
+      if (wikiId in sources) {
+        delete sources[wikiId];
+        this.writeSources(sources);
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(join(this.root, wikiId), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private finishCancelled(wikiId: string): void {
+    this.cleanupResources(wikiId);
+    this.cancelled.delete(wikiId);
   }
 
   resetDraft(wikiId: string): void {
@@ -862,7 +1169,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
 
   private async runBuild(wikiId: string): Promise<void> {
     if (this.isCancelled(wikiId)) {
-      this.cancelled.delete(wikiId);
+      this.finishCancelled(wikiId);
       return;
     }
 
@@ -875,7 +1182,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
 
     try {
       if (this.isCancelled(wikiId)) {
-        this.cancelled.delete(wikiId);
+        this.finishCancelled(wikiId);
         return;
       }
 
@@ -897,7 +1204,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       );
 
       if (this.isCancelled(wikiId)) {
-        this.cancelled.delete(wikiId);
+        this.finishCancelled(wikiId);
         return;
       }
 
@@ -915,7 +1222,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
           `all source documents failed to ingest` +
           (first ? `; first failure: ${first.filename}: ${first.error ?? 'unknown'}` : '');
         if (this.isCancelled(wikiId)) {
-          this.cancelled.delete(wikiId);
+          this.finishCancelled(wikiId);
           return;
         }
         this.setStatus(wikiId, {
@@ -927,7 +1234,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       }
 
       if (this.isCancelled(wikiId)) {
-        this.cancelled.delete(wikiId);
+        this.finishCancelled(wikiId);
         return;
       }
 
@@ -941,7 +1248,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       log.info('ingest ready', { wikiId, pages: pages.length });
     } catch (err) {
       if (this.isCancelled(wikiId)) {
-        this.cancelled.delete(wikiId);
+        this.finishCancelled(wikiId);
         return;
       }
       const row = this.db
