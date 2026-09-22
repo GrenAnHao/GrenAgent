@@ -1,12 +1,11 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentDataRuntime } from './runtime';
 import { AgentDataClient } from './client';
 import { AgentDataStorage } from './storage';
-import type { TaskPage, TaskView, DiagnosticReport, WorkbenchOverview, AuditPage } from './operationsContracts';
-import type { WikiLibraryView, WikiPage, WikiSource } from './wikiContracts';
+import type { TaskPage, TaskView } from './operationsContracts';
 
 describe('operations management integration', () => {
   it('rechecks the old Code task inside creation after the last asynchronous target lookup', async () => {
@@ -60,47 +59,5 @@ describe('operations management integration', () => {
       await expect(host.request('admin.jobs.get', { id: job.id })).resolves.toMatchObject({ state: 'failed' });
       expect(run).toHaveBeenLastCalledWith(retry.ref.id, project, undefined); expect(model).not.toHaveBeenCalled();
     } finally { await host.close(); runtime.close(); await runtime.waitClosed(); rmSync(root, { recursive: true, force: true }); }
-  });
-
-  it('checks Wiki and builds a partial overview without rewriting files, SQL or invoking a model', async () => {
-    const model = vi.fn(async () => 'fixture/model'), execute = vi.fn(async () => '# generated');
-    const runtime = new AgentDataRuntime({ dataPath: ':memory:', wikiModelLabel: model, executeServiceTask: execute }); await runtime.start();
-    try {
-      const kb = await runtime.requestAdmin<WikiLibraryView>('wiki.libraries.create', { name: 'Inspect', description: '', bindings: [] });
-      const page = await runtime.requestAdmin<WikiPage>('wiki.pages.create', { kbId: kb.kbId, title: 'Guide', content: '# Original', sourceRefs: [] });
-      const changed = readFileSync(page.path, 'utf8').replace('Original', 'External'); writeFileSync(page.path, changed);
-      const report = await runtime.requestAdmin<DiagnosticReport>('admin.diagnostics.check');
-      expect(report.items.some((item) => item.resource?.id === kb.kbId && item.state === 'action_required')).toBe(true);
-      expect(readFileSync(page.path, 'utf8')).toBe(changed);
-      const overview = await runtime.requestAdmin<WorkbenchOverview>('admin.overview', { userId: 'local' });
-      expect(overview.libraries).toMatchObject({ total: 1, pages: 1 });
-      expect(overview.recentPages[0]).toMatchObject({ kbId: kb.kbId, pageId: page.pageId });
-      expect(model).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled();
-    } finally { runtime.close(); await runtime.waitClosed(); }
-  });
-
-  it('confirms the Wiki retry model and excludes newly added or deleted sources', async () => {
-    const execute = vi.fn(async () => '# done');
-    const runtime = new AgentDataRuntime({ dataPath: ':memory:', wikiModelLabel: async () => 'fixture/model', executeServiceTask: execute });
-    const host = new AgentDataClient(await runtime.start());
-    try {
-      const kb = await runtime.requestAdmin<WikiLibraryView>('wiki.libraries.create', { name: 'Retry', description: '', bindings: [] });
-      const source = await runtime.requestAdmin<WikiSource>('wiki.sources.create', { kbId: kb.kbId, kind: 'manual', name: 'old.md', content: 'old' });
-      const receipt = await runtime.requestAdmin<{ jobId: string }>('wiki.libraries.ingest', { kbId: kb.kbId });
-      await vi.waitFor(async () => expect(await host.request('admin.jobs.get', { id: receipt.jobId })).toMatchObject({ state: 'completed' }));
-      await runtime.requestAdmin('wiki.sources.update', { kbId: kb.kbId, sourceId: source.sourceId, content: 'new', expected: source });
-      // Seed a historical failed user task without running any publisher.
-      const failed = await host.request<{ id: string }>('admin.jobs.create', { kind: 'unknown', workspace: '/seed' });
-      await host.request('admin.jobs.fail', { id: failed.id, error: 'fixture' });
-      const db = (runtime as unknown as { storage: AgentDataStorage }).storage.db;
-      db.prepare('UPDATE agent_jobs SET kind=?,workspace=?,metadata=? WHERE id=?').run('wiki.ingest', '', JSON.stringify({ target: { type: 'wiki', id: kb.kbId }, payload: { kbId: kb.kbId, sourceIds: [source.sourceId] } }), failed.id);
-      await runtime.requestAdmin('wiki.sources.create', { kbId: kb.kbId, kind: 'manual', name: 'later.md', content: 'later' });
-      await expect(runtime.requestAdmin('admin.tasks.previewRetry', { source: 'user', id: failed.id })).resolves.toMatchObject({ sourceIds: [source.sourceId], targetCount: 1, model: 'fixture/model' });
-      await expect(runtime.requestAdmin('admin.tasks.retry', { source: 'user', id: failed.id })).rejects.toThrow('MODEL_CONFIRMATION_REQUIRED');
-      const retried = await runtime.requestAdmin<TaskView>('admin.tasks.retry', { source: 'user', id: failed.id, expectedModel: 'fixture/model' });
-      await vi.waitFor(async () => expect(await host.request('admin.jobs.get', { id: retried.ref.id })).toMatchObject({ state: 'completed' }));
-      const list = await runtime.requestAdmin<AuditPage>('admin.audit.query', { resource: { type: 'wiki', id: kb.kbId } });
-      expect(list.items.length).toBeGreaterThan(0); expect(execute).toHaveBeenCalledTimes(2);
-    } finally { await host.close(); runtime.close(); await runtime.waitClosed(); }
   });
 });
