@@ -12,6 +12,10 @@ import {
 import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
+  cascadeDeleteWikiPagesWithRefs,
+  deleteSourceFiles,
+} from './ingest/cascade';
+import {
   evictWikiDb,
   ftsSearch,
   initIndexDb,
@@ -491,10 +495,11 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
 
     const sourcesDir = join(asset.dir, 'raw', 'sources');
     const safe = this.resolveRawPath(sourcesDir, filename);
-    if (existsSync(safe)) unlinkSync(safe);
+    deleteSourceFiles(asset.dir, [safe]);
     withWriteDb(asset.dir, (db) => {
       db.prepare('DELETE FROM source WHERE filename = ?').run(filename);
     });
+    this.rebuildPageIndex(asset);
   }
 
   private resolvePagePath(wikiDir: string, ref: string, opts: { allowMissing?: boolean }): string {
@@ -679,7 +684,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     const wikiDir = join(asset.dir, 'wiki');
     const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
     if (isForbiddenResolvedPage(wikiDir, safe)) throw new Error('forbidden_path');
-    unlinkSync(safe);
+    cascadeDeleteWikiPagesWithRefs(asset.dir, [safe]);
     this.rebuildPageIndex(asset);
   }
 
@@ -697,9 +702,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       if (isForbiddenResolvedPage(wikiDir, safe)) throw new Error('forbidden_path');
       paths.push(safe);
     }
-    for (const safe of paths) {
-      if (existsSync(safe)) unlinkSync(safe);
-    }
+    cascadeDeleteWikiPagesWithRefs(asset.dir, paths);
     this.rebuildPageIndex(asset);
   }
 
