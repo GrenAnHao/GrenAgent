@@ -15,12 +15,15 @@ import type { UserImage } from '../../stores/agentReducer';
 import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
 import { MessageEditBox } from './MessageEditBox';
+import type { PromptImage } from './input/ChatInputContext';
 
 interface UserMessageProps {
   text: string;
   images?: UserImage[];
   /** pi 毫秒 timestamp：启用「移出上下文 / 回退到此」，并据此判断是否已被排除（灰显）。 */
   timestamp?: number;
+  /** 会话条目 id：截断目标。缺失时回退/编辑发送/重生成/删除不可用。 */
+  entryId?: string;
 }
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -61,9 +64,14 @@ function bodyTextOf(text: string): string {
     .trim();
 }
 
+function toUserImages(images?: PromptImage[]): UserImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map((img) => ({ mimeType: img.mimeType, data: img.data }));
+}
+
 /** 纯展示（不含 hooks）：供「带 store 订阅」与「无 store 降级」两条路径复用。 */
 function renderUserMessage(
-  { text, images, timestamp }: UserMessageProps,
+  { text, images, timestamp, entryId }: UserMessageProps,
   excluded: boolean,
   onEdit?: () => void,
 ): ReactNode {
@@ -77,7 +85,7 @@ function renderUserMessage(
   const hasImages = Boolean(images?.length);
   const hasBubble = hasImages || bodyText.length > 0;
 
-  const ctx: MessageActionContext = { role: 'user', text: bodyText, timestamp, onEdit };
+  const ctx: MessageActionContext = { role: 'user', text: bodyText, timestamp, entryId, images, onEdit };
   const actions = bodyText ? (
     <MessageActionBar
       ctx={ctx}
@@ -138,7 +146,7 @@ function ExcludableUserMessage(
   return renderUserMessage(props, excluded, props.onEdit);
 }
 
-function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
+function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps) {
   const storeCtx = useOptionalAgentStoreContext();
   const [editing, setEditing] = useState(false);
   const bodyText = bodyTextOf(text);
@@ -151,8 +159,16 @@ function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
             initialText={bodyText}
             initialImages={images}
             onCancel={() => setEditing(false)}
-            onSend={() => {
-              // 本任务只调用 onSend；截断与重发由后续任务接线。
+            onSend={(nextText, nextImages) => {
+              void (async () => {
+                if (!storeCtx || !entryId) {
+                  setEditing(false);
+                  return;
+                }
+                const result = await storeCtx.store.editAndSend(entryId, nextText, toUserImages(nextImages));
+                if (result === 'truncate-failed') return;
+                setEditing(false);
+              })();
             }}
           />
         </div>
@@ -160,7 +176,7 @@ function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
     );
   }
 
-  const onEdit = bodyText ? () => setEditing(true) : undefined;
+  const onEdit = bodyText && entryId ? () => setEditing(true) : undefined;
 
   if (storeCtx && timestamp != null) {
     return (
@@ -168,12 +184,13 @@ function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
         text={text}
         images={images}
         timestamp={timestamp}
+        entryId={entryId}
         store={storeCtx.store}
         onEdit={onEdit}
       />
     );
   }
-  return renderUserMessage({ text, images, timestamp }, false, onEdit);
+  return renderUserMessage({ text, images, timestamp, entryId }, false, onEdit);
 }
 
 export const UserMessage = memo(UserMessageInner);

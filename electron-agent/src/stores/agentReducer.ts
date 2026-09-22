@@ -1,3 +1,4 @@
+import { todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
 import type { WaitingUiPrompt } from './waitingUiPrompt';
 
@@ -16,6 +17,8 @@ export type ChatMessage =
       steering?: boolean;
       /** pi 消息自带的 Unix ms 时间戳；作为「移出上下文 / 回退到此」的稳定 key。本地新发的消息在落盘前为 undefined。 */
       timestamp?: number;
+      /** 会话文件条目 id；截断 / 回退 / 重新生成 / 删除的定位键。后端投影带回前可能缺省。 */
+      entryId?: string;
     }
   | {
       kind: 'assistant';
@@ -61,10 +64,41 @@ export interface AgentState {
    * 中间的 turn_end / agent_end(willRetry) 都还不算空闲（自动重试、compaction、排队续跑仍可能发生）。
    */
   runActive?: boolean;
+  /**
+   * 最近一条 assistant 的停止原因。只有 stop 才表示这轮正常说完；
+   * aborted / error 不能把还在进行中的任务收成完成。
+   */
+  assistantStop?: 'stop' | 'aborted' | 'error';
+  /** 最近一次 todo 清单已经做完。下一轮用户消息后任务条收起，直到出现新的 todo 结果。 */
+  todoListFinished?: boolean;
 }
 
 export function initialAgentState(): AgentState {
   return { messages: [], excluded: new Set(), isStreaming: false, steering: [], followUp: [], composerQueue: [] };
+}
+
+function todoListFinishedFromRun(
+  messages: readonly TodoTranscriptMessage[] | undefined,
+  previous: boolean | undefined,
+): boolean | undefined {
+  if (!messages?.some((message) => message?.role === 'toolResult' && typeof message.toolName === 'string' && message.toolName.toLowerCase() === 'todo')) {
+    return previous;
+  }
+  return todoListFinishedInTranscript(messages);
+}
+
+export function assistantStopFromMessages(
+  messages: readonly { role?: unknown; stopReason?: unknown }[] | undefined,
+): AgentState['assistantStop'] {
+  if (!messages) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== 'assistant') continue;
+    const reason = message.stopReason;
+    if (reason === 'stop' || reason === 'aborted' || reason === 'error') return reason;
+    return undefined;
+  }
+  return undefined;
 }
 
 let counter = 0;
@@ -238,7 +272,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
       // 并清掉「准备响应中」占位（由 isStreaming 接管等待指示，无缝过渡）。
-      return { ...state, isStreaming: true, runActive: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false };
+      return { ...state, isStreaming: true, runActive: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false, assistantStop: undefined };
 
     case 'agent_end': {
       // 只克隆仍处于 streaming 的 assistant（通常 0~1 条），其余保留引用，避免每轮克隆整段历史。
@@ -257,6 +291,13 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         aborting: false,
         compacting: false,
         waitingUiPrompt: undefined,
+        assistantStop: assistantStopFromMessages(
+          (event as { messages?: { role?: unknown; stopReason?: unknown }[] }).messages,
+        ),
+        todoListFinished: todoListFinishedFromRun(
+          (event as { messages?: TodoTranscriptMessage[] }).messages,
+          state.todoListFinished,
+        ),
         messages: touched ? messages : state.messages,
       };
     }
@@ -455,11 +496,13 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'tool_execution_end': {
       const ev = event as Extract<AgentEvent, { type: 'tool_execution_end' }>;
-      return updateTool(state, ev.toolCallId, (t) => ({
+      const next = updateTool(state, ev.toolCallId, (t) => ({
         ...t,
         result: ev.result,
         status: ev.isError ? 'error' : 'done',
       }));
+      if (ev.isError || ev.toolName.toLowerCase() !== 'todo') return next;
+      return { ...next, todoListFinished: false };
     }
 
     case 'queue_update': {
@@ -558,6 +601,8 @@ export function messagesFromAgent(
     if (msg.role === 'user') {
       const { text } = extractText(msg);
       const images = extractImages(msg);
+      const rawEntryId = (msg as { entryId?: unknown }).entryId;
+      const entryId = typeof rawEntryId === 'string' && rawEntryId.trim() ? rawEntryId : undefined;
       if (text.trim() || images.length)
         out.push({
           kind: 'user',
@@ -565,6 +610,7 @@ export function messagesFromAgent(
           text,
           images: images.length ? images : undefined,
           timestamp: messageTimestamp(msg),
+          entryId,
         });
       continue;
     }

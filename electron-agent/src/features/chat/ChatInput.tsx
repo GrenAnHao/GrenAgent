@@ -17,8 +17,11 @@ import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './i
 import { cancelPendingOverlay } from './input/overlayPrompt';
 import { composerCanSend, composerSendBehavior } from './input/sendBehavior';
 import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
+import { makePastedText } from './input/editor/pastedText';
+import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
 import { pi } from '../../lib/pi';
 import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
+import { registerComposerSend, registerComposerSetValue } from './input/composerBridge';
 
 interface ChatInputProps {
   onSend: (
@@ -62,6 +65,13 @@ export function ChatInput({
   const [empty, setEmpty] = useState(true);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
+
+  useEffect(() => {
+    bindBrowserElementChatSink((offer) => {
+      setPastedTexts((prev) => [...prev, { ...makePastedText(offer.text), label: offer.title }]);
+    });
+    return () => bindBrowserElementChatSink(null);
+  }, []);
 
   // 读当前编辑器正文（markdown）。remark-gfm 会转义 _ / @、并把邮箱包成 <a@b.com>，发出前还原。
   const readDraft = useCallback(
@@ -164,6 +174,16 @@ export function ChatInput({
     },
     [editor],
   );
+
+  // 供消息编辑 / 回退把文字写入底部输入框，以及编辑后走同一条普通发送。
+  useEffect(() => {
+    registerComposerSetValue(setValue);
+    registerComposerSend((text, images) => onSend(text, images));
+    return () => {
+      registerComposerSetValue(null);
+      registerComposerSend(null);
+    };
+  }, [setValue, onSend]);
 
   // 输入变化：更新空态 + 安排草稿持久化（MessageEditor 的 onChange 经 ctx.setEmpty 走到这里）。
   const handleChange = useCallback(

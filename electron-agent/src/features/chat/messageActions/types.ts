@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import type { UserImage } from '../../stores/agentReducer';
 
 export type MessageRole = 'user' | 'assistant';
 
@@ -8,14 +9,22 @@ export interface MessageActionContext {
   text: string;
   /** 该消息的 pi 毫秒 timestamp（移出上下文 / 回退到此的稳定 key）。缺失时相关动作禁用。 */
   timestamp?: number;
+  /** 会话条目 id；截断类动作（回退/重生成/删除）需要。 */
+  entryId?: string;
+  /** 用户消息图片：重新生成时一并发出。 */
+  images?: UserImage[];
   /** 该消息当前是否已被移出 LLM 上下文。 */
   excluded?: boolean;
   /** 移出上下文（由 MessageActionBar 在有 store 上下文时注入，内部调 store.excludeMessage）。 */
   onExclude?: (timestamp: number) => void | Promise<void>;
   /** 恢复到上下文（内部调 store.restoreMessage）。 */
   onRestore?: (timestamp: number) => void | Promise<void>;
-  /** 回退到此（内部调 store.rewindTo）。 */
-  onRewind?: (timestamp: number) => void | Promise<void>;
+  /** 回退到此（内部调 store.rewindAndLoad）。 */
+  onRewind?: (entryId: string, text: string) => void | Promise<void>;
+  /** 重新生成（内部调 store.regenerate）。 */
+  onRegenerate?: (entryId: string, text: string, images?: UserImage[]) => void | Promise<void>;
+  /** 删除（内部调 store.deleteFrom）。 */
+  onDelete?: (entryId: string) => void | Promise<void>;
   /** 进入就地编辑（由 UserMessage 注入；缺失时编辑禁用）。 */
   onEdit?: () => void;
 }

@@ -78,7 +78,7 @@ export function renderMessageBody(
 ): ReactNode {
   switch (msg.kind) {
     case 'user':
-      return <UserMessage text={msg.text} images={msg.images} timestamp={msg.timestamp} />;
+      return <UserMessage text={msg.text} images={msg.images} timestamp={msg.timestamp} entryId={msg.entryId} />;
     case 'turn':
       return (
         <TurnTimeline

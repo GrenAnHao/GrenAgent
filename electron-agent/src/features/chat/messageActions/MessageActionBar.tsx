@@ -106,12 +106,27 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
           notify.error('恢复失败');
         }
       },
-      onRewind: async (t) => {
+      onRewind: async (entryId, text) => {
         try {
-          await store.rewindTo(t);
+          await store.rewindAndLoad(entryId, text);
           notify.success('已回退到此');
         } catch {
           notify.error('回退失败');
+        }
+      },
+      onRegenerate: async (entryId, text, images) => {
+        try {
+          await store.regenerate(entryId, text, images);
+        } catch {
+          notify.error('重新生成失败');
+        }
+      },
+      onDelete: async (entryId) => {
+        try {
+          await store.deleteFrom(entryId);
+          notify.success('已删除');
+        } catch {
+          notify.error('删除失败');
         }
       },
     }),

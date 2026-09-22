@@ -59,7 +59,7 @@ describe('buildActionItem', () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
-  it('regenerate / del 为 disabled 占位且无 onClick', () => {
+  it('regenerate / del 无 entryId 时禁用；有 entryId + 回调时可点', () => {
     const labels = { regenerate: '重新生成', del: '删除' } as const;
     for (const slot of ['regenerate', 'del'] as const) {
       const item = buildActionItem(slot, ctx, { success: vi.fn(), error: vi.fn() });
@@ -67,6 +67,28 @@ describe('buildActionItem', () => {
       expect(item.onClick).toBeUndefined();
       expect(item.label).toBe(labels[slot]);
     }
+
+    const onRegenerate = vi.fn();
+    const regen = buildActionItem(
+      'regenerate',
+      { ...ctx, entryId: 'e1', onRegenerate },
+      { success: vi.fn(), error: vi.fn() },
+    );
+    expect(regen.disabled).toBe(false);
+    regen.onClick!();
+    expect(onRegenerate).toHaveBeenCalledWith('e1', '你好世界', undefined);
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onDelete = vi.fn();
+    const del = buildActionItem(
+      'del',
+      { ...ctx, entryId: 'e1', onDelete },
+      { success: vi.fn(), error: vi.fn() },
+    );
+    expect(del.disabled).toBe(false);
+    del.onClick!();
+    expect(onDelete).toHaveBeenCalledWith('e1');
+    confirmSpy.mockRestore();
   });
 
   const notify = { success: vi.fn(), error: vi.fn() };
@@ -102,20 +124,22 @@ describe('buildActionItem', () => {
     expect(item.onClick).toBeUndefined();
   });
 
-  it('rewind：带 timestamp/onRewind 可点击，缺失则禁用', () => {
+  it('rewind：带 entryId/onRewind 可点击，缺失则禁用', () => {
     const onRewind = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const ok = buildActionItem(
       'rewind',
-      { role: 'user', text: 'x', timestamp: 9, onRewind },
+      { role: 'user', text: 'x', entryId: 'e9', onRewind },
       notify,
     );
     expect(ok.label).toBe('回退到此');
     expect(ok.disabled).toBe(false);
     ok.onClick!();
-    expect(onRewind).toHaveBeenCalledWith(9);
+    expect(onRewind).toHaveBeenCalledWith('e9', 'x');
 
     const disabled = buildActionItem('rewind', { role: 'user', text: 'x' }, notify);
     expect(disabled.disabled).toBe(true);
     expect(disabled.onClick).toBeUndefined();
+    confirmSpy.mockRestore();
   });
 });

@@ -5,6 +5,7 @@ import {
   addUserMessage,
   messagesFromAgent,
   excludedFromAgent,
+  assistantStopFromMessages,
   type AgentState,
   type ChatMessage,
   type UserImage,
@@ -14,6 +15,12 @@ import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurati
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
 import { sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
 import { expandSystemWorkerChat } from '../lib/systemWorkerChat';
+import { todoListFinishedInTranscript } from '@extensions/_shared/todo-model';
+import {
+  sendViaComposer,
+  setComposerValue,
+  type PromptImage,
+} from '../features/chat/input/composerBridge';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -44,6 +51,23 @@ export interface AgentStoreApi {
   restoreMessage: (timestamp: number) => Promise<void>;
   /** 回退到某条消息：后端按 timestamp 映射 entry id 后 fork 出新分支并切换，随后重载消息。 */
   rewindTo: (timestamp: number) => Promise<void>;
+  /**
+   * 原地截断会话（drop-target / keep-target）。成功后把界面消息收成剩余对话并同步 ui-history；
+   * 写失败则删除该会话的 ui-history。磁盘已截断但 reload 失败时仍按截断成功处理。
+   */
+  truncateTo: (entryId: string, mode: 'drop-target' | 'keep-target') => Promise<void>;
+  /** 编辑发送：drop-target 截断后走普通发送；截断已成功但发送失败时把文字写入底部输入框。 */
+  editAndSend: (
+    entryId: string,
+    text: string,
+    images?: UserImage[],
+  ) => Promise<'ok' | 'truncate-failed' | 'send-failed'>;
+  /** 回退确认：记住文字 → 截断 drop-target → 写入底部输入框。 */
+  rewindAndLoad: (entryId: string, text: string) => Promise<void>;
+  /** 重新生成：keep-target 后用原文普通发送。 */
+  regenerate: (entryId: string, text: string, images?: UserImage[]) => Promise<void>;
+  /** 删除确认：drop-target，不写入输入框。 */
+  deleteFrom: (entryId: string) => Promise<void>;
   reset: () => void;
   hasLiveActivity: () => boolean;
   /**
@@ -234,7 +258,14 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       m.kind === 'tool' && m.status === 'running' ? { ...m, status: 'error' as const } : m,
     );
     const composerQueue = useStore.getState().composerQueue;
-    setFullState({ ...initialAgentState(), messages: sanitized, excluded: excludedFromAgent(msgs), composerQueue });
+    setFullState({
+      ...initialAgentState(),
+      messages: sanitized,
+      excluded: excludedFromAgent(msgs),
+      composerQueue,
+      assistantStop: assistantStopFromMessages(msgs),
+      todoListFinished: todoListFinishedInTranscript(msgs),
+    });
     // 首次（无 uiHistory / uiHistory 更短）用后端起底：写一份 UI 历史，之后运行中每轮结束再覆盖为完整。
     if (sessionPath != null && processed === backend) {
       const key = sessionKeyFromPath(sessionPath);
@@ -284,6 +315,95 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     loadMessages(res.messages, { force: true });
   };
 
+  const isTruncatedOnDiskError = (error: unknown): boolean => {
+    const msg = error instanceof Error ? error.message : String(error);
+    return /truncated on disk/i.test(msg);
+  };
+
+  const remainingMessages = (
+    messages: ChatMessage[],
+    entryId: string,
+    mode: 'drop-target' | 'keep-target',
+  ): ChatMessage[] => {
+    const idx = messages.findIndex((m) => m.kind === 'user' && m.entryId === entryId);
+    if (idx < 0) return messages;
+    return mode === 'drop-target' ? messages.slice(0, idx) : messages.slice(0, idx + 1);
+  };
+
+  const persistUiHistoryAfterCut = async (messages: ChatMessage[]) => {
+    if (loadedSessionPath == null) return;
+    const key = sessionKeyFromPath(loadedSessionPath);
+    if (!key) return;
+    try {
+      await pi.writeUiHistory(workspace, key, serializeHistory(messages));
+    } catch {
+      try {
+        await pi.deleteUiHistory(workspace, key);
+      } catch {
+        // ignore secondary failure
+      }
+    }
+  };
+
+  const applyCutToUi = async (entryId: string, mode: 'drop-target' | 'keep-target') => {
+    const nextMessages = remainingMessages(useStore.getState().messages, entryId, mode);
+    currentSig = sessionSignature(nextMessages);
+    if (loadedSessionPath != null) setCachedSession(loadedSessionPath, nextMessages, currentSig);
+    useStore.setState({ messages: nextMessages, isStreaming: false, awaitingResponse: false, runActive: false });
+    await persistUiHistoryAfterCut(nextMessages);
+  };
+
+  const truncateTo = async (entryId: string, mode: 'drop-target' | 'keep-target') => {
+    try {
+      const result = await pi.truncateTo(workspace, entryId, mode);
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
+        throw new Error(result.reason === 'branched' ? '会话存在旁支，无法截断' : '截断失败');
+      }
+    } catch (error) {
+      if (!isTruncatedOnDiskError(error)) throw error;
+      // 磁盘已截断：按成功处理，继续同步界面。
+    }
+    await applyCutToUi(entryId, mode);
+  };
+
+  const toPromptImages = (images?: UserImage[]): PromptImage[] | undefined => {
+    if (!images?.length) return undefined;
+    return images.map((img) => ({ type: 'image' as const, mimeType: img.mimeType, data: img.data }));
+  };
+
+  const editAndSend = async (
+    entryId: string,
+    text: string,
+    images?: UserImage[],
+  ): Promise<'ok' | 'truncate-failed' | 'send-failed'> => {
+    try {
+      await truncateTo(entryId, 'drop-target');
+    } catch {
+      return 'truncate-failed';
+    }
+    try {
+      await sendViaComposer(text, toPromptImages(images));
+      return 'ok';
+    } catch {
+      setComposerValue(text);
+      return 'send-failed';
+    }
+  };
+
+  const rewindAndLoad = async (entryId: string, text: string) => {
+    await truncateTo(entryId, 'drop-target');
+    setComposerValue(text);
+  };
+
+  const regenerate = async (entryId: string, text: string, images?: UserImage[]) => {
+    await truncateTo(entryId, 'keep-target');
+    await sendViaComposer(text, toPromptImages(images));
+  };
+
+  const deleteFrom = async (entryId: string) => {
+    await truncateTo(entryId, 'drop-target');
+  };
+
   const reset = () => {
     liveActivity = false;
     // 新会话尚无落盘路径：标记为未载入，切回时按完整加载处理（届时会话已有路径）。
@@ -303,6 +423,11 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     excludeMessage,
     restoreMessage,
     rewindTo,
+    truncateTo,
+    editAndSend,
+    rewindAndLoad,
+    regenerate,
+    deleteFrom,
     reset,
     hasLiveActivity: () => liveActivity,
     getLoadedSessionPath: () => loadedSessionPath,
