@@ -105,6 +105,17 @@ export type WikiAsset = {
   dir: string;
 };
 
+export type WikiAssetDetail = WikiAsset & {
+  internalStatus: string | null;
+  syncError: string | null;
+  pageCount: number | null;
+  summary: string | null;
+  version: number;
+  lastSyncAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WikiRawSource = {
   filename: string;
   sha256: string;
@@ -452,6 +463,104 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     };
   }
 
+  private rowToDetail(row: {
+    wiki_id: string;
+    name: string;
+    status: string;
+    internal_status: string | null;
+    sync_error: string | null;
+    page_count: number | null;
+    summary: string | null;
+    version: number;
+    last_sync_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }): WikiAssetDetail {
+    return {
+      ...this.rowToAsset(row),
+      internalStatus: row.internal_status,
+      syncError: row.sync_error,
+      pageCount: row.page_count,
+      summary: row.summary,
+      version: row.version,
+      lastSyncAt: row.last_sync_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private selectDetail(wikiId: string): WikiAssetDetail {
+    assertSafeWikiId(wikiId);
+    const row = this.db
+      .prepare(
+        `SELECT wiki_id, name, status, internal_status, sync_error, page_count, summary,
+                version, last_sync_at, created_at, updated_at
+         FROM wiki_assets WHERE wiki_id = ?`,
+      )
+      .get(wikiId) as
+      | {
+          wiki_id: string;
+          name: string;
+          status: string;
+          internal_status: string | null;
+          sync_error: string | null;
+          page_count: number | null;
+          summary: string | null;
+          version: number;
+          last_sync_at: string | null;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+    if (!row) throw new Error(`not_found: wiki ${wikiId}`);
+    return this.rowToDetail(row);
+  }
+
+  list(): WikiAssetDetail[] {
+    const rows = this.db
+      .prepare(
+        `SELECT wiki_id, name, status, internal_status, sync_error, page_count, summary,
+                version, last_sync_at, created_at, updated_at
+         FROM wiki_assets ORDER BY created_at ASC, wiki_id ASC`,
+      )
+      .all() as Array<{
+      wiki_id: string;
+      name: string;
+      status: string;
+      internal_status: string | null;
+      sync_error: string | null;
+      page_count: number | null;
+      summary: string | null;
+      version: number;
+      last_sync_at: string | null;
+      created_at: string;
+      updated_at: string;
+    }>;
+    return rows.map((row) => this.rowToDetail(row));
+  }
+
+  read(wikiId: string): WikiAssetDetail {
+    return this.selectDetail(wikiId);
+  }
+
+  update(wikiId: string, patch: { name?: string; summary?: string | null }): WikiAssetDetail {
+    this.requireAsset(wikiId);
+    const now = new Date().toISOString();
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new Error('invalid wiki name');
+      this.db
+        .prepare('UPDATE wiki_assets SET name = ?, updated_at = ? WHERE wiki_id = ?')
+        .run(name, now, wikiId);
+    }
+    if (patch.summary !== undefined) {
+      this.db
+        .prepare('UPDATE wiki_assets SET summary = ?, updated_at = ? WHERE wiki_id = ?')
+        .run(patch.summary, now, wikiId);
+    }
+    return this.selectDetail(wikiId);
+  }
+
   create(input: WikiCreateInput): WikiAsset {
     const name = input.name.trim();
     if (!name) throw new Error('invalid wiki name');
@@ -668,6 +777,17 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
         .all() as WikiRawSource[];
     } finally {
       db.close();
+    }
+  }
+
+  readRaw(wikiId: string, filename: string): string {
+    const asset = this.requireAsset(wikiId);
+    const sourcesDir = join(asset.dir, 'raw', 'sources');
+    const safe = this.resolveRawPath(sourcesDir, filename);
+    try {
+      return readFileSync(safe, 'utf8');
+    } catch {
+      throw new Error(`not_found: raw ${filename}`);
     }
   }
 

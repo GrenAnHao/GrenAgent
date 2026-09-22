@@ -8,19 +8,12 @@ import { AgentDataStorage } from './storage';
 import { ThreadStore } from './threadStore';
 import { MemoryStore } from './memoryStore';
 import type { MemoryDraft, MemoryFilter, MemoryListInput, MemoryOwner } from './memoryContracts';
-import { WikiStore } from './wikiStore';
-import { WikiFiles, wikiHash } from './wikiFiles';
-import { WikiLibraryStore, normalizeWikiWorkspace } from './wikiLibraryStore';
-import { WikiSourceStore } from './wikiSourceStore';
-import { WikiLibraryService } from '../app/wikiLibraryService';
-import { scanWorkspaceMarkdown } from '../app/wikiSyncService';
+import { WikiService } from './wikiEngine/service';
 import { TaskViewStore } from './taskViewStore';
 import { TaskViewService } from '../app/taskViewService';
 import { AuditViewStore } from './auditViewStore';
 import { AgentDataDiagnostics } from '../app/agentDataDiagnostics';
 import type { AuditQuery, DiagnosticReport, JobMetadata, TaskListInput, TaskRef, TaskRetryOptions, WorkbenchOverview } from './operationsContracts';
-import type { WikiSyncSkipInput } from '../app/wikiSyncService';
-import type { WikiDiagnostic, WikiLibrary, WikiLibraryInput, WikiLibraryView, WikiPageInput, WikiRequestContext, WikiSourceInput, WikiSourceRef, WikiTarget, WikiVersion } from './wikiContracts';
 import { JobStore, type Job } from './jobStore';
 import { MemoryService, type LayerScheduleOptions, type MemoryTaskQueue } from '../app/memoryService';
 import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
@@ -58,7 +51,8 @@ export interface AgentDataRuntimeOptions {
   jobRunners?: Record<string, AgentDataJobRunner>;
   codeRetrieval?: AgentDataCodeRetrievalProvider;
   validateProject?: (workspace: string) => Promise<string>;
-  wikiModelLabel?: () => Promise<string>;
+  /** Injected model short-call for Wiki ingest; tests pass a stub. */
+  completeSimple?: (input: { systemPrompt?: string; user: string }) => Promise<string>;
   /** Resolves whether a session is currently owned by the endpoint workspace. */
   resolveSession?: (workspace: string, sessionId: string) => boolean | Promise<boolean>;
   layerSchedule?: LayerScheduleOptions;
@@ -73,10 +67,7 @@ export class AgentDataRuntime {
   private inFlight = 0;
   private readonly token = randomBytes(32).toString('hex');
   private memory?: MemoryStore;
-  private wiki?: WikiStore;
-  private wikiLibraries?: WikiLibraryStore;
-  private wikiSources?: WikiSourceStore;
-  private wikiService?: WikiLibraryService;
+  private wiki?: WikiService;
   private taskViews?: TaskViewStore;
   private taskService?: TaskViewService;
   private auditViews?: AuditViewStore;
@@ -150,26 +141,21 @@ export class AgentDataRuntime {
       ? (this.temporaryWikiRoot = mkdtempSync(join(tmpdir(), 'agent-data-wiki-')))
       : join(dirname(resolve(this.options.dataPath)), 'wiki'));
     this.jobs = new JobStore(this.storage.db);
-    for (const job of this.jobs.list()) if (job.kind === 'wiki.sync' && (job.state === 'pending' || job.state === 'running')) this.jobs.fail(job.id, 'WIKI_TASK_INTERRUPTED: runtime restarted');
-    const wikiFiles = new WikiFiles(wikiRoot);
-    this.wikiLibraries = new WikiLibraryStore(this.storage.db, wikiFiles);
-    this.wikiSources = new WikiSourceStore(this.storage.db, wikiFiles, this.wikiLibraries);
-    this.wiki = new WikiStore(this.storage.db, wikiRoot, { libraries: this.wikiLibraries, sources: this.wikiSources });
-    this.wikiService = new WikiLibraryService({
-      libraries: this.wikiLibraries, sources: this.wikiSources, pages: this.wiki, jobs: this.jobs,
-      runServiceTask: (input) => this.runServiceTask(input),
-      modelLabel: this.options.wikiModelLabel ?? (async () => { throw new Error('MODEL_UNAVAILABLE: no Wiki model is configured'); }),
-      validateProject: this.options.validateProject ?? (async () => { throw new Error('PROJECT_VALIDATOR_UNAVAILABLE'); }),
-      cancelJob: (id) => { const job = this.jobs!.get(id); if (job) this.options.jobRunners?.[job.kind]?.cancel(id); },
+    this.wiki = new WikiService({
+      root: wikiRoot,
+      db: this.storage.db,
+      complete: async (system, prompt) => {
+        if (!this.options.completeSimple) throw new Error('MODEL_UNAVAILABLE: no Wiki model is configured');
+        return this.options.completeSimple({ systemPrompt: system, user: prompt });
+      },
     });
-    this.wikiService.recover();
     this.taskViews = new TaskViewStore(this.storage.db);
     this.taskService = new TaskViewService({ views: this.taskViews, jobs: this.jobs,
       readTarget: (job) => this.readTaskTarget(job), dispatch: (job, metadata, options) => this.retryTask(job, metadata, options),
-      previewWikiRetry: (job) => this.previewWikiRetry(job), canCancel: (job) => job.kind === 'wiki.ingest' || Boolean(this.options.jobRunners?.[job.kind]),
+      canCancel: (job) => Boolean(this.options.jobRunners?.[job.kind]),
     });
     this.auditViews = new AuditViewStore(this.storage.db);
-    this.diagnostics = new AgentDataDiagnostics({ wiki: this.wiki, libraries: this.wikiLibraries,
+    this.diagnostics = new AgentDataDiagnostics({
       codeProjects: () => this.options.codeRetrieval?.projects() ?? [], codeStatus: (workspace) => this.options.codeRetrieval?.status(workspace) ?? {},
     });
     this.threads = new ThreadStore(this.storage);
@@ -191,7 +177,7 @@ export class AgentDataRuntime {
 
   agentEndpoint(workspace: string): AgentDataEndpoint {
     if (!this.endpoint || this.closed) throw new Error('agent data runtime is not started');
-    const key = normalizeWikiWorkspace(workspace);
+    const key = normalizeWorkspace(workspace);
     let token = this.workspaceTokens.get(key);
     if (!token) {
       token = randomBytes(32).toString('hex');
@@ -206,7 +192,7 @@ export class AgentDataRuntime {
     if (!this.endpoint || this.closed) throw new Error('agent data runtime is not started');
     this.inFlight += 1;
     try {
-      const method = this.operationsMethod(name) ?? this.memoryManagementMethod(name) ?? this.wikiMethod(name, { kind: 'admin' });
+      const method = this.operationsMethod(name) ?? this.memoryManagementMethod(name) ?? this.wikiMethod(name, 'admin');
       if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown management method: ${name}`);
       return await method(params) as T;
     } catch (error) {
@@ -241,35 +227,9 @@ export class AgentDataRuntime {
   }
 
   private async readTaskTarget(job: Job): Promise<{ exists: boolean; busy: boolean }> {
-    if (job.kind === 'wiki.ingest') {
-      const payload = job.metadata?.payload;
-      if (!payload || !('kbId' in payload) || job.metadata?.target?.type !== 'wiki' || payload.kbId !== job.metadata.target.id) return { exists: false, busy: false };
-      const kb = this.wikiLibraries!.get(payload.kbId);
-      const sourceIds = payload.sourceIds.filter((id) => this.wikiSources!.get(payload.kbId, id)?.lifecycle === 'active');
-      const pending = kb?.lifecycle === 'active' && sourceIds.length ? this.wikiSources!.pending(kb.kbId, sourceIds) : [];
-      return { exists: Boolean(kb?.lifecycle === 'active' && pending.length), busy: !!kb && this.wikiLibraries!.activeTasks({ kind: 'library', kbId: kb.kbId }).length > 0 };
-    }
-    if (!['wiki.sync', 'codegraph.sync'].includes(job.kind) || !this.options.jobRunners?.[job.kind] || !job.workspace) return { exists: false, busy: false };
+    if (!['codegraph.sync'].includes(job.kind) || !this.options.jobRunners?.[job.kind] || !job.workspace) return { exists: false, busy: false };
     try { if (!(await stat(job.workspace)).isDirectory()) return { exists: false, busy: false }; } catch { return { exists: false, busy: false }; }
-    if (job.kind === 'wiki.sync') {
-      const kb = this.wikiLibraries!.resolveLegacy(job.workspace);
-      const bound = kb?.bindings.some((workspace) => normalizeWikiWorkspace(workspace) === normalizeWikiWorkspace(job.workspace));
-      return { exists: Boolean(kb?.lifecycle === 'active' && bound), busy: !!kb && this.wikiLibraries!.activeTasks({ kind: 'library', kbId: kb.kbId }).length > 0 };
-    }
-    return { exists: true, busy: this.jobs!.list().some((other) => other.kind === job.kind && ['pending', 'running'].includes(other.state) && normalizeWikiWorkspace(other.workspace) === normalizeWikiWorkspace(job.workspace)) };
-  }
-
-  private async previewWikiRetry(job: Job): Promise<{ sourceIds?: string[]; targetCount: number; model: string }> {
-    if (job.kind === 'wiki.ingest') {
-      const payload = job.metadata?.payload;
-      if (!payload || !('kbId' in payload)) throw new Error('TASK_RETRY_UNAVAILABLE');
-      const sourceIds = payload.sourceIds.filter((id) => this.wikiSources!.get(payload.kbId, id)?.lifecycle === 'active');
-      return this.wikiService!.previewIngest(payload.kbId, sourceIds);
-    }
-    if (!this.options.wikiModelLabel) throw new Error('MODEL_UNAVAILABLE');
-    const model = await this.options.wikiModelLabel();
-    const files = await scanWorkspaceMarkdown(job.workspace);
-    return { targetCount: files.length, model };
+    return { exists: true, busy: this.jobs!.list().some((other) => other.kind === job.kind && ['pending', 'running'].includes(other.state) && normalizeWorkspace(other.workspace) === normalizeWorkspace(job.workspace)) };
   }
 
   private async retryTask(previous: Job, metadata: { retryOf: string }, options?: TaskRetryOptions): Promise<Job> {
@@ -278,42 +238,19 @@ export class AgentDataRuntime {
     const target = await this.readTaskTarget(previous);
     if (!target.exists || target.busy) throw new Error(target.busy ? 'TASK_TARGET_BUSY' : 'TASK_TARGET_NOT_FOUND');
     if (this.closed) throw new Error('runtime is closed');
-    if (previous.kind === 'wiki.ingest') {
-      const payload = previous.metadata!.payload!;
-      if (!('kbId' in payload)) throw new Error('TASK_RETRY_UNAVAILABLE');
-      const receipt = await this.wikiService!.startIngest(payload.kbId, payload.sourceIds, undefined, options?.expectedModel, metadata.retryOf);
-      this.dispatchIngest(receipt.jobId);
-      return this.jobs!.get(receipt.jobId)!;
-    }
-    if (previous.kind === 'wiki.sync') {
-      const preview = await this.previewWikiRetry(previous);
-      if (preview.model !== options?.expectedModel) throw new Error('MODEL_CHANGED');
-    }
     const again = await this.readTaskTarget(previous);
     if (!again.exists || again.busy || this.closed) throw new Error('TASK_TARGET_BUSY');
     return this.createUserJob(previous.kind, previous.workspace, { ...metadata }, options?.expectedModel);
   }
 
-  private dispatchIngest(jobId: string): void {
-    this.inFlight += 1;
-    queueMicrotask(() => { void this.wikiService!.runIngest(jobId).catch((error) => {
-      const job = this.jobs!.get(jobId);
-      if (job?.state === 'pending' || job?.state === 'running') this.jobs!.fail(jobId, String(error));
-    }).finally(() => { this.inFlight -= 1; this.finishClose(); }); });
-  }
-
   private async workbenchOverview(userId: string): Promise<WorkbenchOverview> {
     const result: WorkbenchOverview = { recentPages: [], recentMemories: [], errors: [] };
     try {
-      const libraries = this.wikiLibraries!.list().filter((kb) => kb.lifecycle === 'active');
+      const libraries = this.wiki!.list();
       result.libraries = { total: libraries.length, pendingSources: 0, pages: 0 };
       for (const library of libraries) {
-        result.libraries.pendingSources += this.wikiSources!.pending(library.kbId).length;
-        const rows = this.storage!.db.prepare("SELECT page,title,updated_at FROM wiki_documents d WHERE kb_id=? AND NOT EXISTS (SELECT 1 FROM wiki_page_state s WHERE s.kb_id=d.kb_id AND s.page_id=d.page AND s.lifecycle!='active') ORDER BY updated_at DESC,page ASC").all(library.kbId);
-        result.libraries.pages += rows.length;
-        result.recentPages.push(...rows.slice(0, 5).map((row) => ({ kbId: library.kbId, pageId: String(row.page), title: String(row.title), libraryName: library.name, updatedAt: Number(row.updated_at) })));
+        result.libraries.pages += library.pageCount ?? 0;
       }
-      result.recentPages.sort((a, b) => b.updatedAt - a.updatedAt); result.recentPages = result.recentPages.slice(0, 5);
     } catch { result.errors.push({ domain: 'wiki', message: '知识库概览暂不可用' }); }
     try { result.recentMemories = this.memory!.list({ userId, filter: { scope: 'all' }, limit: 5 }).items.map(({ id, content, level, updatedAt }) => ({ id, content: content.slice(0, 240), level, updatedAt })); }
     catch { result.errors.push({ domain: 'memory', message: '最近记忆暂不可用' }); }
@@ -325,35 +262,15 @@ export class AgentDataRuntime {
     return result;
   }
 
-  recordWikiSyncSkip(input: WikiSyncSkipInput): void {
-    const job = this.jobs?.get(input.jobId);
-    if (!job || job.kind !== 'wiki.sync' || normalizeWikiWorkspace(job.workspace) !== normalizeWikiWorkspace(input.workspace)) throw new Error('FORBIDDEN: Wiki task target does not match');
-    const library = this.wikiLibraries!.resolveLegacy(job.workspace);
-    if (!library) throw new Error('FORBIDDEN: Wiki task has no legacy library');
-    this.storage!.db.prepare('INSERT INTO agent_audit(id,action,detail,created_at) VALUES(?,?,?,?)')
-      .run(randomUUID(), 'wiki.sync.skip', JSON.stringify({ jobId: job.id, kbId: library.kbId, resource: { type: 'wiki', id: library.kbId }, resourceName: library.name, page: input.page, reason: input.reason }), Date.now());
-  }
-
-  private wikiContext(token: string, params: Record<string, unknown>): WikiRequestContext {
-    const workspace = this.projectTokens.get(token);
-    if (!workspace) throw new RpcError('FORBIDDEN', 'Wiki socket requests require a project endpoint');
-    if (params.workspace !== undefined && normalizeWikiWorkspace(readString(params.workspace)) !== workspace) throw new RpcError('FORBIDDEN', 'workspace does not match endpoint');
-    return { kind: 'project', workspace };
-  }
-
   /** Main-process service work shares the same serialized system-task lane as memory extraction. */
   async runServiceTask(input: Omit<QueueTaskInput, 'system'>): Promise<unknown> {
     if (!this.taskQueue || this.closed) throw new Error('agent data task executor is not available');
-    const params = input.input && typeof input.input === 'object' ? input.input as Record<string, unknown> : {};
-    const legacy = input.kind === 'wiki_page_generate' && typeof params.workspace === 'string' ? this.ensureLegacyLibrary(params.workspace) : undefined;
-    if (legacy) this.wikiLibraries!.recordTask({ taskSource: 'service_task', taskId: input.id, kbId: legacy.kbId, active: true, canCancel: false });
     this.inFlight += 1;
     try {
       const task = await this.taskQueue.enqueue({ ...input, system: true });
       if (task.status !== 'completed') throw new Error(task.error ?? `service task ${task.status}`);
       return task.output;
     } finally {
-      if (legacy) this.wikiLibraries!.settleTask('service_task', input.id);
       this.inFlight -= 1; this.finishClose();
     }
   }
@@ -368,7 +285,6 @@ export class AgentDataRuntime {
     }
     this.taskQueue?.stop();
     if (this.taskQueue && !this.taskQueue.isIdle()) void this.taskQueue.whenIdle().then(() => this.finishClose());
-    for (const job of this.jobs?.list() ?? []) if (job.kind === 'wiki.ingest' && (job.state === 'pending' || job.state === 'running')) this.wikiService?.requestCancel(job.id);
     this.server?.close();
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
@@ -433,7 +349,7 @@ export class AgentDataRuntime {
       else {
         const workspace = this.projectTokens.get(value.token);
         const projectJobs = workspace ? this.projectJobMethod(value.method, value.params) : undefined;
-        const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, this.wikiContext(value.token, value.params))
+        const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, workspace ? 'project' : 'admin')
           : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
@@ -453,165 +369,49 @@ export class AgentDataRuntime {
     return toolPermissionMethods(this.toolPermission, workspace)[name];
   }
 
-  private wikiMethod(name: string, context: WikiRequestContext): AgentDataMethod | undefined {
-    if (!this.wiki || !this.wikiLibraries || !this.wikiSources || !this.wikiService) return undefined;
-    const libraries = this.wikiLibraries, sources = this.wikiSources, pages = this.wiki, service = this.wikiService;
-    const allowed = ['wiki.libraries.list', 'wiki.libraries.read', 'wiki.pages.list', 'wiki.pages.read', 'wiki.pages.search', 'wiki.read', 'wiki.list', 'wiki.search', 'wiki.replace', 'wiki.reindex'];
-    if (context.kind === 'project' && !allowed.includes(name)) throw new RpcError('FORBIDDEN', 'Wiki management is available only in the application');
-    const library = (p: Record<string, unknown>) => {
-      const kbId = readString(p.kbId);
-      if (context.kind === 'project') return libraries.assertAccess(context, kbId);
-      const value = libraries.get(kbId);
-      if (!value || value.lifecycle === 'deleted') throw new RpcError('NOT_FOUND', 'Wiki library was not found');
-      return value;
-    };
-    if (name === 'wiki.libraries.list') return (p) => {
-      const query = typeof p.query === 'string' ? p.query.trim().toLocaleLowerCase() : '';
-      const project = p.project === undefined ? undefined : normalizeWikiWorkspace(readString(p.project));
-      return (context.kind === 'admin' ? libraries.list() : libraries.visibleLibraries(context))
-        .filter((kb) => (!query || `${kb.name}\n${kb.description}`.toLocaleLowerCase().includes(query)) && (!project || kb.bindings.some((b) => normalizeWikiWorkspace(b) === project)))
-        .map((kb) => this.visibleLibrary(this.libraryView(kb), context));
-    };
-    if (name === 'wiki.libraries.read') return (p) => this.visibleLibrary(this.libraryView(library(p)), context);
-    if (name === 'wiki.libraries.create') return async (p) => this.libraryView(libraries.create(await this.libraryInput(p)));
-    if (name === 'wiki.libraries.update') return async (p) => {
-      const kb = library(p); const input = await this.libraryInput(p, kb);
-      return this.libraryView(libraries.update(kb.kbId, input, readWikiRevision(p.expectedRevision)));
-    };
-    if (name === 'wiki.libraries.previewIngest') return (p) => service.previewIngest(library(p).kbId, readWikiIds(p.sourceIds), readWikiIds(p.regenerateSourceIds));
-    if (name === 'wiki.libraries.ingest') return async (p) => {
-      const receipt = await service.startIngest(library(p).kbId, readWikiIds(p.sourceIds), readWikiIds(p.regenerateSourceIds), p.expectedModel === undefined ? undefined : readString(p.expectedModel));
-      this.dispatchIngest(receipt.jobId);
-      return receipt;
-    };
-    if (name === 'wiki.libraries.reindex') return (p) => service.reindex(library(p).kbId);
-    if (name === 'wiki.sources.list') return (p) => sources.list(library(p).kbId);
-    if (name === 'wiki.sources.read') return (p) => {
-      const kbId = library(p).kbId, sourceId = readString(p.sourceId); const source = sources.get(kbId, sourceId);
-      if (!source) throw new RpcError('NOT_FOUND', 'Wiki source was not found');
-      const revision = p.revision === undefined ? source.revision : readWikiRevision(p.revision);
-      const content = sources.readSnapshot(kbId, { sourceId, revision });
-      return { source, content, version: { revision, contentHash: wikiHash(content) } };
-    };
-    if (name === 'wiki.sources.previewImport') return (p) => service.previewImport(library(p).kbId, readString(p.projectWorkspace), readString(p.relativePath));
-    if (name === 'wiki.sources.create') return (p) => service.addSource(library(p).kbId, readWikiSource(p));
-    if (name === 'wiki.sources.update') return (p) => sources.updateText(library(p).kbId, readString(p.sourceId), readWikiText(p.content), readWikiVersion(p.expected));
-    if (name === 'wiki.pages.list') return (p) => pages.listByLibrary(library(p).kbId).slice(0, context.kind === 'project' ? wikiLimit(p.limit, 50) : undefined).map(({ path, ...page }) => context.kind === 'admin' ? { ...page, path } : page);
-    if (name === 'wiki.pages.read') return (p) => {
-      const page = pages.readById(library(p).kbId, readString(p.pageId));
-      if (!page || context.kind === 'admin') return page;
-      const { path: _path, ...visible } = page; return visible;
-    };
-    if (name === 'wiki.pages.search') return (p) => {
-      const kbIds = p.kbId === undefined ? libraries.visibleLibraries(context).map((kb) => kb.kbId) : [library(p).kbId];
-      return pages.searchByLibraries(kbIds, readString(p.query), wikiLimit(p.limit, 20));
-    };
-    if (name === 'wiki.pages.create') return (p) => pages.createManual(library(p).kbId, readWikiPage(p));
-    if (name === 'wiki.pages.update') return (p) => pages.saveManual(library(p).kbId, readString(p.pageId), { ...readWikiPage(p), expected: readWikiVersion(p.expected) });
-    if (name === 'wiki.pages.setLocked') return (p) => {
-      if (typeof p.locked !== 'boolean') throw new RpcError('INVALID_PARAMS', 'locked must be a boolean');
-      return pages.setLocked(library(p).kbId, readString(p.pageId), p.locked, readWikiVersion(p.expected));
-    };
-    const deletion = /^(wiki\.(libraries|sources|pages))\.(previewDelete|remove)$/.exec(name);
-    if (deletion) return (p) => {
-      const kbId = library(p).kbId;
-      const target: WikiTarget = deletion[2] === 'libraries' ? { kbId, kind: 'library' }
-        : deletion[2] === 'sources' ? { kbId, kind: 'source', sourceId: readString(p.sourceId) } : { kbId, kind: 'page', pageId: readString(p.pageId) };
-      if (deletion[3] === 'previewDelete') return service.previewDelete(target);
-      if (typeof p.cancelActive !== 'boolean') throw new RpcError('INVALID_PARAMS', 'cancelActive must be a boolean');
-      return service.remove(target, p.cancelActive);
-    };
-    if (['wiki.read', 'wiki.list', 'wiki.search', 'wiki.replace', 'wiki.reindex', 'wiki.deleteWorkspace'].includes(name)) return (p) => {
-      let kb = this.legacyLibrary(context, p);
-      if (!kb && context.kind === 'admin' && name === 'wiki.replace') kb = this.ensureLegacyLibrary(readString(p.workspace));
-      if (name === 'wiki.search' && context.kind === 'admin' && p.workspace === undefined) return pages.search({}, readString(p.query), wikiLimit(p.limit, 20));
-      if (name === 'wiki.list' && context.kind === 'admin' && p.workspace === undefined) return pages.listPages({}).slice(0, wikiLimit(p.limit, 50));
-      if (name === 'wiki.reindex' && context.kind === 'admin' && p.workspace === undefined) return pages.rebuildIndex({});
-      if (!kb) {
-        if (name === 'wiki.read') return undefined;
-        if (name === 'wiki.search' || name === 'wiki.list') return [];
-        throw new RpcError('FORBIDDEN', 'the project has no legacy Wiki mapping; use library management');
-      }
-      const scope = { workspace: kb.legacyWorkspace! };
-      if (name === 'wiki.read') {
-        const pageId = readString(p.page), page = pages.readPage(scope, pageId), version = pages.readById(kb.kbId, pageId);
-        return page && version ? { ...page, revision: version.revision, contentHash: version.contentHash } : undefined;
-      }
-      if (name === 'wiki.list') return pages.listPages(scope).slice(0, wikiLimit(p.limit, 50));
-      if (name === 'wiki.search') return pages.search(scope, readString(p.query), wikiLimit(p.limit, 20));
-      if (name === 'wiki.reindex') return service.reindex(kb.kbId);
-      if (name === 'wiki.deleteWorkspace') return service.remove({ kind: 'library', kbId: kb.kbId }, true);
-      return pages.replaceLegacyProtected(scope, readString(p.page), readString(p.title), readWikiText(p.content), typeof p.sourcePath === 'string' ? p.sourcePath : undefined, typeof p.sourceContent === 'string' ? p.sourceContent : undefined, p.expected === null ? null : p.expected === undefined ? undefined : readWikiVersion(p.expected));
-    };
-    if (name === 'wiki.admin.overview') return (p) => pages.overview(readWikiQueryScope(p));
+  private wikiMethod(name: string, access: 'admin' | 'project'): AgentDataMethod | undefined {
+    if (!this.wiki) return undefined;
+    const wiki = this.wiki;
+    const projectAllowed = new Set([
+      'wiki.list', 'wiki.read', 'wiki.search', 'wiki.pageList', 'wiki.pageRead', 'wiki.rawList', 'wiki.rawRead',
+    ]);
+    if (access === 'project' && !projectAllowed.has(name)) {
+      throw new RpcError('FORBIDDEN', 'Wiki management is available only in the application');
+    }
+    const wikiId = (p: Record<string, unknown>) => readString(p.wikiId);
+    if (name === 'wiki.create') return (p) => wiki.create({ name: readString(p.name), ...(p.wikiId === undefined ? {} : { wikiId: readString(p.wikiId) }) });
+    if (name === 'wiki.read') return (p) => wiki.read(wikiId(p));
+    if (name === 'wiki.list') return () => wiki.list();
+    if (name === 'wiki.update') return (p) => wiki.update(wikiId(p), {
+      ...(p.name === undefined ? {} : { name: readString(p.name) }),
+      ...(p.summary === undefined ? {} : { summary: p.summary === null ? null : readWikiText(p.summary) }),
+    });
+    if (name === 'wiki.remove') return (p) => { wiki.remove(wikiId(p)); return null; };
+    if (name === 'wiki.resetDraft') return (p) => { wiki.resetDraft(wikiId(p)); return null; };
+    if (name === 'wiki.ingest') return (p) => wiki.ingest(wikiId(p));
+    if (name === 'wiki.rawWrite') return (p) => { wiki.writeRaw(wikiId(p), readString(p.filename), readWikiText(p.content)); return null; };
+    if (name === 'wiki.rawRemove') return (p) => { wiki.removeRaw(wikiId(p), readString(p.filename)); return null; };
+    if (name === 'wiki.rawList') return (p) => wiki.listRaw(wikiId(p));
+    if (name === 'wiki.rawRead') return (p) => wiki.readRaw(wikiId(p), readString(p.filename));
+    if (name === 'wiki.pageWrite') return (p) => wiki.writePage(wikiId(p), readString(p.ref), readWikiText(p.content));
+    if (name === 'wiki.pageRemove') return (p) => { wiki.removePage(wikiId(p), readString(p.ref)); return null; };
+    if (name === 'wiki.pageList') return (p) => wiki.listPages(wikiId(p));
+    if (name === 'wiki.pageRead') return (p) => wiki.readPage(wikiId(p), readString(p.ref));
+    if (name === 'wiki.search') return (p) => wiki.search(wikiId(p), readString(p.query), {
+      ...(p.limit === undefined ? {} : { limit: wikiLimit(p.limit, 20) }),
+      ...(p.hop === undefined ? {} : { hop: Number(p.hop) }),
+      ...(p.decay === undefined ? {} : { decay: Number(p.decay) }),
+      ...(p.minScore === undefined ? {} : { minScore: Number(p.minScore) }),
+    });
+    if (name === 'wiki.graph') return (p) => wiki.graph(wikiId(p));
     return undefined;
-  }
-
-  private legacyLibrary(context: WikiRequestContext, params: Record<string, unknown>): WikiLibrary | undefined {
-    const workspace = context.kind === 'project' ? context.workspace : params.workspace === undefined ? undefined : readString(params.workspace);
-    if (!workspace) return undefined;
-    const library = this.wikiLibraries!.resolveLegacy(workspace);
-    if (library && context.kind === 'project') this.wikiLibraries!.assertAccess(context, library.kbId);
-    return library;
-  }
-
-  private ensureLegacyLibrary(workspace: string): WikiLibrary {
-    let library = this.wikiLibraries!.resolveLegacy(workspace);
-    if (!library) {
-      this.wikiLibraries!.files.manifest(workspace, true);
-      this.wikiLibraries!.registerLegacyBuckets();
-      library = this.wikiLibraries!.resolveLegacy(workspace);
-    }
-    if (!library) throw new RpcError('WIKI_UNAVAILABLE', 'legacy Wiki registration failed');
-    return this.wikiLibraries!.assertActive(library.kbId);
-  }
-
-  private async libraryInput(p: Record<string, unknown>, current?: WikiLibrary): Promise<WikiLibraryInput> {
-    const bindings = readWikiIds(p.bindings);
-    if (!bindings) throw new RpcError('INVALID_PARAMS', 'bindings must be an array');
-    const validated: string[] = [];
-    for (const binding of bindings) {
-      const old = current?.bindings.find((b) => normalizeWikiWorkspace(b) === normalizeWikiWorkspace(binding));
-      if (old) validated.push(old);
-      else {
-        if (!this.options.validateProject) throw new RpcError('PROJECT_VALIDATOR_UNAVAILABLE', 'project validation is unavailable');
-        validated.push(await this.options.validateProject(binding));
-      }
-    }
-    return { name: readString(p.name), description: readWikiText(p.description), bindings: validated };
-  }
-
-  private libraryView(kb: WikiLibrary): WikiLibraryView {
-    const sourceCounts = this.storage!.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN generation_suppressed=0 AND (status='failed' OR processed_hash IS NULL OR processed_hash!=content_hash) THEN 1 ELSE 0 END) AS pending FROM wiki_sources WHERE kb_id=? AND lifecycle='active'").get(kb.kbId)!;
-    const pageCount = Number(this.storage!.db.prepare("SELECT COUNT(*) AS total FROM wiki_documents d WHERE kb_id=? AND NOT EXISTS (SELECT 1 FROM wiki_page_state s WHERE s.kb_id=d.kb_id AND s.page_id=d.page AND s.lifecycle!='active')").get(kb.kbId)!.total);
-    const sourceCount = Number(sourceCounts.total), pendingSourceCount = Number(sourceCounts.pending ?? 0);
-    const task = this.wikiLibraries!.activeTasks({ kind: 'library', kbId: kb.kbId }).find((t) => t.taskSource === 'agent_job');
-    const diagnostics: WikiDiagnostic[] = [...this.wikiLibraries!.diagnostics, ...this.wiki!.diagnostics];
-    const diagnostic = diagnostics.find((d) => d.kbId === kb.kbId);
-    const deletingTargets: WikiTarget[] = kb.lifecycle === 'deleting' ? [{ kind: 'library', kbId: kb.kbId }] : [];
-    for (const row of this.storage!.db.prepare("SELECT source_id FROM wiki_sources WHERE kb_id=? AND lifecycle='deleting'").all(kb.kbId)) deletingTargets.push({ kind: 'source', kbId: kb.kbId, sourceId: String(row.source_id) });
-    for (const row of this.storage!.db.prepare("SELECT page_id FROM wiki_page_state WHERE kb_id=? AND lifecycle='deleting'").all(kb.kbId)) deletingTargets.push({ kind: 'page', kbId: kb.kbId, pageId: String(row.page_id) });
-    return { ...kb, location: this.wikiLibraries!.files.bucketDir(kb), sourceCount, pageCount, pendingSourceCount,
-      availability: pageCount ? 'available' : sourceCount ? 'pending' : 'draft',
-      deletingTargets, ...(task ? { activeJobId: task.taskId } : {}), ...(diagnostic ? { lastError: diagnostic.message } : {}),
-    };
-  }
-
-  private visibleLibrary(kb: WikiLibraryView, context: WikiRequestContext) {
-    if (context.kind === 'admin') return kb;
-    return { kbId: kb.kbId, name: kb.name, description: kb.description, sourceCount: kb.sourceCount, pageCount: kb.pageCount, pendingSourceCount: kb.pendingSourceCount, availability: kb.availability };
   }
 
   /** Generic job commands must not become a second Wiki management entry. */
   private projectJobMethod(name: string, params: Record<string, unknown>): AgentDataMethod | undefined {
     if (name === 'admin.export' || name === 'admin.audit.list') throw new RpcError('FORBIDDEN', 'aggregate management history is available only in the application');
     if (!name.startsWith('admin.jobs.')) return undefined;
-    if (name === 'admin.jobs.list') return (p) => this.jobs!.list(p.state === undefined ? undefined : readJobState(p.state)).filter((job) => !isWikiJob(job));
-    const ids = name === 'admin.jobs.clear' && Array.isArray(params.ids) ? params.ids : [params.id];
-    if ((name === 'admin.jobs.create' && typeof params.kind === 'string' && params.kind.startsWith('wiki.'))
-      || ids.some((id) => typeof id === 'string' && isWikiJob(this.jobs!.get(id)))) {
-      throw new RpcError('FORBIDDEN', 'Wiki jobs are managed only in the application');
-    }
+    if (name === 'admin.jobs.list') return (p) => this.jobs!.list(p.state === undefined ? undefined : readJobState(p.state));
     return undefined;
   }
 
@@ -696,7 +496,6 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.cancel') return async (p) => {
       const id = readString(p.id);
       const job = this.jobs!.get(id);
-      if (job?.kind === 'wiki.ingest') { this.wikiService!.requestCancel(id); return this.jobs!.get(id); }
       const runner = job ? this.options.jobRunners?.[job.kind] : undefined;
       if (!runner) return this.jobs!.cancel(id);
       // 有执行器时取消只是"请求"：状态由执行器确认停止后通过 admin.jobs.markCancelled 落定，
@@ -712,7 +511,7 @@ export class AgentDataRuntime {
     if (name === 'admin.jobs.markCancelled') return (p) => this.jobs!.cancel(readString(p.id));
     if (name === 'admin.jobs.create') return (p) => {
       const kind = readString(p.kind);
-      if (kind === 'wiki.ingest') throw new RpcError('INVALID_PARAMS', 'use the explicit Wiki ingest entry');
+      if (kind.startsWith('wiki.')) throw new RpcError('INVALID_PARAMS', 'Wiki jobs are no longer created through the job queue');
       const workspace = readString(p.workspace);
       return this.createUserJob(kind, workspace);
     };
@@ -735,28 +534,24 @@ export class AgentDataRuntime {
   private createUserJob(kind: string, workspace: string, metadata?: JobMetadata, expectedModel?: string): Job {
     if (this.closed) throw new Error('runtime is closed');
     const runner = this.options.jobRunners?.[kind];
-    const kb = kind === 'wiki.sync' && runner ? this.ensureLegacyLibrary(workspace) : undefined;
     const create = () => {
       if (metadata?.retryOf) {
         const original = this.jobs!.get(metadata.retryOf);
-        if (!original || !['failed', 'cancelled'].includes(original.state) || original.kind !== kind || original.workspace !== workspace
-          || (kb && (this.wikiLibraries!.get(kb.kbId)?.lifecycle !== 'active' || !kb.bindings.some((binding) => normalizeWikiWorkspace(binding) === normalizeWikiWorkspace(workspace))))) throw new Error('TASK_RETRY_UNAVAILABLE');
+        if (!original || !['failed', 'cancelled'].includes(original.state) || original.kind !== kind || original.workspace !== workspace) throw new Error('TASK_RETRY_UNAVAILABLE');
       }
-      if (runner && this.jobs!.list().some((job) => job.kind === kind && ['pending', 'running'].includes(job.state) && normalizeWikiWorkspace(job.workspace) === normalizeWikiWorkspace(workspace))) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
-      if (kb && this.wikiLibraries!.activeTasks({ kind: 'library', kbId: kb.kbId }).length) throw new RpcError('JOB_ALREADY_RUNNING', 'Wiki library has an active writer');
-      const target = kb ? { type: 'wiki' as const, id: kb.kbId } : kind === 'codegraph.sync' ? { type: 'project' as const, id: workspace } : undefined;
-      const job = this.jobs!.create({ kind, workspace, ...(target || metadata ? { metadata: { ...metadata, ...(target ? { target, resourceName: kb?.name ?? workspace } : {}) } } : {}) });
-      if (kb) this.wikiLibraries!.recordTask({ taskSource: 'agent_job', taskId: job.id, kbId: kb.kbId, active: true, canCancel: true });
+      if (runner && this.jobs!.list().some((job) => job.kind === kind && ['pending', 'running'].includes(job.state) && normalizeWorkspace(job.workspace) === normalizeWorkspace(workspace))) throw new RpcError('JOB_ALREADY_RUNNING', `${kind} is already running for this workspace`);
+      const target = kind === 'codegraph.sync' ? { type: 'project' as const, id: workspace } : undefined;
+      const job = this.jobs!.create({ kind, workspace, ...(target || metadata ? { metadata: { ...metadata, ...(target ? { target, resourceName: workspace } : {}) } } : {}) });
       return job;
     };
-    const job = this.wikiLibraries!.transaction(create);
+    const job = create();
     if (runner) {
       this.inFlight += 1;
       void Promise.resolve().then(() => runner.run(job.id, workspace, expectedModel)).catch((error) => {
         const current = this.jobs!.get(job.id);
         if (!current || ['cancelled', 'completed', 'failed'].includes(current.state)) return;
         this.jobs!.fail(job.id, error instanceof Error ? error.message : String(error));
-      }).finally(() => { if (kb) this.wikiLibraries!.settleTask('agent_job', job.id); this.inFlight -= 1; this.finishClose(); });
+      }).finally(() => { this.inFlight -= 1; this.finishClose(); });
     }
     return job;
   }
@@ -818,34 +613,13 @@ function wikiRpcError(error: unknown): RpcError {
   const code = /^([A-Z][A-Z_]+)(?::|$)/.exec(message)?.[1] ?? 'INTERNAL_ERROR';
   return new RpcError(code, message);
 }
-function isWikiJob(job: Job | undefined): boolean { return !!job && (job.kind.startsWith('wiki.') || job.metadata?.target?.type === 'wiki'); }
 function readWikiText(value: unknown): string { if (typeof value !== 'string') throw new RpcError('INVALID_PARAMS', 'text parameter is required'); return value; }
-function readWikiRevision(value: unknown): number { if (!Number.isInteger(value) || Number(value) < 0) throw new RpcError('INVALID_PARAMS', 'expected revision is required'); return Number(value); }
-function readWikiVersion(value: unknown): WikiVersion {
-  const version = readRecord(value);
-  return { revision: readWikiRevision(version.revision), contentHash: readString(version.contentHash) };
-}
-function readWikiIds(value: unknown): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'IDs must be an array');
-  return [...new Set(value.map(readString))];
-}
-function readWikiPage(value: Record<string, unknown>): WikiPageInput {
-  if (!Array.isArray(value.sourceRefs)) throw new RpcError('INVALID_PARAMS', 'sourceRefs must be an array');
-  const refs = new Map<string, WikiSourceRef>();
-  for (const item of value.sourceRefs) {
-    const ref = readRecord(item), revision = readWikiRevision(ref.revision), sourceId = readString(ref.sourceId);
-    if (revision < 1) throw new RpcError('INVALID_PARAMS', 'sourceRefs revision must be positive');
-    refs.set(JSON.stringify([sourceId, revision]), { sourceId, revision });
-  }
-  return { title: readString(value.title), content: readWikiText(value.content), sourceRefs: [...refs.values()] };
-}
-function readWikiSource(value: Record<string, unknown>): WikiSourceInput {
-  if (value.kind === 'manual' || value.kind === 'upload') return { kind: value.kind, name: readString(value.name), content: readWikiText(value.content) };
-  if (value.kind === 'project') return { kind: value.kind, projectWorkspace: readString(value.projectWorkspace), relativePath: readString(value.relativePath), expectedContentHash: readString(value.expectedContentHash) };
-  throw new RpcError('INVALID_PARAMS', 'invalid Wiki source kind');
-}
 function wikiLimit(value: unknown, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? Math.max(1, Math.min(100, Math.trunc(value))) : fallback; }
+function normalizeWorkspace(workspace: string): string {
+  if (typeof workspace !== 'string' || !workspace.trim()) throw new Error('workspace is required');
+  const normalized = resolve(workspace).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
 function readString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new RpcError('INVALID_PARAMS', 'string parameter is required'); return value; }
 function readLevel(value: unknown): 0 | 1 | 2 | 3 { if (value === 0 || value === 1 || value === 2 || value === 3) return value; throw new RpcError('INVALID_PARAMS', 'level must be 0..3'); }
 function readJobState(value: unknown): import('./jobStore').JobState { if (value === 'pending' || value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled') return value; throw new RpcError('INVALID_PARAMS', 'invalid job state'); }
@@ -856,9 +630,6 @@ function readScope(value: Record<string, unknown>): import('./memoryStore').Memo
  * 因此缺省时传 '' 是安全的；写入路径仍用 readScope 强制要求 workspace。
  */
 function readQueryScope(value: Record<string, unknown>): import('./memoryStore').MemoryScope { return { userId: readString(value.userId), workspace: typeof value.workspace === 'string' && value.workspace.trim() ? value.workspace : '', projectId: value.projectId === undefined ? undefined : readString(value.projectId), sessionId: value.sessionId === undefined ? undefined : readString(value.sessionId), scope: value.scope === 'global' ? 'global' : 'project', includeOtherProjects: value.includeOtherProjects === true }; }
-function readWikiQueryScope(value: Record<string, unknown>): import('./wikiStore').WikiScope {
-  return typeof value.workspace === 'string' && value.workspace.trim() ? { workspace: value.workspace } : {};
-}
 function readRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RpcError('INVALID_PARAMS', 'object parameter is required'); return value as Record<string, unknown>; }
 function readStringArray(value: unknown): string[] { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new RpcError('INVALID_PARAMS', 'string array is required'); return [...value] as string[]; }
 function isTurnStatus(value: unknown): value is import('../app/appServer/types').TurnStatus { return value === 'queued' || value === 'running' || value === 'blocked' || value === 'completed' || value === 'failed' || value === 'cancelled'; }

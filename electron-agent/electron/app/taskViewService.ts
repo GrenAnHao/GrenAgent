@@ -7,10 +7,9 @@ export interface TaskViewServiceOptions {
   /** Read-only target/pending-source checks only; this must not resolve models or start a worker. */
   readTarget: (job: Job) => Promise<{ exists: boolean; busy: boolean }>;
   dispatch: (job: Job, metadata: { retryOf: string }, options?: TaskRetryOptions) => Promise<Job>;
-  previewWikiRetry?: (job: Job) => Promise<{ sourceIds?: string[]; targetCount: number; model: string }>;
   canCancel?: (job: Job) => boolean;
 }
-const retryKinds = new Set(['wiki.sync', 'codegraph.sync', 'wiki.ingest']);
+const retryKinds = new Set(['codegraph.sync']);
 
 export class TaskViewService {
   private readonly pendingTargets = new Set<string>();
@@ -39,19 +38,13 @@ export class TaskViewService {
     this.pendingTargets.add(key);
     try {
       await this.assertTarget(job);
-      if (job.kind !== 'codegraph.sync' && !options?.expectedModel) throw new Error('MODEL_CONFIRMATION_REQUIRED');
       const preview = await this.preview(job);
-      if (preview.callsModel && preview.model !== options?.expectedModel) throw new Error('MODEL_CHANGED');
-      // Awaited lookups and previews are not a reservation; refresh the old task and target before dispatch.
       const current = this.requireRetryable(ref);
       if (this.targetKey(current) !== key) throw new Error('TASK_TARGET_CHANGED');
       await this.assertTarget(current);
       const final = this.requireRetryable(ref);
       if (this.targetKey(final) !== key) throw new Error('TASK_TARGET_CHANGED');
-      const dispatchJob = final.kind === 'wiki.ingest' ? { ...final, metadata: { ...final.metadata,
-        payload: { kbId: final.metadata!.target!.id, sourceIds: preview.sourceIds! } } } : final;
-      // The concrete dispatcher must still recheck its own asynchronous validation and create atomically.
-      const created = await this.options.dispatch(dispatchJob, { retryOf: job.id }, options);
+      const created = await this.options.dispatch(final, { retryOf: job.id }, options);
       const view = this.options.views.read({ source: 'user', id: created.id });
       if (!view) throw new Error('TASK_NOT_FOUND');
       return this.withCapabilities(view);
@@ -73,10 +66,7 @@ export class TaskViewService {
   }
 
   private retryable(job: Job): boolean {
-    if (!retryKinds.has(job.kind) || !['failed', 'cancelled'].includes(job.state)) return false;
-    if (job.kind !== 'wiki.ingest') return Boolean(job.workspace.trim());
-    const payload = job.metadata?.payload;
-    return job.metadata?.target?.type === 'wiki' && Boolean(payload && 'kbId' in payload && payload.kbId === job.metadata.target.id && payload.sourceIds.length);
+    return retryKinds.has(job.kind) && ['failed', 'cancelled'].includes(job.state) && Boolean(job.workspace.trim());
   }
 
   private targetKey(job: Job): string { return job.metadata?.target ? `${job.metadata.target.type}:${job.metadata.target.id}` : `project:${job.workspace}`; }
@@ -89,20 +79,7 @@ export class TaskViewService {
 
   private async preview(job: Job): Promise<TaskRetryPreview> {
     const ref = { source: 'user' as const, id: job.id }; const view = this.options.views.read(ref)!;
-    const base = { ref, resource: view.resource, label: view.label, callsModel: job.kind !== 'codegraph.sync' };
-    if (!base.callsModel) return base;
-    if (!this.options.previewWikiRetry) throw new Error('MODEL_UNAVAILABLE');
-    const preview = await this.options.previewWikiRetry(job);
-    if (!preview.model?.trim()) throw new Error('MODEL_UNAVAILABLE');
-    if (job.kind === 'wiki.ingest') {
-      const payload = job.metadata!.payload!;
-      const original = new Set('sourceIds' in payload ? payload.sourceIds : []);
-      const sourceIds = [...new Set(preview.sourceIds ?? [])].filter((id) => original.has(id));
-      if (!sourceIds.length) throw new Error('NO_PENDING_SOURCES');
-      return { ...base, sourceIds, targetCount: sourceIds.length, model: preview.model };
-    }
-    if (!Number.isSafeInteger(preview.targetCount) || preview.targetCount <= 0) throw new Error('NO_PENDING_SOURCES');
-    return { ...base, targetCount: preview.targetCount, model: preview.model };
+    return { ref, resource: view.resource, label: view.label, callsModel: false };
   }
 
   private async withCapabilities<T extends TaskView>(view: T): Promise<T> {

@@ -40,7 +40,7 @@ export interface AuditPage { items: AuditView[]; nextCursor?: string }
 export interface AuditExport { items: AuditView[]; limit: number; truncated: boolean }
 export interface DiagnosticItem {
   id: string; resource?: ResourceRef; state: 'ok' | 'action_required' | 'unchecked';
-  checkedAt: number; message: string; action?: 'open_file' | 'reindex_wiki' | 'configure_codegraph'; path?: string;
+  checkedAt: number; message: string; action?: 'open_file' | 'configure_codegraph'; path?: string;
 }
 export interface DiagnosticReport { items: DiagnosticItem[]; checkedAt: number }
 export type ResourceNavigation =

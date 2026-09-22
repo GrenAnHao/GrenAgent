@@ -18,7 +18,6 @@ const targetFields: Projection = { ...resourceFields, kind: 'identifier', kbId: 
 const commonFields: Projection = { resource: resourceFields, resourceName: 'text', target: targetFields };
 const jobFields: Projection = { ...commonFields, id: 'identifier', kind: 'identifier', workspace: 'project', stage: 'text', processed: 'count', total: 'count', progress: 'count', state: 'identifier', retryOf: 'identifier', error: 'text', ids: 'list',
   metadata: { target: targetFields, resource: resourceFields, resourceName: 'text', retryOf: 'identifier', payload: { kbId: 'identifier', sourceIds: 'list' } } };
-const wikiFields: Projection = { ...commonFields, jobId: 'identifier', kbId: 'identifier', sourceId: 'identifier', sourceIds: 'list', sourceRevision: 'count', pageId: 'pagePath', page: 'pagePath', model: 'model', reason: 'text', cancelled: 'boolean', error: 'text' };
 
 function project(value: Record<string, unknown>, fields: Projection): Record<string, unknown> {
   const entries: Array<[string, unknown]> = [];
@@ -44,7 +43,6 @@ function project(value: Record<string, unknown>, fields: Projection): Record<str
 
 const actionLabels: Record<string, string> = {
   'job.create': '创建任务', 'job.stage': '更新任务阶段', 'job.cancel_requested': '请求取消任务', 'job.cancel': '取消任务', 'job.complete': '任务完成', 'job.fail': '任务失败', 'job.remove': '移除任务记录', 'job.clear': '清理任务记录',
-  'wiki.ingest.enqueue': '知识库生成入队', 'wiki.ingest.publish': '知识库页面已发布', 'wiki.ingest.fail': '知识库生成失败', 'wiki.ingest.recover': '知识库任务恢复', 'wiki.ingest.skip': '知识库生成已跳过', 'wiki.ingest.cancel_requested': '请求取消知识库生成', 'wiki.sync.skip': '知识库同步已跳过',
   'config.update': '更新配置', 'data.import': '导入配置', 'memory.create': '创建记忆', 'memory.update': '更新记忆', 'memory.remove': '移除记忆',
 };
 
@@ -80,9 +78,9 @@ const resourceCases = [
     type: `json_extract(metadata,'$.${path}.type')`, id: `json_extract(metadata,'$.${path}.id')`,
   })),
   ...['kbId', 'target.kbId', 'metadata.payload.kbId'].map((path) => ({
-    when: `(action GLOB 'wiki.*' OR action GLOB 'job.*') AND json_type(metadata,'$.${path}')='text' AND json_extract(metadata,'$.${path}')!=''`, type: "'wiki'", id: `json_extract(metadata,'$.${path}')`,
+    when: `action GLOB 'job.*' AND json_type(metadata,'$.${path}')='text' AND json_extract(metadata,'$.${path}')!=''`, type: "'wiki'", id: `json_extract(metadata,'$.${path}')`,
   })),
-  { when: "(action GLOB 'job.*' OR action GLOB 'code.*' OR action GLOB 'project.*' OR action GLOB 'wiki.sync.*') AND json_type(metadata,'$.workspace')='text' AND json_extract(metadata,'$.workspace')!=''", type: "'project'", id: "json_extract(metadata,'$.workspace')" },
+  { when: "(action GLOB 'job.*' OR action GLOB 'code.*' OR action GLOB 'project.*') AND json_type(metadata,'$.workspace')='text' AND json_extract(metadata,'$.workspace')!=''", type: "'project'", id: "json_extract(metadata,'$.workspace')" },
   { when: "action GLOB 'memory.*' AND json_type(metadata,'$.id')='text' AND json_extract(metadata,'$.id')!=''", type: "'memory'", id: "json_extract(metadata,'$.id')" },
 ];
 const resourceSql = (field: 'type' | 'id') => `CASE ${resourceCases.map((entry) => `WHEN ${entry.when} THEN ${entry[field]}`).join(' ')} ELSE NULL END`;
@@ -123,7 +121,6 @@ export class AuditViewStore {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
       let fields = commonFields;
       if (row.action.startsWith('job.')) fields = jobFields;
-      else if (row.action.startsWith('wiki.')) fields = wikiFields;
       else if (row.action === 'config.update') fields = { ...commonFields, module: 'identifier', version: 'count' };
       else if (row.action === 'data.import') fields = { ...commonFields, modules: 'count' };
       detail = redactAuditValue(project(parsed as Record<string, unknown>, fields)) as Record<string, unknown>;

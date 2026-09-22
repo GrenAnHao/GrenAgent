@@ -4,7 +4,6 @@ import type { AgentDataEndpoint } from '../agentData/protocol';
 import type { Item, Thread, Turn } from './appServer/types';
 import type { CreateThreadInput, CreateTurnInput, ThreadSnapshot } from '../agentData/threadStore';
 import type { QueueTaskInput } from './appServer/taskQueue';
-import type { WikiSyncSkipInput } from './wikiSyncService';
 // CodeGraph calls may cold-load the embedded SDK and its index. Keep this aligned with
 // extensions/code-retrieval's 65s client timeout instead of AgentDataClient's
 // short default used by lightweight callers.
@@ -60,10 +59,6 @@ export class AgentDataService {
   recordJobStage(id: string, stage: string, processed?: number, total?: number): void {
     if (!this.runtime) throw new Error('agent data runtime is not started');
     this.runtime.recordJobStage(id, stage, processed, total);
-  }
-  recordWikiSyncSkip(input: WikiSyncSkipInput): void {
-    if (!this.runtime) throw new Error('agent data runtime is not started');
-    this.runtime.recordWikiSyncSkip(input);
   }
   async runServiceTask(input: Omit<QueueTaskInput, 'system'>): Promise<unknown> {
     if (!this.runtime) throw new Error('agent data runtime is not started');

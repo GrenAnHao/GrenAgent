@@ -1,19 +1,18 @@
-import { statSync } from 'node:fs';
-import { relative } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { DiagnosticItem, DiagnosticReport } from '../agentData/operationsContracts';
-import type { WikiStore } from '../agentData/wikiStore';
-import type { WikiLibraryStore } from '../agentData/wikiLibraryStore';
-import { wikiHash } from '../agentData/wikiFiles';
 
 export interface CodeDiagnosticStatus {
   connected?: boolean; indexed?: boolean; state?: string; cliAvailable?: boolean; sdkAvailable?: boolean; message?: string;
   files?: number; nodes?: number; edges?: number;
 }
 export interface AgentDataDiagnosticsOptions {
-  wiki: WikiStore; libraries: WikiLibraryStore;
   /** Only known workspaces and status probes are allowed; never initialize or sync an index. */
   codeProjects: () => Array<{ workspace: string; indexed?: boolean }>;
   codeStatus: (workspace: string) => CodeDiagnosticStatus | Promise<CodeDiagnosticStatus>;
+}
+
+function hashId(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 export class AgentDataDiagnostics {
@@ -24,24 +23,12 @@ export class AgentDataDiagnostics {
   async check(): Promise<DiagnosticReport> {
     const checkedAt = Date.now(); const items: DiagnosticItem[] = [];
     this.issued.clear();
-    try {
-      for (const item of this.options.wiki.inspect()) {
-        const view = { ...item, checkedAt };
-        if (view.path || view.action === 'open_file') {
-          try {
-            view.path = this.safeOpenPath(view);
-            if (view.action === 'open_file') this.issued.set(view.id, { ...view });
-          } catch { delete view.path; if (view.action === 'open_file') delete view.action; }
-        }
-        items.push(view);
-      }
-    } catch { items.push({ id: 'wiki:unchecked', checkedAt, state: 'unchecked', message: '无法读取知识库状态，本次未完成检查' }); }
     let projects: ReturnType<AgentDataDiagnosticsOptions['codeProjects']>;
     try { projects = this.options.codeProjects(); }
     catch { projects = []; }
     if (!projects.length) items.push({ id: 'code:unchecked', checkedAt, state: 'unchecked', message: '尚无可检查的已知代码项目；未启动 CodeGraph 或创建索引' });
     for (const workspace of new Set(projects.map((project) => project.workspace))) {
-      const item: DiagnosticItem = { id: `code:${wikiHash(workspace)}`, resource: { type: 'project', id: workspace }, checkedAt, state: 'unchecked', message: 'CodeGraph 仅有未验证的状态，未启动连接或重建索引' };
+      const item: DiagnosticItem = { id: `code:${hashId(workspace)}`, resource: { type: 'project', id: workspace }, checkedAt, state: 'unchecked', message: 'CodeGraph 仅有未验证的状态，未启动连接或重建索引' };
       try {
         const status = await this.options.codeStatus(workspace);
         const state = status.state?.toLowerCase().replace(/-/g, '_');
@@ -66,16 +53,6 @@ export class AgentDataDiagnostics {
   async resolveOpenPath(id: string): Promise<string> {
     const item = typeof id === 'string' ? this.issued.get(id) : undefined;
     if (!item) throw new Error('INVALID_DIAGNOSTIC: invalid diagnostic ID');
-    try { return this.safeOpenPath(item); }
-    catch (error) { throw new Error(`INVALID_DIAGNOSTIC: ${error instanceof Error ? error.message : 'invalid diagnostic path'}`); }
-  }
-
-  private safeOpenPath(item: DiagnosticItem): string {
-    if (item.resource?.type !== 'wiki' || !item.path) throw new Error('invalid diagnostic path');
-    const library = this.options.libraries.assertActive(item.resource.id);
-    const files = this.options.wiki.files;
-    const path = files.filePathAt(library, relative(files.bucketDir(library), item.path).replace(/\\/g, '/'));
-    if (!statSync(path).isFile()) throw new Error('diagnostic path is not a file');
-    return path;
+    throw new Error('INVALID_DIAGNOSTIC: wiki file open is no longer supported');
   }
 }

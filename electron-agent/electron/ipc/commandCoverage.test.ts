@@ -16,15 +16,15 @@ const expectedCommands = [
   'agentData_admin_jobs_get', 'agentData_admin_jobs_cancel', 'agentData_admin_config_get', 'agentData_admin_config_update',
   'agentData_admin_jobs_remove', 'agentData_admin_jobs_clear',
   'agentData_admin_audit_list', 'agentData_admin_diagnostics', 'agentData_admin_export', 'agentData_admin_import',
-  'agentData_memory_overview', 'agentData_wiki_overview', 'agentData_code_status', 'agentData_jobs_create',
-  'agentData_memory_search', 'agentData_memory_delete', 'agentData_wiki_search',
+  'agentData_memory_overview', 'agentData_code_status', 'agentData_jobs_create',
+  'agentData_memory_search', 'agentData_memory_delete',
   'agentData_code_search', 'agentData_code_projects',
   'agentData_code_call', 'agentData_memory_list', 'agentData_memory_read', 'agentData_memory_create', 'agentData_memory_update', 'agentData_memory_conversations_list', 'agentData_memory_conversations_read',
   'agentData_tasks_list', 'agentData_tasks_read', 'agentData_tasks_previewRetry', 'agentData_tasks_retry', 'agentData_audit_query', 'agentData_audit_export', 'agentData_diagnostics_check', 'agentData_diagnostics_open', 'agentData_overview',
-  'agentData_wiki_libraries_list', 'agentData_wiki_libraries_read', 'agentData_wiki_libraries_create', 'agentData_wiki_libraries_update',
-  'agentData_wiki_libraries_previewDelete', 'agentData_wiki_libraries_remove', 'agentData_wiki_libraries_previewIngest', 'agentData_wiki_libraries_ingest', 'agentData_wiki_libraries_reindex',
-  'agentData_wiki_sources_list', 'agentData_wiki_sources_read', 'agentData_wiki_sources_previewImport', 'agentData_wiki_sources_create', 'agentData_wiki_sources_update', 'agentData_wiki_sources_previewDelete', 'agentData_wiki_sources_remove',
-  'agentData_wiki_pages_list', 'agentData_wiki_pages_read', 'agentData_wiki_pages_create', 'agentData_wiki_pages_update', 'agentData_wiki_pages_setLocked', 'agentData_wiki_pages_previewDelete', 'agentData_wiki_pages_remove',
+  'agentData_wiki_create', 'agentData_wiki_read', 'agentData_wiki_list', 'agentData_wiki_update', 'agentData_wiki_remove', 'agentData_wiki_resetDraft', 'agentData_wiki_ingest',
+  'agentData_wiki_rawWrite', 'agentData_wiki_rawRemove', 'agentData_wiki_rawList', 'agentData_wiki_rawRead',
+  'agentData_wiki_pageWrite', 'agentData_wiki_pageRemove', 'agentData_wiki_pageList', 'agentData_wiki_pageRead',
+  'agentData_wiki_search', 'agentData_wiki_graph',
 ] as const;
 
 describe('Rust handler coverage', () => {

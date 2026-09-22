@@ -1,10 +1,10 @@
 import { invoke } from '../platform/runtime';
-import type { WikiManagementApi, WikiLibraryView, WikiSource, WikiPage, WikiDeletePreview, WikiDeleteResult, WikiIngestPreview, WikiIngestReceipt, WikiImportPreview, WikiReindexResult, WikiVersion } from '../../electron/agentData/wikiContracts';
 import type { JobMetadata } from '../../electron/agentData/operationsContracts';
 import type { TaskRef, TaskView, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, AuditQuery, AuditPage, AuditExport, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 import type { MemoryRecord, ManagedMemoryRecord, MemoryListInput, MemoryPage, MemoryReadInput, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail } from '../../electron/ipc/contracts';
 export type { MemoryRecord, ManagedMemoryRecord, MemoryOwner, MemoryFilter, MemoryLevel, MemoryOrigin, MemoryListInput, MemoryPage, MemoryReadInput, MemoryDraft, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail, MemoryItem } from '../../electron/ipc/contracts';
+import type { WikiAssetDetail, WikiRawSource } from '../../electron/agentData/wikiEngine/service';
 
 export interface AgentDataStatus { state: 'ready' | 'closed'; version: number }
 export type AgentJobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -12,8 +12,6 @@ export interface AgentJob { id: string; kind: string; workspace: string; state: 
 export interface AgentConfig { version: number; value: Record<string, unknown> }
 export interface MemoryScope { userId: string; workspace?: string; projectId?: string; sessionId?: string; includeOtherProjects?: boolean }
 export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
-export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
-export interface WikiSearchResult { workspace: string; page: string; title: string; snippet: string; sourcePath: string; chunks: number }
 export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number }
 export interface CodeGraphProject { workspace: string; indexed: boolean }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
@@ -48,38 +46,7 @@ export type CodeRetrievalRequest={
 export interface AgentJobCreateInput { kind: string; workspace: string }
 export interface AgentAuditEvent { id: string; action: string; detail: Record<string, unknown>; createdAt: number }
 export interface AgentDiagnostics { jobs: { total: number; failed: number }; auditEvents: number }
-
-const wikiManagement: WikiManagementApi = {
-  libraries: {
-    list: (input = {}) => invoke<WikiLibraryView[]>('agentData_wiki_libraries_list', { ...input }),
-    read: (kbId) => invoke<WikiLibraryView>('agentData_wiki_libraries_read', { kbId }),
-    create: (input) => invoke<WikiLibraryView>('agentData_wiki_libraries_create', { ...input }),
-    update: (kbId, input, expectedRevision) => invoke<WikiLibraryView>('agentData_wiki_libraries_update', { kbId, ...input, expectedRevision }),
-    previewDelete: (kbId) => invoke<WikiDeletePreview>('agentData_wiki_libraries_previewDelete', { kbId }),
-    remove: (kbId, cancelActive) => invoke<WikiDeleteResult>('agentData_wiki_libraries_remove', { kbId, cancelActive }),
-    previewIngest: (kbId, sourceIds, regenerateSourceIds) => invoke<WikiIngestPreview>('agentData_wiki_libraries_previewIngest', { kbId, sourceIds, regenerateSourceIds }),
-    ingest: (kbId, sourceIds, regenerateSourceIds, expectedModel) => invoke<WikiIngestReceipt>('agentData_wiki_libraries_ingest', { kbId, sourceIds, regenerateSourceIds, expectedModel }),
-    reindex: (kbId) => invoke<WikiReindexResult>('agentData_wiki_libraries_reindex', { kbId }),
-  },
-  sources: {
-    list: (kbId) => invoke<WikiSource[]>('agentData_wiki_sources_list', { kbId }),
-    read: (kbId, sourceId, revision) => invoke<{ source: WikiSource; content: string; version?: WikiVersion }>('agentData_wiki_sources_read', { kbId, sourceId, ...(revision === undefined ? {} : { revision }) }),
-    previewImport: (kbId, projectWorkspace, relativePath) => invoke<WikiImportPreview>('agentData_wiki_sources_previewImport', { kbId, projectWorkspace, relativePath }),
-    create: (kbId, input) => invoke<WikiSource>('agentData_wiki_sources_create', { kbId, ...input }),
-    update: (kbId, sourceId, content, expected) => invoke<WikiSource>('agentData_wiki_sources_update', { kbId, sourceId, content, expected }),
-    previewDelete: (kbId, sourceId) => invoke<WikiDeletePreview>('agentData_wiki_sources_previewDelete', { kbId, sourceId }),
-    remove: (kbId, sourceId, cancelActive) => invoke<WikiDeleteResult>('agentData_wiki_sources_remove', { kbId, sourceId, cancelActive }),
-  },
-  pages: {
-    list: (kbId) => invoke<Array<Omit<WikiPage, 'content'>>>('agentData_wiki_pages_list', { kbId }),
-    read: (kbId, pageId) => invoke<WikiPage | undefined>('agentData_wiki_pages_read', { kbId, pageId }),
-    create: (kbId, input) => invoke<WikiPage>('agentData_wiki_pages_create', { kbId, ...input }),
-    update: (kbId, pageId, input) => invoke<WikiPage>('agentData_wiki_pages_update', { kbId, pageId, ...input }),
-    setLocked: (kbId, pageId, locked, expected) => invoke<WikiPage>('agentData_wiki_pages_setLocked', { kbId, pageId, locked, expected }),
-    previewDelete: (kbId, pageId) => invoke<WikiDeletePreview>('agentData_wiki_pages_previewDelete', { kbId, pageId }),
-    remove: (kbId, pageId, cancelActive) => invoke<WikiDeleteResult>('agentData_wiki_pages_remove', { kbId, pageId, cancelActive }),
-  },
-};
+export type { WikiAssetDetail, WikiRawSource };
 
 export const agentDataApi = {
   tasks: {
@@ -122,9 +89,23 @@ export const agentDataApi = {
     delete: (scope: { userId: string; workspace?: string }, id: string) => invoke<void>('agentData_memory_delete', { ...scope, id }),
   },
   wiki: {
-    ...wikiManagement,
-    overview: (workspace?: string) => invoke<WikiOverview>('agentData_wiki_overview', workspace === undefined ? {} : { workspace }),
-    search: (workspace: string | undefined, query: string, limit = 50) => invoke<WikiSearchResult[]>('agentData_wiki_search', { ...(workspace === undefined ? {} : { workspace }), query, limit }),
+    create: (input: { name: string; wikiId?: string }) => invoke<WikiAssetDetail>('agentData_wiki_create', { ...input }),
+    read: (wikiId: string) => invoke<WikiAssetDetail>('agentData_wiki_read', { wikiId }),
+    list: () => invoke<WikiAssetDetail[]>('agentData_wiki_list'),
+    update: (wikiId: string, patch: { name?: string; summary?: string | null }) => invoke<WikiAssetDetail>('agentData_wiki_update', { wikiId, ...patch }),
+    remove: (wikiId: string) => invoke<null>('agentData_wiki_remove', { wikiId }),
+    resetDraft: (wikiId: string) => invoke<null>('agentData_wiki_resetDraft', { wikiId }),
+    ingest: (wikiId: string) => invoke<unknown>('agentData_wiki_ingest', { wikiId }),
+    rawWrite: (wikiId: string, filename: string, content: string) => invoke<null>('agentData_wiki_rawWrite', { wikiId, filename, content }),
+    rawRemove: (wikiId: string, filename: string) => invoke<null>('agentData_wiki_rawRemove', { wikiId, filename }),
+    rawList: (wikiId: string) => invoke<WikiRawSource[]>('agentData_wiki_rawList', { wikiId }),
+    rawRead: (wikiId: string, filename: string) => invoke<string>('agentData_wiki_rawRead', { wikiId, filename }),
+    pageWrite: (wikiId: string, ref: string, content: string) => invoke<{ lockedInjected: boolean }>('agentData_wiki_pageWrite', { wikiId, ref, content }),
+    pageRemove: (wikiId: string, ref: string) => invoke<null>('agentData_wiki_pageRemove', { wikiId, ref }),
+    pageList: (wikiId: string) => invoke<Array<{ id: string; title: string; type: string; relPath: string }>>('agentData_wiki_pageList', { wikiId }),
+    pageRead: (wikiId: string, ref: string) => invoke<string>('agentData_wiki_pageRead', { wikiId, ref }),
+    search: (wikiId: string, query: string, options: { limit?: number; hop?: number; decay?: number; minScore?: number } = {}) => invoke<unknown>('agentData_wiki_search', { wikiId, query, ...options }),
+    graph: (wikiId: string) => invoke<Array<{ source_id: string; target_id: string }>>('agentData_wiki_graph', { wikiId }),
   },
   code: {
     call: (input: CodeRetrievalRequest) => invoke<unknown>('agentData_code_call', { ...input }),

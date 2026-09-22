@@ -32,8 +32,6 @@ import { AgentDataStorage } from "./agentData/storage";
 import { PluginManager } from "./app/plugin/pluginManager";
 import { builtinPluginDefinitions } from "./app/plugin/builtinPlugins";
 import { SystemWorkerManager } from "./pi/systemWorkerManager";
-import { randomUUID } from "node:crypto";
-import { WikiSyncService, scanWorkspaceMarkdown, readWorkspaceSource } from "./app/wikiSyncService";
 import { CodeGraphService } from "./app/codeGraph/codeGraphService";
 import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
@@ -112,35 +110,13 @@ if (!process.env.VITEST) {
       cancelled: (id) => agentData.request('admin.jobs.markCancelled', { id }),
       stage: (id, stage, processed, total) => agentData.recordJobStage(id, stage, processed, total),
     });
-    const wikiCancelled = new Set<string>();
-    const wikiSync = new WikiSyncService({
-      jobs: {
-        start: (id) => void agentData.request('admin.jobs.start', { id }),
-        progress: (id, value) => void agentData.request('admin.jobs.progress', { id, value }),
-        complete: (id) => agentData.request('admin.jobs.complete', { id }),
-        fail: (id, error) => agentData.request('admin.jobs.fail', { id, error }),
-        markCancelled: (id) => agentData.request('admin.jobs.markCancelled', { id }),
-        cancelled: (id) => wikiCancelled.has(id),
-      },
-      scan: (workspace) => scanWorkspaceMarkdown(workspace),
-      readSource: (workspace, path) => readWorkspaceSource(workspace, path),
-      generate: (source, path, workspace, expectedModel) => agentData.runServiceTask({ id: `wiki-${randomUUID()}`, kind: 'wiki_page_generate', input: { workspace, sourcePath: path, source, ...(expectedModel ? { expectedModel } : {}) } }).then((value) => String(value)),
-      readPage: (workspace, page) => agentData.requestAdmin('wiki.read', { workspace, page }),
-      writePage: (input) => agentData.requestAdmin('wiki.replace', { ...input }),
-      onSkip: (input) => agentData.recordWikiSyncSkip(input),
-      onStage: (id, stage, processed, total) => agentData.recordJobStage(id, stage, processed, total),
-    });
     agentData = new AgentDataService({
       dataPath,
       validateProject: (project) => validateProject(project, worksDir),
       resolveSession: (project, sessionId) => piRuntime?.ownsSession(project, sessionId) ?? false,
-      wikiModelLabel: () => systemWorker.describeModel(),
+      completeSimple: (input) => modelRuntimeHost.completeSimple(input),
       executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
       jobRunners: {
-        'wiki.sync': {
-          run: async (id, workspace, expectedModel) => { wikiCancelled.delete(id); await wikiSync.run(id, workspace, expectedModel); wikiCancelled.delete(id); },
-          cancel: (id) => { wikiCancelled.add(id); },
-        },
         'codegraph.sync': codeGraphJobs,
       },
       codeRetrieval: {

@@ -18,7 +18,6 @@ import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
 import type { ShellService } from '../app/shellService';
 import type { AgentDataService } from '../app/agentDataService';
-import type { WikiVersion, WikiSourceInput, WikiSourceRef } from '../agentData/wikiContracts';
 import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
@@ -185,9 +184,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       ...(args.includeOtherProjects === true ? { includeOtherProjects: true } : {}),
     }));
     registerWikiManagement(services.agentData);
-    registerCommand('agentData_wiki_overview', (_event, args) => services.agentData!.requestAdmin('wiki.admin.overview', {
-      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
-    }));
     registerCommand('agentData_code_status', (_event, args) => services.agentData!.request('codeRetrieval.admin.status', {
       workspace: readString(args, 'workspace'),
     }));
@@ -214,11 +210,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     registerCommand('agentData_memory_delete', (_event, args) => services.agentData!.requestAdmin('memory.delete', {
       userId: readString(args, 'userId'),
       id: readString(args, 'id'),
-    }));
-    registerCommand('agentData_wiki_search', (_event, args) => services.agentData!.requestAdmin('wiki.search', {
-      ...(args.workspace === undefined ? {} : { workspace: readString(args, 'workspace') }),
-      query: readString(args, 'query'),
-      limit: readPositiveInteger(args, 'limit', 50),
     }));
     registerCommand('agentData_code_search', (_event, args) => services.agentData!.request('codeRetrieval.search', {
       workspace: readString(args, 'workspace'),
@@ -503,67 +494,59 @@ function registerDevCommands(service: DevService): void {
 }
 
 function registerWikiManagement(service: AgentDataService): void {
-  registerCommand('agentData_wiki_libraries_list', (_event, args) => service.requestAdmin('wiki.libraries.list', {
-    ...(args.query === undefined ? {} : { query: readText(args, 'query') }), ...(args.project === undefined ? {} : { project: readString(args, 'project') }),
+  registerCommand('agentData_wiki_create', (_event, args) => service.requestAdmin('wiki.create', {
+    name: readString(args, 'name'), ...(args.wikiId === undefined ? {} : { wikiId: readString(args, 'wikiId') }),
   }));
-  registerCommand('agentData_wiki_libraries_read', (_event, args) => service.requestAdmin('wiki.libraries.read', { kbId: readString(args, 'kbId') }));
-  registerCommand('agentData_wiki_libraries_create', (_event, args) => service.requestAdmin('wiki.libraries.create', readLibraryInput(args)));
-  registerCommand('agentData_wiki_libraries_update', (_event, args) => service.requestAdmin('wiki.libraries.update', { kbId: readString(args, 'kbId'), ...readLibraryInput(args), expectedRevision: readRevision(args, 'expectedRevision') }));
-  registerCommand('agentData_wiki_libraries_previewDelete', (_event, args) => service.requestAdmin('wiki.libraries.previewDelete', { kbId: readString(args, 'kbId') }));
-  registerCommand('agentData_wiki_libraries_remove', (_event, args) => service.requestAdmin('wiki.libraries.remove', { kbId: readString(args, 'kbId'), cancelActive: readBoolean(args, 'cancelActive') }));
-  registerCommand('agentData_wiki_libraries_previewIngest', (_event, args) => service.requestAdmin('wiki.libraries.previewIngest', readIngestInput(args)));
-  registerCommand('agentData_wiki_libraries_ingest', (_event, args) => service.requestAdmin('wiki.libraries.ingest', { ...readIngestInput(args), ...(args.expectedModel === undefined ? {} : { expectedModel: readString(args, 'expectedModel') }) }));
-  registerCommand('agentData_wiki_libraries_reindex', (_event, args) => service.requestAdmin('wiki.libraries.reindex', { kbId: readString(args, 'kbId') }));
-  registerCommand('agentData_wiki_sources_list', (_event, args) => service.requestAdmin('wiki.sources.list', { kbId: readString(args, 'kbId') }));
-  registerCommand('agentData_wiki_sources_read', (_event, args) => service.requestAdmin('wiki.sources.read', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), ...(args.revision === undefined ? {} : { revision: readRevision(args, 'revision') }) }));
-  registerCommand('agentData_wiki_sources_previewImport', (_event, args) => service.requestAdmin('wiki.sources.previewImport', { kbId: readString(args, 'kbId'), projectWorkspace: readString(args, 'projectWorkspace'), relativePath: readString(args, 'relativePath') }));
-  registerCommand('agentData_wiki_sources_create', (_event, args) => service.requestAdmin('wiki.sources.create', { kbId: readString(args, 'kbId'), ...readWikiSourceInput(args) }));
-  registerCommand('agentData_wiki_sources_update', (_event, args) => service.requestAdmin('wiki.sources.update', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), content: readText(args, 'content'), expected: readVersion(args) }));
-  registerCommand('agentData_wiki_sources_previewDelete', (_event, args) => service.requestAdmin('wiki.sources.previewDelete', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId') }));
-  registerCommand('agentData_wiki_sources_remove', (_event, args) => service.requestAdmin('wiki.sources.remove', { kbId: readString(args, 'kbId'), sourceId: readString(args, 'sourceId'), cancelActive: readBoolean(args, 'cancelActive') }));
-  registerCommand('agentData_wiki_pages_list', (_event, args) => service.requestAdmin('wiki.pages.list', { kbId: readString(args, 'kbId') }));
-  registerCommand('agentData_wiki_pages_read', (_event, args) => service.requestAdmin('wiki.pages.read', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId') }));
-  registerCommand('agentData_wiki_pages_create', (_event, args) => service.requestAdmin('wiki.pages.create', { kbId: readString(args, 'kbId'), ...readPageInput(args) }));
-  registerCommand('agentData_wiki_pages_update', (_event, args) => service.requestAdmin('wiki.pages.update', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), ...readPageInput(args), expected: readVersion(args) }));
-  registerCommand('agentData_wiki_pages_setLocked', (_event, args) => service.requestAdmin('wiki.pages.setLocked', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), locked: readBoolean(args, 'locked'), expected: readVersion(args) }));
-  registerCommand('agentData_wiki_pages_previewDelete', (_event, args) => service.requestAdmin('wiki.pages.previewDelete', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId') }));
-  registerCommand('agentData_wiki_pages_remove', (_event, args) => service.requestAdmin('wiki.pages.remove', { kbId: readString(args, 'kbId'), pageId: readString(args, 'pageId'), cancelActive: readBoolean(args, 'cancelActive') }));
-}
-
-function readLibraryInput(args: Record<string, unknown>) { return { name: readString(args, 'name'), description: readText(args, 'description'), bindings: readStringArray(args, 'bindings') }; }
-function readPageInput(args: Record<string, unknown>) { return { title: readString(args, 'title'), content: readText(args, 'content'), sourceRefs: readSourceRefs(args) }; }
-function readIngestInput(args: Record<string, unknown>) { return { kbId: readString(args, 'kbId'), ...(args.sourceIds === undefined ? {} : { sourceIds: readStringArray(args, 'sourceIds') }), ...(args.regenerateSourceIds === undefined ? {} : { regenerateSourceIds: readStringArray(args, 'regenerateSourceIds') }) }; }
-function readBoolean(args: Record<string, unknown>, key: string): boolean { if (typeof args[key] !== 'boolean') throw new Error(`${key} must be a boolean`); return args[key]; }
-function readRevision(args: Record<string, unknown>, key: string): number { if (!Number.isInteger(args[key]) || Number(args[key]) < 0) throw new Error(`${key} must be a nonnegative integer`); return Number(args[key]); }
-function readStringArray(args: Record<string, unknown>, key: string): string[] {
-  const values = args[key];
-  if (!Array.isArray(values) || values.some((v) => typeof v !== 'string' || !v.trim())) throw new Error(`${key} must be a string array`);
-  return [...new Set(values as string[])];
-}
-function readVersion(args: Record<string, unknown>): WikiVersion {
-  const expected = readRecord(args, 'expected');
-  if (!Number.isInteger(expected.revision) || Number(expected.revision) < 0 || typeof expected.contentHash !== 'string' || !expected.contentHash) throw new Error('expected version is required');
-  return { revision: Number(expected.revision), contentHash: expected.contentHash };
-}
-function readSourceRefs(args: Record<string, unknown>): WikiSourceRef[] {
-  if (!Array.isArray(args.sourceRefs)) throw new Error('invalid sourceRefs');
-  const refs = new Map<string, WikiSourceRef>();
-  for (const ref of args.sourceRefs) {
-    if (!ref || typeof ref.sourceId !== 'string' || !ref.sourceId.trim() || !Number.isInteger(ref.revision) || ref.revision < 1) throw new Error('invalid sourceRefs');
-    refs.set(JSON.stringify([ref.sourceId, ref.revision]), { sourceId: ref.sourceId, revision: ref.revision });
-  }
-  return [...refs.values()];
-}
-function readWikiSourceInput(args: Record<string, unknown>): WikiSourceInput {
-  if (args.kind === 'manual' || args.kind === 'upload') return { kind: args.kind, name: readString(args, 'name'), content: readText(args, 'content') };
-  if (args.kind === 'project') return { kind: args.kind, projectWorkspace: readString(args, 'projectWorkspace'), relativePath: readString(args, 'relativePath'), expectedContentHash: readString(args, 'expectedContentHash') };
-  throw new Error('invalid source kind');
+  registerCommand('agentData_wiki_read', (_event, args) => service.requestAdmin('wiki.read', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_list', () => service.requestAdmin('wiki.list', {}));
+  registerCommand('agentData_wiki_update', (_event, args) => service.requestAdmin('wiki.update', {
+    wikiId: readString(args, 'wikiId'),
+    ...(args.name === undefined ? {} : { name: readString(args, 'name') }),
+    ...(args.summary === undefined ? {} : { summary: args.summary === null ? null : readText(args, 'summary') }),
+  }));
+  registerCommand('agentData_wiki_remove', (_event, args) => service.requestAdmin('wiki.remove', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_resetDraft', (_event, args) => service.requestAdmin('wiki.resetDraft', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_ingest', (_event, args) => service.requestAdmin('wiki.ingest', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_rawWrite', (_event, args) => service.requestAdmin('wiki.rawWrite', {
+    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'), content: readText(args, 'content'),
+  }));
+  registerCommand('agentData_wiki_rawRemove', (_event, args) => service.requestAdmin('wiki.rawRemove', {
+    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'),
+  }));
+  registerCommand('agentData_wiki_rawList', (_event, args) => service.requestAdmin('wiki.rawList', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_rawRead', (_event, args) => service.requestAdmin('wiki.rawRead', {
+    wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'),
+  }));
+  registerCommand('agentData_wiki_pageWrite', (_event, args) => service.requestAdmin('wiki.pageWrite', {
+    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'), content: readText(args, 'content'),
+  }));
+  registerCommand('agentData_wiki_pageRemove', (_event, args) => service.requestAdmin('wiki.pageRemove', {
+    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'),
+  }));
+  registerCommand('agentData_wiki_pageList', (_event, args) => service.requestAdmin('wiki.pageList', { wikiId: readString(args, 'wikiId') }));
+  registerCommand('agentData_wiki_pageRead', (_event, args) => service.requestAdmin('wiki.pageRead', {
+    wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'),
+  }));
+  registerCommand('agentData_wiki_search', (_event, args) => service.requestAdmin('wiki.search', {
+    wikiId: readString(args, 'wikiId'),
+    query: readString(args, 'query'),
+    ...(args.limit === undefined ? {} : { limit: readPositiveInteger(args, 'limit', 20) }),
+    ...(args.hop === undefined ? {} : { hop: Number(args.hop) }),
+    ...(args.decay === undefined ? {} : { decay: Number(args.decay) }),
+    ...(args.minScore === undefined ? {} : { minScore: Number(args.minScore) }),
+  }));
+  registerCommand('agentData_wiki_graph', (_event, args) => service.requestAdmin('wiki.graph', { wikiId: readString(args, 'wikiId') }));
 }
 
 function readDelivery(args: Record<string, unknown>, key: string): 'followUp' | 'steer' {
   const value = args[key];
   if (value !== 'followUp' && value !== 'steer') throw new Error(`${key} must be followUp or steer`);
   return value;
+}
+
+function readBoolean(args: Record<string, unknown>, key: string): boolean {
+  if (typeof args[key] !== 'boolean') throw new Error(`${key} must be a boolean`);
+  return args[key] as boolean;
 }
 
 function readString(args: Record<string, unknown>, key: string): string {

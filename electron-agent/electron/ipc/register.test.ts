@@ -62,39 +62,32 @@ describe('registerIpcHandlers', () => {
   it('dispatches every Wiki management operation to its fixed method with only supported fields', async () => {
     const agentData = { requestAdmin: vi.fn().mockResolvedValue({}), request: vi.fn() };
     registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    const kb = { kbId: 'k' }, source = { ...kb, sourceId: 's' }, page = { ...kb, pageId: 'p' };
-    const input = { title: 'Title', content: '', sourceRefs: [{ sourceId: 's', revision: 1 }] }, expected = { revision: 1, contentHash: 'h' };
-    const library = { name: 'Library', description: '', bindings: ['D:/a'] };
+    const wikiId = 'w1';
     const operations: Array<[string, Record<string, unknown>]> = [
-      ['libraries.list', { query: 'Library', project: 'D:/a' }], ['libraries.read', kb], ['libraries.create', library], ['libraries.update', { ...kb, ...library, expectedRevision: 1 }],
-      ['libraries.previewDelete', kb], ['libraries.remove', { ...kb, cancelActive: false }], ['libraries.previewIngest', { ...kb, sourceIds: ['s'], regenerateSourceIds: [] }], ['libraries.ingest', { ...kb, sourceIds: ['s'], expectedModel: 'fixture/model' }], ['libraries.reindex', kb],
-      ['sources.list', kb], ['sources.read', { ...source, revision: 1 }], ['sources.previewImport', { ...kb, projectWorkspace: 'D:/a', relativePath: 'README.md' }],
-      ['sources.create', { ...kb, kind: 'project', projectWorkspace: 'D:/a', relativePath: 'README.md', expectedContentHash: 'h' }], ['sources.update', { ...source, content: '', expected }], ['sources.previewDelete', source], ['sources.remove', { ...source, cancelActive: true }],
-      ['pages.list', kb], ['pages.read', page], ['pages.create', { ...kb, ...input }], ['pages.update', { ...page, ...input, expected }], ['pages.setLocked', { ...page, locked: false, expected }], ['pages.previewDelete', page], ['pages.remove', { ...page, cancelActive: true }],
+      ['create', { name: '产品' }], ['read', { wikiId }], ['list', {}], ['update', { wikiId, name: '新品', summary: '摘要' }],
+      ['remove', { wikiId }], ['resetDraft', { wikiId }], ['ingest', { wikiId }],
+      ['rawWrite', { wikiId, filename: 'note.md', content: '原文' }], ['rawRemove', { wikiId, filename: 'note.md' }],
+      ['rawList', { wikiId }], ['rawRead', { wikiId, filename: 'note.md' }],
+      ['pageWrite', { wikiId, ref: 'concepts/auth', content: '# 权限' }], ['pageRemove', { wikiId, ref: 'concepts/auth' }],
+      ['pageList', { wikiId }], ['pageRead', { wikiId, ref: 'concepts/auth' }],
+      ['search', { wikiId, query: '权限', limit: 10, hop: 1 }], ['graph', { wikiId }],
     ];
     for (const [method, args] of operations) {
-      await invoke({}, { command: `agentData_wiki_${method.replace('.', '_')}`, args: { ...args, method: 'untrusted', admin: false } });
+      await invoke({}, { command: `agentData_wiki_${method}`, args: { ...args, method: 'untrusted', admin: false } });
       expect(agentData.requestAdmin).toHaveBeenLastCalledWith(`wiki.${method}`, args);
     }
     expect(agentData.request).not.toHaveBeenCalled();
   });
 
-  it('uses a fixed in-process Wiki admin entry and requires versions before dispatch', async () => {
-    const agentData = { requestAdmin: vi.fn().mockResolvedValue({ kbId: 'k' }), request: vi.fn() };
+  it('uses a fixed in-process Wiki admin entry and rejects unknown wiki invoke', async () => {
+    const agentData = { requestAdmin: vi.fn().mockResolvedValue({ wikiId: 'w' }), request: vi.fn() };
     registerIpcHandlers({ agentData: agentData as never }); const invoke = handler(IPC_CHANNELS.invoke);
-    await invoke({}, { command: 'agentData_wiki_libraries_create', args: { name: '手册', description: '', bindings: [], admin: false, method: 'wiki.deleteWorkspace' } });
-    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.libraries.create', { name: '手册', description: '', bindings: [] });
+    await invoke({}, { command: 'agentData_wiki_create', args: { name: '手册', admin: false, method: 'wiki.deleteWorkspace' } });
+    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.create', { name: '手册' });
     expect(agentData.request).not.toHaveBeenCalled();
-    const input = { kbId: 'k', pageId: 'p', title: 'x', content: '', sourceRefs: [] };
-    await expect(invoke({}, { command: 'agentData_wiki_pages_update', args: input })).rejects.toThrow(/expected/);
-    await expect(invoke({}, { command: 'agentData_wiki_pages_update', args: { ...input, expected: { revision: 1, contentHash: '' } } })).rejects.toThrow(/expected/);
-    const expected = { revision: 1, contentHash: 'h' };
-    await invoke({}, { command: 'agentData_wiki_pages_update', args: { ...input, expected } });
-    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.pages.update', { ...input, expected });
-    await invoke({}, { command: 'agentData_wiki_sources_read', args: { kbId: 'k', sourceId: 's', revision: 1 } });
-    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.sources.read', { kbId: 'k', sourceId: 's', revision: 1 });
-    await expect(invoke({}, { command: 'agentData_wiki_pages_create', args: { ...input, sourceRefs: [{ sourceId: 's', revision: -1 }] } })).rejects.toThrow(/sourceRefs/);
-    await expect(invoke({}, { command: 'agentData_wiki_invoke', args: { method: 'wiki.libraries.list' } })).rejects.toThrow();
+    await invoke({}, { command: 'agentData_wiki_pageWrite', args: { wikiId: 'w', ref: 'concepts/a', content: '# a' } });
+    expect(agentData.requestAdmin).toHaveBeenLastCalledWith('wiki.pageWrite', { wikiId: 'w', ref: 'concepts/a', content: '# a' });
+    await expect(invoke({}, { command: 'agentData_wiki_invoke', args: { method: 'wiki.list' } })).rejects.toThrow();
   });
 
   beforeEach(() => {
@@ -239,15 +232,11 @@ describe('registerIpcHandlers', () => {
     await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', workspace: '/w' } })).resolves.toEqual({
       method: 'memory.admin.overview', params: { userId: 'u', workspace: '/w' },
     });
-    await expect(invoke({}, { command: 'agentData_wiki_overview', args: { workspace: '/w' } })).resolves.toEqual({
-      method: 'wiki.admin.overview', params: { workspace: '/w' },
-    });
-    expect(agentData.requestAdmin).toHaveBeenCalledWith('wiki.admin.overview', { workspace: '/w' });
     await expect(invoke({}, { command: 'agentData_code_status', args: { workspace: '/w' } })).resolves.toEqual({
       method: 'codeRetrieval.admin.status', params: { workspace: '/w' },
     });
-    await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'wiki.sync', workspace: '/w' } })).resolves.toEqual({
-      method: 'admin.jobs.create', params: { kind: 'wiki.sync', workspace: '/w' },
+    await expect(invoke({}, { command: 'agentData_jobs_create', args: { kind: 'codegraph.sync', workspace: '/w' } })).resolves.toEqual({
+      method: 'admin.jobs.create', params: { kind: 'codegraph.sync', workspace: '/w' },
     });
     await expect(invoke({}, { command: 'agentData_memory_overview', args: { userId: 'u', includeOtherProjects: true } })).resolves.toEqual({
       method: 'memory.admin.overview', params: { userId: 'u', includeOtherProjects: true },
@@ -316,4 +305,5 @@ describe('registerIpcHandlers', () => {
     await invoke({ sender }, { command: 'enhance_prompt_abort', args: { workspace: '/ws' } });
     expect(abort).toHaveBeenCalledWith('/ws');
   });
+
 });
