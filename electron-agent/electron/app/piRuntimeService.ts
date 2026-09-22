@@ -13,6 +13,7 @@ import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../
 import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
+import { messagesWithEntryIds } from './messagesWithEntryIds.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -493,7 +494,13 @@ export class PiRuntimeService {
       case 'agent_abort_retry': s.abortRetry(); return undefined;
       case 'agent_get_session_stats': return s.getSessionStats();
       case 'agent_get_state': return handle.getState();
-      case 'agent_get_messages': return { messages: s.messages };
+      case 'agent_get_messages': {
+        const build = s.sessionManager?.buildSessionProjection;
+        if (typeof build === 'function') {
+          return { messages: messagesWithEntryIds(build.call(s.sessionManager)) };
+        }
+        return { messages: s.messages };
+      }
       case 'agent_get_commands': return handle.getCommands();
       case 'agent_get_fork_messages': return { messages: s.getUserMessagesForForking() };
       case 'agent_set_session_name': {

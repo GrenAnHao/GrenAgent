@@ -706,6 +706,60 @@ describe('PiRuntimeService', () => {
     }
   });
 
+  it('agent_get_messages 用 buildSessionProjection 的 entry id，且该 id 可作 truncateTo 目标', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-get-messages-entry-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    const assistant = (id: string, parentId: string) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'assistant', content: [{ type: 'text', text: id }], timestamp: 2 } });
+    await writeFile(sessionFile, [header, user('u1', null), assistant('a1', 'u1'), user('u2', 'a1')].join('\n'), 'utf8');
+
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    handle.session.sessionManager = {
+      getLeafId: () => 'u2',
+      buildSessionProjection: () => ({
+        entries: [
+          { sourceEntry: { id: 'u1' }, messages: [{ role: 'user', content: 'u1', timestamp: 1 }] },
+          {
+            sourceEntry: { id: 'a1' },
+            messages: [{ role: 'assistant', content: [{ type: 'text', text: 'a1' }], timestamp: 2 }],
+          },
+          { sourceEntry: { id: 'u2' }, messages: [{ role: 'user', content: 'u2', timestamp: 3 }] },
+        ],
+        messages: [],
+      }),
+    };
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      const result = (await service.send('C:/work', 'agent_get_messages', {})) as {
+        messages: Array<{ role: string; content: unknown; entryId?: string }>;
+      };
+      const users = result.messages.filter((m) => m.role === 'user');
+      expect(users.map((m) => m.entryId)).toEqual(['u1', 'u2']);
+
+      const target = users[users.length - 1]!;
+      await expect(
+        service.send('C:/work', 'agent_truncate_to', { entryId: target.entryId, mode: 'drop-target' }),
+      ).resolves.toMatchObject({ ok: true });
+
+      const remaining = (await readFile(sessionFile, 'utf8'))
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line).id);
+      expect(remaining).toEqual(['s', 'u1', 'a1']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects branched truncate without changing session file bytes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-truncate-branch-'));
     const sessionFile = join(root, 'session.jsonl');
