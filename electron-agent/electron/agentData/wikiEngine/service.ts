@@ -1,9 +1,9 @@
 // Ported from TencentDB-Agent-Memory MemoryKnowledge (MIT).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { initIndexDb } from './indexDb';
+import { initIndexDb, withWriteDb } from './indexDb';
 
 /** Default purpose — software engineering knowledge base. */
 const DEFAULT_PURPOSE = `This knowledge base accumulates and organizes engineering knowledge of software systems,
@@ -79,6 +79,22 @@ export type WikiAsset = {
   status: string;
   dir: string;
 };
+
+export type WikiRawSource = {
+  filename: string;
+  sha256: string;
+  size: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  last_modified_by: string | null;
+  ingested_at: string | null;
+  ingest_error: string | null;
+};
+
+const RAW_WRITE_MAX_BYTES = 5 * 1024 * 1024;
+const RAW_WRITE_MAX = 50;
+const RAW_ALLOWED_EXT = new Set(['.md', '.txt']);
 
 function assertSafeWikiId(wikiId: string): void {
   if (
@@ -213,5 +229,140 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     this.writeSources(sources);
 
     return { wikiId, name, status: 'draft', dir };
+  }
+
+  private requireAsset(wikiId: string): WikiAsset {
+    assertSafeWikiId(wikiId);
+    const row = this.db
+      .prepare('SELECT wiki_id, name, status FROM wiki_assets WHERE wiki_id = ?')
+      .get(wikiId) as { wiki_id: string; name: string; status: string } | undefined;
+    if (!row) throw new Error(`not_found: wiki ${wikiId}`);
+    return this.rowToAsset(row);
+  }
+
+  private assertWritable(asset: WikiAsset): void {
+    if (asset.status === 'processing') throw new Error('processing');
+  }
+
+  private resolveRawPath(sourcesDir: string, filename: string): string {
+    if (
+      !filename ||
+      filename.includes('..') ||
+      filename.startsWith('/') ||
+      filename.startsWith('\\')
+    ) {
+      throw new Error('invalid_path');
+    }
+    const normalized = normalize(filename);
+    if (normalized.startsWith('..') || normalized.startsWith('/') || normalized.startsWith('\\')) {
+      throw new Error('invalid_path');
+    }
+    const ext = extname(normalized).toLowerCase();
+    if (!RAW_ALLOWED_EXT.has(ext)) throw new Error('invalid_path');
+
+    const base = resolve(sourcesDir);
+    const safe = resolve(base, normalized);
+    const dirWithSep = base.endsWith(sep) ? base : base + sep;
+    if (safe !== base && !safe.startsWith(dirWithSep)) throw new Error('invalid_path');
+    if (safe === base) throw new Error('invalid_path');
+    return safe;
+  }
+
+  private sha256(text: string): string {
+    return createHash('sha256').update(text, 'utf8').digest('hex');
+  }
+
+  private upsertSource(
+    db: DatabaseSync,
+    entry: { filename: string; sha256: string; size: number },
+  ): void {
+    const now = new Date().toISOString();
+    const old = db.prepare('SELECT sha256 FROM source WHERE filename = ?').get(entry.filename) as
+      | { sha256: string }
+      | undefined;
+    if (!old) {
+      db.prepare(
+        `INSERT INTO source(filename, sha256, size, status, created_at, updated_at, last_modified_by, ingested_at, ingest_error)
+         VALUES (?, ?, ?, 'uploaded', ?, ?, NULL, NULL, NULL)`,
+      ).run(entry.filename, entry.sha256, entry.size, now, now);
+      return;
+    }
+    if (old.sha256 !== entry.sha256) {
+      db.prepare(
+        `UPDATE source SET sha256 = ?, size = ?, status = 'uploaded', updated_at = ?, ingest_error = NULL
+         WHERE filename = ?`,
+      ).run(entry.sha256, entry.size, now, entry.filename);
+    }
+  }
+
+  writeRaw(wikiId: string, filename: string, content: string): void {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+
+    const size = Buffer.byteLength(content, 'utf8');
+    if (size > RAW_WRITE_MAX_BYTES) throw new Error('too_large');
+
+    const sourcesDir = join(asset.dir, 'raw', 'sources');
+    const safe = this.resolveRawPath(sourcesDir, filename);
+    mkdirSync(sourcesDir, { recursive: true });
+    writeFileSync(safe, content, 'utf8');
+    withWriteDb(asset.dir, (db) => {
+      this.upsertSource(db, { filename, sha256: this.sha256(content), size });
+    });
+  }
+
+  writeRawMany(wikiId: string, files: Array<{ filename: string; content: string }>): void {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+    if (files.length > RAW_WRITE_MAX) {
+      throw new Error(`files exceeds max ${RAW_WRITE_MAX}`);
+    }
+
+    const sourcesDir = join(asset.dir, 'raw', 'sources');
+    const plans: Array<{ filename: string; safePath: string; content: string; size: number }> = [];
+    for (const { filename, content } of files) {
+      if (typeof content !== 'string') throw new Error('invalid_path');
+      const size = Buffer.byteLength(content, 'utf8');
+      if (size > RAW_WRITE_MAX_BYTES) throw new Error('too_large');
+      const safePath = this.resolveRawPath(sourcesDir, filename);
+      plans.push({ filename, safePath, content, size });
+    }
+
+    mkdirSync(sourcesDir, { recursive: true });
+    for (const p of plans) {
+      writeFileSync(p.safePath, p.content, 'utf8');
+    }
+    withWriteDb(asset.dir, (db) => {
+      for (const p of plans) {
+        this.upsertSource(db, { filename: p.filename, sha256: this.sha256(p.content), size: p.size });
+      }
+    });
+  }
+
+  listRaw(wikiId: string): WikiRawSource[] {
+    const asset = this.requireAsset(wikiId);
+    const db = new DatabaseSync(join(asset.dir, 'index.db'));
+    try {
+      return db
+        .prepare(
+          `SELECT filename, sha256, size, status, created_at, updated_at, last_modified_by, ingested_at, ingest_error
+           FROM source ORDER BY filename`,
+        )
+        .all() as WikiRawSource[];
+    } finally {
+      db.close();
+    }
+  }
+
+  removeRaw(wikiId: string, filename: string): void {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+
+    const sourcesDir = join(asset.dir, 'raw', 'sources');
+    const safe = this.resolveRawPath(sourcesDir, filename);
+    if (existsSync(safe)) unlinkSync(safe);
+    withWriteDb(asset.dir, (db) => {
+      db.prepare('DELETE FROM source WHERE filename = ?').run(filename);
+    });
   }
 }
