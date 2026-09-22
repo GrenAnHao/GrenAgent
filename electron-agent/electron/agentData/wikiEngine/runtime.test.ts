@@ -50,4 +50,20 @@ describe('AgentDataRuntime wiki engine wiring', () => {
     await expect(runtime.requestAdmin('wiki.libraries.list', {})).rejects.toThrow(/METHOD_NOT_FOUND|unknown management method/);
     expect(completeSimple).not.toHaveBeenCalled();
   });
+
+  it('rejects wiki writes from the host socket token', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-host-socket-'));
+    const runtime = new AgentDataRuntime({
+      dataPath: join(root, 'agent-data.db'),
+      wikiRootDir: join(root, 'wiki'),
+      completeSimple: async () => 'unused',
+    });
+    runtimes.push(runtime);
+    const endpoint = await runtime.start();
+    const host = new AgentDataClient(endpoint);
+    clients.push(host);
+
+    await expect(host.request('wiki.create', { name: '越权库' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(runtime.requestAdmin('wiki.create', { name: '管理入口' })).resolves.toMatchObject({ status: 'draft' });
+  });
 });

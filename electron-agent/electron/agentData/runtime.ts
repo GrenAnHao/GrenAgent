@@ -349,7 +349,10 @@ export class AgentDataRuntime {
       else {
         const workspace = this.projectTokens.get(value.token);
         const projectJobs = workspace ? this.projectJobMethod(value.method, value.params) : undefined;
-        const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, workspace ? 'project' : 'admin')
+        if (value.method.startsWith('wiki.') && !workspace) {
+          throw new RpcError('FORBIDDEN', 'Wiki management is available only in the application');
+        }
+        const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, 'project')
           : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
         response = { id: value.id, ok: true, result: await method(value.params) };
