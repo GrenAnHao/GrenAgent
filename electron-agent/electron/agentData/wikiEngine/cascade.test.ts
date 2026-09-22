@@ -99,7 +99,16 @@ See [[A]] here.
     );
 
     const indexPath = join(wiki.dir, 'wiki/index.md');
-    const indexBefore = readFileSync(indexPath, 'utf8');
+    const indexWithLink = `---
+type: index
+title: Index
+---
+
+# Index
+
+[[A]]
+`;
+    writeFileSync(indexPath, indexWithLink, 'utf8');
 
     service.removePage(wiki.wikiId, 'entities/A');
 
@@ -107,6 +116,6 @@ See [[A]] here.
     const cContent = readFileSync(join(wiki.dir, 'wiki/entities/C.md'), 'utf8');
     expect(cContent).not.toContain('[[A]]');
     expect(cContent).toContain('See A here.');
-    expect(readFileSync(indexPath, 'utf8')).toBe(indexBefore);
+    expect(readFileSync(indexPath, 'utf8')).toContain('[[A]]');
   });
 });

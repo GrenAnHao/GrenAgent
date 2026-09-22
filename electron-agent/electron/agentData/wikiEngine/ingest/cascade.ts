@@ -195,10 +195,13 @@ export function cascadeDeleteWikiPagesWithRefs(
   }
 
   // 清理剩余 page 中指向已删页的 [[wikilink]]：把 [[X]] / [[X|label]] 替换为其展示文本。
+  // 结构性文件不参与悬空链接重写（与 deleteSourceFiles 一致）。
   let rewrittenFiles = 0;
   const linkRe = /\[\[([^\]]+?)\]\]/g;
   for (const pagePath of collectWikiPages(wikiDir)) {
     if (toDelete.has(pagePath)) continue;
+    const relFromWiki = relative(wikiDir, pagePath).replace(/\\/g, '/');
+    if (isStructural(relFromWiki)) continue;
     let content: string;
     try {
       content = readFileSync(pagePath, 'utf-8');
