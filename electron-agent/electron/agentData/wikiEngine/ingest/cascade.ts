@@ -117,7 +117,11 @@ export function deleteSourceFiles(
     } else {
       // 共享 → 重写去掉被删源
       try {
-        const rewritten = buildPage({ ...parsed.frontmatter, sources: remaining }, parsed.body);
+        let rewritten = buildPage({ ...parsed.frontmatter, sources: remaining }, parsed.body);
+        // buildPage 故意不写 locked；级联重写须保留用户页上已有的 locked: true。
+        if (parsed.frontmatter.locked === true) {
+          rewritten = rewritten.replace(/^---\n/, '---\nlocked: true\n');
+        }
         writeFileSync(pagePath, rewritten, 'utf-8');
         rewrittenSourcePages++;
       } catch {

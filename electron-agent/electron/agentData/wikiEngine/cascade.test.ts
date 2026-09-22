@@ -71,6 +71,39 @@ sources:
     expect(service.listRaw(wiki.wikiId).map((r) => r.filename)).toEqual(['other.md']);
   });
 
+  it('removeRaw keeps locked true when rewriting a shared page', () => {
+    const { service } = makeService();
+    const wiki = service.create({ name: '级联保留锁定' });
+
+    service.writeRaw(wiki.wikiId, 'note.md', 'note body');
+    service.writeRaw(wiki.wikiId, 'other.md', 'other body');
+
+    service.writePage(
+      wiki.wikiId,
+      'entities/Shared',
+      `---
+type: entity
+title: Shared
+sources:
+  - note.md
+  - other.md
+---
+
+# Shared
+`,
+    );
+
+    const before = readFileSync(join(wiki.dir, 'wiki/entities/Shared.md'), 'utf8');
+    expect(before).toMatch(/^locked:\s*true\s*$/m);
+
+    service.removeRaw(wiki.wikiId, 'note.md');
+
+    const after = readFileSync(join(wiki.dir, 'wiki/entities/Shared.md'), 'utf8');
+    expect(after).toMatch(/^locked:\s*true\s*$/m);
+    expect(after).toContain('other.md');
+    expect(after).not.toMatch(/^\s*-\s*note\.md\s*$/m);
+  });
+
   it('removePage clears dangling wikilinks to display text; leaves index.md alone', () => {
     const { service } = makeService();
     const wiki = service.create({ name: '级联删页' });
