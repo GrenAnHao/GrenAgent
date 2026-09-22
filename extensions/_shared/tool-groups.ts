@@ -21,7 +21,7 @@ export const NET_TOOLS = [
 
 // 写入工具：直接写文件或调用数据服务，不经 safety 的 write/edit 路径检查（SAFETY_WRITE_ALLOW），
 // 故 readonly 模式必须单独拦截，否则 fs 隔离可被它们绕过。
-export const WRITE_TOOLS = ["ast_edit", "hl_edit", "wiki_update", "wiki_reindex"] as const;
+export const WRITE_TOOLS = ["ast_edit", "hl_edit"] as const;
 
 // 代码执行工具——均在宿主进程执行（py_run/js_run 走常驻内核：node:vm 可逃逸 / python 子进程；
 // dap_* 启动/求值被调试程序）。ask 策略下需对其二次确认；能力闸（受限 fs / 受限 IM 会话）按此整体 deny。

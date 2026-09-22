@@ -185,7 +185,7 @@ const NAMED_AGENT_PRESET: Record<string, string> = {
 };
 
 /** Frontmatter tools that imply a writable worker; their absence infers explore (readonly). */
-const WRITE_TOOL_HINTS = new Set(["write", "edit", "ast_edit", "hl_edit", "wiki_update", "wiki_reindex"]);
+const WRITE_TOOL_HINTS = new Set(["write", "edit", "ast_edit", "hl_edit"]);
 
 /**
  * Infer a capability preset from a named agent when spawn_agent omits `profile`.

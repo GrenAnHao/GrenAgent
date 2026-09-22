@@ -21,7 +21,7 @@ describe("tool-groups", () => {
   });
 
   it("WRITE_TOOLS are the write-allowlist bypass writers", () => {
-    expect([...WRITE_TOOLS].sort()).toEqual(["ast_edit", "hl_edit", "wiki_reindex", "wiki_update"]);
+    expect([...WRITE_TOOLS].sort()).toEqual(["ast_edit", "hl_edit"]);
   });
 
   it("CODE_EXEC_TOOLS are the host-executed code tools (deduped, no removed sandbox_sh)", () => {
