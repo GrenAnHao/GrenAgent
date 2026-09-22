@@ -66,7 +66,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `fable-behavior` | Fable 5 + coding-agent 行为层（Tier 注入 + 子 agent 种子 + `fable_behavior_ref`） | `fable_behavior_ref` |
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
 | `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
-| `wiki-rag` | Markdown Wiki 生成、读取与无模型索引重建 | `wiki_search`、`wiki_update`、`wiki_read`、`wiki_list`、`wiki_reindex` |
+| `wiki-rag` | TencentDB 风格 Wiki 只读检索（列出 / 检索 / 阅读） | `wiki_list`、`wiki_read`、`wiki_search` |
 | `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files`、`code_status`、`code_usages`、`code_path`、`code_hierarchy`、`code_call_graph`、`code_deps`、`code_cycles`、`code_dead_code`、`code_metrics`、`code_routes`、`code_traverse`、`code_context`、`code_changed` |
 | `session-memory` | 会话结构化工作状态，压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms`、`fetch_html`、`fetch_markdown`、`fetch_txt`、`fetch_json` |
@@ -116,7 +116,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。启动后在 `127.0.0.1` 随机端口提供 JSONL RPC（`randomBytes(32)` token 鉴权），数据落在 `<应用数据目录>/agent-data.db`（`node:sqlite`）：
 
 - `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
-- `wikiStore` / `wikiFiles`：Markdown 文件保存正文及来源快照，`wiki_documents` 保存衍生元数据，`wiki_fts` 提供全文检索；原 `wiki_pages` 留作兼容迁移来源。读取正文走文件，重建索引不调用模型。
+- `wikiEngine`：每个知识库为 `<应用数据目录>/wiki/<wikiId>/`（原文 `raw/sources/`、生成页 `wiki/`、库内 `index.db`）；库状态在 `wiki_assets`（`draft` / `pending` / `processing` / `ready` / `failed`）。只有 `processing` 拒绝写入；工作台可 `resetDraft`。抽取在进程内队列完成，不建 `wiki.*` 系统任务。Agent 仅 `wiki_list` / `wiki_search` / `wiki_read`。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
 - 代码检索通过主进程 `CodeGraphService` / `CodeGraphEngine` 内置的 CodeGraph 1.6.0 SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
 - `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立/同步才写索引，不启用 SDK watcher；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
@@ -130,7 +130,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 运行时启动后主进程自连，同时把 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS / 子代理 env，扩展可反向调用记忆与 Wiki 能力。
 
-记忆提炼与 Wiki 批量生成共用 `TaskQueue` 的系统任务通道。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
+记忆提炼共用 `TaskQueue` 的系统任务通道；Wiki 抽取走进程内串行队列与 Electron 模型短调用，不再创建 `wiki.ingest` / `wiki.sync` 任务。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
 部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。
 
@@ -177,7 +177,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 | --- | --- |
 | 会话记录 | `~/.pi/agent/sessions/*.jsonl` |
 | Agent Data（记忆 / Wiki / 任务与审计） | `<应用数据目录>/agent-data.db`（Electron 主进程托管） |
-| Wiki 正文与来源快照 | `<应用数据目录>/wiki/<工作区哈希>/wiki/` 与同级 `raw/sources/`，参见 [Wiki 使用说明](./agent-data-wiki.md) |
+| Wiki 正文与库内索引 | `<应用数据目录>/wiki/<wikiId>/`（`wiki/`、`raw/sources/`、`index.db`），参见 [Wiki 使用说明](./agent-data-wiki.md) |
 | 生成的图片 | `<工作区>/.pi/images/` |
 | 合成的音频 | `<工作区>/.pi/audio/` |
 | TencentDB 本地运行时数据（历史） | `<应用数据目录>/tencentdb-memory/`（MemoryCore、MemoryKnowledge，Tauri 版） |
