@@ -65,13 +65,16 @@ describe('MessageActionBar', () => {
   });
 });
 
-function renderContextBar() {
+function renderContextBar(overrides?: {
+  bar?: Array<'rewind' | 'edit' | 'copy' | 'exclude'>;
+  menu?: Array<'copy' | 'divider' | 'rewind' | 'edit' | 'regenerate' | 'del' | 'exclude'>;
+}) {
   return render(
     <App>
       <MessageActionBar
-        ctx={{ role: 'assistant', text: 'hi', timestamp: 1000 }}
-        bar={['rewind', 'exclude', 'copy']}
-        menu={['copy', 'divider', 'rewind', 'exclude']}
+        ctx={{ role: 'user', text: 'hi', timestamp: 1000 }}
+        bar={overrides?.bar ?? ['rewind', 'edit', 'copy']}
+        menu={overrides?.menu ?? ['copy', 'divider', 'rewind', 'edit', 'regenerate', 'del']}
       />
     </App>,
   );
@@ -85,9 +88,23 @@ describe('MessageActionBar 流式门控（ContextBar）', () => {
     expect(screen.getByTestId('msg-action-bar-rewind')).toBeTruthy();
   });
 
-  it('流式进行中：隐藏整条操作栏（不在回合进行中暴露回退/移出）', () => {
+  it('流式进行中：仍渲染操作栏，有回退、没有编辑', () => {
     storeState.isStreaming = true;
     renderContextBar();
-    expect(screen.queryByTestId('message-action-bar')).toBeNull();
+    expect(screen.getByTestId('message-action-bar')).toBeTruthy();
+    expect(screen.getByTestId('msg-action-bar-rewind')).toBeTruthy();
+    expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
+  });
+
+  it('用户消息栏位：编辑可访问名称是「编辑」，菜单无「移出上下文」', async () => {
+    storeState.isStreaming = false;
+    renderContextBar();
+    expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '编辑（即将支持）' })).toBeNull();
+
+    screen.getByRole('button', { name: '更多' }).click();
+    const menu = await screen.findByRole('menu');
+    expect(menu.textContent).not.toContain('移出上下文');
+    expect(within(menu).getByText('编辑')).toBeTruthy();
   });
 });

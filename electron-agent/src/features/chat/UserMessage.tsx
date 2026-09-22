@@ -68,8 +68,8 @@ function renderUserMessage(
   const actions = bodyText ? (
     <MessageActionBar
       ctx={ctx}
-      bar={['rewind', 'exclude', 'copy']}
-      menu={['copy', 'divider', 'rewind', 'exclude', 'divider', 'edit', 'regenerate', 'del']}
+      bar={['rewind', 'edit', 'copy']}
+      menu={['copy', 'divider', 'rewind', 'edit', 'regenerate', 'del']}
     />
   ) : undefined;
 

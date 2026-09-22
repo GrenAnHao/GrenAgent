@@ -48,11 +48,12 @@ describe('buildActionItem', () => {
   });
 
   it('edit / regenerate / del 为 disabled 占位且无 onClick', () => {
+    const labels = { edit: '编辑', regenerate: '重新生成', del: '删除' } as const;
     for (const slot of ['edit', 'regenerate', 'del'] as const) {
       const item = buildActionItem(slot, ctx, { success: vi.fn(), error: vi.fn() });
       expect(item.disabled).toBe(true);
       expect(item.onClick).toBeUndefined();
-      expect(item.label).toContain('即将支持');
+      expect(item.label).toBe(labels[slot]);
     }
   });
 

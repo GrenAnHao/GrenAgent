@@ -7,6 +7,16 @@ import type { MessageActionContext, MessageActionSlot, Notify } from './types';
 import { useOptionalAgentStoreContext } from '../../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../../stores/agent';
 
+/** 流式进行中从 bar/menu 滤掉的槽位：编辑/重生成/删除会改写会话，等回合结束后再露出。 */
+const HIDDEN_WHILE_STREAMING = new Set<MessageActionSlot>(['edit', 'regenerate', 'del']);
+
+function filterStreamingSlots(slots: MessageActionSlot[]): MessageActionSlot[];
+function filterStreamingSlots(slots: MessageActionSlot[] | undefined): MessageActionSlot[] | undefined;
+function filterStreamingSlots(slots: MessageActionSlot[] | undefined): MessageActionSlot[] | undefined {
+  if (!slots) return slots;
+  return slots.filter((slot) => !HIDDEN_WHILE_STREAMING.has(slot));
+}
+
 interface MessageActionBarProps {
   ctx: MessageActionContext;
   /** 常驻图标条的槽位（按显示顺序）。 */
@@ -76,8 +86,7 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
   const notify = useNotify();
   const ts = ctx.timestamp as number; // 外层已保证 != null
   const excluded = store.useStore((s) => s.excluded.has(ts));
-  // 流式进行中（整段 agent run 未结束）隐藏悬浮操作栏：回退(fork)/移出上下文等会改写会话树的动作
-  // 若在进行中的回合里触发，会与在跑的回合抢状态、产生竞态——此时不该出现这些工具（回合结束即恢复）。
+  // 流式进行中仍渲染操作栏（回退/复制可用），但滤掉 edit/regenerate/del，避免与进行中的回合抢状态。
   const isStreaming = store.useStore((s) => s.isStreaming);
   const enriched = useMemo<MessageActionContext>(
     () => ({
@@ -108,8 +117,9 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
     }),
     [ctx, excluded, store, notify],
   );
-  if (isStreaming) return null;
-  return renderActions(enriched, bar, menu, notify);
+  const visibleBar = isStreaming ? filterStreamingSlots(bar) : bar;
+  const visibleMenu = isStreaming ? filterStreamingSlots(menu) : menu;
+  return renderActions(enriched, visibleBar, visibleMenu, notify);
 }
 
 /** 无 store 上下文（如子代理对话）或消息无 timestamp：仅渲染基础动作（copy 等）。 */

@@ -129,8 +129,8 @@ function renderTurn(
   const actions = text ? (
     <MessageActionBar
       ctx={ctx}
-      bar={['rewind', 'exclude', 'copy']}
-      menu={['copy', 'divider', 'rewind', 'exclude']}
+      bar={['copy']}
+      menu={['copy']}
     />
   ) : undefined;
   return (
