@@ -4,7 +4,8 @@ import type { MessageActionContext, MessageActionItem, MessageActionKey, Notify 
 /**
  * 解析单个 slot 为动作项。copy 为真实现（写剪贴板 + 提示）；
  * exclude（移出/恢复上下文）、rewind（回退到此）在有 store 上下文且消息带 timestamp 时可用，
- * 由 MessageActionBar 注入回调；否则禁用。edit/regenerate/del 仍为 disabled 占位。
+ * 由 MessageActionBar 注入回调；否则禁用。regenerate/del 仍为 disabled 占位；
+ * edit 在有 onEdit 时启用。
  */
 export function buildActionItem(
   slot: MessageActionKey,
@@ -30,8 +31,16 @@ export function buildActionItem(
           }
         },
       };
-    case 'edit':
-      return { key: 'edit', icon: PencilLine, label: '编辑', disabled: true };
+    case 'edit': {
+      const handler = ctx.onEdit;
+      return {
+        key: 'edit',
+        icon: PencilLine,
+        label: '编辑',
+        disabled: !handler,
+        onClick: handler,
+      };
+    }
     case 'regenerate':
       return { key: 'regenerate', icon: RotateCcw, label: '重新生成', disabled: true };
     case 'del':

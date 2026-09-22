@@ -16,6 +16,8 @@ export interface MessageActionContext {
   onRestore?: (timestamp: number) => void | Promise<void>;
   /** 回退到此（内部调 store.rewindTo）。 */
   onRewind?: (timestamp: number) => void | Promise<void>;
+  /** 进入就地编辑（由 UserMessage 注入；缺失时编辑禁用）。 */
+  onEdit?: () => void;
 }
 
 /** 轻量提示句柄（解耦 antd MessageInstance，便于测试）。 */

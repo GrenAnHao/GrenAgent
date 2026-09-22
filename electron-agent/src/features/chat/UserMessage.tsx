@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type ReactNode } from 'react';
+import { memo, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, Image } from '@lobehub/ui';
 import { EyeOff } from 'lucide-react';
 import { createStaticStyles } from 'antd-style';
@@ -14,6 +14,7 @@ import type { AgentStoreApi } from '../../stores/agent';
 import type { UserImage } from '../../stores/agentReducer';
 import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
+import { MessageEditBox } from './MessageEditBox';
 
 interface UserMessageProps {
   text: string;
@@ -41,6 +42,9 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
+  editWrap: css`
+    width: 100%;
+  `,
 }));
 
 const gridStyle: CSSProperties = {
@@ -49,10 +53,19 @@ const gridStyle: CSSProperties = {
   gap: 6,
 };
 
+function bodyTextOf(text: string): string {
+  return parseAttachments(text)
+    .filter((p) => p.type === 'text')
+    .map((p) => (p.type === 'text' ? p.text : ''))
+    .join('')
+    .trim();
+}
+
 /** 纯展示（不含 hooks）：供「带 store 订阅」与「无 store 降级」两条路径复用。 */
 function renderUserMessage(
   { text, images, timestamp }: UserMessageProps,
   excluded: boolean,
+  onEdit?: () => void,
 ): ReactNode {
   const parts = parseAttachments(text);
   const bodyText = parts
@@ -64,7 +77,7 @@ function renderUserMessage(
   const hasImages = Boolean(images?.length);
   const hasBubble = hasImages || bodyText.length > 0;
 
-  const ctx: MessageActionContext = { role: 'user', text: bodyText, timestamp };
+  const ctx: MessageActionContext = { role: 'user', text: bodyText, timestamp, onEdit };
   const actions = bodyText ? (
     <MessageActionBar
       ctx={ctx}
@@ -118,13 +131,36 @@ function renderUserMessage(
 }
 
 /** 有 store 上下文 + 带 timestamp：订阅排除态以灰显。 */
-function ExcludableUserMessage(props: UserMessageProps & { store: AgentStoreApi; timestamp: number }) {
+function ExcludableUserMessage(
+  props: UserMessageProps & { store: AgentStoreApi; timestamp: number; onEdit?: () => void },
+) {
   const excluded = props.store.useStore((s) => s.excluded.has(props.timestamp));
-  return renderUserMessage(props, excluded);
+  return renderUserMessage(props, excluded, props.onEdit);
 }
 
 function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
   const storeCtx = useOptionalAgentStoreContext();
+  const [editing, setEditing] = useState(false);
+  const bodyText = bodyTextOf(text);
+
+  if (editing) {
+    return (
+      <ChatItemShell placement="left" bubble={false}>
+        <div className={styles.editWrap}>
+          <MessageEditBox
+            initialText={bodyText}
+            onCancel={() => setEditing(false)}
+            onSend={() => {
+              // 本任务只调用 onSend；截断与重发由后续任务接线。
+            }}
+          />
+        </div>
+      </ChatItemShell>
+    );
+  }
+
+  const onEdit = bodyText ? () => setEditing(true) : undefined;
+
   if (storeCtx && timestamp != null) {
     return (
       <ExcludableUserMessage
@@ -132,10 +168,11 @@ function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
         images={images}
         timestamp={timestamp}
         store={storeCtx.store}
+        onEdit={onEdit}
       />
     );
   }
-  return renderUserMessage({ text, images, timestamp }, false);
+  return renderUserMessage({ text, images, timestamp }, false, onEdit);
 }
 
 export const UserMessage = memo(UserMessageInner);

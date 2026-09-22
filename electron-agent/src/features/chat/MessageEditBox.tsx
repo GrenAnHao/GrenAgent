@@ -1,0 +1,304 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@lobehub/ui';
+import { Editor, useEditor } from '@lobehub/editor/react';
+import type { ISlashOption } from '@lobehub/editor';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import {
+  ChatInputProvider,
+  type ChatInputContextValue,
+  type ImageAttachment,
+  type PromptImage,
+} from './input/ChatInputContext';
+import { composeMessage } from './input/editor/composeMessage';
+import type { PastedText } from './input/editor/types';
+import { InputChips } from './input/editor/InputChips';
+import { createBoxMenu } from './input/editor/SlashBoxMenu';
+import ReactChatTagPlugin from './input/editor/ChatTag/ReactChatTagPlugin';
+import { useCommandPaste } from './input/editor/useCommandPaste';
+import { useUrlPaste } from './input/editor/useUrlPaste';
+import { usePasteCapture } from './input/editor/usePasteCapture';
+import { useFileMention } from './input/editor/useFileMention';
+import { useSlashOptions } from './input/editor/useSlashOptions';
+import { useTauriFileDrop } from './input/editor/useTauriFileDrop';
+import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
+
+const PLACEHOLDER = '编辑消息，@ 引用文件/目录，/ 调用技能…';
+
+const styles = createStaticStyles(({ css }) => ({
+  zone: css`
+    position: relative;
+    width: 100%;
+  `,
+  surface: css`
+    container-type: inline-size;
+
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusLG};
+
+    background: ${cssVar.colorBgElevated};
+    box-shadow: ${cssVar.boxShadowSecondary};
+
+    transition: border-color 0.15s ease;
+
+    &:focus-within {
+      border-color: ${cssVar.colorBorder};
+    }
+  `,
+  body: css`
+    scrollbar-width: thin;
+
+    overflow-y: auto;
+
+    min-height: clamp(72px, 12cqw, 108px);
+    max-height: 300px;
+
+    cursor: text;
+  `,
+  editor: css`
+    font: var(--pi-md-base);
+
+    p {
+      margin-block: 0;
+    }
+
+    .editor_mention {
+      padding: 1px 6px;
+      border: none;
+      border-radius: ${cssVar.borderRadius};
+
+      color: ${cssVar.colorPrimary};
+
+      background: ${cssVar.colorPrimaryBg};
+    }
+  `,
+  dropHint: css`
+    position: absolute;
+    inset: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border: 1px dashed ${cssVar.colorPrimary};
+    border-radius: ${cssVar.borderRadiusLG};
+
+    font-size: 13px;
+    color: ${cssVar.colorPrimary};
+
+    background: ${cssVar.colorPrimaryBg};
+
+    pointer-events: none;
+  `,
+  actions: css`
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+  `,
+}));
+
+export interface MessageEditBoxProps {
+  initialText: string;
+  onCancel: () => void;
+  onSend: (text: string, images?: PromptImage[]) => void;
+}
+
+type SlashSearch = {
+  leadOffset: number;
+  matchingString: string;
+  replaceableString: string;
+} | null;
+
+/** 编辑专用简化输入框：复用底部编辑器 / 图片块 / 拖放 / @，/ 只保留技能，工具栏仅取消与发送。 */
+export function MessageEditBox({ initialText, onCancel, onSend }: MessageEditBoxProps) {
+  const { workspace } = useAgentStoreContext();
+  const editor = useEditor();
+  const [empty, setEmpty] = useState(!initialText.trim());
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
+  const zoneRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const primedRef = useRef(false);
+
+  useEffect(() => {
+    if (primedRef.current) return;
+    primedRef.current = true;
+    if (initialText) editor.setDocument('markdown', initialText);
+    else editor.cleanDocument();
+    setEmpty(!initialText.trim());
+    requestAnimationFrame(() => editor.focus());
+  }, [editor, initialText]);
+
+  const readDraft = useCallback(
+    () => unescapeComposerMarkdown(String(editor.getDocument('markdown') || '')),
+    [editor],
+  );
+
+  const send = useCallback(() => {
+    const text = composeMessage(readDraft(), pastedTexts);
+    const images: PromptImage[] = attachments.map(({ type, mimeType, data }) => ({
+      type,
+      mimeType,
+      data,
+    }));
+    if (!text && images.length === 0) return;
+    onSend(text, images.length ? images : undefined);
+  }, [attachments, onSend, pastedTexts, readDraft]);
+
+  const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
+  const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
+  const { slashItems: loadSlashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>
+    editor.cleanDocument(),
+  );
+  // 编辑框 / 只弹出技能：过滤掉快捷操作、工具、提示词、系统命令等。
+  const slashItems = useCallback(
+    async (search: SlashSearch): Promise<ISlashOption[]> => {
+      const items = await loadSlashItems(search);
+      return items.filter((item) => {
+        if ('type' in item && item.type === 'divider') {
+          return 'label' in item && (item as { label?: string }).label === '技能';
+        }
+        const meta = (item as { metadata?: { group?: string } }).metadata;
+        return meta?.group === 'skill';
+      });
+    },
+    [loadSlashItems],
+  );
+  const { tryCommandPaste } = useCommandPaste(workspace, editor);
+  const { tryUrlPaste } = useUrlPaste(editor);
+
+  const addAttachments = useCallback((items: ImageAttachment[]) => {
+    setAttachments((prev) => [...prev, ...items]);
+  }, []);
+  const addPastedText = useCallback((text: PastedText) => {
+    setPastedTexts((prev) => [...prev, text]);
+  }, []);
+
+  usePasteCapture({
+    targetRef: zoneRef,
+    onImages: addAttachments,
+    onPastedText: addPastedText,
+    onUrlText: tryUrlPaste,
+    onCommandText: tryCommandPaste,
+  });
+  const { dragOver, dragKind } = useTauriFileDrop({
+    editor,
+    workspace,
+    zoneRef,
+    onImages: addAttachments,
+    onPastedText: addPastedText,
+  });
+
+  const ctx: ChatInputContextValue = useMemo(
+    () => ({
+      editor,
+      empty,
+      setEmpty,
+      setValue: (text: string) => {
+        if (text) editor.setDocument('markdown', text);
+        else editor.cleanDocument();
+        setEmpty(!text);
+      },
+      readDraft,
+      attachments,
+      addAttachments,
+      removeAttachment: (index) => setAttachments((prev) => prev.filter((_, i) => i !== index)),
+      pastedTexts,
+      addPastedText,
+      removePastedText: (id) => setPastedTexts((prev) => prev.filter((p) => p.id !== id)),
+      isStreaming: false,
+      isGenerating: false,
+      hasRunningTool: false,
+      steering: [],
+      followUp: [],
+      steerQueued: () => undefined,
+      hasComposerQueue: false,
+      inFlight: false,
+      send,
+      stop: () => undefined,
+    }),
+    [addAttachments, addPastedText, attachments, editor, empty, pastedTexts, readDraft, send],
+  );
+
+  const hasChips = attachments.length > 0 || pastedTexts.length > 0;
+  const canSend = !empty || attachments.length > 0 || pastedTexts.length > 0;
+
+  return (
+    <ChatInputProvider value={ctx}>
+      <div ref={zoneRef} className={styles.zone} data-testid="message-edit-box">
+        <div ref={surfaceRef} className={styles.surface}>
+          {hasChips ? <InputChips /> : null}
+          <div
+            className={styles.body}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) editor.focus();
+            }}
+          >
+            <Editor
+              autoFocus
+              editor={editor}
+              content={initialText}
+              type="text"
+              variant="chat"
+              className={cx(styles.editor)}
+              pasteAsPlainText
+              enablePasteMarkdown={false}
+              markdownOption={false}
+              slashPlacement="top"
+              placeholder={PLACEHOLDER}
+              plugins={[ReactChatTagPlugin]}
+              mentionOption={{
+                items: mentionItems,
+                onSelect: mentionOnSelect,
+                maxLength: 80,
+                renderComp: boxMenu,
+              }}
+              slashOption={{
+                items: slashItems,
+                onSelect: slashOnSelect,
+                maxLength: 32,
+                renderComp: boxMenu,
+              }}
+              onChange={() => setEmpty(editor.isEmpty)}
+              onPressEnter={({ event }) => {
+                if (event.shiftKey || event.isComposing) return;
+                event.preventDefault();
+                void send();
+                return true;
+              }}
+            />
+          </div>
+          <div className={styles.actions}>
+            <Button aria-label="取消" onClick={onCancel}>
+              取消
+            </Button>
+            <Button
+              type="primary"
+              aria-label="发送"
+              disabled={!canSend}
+              onClick={() => void send()}
+            >
+              发送
+            </Button>
+          </div>
+        </div>
+        {dragOver ? (
+          <div className={styles.dropHint}>
+            {dragKind === 'text'
+              ? '拖放以插入文本'
+              : dragKind === 'image'
+                ? '拖放以插入图片'
+                : '拖放文件以引用'}
+          </div>
+        ) : null}
+      </div>
+    </ChatInputProvider>
+  );
+}

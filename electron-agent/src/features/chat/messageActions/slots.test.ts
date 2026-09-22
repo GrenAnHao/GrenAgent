@@ -47,9 +47,21 @@ describe('buildActionItem', () => {
     expect(error).toHaveBeenCalledWith('复制失败');
   });
 
-  it('edit / regenerate / del 为 disabled 占位且无 onClick', () => {
-    const labels = { edit: '编辑', regenerate: '重新生成', del: '删除' } as const;
-    for (const slot of ['edit', 'regenerate', 'del'] as const) {
+  it('edit 无 onEdit 时禁用；有 onEdit 时可点击', () => {
+    const disabled = buildActionItem('edit', ctx, { success: vi.fn(), error: vi.fn() });
+    expect(disabled.disabled).toBe(true);
+    expect(disabled.onClick).toBeUndefined();
+
+    const onEdit = vi.fn();
+    const enabled = buildActionItem('edit', { ...ctx, onEdit }, { success: vi.fn(), error: vi.fn() });
+    expect(enabled.disabled).toBe(false);
+    enabled.onClick!();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('regenerate / del 为 disabled 占位且无 onClick', () => {
+    const labels = { regenerate: '重新生成', del: '删除' } as const;
+    for (const slot of ['regenerate', 'del'] as const) {
       const item = buildActionItem(slot, ctx, { success: vi.fn(), error: vi.fn() });
       expect(item.disabled).toBe(true);
       expect(item.onClick).toBeUndefined();
