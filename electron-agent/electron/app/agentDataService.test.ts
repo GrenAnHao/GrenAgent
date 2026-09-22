@@ -29,19 +29,6 @@ describe('AgentDataService', () => {
     } finally { release('# complete'); await work.catch(() => {}); await service.stop(); rmSync(directory, { recursive: true, force: true }); }
   });
 
-  it('records old-sync skips through a fixed in-process audit entry', async () => {
-    const service = new AgentDataService({ dataPath: ':memory:', jobRunners: { 'wiki.sync': { run: async () => {}, cancel: () => {} } } });
-    await service.start();
-    try {
-      const job = await service.request<{ id: string }>('admin.jobs.create', { kind: 'wiki.sync', workspace: 'D:/legacy' });
-      expect(service).toHaveProperty('recordWikiSyncSkip', expect.any(Function));
-      service.recordWikiSyncSkip({ jobId: job.id, workspace: 'D:/legacy', page: 'guide.md', reason: 'locked' });
-      const audit = await service.request<Array<{ action: string; detail: Record<string, unknown> }>>('admin.audit.list');
-      expect(audit.find((event) => event.action === 'wiki.sync.skip')?.detail).toMatchObject({ jobId: job.id, page: 'guide.md', reason: 'locked', resource: { type: 'wiki', id: expect.any(String) }, resourceName: expect.any(String) });
-      expect(() => service.recordWikiSyncSkip({ jobId: job.id, workspace: 'D:/other', page: 'guide.md', reason: 'locked' })).toThrow('FORBIDDEN');
-    } finally { await service.stop(); }
-  });
-
   it('does not finish stopping until an existing Wiki executor has actually settled', async () => {
     let release!: (value: string) => void;
     const execute = vi.fn(() => new Promise<string>((resolve) => { release = resolve; }));
@@ -67,9 +54,9 @@ describe('AgentDataService', () => {
       const next = service.agentEndpoint('D:/a');
       expect(next.token === previous.token).toBe(false);
       oldClient = new AgentDataClient({ ...next, token: previous.token }); nextClient = new AgentDataClient(next);
-      await expect(oldClient.request('wiki.libraries.list')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-      await expect(nextClient.request('wiki.libraries.list')).resolves.toEqual([]);
-      await expect(service.requestAdmin('wiki.libraries.create', { name: '无关联', description: '', bindings: [] })).resolves.toMatchObject({ name: '无关联' });
+      await expect(oldClient.request('wiki.list')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      await expect(nextClient.request('wiki.list')).resolves.toEqual([]);
+      await expect(service.requestAdmin('wiki.create', { name: '无关联' })).resolves.toMatchObject({ name: '无关联' });
     } finally { await oldClient?.close(); await nextClient?.close(); await service.stop(); }
   });
 

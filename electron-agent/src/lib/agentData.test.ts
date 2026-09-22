@@ -47,21 +47,22 @@ describe('agentDataApi', () => {
     } finally { spy.mockRestore(); }
   });
 
-  it('keeps Wiki versions, source kind and stable deletion targets in explicit commands', async () => {
-    const spy = vi.spyOn(runtime, 'invoke').mockResolvedValue({});
+  it('routes Wiki list create and overview through fixed commands', async () => {
+    const spy = vi.spyOn(runtime, 'invoke').mockImplementation(async (command) => {
+      if (command === 'agentData_wiki_list') return [];
+      return {};
+    });
     try {
-      expect(agentDataApi.wiki).toHaveProperty('pages');
-      const expected = { revision: 2, contentHash: 'hash' };
-      await agentDataApi.wiki.pages.update('k', 'p', { title: 'x', content: '', sourceRefs: [], expected });
-      await agentDataApi.wiki.sources.create('k', { kind: 'upload', name: 'x.md', content: '' });
-      await agentDataApi.wiki.libraries.remove('k', false);
-      expect(spy).toHaveBeenNthCalledWith(1, 'agentData_wiki_pages_update', { kbId: 'k', pageId: 'p', title: 'x', content: '', sourceRefs: [], expected });
-      expect(spy).toHaveBeenNthCalledWith(2, 'agentData_wiki_sources_create', { kbId: 'k', kind: 'upload', name: 'x.md', content: '' });
-      expect(spy).toHaveBeenNthCalledWith(3, 'agentData_wiki_libraries_remove', { kbId: 'k', cancelActive: false });
-      await agentDataApi.wiki.sources.read('k', 's', 1);
-      expect(spy).toHaveBeenLastCalledWith('agentData_wiki_sources_read', { kbId: 'k', sourceId: 's', revision: 1 });
-      spy.mockRejectedValueOnce(new Error('VERSION_CONFLICT: Wiki page changed'));
-      await expect(agentDataApi.wiki.pages.setLocked('k', 'p', false, expected)).rejects.toThrow('VERSION_CONFLICT');
+      expect(agentDataApi.wiki).toHaveProperty('list', expect.any(Function));
+      expect(agentDataApi.wiki).not.toHaveProperty('libraries');
+      expect(agentDataApi.wiki).not.toHaveProperty('pages');
+      expect(agentDataApi.wiki).not.toHaveProperty('sources');
+      await agentDataApi.wiki.list();
+      await agentDataApi.wiki.create({ name: '手册' });
+      await agentDataApi.wiki.overview();
+      expect(spy).toHaveBeenNthCalledWith(1, 'agentData_wiki_list');
+      expect(spy).toHaveBeenNthCalledWith(2, 'agentData_wiki_create', { name: '手册' });
+      expect(spy).toHaveBeenNthCalledWith(3, 'agentData_wiki_list');
     } finally { spy.mockRestore(); }
   });
 
@@ -79,13 +80,16 @@ describe('agentDataApi', () => {
   it('uses typed IPC commands', async () => { const spy = vi.spyOn(runtime, 'invoke').mockResolvedValue({ state: 'ready', version: 1 }); await agentDataApi.status(); expect(spy).toHaveBeenCalledWith('agentData_status'); spy.mockRestore(); });
 
   it('exposes typed module queries and job creation', async () => {
-    const spy = vi.spyOn(runtime, 'invoke').mockResolvedValue({});
+    const spy = vi.spyOn(runtime, 'invoke').mockImplementation(async (command) => {
+      if (command === 'agentData_wiki_list') return [];
+      return {};
+    });
     await agentDataApi.memory.overview({ userId: 'u', workspace: '/w' });
-    await agentDataApi.wiki.overview('/w');
+    await agentDataApi.wiki.overview();
     await agentDataApi.code.status('/w');
     await agentDataApi.jobs.create({ kind: 'wiki.sync', workspace: '/w' });
     expect(spy).toHaveBeenNthCalledWith(1, 'agentData_memory_overview', { userId: 'u', workspace: '/w' });
-    expect(spy).toHaveBeenNthCalledWith(2, 'agentData_wiki_overview', { workspace: '/w' });
+    expect(spy).toHaveBeenNthCalledWith(2, 'agentData_wiki_list');
     expect(spy).toHaveBeenNthCalledWith(3, 'agentData_code_status', { workspace: '/w' });
     expect(spy).toHaveBeenNthCalledWith(4, 'agentData_jobs_create', { kind: 'wiki.sync', workspace: '/w' });
     await agentDataApi.memory.overview({ userId: 'u', includeOtherProjects: true });
