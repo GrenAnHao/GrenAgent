@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -34,6 +34,39 @@ describe('wiki page write', () => {
     expect(() => service.writePage(wiki.wikiId, 'index.md', 'x')).toThrow(/forbidden_path/);
     expect(() => service.writePage(wiki.wikiId, 'purpose', 'x')).toThrow(/forbidden_path/);
     expect(() => service.removePage(wiki.wikiId, 'wiki/index')).toThrow(/forbidden_path/);
+  });
+
+  it('rejects ./purpose after resolve and leaves purpose.md unchanged', () => {
+    const { service } = makeService();
+    const wiki = service.create({ name: '点路径拒绝' });
+    const before = readFileSync(join(wiki.dir, 'wiki/purpose.md'), 'utf8');
+    expect(() => service.writePage(wiki.wikiId, './purpose', 'hacked')).toThrow(/forbidden_path/);
+    expect(() => service.writePage(wiki.wikiId, './purpose.md', 'hacked')).toThrow(/forbidden_path/);
+    expect(() => service.writePage(wiki.wikiId, 'wiki/./purpose', 'hacked')).toThrow(/forbidden_path/);
+    expect(() => service.writePage(wiki.wikiId, '.\\purpose', 'hacked')).toThrow(/forbidden_path/);
+    expect(() => service.removePage(wiki.wikiId, './purpose')).toThrow(/forbidden_path/);
+    expect(readFileSync(join(wiki.dir, 'wiki/purpose.md'), 'utf8')).toBe(before);
+    expect(readFileSync(join(wiki.dir, 'wiki/index.md'), 'utf8')).toContain('type: index');
+    expect(readFileSync(join(wiki.dir, 'wiki/schema.md'), 'utf8')).toContain('type: schema');
+  });
+
+  it('allows concepts/purpose without treating it as structural', () => {
+    const { service } = makeService();
+    const wiki = service.create({ name: '非根 purpose' });
+    const written = service.writePage(wiki.wikiId, 'concepts/purpose', '# 概念 purpose');
+    expect(written.lockedInjected).toBe(true);
+    expect(service.readPage(wiki.wikiId, 'concepts/purpose')).toContain('# 概念 purpose');
+  });
+
+  it('injects locked into empty frontmatter without duplicating body', () => {
+    const { service } = makeService();
+    const wiki = service.create({ name: '空 frontmatter' });
+    const written = service.writePage(wiki.wikiId, 'concepts/empty-fm', '---\n\n---\n# 正文');
+    expect(written.lockedInjected).toBe(true);
+    const text = service.readPage(wiki.wikiId, 'concepts/empty-fm');
+    expect(text).toMatch(/^---\nlocked: true\n---\n/);
+    expect(text).toContain('# 正文');
+    expect(text.split('# 正文').length - 1).toBe(1);
   });
 
   it('allows writing log and reads back locked true', () => {

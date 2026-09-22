@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { evictWikiDb, initIndexDb, writeIndex, withWriteDb, type WikiIndexPage } from './indexDb';
 
@@ -107,14 +107,8 @@ const RAW_ALLOWED_EXT = new Set(['.md', '.txt']);
 const PAGE_WRITE_MAX_BYTES = 512 * 1024;
 const PAGE_BATCH_MAX = 20;
 
-const PAGE_FORBIDDEN_REFS = new Set([
-  'index',
-  'schema',
-  'purpose',
-  'wiki/index',
-  'wiki/schema',
-  'wiki/purpose',
-]);
+/** Wiki-root structural pages only (resolved relative path, lowercased, forward slashes). */
+const PAGE_FORBIDDEN_REL = new Set(['index.md', 'schema.md', 'purpose.md']);
 
 function injectLockedTrue(content: string): { content: string; lockedInjected: boolean } {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?/);
@@ -123,25 +117,31 @@ function injectLockedTrue(content: string): { content: string; lockedInjected: b
     return { content: wrapped, lockedInjected: true };
   }
   const fmBody = fmMatch[1];
+  const rest = content.slice(fmMatch[0].length);
   const lockedMatch = fmBody.match(/^locked:\s*(true|false)\s*$/m);
   if (lockedMatch) {
     if (lockedMatch[1] === 'true') return { content, lockedInjected: false };
     const newFmBody = fmBody.replace(/^locked:\s*(true|false)\s*$/m, 'locked: true');
     return {
-      content: content.replace(fmBody, newFmBody),
+      content: `---\n${newFmBody}\n---\n${rest}`,
       lockedInjected: true,
     };
   }
-  const newFmBody = fmBody.endsWith('\n') ? `${fmBody}locked: true` : `${fmBody}\nlocked: true`;
+  const newFmBody =
+    fmBody.length === 0 || fmBody.endsWith('\n')
+      ? `${fmBody}locked: true`
+      : `${fmBody}\nlocked: true`;
   return {
-    content: content.replace(fmBody, newFmBody),
+    content: `---\n${newFmBody}\n---\n${rest}`,
     lockedInjected: true,
   };
 }
 
-function isForbiddenPageRef(ref: string): boolean {
-  const cleanRef = ref.replace(/^wiki\//, '').replace(/\.md$/, '');
-  return PAGE_FORBIDDEN_REFS.has(cleanRef) || PAGE_FORBIDDEN_REFS.has(`wiki/${cleanRef}`);
+function isForbiddenResolvedPage(wikiDir: string, safePath: string): boolean {
+  const rel = relative(resolve(wikiDir), resolve(safePath))
+    .replace(/\\/g, '/')
+    .toLowerCase();
+  return PAGE_FORBIDDEN_REL.has(rel);
 }
 
 function extractFrontmatterFields(content: string): { title: string; type: string } {
@@ -573,10 +573,11 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     this.assertWritable(asset);
 
     if (Buffer.byteLength(content, 'utf8') > PAGE_WRITE_MAX_BYTES) throw new Error('too_large');
-    if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
 
     const wikiDir = join(asset.dir, 'wiki');
     const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: true });
+    if (isForbiddenResolvedPage(wikiDir, safe)) throw new Error('forbidden_path');
+
     const { content: finalContent, lockedInjected } = injectLockedTrue(content);
 
     mkdirSync(join(safe, '..'), { recursive: true });
@@ -606,9 +607,9 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     const plans: Plan[] = [];
     for (const { ref, content } of pages) {
       if (typeof content !== 'string') throw new Error('invalid_path');
-      if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
       if (Buffer.byteLength(content, 'utf8') > PAGE_WRITE_MAX_BYTES) throw new Error('too_large');
       const safePath = this.resolvePagePath(wikiDir, ref, { allowMissing: true });
+      if (isForbiddenResolvedPage(wikiDir, safePath)) throw new Error('forbidden_path');
       const { content: finalContent, lockedInjected } = injectLockedTrue(content);
       plans.push({
         ref,
@@ -667,10 +668,10 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
   removePage(wikiId: string, ref: string): void {
     const asset = this.requireAsset(wikiId);
     this.assertWritable(asset);
-    if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
 
     const wikiDir = join(asset.dir, 'wiki');
     const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
+    if (isForbiddenResolvedPage(wikiDir, safe)) throw new Error('forbidden_path');
     unlinkSync(safe);
     this.rebuildPageIndex(asset);
   }
@@ -685,8 +686,9 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     const wikiDir = join(asset.dir, 'wiki');
     const paths: string[] = [];
     for (const ref of refs) {
-      if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
-      paths.push(this.resolvePagePath(wikiDir, ref, { allowMissing: false }));
+      const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
+      if (isForbiddenResolvedPage(wikiDir, safe)) throw new Error('forbidden_path');
+      paths.push(safe);
     }
     for (const safe of paths) {
       if (existsSync(safe)) unlinkSync(safe);
