@@ -57,7 +57,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     const [statusResult, memoryResult, wikiResult, aggregateResult] = await Promise.allSettled([
       agentDataApi.status(),
       userId ? agentDataApi.memory.overview({ userId, includeOtherProjects: true }) : Promise.resolve(undefined),
-      agentDataApi.wiki.overview(undefined),
+      agentDataApi.wiki.overview(),
       agentDataApi.overview({ userId: userId ?? 'local' }),
     ]);
     if (epoch !== requestEpoch.current) return;

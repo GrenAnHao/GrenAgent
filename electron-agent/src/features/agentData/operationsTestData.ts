@@ -18,7 +18,7 @@ export const auditEvent: AuditView = {
   detail: { apiKey: 'secret-value', nested: { authorization: 'Bearer abc', token: 'token-value' }, message: 'Authorization: Bearer secret-bearer', resourceId: 'kb-a' },
 };
 export const report: DiagnosticReport = { checkedAt: 2000, items: [
-  { id: 'wiki:kb-a:manifest', resource: task.resource, state: 'action_required', checkedAt: 2000, message: '页面清单需要重建', action: 'reindex_wiki' },
+  { id: 'wiki:kb-a:manifest', resource: task.resource, state: 'action_required', checkedAt: 2000, message: '知识库状态需要人工确认' },
   { id: 'codegraph:cli', state: 'unchecked', checkedAt: 2000, message: 'CodeGraph CLI 尚未配置', action: 'configure_codegraph' },
 ] };
 export function deferred<T>() {

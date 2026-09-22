@@ -396,6 +396,10 @@ export class AgentDataRuntime {
     if (name === 'wiki.rawRemove') return (p) => { wiki.removeRaw(wikiId(p), readString(p.filename)); return null; };
     if (name === 'wiki.rawList') return (p) => wiki.listRaw(wikiId(p));
     if (name === 'wiki.rawRead') return (p) => wiki.readRaw(wikiId(p), readString(p.filename));
+    if (name === 'wiki.writeTemplate') return (p) => {
+      wiki.writeTemplate(wikiId(p), readString(p.name), readWikiText(p.content));
+      return null;
+    };
     if (name === 'wiki.pageWrite') return (p) => wiki.writePage(wikiId(p), readString(p.ref), readWikiText(p.content));
     if (name === 'wiki.pageRemove') return (p) => { wiki.removePage(wikiId(p), readString(p.ref)); return null; };
     if (name === 'wiki.pageList') return (p) => wiki.listPages(wikiId(p));

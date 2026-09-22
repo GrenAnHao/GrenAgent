@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentDataCenter } from './AgentDataCenter';
-import { library, source } from './wiki/wikiTestData';
+import { wikiAsset, rawSource } from './wiki/wikiTestData';
 import { mockWikiBrowser, renderWiki as render } from './wiki/wikiTestSupport';
 vi.mock('../chat/LazyMarkdown', () => ({ LazyMarkdown: ({ children }: { children: string }) => <pre>{children}</pre> }));
 
@@ -15,7 +15,12 @@ vi.mock('../../lib/agentData', () => ({
     audits: { query: vi.fn(), export: vi.fn() }, checks: { check: vi.fn(), open: vi.fn() },
     jobs: { list: vi.fn(), get: vi.fn(), create: vi.fn(), cancel: vi.fn(), remove: vi.fn(), clear: vi.fn() },
     memory: { overview: vi.fn(), search: vi.fn(), delete: vi.fn(), list: vi.fn(), read: vi.fn(), create: vi.fn(), update: vi.fn(), conversations: { list: vi.fn(), read: vi.fn() } },
-    wiki: { overview: vi.fn(), search: vi.fn(), libraries: { list: vi.fn(), read: vi.fn(), previewIngest: vi.fn(), ingest: vi.fn() }, sources: { list: vi.fn() }, pages: { list: vi.fn() } },
+    wiki: {
+      overview: vi.fn(), list: vi.fn(), read: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(),
+      resetDraft: vi.fn(), ingest: vi.fn(), rawWrite: vi.fn(), rawRemove: vi.fn(), rawList: vi.fn(), rawRead: vi.fn(),
+      writeTemplate: vi.fn(), pageWrite: vi.fn(), pageRemove: vi.fn(), pageList: vi.fn(), pageRead: vi.fn(),
+      search: vi.fn(), graph: vi.fn(),
+    },
     code: { projects: vi.fn(), status: vi.fn(), search: vi.fn(), call: vi.fn() },
   },
 }));
@@ -48,11 +53,12 @@ describe('AgentDataCenter', () => {
     vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [] });
     vi.mocked(agentDataApi.memory.conversations.list).mockResolvedValue({ items: [] });
     vi.mocked(agentDataApi.wiki.overview).mockResolvedValue({ pages: 12, latestUpdatedAt: 100 });
-    vi.mocked(agentDataApi.wiki.search).mockResolvedValue([]);
-    vi.mocked(agentDataApi.wiki.libraries.list).mockResolvedValue([library]);
-    vi.mocked(agentDataApi.wiki.libraries.read).mockResolvedValue(library);
-    vi.mocked(agentDataApi.wiki.sources.list).mockResolvedValue([source]);
-    vi.mocked(agentDataApi.wiki.pages.list).mockResolvedValue([]);
+    vi.mocked(agentDataApi.wiki.list).mockResolvedValue([wikiAsset]);
+    vi.mocked(agentDataApi.wiki.read).mockResolvedValue(wikiAsset);
+    vi.mocked(agentDataApi.wiki.rawList).mockResolvedValue([rawSource]);
+    vi.mocked(agentDataApi.wiki.pageList).mockResolvedValue([]);
+    vi.mocked(agentDataApi.wiki.graph).mockResolvedValue([]);
+    vi.mocked(agentDataApi.wiki.ingest).mockResolvedValue({ kind: 'ok' });
     vi.mocked(agentDataApi.code.projects).mockResolvedValue([]);
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/proj/alpha', indexed: false, connected: false });
     vi.mocked(agentDataApi.code.call).mockResolvedValue({ content: [{ type: 'text', text: '[]' }] });
@@ -62,8 +68,7 @@ describe('AgentDataCenter', () => {
     render(<AgentDataCenter userId="u" />);
     expect(await screen.findByText('248')).toBeTruthy();
     expect(agentDataApi.memory.overview).toHaveBeenCalledWith({ userId: 'u', includeOtherProjects: true });
-    expect(agentDataApi.wiki.overview).toHaveBeenCalledWith(undefined);
-    // Code 概览不预取：它需要用户先选项目。
+    expect(agentDataApi.wiki.overview).toHaveBeenCalled();
     expect(agentDataApi.code.status).not.toHaveBeenCalled();
   });
 
@@ -150,26 +155,16 @@ describe('AgentDataCenter', () => {
     expect(screen.queryByText('123')).toBeNull();
   });
 
-  it('creates a Wiki task without navigating away and opens the requested task only on click', async () => {
-    const job = { id: 'wiki-job', kind: 'wiki.sync', workspace: 'D:/proj/alpha', state: 'pending' as const, progress: 0, createdAt: 1, updatedAt: 1 };
-    vi.mocked(agentDataApi.wiki.libraries.previewIngest).mockResolvedValue({ sourceIds: ['s'], targetCount: 1, model: 'fixture-model' });
-    vi.mocked(agentDataApi.wiki.libraries.ingest).mockResolvedValue({ jobId: job.id, targetCount: 1, model: 'fixture-model' });
-    vi.mocked(agentDataApi.jobs.get).mockResolvedValue(job);
+  it('starts wiki ingest from the workbench without creating a legacy job task', async () => {
     render(<AgentDataCenter userId="u" initialProject="D:/proj/alpha" />);
     await screen.findByText('248');
     fireEvent.click(screen.getByRole('tab', { name: 'Wiki' }));
-    vi.mocked(agentDataApi.jobs.list).mockResolvedValue([job]);
     fireEvent.click(await screen.findByRole('button', { name: '打开知识库 产品' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始抽取' }).hasAttribute('disabled')).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: '开始抽取' }));
-    fireEvent.click(await screen.findByRole('button', { name: '确认抽取 1 份资料' }));
-    const show = await screen.findByRole('button', { name: '查看任务' });
+    await waitFor(() => expect(agentDataApi.wiki.ingest).toHaveBeenCalledWith('k'));
+    expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
     expect(screen.getByRole('tab', { name: 'Wiki' }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.click(show);
-    const panel = screen.getByRole('tabpanel', { name: '任务' });
-    // 用 data-row-key 直接定位：按 role+name 查询会对整行做可访问名计算，
-    // 在 jsdom + antd 大样式表下单次耗时可达 20s 以上。
-    await waitFor(() => expect(panel.querySelector('tr[data-row-key="user:wiki-job"]')?.getAttribute('aria-selected')).toBe('true'), { timeout: 10000 });
   });
 
   it('supports keyboard tab navigation without mounting unseen panels', async () => {
@@ -178,9 +173,7 @@ describe('AgentDataCenter', () => {
     expect(screen.queryByTestId('wiki-panel')).toBeNull();
     const overview = screen.getByRole('tab', { name: '概览' });
     overview.focus();
-    // antd Tabs 键盘语义：方向键移动焦点，Enter 选中；rc-tabs 读 event.code。
     fireEvent.keyDown(overview, { key: 'ArrowRight', code: 'ArrowRight' });
-    // 焦点落到的 tab 内会出现隐藏的 aria-live 定位文本（"Tab 2 of 6"），name 需用部分匹配。
     const memory = screen.getByRole('tab', { name: /Memory/ });
     expect(document.activeElement).toBe(memory);
     fireEvent.keyDown(memory, { key: 'Enter', code: 'Enter' });

@@ -882,6 +882,20 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     evictWikiDb(asset.wikiId);
   }
 
+  /**
+   * Overwrite wiki/purpose.md or wiki/schema.md only. No locked injection; not writePage.
+   */
+  writeTemplate(wikiId: string, name: string, content: string): void {
+    if (name !== 'purpose' && name !== 'schema') throw new Error('forbidden_path');
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+    if (typeof content !== 'string') throw new Error('invalid_path');
+    if (Buffer.byteLength(content, 'utf8') > PAGE_WRITE_MAX_BYTES) throw new Error('too_large');
+    const target = join(asset.dir, 'wiki', `${name}.md`);
+    writeFileSync(target, content, 'utf8');
+    this.rebuildPageIndex(asset);
+  }
+
   writePage(wikiId: string, ref: string, content: string): { lockedInjected: boolean } {
     const asset = this.requireAsset(wikiId);
     this.assertWritable(asset);

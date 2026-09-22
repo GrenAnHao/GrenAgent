@@ -4,9 +4,11 @@ import type { TaskRef, TaskView, TaskPage, TaskListInput, TaskDetail, TaskRetryP
 export type { TaskRef, TaskView, TaskStatus, TaskPage, TaskListInput, TaskDetail, TaskRetryPreview, TaskRetryOptions, ResourceRef, ResourceNavigation, AuditQuery, AuditView, AuditPage, AuditExport, DiagnosticItem, DiagnosticReport, WorkbenchOverview } from '../../electron/agentData/operationsContracts';
 import type { MemoryRecord, ManagedMemoryRecord, MemoryListInput, MemoryPage, MemoryReadInput, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail } from '../../electron/ipc/contracts';
 export type { MemoryRecord, ManagedMemoryRecord, MemoryOwner, MemoryFilter, MemoryLevel, MemoryOrigin, MemoryListInput, MemoryPage, MemoryReadInput, MemoryDraft, MemoryCreateInput, MemoryUpdateInput, MemoryConversation, MemoryConversationDetail, MemoryItem } from '../../electron/ipc/contracts';
-import type { WikiAssetDetail, WikiRawSource } from '../../electron/agentData/wikiEngine/service';
+import type { IngestResult, WikiAssetDetail, WikiRawSource, WikiSearchHit, WikiSearchResponse } from '../../electron/agentData/wikiEngine/service';
+export type { IngestResult, WikiAssetDetail, WikiRawSource, WikiSearchHit, WikiSearchResponse };
 
 export interface AgentDataStatus { state: 'ready' | 'closed'; version: number }
+export interface WikiOverview { pages: number; latestUpdatedAt: number | null }
 export type AgentJobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export interface AgentJob { id: string; kind: string; workspace: string; state: AgentJobState; progress: number; error?: string; createdAt: number; updatedAt: number; metadata?: JobMetadata }
 export interface AgentConfig { version: number; value: Record<string, unknown> }
@@ -46,7 +48,6 @@ export type CodeRetrievalRequest={
 export interface AgentJobCreateInput { kind: string; workspace: string }
 export interface AgentAuditEvent { id: string; action: string; detail: Record<string, unknown>; createdAt: number }
 export interface AgentDiagnostics { jobs: { total: number; failed: number }; auditEvents: number }
-export type { WikiAssetDetail, WikiRawSource };
 
 export const agentDataApi = {
   tasks: {
@@ -95,17 +96,29 @@ export const agentDataApi = {
     update: (wikiId: string, patch: { name?: string; summary?: string | null }) => invoke<WikiAssetDetail>('agentData_wiki_update', { wikiId, ...patch }),
     remove: (wikiId: string) => invoke<null>('agentData_wiki_remove', { wikiId }),
     resetDraft: (wikiId: string) => invoke<null>('agentData_wiki_resetDraft', { wikiId }),
-    ingest: (wikiId: string) => invoke<unknown>('agentData_wiki_ingest', { wikiId }),
+    ingest: (wikiId: string) => invoke<IngestResult>('agentData_wiki_ingest', { wikiId }),
     rawWrite: (wikiId: string, filename: string, content: string) => invoke<null>('agentData_wiki_rawWrite', { wikiId, filename, content }),
     rawRemove: (wikiId: string, filename: string) => invoke<null>('agentData_wiki_rawRemove', { wikiId, filename }),
     rawList: (wikiId: string) => invoke<WikiRawSource[]>('agentData_wiki_rawList', { wikiId }),
     rawRead: (wikiId: string, filename: string) => invoke<string>('agentData_wiki_rawRead', { wikiId, filename }),
+    writeTemplate: (wikiId: string, name: 'purpose' | 'schema', content: string) => invoke<null>('agentData_wiki_writeTemplate', { wikiId, name, content }),
     pageWrite: (wikiId: string, ref: string, content: string) => invoke<{ lockedInjected: boolean }>('agentData_wiki_pageWrite', { wikiId, ref, content }),
     pageRemove: (wikiId: string, ref: string) => invoke<null>('agentData_wiki_pageRemove', { wikiId, ref }),
     pageList: (wikiId: string) => invoke<Array<{ id: string; title: string; type: string; relPath: string }>>('agentData_wiki_pageList', { wikiId }),
     pageRead: (wikiId: string, ref: string) => invoke<string>('agentData_wiki_pageRead', { wikiId, ref }),
-    search: (wikiId: string, query: string, options: { limit?: number; hop?: number; decay?: number; minScore?: number } = {}) => invoke<unknown>('agentData_wiki_search', { wikiId, query, ...options }),
+    search: (wikiId: string, query: string, options: { limit?: number; hop?: number; decay?: number; minScore?: number } = {}) => invoke<WikiSearchResponse>('agentData_wiki_search', { wikiId, query, ...options }),
     graph: (wikiId: string) => invoke<Array<{ source_id: string; target_id: string }>>('agentData_wiki_graph', { wikiId }),
+    overview: async (): Promise<WikiOverview> => {
+      const items = await invoke<WikiAssetDetail[]>('agentData_wiki_list');
+      let pages = 0;
+      let latestUpdatedAt: number | null = null;
+      for (const item of items) {
+        pages += item.pageCount ?? 0;
+        const stamp = Date.parse(item.updatedAt);
+        if (Number.isFinite(stamp) && (latestUpdatedAt === null || stamp > latestUpdatedAt)) latestUpdatedAt = stamp;
+      }
+      return { pages, latestUpdatedAt };
+    },
   },
   code: {
     call: (input: CodeRetrievalRequest) => invoke<unknown>('agentData_code_call', { ...input }),

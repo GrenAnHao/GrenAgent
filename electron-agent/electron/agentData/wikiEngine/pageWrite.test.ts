@@ -13,6 +13,18 @@ function makeService() {
 }
 
 describe('wiki page write', () => {
+  it('writeTemplate overwrites purpose and schema without locked and rejects other names', () => {
+    const { service } = makeService();
+    const wiki = service.create({ name: '模板' });
+    service.writeTemplate(wiki.wikiId, 'purpose', '# 自定义用途');
+    expect(readFileSync(join(wiki.dir, 'wiki/purpose.md'), 'utf8')).toBe('# 自定义用途');
+    expect(readFileSync(join(wiki.dir, 'wiki/purpose.md'), 'utf8')).not.toContain('locked:');
+    service.writeTemplate(wiki.wikiId, 'schema', '# 自定义结构');
+    expect(readFileSync(join(wiki.dir, 'wiki/schema.md'), 'utf8')).toBe('# 自定义结构');
+    expect(() => service.writeTemplate(wiki.wikiId, 'index', 'x')).toThrow(/forbidden_path/);
+    expect(() => service.writeTemplate(wiki.wikiId, 'log', 'x')).toThrow(/forbidden_path/);
+  });
+
   it('injects locked true and rejects structural pages and escapes', () => {
     const { service } = makeService();
     const wiki = service.create({ name: '产品' });

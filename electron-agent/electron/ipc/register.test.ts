@@ -68,6 +68,7 @@ describe('registerIpcHandlers', () => {
       ['remove', { wikiId }], ['resetDraft', { wikiId }], ['ingest', { wikiId }],
       ['rawWrite', { wikiId, filename: 'note.md', content: '原文' }], ['rawRemove', { wikiId, filename: 'note.md' }],
       ['rawList', { wikiId }], ['rawRead', { wikiId, filename: 'note.md' }],
+      ['writeTemplate', { wikiId, name: 'purpose', content: '# purpose' }],
       ['pageWrite', { wikiId, ref: 'concepts/auth', content: '# 权限' }], ['pageRemove', { wikiId, ref: 'concepts/auth' }],
       ['pageList', { wikiId }], ['pageRead', { wikiId, ref: 'concepts/auth' }],
       ['search', { wikiId, query: '权限', limit: 10, hop: 1 }], ['graph', { wikiId }],

@@ -517,6 +517,9 @@ function registerWikiManagement(service: AgentDataService): void {
   registerCommand('agentData_wiki_rawRead', (_event, args) => service.requestAdmin('wiki.rawRead', {
     wikiId: readString(args, 'wikiId'), filename: readString(args, 'filename'),
   }));
+  registerCommand('agentData_wiki_writeTemplate', (_event, args) => service.requestAdmin('wiki.writeTemplate', {
+    wikiId: readString(args, 'wikiId'), name: readString(args, 'name'), content: readText(args, 'content'),
+  }));
   registerCommand('agentData_wiki_pageWrite', (_event, args) => service.requestAdmin('wiki.pageWrite', {
     wikiId: readString(args, 'wikiId'), ref: readString(args, 'ref'), content: readText(args, 'content'),
   }));

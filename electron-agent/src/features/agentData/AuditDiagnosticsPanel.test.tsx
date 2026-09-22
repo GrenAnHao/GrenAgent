@@ -8,11 +8,10 @@ import { AuditDiagnosticsPanel, redact } from './AuditDiagnosticsPanel';
 import { agentDataApi } from '../../lib/agentData';
 import { auditEvent, deferred, report, task } from './operationsTestData';
 import type { AuditExport, AuditPage, DiagnosticReport } from '../../../electron/agentData/operationsContracts';
-import type { WikiReindexResult } from '../../../electron/agentData/wikiContracts';
 
 vi.mock('../../lib/agentData', () => ({ agentDataApi: {
   audits: { query: vi.fn(), export: vi.fn() }, checks: { check: vi.fn(), open: vi.fn() },
-  wiki: { libraries: { reindex: vi.fn() } }, jobs: { create: vi.fn() },
+  wiki: { list: vi.fn() }, jobs: { create: vi.fn() },
 } }));
 const clipboard = vi.fn();
 beforeEach(() => {
@@ -31,7 +30,6 @@ beforeEach(() => {
   vi.mocked(agentDataApi.audits.export).mockResolvedValue({ items: [auditEvent], limit: 500, truncated: false });
   vi.mocked(agentDataApi.checks.check).mockResolvedValue(report);
   vi.mocked(agentDataApi.checks.open).mockResolvedValue(undefined);
-  vi.mocked(agentDataApi.wiki.libraries.reindex).mockResolvedValue({ pages: 3, diagnostics: [{ code: 'invalid_page', path: 'wiki/broken.md', message: '格式有误' }] });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -80,7 +78,7 @@ describe('操作记录', () => {
     fireEvent.click(await screen.findByRole('button', { name: '加载更多记录' }));
     expect(await screen.findByText('第二页事件')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    await screen.findByText('页面清单需要重建');
+    await screen.findByText('知识库状态需要人工确认');
     fireEvent.click(screen.getByRole('tab', { name: '操作记录' }));
     expect(screen.getByText('第二页事件')).toBeInTheDocument();
     await waitFor(() => expect(agentDataApi.audits.query).toHaveBeenCalledTimes(4));
@@ -204,7 +202,7 @@ describe('运行诊断', () => {
     expect(screen.getByText('未检查')).toBeInTheDocument();
     expect(screen.getByText('需要处理')).toBeInTheDocument();
     expect(screen.getByText(/检查时间/)).toBeInTheDocument();
-    expect(agentDataApi.wiki.libraries.reindex).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '重建页面清单' })).toBeNull();
   });
   it('opens a validated diagnostic ID, never its returned path, and keeps errors local', async () => {
     const fileItem = { id: 'wiki:kb-a:file', resource: task.resource, state: 'action_required' as const, checkedAt: 2, message: '坏文件', action: 'open_file' as const, path: 'C:/unsafe/arbitrary.txt' };
@@ -215,71 +213,26 @@ describe('运行诊断', () => {
     fireEvent.click(await screen.findByRole('button', { name: '打开问题文件' }));
     expect(agentDataApi.checks.open).toHaveBeenCalledWith('wiki:kb-a:file');
     expect(await screen.findByRole('alert')).toHaveTextContent('文件已移除');
-    expect(screen.getByText('页面清单需要重建')).toBeInTheDocument();
+    expect(screen.getByText('知识库状态需要人工确认')).toBeInTheDocument();
   });
-  it('requires explicit no-model reindex confirmation and reports files without creating a job', async () => {
-    const onRefresh = vi.fn();
-    render(<AuditDiagnosticsPanel onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重建页面清单' }));
-    expect(screen.getByText(/不调用模型、不修改正文/)).toBeInTheDocument();
-    expect(agentDataApi.wiki.libraries.reindex).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '确认重建' }));
-    expect(await screen.findByText(/3 个页面/)).toBeInTheDocument();
-    expect(screen.getByText('wiki/broken.md：格式有误')).toBeInTheDocument();
-    expect(agentDataApi.wiki.libraries.reindex).toHaveBeenCalledWith('kb-a');
-    expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
-    expect(onRefresh).toHaveBeenCalledOnce();
-    await waitFor(() => expect(agentDataApi.checks.check).toHaveBeenCalledTimes(2));
-  });
-  it('redacts recognizable credentials in reindex diagnostic messages', async () => {
-    vi.mocked(agentDataApi.wiki.libraries.reindex).mockResolvedValueOnce({ pages: 1, diagnostics: [{ code: 'invalid_page', path: 'wiki/broken.md', message: 'parse failed token=reindex-credential' }] });
+  it('does not expose wiki reindex entry points', async () => {
     render(<AuditDiagnosticsPanel />);
     fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重建页面清单' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认重建' }));
-    expect(await screen.findByText('wiki/broken.md：parse failed token=[redacted]')).toBeInTheDocument();
-    expect(screen.queryByText(/reindex-credential/)).toBeNull();
-  });
-  it('keeps confirmation and reports a deleted resource failure instead of claiming success', async () => {
-    vi.mocked(agentDataApi.wiki.libraries.reindex).mockRejectedValueOnce(new Error('知识库已删除'));
-    render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重建页面清单' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认重建' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('知识库已删除');
-    expect(screen.getByRole('button', { name: '确认重建' })).toBeEnabled();
-    expect(screen.queryByText(/扫描完成/)).toBeNull();
-  });
-  it('blocks duplicate writes and Escape then isolates a hidden reindex result', async () => {
-    const pending = deferred<WikiReindexResult>();
-    vi.mocked(agentDataApi.wiki.libraries.reindex).mockReturnValueOnce(pending.promise);
-    const onRefresh = vi.fn();
-    const { rerender } = render(<AuditDiagnosticsPanel onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    fireEvent.click(await screen.findByRole('button', { name: '重建页面清单' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认重建' }));
-    expect(screen.getByRole('button', { name: '确认重建' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', keyCode: 27 });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    rerender(<AuditDiagnosticsPanel visible={false} onRefresh={onRefresh} />);
-    await act(async () => pending.resolve({ pages: 99, diagnostics: [] }));
-    rerender(<AuditDiagnosticsPanel visible onRefresh={onRefresh} />);
-    expect(screen.queryByText(/99 个页面/)).toBeNull();
-    expect(onRefresh).not.toHaveBeenCalled();
+    expect(await screen.findByText('知识库状态需要人工确认')).toBeInTheDocument();
+    expect(screen.queryByText('重建页面清单')).toBeNull();
+    expect(screen.queryByText('确认重建')).toBeNull();
   });
   it('keeps a prior partial report on refresh error and never loads the other hidden tab', async () => {
     const late = deferred<DiagnosticReport>();
     const { rerender } = render(<AuditDiagnosticsPanel />);
     fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
-    await screen.findByText('页面清单需要重建');
+    await screen.findByText('知识库状态需要人工确认');
     const auditCount = vi.mocked(agentDataApi.audits.query).mock.calls.length;
     vi.mocked(agentDataApi.checks.check).mockRejectedValueOnce(new Error('诊断刷新失败'));
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('诊断刷新失败');
     expect(screen.getByText(/上次结果，可能已过期/)).toBeInTheDocument();
-    expect(screen.getByText('页面清单需要重建')).toBeInTheDocument();
+    expect(screen.getByText('知识库状态需要人工确认')).toBeInTheDocument();
     expect(agentDataApi.audits.query).toHaveBeenCalledTimes(auditCount);
     vi.mocked(agentDataApi.checks.check).mockReturnValueOnce(late.promise);
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));

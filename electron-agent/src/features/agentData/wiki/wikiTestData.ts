@@ -1,24 +1,48 @@
-import type { WikiDeletePreview, WikiLibraryView, WikiPage, WikiSource } from '../../../../electron/agentData/wikiContracts';
+import type { WikiAssetDetail, WikiRawSource, WikiSearchResponse } from '../../../lib/agentData';
 
-export const library: WikiLibraryView = {
-  kbId: 'k', storageKey: 'kb-11111111-1111-4111-8111-111111111111', name: '产品', description: '团队说明',
-  bindings: ['D:/a', 'D:/b'], revision: 1, lifecycle: 'active', epoch: 1, createdAt: 1, updatedAt: 1,
-  location: 'D:/app/wiki/kb-11111111-1111-4111-8111-111111111111', sourceCount: 1, pageCount: 1,
-  pendingSourceCount: 1, availability: 'available',
+export const wikiAsset: WikiAssetDetail = {
+  wikiId: 'k',
+  name: '产品',
+  status: 'draft',
+  dir: 'D:/app/wiki/k',
+  internalStatus: null,
+  syncError: null,
+  pageCount: 1,
+  summary: '团队说明',
+  version: 1,
+  lastSyncAt: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
 };
-export const source: WikiSource = {
-  kbId: 'k', sourceId: 's', name: 'a.md', kind: 'manual', snapshotPath: 'raw/sources/s/1-h.md',
-  revision: 1, contentHash: 'source-h', lifecycle: 'active', epoch: 1, status: 'pending',
-  generatedPageId: 'p', generationSuppressed: false, createdAt: 1, updatedAt: 1,
+
+export const rawSource: WikiRawSource = {
+  filename: 'a.md',
+  sha256: 'abc',
+  size: 12,
+  status: 'uploaded',
+  created_at: '2026-01-01T00:00:00.000Z',
+  updated_at: '2026-01-01T00:00:00.000Z',
+  last_modified_by: null,
+  ingested_at: null,
+  ingest_error: null,
 };
-export const page: WikiPage = {
-  kbId: 'k', pageId: 'p', title: '说明', content: '# 原文',
-  path: `${library.location}/wiki/p.md`, sourceRefs: [], locked: true,
-  revision: 1, contentHash: 'page-h', lifecycle: 'active', epoch: 1, updatedAt: 1,
+
+export const wikiPage = { id: 'concepts/auth', title: '说明', type: 'concept', relPath: 'wiki/concepts/auth.md' };
+
+export const searchResponse: WikiSearchResponse = {
+  results: [{
+    path: 'wiki/concepts/auth.md',
+    title: '说明',
+    snippet: '权限模型',
+    score: 1,
+    type: 'concept',
+    hop: 0,
+    related: [],
+  }],
+  links: [],
+  count: 1,
 };
-export const deletePreview: WikiDeletePreview = {
-  target: { kind: 'library', kbId: 'k' }, name: '产品', revision: 1, sources: 1, pages: 1, bindings: ['D:/a', 'D:/b'],
-};
+
 export function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;

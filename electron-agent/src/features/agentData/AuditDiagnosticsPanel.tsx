@@ -4,7 +4,6 @@ import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { agentDataApi } from '../../lib/agentData';
 import type { AuditExport, AuditQuery, AuditView, DiagnosticItem, DiagnosticReport, ResourceNavigation, ResourceRef } from '../../../electron/agentData/operationsContracts';
-import type { WikiReindexResult } from '../../../electron/agentData/wikiContracts';
 import { styles } from './agentDataStyles';
 import { operationsStyles as ops } from './operationsStyles';
 import { redact, resourceNavigation } from './operationsPresentation';
@@ -31,7 +30,7 @@ export function AuditDiagnosticsPanel({ visible = true, navigation, resourceFilt
     <div className={styles.sectionHeading} style={{ flex: '0 0 auto' }}><Typography.Title level={5} style={{ margin: 0 }}>审计与诊断</Typography.Title><Typography.Text type="secondary">查看记录与运行状态</Typography.Text></div>
     <Tabs id="audit-diagnostics" className={styles.bodyTabs} activeKey={tab} onChange={(key) => setTab(key as 'audit' | 'diagnostics')} items={[
       { key: 'audit', label: '操作记录', children: <div className={ops.scrollPanel}><AuditRecords visible={visible && tab === 'audit'} resourceFilter={resource} selectionRequest={request} onNavigate={onNavigate} /></div> },
-      { key: 'diagnostics', label: '运行诊断', children: <div className={ops.scrollPanel}><Diagnostics visible={visible && tab === 'diagnostics'} onNavigate={onNavigate} onRefresh={onRefresh} /></div> },
+      { key: 'diagnostics', label: '运行诊断', children: <div className={ops.scrollPanel}><Diagnostics visible={visible && tab === 'diagnostics'} onNavigate={onNavigate} /></div> },
     ]} />
   </section>;
 }
@@ -226,21 +225,17 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }:
   </Flex>;
 }
 
-function Diagnostics({ visible, onNavigate, onRefresh }: Pick<Props, 'onNavigate' | 'onRefresh'> & { visible: boolean }) {
+function Diagnostics({ visible, onNavigate }: Pick<Props, 'onNavigate' | 'onRefresh'> & { visible: boolean }) {
   const [report, setReport] = useState<DiagnosticReport>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [category, setCategory] = useState('');
   const [resource, setResource] = useState('');
-  const [target, setTarget] = useState<DiagnosticItem>();
-  const [result, setResult] = useState<WikiReindexResult>();
-  const [mutationError, setMutationError] = useState<string>();
-  const [busy, setBusy] = useState(false);
   const [openBusy, setOpenBusy] = useState<string>();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [guide, setGuide] = useState<DiagnosticItem>();
-  const epoch = useRef(0); const mutationEpoch = useRef(0); const openEpoch = useRef(0); const busyRef = useRef(false);
-  const current = useRef({ visible, target: target?.id }); current.current = { visible, target: target?.id };
+  const epoch = useRef(0); const openEpoch = useRef(0);
+  const current = useRef({ visible }); current.current = { visible };
 
   const check = async () => {
     if (!current.current.visible) return;
@@ -252,28 +247,10 @@ function Diagnostics({ visible, onNavigate, onRefresh }: Pick<Props, 'onNavigate
     finally { if (request === epoch.current && current.current.visible) setLoading(false); }
   };
   useEffect(() => {
-    mutationEpoch.current++; openEpoch.current++; busyRef.current = false; setBusy(false); setOpenBusy(undefined); setMutationError(undefined); setResult(undefined);
+    openEpoch.current++; setOpenBusy(undefined);
     if (visible) void check();
-    return () => { epoch.current++; mutationEpoch.current++; openEpoch.current++; };
+    return () => { epoch.current++; openEpoch.current++; };
   }, [visible]);
-  const beginReindex = (item: DiagnosticItem) => {
-    if (!visible || busyRef.current || item.resource?.type !== 'wiki') return;
-    mutationEpoch.current++; setTarget(item); setResult(undefined); setMutationError(undefined);
-  };
-  const closeReindex = () => { if (!busyRef.current) { mutationEpoch.current++; setTarget(undefined); } };
-  const reindex = async () => {
-    if (!target || target.resource?.type !== 'wiki' || busyRef.current || !visible) return;
-    const stable = target; const kbId = target.resource.id; const request = mutationEpoch.current;
-    const valid = () => request === mutationEpoch.current && current.current.visible && current.current.target === stable.id;
-    busyRef.current = true; setBusy(true); setMutationError(undefined);
-    try {
-      const next = await agentDataApi.wiki.libraries.reindex(kbId);
-      if (!valid()) return;
-      setResult(next); await check();
-      if (valid()) await onRefresh?.();
-    } catch (cause) { if (valid()) setMutationError(message(cause)); }
-    finally { if (valid()) { busyRef.current = false; setBusy(false); } }
-  };
   const open = async (item: DiagnosticItem) => {
     if (!visible || openBusy) return;
     const request = ++openEpoch.current;
@@ -298,7 +275,7 @@ function Diagnostics({ visible, onNavigate, onRefresh }: Pick<Props, 'onNavigate
         { value: '', label: '全部资源' },
         ...resourceOptions.map(([key, value]) => ({ value: key, label: value.id }))
       ]} />
-      <Button disabled={!visible || loading || busy} onClick={() => void check()}>{loading ? '正在检查…' : '重新检查'}</Button>
+      <Button disabled={!visible || loading} onClick={() => void check()}>{loading ? '正在检查…' : '重新检查'}</Button>
     </Flex>
     <Typography.Text type="secondary">检查只读取状态，不会自动调用模型、重建索引或安装工具。</Typography.Text>
     {report ? <Typography.Text type="secondary">检查时间：{new Date(report.checkedAt).toLocaleString()}{error ? ' · 上次结果，可能已过期' : ''}</Typography.Text> : !loading && !error ? <Typography.Text type="secondary">尚未检查</Typography.Text> : null}
@@ -310,20 +287,10 @@ function Diagnostics({ visible, onNavigate, onRefresh }: Pick<Props, 'onNavigate
       <Space size={8} wrap>
         {item.resource && onNavigate ? <Button size="small" onClick={() => onNavigate(resourceNavigation(item.resource!))}>查看关联资源</Button> : null}
         {item.action === 'open_file' ? <Button size="small" disabled={!!openBusy} onClick={() => void open(item)}>打开问题文件</Button> : null}
-        {item.action === 'reindex_wiki' && item.resource?.type === 'wiki' ? <Button size="small" disabled={busy} onClick={() => beginReindex(item)}>重建页面清单</Button> : null}
         {item.action === 'configure_codegraph' ? <Button size="small" onClick={() => setGuide(item)}>查看配置说明</Button> : null}
       </Space>
       {rowErrors[item.id] ? <Alert type="error" showIcon title={rowErrors[item.id]} /> : null}
     </Card>)}</Flex> : null}
     {guide ? <Card size="small"><p>请先在本机配置 CodeGraph CLI，并在项目代码页检查连接与索引状态。这里不会自动安装或执行修复。</p>{onNavigate ? <Button onClick={() => onNavigate({ view: 'code', ...(guide.resource?.type === 'project' ? { workspace: guide.resource.id } : {}) })}>前往代码配置</Button> : null}</Card> : null}
-    <Modal open={visible && !!target} title="重建页面清单" closable={!busy} keyboard={!busy} mask={{ closable: !busy }} onCancel={closeReindex} footer={<Space size={8}>
-      <Button autoInsertSpace={autoInsertSpace} disabled={busy} onClick={closeReindex}>关闭</Button>
-      {!result ? <Button disabled={busy} onClick={() => void reindex()}>确认重建</Button> : null}
-    </Space>}>
-      <p>重新扫描知识库页面并重建检索清单；不调用模型、不修改正文，不创建后台模型任务。</p>
-      <p>知识库 ID：{target?.resource?.id}</p>
-      {mutationError ? <Alert type="error" showIcon title={mutationError} /> : null}
-      {result ? <><p>扫描完成：{result.pages} 个页面，{result.diagnostics.length} 个问题文件。</p><ul>{result.diagnostics.map((item, index) => <li key={`${item.path}:${index}`}>{item.path}：{String(redact(item.message))}</li>)}</ul></> : null}
-    </Modal>
   </Flex>;
 }

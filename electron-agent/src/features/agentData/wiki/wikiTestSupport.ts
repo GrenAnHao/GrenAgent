@@ -3,7 +3,7 @@ import { createElement, type ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { agentDataApi } from '../../../lib/agentData';
-import { deletePreview, library, page, source } from './wikiTestData';
+import { rawSource, searchResponse, wikiAsset, wikiPage } from './wikiTestData';
 
 export function renderWiki(ui: ReactNode) {
   return render(ui, { wrapper: ({ children }) => createElement(ConfigProvider, { theme: { token: { motion: false } } }, children) });
@@ -18,29 +18,25 @@ export function mockWikiBrowser() {
 
 export function mockWikiApi() {
   mockWikiBrowser();
-  const { libraries, sources, pages } = agentDataApi.wiki;
-  vi.spyOn(libraries, 'list').mockResolvedValue([library]);
-  vi.spyOn(libraries, 'read').mockResolvedValue(library);
-  vi.spyOn(libraries, 'create').mockResolvedValue(library);
-  vi.spyOn(libraries, 'update').mockResolvedValue(library);
-  vi.spyOn(libraries, 'previewDelete').mockResolvedValue(deletePreview);
-  vi.spyOn(libraries, 'remove').mockResolvedValue({ state: 'deleted' });
-  vi.spyOn(libraries, 'previewIngest').mockResolvedValue({ sourceIds: ['s'], targetCount: 1, model: 'fixture/provider-model' });
-  vi.spyOn(libraries, 'ingest').mockResolvedValue({ jobId: 'job-1', targetCount: 1, model: 'fixture/provider-model' });
-  vi.spyOn(libraries, 'reindex').mockResolvedValue({ pages: 1, diagnostics: [] });
-  vi.spyOn(sources, 'list').mockResolvedValue([source]);
-  vi.spyOn(sources, 'read').mockResolvedValue({ source, content: '# 来源正文' });
-  vi.spyOn(sources, 'previewImport').mockResolvedValue({ projectWorkspace: 'D:/a', relativePath: 'docs/a.md', name: 'a.md', contentHash: 'import-h', bytes: 17 });
-  vi.spyOn(sources, 'create').mockResolvedValue(source);
-  vi.spyOn(sources, 'update').mockResolvedValue({ ...source, revision: 2 });
-  vi.spyOn(sources, 'previewDelete').mockResolvedValue({ ...deletePreview, name: source.name, target: { kind: 'source', kbId: 'k', sourceId: 's' } });
-  vi.spyOn(sources, 'remove').mockResolvedValue({ state: 'deleted' });
-  vi.spyOn(pages, 'list').mockResolvedValue([page]);
-  vi.spyOn(pages, 'read').mockResolvedValue(page);
-  vi.spyOn(pages, 'create').mockResolvedValue(page);
-  vi.spyOn(pages, 'update').mockResolvedValue({ ...page, revision: 2 });
-  vi.spyOn(pages, 'setLocked').mockResolvedValue({ ...page, locked: false, revision: 2 });
-  vi.spyOn(pages, 'previewDelete').mockResolvedValue({ ...deletePreview, name: page.title, target: { kind: 'page', kbId: 'k', pageId: 'p' } });
-  vi.spyOn(pages, 'remove').mockResolvedValue({ state: 'deleted' });
+  const wiki = agentDataApi.wiki;
+  vi.spyOn(wiki, 'list').mockResolvedValue([wikiAsset]);
+  vi.spyOn(wiki, 'read').mockResolvedValue(wikiAsset);
+  vi.spyOn(wiki, 'create').mockResolvedValue(wikiAsset);
+  vi.spyOn(wiki, 'update').mockResolvedValue(wikiAsset);
+  vi.spyOn(wiki, 'remove').mockResolvedValue(null);
+  vi.spyOn(wiki, 'resetDraft').mockResolvedValue(null);
+  vi.spyOn(wiki, 'ingest').mockResolvedValue({ kind: 'ok' });
+  vi.spyOn(wiki, 'rawWrite').mockResolvedValue(null);
+  vi.spyOn(wiki, 'rawRemove').mockResolvedValue(null);
+  vi.spyOn(wiki, 'rawList').mockResolvedValue([rawSource]);
+  vi.spyOn(wiki, 'rawRead').mockResolvedValue('# 来源正文');
+  vi.spyOn(wiki, 'writeTemplate').mockResolvedValue(null);
+  vi.spyOn(wiki, 'pageWrite').mockResolvedValue({ lockedInjected: true });
+  vi.spyOn(wiki, 'pageRemove').mockResolvedValue(null);
+  vi.spyOn(wiki, 'pageList').mockResolvedValue([wikiPage]);
+  vi.spyOn(wiki, 'pageRead').mockResolvedValue('# 页面正文');
+  vi.spyOn(wiki, 'search').mockResolvedValue(searchResponse);
+  vi.spyOn(wiki, 'graph').mockResolvedValue([]);
+  vi.spyOn(wiki, 'overview').mockResolvedValue({ pages: 1, latestUpdatedAt: Date.parse(wikiAsset.updatedAt) });
   vi.spyOn(agentDataApi.jobs, 'create').mockRejectedValue(new Error('Unexpected legacy job creation'));
 }
