@@ -11,7 +11,14 @@ import {
 } from 'node:fs';
 import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { evictWikiDb, initIndexDb, writeIndex, withWriteDb, type WikiIndexPage } from './indexDb';
+import {
+  evictWikiDb,
+  ftsSearch,
+  initIndexDb,
+  writeIndex,
+  withWriteDb,
+  type WikiIndexPage,
+} from './indexDb';
 
 /** Default purpose — software engineering knowledge base. */
 const DEFAULT_PURPOSE = `This knowledge base accumulates and organizes engineering knowledge of software systems,
@@ -694,5 +701,35 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       if (existsSync(safe)) unlinkSync(safe);
     }
     this.rebuildPageIndex(asset);
+  }
+
+  search(wikiId: string, query: string): Array<{ id: string; score: number }> {
+    const asset = this.requireAsset(wikiId);
+    if (asset.status !== 'ready') return [];
+    return ftsSearch(asset.dir, query, 20);
+  }
+
+  graph(wikiId: string): Array<{ source_id: string; target_id: string }> {
+    const asset = this.requireAsset(wikiId);
+    if (asset.status !== 'ready') return [];
+    const db = new DatabaseSync(join(asset.dir, 'index.db'));
+    try {
+      return db
+        .prepare('SELECT source_id, target_id FROM graph_edge')
+        .all() as Array<{ source_id: string; target_id: string }>;
+    } finally {
+      db.close();
+    }
+  }
+
+  resetDraft(wikiId: string): void {
+    this.requireAsset(wikiId);
+    this.db
+      .prepare(
+        `UPDATE wiki_assets
+         SET status = 'draft', internal_status = NULL, sync_error = NULL
+         WHERE wiki_id = ? AND status IN ('pending', 'processing')`,
+      )
+      .run(wikiId);
   }
 }
