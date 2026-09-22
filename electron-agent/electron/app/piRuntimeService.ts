@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
@@ -536,9 +536,28 @@ export class PiRuntimeService {
     if (!result.ok) return result;
 
     const temporary = `${sessionFile}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${result.lines.join('\n')}\n`, 'utf8');
-    await rename(temporary, sessionFile);
-    await handle.reload();
+    try {
+      await writeFile(temporary, `${result.lines.join('\n')}\n`, 'utf8');
+      await rename(temporary, sessionFile);
+    } catch (error) {
+      // rename 成功后 temporary 路径已不存在；仅在写/换名失败时清掉残留 tmp，绝不删 sessionFile。
+      await rm(temporary, { force: true });
+      throw error;
+    }
+
+    try {
+      await handle.reload();
+    } catch (firstError) {
+      try {
+        await handle.reload();
+      } catch (secondError) {
+        const cause = secondError instanceof Error ? secondError.message : String(secondError);
+        const prior = firstError instanceof Error ? firstError.message : String(firstError);
+        throw new Error(
+          `Session file truncated on disk but in-memory session reload failed (retried once; first: ${prior}): ${cause}`,
+        );
+      }
+    }
     return result;
   }
 

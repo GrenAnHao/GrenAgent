@@ -1,10 +1,26 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
+
+const fsRenameControl = vi.hoisted(() => ({ failNext: false }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (fsRenameControl.failNext) {
+        fsRenameControl.failNext = false;
+        throw new Error('rename blocked');
+      }
+      return actual.rename(...args);
+    },
+  };
+});
 
 function fakeHandle(session: Record<string, unknown> = {}) {
   const sessionId = typeof session.sessionId === 'string' ? session.sessionId : 'session-a';
@@ -711,6 +727,67 @@ describe('PiRuntimeService', () => {
         .resolves.toEqual({ ok: false, reason: 'branched' });
       expect(Buffer.compare(await readFile(sessionFile), before)).toBe(0);
       expect(handle.reload).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('removes truncate temporary file when rename fails and leaves the session file unchanged', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-truncate-rename-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    await writeFile(sessionFile, [header, user('u1', null), user('u2', 'u1')].join('\n'), 'utf8');
+    const before = await readFile(sessionFile);
+    fsRenameControl.failNext = true;
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: 'u2', mode: 'drop-target' }))
+        .rejects.toThrow('rename blocked');
+      expect(Buffer.compare(await readFile(sessionFile), before)).toBe(0);
+      expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+      expect(handle.reload).not.toHaveBeenCalled();
+    } finally {
+      fsRenameControl.failNext = false;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retries reload after truncate and reports disk truncated when reload still fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-truncate-reload-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    await writeFile(sessionFile, [header, user('u1', null), user('u2', 'u1')].join('\n'), 'utf8');
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    handle.reload = vi.fn()
+      .mockRejectedValueOnce(new Error('reload busy'))
+      .mockRejectedValueOnce(new Error('reload still busy'));
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: 'u2', mode: 'drop-target' }))
+        .rejects.toThrow(/truncated on disk.*in-memory session reload failed/i);
+      const remaining = (await readFile(sessionFile, 'utf8'))
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line).id);
+      expect(remaining).toEqual(['s', 'u1']);
+      expect(handle.reload).toHaveBeenCalledTimes(2);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
