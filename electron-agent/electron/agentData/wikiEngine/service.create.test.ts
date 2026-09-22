@@ -24,4 +24,12 @@ describe('create wiki', () => {
     expect(again.status).toBe('draft');
     expect(readFileSync(join(created.dir, 'wiki/purpose.md'), 'utf8')).toBe('自定义');
   });
+
+  it('rejects a dot wikiId and does not write index.db under root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-root-'));
+    const db = new DatabaseSync(':memory:');
+    const service = new WikiService({ root, db, complete: async () => 'unused' });
+    expect(() => service.create({ name: '坏', wikiId: '.' })).toThrow();
+    expect(existsSync(join(root, 'index.db'))).toBe(false);
+  });
 });

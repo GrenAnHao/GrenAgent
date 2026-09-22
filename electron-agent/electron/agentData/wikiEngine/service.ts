@@ -83,6 +83,8 @@ export type WikiAsset = {
 function assertSafeWikiId(wikiId: string): void {
   if (
     !wikiId ||
+    wikiId !== wikiId.trim() ||
+    wikiId === '.' ||
     wikiId === SOURCES_FILE ||
     wikiId.includes('..') ||
     wikiId.includes('/') ||
