@@ -21,6 +21,7 @@ import {
   setComposerValue,
   type PromptImage,
 } from '../features/chat/input/composerBridge';
+import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -168,6 +169,27 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       } catch {
         // ignore
       }
+      // 轻量回填：只补本地用户消息缺失的 entryId/timestamp，不重排列表（fire-and-forget）。
+      void syncEntryIdsAfterTurn();
+    }
+  };
+
+  /** 回合结束后按序把 getMessages 带回的 entryId 补到本地用户消息。 */
+  const syncEntryIdsAfterTurn = async () => {
+    try {
+      const res = await pi.getMessages(workspace);
+      const current = useStore.getState().messages;
+      const patched = backfillEntryIds(current, res.messages);
+      if (patched === current) return;
+      useStore.setState({ messages: patched });
+      if (loadedSessionPath != null) {
+        currentSig = sessionSignature(patched);
+        setCachedSession(loadedSessionPath, patched, currentSig);
+        const key = sessionKeyFromPath(loadedSessionPath);
+        if (key) void pi.writeUiHistory(workspace, key, serializeHistory(patched)).catch(() => {});
+      }
+    } catch {
+      // ignore：回填失败不阻断回合结束路径
     }
   };
 
@@ -320,14 +342,15 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     return /truncated on disk/i.test(msg);
   };
 
-  const remainingMessages = (
-    messages: ChatMessage[],
-    entryId: string,
-    mode: 'drop-target' | 'keep-target',
-  ): ChatMessage[] => {
-    const idx = messages.findIndex((m) => m.kind === 'user' && m.entryId === entryId);
-    if (idx < 0) return messages;
-    return mode === 'drop-target' ? messages.slice(0, idx) : messages.slice(0, idx + 1);
+  const deleteUiHistoryFailClosed = async () => {
+    if (loadedSessionPath == null) return;
+    const key = sessionKeyFromPath(loadedSessionPath);
+    if (!key) return;
+    try {
+      await pi.deleteUiHistory(workspace, key);
+    } catch {
+      // ignore
+    }
   };
 
   const persistUiHistoryAfterCut = async (messages: ChatMessage[]) => {
@@ -337,20 +360,31 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     try {
       await pi.writeUiHistory(workspace, key, serializeHistory(messages));
     } catch {
-      try {
-        await pi.deleteUiHistory(workspace, key);
-      } catch {
-        // ignore secondary failure
-      }
+      await deleteUiHistoryFailClosed();
     }
   };
 
+  /**
+   * 磁盘截断已成功后同步界面。若本地列表找不到 entryId，禁止把未裁短的长列表写回 ui-history：
+   * 优先 getMessages 重建；失败则删除该会话 ui-history。
+   */
   const applyCutToUi = async (entryId: string, mode: 'drop-target' | 'keep-target') => {
-    const nextMessages = remainingMessages(useStore.getState().messages, entryId, mode);
-    currentSig = sessionSignature(nextMessages);
-    if (loadedSessionPath != null) setCachedSession(loadedSessionPath, nextMessages, currentSig);
-    useStore.setState({ messages: nextMessages, isStreaming: false, awaitingResponse: false, runActive: false });
-    await persistUiHistoryAfterCut(nextMessages);
+    useStore.setState({ isStreaming: false, awaitingResponse: false, runActive: false });
+    const cut = cutMessagesAfterEntry(useStore.getState().messages, entryId, mode);
+    if (!cut) {
+      liveActivity = false;
+      try {
+        const res = await pi.getMessages(workspace);
+        loadMessages(res.messages, { force: true });
+      } catch {
+        await deleteUiHistoryFailClosed();
+      }
+      return;
+    }
+    currentSig = sessionSignature(cut);
+    if (loadedSessionPath != null) setCachedSession(loadedSessionPath, cut, currentSig);
+    useStore.setState({ messages: cut });
+    await persistUiHistoryAfterCut(cut);
   };
 
   const truncateTo = async (entryId: string, mode: 'drop-target' | 'keep-target') => {

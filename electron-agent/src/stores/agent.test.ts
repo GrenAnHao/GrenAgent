@@ -7,10 +7,19 @@ const { eventHandlers, piMock } = vi.hoisted(() => ({
     excludeEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     restoreEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     rewindTo: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
+    truncateTo: vi.fn(
+      (
+        _ws: string,
+        _entryId: string,
+        _mode: 'drop-target' | 'keep-target',
+      ): Promise<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' }> =>
+        Promise.resolve({ ok: true, lines: [] }),
+    ),
     getMessages: vi.fn(
       (_ws: string): Promise<{ messages: unknown[] }> => Promise.resolve({ messages: [] }),
     ),
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
+    deleteUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve()),
   },
 }));
 vi.mock('../lib/pi', () => ({
@@ -39,8 +48,10 @@ describe('createAgentStore', () => {
     piMock.excludeEntry.mockReset().mockResolvedValue(undefined);
     piMock.restoreEntry.mockReset().mockResolvedValue(undefined);
     piMock.rewindTo.mockReset().mockResolvedValue(undefined);
+    piMock.truncateTo.mockReset().mockResolvedValue({ ok: true, lines: [] });
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
+    piMock.deleteUiHistory.mockReset().mockResolvedValue(undefined);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -440,5 +451,105 @@ describe('createAgentStore', () => {
       expect(excluded.has(200)).toBe(true);
       expect(excluded.has(100)).toBe(false);
     });
+
+    it('truncateTo 本地找不到 entryId 时 getMessages 重建，不把长列表写回 ui-history', async () => {
+      store = createAgentStore('.');
+      store.loadMessages(
+        [
+          { role: 'user', content: 'keep', entryId: 'u1', timestamp: 1 },
+          { role: 'assistant', content: [{ type: 'text', text: 'ok' }], entryId: 'a1', timestamp: 2 },
+          { role: 'user', content: 'gone', entryId: 'u2', timestamp: 3 },
+        ] as never,
+        { force: true, sessionPath: '/ws/foo.jsonl' },
+      );
+      // 模拟 UI 列表缺 entryId（无法本地裁切），但磁盘截断已成功
+      store.useStore.setState({
+        messages: store.useStore.getState().messages.map((m) =>
+          m.kind === 'user' ? { ...m, entryId: undefined } : m,
+        ),
+      });
+      piMock.writeUiHistory.mockClear();
+      piMock.getMessages.mockResolvedValueOnce({
+        messages: [
+          { role: 'user', content: 'keep', entryId: 'u1', timestamp: 1 },
+          { role: 'assistant', content: [{ type: 'text', text: 'ok' }], entryId: 'a1', timestamp: 2 },
+        ],
+      });
+
+      await store.truncateTo('u2', 'drop-target');
+
+      expect(piMock.truncateTo).toHaveBeenCalledWith('.', 'u2', 'drop-target');
+      expect(piMock.getMessages).toHaveBeenCalled();
+      const msgs = store.useStore.getState().messages;
+      expect(msgs).toHaveLength(2);
+      expect(msgs.every((m) => m.kind !== 'user' || (m as { text: string }).text !== 'gone')).toBe(true);
+      // 不得用裁切失败前的 3 条长列表覆盖写盘：重建路径写的是后端短列表
+      const writes = piMock.writeUiHistory.mock.calls.map((c) => String(c[2]));
+      expect(writes.some((body) => body.includes('gone'))).toBe(false);
+    });
+
+    it('truncateTo 找不到 entryId 且 getMessages 失败时删除 ui-history', async () => {
+      store = createAgentStore('.');
+      store.loadMessages(
+        [{ role: 'user', content: 'x', entryId: 'u1', timestamp: 1 }] as never,
+        { force: true, sessionPath: '/ws/bar.jsonl' },
+      );
+      store.useStore.setState({
+        messages: store.useStore.getState().messages.map((m) =>
+          m.kind === 'user' ? { ...m, entryId: undefined } : m,
+        ),
+      });
+      piMock.getMessages.mockRejectedValueOnce(new Error('offline'));
+      piMock.writeUiHistory.mockClear();
+      piMock.deleteUiHistory.mockClear();
+
+      await store.truncateTo('u1', 'drop-target');
+
+      expect(piMock.deleteUiHistory).toHaveBeenCalledWith('.', 'bar');
+      expect(piMock.writeUiHistory.mock.calls.length).toBe(0);
+    });
+  });
+
+  it('回合结束后按序回填本地用户消息的 entryId，不重排', async () => {
+    store = createAgentStore('.');
+    store.loadMessages([], { force: true, sessionPath: '/ws/s.jsonl' });
+    store.pushUserMessage('hello');
+    expect(store.useStore.getState().messages[0]).toMatchObject({ kind: 'user', text: 'hello' });
+    expect((store.useStore.getState().messages[0] as { entryId?: string }).entryId).toBeUndefined();
+
+    piMock.getMessages.mockResolvedValueOnce({
+      messages: [
+        { role: 'user', content: 'hello', entryId: 'entry-hello', timestamp: 42 },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'world' }],
+          entryId: 'entry-asst',
+          timestamp: 43,
+        },
+      ],
+    });
+
+    emit({ type: 'agent_start' });
+    emit({
+      type: 'message_start',
+      message: { role: 'assistant', content: [], timestamp: 43 },
+    });
+    emit({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'world' }],
+        timestamp: 43,
+      },
+    });
+    emit({ type: 'agent_end' });
+    flushRAF();
+
+    await vi.waitFor(() => {
+      const user = store.useStore.getState().messages.find((m) => m.kind === 'user');
+      expect(user).toMatchObject({ text: 'hello', entryId: 'entry-hello', timestamp: 42 });
+    });
+    const ids = store.useStore.getState().messages.map((m) => m.id);
+    expect(ids[0]).toBe(store.useStore.getState().messages[0]!.id);
   });
 });
