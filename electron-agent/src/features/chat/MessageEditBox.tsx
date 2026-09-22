@@ -106,6 +106,8 @@ const styles = createStaticStyles(({ css }) => ({
 
 export interface MessageEditBoxProps {
   initialText: string;
+  /** 原消息图片：进入编辑时以附件块预填。 */
+  initialImages?: Array<{ mimeType: string; data: string }>;
   onCancel: () => void;
   onSend: (text: string, images?: PromptImage[]) => void;
 }
@@ -116,12 +118,45 @@ type SlashSearch = {
   replaceableString: string;
 } | null;
 
+function toInitialAttachments(
+  images: Array<{ mimeType: string; data: string }> | undefined,
+): ImageAttachment[] {
+  if (!images?.length) return [];
+  return images.map((img, i) => ({
+    type: 'image' as const,
+    mimeType: img.mimeType,
+    data: img.data,
+    name: `image-${i + 1}`,
+    url: `data:${img.mimeType};base64,${img.data}`,
+  }));
+}
+
+/**
+ * 编辑框 / 只保留技能命令。
+ * 用稳定字段 metadata.group === 'skill' 判定；丢弃 type:'divider' 分组标题
+ * （标题文案本地化，单组时也不需要）。切勿用中文 label 过滤。
+ */
+export function filterSkillSlashOptions(items: ISlashOption[]): ISlashOption[] {
+  return items.filter((item) => {
+    if ('type' in item && item.type === 'divider') return false;
+    const meta = (item as { metadata?: { group?: string } }).metadata;
+    return meta?.group === 'skill';
+  });
+}
+
 /** 编辑专用简化输入框：复用底部编辑器 / 图片块 / 拖放 / @，/ 只保留技能，工具栏仅取消与发送。 */
-export function MessageEditBox({ initialText, onCancel, onSend }: MessageEditBoxProps) {
+export function MessageEditBox({
+  initialText,
+  initialImages,
+  onCancel,
+  onSend,
+}: MessageEditBoxProps) {
   const { workspace } = useAgentStoreContext();
   const editor = useEditor();
   const [empty, setEmpty] = useState(!initialText.trim());
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<ImageAttachment[]>(() =>
+    toInitialAttachments(initialImages),
+  );
   const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
   const zoneRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -157,18 +192,9 @@ export function MessageEditBox({ initialText, onCancel, onSend }: MessageEditBox
   const { slashItems: loadSlashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>
     editor.cleanDocument(),
   );
-  // 编辑框 / 只弹出技能：过滤掉快捷操作、工具、提示词、系统命令等。
   const slashItems = useCallback(
-    async (search: SlashSearch): Promise<ISlashOption[]> => {
-      const items = await loadSlashItems(search);
-      return items.filter((item) => {
-        if ('type' in item && item.type === 'divider') {
-          return 'label' in item && (item as { label?: string }).label === '技能';
-        }
-        const meta = (item as { metadata?: { group?: string } }).metadata;
-        return meta?.group === 'skill';
-      });
-    },
+    async (search: SlashSearch): Promise<ISlashOption[]> =>
+      filterSkillSlashOptions(await loadSlashItems(search)),
     [loadSlashItems],
   );
   const { tryCommandPaste } = useCommandPaste(workspace, editor);

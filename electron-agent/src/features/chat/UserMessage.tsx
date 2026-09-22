@@ -149,6 +149,7 @@ function UserMessageInner({ text, images, timestamp }: UserMessageProps) {
         <div className={styles.editWrap}>
           <MessageEditBox
             initialText={bodyText}
+            initialImages={images}
             onCancel={() => setEditing(false)}
             onSend={() => {
               // 本任务只调用 onSend；截断与重发由后续任务接线。
