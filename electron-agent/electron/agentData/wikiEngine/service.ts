@@ -15,16 +15,22 @@ import {
   cascadeDeleteWikiPagesWithRefs,
   deleteSourceFiles,
 } from './ingest/cascade';
+import { createLimit, getGlobalLlmConcurrency } from './ingest/concurrency';
+import { runIngestIncremental } from './ingest/runIncremental';
 import {
   evictWikiDb,
   ftsSearch,
   initIndexDb,
+  readSourceStates,
   writeIndex,
+  writeIndexAndSources,
   withWriteDb,
   type WikiIndexPage,
 } from './indexDb';
+import { createLlmClient, type CompleteFn } from './llm';
+import { createLogger } from './logger';
 
-/** Default purpose — software engineering knowledge base. */
+const log = createLogger('wiki-service');
 const DEFAULT_PURPOSE = `This knowledge base accumulates and organizes engineering knowledge of software systems,
 including system architecture, module design, data flow, deployment models, permission models, etc.
 By ingesting requirement documents, architecture designs, meeting notes, RFCs, technical decisions and other
@@ -84,8 +90,6 @@ const DEFAULT_FILES: ReadonlyArray<readonly [string, string]> = [
     '---\ntype: index\ntitle: Index\n---\n\n# Index\n\n## Entities\n\n## Concepts\n\n## Sources\n',
   ],
 ];
-
-type CompleteFn = (input: unknown) => Promise<string>;
 
 export type WikiCreateInput = {
   name: string;
@@ -191,10 +195,17 @@ function assertSafeWikiId(wikiId: string): void {
   }
 }
 
+export type IngestResult =
+  | { kind: 'ok' }
+  | { kind: 'busy'; status: 'pending' | 'processing'; step: string | null };
+
 export class WikiService {
   private readonly root: string;
   private readonly db: DatabaseSync;
   private readonly complete: CompleteFn;
+  private readonly cancelled = new Set<string>();
+  private readonly buildQueues = new Map<string, Promise<void>>();
+  private readonly globalLlmLimit = createLimit(getGlobalLlmConcurrency());
 
   constructor(opts: { root: string; db: DatabaseSync; complete: CompleteFn }) {
     this.root = opts.root;
@@ -734,5 +745,217 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
          WHERE wiki_id = ? AND status IN ('pending', 'processing')`,
       )
       .run(wikiId);
+  }
+
+  /**
+   * Explicit ingest. Returns a Promise that resolves when this run finishes
+   * (tests can await). pending/processing → busy without re-queueing.
+   */
+  async ingest(wikiId: string): Promise<IngestResult> {
+    const asset = this.requireAsset(wikiId);
+    const row = this.db
+      .prepare('SELECT status, internal_status, version FROM wiki_assets WHERE wiki_id = ?')
+      .get(wikiId) as
+      | { status: string; internal_status: string | null; version: number }
+      | undefined;
+    if (!row) throw new Error(`not_found: wiki ${wikiId}`);
+
+    if (row.status === 'pending' || row.status === 'processing') {
+      return {
+        kind: 'busy',
+        status: row.status,
+        step: row.internal_status,
+      };
+    }
+
+    const sourcesDir = join(asset.dir, 'raw', 'sources');
+    const hasSource =
+      existsSync(sourcesDir) &&
+      readdirSync(sourcesDir).some((name) => {
+        const full = join(sourcesDir, name);
+        try {
+          return statSync(full).isFile() && (name.endsWith('.md') || name.endsWith('.txt'));
+        } catch {
+          return false;
+        }
+      });
+    if (!hasSource) {
+      throw new Error('no source documents to ingest');
+    }
+
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE wiki_assets
+         SET status = 'pending', internal_status = NULL, sync_error = NULL,
+             version = version + 1, updated_at = ?
+         WHERE wiki_id = ?`,
+      )
+      .run(now, wikiId);
+
+    const job = this.enqueueBuild(wikiId);
+    await job;
+    return { kind: 'ok' };
+  }
+
+  private enqueueBuild(wikiId: string): Promise<void> {
+    const prev = this.buildQueues.get(wikiId) ?? Promise.resolve();
+    const job = prev
+      .catch(() => {
+        /* keep queue alive after prior failure */
+      })
+      .then(() => this.runBuild(wikiId));
+    this.buildQueues.set(wikiId, job);
+    return job.finally(() => {
+      if (this.buildQueues.get(wikiId) === job) this.buildQueues.delete(wikiId);
+    });
+  }
+
+  private setStatus(
+    wikiId: string,
+    patch: {
+      status?: string;
+      internal_status?: string | null;
+      sync_error?: string | null;
+      page_count?: number | null;
+      last_sync_at?: string | null;
+    },
+  ): void {
+    const now = new Date().toISOString();
+    const cur = this.db
+      .prepare(
+        'SELECT status, internal_status, sync_error, page_count, last_sync_at FROM wiki_assets WHERE wiki_id = ?',
+      )
+      .get(wikiId) as
+      | {
+          status: string;
+          internal_status: string | null;
+          sync_error: string | null;
+          page_count: number | null;
+          last_sync_at: string | null;
+        }
+      | undefined;
+    if (!cur) return;
+    this.db
+      .prepare(
+        `UPDATE wiki_assets SET
+           status = ?, internal_status = ?, sync_error = ?,
+           page_count = ?, last_sync_at = ?, updated_at = ?
+         WHERE wiki_id = ?`,
+      )
+      .run(
+        patch.status ?? cur.status,
+        patch.internal_status !== undefined ? patch.internal_status : cur.internal_status,
+        patch.sync_error !== undefined ? patch.sync_error : cur.sync_error,
+        patch.page_count !== undefined ? patch.page_count : cur.page_count,
+        patch.last_sync_at !== undefined ? patch.last_sync_at : cur.last_sync_at,
+        now,
+        wikiId,
+      );
+  }
+
+  private isCancelled(wikiId: string): boolean {
+    if (this.cancelled.has(wikiId)) return true;
+    const row = this.db.prepare('SELECT 1 FROM wiki_assets WHERE wiki_id = ?').get(wikiId);
+    return !row;
+  }
+
+  private async runBuild(wikiId: string): Promise<void> {
+    if (this.isCancelled(wikiId)) {
+      this.cancelled.delete(wikiId);
+      return;
+    }
+
+    const asset = this.requireAsset(wikiId);
+    this.setStatus(wikiId, {
+      status: 'processing',
+      internal_status: 'scanning',
+      sync_error: null,
+    });
+
+    try {
+      if (this.isCancelled(wikiId)) {
+        this.cancelled.delete(wikiId);
+        return;
+      }
+
+      this.setStatus(wikiId, { status: 'processing', internal_status: 'ingesting' });
+
+      const llm = createLlmClient(this.complete);
+      let oldStates = new Map<string, { sha256: string; status: 'uploaded' | 'ingested' | 'failed' }>();
+      try {
+        oldStates = readSourceStates(asset.dir);
+      } catch {
+        /* fresh */
+      }
+
+      const outcome = await runIngestIncremental(
+        asset.dir,
+        oldStates,
+        llm,
+        this.globalLlmLimit,
+      );
+
+      if (this.isCancelled(wikiId)) {
+        this.cancelled.delete(wikiId);
+        return;
+      }
+
+      this.setStatus(wikiId, { status: 'processing', internal_status: 'rebuilding-index' });
+
+      const pages = this.scanWikiPages(asset);
+      writeIndexAndSources(asset.dir, pages, outcome.processed, outcome.deletedSources);
+      evictWikiDb(wikiId);
+
+      const attempted = outcome.processed.length;
+      const failed = outcome.processed.filter((p) => !p.ok);
+      if (attempted > 0 && failed.length === attempted) {
+        const first = failed[0];
+        const msg =
+          `all source documents failed to ingest` +
+          (first ? `; first failure: ${first.filename}: ${first.error ?? 'unknown'}` : '');
+        if (this.isCancelled(wikiId)) {
+          this.cancelled.delete(wikiId);
+          return;
+        }
+        this.setStatus(wikiId, {
+          status: 'failed',
+          internal_status: null,
+          sync_error: msg.slice(0, 500),
+        });
+        throw new Error(msg);
+      }
+
+      if (this.isCancelled(wikiId)) {
+        this.cancelled.delete(wikiId);
+        return;
+      }
+
+      this.setStatus(wikiId, {
+        status: 'ready',
+        internal_status: null,
+        sync_error: null,
+        page_count: pages.length,
+        last_sync_at: new Date().toISOString(),
+      });
+      log.info('ingest ready', { wikiId, pages: pages.length });
+    } catch (err) {
+      if (this.isCancelled(wikiId)) {
+        this.cancelled.delete(wikiId);
+        return;
+      }
+      const row = this.db
+        .prepare('SELECT status FROM wiki_assets WHERE wiki_id = ?')
+        .get(wikiId) as { status: string } | undefined;
+      // already marked failed above for all-sources-failed
+      if (row?.status === 'failed') throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      this.setStatus(wikiId, {
+        status: 'failed',
+        internal_status: null,
+        sync_error: msg.slice(0, 500),
+      });
+      throw err;
+    }
   }
 }

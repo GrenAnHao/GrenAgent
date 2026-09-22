@@ -203,30 +203,117 @@ export function ftsSearch(
   }
 }
 
+function writeIndexInto(db: DatabaseSync, pages: WikiIndexPage[]): void {
+  db.prepare('DELETE FROM wiki_fts').run();
+  db.prepare('DELETE FROM page_meta').run();
+  db.prepare('DELETE FROM graph_edge').run();
+
+  const insFts = db.prepare(
+    'INSERT INTO wiki_fts(page_id, title_tok, content_tok) VALUES (?,?,?)',
+  );
+  const insMeta = db.prepare(
+    'INSERT INTO page_meta(page_id, title, type, rel_path, snippet) VALUES (?,?,?,?,?)',
+  );
+  const insEdge = db.prepare(
+    'INSERT OR IGNORE INTO graph_edge(source_id, target_id) VALUES (?,?)',
+  );
+
+  const idSet = new Set(pages.map((p) => p.id));
+  for (const p of pages) {
+    insFts.run(p.id, tokenize(p.title).join(' '), tokenize(p.content).join(' '));
+    const snippet = [...p.content].slice(0, 200).join('');
+    insMeta.run(p.id, p.title, p.type, p.relPath, snippet);
+    for (const target of p.links) {
+      if (idSet.has(target)) insEdge.run(p.id, target);
+    }
+  }
+}
+
 export function writeIndex(wikiDir: string, pages: WikiIndexPage[]): void {
   withWriteDb(wikiDir, (db) => {
-    db.prepare('DELETE FROM wiki_fts').run();
-    db.prepare('DELETE FROM page_meta').run();
-    db.prepare('DELETE FROM graph_edge').run();
+    writeIndexInto(db, pages);
+  });
+}
 
-    const insFts = db.prepare(
-      'INSERT INTO wiki_fts(page_id, title_tok, content_tok) VALUES (?,?,?)',
-    );
-    const insMeta = db.prepare(
-      'INSERT INTO page_meta(page_id, title, type, rel_path, snippet) VALUES (?,?,?,?,?)',
-    );
-    const insEdge = db.prepare(
-      'INSERT OR IGNORE INTO graph_edge(source_id, target_id) VALUES (?,?)',
-    );
+export type SourceStatus = 'uploaded' | 'ingested' | 'failed';
 
-    const idSet = new Set(pages.map((p) => p.id));
-    for (const p of pages) {
-      insFts.run(p.id, tokenize(p.title).join(' '), tokenize(p.content).join(' '));
-      const snippet = [...p.content].slice(0, 200).join('');
-      insMeta.run(p.id, p.title, p.type, p.relPath, snippet);
-      for (const target of p.links) {
-        if (idSet.has(target)) insEdge.run(p.id, target);
-      }
-    }
+export function readSourceStates(
+  wikiDir: string,
+): Map<string, { sha256: string; status: SourceStatus }> {
+  const db = openDb(wikiDir);
+  try {
+    const rows = db.prepare('SELECT filename, sha256, status FROM source').all() as Array<{
+      filename: string;
+      sha256: string;
+      status: SourceStatus;
+    }>;
+    const m = new Map<string, { sha256: string; status: SourceStatus }>();
+    for (const r of rows) m.set(r.filename, { sha256: r.sha256, status: r.status });
+    return m;
+  } finally {
+    db.close();
+  }
+}
+
+export function classifySources(
+  disk: Array<{ filename: string; sha256: string }>,
+  oldStates: Map<string, { sha256: string; status: SourceStatus }>,
+): { toIngest: string[]; skipped: string[]; deleted: string[] } {
+  const diskNames = new Set(disk.map((d) => d.filename));
+  const deleted = [...oldStates.keys()].filter((fn) => !diskNames.has(fn));
+  const toIngest: string[] = [];
+  const skipped: string[] = [];
+  for (const d of disk) {
+    const prev = oldStates.get(d.filename);
+    if (!prev || prev.status !== 'ingested' || prev.sha256 !== d.sha256) toIngest.push(d.filename);
+    else skipped.push(d.filename);
+  }
+  return { toIngest, skipped, deleted };
+}
+
+export function recordSourceIngestResult(
+  db: DatabaseSync,
+  entry: { filename: string; sha256: string; size: number; ok: boolean; error?: string | null },
+): void {
+  const now = new Date().toISOString();
+  const status: SourceStatus = entry.ok ? 'ingested' : 'failed';
+  const ingestedAt = entry.ok ? now : null;
+  const ingestError = entry.ok ? null : (entry.error ?? 'unknown').slice(0, 500);
+  const exists = db.prepare('SELECT 1 FROM source WHERE filename = ?').get(entry.filename);
+  if (exists) {
+    db.prepare(
+      'UPDATE source SET status = ?, ingested_at = ?, ingest_error = ? WHERE filename = ?',
+    ).run(status, ingestedAt, ingestError, entry.filename);
+  } else {
+    db.prepare(
+      `INSERT INTO source(filename, sha256, size, status, created_at, updated_at, last_modified_by, ingested_at, ingest_error)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(entry.filename, entry.sha256, entry.size, status, now, now, ingestedAt, ingestError);
+  }
+}
+
+export function deleteSourceRows(db: DatabaseSync, filenames: string[]): void {
+  if (filenames.length === 0) return;
+  const stmt = db.prepare('DELETE FROM source WHERE filename = ?');
+  for (const fn of filenames) stmt.run(fn);
+}
+
+/** Rebuild FTS/meta/edges and record ingest source results in one write transaction. */
+export function writeIndexAndSources(
+  wikiDir: string,
+  pages: WikiIndexPage[],
+  processed: Array<{
+    filename: string;
+    sha256: string;
+    size: number;
+    ok: boolean;
+    error?: string | null;
+  }>,
+  deletedSources: string[],
+): void {
+  withWriteDb(wikiDir, (db) => {
+    writeIndexInto(db, pages);
+    for (const p of processed) recordSourceIngestResult(db, p);
+    deleteSourceRows(db, deletedSources);
   });
 }
