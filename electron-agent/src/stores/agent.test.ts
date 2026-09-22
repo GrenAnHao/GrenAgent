@@ -452,7 +452,7 @@ describe('createAgentStore', () => {
       expect(excluded.has(100)).toBe(false);
     });
 
-    it('truncateTo 本地找不到 entryId 时 getMessages 重建，不把长列表写回 ui-history', async () => {
+    it('truncateTo 本地找不到 entryId 时 getMessages 重建并落盘短列表', async () => {
       store = createAgentStore('.');
       store.loadMessages(
         [
@@ -469,6 +469,7 @@ describe('createAgentStore', () => {
         ),
       });
       piMock.writeUiHistory.mockClear();
+      piMock.deleteUiHistory.mockClear();
       piMock.getMessages.mockResolvedValueOnce({
         messages: [
           { role: 'user', content: 'keep', entryId: 'u1', timestamp: 1 },
@@ -483,9 +484,18 @@ describe('createAgentStore', () => {
       const msgs = store.useStore.getState().messages;
       expect(msgs).toHaveLength(2);
       expect(msgs.every((m) => m.kind !== 'user' || (m as { text: string }).text !== 'gone')).toBe(true);
-      // 不得用裁切失败前的 3 条长列表覆盖写盘：重建路径写的是后端短列表
+
       const writes = piMock.writeUiHistory.mock.calls.map((c) => String(c[2]));
-      expect(writes.some((body) => body.includes('gone'))).toBe(false);
+      const deleted = piMock.deleteUiHistory.mock.calls.length > 0;
+      // 写 0 次且未删旧历史 = 失败：短列表必须落盘，或至少删掉更长的旧 ui-history
+      expect(writes.length > 0 || deleted).toBe(true);
+      if (writes.length > 0) {
+        expect(writes.some((body) => body.includes('gone'))).toBe(false);
+        expect(writes.some((body) => body.includes('keep'))).toBe(true);
+        expect(piMock.writeUiHistory).toHaveBeenCalledWith('.', 'foo', expect.any(String));
+      } else {
+        expect(piMock.deleteUiHistory).toHaveBeenCalledWith('.', 'foo');
+      }
     });
 
     it('truncateTo 找不到 entryId 且 getMessages 失败时删除 ui-history', async () => {

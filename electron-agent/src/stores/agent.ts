@@ -375,7 +375,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       liveActivity = false;
       try {
         const res = await pi.getMessages(workspace);
-        loadMessages(res.messages, { force: true });
+        // 必须带 sessionPath：否则短列表只进内存，磁盘上更长的 ui-history 仍会在下次加载盖回已删消息。
+        loadMessages(res.messages, { force: true, sessionPath: loadedSessionPath });
       } catch {
         await deleteUiHistoryFailClosed();
       }
