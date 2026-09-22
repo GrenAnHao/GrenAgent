@@ -221,6 +221,16 @@ export const pi = {
   rewindTo: (workspace: string, timestamp: number) =>
     invoke<unknown>('agent_rewind_to', { workspace, timestamp }),
   /**
+   * 原地截断会话：按 entryId 删除目标（或仅其后继）并 reload。
+   * mode: drop-target 连目标一起删；keep-target 保留目标只删后代。
+   */
+  truncateTo: (workspace: string, entryId: string, mode: 'drop-target' | 'keep-target') =>
+    invoke<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' }>('agent_truncate_to', {
+      workspace,
+      entryId,
+      mode,
+    }),
+  /**
    * 直接按 entry id fork 出新分支（保留原路径，符合会话树模型）。
    * 预留给后续 Phase（手动 fork / 编辑后重生成）：当前前端无调用方，对应后端 command 已存在并注册。
    */

@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
@@ -11,6 +12,7 @@ import { isSessionWorkspaceMismatch, readSessionIdentity } from './sessionIdenti
 import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
 import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
+import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -30,6 +32,7 @@ const commandTypes = {
   agent_exclude_entry: 'prompt',
   agent_restore_entry: 'prompt',
   agent_rewind_to: 'fork',
+  agent_truncate_to: 'truncate',
   agent_compact: 'compact',
   agent_set_auto_compaction: 'set_auto_compaction',
   agent_abort_retry: 'abort_retry',
@@ -52,7 +55,7 @@ export interface AgentHostPort {
   workspaces?(): string[];
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
-  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
+  'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
 
 /** 第 3 份已删除 client 接缝：会话操作一律走 runOnHandle。 */
 interface SessionOps {
@@ -214,6 +217,9 @@ export class PiRuntimeService {
         await this.syncSessionFork(workspace, sourceSessionId, targetSessionId);
       }
       return result;
+    }
+    if (command === 'agent_truncate_to') {
+      return this.truncateSessionTo(handle, rpcArgs);
     }
     const adapter = this.options.threadStore && shouldTrackTurn(command, args)
       ? await this.prepareTurn(workspace, command, args, session)
@@ -505,8 +511,35 @@ export class PiRuntimeService {
         return { cancelled: (await handle.fork(leafId, { position: 'at' })).cancelled };
       }
       case 'agent_rewind_to': return handle.fork(String(args.entryId ?? ''));
+      case 'agent_truncate_to': throw new Error('agent_truncate_to must run through truncateSessionTo');
       default: throw new Error(`Unsupported handle command: ${command}`);
     }
+  }
+
+  private async truncateSessionTo(handle: WorkspaceHandlePort, args: Record<string, unknown>): Promise<unknown> {
+    const state = handle.getState();
+    const sessionFile = state.sessionFile;
+    if (typeof sessionFile !== 'string' || !sessionFile) throw new Error('no active session file');
+    const entryId = typeof args.entryId === 'string' ? args.entryId.trim() : '';
+    if (!entryId) throw new Error('entryId is required');
+    const mode = args.mode;
+    if (mode !== 'drop-target' && mode !== 'keep-target') {
+      throw new Error('mode must be drop-target or keep-target');
+    }
+
+    if (handle.session.isStreaming) await handle.session.abort();
+    await handle.session.waitForIdle();
+
+    const raw = await readFile(sessionFile, 'utf8');
+    const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const result = truncateSessionLines(lines, entryId, mode as TruncateMode);
+    if (!result.ok) return result;
+
+    const temporary = `${sessionFile}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${result.lines.join('\n')}\n`, 'utf8');
+    await rename(temporary, sessionFile);
+    await handle.reload();
+    return result;
   }
 
   private handleOps(handle: WorkspaceHandlePort, origin: 'main' | 'goal' = 'main'): SessionOps {

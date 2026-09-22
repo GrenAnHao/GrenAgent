@@ -41,6 +41,7 @@ function fakeHandle(session: Record<string, unknown> = {}) {
     newSession: vi.fn(async () => ({ cancelled: false })),
     switchSession: vi.fn(async () => ({ cancelled: false })),
     fork: vi.fn(async () => ({ cancelled: false })),
+    reload: vi.fn(async () => {}),
     ui: { respond: vi.fn() },
     currentTurnOrigin: 'main' as const,
     dispose: vi.fn(async () => {}),
@@ -653,6 +654,63 @@ describe('PiRuntimeService', () => {
     try {
       await expect(service.send('C:/work', 'agent_rewind_to', { timestamp: 200 })).resolves.toEqual({ cancelled: false });
       expect(handle.fork).toHaveBeenCalledWith('entry-2');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('truncates a linear session file in place and reloads', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-truncate-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    const assistant = (id: string, parentId: string) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'assistant', content: [{ type: 'text', text: id }], timestamp: 2 } });
+    await writeFile(sessionFile, [header, user('u1', null), assistant('a1', 'u1'), user('u2', 'a1')].join('\n'), 'utf8');
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: 'u2', mode: 'drop-target' }))
+        .resolves.toMatchObject({ ok: true });
+      const remaining = (await readFile(sessionFile, 'utf8'))
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line).id);
+      expect(remaining).toEqual(['s', 'u1', 'a1']);
+      expect(handle.reload).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects branched truncate without changing session file bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-truncate-branch-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    await writeFile(sessionFile, [header, user('u1', null), user('other', null)].join('\n'), 'utf8');
+    const before = await readFile(sessionFile);
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: 'u1', mode: 'drop-target' }))
+        .resolves.toEqual({ ok: false, reason: 'branched' });
+      expect(Buffer.compare(await readFile(sessionFile), before)).toBe(0);
+      expect(handle.reload).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
