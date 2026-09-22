@@ -112,4 +112,22 @@ describe('wiki raw sources', () => {
     service.removeRaw(wiki.wikiId, 'gone.md');
     expect(service.listRaw(wiki.wikiId)).toEqual([]);
   });
+
+  it('rejects relative or blank filenames and still accepts Chinese names', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-raw-'));
+    const db = new DatabaseSync(':memory:');
+    const service = new WikiService({ root, db, complete: async () => '' });
+    const wiki = service.create({ name: '文件名' });
+
+    expect(() => service.writeRaw(wiki.wikiId, './note.md', 'x')).toThrow(/invalid_path/);
+    expect(service.listRaw(wiki.wikiId)).toEqual([]);
+
+    expect(() => service.writeRaw(wiki.wikiId, ' 产品.md', 'x')).toThrow(/invalid_path/);
+    expect(() => service.writeRaw(wiki.wikiId, ' .md', 'x')).toThrow(/invalid_path/);
+
+    service.writeRaw(wiki.wikiId, '产品.md', '中文内容');
+    expect(service.listRaw(wiki.wikiId)).toEqual([
+      expect.objectContaining({ filename: '产品.md', status: 'uploaded' }),
+    ]);
+  });
 });

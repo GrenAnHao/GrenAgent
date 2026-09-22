@@ -1,7 +1,7 @@
 // Ported from TencentDB-Agent-Memory MemoryKnowledge (MIT).
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { initIndexDb, withWriteDb } from './indexDb';
 
@@ -244,32 +244,57 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     if (asset.status === 'processing') throw new Error('processing');
   }
 
-  private resolveRawPath(sourcesDir: string, filename: string): string {
-    if (
-      !filename ||
-      filename.includes('..') ||
-      filename.startsWith('/') ||
-      filename.startsWith('\\')
-    ) {
-      throw new Error('invalid_path');
+  private assertRawFilename(filename: string): void {
+    if (!filename) throw new Error('invalid_path');
+    if (filename.includes('/') || filename.includes('\\')) throw new Error('invalid_path');
+    if (filename === '.' || filename === '..') throw new Error('invalid_path');
+    if (filename !== filename.trim()) throw new Error('invalid_path');
+    for (let i = 0; i < filename.length; i++) {
+      const code = filename.charCodeAt(i);
+      if (code < 32 || code === 127) throw new Error('invalid_path');
     }
-    const normalized = normalize(filename);
-    if (normalized.startsWith('..') || normalized.startsWith('/') || normalized.startsWith('\\')) {
-      throw new Error('invalid_path');
-    }
-    const ext = extname(normalized).toLowerCase();
+    const ext = extname(filename).toLowerCase();
     if (!RAW_ALLOWED_EXT.has(ext)) throw new Error('invalid_path');
+    const stem = filename.slice(0, filename.length - ext.length);
+    if (!stem) throw new Error('invalid_path');
+  }
 
+  private resolveRawPath(sourcesDir: string, filename: string): string {
+    this.assertRawFilename(filename);
     const base = resolve(sourcesDir);
-    const safe = resolve(base, normalized);
+    const safe = resolve(base, filename);
     const dirWithSep = base.endsWith(sep) ? base : base + sep;
-    if (safe !== base && !safe.startsWith(dirWithSep)) throw new Error('invalid_path');
-    if (safe === base) throw new Error('invalid_path');
+    if (safe === base || !safe.startsWith(dirWithSep)) throw new Error('invalid_path');
     return safe;
   }
 
   private sha256(text: string): string {
     return createHash('sha256').update(text, 'utf8').digest('hex');
+  }
+
+  private readExistingContent(safePath: string): string | null {
+    try {
+      return readFileSync(safePath, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  private rollbackRawWrites(
+    written: Array<{ safePath: string; previous: string | null }>,
+  ): void {
+    for (let i = written.length - 1; i >= 0; i--) {
+      const item = written[i];
+      try {
+        if (item.previous === null) {
+          unlinkSync(item.safePath);
+        } else {
+          writeFileSync(item.safePath, item.previous, 'utf8');
+        }
+      } catch {
+        // best-effort restore
+      }
+    }
   }
 
   private upsertSource(
@@ -304,11 +329,19 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
 
     const sourcesDir = join(asset.dir, 'raw', 'sources');
     const safe = this.resolveRawPath(sourcesDir, filename);
+    const previous = this.readExistingContent(safe);
     mkdirSync(sourcesDir, { recursive: true });
-    writeFileSync(safe, content, 'utf8');
-    withWriteDb(asset.dir, (db) => {
-      this.upsertSource(db, { filename, sha256: this.sha256(content), size });
-    });
+    const written: Array<{ safePath: string; previous: string | null }> = [];
+    try {
+      writeFileSync(safe, content, 'utf8');
+      written.push({ safePath: safe, previous });
+      withWriteDb(asset.dir, (db) => {
+        this.upsertSource(db, { filename, sha256: this.sha256(content), size });
+      });
+    } catch (err) {
+      this.rollbackRawWrites(written);
+      throw err;
+    }
   }
 
   writeRawMany(wikiId: string, files: Array<{ filename: string; content: string }>): void {
@@ -319,26 +352,48 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     }
 
     const sourcesDir = join(asset.dir, 'raw', 'sources');
-    const plans: Array<{ filename: string; safePath: string; content: string; size: number }> = [];
+    const plans: Array<{
+      filename: string;
+      safePath: string;
+      content: string;
+      size: number;
+      previous: string | null;
+    }> = [];
     for (const { filename, content } of files) {
       if (typeof content !== 'string') throw new Error('invalid_path');
       const size = Buffer.byteLength(content, 'utf8');
       if (size > RAW_WRITE_MAX_BYTES) throw new Error('too_large');
       const safePath = this.resolveRawPath(sourcesDir, filename);
-      plans.push({ filename, safePath, content, size });
+      plans.push({
+        filename,
+        safePath,
+        content,
+        size,
+        previous: this.readExistingContent(safePath),
+      });
     }
 
     mkdirSync(sourcesDir, { recursive: true });
-    for (const p of plans) {
-      writeFileSync(p.safePath, p.content, 'utf8');
-    }
-    withWriteDb(asset.dir, (db) => {
+    const written: Array<{ safePath: string; previous: string | null }> = [];
+    try {
       for (const p of plans) {
-        this.upsertSource(db, { filename: p.filename, sha256: this.sha256(p.content), size: p.size });
+        writeFileSync(p.safePath, p.content, 'utf8');
+        written.push({ safePath: p.safePath, previous: p.previous });
       }
-    });
+      withWriteDb(asset.dir, (db) => {
+        for (const p of plans) {
+          this.upsertSource(db, {
+            filename: p.filename,
+            sha256: this.sha256(p.content),
+            size: p.size,
+          });
+        }
+      });
+    } catch (err) {
+      this.rollbackRawWrites(written);
+      throw err;
+    }
   }
-
   listRaw(wikiId: string): WikiRawSource[] {
     const asset = this.requireAsset(wikiId);
     const db = new DatabaseSync(join(asset.dir, 'index.db'));
