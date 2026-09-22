@@ -147,10 +147,10 @@ Output the merged complete page.`;
 
   const out = await llm.chat({ system: MERGE_SYSTEM, prompt, label: "merge-rewrite" });
 
-  // 兜底：若 LLM 返回空或无 frontmatter，退回候选页，避免丢页。
+  // 兜底：LLM 返回空或无 frontmatter → 保留旧页正文，只并 sources（勿用候选页覆盖）。
   const mergedParsed = parseFrontmatter(out);
   if (!out.trim() || !mergedParsed.hasFrontmatter) {
-    return reconcileSources(existingContent, candidateContent, candidateContent);
+    return reconcileSources(existingContent, candidateContent, existingContent);
   }
   return reconcileSources(existingContent, candidateContent, out);
 }

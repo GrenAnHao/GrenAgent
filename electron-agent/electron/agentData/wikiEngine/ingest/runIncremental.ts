@@ -141,11 +141,13 @@ export async function runIngestIncremental(
       return { filename: r.filename, sha256: r.sha256, size: r.size, ok: false, error: r.error };
     }
     const sourcePages = [...r.candidates.keys()];
+    // 只看该源自己的 mergeErrors：每个候选路径都有合并错误才算失败。
+    // locked 跳过不写 error → 仍算成功。不把别的源写同路径当成该源成功。
     const allMergeFailed =
       sourcePages.length > 0 &&
-      sourcePages.every((p) => mergeErrors.some((e) => e.source === r.filename && e.relPath === p)) &&
-      !sourcePages.some((p) => written.includes(p));
-    // locked-only skip: candidates exist but none written and no merge errors → still ok
+      sourcePages.every((p) =>
+        mergeErrors.some((e) => e.source === r.filename && e.relPath === p),
+      );
     return {
       filename: r.filename,
       sha256: r.sha256,

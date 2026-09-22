@@ -73,6 +73,10 @@ Source summary for b.md.
 function makeComplete(opts?: {
   failSources?: Set<string>;
   failOverview?: boolean;
+  /** merge-rewrite returns empty string (tests keep-old-body fallback). */
+  emptyMergeRewrite?: boolean;
+  /** Throw on merge-rewrite when prompt contains this marker (e.g. FROM FIRST). */
+  failMergePromptIncludes?: string;
   onCall?: (system: string, prompt: string, label?: string) => void;
 }) {
   let calls = 0;
@@ -152,6 +156,48 @@ SHOULD NOT APPLY
 `,
         );
       }
+      if (sourceName === 'merge-empty.md' || sourceName.startsWith('merge-empty.md')) {
+        return fileBlock(
+          'wiki/concepts/topic.md',
+          `---
+type: concept
+title: Topic
+sources:
+  - merge-empty.md
+---
+
+CANDIDATE THAT MUST NOT OVERWRITE
+`,
+        );
+      }
+      if (sourceName === 'first.md' || sourceName.startsWith('first.md')) {
+        return fileBlock(
+          'wiki/concepts/topic.md',
+          `---
+type: concept
+title: Topic
+sources:
+  - first.md
+---
+
+FROM FIRST
+`,
+        );
+      }
+      if (sourceName === 'second.md' || sourceName.startsWith('second.md')) {
+        return fileBlock(
+          'wiki/concepts/topic.md',
+          `---
+type: concept
+title: Topic
+sources:
+  - second.md
+---
+
+FROM SECOND
+`,
+        );
+      }
       return fileBlock(
         'wiki/sources/fallback.md',
         `---
@@ -167,6 +213,12 @@ fallback
     }
 
     if (label === 'merge-rewrite') {
+      if (opts?.failMergePromptIncludes && prompt.includes(opts.failMergePromptIncludes)) {
+        throw new Error('merge boom for first source');
+      }
+      if (opts?.emptyMergeRewrite) {
+        return '';
+      }
       return `---
 type: concept
 title: Topic
@@ -427,5 +479,64 @@ LOCKED BODY
       expect.objectContaining({ kind: 'busy', status: 'pending' }),
     );
     expect(calls).toBe(0);
+  });
+
+  it('keeps old page body when merge-rewrite returns empty', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-ingest-'));
+    const db = new DatabaseSync(':memory:');
+    const unique = 'UNIQUE_OLD_SENTENCE_KEEP_ME';
+    const mock = makeComplete({ emptyMergeRewrite: true });
+    const service = new WikiService({ root, db, complete: mock.complete });
+    const wiki = service.create({ name: '空重写保留' });
+    writeFileSync(
+      join(wiki.dir, 'wiki/concepts/topic.md'),
+      `---
+type: concept
+title: Topic
+sources:
+  - old.md
+---
+
+${unique}
+`,
+      'utf8',
+    );
+    service.writeRaw(wiki.wikiId, 'merge-empty.md', 'new material');
+    await service.ingest(wiki.wikiId);
+    const content = readFileSync(join(wiki.dir, 'wiki/concepts/topic.md'), 'utf8');
+    expect(content).toContain(unique);
+    expect(content).not.toContain('CANDIDATE THAT MUST NOT OVERWRITE');
+  });
+
+  it('marks only the failing source failed when two candidates share a page', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-ingest-'));
+    const db = new DatabaseSync(':memory:');
+    const mock = makeComplete({ failMergePromptIncludes: 'FROM FIRST' });
+    const service = new WikiService({ root, db, complete: mock.complete });
+    const wiki = service.create({ name: '同页合并部分失败' });
+    writeFileSync(
+      join(wiki.dir, 'wiki/concepts/topic.md'),
+      `---
+type: concept
+title: Topic
+sources:
+  - old.md
+---
+
+OLD SHARED
+`,
+      'utf8',
+    );
+    service.writeRaw(wiki.wikiId, 'first.md', 'first body');
+    service.writeRaw(wiki.wikiId, 'second.md', 'second body');
+    await service.ingest(wiki.wikiId);
+
+    const rows = service.listRaw(wiki.wikiId);
+    expect(rows.find((r) => r.filename === 'first.md')?.status).toBe('failed');
+    expect(rows.find((r) => r.filename === 'second.md')?.status).toBe('ingested');
+    expect(assetStatus(db, wiki.wikiId).status).toBe('ready');
+    expect(readFileSync(join(wiki.dir, 'wiki/concepts/topic.md'), 'utf8')).toContain(
+      'REWRITTEN FULL PAGE',
+    );
   });
 });
