@@ -126,6 +126,7 @@ vi.mock('../../stores/AgentStoreContext', () => {
             messages: [...state.storeState.messages, { kind: 'user', id: 'u1', text, ...(steering ? { steering: true } : {}) }],
           };
         },
+        syncEntryIdsAfterAccept: () => Promise.resolve(),
       },
       setWorkspaceReady: () => {},
       appBooted: true,

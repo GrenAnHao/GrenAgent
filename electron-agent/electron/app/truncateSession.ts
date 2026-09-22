@@ -2,7 +2,7 @@ export type TruncateMode = 'drop-target' | 'keep-target';
 
 export type TruncateSessionResult =
   | { ok: true; lines: string[] }
-  | { ok: false; reason: 'branched' };
+  | { ok: false; reason: 'branched' | 'missing' };
 
 type SessionLine = {
   type: string;
@@ -59,7 +59,7 @@ export function truncateSessionLines(
 ): TruncateSessionResult {
   const targetIndex = findTargetIndex(lines, targetId);
   if (targetIndex < 0) {
-    return { ok: true, lines: [...lines] };
+    return { ok: false, reason: 'missing' };
   }
 
   const descendants = collectDescendantIds(lines, targetId);

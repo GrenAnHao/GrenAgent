@@ -218,6 +218,7 @@ export function ChatView() {
       store.pushUserMessage(item.text, item.images);
       store.useStore.setState({ awaitingResponse: true, lastError: undefined });
       await pi.prompt(workspace, item.text, undefined, toPromptImages(item.images));
+      void store.syncEntryIdsAfterAccept();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!userAbortedRef.current && !/abort/i.test(msg)) {
@@ -298,6 +299,7 @@ export function ChatView() {
       for (let attempt = 0; attempt <= MAX_SEND_RETRIES; attempt++) {
         try {
           await pi.prompt(workspace, text, 'steer', images);
+          void store.syncEntryIdsAfterAccept();
           store.useStore.setState({ retrying: undefined });
           return;
         } catch (e) {
@@ -419,6 +421,7 @@ export function ChatView() {
         store.useStore.setState({ lastError: undefined });
         await commandLanes.run(workspace, async () => {
           await pi.prompt(workspace, text, undefined, images);
+          void store.syncEntryIdsAfterAccept();
           await awaitStreamingEnd(
             store.useStore,
             /^\//.test(text.trim()) ? { startTimeoutMs: 2000 } : undefined,

@@ -34,6 +34,14 @@ describe('truncateSessionLines', () => {
     expect(result).toEqual({ ok: false, reason: 'branched' });
   });
 
+  it('目标不存在时返回 missing，且不改输入', () => {
+    const lines = [header, user('u1', null), assistant('a1', 'u1')];
+    const before = [...lines];
+    const result = truncateSessionLines(lines, 'missing-id', 'drop-target');
+    expect(result).toEqual({ ok: false, reason: 'missing' });
+    expect(lines).toEqual(before);
+  });
+
   it('drop-target 从 user 截断时删除 model_change 与 assistant 链，保留 header', () => {
     const lines = [header, user('u1', null), modelChange('mc1', 'u1'), assistant('a1', 'mc1')];
     const result = truncateSessionLines(lines, 'u1', 'drop-target');

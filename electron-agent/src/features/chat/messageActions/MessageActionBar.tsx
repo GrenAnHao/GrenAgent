@@ -6,15 +6,52 @@ import { buildActionItem } from './slots';
 import type { MessageActionContext, MessageActionSlot, Notify } from './types';
 import { useOptionalAgentStoreContext } from '../../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../../stores/agent';
+import type { ChatMessage } from '../../../stores/agentReducer';
 
-/** 流式进行中从 bar/menu 滤掉的槽位：编辑/重生成/删除会改写会话，等回合结束后再露出。 */
-const HIDDEN_WHILE_STREAMING = new Set<MessageActionSlot>(['edit', 'regenerate', 'del']);
+/** 流式/等待响应中从 bar/menu 滤掉的槽位：编辑/重生成/删除会改写会话，等回合结束后再露出。 */
+const HIDDEN_WHILE_BUSY = new Set<MessageActionSlot>(['edit', 'regenerate', 'del']);
+/** 已移出上下文：不允许编辑/回退/重生成/删除。 */
+const HIDDEN_WHEN_EXCLUDED = new Set<MessageActionSlot>(['edit', 'regenerate', 'del', 'rewind']);
+/** 非当前上下文最后一条用户消息：隐藏编辑与重新生成。 */
+const HIDDEN_WHEN_NOT_LAST = new Set<MessageActionSlot>(['edit', 'regenerate']);
 
-function filterStreamingSlots(slots: MessageActionSlot[]): MessageActionSlot[];
-function filterStreamingSlots(slots: MessageActionSlot[] | undefined): MessageActionSlot[] | undefined;
-function filterStreamingSlots(slots: MessageActionSlot[] | undefined): MessageActionSlot[] | undefined {
+function filterSlots(
+  slots: MessageActionSlot[] | undefined,
+  hide: Set<MessageActionSlot>,
+): MessageActionSlot[] | undefined {
   if (!slots) return slots;
-  return slots.filter((slot) => !HIDDEN_WHILE_STREAMING.has(slot));
+  return slots.filter((slot) => !hide.has(slot));
+}
+
+function matchesUserMessage(
+  m: ChatMessage,
+  entryId: string | undefined,
+  timestamp: number | undefined,
+): boolean {
+  if (m.kind !== 'user') return false;
+  if (entryId && m.entryId) return m.entryId === entryId;
+  if (timestamp != null && m.timestamp != null) return m.timestamp === timestamp;
+  return false;
+}
+
+function findLastInContextUserIndex(messages: ChatMessage[], excluded: Set<number>): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.kind !== 'user') continue;
+    if (m.timestamp != null && excluded.has(m.timestamp)) continue;
+    return i;
+  }
+  return -1;
+}
+
+function hasReplyAfter(messages: ChatMessage[], userIndex: number): boolean {
+  for (let i = userIndex + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.kind === 'user') return false;
+    if (m.kind === 'assistant' || m.kind === 'tool') return true;
+  }
+  return false;
 }
 
 interface MessageActionBarProps {
@@ -81,75 +118,118 @@ function useNotify(): Notify {
   );
 }
 
-/** 有 store 上下文 + 消息带 timestamp：订阅 excluded 灰显态，注入移出/恢复/回退回调。 */
+/** 有 store 上下文 + 消息带 timestamp 或 entryId：订阅 excluded，注入上下文动作回调。 */
 function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: AgentStoreApi }) {
   const notify = useNotify();
-  const ts = ctx.timestamp as number; // 外层已保证 != null
-  const excluded = store.useStore((s) => s.excluded.has(ts));
-  // 流式进行中仍渲染操作栏（回退/复制可用），但滤掉 edit/regenerate/del，避免与进行中的回合抢状态。
-  const isStreaming = store.useStore((s) => s.isStreaming);
+  const ts = ctx.timestamp;
+  const excluded = store.useStore((s) => (ts != null ? s.excluded.has(ts) : false));
+  // 流式/等待响应中仍渲染操作栏（回退/复制可用），但滤掉 edit/regenerate/del。
+  const isBusy = store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse));
+  const messages = store.useStore((s) => s.messages);
+  const excludedSet = store.useStore((s) => s.excluded);
+
+  const lastIdx = findLastInContextUserIndex(messages, excludedSet);
+  const isLastInContext =
+    lastIdx >= 0 && matchesUserMessage(messages[lastIdx]!, ctx.entryId, ctx.timestamp);
+  const canRegenerate = isLastInContext && hasReplyAfter(messages, lastIdx);
+
   const enriched = useMemo<MessageActionContext>(
     () => ({
       ...ctx,
       excluded,
-      onExclude: async (t) => {
-        try {
-          await store.excludeMessage(t);
-        } catch {
-          notify.error('移出上下文失败');
-        }
-      },
-      onRestore: async (t) => {
-        try {
-          await store.restoreMessage(t);
-        } catch {
-          notify.error('恢复失败');
-        }
-      },
-      onRewind: async (entryId, text) => {
-        try {
-          await store.rewindAndLoad(entryId, text);
-          notify.success('已回退到此');
-        } catch {
-          notify.error('回退失败');
-        }
-      },
-      onRegenerate: async (entryId, text, images) => {
-        try {
-          await store.regenerate(entryId, text, images);
-        } catch {
-          notify.error('重新生成失败');
-        }
-      },
-      onDelete: async (entryId) => {
-        try {
-          await store.deleteFrom(entryId);
-          notify.success('已删除');
-        } catch {
-          notify.error('删除失败');
-        }
-      },
+      // excluded 消息不注入改写类回调；非最后一条不注入 regenerate。
+      onExclude:
+        ts == null
+          ? undefined
+          : async (t) => {
+              try {
+                await store.excludeMessage(t);
+              } catch {
+                notify.error('移出上下文失败');
+              }
+            },
+      onRestore:
+        ts == null
+          ? undefined
+          : async (t) => {
+              try {
+                await store.restoreMessage(t);
+              } catch {
+                notify.error('恢复失败');
+              }
+            },
+      onRewind: excluded
+        ? undefined
+        : async (entryId, text) => {
+            try {
+              await store.rewindAndLoad(entryId, text);
+              notify.success('已回退到此');
+            } catch {
+              notify.error('回退失败');
+            }
+          },
+      onRegenerate:
+        excluded || !canRegenerate
+          ? undefined
+          : async (entryId, text, images) => {
+              try {
+                await store.regenerate(entryId, text, images);
+              } catch {
+                notify.error('重新生成失败');
+              }
+            },
+      onDelete: excluded
+        ? undefined
+        : async (entryId) => {
+            try {
+              await store.deleteFrom(entryId);
+              notify.success('已删除');
+            } catch {
+              notify.error('删除失败');
+            }
+          },
+      // excluded / 非最后一条：去掉上游 onEdit，避免菜单里仍可点。
+      onEdit: excluded || !isLastInContext ? undefined : ctx.onEdit,
     }),
-    [ctx, excluded, store, notify],
+    [ctx, excluded, store, notify, ts, canRegenerate, isLastInContext],
   );
-  const visibleBar = isStreaming ? filterStreamingSlots(bar) : bar;
-  const visibleMenu = isStreaming ? filterStreamingSlots(menu) : menu;
+
+  let visibleBar = bar;
+  let visibleMenu = menu;
+  if (excluded) {
+    visibleBar = filterSlots(visibleBar, HIDDEN_WHEN_EXCLUDED) ?? visibleBar;
+    visibleMenu = filterSlots(visibleMenu, HIDDEN_WHEN_EXCLUDED);
+  } else if (!isLastInContext) {
+    visibleBar = filterSlots(visibleBar, HIDDEN_WHEN_NOT_LAST) ?? visibleBar;
+    visibleMenu = filterSlots(visibleMenu, HIDDEN_WHEN_NOT_LAST);
+  }
+  if (isBusy) {
+    visibleBar = filterSlots(visibleBar, HIDDEN_WHILE_BUSY) ?? visibleBar;
+    visibleMenu = filterSlots(visibleMenu, HIDDEN_WHILE_BUSY);
+  }
+  // 最后一条但尚无回复：隐藏重新生成（编辑仍可，若对话已停）。
+  if (!excluded && isLastInContext && !canRegenerate) {
+    const hideRegen = new Set<MessageActionSlot>(['regenerate']);
+    visibleBar = filterSlots(visibleBar, hideRegen) ?? visibleBar;
+    visibleMenu = filterSlots(visibleMenu, hideRegen);
+  }
+
   return renderActions(enriched, visibleBar, visibleMenu, notify);
 }
 
-/** 无 store 上下文（如子代理对话）或消息无 timestamp：仅渲染基础动作（copy 等）。 */
+/** 无 store 上下文（如子代理对话）或缺定位键：仅渲染基础动作（copy 等）。 */
 function PlainBar({ ctx, bar, menu }: MessageActionBarProps) {
   const notify = useNotify();
   return renderActions(ctx, bar, menu, notify);
 }
 
 /**
- * 通用消息操作栏。主对话（有 AgentStoreProvider）且消息带 timestamp 时启用上下文控制动作；
+ * 通用消息操作栏。主对话（有 AgentStoreProvider）且消息带 timestamp 或 entryId 时启用上下文控制动作；
  * 其余场景降级为基础动作，保证子代理对话等无 store 环境也能安全渲染。
  */
 export const MessageActionBar = memo<MessageActionBarProps>((props) => {
   const storeCtx = useOptionalAgentStoreContext();
-  if (storeCtx && props.ctx.timestamp != null) {
+  if (storeCtx && (props.ctx.timestamp != null || props.ctx.entryId)) {
     return <ContextBar {...props} store={storeCtx.store} />;
   }
   return <PlainBar {...props} />;

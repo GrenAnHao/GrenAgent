@@ -69,6 +69,11 @@ export interface AgentStoreApi {
   regenerate: (entryId: string, text: string, images?: UserImage[]) => Promise<void>;
   /** 删除确认：drop-target，不写入输入框。 */
   deleteFrom: (entryId: string) => Promise<void>;
+  /**
+   * prompt 被后端接受后立刻补本地用户消息的 entryId/timestamp（不重排、不 loadMessages）。
+   * 回合结束也会再跑一次，幂等。
+   */
+  syncEntryIdsAfterAccept: () => Promise<void>;
   reset: () => void;
   hasLiveActivity: () => boolean;
   /**
@@ -170,12 +175,12 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         // ignore
       }
       // 轻量回填：只补本地用户消息缺失的 entryId/timestamp，不重排列表（fire-and-forget）。
-      void syncEntryIdsAfterTurn();
+      void syncEntryIdsAfterAccept();
     }
   };
 
-  /** 回合结束后按序把 getMessages 带回的 entryId 补到本地用户消息。 */
-  const syncEntryIdsAfterTurn = async () => {
+  /** 按序把 getMessages 带回的 entryId/timestamp 补到本地用户消息；不重排、不整表重置。 */
+  const syncEntryIdsAfterAccept = async () => {
     try {
       const res = await pi.getMessages(workspace);
       const current = useStore.getState().messages;
@@ -189,7 +194,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         if (key) void pi.writeUiHistory(workspace, key, serializeHistory(patched)).catch(() => {});
       }
     } catch {
-      // ignore：回填失败不阻断回合结束路径
+      // ignore：回填失败不阻断发送/回合结束路径
     }
   };
 
@@ -392,7 +397,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     try {
       const result = await pi.truncateTo(workspace, entryId, mode);
       if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
-        throw new Error(result.reason === 'branched' ? '会话存在旁支，无法截断' : '截断失败');
+        throw new Error(
+          result.reason === 'branched'
+            ? '会话存在旁支，无法截断'
+            : result.reason === 'missing'
+              ? '截断失败：目标条目不存在'
+              : '截断失败',
+        );
       }
     } catch (error) {
       if (!isTruncatedOnDiskError(error)) throw error;
@@ -463,6 +474,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     rewindAndLoad,
     regenerate,
     deleteFrom,
+    syncEntryIdsAfterAccept,
     reset,
     hasLiveActivity: () => liveActivity,
     getLoadedSessionPath: () => loadedSessionPath,

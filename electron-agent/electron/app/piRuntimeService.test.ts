@@ -786,6 +786,32 @@ describe('PiRuntimeService', () => {
     }
   });
 
+  it('rejects missing truncate target without changing session file bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-truncate-missing-'));
+    const sessionFile = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 's', version: 1 });
+    const user = (id: string, parentId: string | null) =>
+      JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content: id, timestamp: 1 } });
+    await writeFile(sessionFile, [header, user('u1', null)].join('\n'), 'utf8');
+    const before = await readFile(sessionFile);
+    const { host, handle } = fakeAgentHost();
+    handle.getState = vi.fn(() => ({ sessionFile }));
+    const service = new PiRuntimeService({
+      agentDir: 'C:/agent',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+    });
+
+    try {
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: 'nope', mode: 'drop-target' }))
+        .resolves.toEqual({ ok: false, reason: 'missing' });
+      expect(Buffer.compare(await readFile(sessionFile), before)).toBe(0);
+      expect(handle.reload).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('removes truncate temporary file when rename fails and leaves the session file unchanged', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-truncate-rename-'));
     const sessionFile = join(root, 'session.jsonl');

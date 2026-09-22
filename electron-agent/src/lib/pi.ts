@@ -225,7 +225,7 @@ export const pi = {
    * mode: drop-target 连目标一起删；keep-target 保留目标只删后代。
    */
   truncateTo: (workspace: string, entryId: string, mode: 'drop-target' | 'keep-target') =>
-    invoke<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' }>('agent_truncate_to', {
+    invoke<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' | 'missing' }>('agent_truncate_to', {
       workspace,
       entryId,
       mode,

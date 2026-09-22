@@ -1,10 +1,36 @@
-import { afterEach, describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
 import { UserMessage } from './UserMessage';
 
 afterEach(cleanup);
+
+const { storeState, fakeStore, useOptional } = vi.hoisted(() => {
+  const storeState = {
+    excluded: new Set<number>(),
+    isStreaming: false,
+    awaitingResponse: false,
+    messages: [] as Array<{ kind: string; entryId?: string; timestamp?: number; text?: string }>,
+  };
+  const fakeStore = {
+    useStore: (sel: (s: typeof storeState) => unknown) => sel(storeState),
+    rewindAndLoad: () => {},
+    regenerate: () => {},
+    deleteFrom: () => {},
+    excludeMessage: () => {},
+    restoreMessage: () => {},
+  };
+  return {
+    storeState,
+    fakeStore,
+    useOptional: vi.fn(() => ({ store: fakeStore, workspace: '.' })),
+  };
+});
+
+vi.mock('../../stores/AgentStoreContext', () => ({
+  useOptionalAgentStoreContext: () => useOptional(),
+}));
 
 const renderMsg = (text: string) =>
   render(
@@ -16,6 +42,14 @@ const renderMsg = (text: string) =>
   );
 
 describe('UserMessage', () => {
+  afterEach(() => {
+    storeState.excluded = new Set();
+    storeState.isStreaming = false;
+    storeState.awaitingResponse = false;
+    storeState.messages = [];
+    useOptional.mockImplementation(() => ({ store: fakeStore, workspace: '.' }));
+  });
+
   it('把 pi:attachment 标记渲染成附件卡片, 正文进气泡', () => {
     const text =
       '看这个\n\n<pi:attachment type="file" path="src/config.ts" lines="42">\nconst x = 1\n</pi:attachment>';
@@ -67,5 +101,70 @@ describe('UserMessage', () => {
       </App>,
     );
     expect(container.querySelector('.chat-actions')).toBeNull();
+  });
+
+  it('非最后一条用户消息：没有编辑、没有重新生成', async () => {
+    storeState.messages = [
+      { kind: 'user', entryId: 'e-old', timestamp: 1000, text: 'old' },
+      { kind: 'assistant' },
+      { kind: 'user', entryId: 'e-last', timestamp: 2000, text: 'last' },
+      { kind: 'assistant' },
+    ];
+    render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="old" entryId="e-old" timestamp={1000} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
+    screen.getByRole('button', { name: '更多' }).click();
+    const menu = await screen.findByRole('menu');
+    expect(menu.textContent).not.toContain('编辑');
+    expect(menu.textContent).not.toContain('重新生成');
+  });
+
+  it('最后一条且后面有回复、对话停下：有编辑和重新生成', async () => {
+    storeState.messages = [
+      { kind: 'user', entryId: 'e-last', timestamp: 1000, text: 'last' },
+      { kind: 'assistant' },
+    ];
+    render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="last" entryId="e-last" timestamp={1000} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByTestId('msg-action-bar-edit')).toBeTruthy();
+    screen.getByRole('button', { name: '更多' }).click();
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByText('编辑')).toBeTruthy();
+    expect(within(menu).getByText('重新生成')).toBeTruthy();
+  });
+
+  it('excluded：没有编辑、回退、重新生成、删除', async () => {
+    storeState.excluded = new Set([1000]);
+    storeState.messages = [
+      { kind: 'user', entryId: 'e-ex', timestamp: 1000, text: 'ex' },
+      { kind: 'assistant' },
+      { kind: 'user', entryId: 'e-last', timestamp: 2000, text: 'last' },
+    ];
+    render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="ex" entryId="e-ex" timestamp={1000} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByText('已移出上下文')).toBeTruthy();
+    expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
+    expect(screen.queryByTestId('msg-action-bar-rewind')).toBeNull();
+    screen.getByRole('button', { name: '更多' }).click();
+    const menu = await screen.findByRole('menu');
+    expect(menu.textContent).not.toContain('编辑');
+    expect(menu.textContent).not.toContain('回退到此');
+    expect(menu.textContent).not.toContain('重新生成');
+    expect(menu.textContent).not.toContain('删除');
   });
 });

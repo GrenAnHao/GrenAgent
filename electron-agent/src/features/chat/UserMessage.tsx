@@ -11,7 +11,7 @@ import { parseAttachments } from './attachment';
 import { AttachmentCard } from './AttachmentCard';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
-import type { UserImage } from '../../stores/agentReducer';
+import type { ChatMessage, UserImage } from '../../stores/agentReducer';
 import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
 import { MessageEditBox } from './MessageEditBox';
@@ -67,6 +67,23 @@ function bodyTextOf(text: string): string {
 function toUserImages(images?: PromptImage[]): UserImage[] | undefined {
   if (!images?.length) return undefined;
   return images.map((img) => ({ mimeType: img.mimeType, data: img.data }));
+}
+
+function isLastInContextUser(
+  messages: ChatMessage[],
+  excluded: Set<number>,
+  entryId: string | undefined,
+  timestamp: number | undefined,
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.kind !== 'user') continue;
+    if (m.timestamp != null && excluded.has(m.timestamp)) continue;
+    if (entryId && m.entryId) return m.entryId === entryId;
+    if (timestamp != null && m.timestamp != null) return m.timestamp === timestamp;
+    return false;
+  }
+  return false;
 }
 
 /** 纯展示（不含 hooks）：供「带 store 订阅」与「无 store 降级」两条路径复用。 */
@@ -143,13 +160,24 @@ function ExcludableUserMessage(
   props: UserMessageProps & { store: AgentStoreApi; timestamp: number; onEdit?: () => void },
 ) {
   const excluded = props.store.useStore((s) => s.excluded.has(props.timestamp));
-  return renderUserMessage(props, excluded, props.onEdit);
+  return renderUserMessage(props, excluded, excluded ? undefined : props.onEdit);
 }
 
 function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps) {
   const storeCtx = useOptionalAgentStoreContext();
   const [editing, setEditing] = useState(false);
   const bodyText = bodyTextOf(text);
+
+  const isBusy = storeCtx
+    ? storeCtx.store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse))
+    : false;
+  const canEditLast = storeCtx
+    ? storeCtx.store.useStore((s) => isLastInContextUser(s.messages, s.excluded, entryId, timestamp))
+    : false;
+  const excludedNow =
+    storeCtx && timestamp != null
+      ? storeCtx.store.useStore((s) => s.excluded.has(timestamp))
+      : false;
 
   if (editing) {
     return (
@@ -176,7 +204,11 @@ function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps
     );
   }
 
-  const onEdit = bodyText && entryId ? () => setEditing(true) : undefined;
+  // 编辑：仅当前上下文最后一条用户消息，且对话停下；excluded / 无 store 不给。
+  const onEdit =
+    storeCtx && bodyText && entryId && !isBusy && canEditLast && !excludedNow
+      ? () => setEditing(true)
+      : undefined;
 
   if (storeCtx && timestamp != null) {
     return (

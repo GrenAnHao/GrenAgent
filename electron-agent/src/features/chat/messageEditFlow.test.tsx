@@ -22,7 +22,7 @@ const {
       _ws: string,
       _entryId: string,
       _mode: 'drop-target' | 'keep-target',
-    ): Promise<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' }> =>
+    ): Promise<{ ok: true; lines: string[] } | { ok: false; reason: 'branched' | 'missing' }> =>
       Promise.resolve({ ok: true, lines: [] }),
   ),
   writeUiHistory: vi.fn((_ws: string, _key: string, _content: string) => Promise.resolve()),
