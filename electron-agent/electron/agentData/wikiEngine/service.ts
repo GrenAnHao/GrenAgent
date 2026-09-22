@@ -1,9 +1,17 @@
 // Ported from TencentDB-Agent-Memory MemoryKnowledge (MIT).
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { extname, join, resolve, sep } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { initIndexDb, withWriteDb } from './indexDb';
+import { evictWikiDb, initIndexDb, writeIndex, withWriteDb, type WikiIndexPage } from './indexDb';
 
 /** Default purpose — software engineering knowledge base. */
 const DEFAULT_PURPOSE = `This knowledge base accumulates and organizes engineering knowledge of software systems,
@@ -95,6 +103,67 @@ export type WikiRawSource = {
 const RAW_WRITE_MAX_BYTES = 5 * 1024 * 1024;
 const RAW_WRITE_MAX = 50;
 const RAW_ALLOWED_EXT = new Set(['.md', '.txt']);
+
+const PAGE_WRITE_MAX_BYTES = 512 * 1024;
+const PAGE_BATCH_MAX = 20;
+
+const PAGE_FORBIDDEN_REFS = new Set([
+  'index',
+  'schema',
+  'purpose',
+  'wiki/index',
+  'wiki/schema',
+  'wiki/purpose',
+]);
+
+function injectLockedTrue(content: string): { content: string; lockedInjected: boolean } {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!fmMatch) {
+    const wrapped = `---\nlocked: true\n---\n${content.startsWith('\n') ? content.slice(1) : content}`;
+    return { content: wrapped, lockedInjected: true };
+  }
+  const fmBody = fmMatch[1];
+  const lockedMatch = fmBody.match(/^locked:\s*(true|false)\s*$/m);
+  if (lockedMatch) {
+    if (lockedMatch[1] === 'true') return { content, lockedInjected: false };
+    const newFmBody = fmBody.replace(/^locked:\s*(true|false)\s*$/m, 'locked: true');
+    return {
+      content: content.replace(fmBody, newFmBody),
+      lockedInjected: true,
+    };
+  }
+  const newFmBody = fmBody.endsWith('\n') ? `${fmBody}locked: true` : `${fmBody}\nlocked: true`;
+  return {
+    content: content.replace(fmBody, newFmBody),
+    lockedInjected: true,
+  };
+}
+
+function isForbiddenPageRef(ref: string): boolean {
+  const cleanRef = ref.replace(/^wiki\//, '').replace(/\.md$/, '');
+  return PAGE_FORBIDDEN_REFS.has(cleanRef) || PAGE_FORBIDDEN_REFS.has(`wiki/${cleanRef}`);
+}
+
+function extractFrontmatterFields(content: string): { title: string; type: string } {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  const fm = fmMatch ? fmMatch[1] : '';
+  const titleMatch = fm.match(/^title:\s*["']?(.+?)["']?\s*$/m);
+  const typeMatch = fm.match(/^type:\s*["']?(.+?)["']?\s*$/m);
+  return {
+    title: titleMatch ? titleMatch[1].trim() : '',
+    type: typeMatch ? typeMatch[1].trim().toLowerCase() : 'other',
+  };
+}
+
+function extractWikilinks(content: string): string[] {
+  const links: string[] = [];
+  const regex = /\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    links.push(match[1].trim());
+  }
+  return links;
+}
 
 function assertSafeWikiId(wikiId: string): void {
   if (
@@ -419,5 +488,209 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     withWriteDb(asset.dir, (db) => {
       db.prepare('DELETE FROM source WHERE filename = ?').run(filename);
     });
+  }
+
+  private resolvePagePath(wikiDir: string, ref: string, opts: { allowMissing?: boolean }): string {
+    if (!ref || ref.includes('..') || ref.startsWith('/') || ref.startsWith('\\')) {
+      throw new Error('invalid_path');
+    }
+    const cleanRef = ref.replace(/^wiki\//, '');
+    if (!cleanRef || cleanRef.includes('..')) throw new Error('invalid_path');
+
+    const base = resolve(wikiDir);
+    const baseWithSep = base.endsWith(sep) ? base : base + sep;
+    const candidates = cleanRef.endsWith('.md') ? [cleanRef] : [cleanRef + '.md', cleanRef];
+
+    for (const c of candidates) {
+      const safe = resolve(base, c);
+      if (safe === base || !safe.startsWith(baseWithSep)) continue;
+      if (opts.allowMissing) {
+        if (c.endsWith('.md')) return safe;
+        continue;
+      }
+      if (existsSync(safe)) return safe;
+    }
+
+    if (opts.allowMissing) {
+      const forced = cleanRef.endsWith('.md') ? cleanRef : `${cleanRef}.md`;
+      const safe = resolve(base, forced);
+      if (safe === base || !safe.startsWith(baseWithSep)) throw new Error('invalid_path');
+      return safe;
+    }
+    throw new Error('not_found');
+  }
+
+  private scanWikiPages(asset: WikiAsset): WikiIndexPage[] {
+    const wikiDir = join(asset.dir, 'wiki');
+    const pages: WikiIndexPage[] = [];
+    const walk = (dir: string): void => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        let st;
+        try {
+          st = statSync(full);
+        } catch {
+          continue;
+        }
+        if (st.isDirectory()) {
+          if (entry === 'media') continue;
+          walk(full);
+          continue;
+        }
+        if (!entry.endsWith('.md')) continue;
+        let content = '';
+        try {
+          content = readFileSync(full, 'utf8');
+        } catch {
+          continue;
+        }
+        const rel = full.slice(wikiDir.length + 1).replace(/\\/g, '/');
+        const id = rel.replace(/\.md$/, '');
+        const fm = extractFrontmatterFields(content);
+        pages.push({
+          id,
+          title: fm.title || basename(entry, '.md'),
+          type: fm.type,
+          relPath: `wiki/${rel}`,
+          content,
+          links: extractWikilinks(content),
+        });
+      }
+    };
+    walk(wikiDir);
+    return pages;
+  }
+
+  private rebuildPageIndex(asset: WikiAsset): void {
+    const pages = this.scanWikiPages(asset);
+    writeIndex(asset.dir, pages);
+    evictWikiDb(asset.wikiId);
+  }
+
+  writePage(wikiId: string, ref: string, content: string): { lockedInjected: boolean } {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+
+    if (Buffer.byteLength(content, 'utf8') > PAGE_WRITE_MAX_BYTES) throw new Error('too_large');
+    if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
+
+    const wikiDir = join(asset.dir, 'wiki');
+    const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: true });
+    const { content: finalContent, lockedInjected } = injectLockedTrue(content);
+
+    mkdirSync(join(safe, '..'), { recursive: true });
+    writeFileSync(safe, finalContent, 'utf8');
+    this.rebuildPageIndex(asset);
+    return { lockedInjected };
+  }
+
+  writePages(
+    wikiId: string,
+    pages: Array<{ ref: string; content: string }>,
+  ): Array<{ ref: string; lockedInjected: boolean }> {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+    if (pages.length > PAGE_BATCH_MAX) {
+      throw new Error(`pages exceeds max ${PAGE_BATCH_MAX}`);
+    }
+
+    const wikiDir = join(asset.dir, 'wiki');
+    type Plan = {
+      ref: string;
+      safePath: string;
+      finalContent: string;
+      lockedInjected: boolean;
+      previous: string | null;
+    };
+    const plans: Plan[] = [];
+    for (const { ref, content } of pages) {
+      if (typeof content !== 'string') throw new Error('invalid_path');
+      if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
+      if (Buffer.byteLength(content, 'utf8') > PAGE_WRITE_MAX_BYTES) throw new Error('too_large');
+      const safePath = this.resolvePagePath(wikiDir, ref, { allowMissing: true });
+      const { content: finalContent, lockedInjected } = injectLockedTrue(content);
+      plans.push({
+        ref,
+        safePath,
+        finalContent,
+        lockedInjected,
+        previous: this.readExistingContent(safePath),
+      });
+    }
+
+    const written: Array<{ safePath: string; previous: string | null }> = [];
+    try {
+      for (const p of plans) {
+        mkdirSync(join(p.safePath, '..'), { recursive: true });
+        writeFileSync(p.safePath, p.finalContent, 'utf8');
+        written.push({ safePath: p.safePath, previous: p.previous });
+      }
+      this.rebuildPageIndex(asset);
+    } catch (err) {
+      this.rollbackRawWrites(written);
+      throw err;
+    }
+    return plans.map(({ ref, lockedInjected }) => ({ ref, lockedInjected }));
+  }
+
+  readPage(wikiId: string, ref: string): string {
+    const asset = this.requireAsset(wikiId);
+    const wikiDir = join(asset.dir, 'wiki');
+    const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
+    return readFileSync(safe, 'utf8');
+  }
+
+  readPages(wikiId: string, refs: string[]): Array<{ ref: string; content: string }> {
+    const asset = this.requireAsset(wikiId);
+    if (refs.length > PAGE_BATCH_MAX) {
+      throw new Error(`refs exceeds max ${PAGE_BATCH_MAX}`);
+    }
+    const wikiDir = join(asset.dir, 'wiki');
+    return refs.map((ref) => {
+      const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
+      return { ref, content: readFileSync(safe, 'utf8') };
+    });
+  }
+
+  listPages(wikiId: string): Array<{ id: string; title: string; type: string; relPath: string }> {
+    const asset = this.requireAsset(wikiId);
+    if (asset.status !== 'ready') return [];
+    return this.scanWikiPages(asset).map(({ id, title, type, relPath }) => ({
+      id,
+      title,
+      type,
+      relPath,
+    }));
+  }
+
+  removePage(wikiId: string, ref: string): void {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+    if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
+
+    const wikiDir = join(asset.dir, 'wiki');
+    const safe = this.resolvePagePath(wikiDir, ref, { allowMissing: false });
+    unlinkSync(safe);
+    this.rebuildPageIndex(asset);
+  }
+
+  removePages(wikiId: string, refs: string[]): void {
+    const asset = this.requireAsset(wikiId);
+    this.assertWritable(asset);
+    if (refs.length > PAGE_BATCH_MAX) {
+      throw new Error(`refs exceeds max ${PAGE_BATCH_MAX}`);
+    }
+
+    const wikiDir = join(asset.dir, 'wiki');
+    const paths: string[] = [];
+    for (const ref of refs) {
+      if (isForbiddenPageRef(ref)) throw new Error('forbidden_path');
+      paths.push(this.resolvePagePath(wikiDir, ref, { allowMissing: false }));
+    }
+    for (const safe of paths) {
+      if (existsSync(safe)) unlinkSync(safe);
+    }
+    this.rebuildPageIndex(asset);
   }
 }
