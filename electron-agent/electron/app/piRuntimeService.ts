@@ -14,6 +14,7 @@ import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
 import { messagesWithEntryIds } from './messagesWithEntryIds.js';
+import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -47,6 +48,9 @@ const commandTypes = {
   agent_clone: 'clone',
   agent_get_fork_messages: 'get_fork_messages',
   agent_set_session_name: 'set_session_name',
+  ask_user_draft_read: 'prompt',
+  ask_user_draft_write: 'prompt',
+  ask_user_draft_delete: 'prompt',
 } as const;
 
 export interface AgentHostPort {
@@ -221,6 +225,23 @@ export class PiRuntimeService {
     }
     if (command === 'agent_truncate_to') {
       return this.truncateSessionTo(handle, rpcArgs);
+    }
+    if (command === 'ask_user_draft_read' || command === 'ask_user_draft_write' || command === 'ask_user_draft_delete') {
+      const sessionFile = handle.session.sessionFile;
+      if (typeof sessionFile !== 'string' || !sessionFile) throw new Error('ask_user draft requires a session file');
+      if (command === 'ask_user_draft_read') {
+        const toolCallId = args.toolCallId;
+        if (typeof toolCallId !== 'string' || !toolCallId) throw new Error('toolCallId must be a non-empty string');
+        return readAskUserDraft(sessionFile, toolCallId);
+      }
+      if (command === 'ask_user_draft_write') {
+        const draft = args.draft;
+        if (!draft || typeof draft !== 'object' || typeof (draft as AskUserDraft).toolCallId !== 'string') {
+          throw new Error('draft must be an object with a string toolCallId');
+        }
+        return writeAskUserDraft(sessionFile, draft as AskUserDraft);
+      }
+      return deleteAskUserDraft(sessionFile);
     }
     const adapter = this.options.threadStore && shouldTrackTurn(command, args)
       ? await this.prepareTurn(workspace, command, args, session)

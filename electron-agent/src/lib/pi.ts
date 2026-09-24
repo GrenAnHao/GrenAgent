@@ -5,6 +5,7 @@ import type { UsageReport } from './usageReport';
 export type { UsageReport } from './usageReport';
 import type { PackageListItem, PackageSearchResult } from '../../electron/app/piPackageModel';
 export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
+import type { AskUserDraft } from '../../electron/agent/askUserDraft';
 export type PackageInstallScope = 'user' | 'project';
 
 export interface PiEventEnvelope {
@@ -271,6 +272,12 @@ export const pi = {
     invoke<unknown>('permission_resolve', { requestId: id, resolution }),
   getSessionStats: (workspace: string) =>
     invoke<SessionStats>('agent_get_session_stats', { workspace }),
+  readAskUserDraft: (workspace: string, toolCallId: string) =>
+    invoke<AskUserDraft | null>('ask_user_draft_read', { workspace, toolCallId }),
+  writeAskUserDraft: (workspace: string, draft: AskUserDraft) =>
+    invoke<void>('ask_user_draft_write', { workspace, draft }),
+  deleteAskUserDraft: (workspace: string) =>
+    invoke<void>('ask_user_draft_delete', { workspace }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
