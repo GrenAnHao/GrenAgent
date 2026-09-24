@@ -115,6 +115,53 @@ describe('restoreInlineQuestionOnLoad', () => {
     });
   });
 
+  it('clears the previous card while loading, and opens restored only once with the real draft', async () => {
+    const draft = {
+      toolCallId: 'tc1',
+      selected: { q1: ['o1'] },
+      customTexts: {},
+      extraText: 'note',
+      extraImages: [],
+    };
+    let resolveDraft!: (value: typeof draft) => void;
+    readAskUserDraft.mockReturnValue(
+      new Promise<typeof draft>((resolve) => {
+        resolveDraft = resolve;
+      }),
+    );
+
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'old-tc',
+      data,
+      mode: 'restored',
+      toolCallId: 'old-tc',
+      sessionPath: '/s/old.jsonl',
+    });
+
+    restoreInlineQuestionOnLoad('/ws', pendingMsgs, '/s/a.jsonl');
+    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1'));
+
+    const mid = useInlineQuestionStore.getState().byWorkspace['/ws'];
+    // 旧卡已清；草稿未就绪前不得出现同 toolCallId 且 draft:null 的中间 restored。
+    expect(mid?.id).not.toBe('old-tc');
+    expect(
+      mid != null && mid.id === 'tc1' && mid.mode === 'restored' && mid.draft === null,
+    ).toBe(false);
+    expect(mid).toBeUndefined();
+
+    resolveDraft(draft);
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toMatchObject({
+        id: 'tc1',
+        mode: 'restored',
+        toolCallId: 'tc1',
+        sessionPath: '/s/a.jsonl',
+        draft,
+      });
+    });
+  });
+
   it('clears a non-live overlay when there is no pending ask_user', async () => {
     useInlineQuestionStore.getState().setRequest({
       workspace: '/ws',

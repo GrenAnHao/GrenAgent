@@ -62,16 +62,12 @@ async function restoreInlineQuestionOnLoadAsync(
   const toolCallId = pending.toolCallId;
   const path = sessionPath ?? undefined;
 
-  // 先落 restored 卡再读草稿，避免切会话时旧卡仍可点。
-  useInlineQuestionStore.getState().setRequest({
-    workspace,
-    id: toolCallId,
-    data,
-    mode: 'restored',
-    toolCallId,
-    sessionPath: path,
-    draft: null,
-  });
+  // 立刻清掉上一张非 live 卡，避免切会话后旧卡仍可点；草稿就绪前不 setRequest，
+  // 否则同 toolCallId 的 draft:null 中间态会让 InlineQuestionCard 灌空选并写盘冲掉草稿。
+  if (!isCurrent()) return;
+  if (useInlineQuestionStore.getState().byWorkspace[workspace]?.mode !== 'live') {
+    useInlineQuestionStore.getState().clear(workspace);
+  }
 
   let draft: AskUserDraft | null = null;
   if (sessionPath) {
