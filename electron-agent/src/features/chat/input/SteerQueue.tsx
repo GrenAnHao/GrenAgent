@@ -85,7 +85,7 @@ export function SteerQueue() {
   if (queue.length === 0) return null;
 
   return (
-    <div className={styles.wrap} data-testid="steer-queue">
+    <div className={styles.wrap} data-cap-layer="" data-testid="steer-queue">
       {queue.map((item) => {
         const editing = editingId === item.id;
         return (

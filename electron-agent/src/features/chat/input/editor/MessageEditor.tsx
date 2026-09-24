@@ -85,6 +85,10 @@ const styles = createStaticStyles(({ css }) => ({
     [data-dock-card] + [data-dock-card] {
       border-top: 1px solid ${cssVar.colorBorderSecondary};
     }
+
+    [data-cap-layer] + [data-cap-layer] {
+      border-top: 1px solid ${cssVar.colorBorderSecondary};
+    }
   `,
   body: css`
     scrollbar-width: thin;

@@ -184,13 +184,27 @@ describe('MessageEditor project context citations', () => {
   it('stacks queue, tasks, then goal inside the dock', async () => {
     useGoalStore.getState().setSnapshot('session-a', snapshot);
     agentState.composerQueue = [{ id: 'cq-1', text: '先改测试' }];
+    agentState.messages = [
+      {
+        kind: 'tool',
+        id: 'todo-1',
+        toolCallId: 'c1',
+        toolName: 'todo',
+        args: {},
+        status: 'done',
+        result: { details: { todos: [{ id: 1, text: '写组件', status: 'in_progress' }], nextId: 2 } },
+      },
+    ];
     render(<MessageEditor leftActions={[]} rightActions={[]} />);
 
     const dock = await screen.findByTestId('composer-dock');
     const queue = await screen.findByTestId('steer-queue');
+    const tasks = await screen.findByTestId('todo-dock');
     const goal = await screen.findByTestId('goal-pill');
-    expect(queue.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(queue.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tasks.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(dock.contains(queue)).toBe(true);
+    expect(dock.contains(tasks)).toBe(true);
     expect(dock.contains(goal)).toBe(true);
     expect(dock.compareDocumentPosition(screen.getByTestId('composer-surface')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
