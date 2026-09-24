@@ -1,5 +1,5 @@
 import { App } from 'antd';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { QuestionSelector } from '../../components/QuestionSelector';
 import { encodeAskUserAnswer, formatAnswers } from '../../components/QuestionSelector/answers';
 import type { ImageAttachment } from './input/ChatInputContext';
@@ -7,9 +7,11 @@ import {
   completeAskUser,
   deleteAskUserDraft,
   extensionUiRespond,
+  pi,
   writeAskUserDraft,
 } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import type { ChatMessage } from '../../stores/agentReducer';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 
 function draftImagesToAttachments(
@@ -24,17 +26,36 @@ function draftImagesToAttachments(
   }));
 }
 
+/** 从 ChatMessage 列表取最后一条 running ask_user 的 toolCallId。 */
+function findRunningAskUserToolCallId(messages: ChatMessage[]): string | undefined {
+  let last: string | undefined;
+  for (const m of messages) {
+    if (
+      m.kind === 'tool' &&
+      m.status === 'running' &&
+      typeof m.toolName === 'string' &&
+      m.toolName.toLowerCase() === 'ask_user'
+    ) {
+      last = m.toolCallId;
+    }
+  }
+  return last;
+}
+
 /**
  * 阻塞式 ask_user 富卡，由 `ComposerPromptOverlay` 渲染。
  */
 export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const { message } = App.useApp();
-  const { workspace } = useAgentStoreContext();
+  const { workspace, store } = useAgentStoreContext();
+  const messages = store.useStore((s) => s.messages);
   const item = useInlineQuestionStore((s) => s.byWorkspace[workspace]);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
   const [extraText, setExtraText] = useState('');
   const [extraImages, setExtraImages] = useState<ImageAttachment[]>([]);
+  /** undefined=未取；null=取过但没有；string=sessionFile */
+  const sessionFileRef = useRef<string | null | undefined>(undefined);
 
   const reqId = item?.id;
   useEffect(() => {
@@ -53,21 +74,43 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
     }
   }, [reqId, workspace]);
 
-  // agent store 的 messages 是 ChatMessage（kind），findPendingAskUser 要 role 形 AgentMessage；
-  // 现有通道读不到可喂给 findPendingAskUser 的原始会话消息，故跳过 live 补 toolCallId。
   useEffect(() => {
-    if (!item?.sessionPath || !item.toolCallId) return;
-    void writeAskUserDraft(workspace, {
-      toolCallId: item.toolCallId,
-      selected,
-      customTexts,
-      extraText,
-      extraImages: extraImages.map(({ type, mimeType, data }) => ({ type, mimeType, data })),
-    }).catch(() => {});
+    let cancelled = false;
+    void (async () => {
+      if (!item) return;
+      const toolCallId = item.toolCallId ?? findRunningAskUserToolCallId(messages);
+      if (!toolCallId) return;
+
+      let sessionPath = item.sessionPath;
+      if (!sessionPath) {
+        if (sessionFileRef.current === undefined) {
+          try {
+            const state = (await pi.getState(workspace)) as { sessionFile?: string | null };
+            sessionFileRef.current =
+              typeof state?.sessionFile === 'string' && state.sessionFile ? state.sessionFile : null;
+          } catch {
+            sessionFileRef.current = null;
+          }
+        }
+        sessionPath = sessionFileRef.current ?? undefined;
+      }
+      if (cancelled || !sessionPath) return;
+
+      await writeAskUserDraft(workspace, {
+        toolCallId,
+        selected,
+        customTexts,
+        extraText,
+        extraImages: extraImages.map(({ type, mimeType, data }) => ({ type, mimeType, data })),
+      }).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     workspace,
-    item?.sessionPath,
-    item?.toolCallId,
+    item,
+    messages,
     selected,
     customTexts,
     extraText,

@@ -7,7 +7,12 @@ vi.mock('../../../lib/pi', () => ({
   pi: { resolvePermission: vi.fn() },
 }));
 vi.mock('../../../stores/AgentStoreContext', () => ({
-  useAgentStoreContext: () => ({ workspace: '/ws' }),
+  useAgentStoreContext: () => ({
+    workspace: '/ws',
+    store: {
+      useStore: (selector: (s: { messages: unknown[] }) => unknown) => selector({ messages: [] }),
+    },
+  }),
   useAgentStore: () => ({
     useStore: { setState: () => undefined },
   }),

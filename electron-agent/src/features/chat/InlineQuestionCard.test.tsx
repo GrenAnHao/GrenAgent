@@ -1,14 +1,41 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { respond, completeAskUser, writeAskUserDraft, deleteAskUserDraft } = vi.hoisted(() => ({
-  respond: vi.fn(() => Promise.resolve()),
-  completeAskUser: vi.fn(() => Promise.resolve('ok' as const)),
-  writeAskUserDraft: vi.fn(() => Promise.resolve()),
-  deleteAskUserDraft: vi.fn(() => Promise.resolve()),
+const { respond, completeAskUser, writeAskUserDraft, deleteAskUserDraft, getState, mockMessages } = vi.hoisted(() => {
+  const mockMessages: Array<{
+    kind: string;
+    id: string;
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+    result: unknown;
+    status: string;
+  }> = [];
+  return {
+    respond: vi.fn(() => Promise.resolve()),
+    completeAskUser: vi.fn(() => Promise.resolve('ok' as const)),
+    writeAskUserDraft: vi.fn(() => Promise.resolve()),
+    deleteAskUserDraft: vi.fn(() => Promise.resolve()),
+    getState: vi.fn(() => Promise.resolve({ sessionFile: '/tmp/live.jsonl' })),
+    mockMessages,
+  };
+});
+vi.mock('../../lib/pi', () => ({
+  extensionUiRespond: respond,
+  completeAskUser,
+  writeAskUserDraft,
+  deleteAskUserDraft,
+  pi: { getState },
 }));
-vi.mock('../../lib/pi', () => ({ extensionUiRespond: respond, completeAskUser, writeAskUserDraft, deleteAskUserDraft }));
-vi.mock('../../stores/AgentStoreContext', () => ({ useAgentStoreContext: () => ({ workspace: '/ws' }) }));
+vi.mock('../../stores/AgentStoreContext', () => ({
+  useAgentStoreContext: () => ({
+    workspace: '/ws',
+    store: {
+      useStore: (selector: (s: { messages: typeof mockMessages }) => unknown) =>
+        selector({ messages: mockMessages }),
+    },
+  }),
+}));
 
 import { InlineQuestionCard } from './InlineQuestionCard';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
@@ -19,6 +46,8 @@ afterEach(() => {
   completeAskUser.mockClear();
   writeAskUserDraft.mockClear();
   deleteAskUserDraft.mockClear();
+  getState.mockClear();
+  mockMessages.length = 0;
   useInlineQuestionStore.setState({ byWorkspace: {} });
 });
 
@@ -82,5 +111,30 @@ describe('InlineQuestionCard', () => {
     fireEvent.click(screen.getByTestId('inline-question-continue'));
     expect(completeAskUser).toHaveBeenCalledWith('/ws', 'q1', '[我的选择]\n1. T：甲', undefined);
     expect(respond).not.toHaveBeenCalled();
+  });
+
+  it('writes a live draft using running ask_user and getState sessionFile', async () => {
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-1',
+      toolCallId: 'tc-live',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u-live', data, mode: 'live' });
+    render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('甲'));
+    await waitFor(() => {
+      expect(writeAskUserDraft).toHaveBeenCalledWith(
+        '/ws',
+        expect.objectContaining({
+          toolCallId: 'tc-live',
+          selected: { q1: ['a'] },
+        }),
+      );
+    });
+    expect(getState).toHaveBeenCalledWith('/ws');
   });
 });
