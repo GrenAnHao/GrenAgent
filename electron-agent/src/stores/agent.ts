@@ -282,7 +282,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // 重启后残留的 status:'running' 工具消息（进程被杀、未收到 tool_execution_end）标为 error，
     // 避免永久显示「运行中…」。
     const sanitized = processed.map((m) =>
-      m.kind === 'tool' && m.status === 'running' ? { ...m, status: 'error' as const } : m,
+      m.kind === 'tool' && m.status === 'running' && m.toolName.toLowerCase() !== 'ask_user'
+        ? { ...m, status: 'error' as const }
+        : m,
     );
     const composerQueue = useStore.getState().composerQueue;
     setFullState({

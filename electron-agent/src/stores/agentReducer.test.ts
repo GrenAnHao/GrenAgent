@@ -343,6 +343,29 @@ describe('applyEvent', () => {
     expect(msgs[0].kind).toBe('tool');
   });
 
+  it('messagesFromAgent keeps an unanswered ask_user as a running tool row', () => {
+    const msgs = messagesFromAgent([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: { questions: [{ question: '选哪个' }] } }],
+      },
+    ] as never);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: 'tool', toolCallId: 'q1', toolName: 'ask_user', status: 'running' });
+  });
+
+  it('messagesFromAgent does not keep ask_user after its tool result arrives', () => {
+    const msgs = messagesFromAgent([
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: { questions: [] } }],
+      },
+      { role: 'toolResult', toolCallId: 'q1', toolName: 'ask_user', content: [{ type: 'text', text: '[我的选择]\n1. 选哪个：甲' }], isError: false },
+    ] as never);
+    expect(msgs.filter((m) => m.kind === 'tool' && m.status === 'running')).toHaveLength(0);
+    expect(msgs.some((m) => m.kind === 'tool' && m.status === 'done')).toBe(true);
+  });
+
   it('accumulates thinking from thinking_delta and keeps it after message_end', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);

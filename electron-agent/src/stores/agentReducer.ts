@@ -1,4 +1,5 @@
 import { todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
+import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
 import type { WaitingUiPrompt } from './waitingUiPrompt';
 
@@ -648,6 +649,18 @@ export function messagesFromAgent(
       });
       pendingToolCalls.delete(toolCallId);
     }
+  }
+  const pending = findPendingAskUser(msgs);
+  if (pending && !out.some((m) => m.kind === 'tool' && m.toolCallId === pending.toolCallId)) {
+    out.push({
+      kind: 'tool',
+      id: nextId(),
+      toolCallId: pending.toolCallId,
+      toolName: 'ask_user',
+      args: pending.args,
+      result: undefined,
+      status: 'running',
+    });
   }
   return out;
 }
