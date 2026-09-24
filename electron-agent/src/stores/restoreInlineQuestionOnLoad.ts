@@ -52,6 +52,9 @@ async function restoreInlineQuestionOnLoadAsync(
     }
   }
 
+  // 读草稿期间可能已有现场 live 请求；不要盖掉它。
+  if (useInlineQuestionStore.getState().byWorkspace[workspace]?.mode === 'live') return;
+
   useInlineQuestionStore.getState().setRequest({
     workspace,
     id: pending.toolCallId,

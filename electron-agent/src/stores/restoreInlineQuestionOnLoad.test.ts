@@ -87,6 +87,34 @@ describe('restoreInlineQuestionOnLoad', () => {
     expect(readAskUserDraft).not.toHaveBeenCalled();
   });
 
+  it('does not replace a live request that arrives while the draft is still loading', async () => {
+    let resolveDraft!: (value: null) => void;
+    readAskUserDraft.mockReturnValue(
+      new Promise<null>((resolve) => {
+        resolveDraft = resolve;
+      }),
+    );
+
+    restoreInlineQuestionOnLoad('/ws', pendingMsgs, '/s/a.jsonl');
+    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalled());
+
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'live-2',
+      data,
+      mode: 'live',
+    });
+
+    resolveDraft(null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toMatchObject({
+      id: 'live-2',
+      mode: 'live',
+    });
+  });
+
   it('clears a non-live overlay when there is no pending ask_user', async () => {
     useInlineQuestionStore.getState().setRequest({
       workspace: '/ws',
