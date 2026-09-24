@@ -22,6 +22,8 @@ import {
   type PromptImage,
 } from '../features/chat/input/composerBridge';
 import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
+import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
+import { findPendingAskUser } from '../features/chat/pendingAskUser';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -280,12 +282,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     clearQueue();
     // 从会话树重建上下文排除集（best-effort），切换 / 重载会话后恢复灰显。
     // 重启后残留的 status:'running' 工具消息（进程被杀、未收到 tool_execution_end）标为 error，
-    // 避免永久显示「运行中…」。
-    const sanitized = processed.map((m) =>
-      m.kind === 'tool' && m.status === 'running' && m.toolName.toLowerCase() !== 'ask_user'
-        ? { ...m, status: 'error' as const }
-        : m,
-    );
+    // 避免永久显示「运行中…」。仅当前未完成的 ask_user（findPendingAskUser）保持 running，
+    // 并在 uiHistory 盖掉 backend 时补回缺失的 waiting 行。
+    const sanitized = applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs));
     const composerQueue = useStore.getState().composerQueue;
     setFullState({
       ...initialAgentState(),
