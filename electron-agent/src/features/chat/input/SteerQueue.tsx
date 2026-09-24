@@ -25,6 +25,11 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 13px;
     color: ${cssVar.colorText};
     text-align: left;
+    white-space: nowrap;
+  `,
+  headerLabel: css`
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
@@ -32,6 +37,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 6px 12px;
   `,
   head: css`
     display: flex;
@@ -113,7 +119,7 @@ export function SteerQueue() {
         title={firstTitle}
         type="button"
       >
-        {summary}
+        <span className={styles.headerLabel}>{summary}</span>
       </button>
       {expanded
         ? queue.map((item) => {
