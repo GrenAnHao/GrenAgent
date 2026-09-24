@@ -1,4 +1,4 @@
-import { useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
 import { CornerDownRight, GripVertical, PencilLine, Trash2 } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
@@ -113,6 +113,16 @@ export function SteerQueue() {
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [draft, setDraft] = useState('');
+  const dragDetachRef = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      dragDetachRef.current?.();
+      dragDetachRef.current = null;
+    },
+    [],
+  );
+
   if (queue.length === 0) return null;
 
   const summary = queueSummaryLabel(queue);
@@ -121,22 +131,39 @@ export function SteerQueue() {
   const onDragHandlePointerDown = (draggingId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
     event.stopPropagation();
+    dragDetachRef.current?.();
+
     const pointerId = event.pointerId;
+
+    const detach = () => {
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      if (dragDetachRef.current === detach) dragDetachRef.current = null;
+    };
+
     const onPointerUp = (up: PointerEvent) => {
       if (up.pointerId !== pointerId) return;
-      window.removeEventListener('pointerup', onPointerUp);
+      detach();
       const current = useStore.getState().composerQueue ?? [];
       if (!current.some((entry) => entry.id === draggingId)) return;
-      const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="composer-queue-item-"]')).map(
-        (el) => {
+      const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-queue-id]'))
+        .map((el) => {
           const rect = el.getBoundingClientRect();
           return { id: el.dataset.queueId ?? '', top: rect.top, bottom: rect.bottom };
-        },
-      ).filter((row) => row.id);
+        })
+        .filter((row) => row.id);
       const beforeId = queueDropBeforeId(rects, draggingId, up.clientY);
       useStore.setState({ composerQueue: moveComposerItem(current, draggingId, beforeId) });
     };
+
+    const onPointerCancel = (up: PointerEvent) => {
+      if (up.pointerId !== pointerId) return;
+      detach();
+    };
+
+    dragDetachRef.current = detach;
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
   };
 
   return (

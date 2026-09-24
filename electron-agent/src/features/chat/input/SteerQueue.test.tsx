@@ -178,4 +178,25 @@ describe('SteerQueue', () => {
     fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientY: 35 });
     expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-2']);
   });
+
+  it('pointercancel 后不再重排', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先改测试' },
+      { id: 'cq-2', text: '第二条' },
+    ];
+    render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
+
+    const row1 = screen.getByTestId('composer-queue-item-cq-1');
+    const row2 = screen.getByTestId('composer-queue-item-cq-2');
+    mockRect(row1, 0, 20);
+    mockRect(row2, 20, 40);
+
+    const handle = screen.getAllByTestId('queue-drag-handle')[0]!;
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 10 });
+    fireEvent.pointerCancel(window, { pointerId: 1, clientY: 35 });
+    fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientY: 35 });
+
+    expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-1', 'cq-2']);
+  });
 });
