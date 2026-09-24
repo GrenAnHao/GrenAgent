@@ -12,15 +12,43 @@ export function askUserDraftPath(sessionFile: string): string {
   return `${sessionFile}.ask-user-draft.json`;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseSelected(value: unknown): Record<string, string[]> | null {
+  if (!isPlainObject(value)) return null;
+  const selected: Record<string, string[]> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!Array.isArray(entry) || entry.some((item) => typeof item !== 'string')) return null;
+    selected[key] = entry;
+  }
+  return selected;
+}
+
+function parseCustomTexts(value: unknown): Record<string, string> | null {
+  if (value === undefined) return {};
+  if (!isPlainObject(value)) return null;
+  const customTexts: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') return null;
+    customTexts[key] = entry;
+  }
+  return customTexts;
+}
+
 export async function readAskUserDraft(sessionFile: string, toolCallId: string): Promise<AskUserDraft | null> {
   try {
     const parsed = JSON.parse(await readFile(askUserDraftPath(sessionFile), 'utf8')) as Partial<AskUserDraft>;
     if (!parsed || parsed.toolCallId !== toolCallId) return null;
-    if (!parsed.selected || typeof parsed.selected !== 'object') return null;
+    const selected = parseSelected(parsed.selected);
+    if (!selected) return null;
+    const customTexts = parseCustomTexts(parsed.customTexts);
+    if (!customTexts) return null;
     return {
       toolCallId,
-      selected: parsed.selected,
-      customTexts: parsed.customTexts && typeof parsed.customTexts === 'object' ? parsed.customTexts : {},
+      selected,
+      customTexts,
       extraText: typeof parsed.extraText === 'string' ? parsed.extraText : '',
       extraImages: Array.isArray(parsed.extraImages) ? parsed.extraImages.filter((img) => img && img.type === 'image' && typeof img.mimeType === 'string' && typeof img.data === 'string') : [],
     };

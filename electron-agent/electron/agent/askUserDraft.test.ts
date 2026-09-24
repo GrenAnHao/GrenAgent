@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,17 +19,22 @@ describe('askUserDraft', () => {
     expect(await readAskUserDraft(sessionFile, 'other')).toBeNull();
     await deleteAskUserDraft(sessionFile);
     expect(await readAskUserDraft(sessionFile, 'q1')).toBeNull();
-    await readFile(`${sessionFile}.ask-user-draft.json`).catch((error: NodeJS.ErrnoException) => {
-      expect(error.code).toBe('ENOENT');
-    });
+    await expect(readFile(`${sessionFile}.ask-user-draft.json`)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('returns null for corrupt json', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ask-draft-'));
     dirs.push(dir);
     const sessionFile = path.join(dir, 's.jsonl');
-    const { writeFile } = await import('node:fs/promises');
     await writeFile(`${sessionFile}.ask-user-draft.json`, '{');
+    expect(await readAskUserDraft(sessionFile, 'q1')).toBeNull();
+  });
+
+  it('returns null when selected is an array', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'ask-draft-'));
+    dirs.push(dir);
+    const sessionFile = path.join(dir, 's.jsonl');
+    await writeFile(`${sessionFile}.ask-user-draft.json`, JSON.stringify({ toolCallId: 'q1', selected: [] }));
     expect(await readAskUserDraft(sessionFile, 'q1')).toBeNull();
   });
 });
