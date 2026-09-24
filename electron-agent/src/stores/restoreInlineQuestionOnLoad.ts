@@ -7,6 +7,9 @@ import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import { pi } from '../lib/pi';
 import { useInlineQuestionStore } from './inlineQuestionStore';
 
+/** 每个 workspace 的恢复世代：新调用递增，过期的异步结果丢弃。 */
+const restoreGenerationByWorkspace = new Map<string, number>();
+
 /**
  * 会话载入后恢复未完成 ask_user 浮层（含草稿）。
  * 读草稿是异步的；调用方不要 await，以免打乱「先补行再算签名」顺序。
@@ -16,20 +19,26 @@ export function restoreInlineQuestionOnLoad(
   msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }>,
   sessionPath?: string | null,
 ): void {
-  void restoreInlineQuestionOnLoadAsync(workspace, msgs, sessionPath);
+  const generation = (restoreGenerationByWorkspace.get(workspace) ?? 0) + 1;
+  restoreGenerationByWorkspace.set(workspace, generation);
+  void restoreInlineQuestionOnLoadAsync(workspace, msgs, sessionPath, generation);
 }
 
 async function restoreInlineQuestionOnLoadAsync(
   workspace: string,
   msgs: Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }>,
-  sessionPath?: string | null,
+  sessionPath: string | null | undefined,
+  generation: number,
 ): Promise<void> {
+  const isCurrent = () => restoreGenerationByWorkspace.get(workspace) === generation;
+
   const cur = useInlineQuestionStore.getState().byWorkspace[workspace];
   // 活着的等待优先：不要 clear，也不要用 restored 覆盖。
   if (cur?.mode === 'live') return;
 
   const pending = findPendingAskUser(msgs);
   if (!pending) {
+    if (!isCurrent()) return;
     useInlineQuestionStore.getState().clear(workspace);
     return;
   }
@@ -41,27 +50,38 @@ async function restoreInlineQuestionOnLoadAsync(
     extraPlaceholder?: string;
   };
   const data = normalizeQuestions(raw.questions ?? [], pending.toolCallId, raw);
-  if (!data) return;
+  if (!data) {
+    if (!isCurrent()) return;
+    // 题目无法展示：清掉旧 restored，避免和 waiting 行不一致；live 不动。
+    if (useInlineQuestionStore.getState().byWorkspace[workspace]?.mode !== 'live') {
+      useInlineQuestionStore.getState().clear(workspace);
+    }
+    return;
+  }
+
+  const toolCallId = pending.toolCallId;
+  const path = sessionPath ?? undefined;
 
   let draft: AskUserDraft | null = null;
   if (sessionPath) {
     try {
-      draft = await pi.readAskUserDraft(workspace, pending.toolCallId);
+      draft = await pi.readAskUserDraft(workspace, toolCallId);
     } catch {
       draft = null;
     }
   }
 
-  // 读草稿期间可能已有现场 live 请求；不要盖掉它。
+  // 过期的异步恢复、或读草稿期间已有现场 live：都不要写。
+  if (!isCurrent()) return;
   if (useInlineQuestionStore.getState().byWorkspace[workspace]?.mode === 'live') return;
 
   useInlineQuestionStore.getState().setRequest({
     workspace,
-    id: pending.toolCallId,
+    id: toolCallId,
     data,
     mode: 'restored',
-    toolCallId: pending.toolCallId,
-    sessionPath: sessionPath ?? undefined,
+    toolCallId,
+    sessionPath: path,
     draft,
   });
 }

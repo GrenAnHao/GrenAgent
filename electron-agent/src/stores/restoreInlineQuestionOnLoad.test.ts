@@ -154,4 +154,111 @@ describe('restoreInlineQuestionOnLoad', () => {
     });
     expect(readAskUserDraft).toHaveBeenCalledTimes(1);
   });
+
+  it('drops a stale restore when a newer restore starts while the draft is still loading', async () => {
+    let resolveFirst!: (value: null) => void;
+    readAskUserDraft.mockImplementation((_ws: string, toolCallId: string) => {
+      if (toolCallId === 'tc1') {
+        return new Promise<null>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    restoreInlineQuestionOnLoad('/ws', pendingMsgs, '/s/a.jsonl');
+    await vi.waitFor(() => expect(readAskUserDraft).toHaveBeenCalledWith('/ws', 'tc1'));
+
+    const laterMsgs = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'tc2',
+            name: 'ask_user',
+            arguments: {
+              questions: [{ question: '第二题', options: ['丙'] }],
+            },
+          },
+        ],
+      },
+    ];
+    restoreInlineQuestionOnLoad('/ws', laterMsgs, '/s/b.jsonl');
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toMatchObject({
+        id: 'tc2',
+        mode: 'restored',
+        sessionPath: '/s/b.jsonl',
+      });
+    });
+
+    resolveFirst(null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toMatchObject({
+      id: 'tc2',
+      mode: 'restored',
+      sessionPath: '/s/b.jsonl',
+    });
+  });
+
+  it('clears a non-live overlay when questions cannot be normalized', async () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'old',
+      data,
+      mode: 'restored',
+      toolCallId: 'old',
+    });
+
+    const badMsgs = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'tc-bad',
+            name: 'ask_user',
+            arguments: { questions: [{ question: '   ', options: [] }] },
+          },
+        ],
+      },
+    ];
+    restoreInlineQuestionOnLoad('/ws', badMsgs, '/s/a.jsonl');
+    await Promise.resolve();
+
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toBeUndefined();
+  });
+
+  it('keeps a live overlay when questions cannot be normalized', async () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'live-3',
+      data,
+      mode: 'live',
+    });
+
+    const badMsgs = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'tc-bad',
+            name: 'ask_user',
+            arguments: { questions: [{ question: '', options: [] }] },
+          },
+        ],
+      },
+    ];
+    restoreInlineQuestionOnLoad('/ws', badMsgs, '/s/a.jsonl');
+    await Promise.resolve();
+
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toMatchObject({
+      id: 'live-3',
+      mode: 'live',
+    });
+  });
 });
