@@ -17,7 +17,7 @@ import { FileDiffBlock } from './FileDiffBlock';
 import { FileReadBlock } from './FileReadBlock';
 import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, mutationPath } from './fileDiffModel';
 import { LazyHighlighter } from './LazyHighlighter';
-import { GlobCard, GrepCard } from './SearchCards';
+import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
 import { renderExtensionCard } from './extensionCards';
 import {
@@ -244,6 +244,12 @@ function ToolDetail({
     return <FileDiffBlock path={diff.path} rows={diff.rows} added={diff.added} deleted={diff.deleted} />;
   }
 
+  if (name === 'search') {
+    const details = getDetails(result);
+    if (Array.isArray(details?.matches)) {
+      return <CodeSearchCard result={result} />;
+    }
+  }
   if (name === 'grep' || name === 'ripgrep') {
     if (status === 'running' && !text) return <CodeSurface>搜索中…</CodeSurface>;
     return <GrepCard result={result} />;

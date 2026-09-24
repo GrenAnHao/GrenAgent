@@ -20,6 +20,7 @@ describe('GrepCard', { timeout: 30_000 }, () => {
     expect(await screen.findByText('a.ts')).toBeTruthy();
     expect(screen.getByText('b.ts')).toBeTruthy();
     await waitFor(() => {
+      expect(container.textContent).toContain('3');
       expect(container.textContent).toContain('const foo = 1');
       expect(container.textContent).toContain('foo()');
     });
