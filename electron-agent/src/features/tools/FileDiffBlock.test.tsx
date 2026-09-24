@@ -46,11 +46,12 @@ describe('FileDiffBlock', () => {
 });
 
 describe('FileReadBlock', () => {
-  it('shows the file text through Highlighter', () => {
+  it('shows the file name and the file text', async () => {
     render(<FileReadBlock path="note.txt" text={'alpha\nbeta'} />);
-    const text = screen.getByTestId('file-read-block').textContent ?? '';
-    expect(text).toContain('alpha');
-    expect(text).toContain('beta');
+    expect(screen.getByTestId('code-card-name').textContent).toBe('note.txt');
+    expect(screen.getByTestId('code-card-header').querySelector('button')).toBeNull();
+    expect(await screen.findByText(/alpha/)).toBeTruthy();
+    expect(screen.getByTestId('file-read-block').textContent).toContain('beta');
   });
 
   it('renders nothing when text is empty', () => {
