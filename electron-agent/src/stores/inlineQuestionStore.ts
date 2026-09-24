@@ -1,10 +1,15 @@
 import { create } from 'zustand';
 import type { QSData } from '../components/QuestionSelector/answers';
+import type { AskUserDraft } from '../../electron/agent/askUserDraft';
 
 export interface InlineQuestionItem {
   workspace: string;
   id: string;
   data: QSData;
+  mode: 'live' | 'restored';
+  toolCallId?: string;
+  sessionPath?: string;
+  draft?: AskUserDraft | null;
 }
 
 interface InlineQuestionState {

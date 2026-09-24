@@ -77,6 +77,7 @@ describe('cancelPendingOverlay', () => {
       workspace: '/ws',
       id: 'u1',
       data: { kind: 'questions', id: 'q1', questions: [] },
+      mode: 'live',
     });
     expect(await cancelPendingOverlay('/ws')).toBe('cancelled');
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u1', cancelled: true });

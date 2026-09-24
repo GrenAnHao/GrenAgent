@@ -24,6 +24,7 @@ import {
 import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
 import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
+import { restoreInlineQuestionOnLoad } from './restoreInlineQuestionOnLoad';
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -273,9 +274,13 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // 后缓存缺行；切回时 showCachedSession + sig 命中会永久跳过补行。
     const sanitized = applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs));
     const sig = sessionSignature(sanitized);
+    // 浮层恢复：正常写入与「签名未变提前 return」两条路径都要跑，否则缓存命中会跳过浮层。
+    // 读草稿异步，不 await，以免打乱上面「先补行再算签名」的顺序。
+    const restoreOverlay = () => restoreInlineQuestionOnLoad(workspace, msgs, sessionPath);
     // 后台刷新命中「同一会话 + 内容未变」→ 跳过 setState：缓存已秒显，无谓重渲染会让整列闪一下。
     if (sessionPath != null && sessionPath === loadedSessionPath && sig === currentSig) {
       liveActivity = false;
+      restoreOverlay();
       return;
     }
     liveActivity = false;
@@ -298,6 +303,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       const key = sessionKeyFromPath(sessionPath);
       if (key) void pi.writeUiHistory(workspace, key, serializeHistory(backend)).catch(() => {});
     }
+    restoreOverlay();
   };
 
   // excluded 是 Set：每次以新 Set 替换，保证 zustand 浅比较能触发订阅者重渲染。

@@ -29,7 +29,7 @@ describe('InlineQuestionCard', () => {
   });
 
   it('submits formatted answer and clears', () => {
-    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u1', data });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u1', data, mode: 'live' });
     render(<InlineQuestionCard />);
     fireEvent.click(screen.getByText('乙'));
     fireEvent.click(screen.getByTestId('inline-question-continue'));
@@ -42,6 +42,7 @@ describe('InlineQuestionCard', () => {
         workspace: '/ws',
         id: 'u3',
         data: { ...data, allowExtra: true },
+        mode: 'live',
       });
       render(<InlineQuestionCard />);
       fireEvent.click(screen.getByText('乙'));

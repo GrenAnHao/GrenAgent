@@ -216,7 +216,12 @@ export function ExtensionUiHost() {
       if (method === 'input') {
         const data = parseAskUserPayload((e.request as { title?: unknown }).title);
         if (data) {
-          useInlineQuestionStore.getState().setRequest({ workspace: e.workspace, id: e.request.id, data });
+          useInlineQuestionStore.getState().setRequest({
+            workspace: e.workspace,
+            id: e.request.id,
+            data,
+            mode: 'live',
+          });
           return;
         }
         // visual choice 哨兵：read_visual_choice 阻塞中，标记 pending 并记录 requestId

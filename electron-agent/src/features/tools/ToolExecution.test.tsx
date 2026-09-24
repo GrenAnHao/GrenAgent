@@ -327,6 +327,7 @@ describe('ToolExecution ask_user stub', () => {
       workspace: '/ws',
       id: 'u1',
       data: { kind: 'questions', id: 'q1', questions: [] },
+      mode: 'live',
     });
     wrap(<ToolExecution toolName="ask_user" args={{}} result={{}} status="running" />);
     expect(screen.getByTestId('ask-user-pending')).toBeTruthy();

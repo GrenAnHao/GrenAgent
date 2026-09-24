@@ -135,6 +135,7 @@ describe('EnhancePromptAction', () => {
         id: 'q1',
         questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
       },
+      mode: 'live',
     });
     render(<EnhancePromptAction />);
     expect(screen.getByTestId('composer-enhance-prompt')).toBeDisabled();

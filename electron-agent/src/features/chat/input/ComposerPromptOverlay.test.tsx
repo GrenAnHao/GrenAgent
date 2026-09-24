@@ -68,6 +68,7 @@ describe('ComposerPromptOverlay', () => {
         id: 'q1',
         questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
       },
+      mode: 'live',
     });
     renderOverlay();
     expect(screen.getByTestId('composer-prompt-overlay')).toHaveStyle({ width: '480px' });
@@ -88,6 +89,7 @@ describe('ComposerPromptOverlay', () => {
           { id: 'q2', title: '第二题', options: [{ id: 'c', label: '丙' }] },
         ],
       },
+      mode: 'live',
     });
     renderOverlay();
     fireEvent.click(screen.getByText('甲'));
@@ -109,6 +111,7 @@ describe('ComposerPromptOverlay', () => {
         id: 'q1',
         questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
       },
+      mode: 'live',
     });
     renderOverlay();
     const overlay = screen.getByTestId('composer-prompt-overlay');
@@ -146,6 +149,7 @@ describe('ComposerPromptOverlay', () => {
         id: 'q1',
         questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
       },
+      mode: 'live',
     });
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
