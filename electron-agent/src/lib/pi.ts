@@ -378,6 +378,18 @@ export const pi = {
 export const extensionUiRespond = (workspace: string, response: Record<string, unknown>) =>
   pi.respondUi(workspace, response);
 
+export const writeAskUserDraft = (workspace: string, draft: AskUserDraft) =>
+  pi.writeAskUserDraft(workspace, draft);
+
+export const deleteAskUserDraft = (workspace: string) => pi.deleteAskUserDraft(workspace);
+
+export const completeAskUser = (
+  workspace: string,
+  toolCallId: string,
+  value?: string,
+  cancelled?: boolean,
+) => pi.completeAskUser(workspace, toolCallId, value, cancelled);
+
 export interface SessionInfo {
   id: string;
   path: string;

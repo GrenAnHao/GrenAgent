@@ -1,4 +1,4 @@
-import { extensionUiRespond, type ExtensionUiRequest } from '../../../lib/pi';
+import { extensionUiRespond, pi, type ExtensionUiRequest } from '../../../lib/pi';
 import type { ChatMessage } from '../../../stores/agentReducer';
 import { useInlineQuestionStore } from '../../../stores/inlineQuestionStore';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
@@ -59,11 +59,17 @@ export async function cancelPendingOverlay(
   const inline = useInlineQuestionStore.getState().byWorkspace[workspace];
   if (inline) {
     try {
-      await extensionUiRespond(workspace, {
-        type: 'extension_ui_response',
-        id: inline.id,
-        cancelled: true,
-      });
+      if (inline.mode === 'restored') {
+        const toolCallId = inline.toolCallId ?? inline.id;
+        await pi.completeAskUser(workspace, toolCallId, undefined, true);
+      } else {
+        await extensionUiRespond(workspace, {
+          type: 'extension_ui_response',
+          id: inline.id,
+          cancelled: true,
+        });
+      }
+      await pi.deleteAskUserDraft(workspace).catch(() => {});
       useInlineQuestionStore.getState().clear(workspace, inline.id);
       return 'cancelled';
     } catch {

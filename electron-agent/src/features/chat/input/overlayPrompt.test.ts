@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { respond, resolvePermission } = vi.hoisted(() => ({
+const { respond, completeAskUser, deleteAskUserDraft, resolvePermission } = vi.hoisted(() => ({
   respond: vi.fn(() => Promise.resolve()),
+  completeAskUser: vi.fn(() => Promise.resolve('ok' as const)),
+  deleteAskUserDraft: vi.fn(() => Promise.resolve()),
   resolvePermission: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('../../../lib/pi', () => ({
   extensionUiRespond: respond,
-  pi: { resolvePermission },
+  completeAskUser,
+  deleteAskUserDraft,
+  pi: { resolvePermission, completeAskUser, deleteAskUserDraft },
 }));
 
 import { useInlineQuestionStore } from '../../../stores/inlineQuestionStore';
@@ -20,6 +24,8 @@ import {
 
 afterEach(() => {
   respond.mockClear();
+  completeAskUser.mockClear();
+  deleteAskUserDraft.mockClear();
   resolvePermission.mockClear();
   useInlineQuestionStore.setState({ byWorkspace: {} });
   useUiPromptStore.setState({ byWorkspace: {} });
@@ -81,6 +87,21 @@ describe('cancelPendingOverlay', () => {
     });
     expect(await cancelPendingOverlay('/ws')).toBe('cancelled');
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u1', cancelled: true });
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toBeUndefined();
+  });
+
+  it('completes restored ask_user without extensionUiRespond', async () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'q1',
+      data: { kind: 'questions', id: 'q1', questions: [] },
+      mode: 'restored',
+      toolCallId: 'q1',
+      sessionPath: '/tmp/s.jsonl',
+    });
+    expect(await cancelPendingOverlay('/ws')).toBe('cancelled');
+    expect(completeAskUser).toHaveBeenCalledWith('/ws', 'q1', undefined, true);
+    expect(respond).not.toHaveBeenCalled();
     expect(useInlineQuestionStore.getState().byWorkspace['/ws']).toBeUndefined();
   });
 
