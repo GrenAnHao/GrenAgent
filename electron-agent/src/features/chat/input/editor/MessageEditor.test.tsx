@@ -181,6 +181,17 @@ describe('MessageEditor project context citations', () => {
     expect(screen.getByTestId('composer-dock').contains(queue)).toBe(true);
   });
 
+  it('leaves the composer dock empty when every layer is absent', () => {
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+
+    const dock = screen.getByTestId('composer-dock');
+    expect(dock.childElementCount).toBe(0);
+    const textNodes = Array.from(dock.childNodes).filter(
+      (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '') !== '',
+    );
+    expect(textNodes).toHaveLength(0);
+  });
+
   it('stacks queue, tasks, then goal inside the dock', async () => {
     useGoalStore.getState().setSnapshot('session-a', snapshot);
     agentState.composerQueue = [{ id: 'cq-1', text: '先改测试' }];

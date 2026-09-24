@@ -209,11 +209,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
 
   return (
     <div ref={zoneRef} className={styles.zone}>
-      <div data-testid="composer-dock" className={styles.dock}>
-        <SteerQueue />
-        <TodoDockFromStore />
-        <GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} />
-      </div>
+      <div data-testid="composer-dock" className={styles.dock}><SteerQueue /><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /></div>
       <SessionGoalDrawer
         onClose={() => setGoalDrawerSessionId(undefined)}
         onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
