@@ -25,6 +25,42 @@ import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
 import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import { restoreInlineQuestionOnLoad } from './restoreInlineQuestionOnLoad';
+import { useInlineQuestionStore } from './inlineQuestionStore';
+
+/**
+ * 缓存是 ChatMessage 列表；restore 需要 agent 形态才能 findPendingAskUser。
+ * 只从 running 的 ask_user 工具行合成一条，够恢复浮层。
+ */
+function agentMsgsForAskUserRestore(
+  messages: ChatMessage[],
+): Array<{ role?: unknown; content?: unknown; toolCallId?: unknown }> {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (
+      m.kind === 'tool' &&
+      typeof m.toolName === 'string' &&
+      m.toolName.toLowerCase() === 'ask_user' &&
+      m.status === 'running' &&
+      m.toolCallId
+    ) {
+      const args = m.args && typeof m.args === 'object' ? (m.args as Record<string, unknown>) : {};
+      return [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: m.toolCallId,
+              name: 'ask_user',
+              arguments: args,
+            },
+          ],
+        },
+      ];
+    }
+  }
+  return [];
+}
 
 export interface LoadMessagesOptions {
   force?: boolean;
@@ -489,11 +525,21 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       if (liveActivity) return false;
       const entry = getCachedSession(sessionPath);
       if (!entry) return false;
+      const previousPath = loadedSessionPath;
       loadedSessionPath = sessionPath;
       currentSig = entry.sig;
       clearQueue();
       const composerQueue = useStore.getState().composerQueue;
       setFullState({ ...initialAgentState(), messages: entry.messages, composerQueue });
+      // 同项目切会话：消息已是目标会话，浮层必须立刻对齐，否则用户会点到上一会话的卡。
+      // live 且仍属同一会话时保留；切到另一 sessionPath 则清掉后按缓存恢复。
+      const cur = useInlineQuestionStore.getState().byWorkspace[workspace];
+      if (!(cur?.mode === 'live' && previousPath === sessionPath)) {
+        if (cur?.mode === 'live') {
+          useInlineQuestionStore.getState().clear(workspace);
+        }
+        restoreInlineQuestionOnLoad(workspace, agentMsgsForAskUserRestore(entry.messages), sessionPath);
+      }
       return true;
     },
     destroy: () => {

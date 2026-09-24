@@ -20,6 +20,7 @@ const { eventHandlers, piMock } = vi.hoisted(() => ({
     ),
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
     deleteUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve()),
+    readAskUserDraft: vi.fn((_ws: string, _toolCallId: string) => Promise.resolve(null)),
   },
 }));
 vi.mock('../lib/pi', () => ({
@@ -38,6 +39,8 @@ vi.mock('@extensions/_shared/todo-model', () => ({
 import { createAgentStore } from './agent';
 import { clearThinkingDurationsForTest } from '../lib/thinkingDurations';
 import { getCachedSession } from '../lib/sessionMessageCache';
+import { useInlineQuestionStore } from './inlineQuestionStore';
+import type { QSData } from '../components/QuestionSelector/answers';
 
 function emit(event: unknown, source?: 'interactive' | 'goal') {
   for (const h of eventHandlers) h({ workspace: '.', event, source });
@@ -57,6 +60,8 @@ describe('createAgentStore', () => {
     piMock.getMessages.mockReset().mockResolvedValue({ messages: [] });
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.deleteUiHistory.mockReset().mockResolvedValue(undefined);
+    piMock.readAskUserDraft.mockReset().mockResolvedValue(null);
+    useInlineQuestionStore.setState({ byWorkspace: {} });
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -316,6 +321,121 @@ describe('createAgentStore', () => {
     // 同会话再次 load：签名须基于补行后列表，否则会提前 return 且界面停在无 waiting 的缓存。
     store.loadMessages(backendMsgs as never, { force: true, sessionPath, uiHistory });
     expect(store.useStore.getState().messages.some(isWaiting)).toBe(true);
+  });
+
+  const askOverlayData: QSData = {
+    kind: 'questions',
+    id: 'q1',
+    questions: [{ id: 'q1', title: '选哪个', options: [{ id: 'o1', label: '甲' }] }],
+  };
+
+  it('showCachedSession 无 pending ask_user 时立刻清掉上一会话的询问卡', async () => {
+    store = createAgentStore('.');
+    const withAsk = '/sessions/with-ask.jsonl';
+    const plain = '/sessions/plain.jsonl';
+
+    store.loadMessages(
+      [
+        { role: 'user', content: 'pick' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'old-tc',
+              name: 'ask_user',
+              arguments: { questions: [{ question: '选哪个', options: ['甲'] }] },
+            },
+          ],
+        },
+      ] as never,
+      { force: true, sessionPath: withAsk },
+    );
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']?.id).toBe('old-tc');
+    });
+
+    store.loadMessages([{ role: 'user', content: 'hello' }] as never, {
+      force: true,
+      sessionPath: plain,
+    });
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']).toBeUndefined();
+    });
+
+    // 再挂一张属于 withAsk 的卡，模拟切走前浮层仍在。
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '.',
+      id: 'stale-tc',
+      data: askOverlayData,
+      mode: 'restored',
+      toolCallId: 'stale-tc',
+      sessionPath: withAsk,
+    });
+
+    expect(store.showCachedSession(plain)).toBe(true);
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']).toBeUndefined();
+    });
+  });
+
+  it('showCachedSession 有 pending ask_user 时立刻换成缓存会话的卡', async () => {
+    store = createAgentStore('.');
+    const sessionA = '/sessions/a.jsonl';
+    const sessionB = '/sessions/b.jsonl';
+
+    store.loadMessages(
+      [
+        { role: 'user', content: 'a' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'tc-a',
+              name: 'ask_user',
+              arguments: { questions: [{ question: 'A题', options: ['甲'] }] },
+            },
+          ],
+        },
+      ] as never,
+      { force: true, sessionPath: sessionA },
+    );
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']?.id).toBe('tc-a');
+    });
+
+    store.loadMessages(
+      [
+        { role: 'user', content: 'b' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'tc-b',
+              name: 'ask_user',
+              arguments: { questions: [{ question: 'B题', options: ['乙'] }] },
+            },
+          ],
+        },
+      ] as never,
+      { force: true, sessionPath: sessionB },
+    );
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']?.id).toBe('tc-b');
+    });
+
+    // 浮层仍是 B，消息切回 A 的缓存：卡必须立刻变成 tc-a，不能留着 tc-b。
+    expect(store.showCachedSession(sessionA)).toBe(true);
+    await vi.waitFor(() => {
+      expect(useInlineQuestionStore.getState().byWorkspace['.']).toMatchObject({
+        id: 'tc-a',
+        mode: 'restored',
+        toolCallId: 'tc-a',
+        sessionPath: sessionA,
+      });
+    });
   });
 
   it('强制重载不会覆盖等待中的实时事件队列', () => {

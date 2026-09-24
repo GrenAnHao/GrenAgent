@@ -72,3 +72,22 @@ export async function completeAskUser(
   await session.agent.continue();
   return 'ok';
 }
+
+/**
+ * 补写已成功（含 duplicate）后删草稿。删除失败只记日志，仍返回原结果，
+ * 避免前端把已成功的补写当成失败、浮层卡住后再点一次 continue。
+ */
+export async function finishCompleteAskUser(
+  result: 'ok' | 'duplicate',
+  deleteDraft: () => Promise<void>,
+  logError: (err: unknown) => void = (err) => {
+    console.error('[ask_user] draft delete failed after complete', err);
+  },
+): Promise<'ok' | 'duplicate'> {
+  try {
+    await deleteDraft();
+  } catch (err) {
+    logError(err);
+  }
+  return result;
+}

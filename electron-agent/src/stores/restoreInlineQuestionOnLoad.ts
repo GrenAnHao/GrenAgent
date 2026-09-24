@@ -62,6 +62,17 @@ async function restoreInlineQuestionOnLoadAsync(
   const toolCallId = pending.toolCallId;
   const path = sessionPath ?? undefined;
 
+  // 先落 restored 卡再读草稿，避免切会话时旧卡仍可点。
+  useInlineQuestionStore.getState().setRequest({
+    workspace,
+    id: toolCallId,
+    data,
+    mode: 'restored',
+    toolCallId,
+    sessionPath: path,
+    draft: null,
+  });
+
   let draft: AskUserDraft | null = null;
   if (sessionPath) {
     try {

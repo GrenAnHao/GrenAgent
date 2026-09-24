@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { completeAskUser } from './completeAskUser';
+import { completeAskUser, finishCompleteAskUser } from './completeAskUser';
 
 function fakeSession(messages: Array<Record<string, unknown>>) {
   const appended: unknown[] = [];
@@ -58,5 +58,30 @@ describe('completeAskUser', () => {
       { role: 'assistant', content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: {} }] },
     ]);
     await expect(completeAskUser(session, { toolCallId: 'other', cancelled: true })).rejects.toThrow(/pending/);
+  });
+});
+
+describe('finishCompleteAskUser', () => {
+  it('returns the original result when draft delete fails', async () => {
+    const logError = vi.fn();
+    await expect(
+      finishCompleteAskUser('ok', async () => {
+        throw new Error('delete failed');
+      }, logError),
+    ).resolves.toBe('ok');
+    expect(logError).toHaveBeenCalledTimes(1);
+
+    await expect(
+      finishCompleteAskUser('duplicate', async () => {
+        throw new Error('delete failed');
+      }, logError),
+    ).resolves.toBe('duplicate');
+    expect(logError).toHaveBeenCalledTimes(2);
+  });
+
+  it('still returns the result when draft delete succeeds', async () => {
+    const deleteDraft = vi.fn(async () => {});
+    await expect(finishCompleteAskUser('ok', deleteDraft)).resolves.toBe('ok');
+    expect(deleteDraft).toHaveBeenCalledTimes(1);
   });
 });

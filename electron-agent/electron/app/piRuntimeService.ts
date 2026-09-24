@@ -15,7 +15,7 @@ import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey,
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
 import { messagesWithEntryIds } from './messagesWithEntryIds.js';
 import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
-import { completeAskUser } from '../agent/completeAskUser.js';
+import { completeAskUser, finishCompleteAskUser } from '../agent/completeAskUser.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -255,7 +255,7 @@ export class PiRuntimeService {
       });
       const sessionFile = handle.session.sessionFile;
       if (typeof sessionFile === 'string' && sessionFile) {
-        await deleteAskUserDraft(sessionFile);
+        return finishCompleteAskUser(result, () => deleteAskUserDraft(sessionFile));
       }
       return result;
     }
