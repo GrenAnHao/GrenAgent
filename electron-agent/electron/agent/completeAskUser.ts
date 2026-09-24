@@ -44,7 +44,14 @@ export async function completeAskUser(
   const alreadyHas = session.messages.some(
     (msg) => msg.role === 'toolResult' && msg.toolCallId === input.toolCallId,
   );
-  if (alreadyHas) return 'duplicate';
+  if (alreadyHas) {
+    const last = session.agent.state.messages.at(-1) as { role?: unknown; toolCallId?: unknown } | undefined;
+    if (last?.role === 'toolResult' && last.toolCallId === input.toolCallId) {
+      await session.agent.continue();
+      return 'ok';
+    }
+    return 'duplicate';
+  }
 
   const pending = findPendingAskUser(session.messages);
   if (!pending || pending.toolCallId !== input.toolCallId) {

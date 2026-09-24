@@ -32,10 +32,21 @@ describe('completeAskUser', () => {
     expect(session.agent.continue).toHaveBeenCalledTimes(1);
   });
 
-  it('does not append twice when the tool result already exists', async () => {
+  it('retries continue when the last message is already this tool result', async () => {
     const session = fakeSession([
       { role: 'assistant', content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: {} }] },
       { role: 'toolResult', toolCallId: 'q1', toolName: 'ask_user', content: [{ type: 'text', text: 'done' }] },
+    ]);
+    await expect(completeAskUser(session, { toolCallId: 'q1', cancelled: true })).resolves.toBe('ok');
+    expect(session.appended).toHaveLength(0);
+    expect(session.agent.continue).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns duplicate when a later message follows the tool result', async () => {
+    const session = fakeSession([
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: {} }] },
+      { role: 'toolResult', toolCallId: 'q1', toolName: 'ask_user', content: [{ type: 'text', text: 'done' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '已继续' }] },
     ]);
     await expect(completeAskUser(session, { toolCallId: 'q1', cancelled: true })).resolves.toBe('duplicate');
     expect(session.appended).toHaveLength(0);
