@@ -12,6 +12,7 @@ const { steerQueued, agentState } = vi.hoisted(() => ({
 vi.mock('../../../stores/AgentStoreContext', () => ({
   useAgentStore: () => ({
     useStore: Object.assign((sel: (s: typeof agentState) => unknown) => sel(agentState), {
+      getState: () => agentState,
       setState: (partial: Partial<typeof agentState> | ((s: typeof agentState) => Partial<typeof agentState>)) => {
         const patch = typeof partial === 'function' ? partial(agentState) : partial;
         Object.assign(agentState, patch);
@@ -86,5 +87,95 @@ describe('SteerQueue', () => {
     expect(agentState.composerQueue).toEqual([]);
     rerender(<SteerQueue />);
     expect(screen.queryByTestId('steer-queue')).toBeNull();
+  });
+
+  function mockRect(el: HTMLElement, top: number, bottom: number) {
+    el.getBoundingClientRect = () => ({
+      top,
+      bottom,
+      left: 0,
+      right: 100,
+      width: 100,
+      height: 20,
+      x: 0,
+      y: top,
+      toJSON() {
+        return {};
+      },
+    });
+  }
+
+  it('拖动手柄交换两条顺序', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先改测试' },
+      { id: 'cq-2', text: '第二条' },
+    ];
+    const { rerender } = render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
+
+    const row1 = screen.getByTestId('composer-queue-item-cq-1');
+    const row2 = screen.getByTestId('composer-queue-item-cq-2');
+    mockRect(row1, 0, 20);
+    mockRect(row2, 20, 40);
+
+    const handle = screen.getAllByTestId('queue-drag-handle')[0]!;
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 10 });
+    fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientY: 35 });
+    rerender(<SteerQueue />);
+
+    expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-2', 'cq-1']);
+  });
+
+  it('点引导不改变顺序', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先改测试' },
+      { id: 'cq-2', text: '第二条' },
+    ];
+    render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '发送引导' })[0]!);
+    expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-1', 'cq-2']);
+    expect(steerQueued).toHaveBeenCalledWith('cq-1');
+  });
+
+  it('编辑中被拖走仍在编辑', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先改测试' },
+      { id: 'cq-2', text: '第二条' },
+    ];
+    const { rerender } = render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑消息' })[0]!);
+
+    const row1 = screen.getByTestId('composer-queue-item-cq-1');
+    const row2 = screen.getByTestId('composer-queue-item-cq-2');
+    mockRect(row1, 0, 20);
+    mockRect(row2, 20, 40);
+
+    const handle = screen.getAllByTestId('queue-drag-handle')[0]!;
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 10 });
+    fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientY: 35 });
+    rerender(<SteerQueue />);
+
+    expect(screen.getByLabelText('编辑跟进')).toBeTruthy();
+    expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-2', 'cq-1']);
+  });
+
+  it('拖拽过程中条目被删则不写回', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先改测试' },
+      { id: 'cq-2', text: '第二条' },
+    ];
+    const { rerender } = render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
+
+    const handle = screen.getAllByTestId('queue-drag-handle')[0]!;
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 10 });
+
+    agentState.composerQueue = [{ id: 'cq-2', text: '第二条' }];
+    rerender(<SteerQueue />);
+
+    fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientY: 35 });
+    expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-2']);
   });
 });

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
 import { CornerDownRight, GripVertical, PencilLine, Trash2 } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useChatInput } from './ChatInputContext';
-import { updateComposerItem } from './composerQueue';
+import { moveComposerItem, updateComposerItem } from './composerQueue';
+import { queueDropBeforeId } from './queueDrop';
 import { queueSummaryLabel } from './queueSummary';
 import { useAgentStore } from '../../../stores/AgentStoreContext';
 
@@ -46,8 +47,15 @@ const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
   `,
   grip: css`
+    display: inline-flex;
     flex: none;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
     color: ${cssVar.colorTextQuaternary};
+    background: transparent;
+    cursor: grab;
   `,
   title: css`
     overflow: hidden;
@@ -110,6 +118,27 @@ export function SteerQueue() {
   const summary = queueSummaryLabel(queue);
   const firstTitle = queue[0]?.text.trim() || undefined;
 
+  const onDragHandlePointerDown = (draggingId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    const pointerId = event.pointerId;
+    const onPointerUp = (up: PointerEvent) => {
+      if (up.pointerId !== pointerId) return;
+      window.removeEventListener('pointerup', onPointerUp);
+      const current = useStore.getState().composerQueue ?? [];
+      if (!current.some((entry) => entry.id === draggingId)) return;
+      const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="composer-queue-item-"]')).map(
+        (el) => {
+          const rect = el.getBoundingClientRect();
+          return { id: el.dataset.queueId ?? '', top: rect.top, bottom: rect.bottom };
+        },
+      ).filter((row) => row.id);
+      const beforeId = queueDropBeforeId(rects, draggingId, up.clientY);
+      useStore.setState({ composerQueue: moveComposerItem(current, draggingId, beforeId) });
+    };
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
   return (
     <div className={styles.wrap} data-cap-layer="" data-testid="steer-queue">
       <button
@@ -125,9 +154,23 @@ export function SteerQueue() {
         ? queue.map((item) => {
             const editing = editingId === item.id;
             return (
-              <div className={styles.card} data-dock-card="" data-testid={`composer-queue-item-${item.id}`} key={item.id}>
+              <div
+                className={styles.card}
+                data-dock-card=""
+                data-queue-id={item.id}
+                data-testid={`composer-queue-item-${item.id}`}
+                key={item.id}
+              >
                 <div className={styles.head}>
-                  <Icon className={styles.grip} icon={GripVertical} size={14} />
+                  <button
+                    aria-label="拖拽排序"
+                    className={styles.grip}
+                    data-testid="queue-drag-handle"
+                    onPointerDown={(event) => onDragHandlePointerDown(item.id, event)}
+                    type="button"
+                  >
+                    <Icon icon={GripVertical} size={14} />
+                  </button>
                   <span className={styles.title}>跟进</span>
                   <div className={styles.actions}>
                     <ActionIcon
