@@ -15,6 +15,7 @@ import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey,
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
 import { messagesWithEntryIds } from './messagesWithEntryIds.js';
 import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
+import { completeAskUser } from '../agent/completeAskUser.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -51,6 +52,7 @@ const commandTypes = {
   ask_user_draft_read: 'prompt',
   ask_user_draft_write: 'prompt',
   ask_user_draft_delete: 'prompt',
+  agent_complete_ask_user: 'prompt',
 } as const;
 
 export interface AgentHostPort {
@@ -242,6 +244,20 @@ export class PiRuntimeService {
         return writeAskUserDraft(sessionFile, draft as AskUserDraft);
       }
       return deleteAskUserDraft(sessionFile);
+    }
+    if (command === 'agent_complete_ask_user') {
+      const toolCallId = args.toolCallId;
+      if (typeof toolCallId !== 'string' || !toolCallId) throw new Error('toolCallId must be a non-empty string');
+      const result = await completeAskUser(handle.session, {
+        toolCallId,
+        value: typeof args.value === 'string' ? args.value : undefined,
+        cancelled: args.cancelled === true,
+      });
+      const sessionFile = handle.session.sessionFile;
+      if (typeof sessionFile === 'string' && sessionFile) {
+        await deleteAskUserDraft(sessionFile);
+      }
+      return result;
     }
     const adapter = this.options.threadStore && shouldTrackTurn(command, args)
       ? await this.prepareTurn(workspace, command, args, session)

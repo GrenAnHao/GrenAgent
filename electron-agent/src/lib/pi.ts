@@ -278,6 +278,8 @@ export const pi = {
     invoke<void>('ask_user_draft_write', { workspace, draft }),
   deleteAskUserDraft: (workspace: string) =>
     invoke<void>('ask_user_draft_delete', { workspace }),
+  completeAskUser: (workspace: string, toolCallId: string, value?: string, cancelled?: boolean) =>
+    invoke<'ok' | 'duplicate'>('agent_complete_ask_user', { workspace, toolCallId, value, cancelled }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),

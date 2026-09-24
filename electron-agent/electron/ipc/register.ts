@@ -476,6 +476,7 @@ function registerPiCommands(service: PiRuntimeService): void {
     'agent_get_messages', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
     'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
     'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',
+    'agent_complete_ask_user',
   ]) {
     registerCommand(command, (_event, args) => {
       const { workspace, ...input } = args;
