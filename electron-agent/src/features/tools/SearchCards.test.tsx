@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
-import { GlobCard, GrepCard } from './SearchCards';
+import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 
 afterEach(cleanup);
 
@@ -11,22 +11,74 @@ const wrap = (ui: React.ReactElement) =>
 const textResult = (text: string) => ({ content: [{ type: 'text', text }] });
 
 describe('GrepCard', { timeout: 30_000 }, () => {
-  it('按文件分组展示命中行号与内容', () => {
+  it('按文件分组展示命中行号与内容', async () => {
     const result = textResult(
       ['Found 2 matches', '/proj/a.ts:', '  Line 3: const foo = 1', '', '/proj/b.ts:', '  Line 9: foo()'].join('\n'),
     );
     const { container } = wrap(<GrepCard result={result} />);
     expect(screen.getByTestId('card-grep')).toBeTruthy();
-    expect(container.textContent).toContain('a.ts');
-    expect(container.textContent).toContain('b.ts');
-    expect(container.textContent).toContain('3');
-    expect(container.textContent).toContain('const foo = 1');
-    expect(container.textContent).toContain('foo()');
+    expect(await screen.findByText('a.ts')).toBeTruthy();
+    expect(screen.getByText('b.ts')).toBeTruthy();
+    await waitFor(() => {
+      expect(container.textContent).toContain('const foo = 1');
+      expect(container.textContent).toContain('foo()');
+    });
+    expect(screen.getAllByTestId('code-card-header').every((header) => header.querySelector('button') == null)).toBe(true);
   });
 
   it('无命中显示占位', () => {
     const { container } = wrap(<GrepCard result={textResult('No files found')} />);
     expect(container.textContent).toContain('未找到匹配');
+  });
+});
+
+describe('CodeSearchCard', { timeout: 30_000 }, () => {
+  it('按文件展示代码命中', async () => {
+    const { container } = wrap(
+      <CodeSearchCard
+        result={{
+          content: [{ type: 'text', text: 'src/a.ts\n  12: export function PddWorkbench' }],
+          details: {
+            matches: [{ file: 'src/a.ts', line: 12, text: 'export function PddWorkbench' }],
+            total: 1,
+            files: 1,
+            capped: false,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('card-code-search')).toBeTruthy();
+    expect(await screen.findByText('a.ts')).toBeTruthy();
+    await waitFor(() => {
+      expect(container.textContent).toContain('export function PddWorkbench');
+    });
+    expect(screen.getByTestId('code-card-header').querySelector('button')).toBeNull();
+  });
+
+  it('无命中显示未找到匹配', () => {
+    const { container } = wrap(
+      <CodeSearchCard
+        result={{
+          content: [{ type: 'text', text: 'No matches.' }],
+          details: { matches: [], total: 0, files: 0, capped: false },
+        }}
+      />,
+    );
+    expect(container.textContent).toContain('未找到匹配');
+    expect(container.textContent).not.toContain('未找到结果');
+  });
+
+  it('工具失败时展示返回的原因', () => {
+    const { container } = wrap(
+      <CodeSearchCard
+        result={{
+          content: [{ type: 'text', text: 'search: no valid patterns.' }],
+          details: { matches: [], total: 0, files: 0, capped: false },
+        }}
+      />,
+    );
+    expect(container.textContent).toContain('search: no valid patterns.');
+    expect(container.textContent).not.toContain('未找到结果');
   });
 });
 

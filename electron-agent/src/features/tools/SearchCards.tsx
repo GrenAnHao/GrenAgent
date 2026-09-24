@@ -2,7 +2,10 @@ import { createStaticStyles, cssVar } from 'antd-style';
 import FileIcon from '../../components/FileIcon';
 import { memo } from 'react';
 import { extractText } from './toolUtils';
-import { parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
+import { parseCodeSearch, parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
+import { languageFromPath } from './codeLanguage';
+import { CodeCard } from './CodeCard';
+import { LazyHighlighter } from './LazyHighlighter';
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
@@ -10,21 +13,7 @@ const styles = createStaticStyles(({ css }) => ({
     flex-direction: column;
     gap: 6px;
     width: 100%;
-    max-width: 560px;
-  `,
-  file: css`
-    overflow: hidden;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
-    background: ${cssVar.colorBgContainer};
-  `,
-  fileHead: css`
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 8px;
-    font-size: 12px;
-    color: ${cssVar.colorTextSecondary};
+    max-width: 100%;
   `,
   fileName: css`
     overflow: hidden;
@@ -44,47 +33,6 @@ const styles = createStaticStyles(({ css }) => ({
     white-space: nowrap;
     direction: rtl;
     text-align: left;
-  `,
-  count: css`
-    flex-shrink: 0;
-    margin-inline-start: auto;
-    padding: 0 6px;
-    border-radius: 999px;
-    background: ${cssVar.colorFillTertiary};
-    color: ${cssVar.colorTextTertiary};
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-  `,
-  matches: css`
-    display: flex;
-    flex-direction: column;
-    border-block-start: 1px solid ${cssVar.colorFillQuaternary};
-  `,
-  matchRow: css`
-    display: flex;
-    gap: 8px;
-    padding: 2px 8px;
-    font-family: var(--code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
-    font-size: 12px;
-    line-height: 1.5;
-
-    &:hover {
-      background: ${cssVar.colorFillQuaternary};
-    }
-  `,
-  lineNo: css`
-    flex-shrink: 0;
-    min-width: 36px;
-    color: ${cssVar.colorTextQuaternary};
-    text-align: right;
-    user-select: none;
-    font-variant-numeric: tabular-nums;
-  `,
-  code: css`
-    overflow: hidden;
-    color: ${cssVar.colorTextSecondary};
-    text-overflow: ellipsis;
-    white-space: pre;
   `,
   row: css`
     display: flex;
@@ -114,34 +62,66 @@ function splitPath(p: string): { dir: string; name: string } {
   return i >= 0 ? { dir: norm.slice(0, i), name: norm.slice(i + 1) } : { dir: '', name: norm };
 }
 
-/** grep 命中卡：按文件分组，每组列出命中行号 + 内容（对齐 Cursor 的 Grepped 结果）。 */
+/** grep 命中卡：按文件分组，命中内容用 Highlighter 高亮。 */
 export const GrepCard = memo(function GrepCard({ result }: { result: unknown }) {
   const { truncated, files } = parseGrepOutput(extractText(result));
   if (files.length === 0) return <div className={styles.empty}>未找到匹配</div>;
   return (
     <div className={styles.wrap} data-testid="card-grep">
       {files.map((f) => {
-        const { dir, name } = splitPath(f.path);
+        const { name } = splitPath(f.path);
         return (
-          <div key={f.path} className={styles.file}>
-            <div className={styles.fileHead} title={f.path}>
-              <FileIcon fileName={name} size={13} variant="raw" />
-              <span className={styles.fileName}>{name}</span>
-              {dir && <span className={styles.dir}>{dir}</span>}
-              <span className={styles.count}>{f.matches.length}</span>
-            </div>
-            <div className={styles.matches}>
-              {f.matches.map((m, i) => (
-                <div className={styles.matchRow} key={i}>
-                  <span className={styles.lineNo}>{m.line}</span>
-                  <span className={styles.code}>{m.text}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <CodeCard fileName={name} key={f.path}>
+            <LazyHighlighter
+              copyable={false}
+              language={languageFromPath(f.path)}
+              showLanguage={false}
+              variant="borderless"
+              style={{ width: '100%' }}
+              styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
+            >
+              {f.matches.map((m) => m.text).join('\n')}
+            </LazyHighlighter>
+          </CodeCard>
         );
       })}
       {truncated && <div className={styles.more}>结果较多，已截断显示</div>}
+    </div>
+  );
+});
+
+/** 本地代码检索卡：按文件分组展示 `search` 的命中行。 */
+export const CodeSearchCard = memo(function CodeSearchCard({ result }: { result: unknown }) {
+  const details =
+    result && typeof result === 'object' && 'details' in result
+      ? (result as { details?: unknown }).details
+      : undefined;
+  const view = parseCodeSearch(
+    extractText(result),
+    details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>) : undefined,
+  );
+  if (view.error) return <div className={styles.empty}>{view.error}</div>;
+  if (view.files.length === 0) return <div className={styles.empty}>未找到匹配</div>;
+  return (
+    <div className={styles.wrap} data-testid="card-code-search">
+      {view.files.map((f) => {
+        const { name } = splitPath(f.path);
+        return (
+          <CodeCard fileName={name} key={f.path}>
+            <LazyHighlighter
+              copyable={false}
+              language={languageFromPath(f.path)}
+              showLanguage={false}
+              variant="borderless"
+              style={{ width: '100%' }}
+              styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
+            >
+              {f.matches.map((m) => m.text).join('\n')}
+            </LazyHighlighter>
+          </CodeCard>
+        );
+      })}
+      {view.capped && <div className={styles.more}>结果较多，已截断显示</div>}
     </div>
   );
 });
