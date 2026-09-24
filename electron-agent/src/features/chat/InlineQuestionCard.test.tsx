@@ -205,4 +205,130 @@ describe('InlineQuestionCard', () => {
     });
     expect(getState).toHaveBeenCalledWith('/ws');
   });
+
+  it('retries getState after a rejected lookup on the same request', async () => {
+    getState.mockRejectedValue(new Error('down'));
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-1',
+      toolCallId: 'tc-retry',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'live-retry', data, mode: 'live' });
+    render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('甲'));
+    await waitFor(() => {
+      expect(getState).toHaveBeenCalled();
+    });
+    expect(writeAskUserDraft).not.toHaveBeenCalled();
+
+    getState.mockClear();
+    writeAskUserDraft.mockClear();
+    getState.mockResolvedValue({ sessionFile: '/tmp/retry.jsonl' });
+    fireEvent.click(screen.getByText('乙'));
+    await waitFor(() => {
+      expect(getState).toHaveBeenCalled();
+      expect(writeAskUserDraft).toHaveBeenCalledWith(
+        '/ws',
+        expect.objectContaining({
+          toolCallId: 'tc-retry',
+          selected: { q1: ['b'] },
+        }),
+      );
+    });
+  });
+
+  it('ignores a stale getState result after the request changes', async () => {
+    let resolveFirst!: (value: unknown) => void;
+    getState.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-1',
+      toolCallId: 'tc-1',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'live-1', data, mode: 'live' });
+    const { rerender } = render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('甲'));
+    await waitFor(() => {
+      expect(getState).toHaveBeenCalled();
+    });
+
+    getState.mockResolvedValue({ sessionFile: '/tmp/new.jsonl' });
+    writeAskUserDraft.mockClear();
+    mockMessages.length = 0;
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-2',
+      toolCallId: 'tc-2',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'live-2', data, mode: 'live' });
+    rerender(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('乙'));
+    await waitFor(() => {
+      expect(writeAskUserDraft).toHaveBeenCalledWith(
+        '/ws',
+        expect.objectContaining({ toolCallId: 'tc-2', selected: { q1: ['b'] } }),
+      );
+    });
+
+    const writesBeforeStale = writeAskUserDraft.mock.calls.length;
+    resolveFirst({ sessionFile: null });
+    await Promise.resolve();
+    await Promise.resolve();
+    fireEvent.click(screen.getByText('甲'));
+    await waitFor(() => {
+      expect(writeAskUserDraft.mock.calls.length).toBeGreaterThan(writesBeforeStale);
+    });
+    const last = writeAskUserDraft.mock.calls.at(-1)?.[1] as { toolCallId?: string };
+    expect(last.toolCallId).toBe('tc-2');
+  });
+
+  it('keeps the restored card when completeAskUser rejects', async () => {
+    completeAskUser.mockRejectedValueOnce(new Error('complete failed'));
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'q1',
+      mode: 'restored',
+      toolCallId: 'q1',
+      sessionPath: '/tmp/s.jsonl',
+      draft: { toolCallId: 'q1', selected: { q1: ['a'] }, customTexts: {}, extraText: '', extraImages: [] },
+      data,
+    });
+    render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByTestId('inline-question-continue'));
+    await waitFor(() => {
+      expect(completeAskUser).toHaveBeenCalled();
+    });
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']?.id).toBe('q1');
+    expect(deleteAskUserDraft).not.toHaveBeenCalled();
+  });
+
+  it('keeps the live card and draft when extensionUiRespond rejects', async () => {
+    respond.mockRejectedValueOnce(new Error('respond failed'));
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'u-fail', data, mode: 'live' });
+    render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('乙'));
+    fireEvent.click(screen.getByTestId('inline-question-continue'));
+    await waitFor(() => {
+      expect(respond).toHaveBeenCalled();
+    });
+    expect(useInlineQuestionStore.getState().byWorkspace['/ws']?.id).toBe('u-fail');
+    expect(deleteAskUserDraft).not.toHaveBeenCalled();
+  });
 });

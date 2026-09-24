@@ -93,10 +93,12 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
         if (sessionFileRef.current === undefined) {
           try {
             const state = (await pi.getState(workspace)) as { sessionFile?: string | null };
+            if (cancelled) return;
             sessionFileRef.current =
               typeof state?.sessionFile === 'string' && state.sessionFile ? state.sessionFile : null;
           } catch {
-            sessionFileRef.current = null;
+            // 抛错不记 null，保持 undefined 以便下次选择再试。
+            if (cancelled) return;
           }
         }
         sessionPath = sessionFileRef.current ?? undefined;
@@ -156,8 +158,8 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
         });
         await deleteAskUserDraft(workspace).catch(() => {});
         clear();
-      } catch {
-        // live 失败：保留浮层与草稿，与 restored 一致不清。
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : String(err));
       }
     })();
   };
