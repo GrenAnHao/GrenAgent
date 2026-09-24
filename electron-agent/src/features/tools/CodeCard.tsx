@@ -109,8 +109,8 @@ export const CodeCard = memo(function CodeCard({
         </div>
         {showStats ? (
           <div className={styles.stats} data-testid="code-card-stats">
-            {deleted > 0 ? <span className={styles.del}>-{deleted}</span> : null}
             {added > 0 ? <span className={styles.add}>+{added}</span> : null}
+            {deleted > 0 ? <span className={styles.del}>-{deleted}</span> : null}
           </div>
         ) : null}
       </div>
