@@ -30,9 +30,14 @@ vi.mock('../lib/pi', () => ({
   },
   onPiExit: () => Promise.resolve(() => {}),
 }));
+// agent.ts 直接 import 的符号在本工作树 todo-model 里尚未落地；单测只关心消息载入路径。
+vi.mock('@extensions/_shared/todo-model', () => ({
+  todoListFinishedInTranscript: () => false,
+}));
 
 import { createAgentStore } from './agent';
 import { clearThinkingDurationsForTest } from '../lib/thinkingDurations';
+import { getCachedSession } from '../lib/sessionMessageCache';
 
 function emit(event: unknown, source?: 'interactive' | 'goal') {
   for (const h of eventHandlers) h({ workspace: '.', event, source });
@@ -264,6 +269,53 @@ describe('createAgentStore', () => {
     expect(msgs).toHaveLength(2);
     expect(msgs[0].kind).toBe('user');
     expect(msgs[0].kind === 'user' ? msgs[0].text : '').toBe('early');
+  });
+
+  it('loadMessages caches the restored ask_user waiting row used for signature', () => {
+    store = createAgentStore('.');
+    const sessionPath = '/sessions/ask-wait.jsonl';
+    // uiHistory 必须严格长于 backend（backend = user + messagesFromAgent 补的 ask_user 行 → 2），
+    // 才会走「用 UI 完整历史盖掉 backend」分支，从而暴露「先签名后补行」的缓存空洞。
+    const uiHistory = [
+      { id: 'h-0', kind: 'user' as const, text: 'early' },
+      { id: 'h-1', kind: 'assistant' as const, text: 'ok', thinking: '', streaming: false },
+      { id: 'h-2', kind: 'user' as const, text: 'pick one' },
+    ];
+    const backendMsgs = [
+      { role: 'user', content: 'pick one' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'q1',
+            name: 'ask_user',
+            arguments: { questions: [{ question: '选哪个' }] },
+          },
+        ],
+      },
+    ];
+    store.loadMessages(backendMsgs as never, { force: true, sessionPath, uiHistory });
+
+    const isWaiting = (m: { kind: string; toolCallId?: string; status?: string }) =>
+      m.kind === 'tool' && m.toolCallId === 'q1' && m.status === 'running';
+
+    expect(store.useStore.getState().messages.some(isWaiting)).toBe(true);
+
+    const cached = getCachedSession(sessionPath);
+    expect(cached?.messages.some(isWaiting)).toBe(true);
+
+    // 切走再灌缓存：缓存必须已含 waiting，否则 showCachedSession 会丢掉补行。
+    store.loadMessages([{ role: 'user', content: 'other' }] as never, {
+      force: true,
+      sessionPath: '/sessions/other.jsonl',
+    });
+    expect(store.showCachedSession(sessionPath)).toBe(true);
+    expect(store.useStore.getState().messages.some(isWaiting)).toBe(true);
+
+    // 同会话再次 load：签名须基于补行后列表，否则会提前 return 且界面停在无 waiting 的缓存。
+    store.loadMessages(backendMsgs as never, { force: true, sessionPath, uiHistory });
+    expect(store.useStore.getState().messages.some(isWaiting)).toBe(true);
   });
 
   it('强制重载不会覆盖等待中的实时事件队列', () => {

@@ -269,7 +269,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     const processed = expandSystemWorkerChat(
       uiHistory && uiHistory.length > backend.length ? uiHistory : backend,
     );
-    const sig = sessionSignature(processed);
+    // 先补回当前未完成 ask_user 的 waiting 行，再算签名 / 写缓存，避免 uiHistory 盖掉 backend
+    // 后缓存缺行；切回时 showCachedSession + sig 命中会永久跳过补行。
+    const sanitized = applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs));
+    const sig = sessionSignature(sanitized);
     // 后台刷新命中「同一会话 + 内容未变」→ 跳过 setState：缓存已秒显，无谓重渲染会让整列闪一下。
     if (sessionPath != null && sessionPath === loadedSessionPath && sig === currentSig) {
       liveActivity = false;
@@ -278,13 +281,9 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     liveActivity = false;
     if (sessionPath !== undefined) loadedSessionPath = sessionPath;
     currentSig = sig;
-    if (sessionPath != null) setCachedSession(sessionPath, processed, sig);
+    if (sessionPath != null) setCachedSession(sessionPath, sanitized, sig);
     clearQueue();
     // 从会话树重建上下文排除集（best-effort），切换 / 重载会话后恢复灰显。
-    // 重启后残留的 status:'running' 工具消息（进程被杀、未收到 tool_execution_end）标为 error，
-    // 避免永久显示「运行中…」。仅当前未完成的 ask_user（findPendingAskUser）保持 running，
-    // 并在 uiHistory 盖掉 backend 时补回缺失的 waiting 行。
-    const sanitized = applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs));
     const composerQueue = useStore.getState().composerQueue;
     setFullState({
       ...initialAgentState(),

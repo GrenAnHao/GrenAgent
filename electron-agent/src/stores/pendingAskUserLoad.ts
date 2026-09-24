@@ -9,7 +9,6 @@ export function applyPendingAskUserOnLoad(
   messages: ChatMessage[],
   pending: PendingAskUser | null,
 ): ChatMessage[] {
-  const pendingId = pending?.toolCallId ?? null;
   let sawPending = false;
 
   const out = messages.map((m) => {
