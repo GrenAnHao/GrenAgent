@@ -78,3 +78,85 @@ export function parseGlobOutput(text: string): GlobResult {
   }
   return { files, truncated };
 }
+
+export interface CodeSearchMatch {
+  line: number;
+  text: string;
+}
+
+export interface CodeSearchFile {
+  path: string;
+  matches: CodeSearchMatch[];
+}
+
+export interface CodeSearchView {
+  files: CodeSearchFile[];
+  total: number;
+  capped: boolean;
+  error?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** 解析 batch-tools `search` 的结果：优先 details.matches，否则解析文本分组。 */
+export function parseCodeSearch(text: string, details?: Record<string, unknown>): CodeSearchView {
+  if (details && Array.isArray(details.matches)) {
+    const files: CodeSearchFile[] = [];
+    const index = new Map<string, CodeSearchFile>();
+    for (const item of details.matches) {
+      if (!isRecord(item) || typeof item.file !== 'string' || !item.file) continue;
+      let file = index.get(item.file);
+      if (!file) {
+        file = { path: item.file, matches: [] };
+        index.set(item.file, file);
+        files.push(file);
+      }
+      file.matches.push({
+        line: typeof item.line === 'number' ? item.line : 0,
+        text: typeof item.text === 'string' ? item.text : '',
+      });
+    }
+    const total =
+      typeof details.total === 'number' ? details.total : files.reduce((n, file) => n + file.matches.length, 0);
+    const error = files.length === 0 && text.startsWith('search:') ? text : undefined;
+    return { files, total, capped: details.capped === true, error };
+  }
+  return parseCodeSearchText(text);
+}
+
+function parseCodeSearchText(text: string): CodeSearchView {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith('No matches')) {
+    return { files: [], total: 0, capped: false };
+  }
+  if (trimmed.startsWith('search:')) {
+    return { files: [], total: 0, capped: false, error: trimmed };
+  }
+
+  const files: CodeSearchFile[] = [];
+  let current: CodeSearchFile | null = null;
+  let total = 0;
+  let capped = false;
+  for (const raw of text.split('\n')) {
+    const footer = raw.match(/^\((\d+) matches in \d+ files(.*)\)$/);
+    if (footer) {
+      total = Number(footer[1]);
+      capped = /capped/i.test(footer[2] ?? '');
+      continue;
+    }
+    const hit = raw.match(/^ {2}(\d+): (.*)$/);
+    if (hit) {
+      current?.matches.push({ line: Number(hit[1]), text: hit[2] });
+      continue;
+    }
+    if (!raw.trim() || raw.startsWith(' ')) continue;
+    current = { path: raw, matches: [] };
+    files.push(current);
+  }
+
+  const withHits = files.filter((file) => file.matches.length > 0);
+  if (total === 0) total = withHits.reduce((n, file) => n + file.matches.length, 0);
+  return { files: withHits, total, capped };
+}
