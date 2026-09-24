@@ -207,7 +207,7 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
 
   return (
     <>
-      <div className={dockCard.card}>
+      <div className={dockCard.card} data-dock-card="">
       <div className={styles.row} data-testid="goal-pill" title={rowTitle}>
         <span
           className={styles.lamp}

@@ -89,7 +89,7 @@ export function SteerQueue() {
       {queue.map((item) => {
         const editing = editingId === item.id;
         return (
-          <div className={cx(dockCard.card, styles.card)} data-testid={`composer-queue-item-${item.id}`} key={item.id}>
+          <div className={cx(dockCard.card, styles.card)} data-dock-card="" data-testid={`composer-queue-item-${item.id}`} key={item.id}>
             <div className={styles.head}>
               <Icon className={styles.grip} icon={GripVertical} size={14} />
               <span className={styles.title}>跟进</span>

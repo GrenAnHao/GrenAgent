@@ -181,6 +181,20 @@ describe('MessageEditor project context citations', () => {
     expect(screen.getByTestId('composer-dock').contains(queue)).toBe(true);
   });
 
+  it('stacks queue, tasks, then goal inside the dock', async () => {
+    useGoalStore.getState().setSnapshot('session-a', snapshot);
+    agentState.composerQueue = [{ id: 'cq-1', text: '先改测试' }];
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+
+    const dock = await screen.findByTestId('composer-dock');
+    const queue = await screen.findByTestId('steer-queue');
+    const goal = await screen.findByTestId('goal-pill');
+    expect(queue.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.contains(queue)).toBe(true);
+    expect(dock.contains(goal)).toBe(true);
+    expect(dock.compareDocumentPosition(screen.getByTestId('composer-surface')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps the approval card in the editor flow, not the overlay', () => {
     useUiPromptStore.getState().setRequest({
       workspace: '/repo',

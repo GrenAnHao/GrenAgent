@@ -89,7 +89,7 @@ export function TodoDock({ todos }: { todos: readonly Todo[] }) {
   if (todos.length === 0) return null;
 
   return (
-    <div className={dockCard.card} data-testid="todo-dock">
+    <div className={dockCard.card} data-dock-card="" data-testid="todo-dock">
       <button
         aria-expanded={!collapsed}
         aria-label="任务"

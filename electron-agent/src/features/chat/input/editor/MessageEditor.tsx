@@ -62,12 +62,28 @@ const styles = createStaticStyles(({ css }) => ({
   dock: css`
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 6px;
+    margin-bottom: -1px;
+
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-bottom: none;
+    border-radius: ${cssVar.borderRadiusLG} ${cssVar.borderRadiusLG} 0 0;
+
+    background: ${cssVar.colorBgElevated};
 
     &:empty {
       display: none;
       margin: 0;
+      border: none;
+    }
+
+    [data-dock-card] {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+    }
+
+    [data-dock-card] + [data-dock-card] {
+      border-top: 1px solid ${cssVar.colorBorderSecondary};
     }
   `,
   body: css`
@@ -189,7 +205,11 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
 
   return (
     <div ref={zoneRef} className={styles.zone}>
-      <div data-testid="composer-dock" className={styles.dock}><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /><SteerQueue /></div>
+      <div data-testid="composer-dock" className={styles.dock}>
+        <SteerQueue />
+        <TodoDockFromStore />
+        <GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} />
+      </div>
       <SessionGoalDrawer
         onClose={() => setGoalDrawerSessionId(undefined)}
         onSnapshot={(snapshot) => setGoalSnapshot(snapshot.sessionId, snapshot)}
