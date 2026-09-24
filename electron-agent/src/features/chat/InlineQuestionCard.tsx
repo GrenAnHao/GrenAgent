@@ -54,13 +54,19 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
   const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
   const [extraText, setExtraText] = useState('');
   const [extraImages, setExtraImages] = useState<ImageAttachment[]>([]);
-  /** undefined=未取；null=取过但没有；string=sessionFile */
+  /** 已按当前 reqId 完成草稿灌入；写盘前必须匹配。 */
+  const [readyReqId, setReadyReqId] = useState<string | undefined>();
+  /** undefined=未取；null=取过但没有；string=sessionFile。随 reqId 重置。 */
   const sessionFileRef = useRef<string | null | undefined>(undefined);
 
   const reqId = item?.id;
   useEffect(() => {
+    sessionFileRef.current = undefined;
     const cur = useInlineQuestionStore.getState().byWorkspace[workspace];
-    if (!cur || cur.id !== reqId) return;
+    if (!cur || cur.id !== reqId) {
+      setReadyReqId(undefined);
+      return;
+    }
     if (cur.draft) {
       setSelected(cur.draft.selected);
       setCustomTexts(cur.draft.customTexts);
@@ -72,12 +78,13 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
       setExtraText('');
       setExtraImages([]);
     }
+    setReadyReqId(reqId);
   }, [reqId, workspace]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!item) return;
+      if (!item || readyReqId !== item.id) return;
       const toolCallId = item.toolCallId ?? findRunningAskUserToolCallId(messages);
       if (!toolCallId) return;
 
@@ -111,6 +118,7 @@ export const InlineQuestionCard = memo(function InlineQuestionCard() {
     workspace,
     item,
     messages,
+    readyReqId,
     selected,
     customTexts,
     extraText,

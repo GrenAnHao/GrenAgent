@@ -46,7 +46,7 @@ afterEach(() => {
   completeAskUser.mockClear();
   writeAskUserDraft.mockClear();
   deleteAskUserDraft.mockClear();
-  getState.mockClear();
+  getState.mockReset().mockResolvedValue({ sessionFile: '/tmp/live.jsonl' });
   mockMessages.length = 0;
   useInlineQuestionStore.setState({ byWorkspace: {} });
 });
@@ -132,6 +132,74 @@ describe('InlineQuestionCard', () => {
         expect.objectContaining({
           toolCallId: 'tc-live',
           selected: { q1: ['a'] },
+        }),
+      );
+    });
+    expect(getState).toHaveBeenCalledWith('/ws');
+  });
+
+  it('does not overwrite a restored draft with empty selection on mount', async () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'q1',
+      mode: 'restored',
+      toolCallId: 'q1',
+      sessionPath: '/tmp/s.jsonl',
+      draft: { toolCallId: 'q1', selected: { q1: ['a'] }, customTexts: {}, extraText: '', extraImages: [] },
+      data,
+    });
+    render(<InlineQuestionCard />);
+    await waitFor(() => {
+      const calls = writeAskUserDraft.mock.calls as Array<[string, { selected: Record<string, string[]> }]>;
+      expect(calls.every(([, d]) => Boolean(d.selected?.q1?.includes('a')))).toBe(true);
+      if (calls.length > 0) {
+        const last = calls[calls.length - 1]![1];
+        expect(last.selected?.q1).toEqual(['a']);
+      }
+    });
+  });
+
+  it('retries getState for a new live request after a null sessionFile', async () => {
+    getState.mockResolvedValue({ sessionFile: null });
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-1',
+      toolCallId: 'tc-1',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'live-1', data, mode: 'live' });
+    const { rerender } = render(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('甲'));
+    await waitFor(() => {
+      expect(getState).toHaveBeenCalled();
+    });
+    expect(writeAskUserDraft).not.toHaveBeenCalled();
+
+    writeAskUserDraft.mockClear();
+    getState.mockClear();
+    getState.mockResolvedValue({ sessionFile: '/tmp/second.jsonl' });
+    mockMessages.length = 0;
+    mockMessages.push({
+      kind: 'tool',
+      id: 'tool-2',
+      toolCallId: 'tc-2',
+      toolName: 'ask_user',
+      args: {},
+      result: null,
+      status: 'running',
+    });
+    useInlineQuestionStore.getState().setRequest({ workspace: '/ws', id: 'live-2', data, mode: 'live' });
+    rerender(<InlineQuestionCard />);
+    fireEvent.click(screen.getByText('乙'));
+    await waitFor(() => {
+      expect(writeAskUserDraft).toHaveBeenCalledWith(
+        '/ws',
+        expect.objectContaining({
+          toolCallId: 'tc-2',
+          selected: { q1: ['b'] },
         }),
       );
     });
