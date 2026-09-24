@@ -1,7 +1,8 @@
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Check } from 'lucide-react';
-import { memo } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
+import { labelOverflows } from './labelOverflows';
 
 const styles = createStaticStyles(({ css }) => ({
   opt: css`
@@ -74,10 +75,24 @@ export const OptionRow = memo(function OptionRow({
   multi,
   onClick,
 }: OptionRowProps) {
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  useLayoutEffect(() => {
+    const el = labelRef.current;
+    setOverflow(el ? labelOverflows(el) : false);
+  }, [label]);
+
   return (
     <div className={cx(styles.opt, selected && styles.sel)} onClick={onClick}>
       <span className={styles.key}>{index}</span>
-      <span className={styles.label}>{label}</span>
+      <span
+        ref={labelRef}
+        className={styles.label}
+        data-testid="option-row-label"
+        title={overflow ? label : undefined}
+      >
+        {label}
+      </span>
       {multi && selected ? <Icon className={styles.ck} icon={Check} size={13} /> : null}
       {!multi && recommended ? <span className={styles.rec}>推荐</span> : null}
     </div>
