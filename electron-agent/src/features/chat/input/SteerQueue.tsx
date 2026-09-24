@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
 import { CornerDownRight, GripVertical, PencilLine, Trash2 } from 'lucide-react';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { useChatInput } from './ChatInputContext';
 import { updateComposerItem } from './composerQueue';
-import { dockCard } from './dockCard';
+import { queueSummaryLabel } from './queueSummary';
 import { useAgentStore } from '../../../stores/AgentStoreContext';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -12,6 +12,21 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     flex-direction: column;
     gap: 6px;
+  `,
+  header: css`
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 6px 12px;
+    overflow: hidden;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    color: ${cssVar.colorText};
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   `,
   card: css`
     display: flex;
@@ -75,82 +90,98 @@ function actionProps(label: string) {
 /**
  * 执行中发送后停在输入栏的跟进条。
  * 点引导 → 注入当前回合；不点 → 本轮结束后自动跟进；可编辑 / 删除。
+ * 默认收起为一行摘要，点标题才展开每条。
  */
 export function SteerQueue() {
   const { useStore } = useAgentStore();
   const queue = useStore((s) => s.composerQueue) ?? [];
   const { steerQueued } = useChatInput();
+  const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [draft, setDraft] = useState('');
   if (queue.length === 0) return null;
 
+  const summary = queueSummaryLabel(queue);
+  const firstTitle = queue[0]?.text.trim() || undefined;
+
   return (
     <div className={styles.wrap} data-cap-layer="" data-testid="steer-queue">
-      {queue.map((item) => {
-        const editing = editingId === item.id;
-        return (
-          <div className={cx(dockCard.card, styles.card)} data-dock-card="" data-testid={`composer-queue-item-${item.id}`} key={item.id}>
-            <div className={styles.head}>
-              <Icon className={styles.grip} icon={GripVertical} size={14} />
-              <span className={styles.title}>跟进</span>
-              <div className={styles.actions}>
-                <ActionIcon
-                  {...actionProps('发送引导')}
-                  icon={CornerDownRight}
-                  onClick={() => steerQueued(item.id)}
-                  size="small"
-                />
-                <ActionIcon
-                  {...actionProps('编辑消息')}
-                  icon={PencilLine}
-                  onClick={() => {
-                    setEditingId(item.id);
-                    setDraft(item.text);
-                  }}
-                  size="small"
-                />
-                <ActionIcon
-                  {...actionProps('删除这条')}
-                  icon={Trash2}
-                  onClick={() => {
-                    useStore.setState((s) => ({
-                      composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== item.id),
-                    }));
-                    if (editingId === item.id) setEditingId(undefined);
-                  }}
-                  size="small"
-                />
+      <button
+        aria-expanded={expanded}
+        className={styles.header}
+        onClick={() => setExpanded((v) => !v)}
+        title={firstTitle}
+        type="button"
+      >
+        {summary}
+      </button>
+      {expanded
+        ? queue.map((item) => {
+            const editing = editingId === item.id;
+            return (
+              <div className={styles.card} data-dock-card="" data-testid={`composer-queue-item-${item.id}`} key={item.id}>
+                <div className={styles.head}>
+                  <Icon className={styles.grip} icon={GripVertical} size={14} />
+                  <span className={styles.title}>跟进</span>
+                  <div className={styles.actions}>
+                    <ActionIcon
+                      {...actionProps('发送引导')}
+                      icon={CornerDownRight}
+                      onClick={() => steerQueued(item.id)}
+                      size="small"
+                    />
+                    <ActionIcon
+                      {...actionProps('编辑消息')}
+                      icon={PencilLine}
+                      onClick={() => {
+                        setEditingId(item.id);
+                        setDraft(item.text);
+                      }}
+                      size="small"
+                    />
+                    <ActionIcon
+                      {...actionProps('删除这条')}
+                      icon={Trash2}
+                      onClick={() => {
+                        useStore.setState((s) => ({
+                          composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== item.id),
+                        }));
+                        if (editingId === item.id) setEditingId(undefined);
+                      }}
+                      size="small"
+                    />
+                  </div>
+                </div>
+                {editing ? (
+                  <textarea
+                    aria-label="编辑跟进"
+                    className={styles.editor}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        const next = draft.trim();
+                        if (!next) return;
+                        useStore.setState((s) => ({
+                          composerQueue: updateComposerItem(s.composerQueue ?? [], item.id, next),
+                        }));
+                        setEditingId(undefined);
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setEditingId(undefined);
+                        setDraft(item.text);
+                      }
+                    }}
+                    value={draft}
+                  />
+                ) : (
+                  <p className={styles.body}>{item.text}</p>
+                )}
               </div>
-            </div>
-            {editing ? (
-              <textarea
-                aria-label="编辑跟进"
-                className={styles.editor}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    const next = draft.trim();
-                    if (!next) return;
-                    useStore.setState((s) => ({
-                      composerQueue: updateComposerItem(s.composerQueue ?? [], item.id, next),
-                    }));
-                    setEditingId(undefined);
-                  }
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setEditingId(undefined);
-                    setDraft(item.text);
-                  }
-                }}
-                value={draft}
-              />
-            ) : (
-              <p className={styles.body}>{item.text}</p>
-            )}
-          </div>
-        );
-      })}
+            );
+          })
+        : null}
     </div>
   );
 }
