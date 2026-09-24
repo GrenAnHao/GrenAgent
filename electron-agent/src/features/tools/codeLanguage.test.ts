@@ -14,8 +14,8 @@ describe('languageLabel', () => {
     const samples = ['a.ts', 'a.tsx', 'a.js', 'a.jsx', 'a.py', 'a.go', 'a.rs', 'a.java', 'a.css', 'a.scss', 'a.html', 'a.json', 'a.md', 'a.sh', 'a.ps1', 'a.sql', 'a.yml', 'a.toml', 'a.xml', 'a.vue', 'a.svelte', 'a.c', 'a.cpp', 'a.cs', 'a.txt'];
     for (const sample of samples) {
       const id = languageFromPath(sample);
-      expect(languageLabel(id).length).toBeGreaterThan(0);
-      expect(languageFileName(id).length).toBeGreaterThan(0);
+      expect(languageLabel(id)).not.toBe(id);
+      expect(languageFileName(id)).toMatch(/^file\./);
     }
   });
 });
