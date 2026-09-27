@@ -8,6 +8,7 @@ export type ToolSegment = {
   args: unknown;
   result: unknown;
   status: 'running' | 'done' | 'error';
+  argsComplete?: boolean;
 };
 
 export type ThinkingSegment = {
@@ -31,8 +32,9 @@ export type TimelineSegment = ThinkingSegment | TextSegment | ToolSegment;
 export type DisplayMessage =
   | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; timestamp?: number; entryId?: string }
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
-  | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error' }
+  | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error'; argsComplete?: boolean }
   | { kind: 'notice'; id: string; customType: string; content: string }
+  | { kind: 'compaction'; id: string }
   | { kind: 'command-input'; id: string; command: string; rest: string; beforeCount: number };
 
 export type CommandInputMessage = Extract<DisplayMessage, { kind: 'command-input' }>;
@@ -114,6 +116,7 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             args: msg.args,
             result: msg.result,
             status: msg.status,
+            argsComplete: msg.argsComplete,
           });
         }
         break;

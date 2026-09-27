@@ -12,9 +12,18 @@ export function sessionKeyFromPath(path: string | null | undefined): string | nu
   return stem || null;
 }
 
-/** 把前端完整消息列表序列化成 jsonl（每行一条 ChatMessage）。 */
+function historyMessage(message: ChatMessage): ChatMessage {
+  if (message.kind !== 'tool' || message.argsComplete === undefined) return message;
+  const { argsComplete, ...rest } = message;
+  if (argsComplete === false) {
+    return { ...rest, status: 'error', result: { content: [{ type: 'text', text: '已中断' }] } };
+  }
+  return rest;
+}
+
+/** 把前端完整消息列表序列化成 jsonl（每行一条 ChatMessage）。参数生成标记不落盘。 */
 export function serializeHistory(messages: ChatMessage[]): string {
-  return messages.map((m) => JSON.stringify(m)).join('\n');
+  return messages.map((m) => JSON.stringify(historyMessage(m))).join('\n');
 }
 
 /**

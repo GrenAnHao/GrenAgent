@@ -17,6 +17,7 @@ import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
 import { subAgentMode, taskLabel } from '../panels/subagentUtils';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
+import { CompactionDivider } from './CompactionStatusRow';
 
 const commandInputStyles = createStaticStyles(({ css }) => ({
   row: css`
@@ -122,8 +123,11 @@ export function renderMessageBody(
           args={msg.args}
           result={msg.result}
           status={msg.status}
+          argsComplete={msg.argsComplete}
         />
       );
+    case 'compaction':
+      return <CompactionDivider label="已压缩" testId="compaction-done" />;
     case 'notice':
       if (msg.customType === 'agent-answer') return <AnswerCard content={msg.content} />;
       if (msg.customType === 'agent-plan') return <PlanCard content={msg.content} />;

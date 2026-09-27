@@ -31,10 +31,11 @@ export interface PiExitEnvelope {
 export type AgentEvent =
   | { type: 'agent_start' }
   | { type: 'agent_end'; messages: AgentMessage[] }
+  | { type: 'agent_settled' }
   | { type: 'turn_start' }
   | { type: 'turn_end'; message: AgentMessage; toolResults: unknown[] }
   | { type: 'message_start'; message: AgentMessage }
-  | { type: 'message_update'; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
+  | { type: 'message_update'; message?: AgentMessage; assistantMessageEvent: AssistantMessageEvent; usage?: unknown }
   | { type: 'message_end'; message: AgentMessage }
   | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
   | { type: 'tool_execution_update'; toolCallId: string; toolName: string; partialResult: unknown }
@@ -52,9 +53,13 @@ export interface AgentMessage {
   content: unknown;
   [k: string]: unknown;
 }
+export type ToolCallBlock = { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> };
 export type AssistantMessageEvent =
   | { type: 'text_delta'; delta: string }
   | { type: 'thinking_delta'; delta: string }
+  | { type: 'toolcall_start'; contentIndex: number; id?: string; toolName?: string }
+  | { type: 'toolcall_delta'; contentIndex: number; delta: string; id?: string; toolName?: string }
+  | { type: 'toolcall_end'; contentIndex: number; toolCall: ToolCallBlock }
   | { type: string; [k: string]: unknown };
 
 export interface ExtensionUiRequest {
@@ -245,12 +250,17 @@ export const pi = {
     invoke<{ messages: AgentMessage[] }>('agent_get_fork_messages', { workspace }),
   compact: (workspace: string) => invoke<unknown>('agent_compact', { workspace }),
   getState: (workspace: string) => invoke<unknown>('agent_get_state', { workspace }),
+  /** 主进程仍在跑的交互回合。渲染进程热更新后用来恢复停止按钮和侧边栏运行态。 */
+  listRunningTurns: () =>
+    invoke<Array<{ workspace: string; sessionId?: string; sessionPath?: string }>>('agent_list_running_turns'),
   getMessages: (workspace: string) => invoke<{ messages: AgentMessage[] }>('agent_get_messages', { workspace }),
   newSession: (workspace: string) => invoke<unknown>('agent_new_session', { workspace }),
   switchSession: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_switch_session', { workspace, sessionPath }),
   listSessions: (workspace: string) => invoke<SessionInfo[]>('list_pi_sessions', { workspace }),
   listAllSessions: () => invoke<SessionInfo[]>('list_all_sessions'),
+  /** 已打开但可能还没有会话文件的项目目录。 */
+  listProjects: () => invoke<string[]>('list_projects'),
   setSessionName: (workspace: string, name: string) =>
     invoke<unknown>('agent_set_session_name', { workspace, name }),
   setSessionDisplayName: (sessionPath: string, name: string) =>

@@ -133,6 +133,28 @@ describe('WorkspaceHandle', () => {
     expect(meta).toMatchObject({ sessionId: 's1', source: 'interactive' });
   });
 
+  it('连续 toolcall_delta 后紧跟 agent_end，先发合并 delta', async () => {
+    const { runtime, first } = makeRuntime();
+    const { handle, onEvent } = makeHandle(runtime);
+    await handle.start();
+    const partial = { content: [{ type: 'toolCall', id: 'call_1', name: 'write', arguments: {} }] };
+    const base = { role: 'assistant', usage: { output: 1 }, content: partial.content };
+    first.emit({
+      type: 'message_update',
+      message: base,
+      assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"pa', partial },
+    });
+    first.emit({
+      type: 'message_update',
+      message: { ...base, usage: { output: 2 } },
+      assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: 'th"', partial },
+    });
+    first.emit({ type: 'agent_end', willRetry: false });
+    expect(onEvent.mock.calls.map(([event]) => event.assistantMessageEvent?.delta ?? event.type)).toEqual(['{"path"', 'agent_end']);
+    expect(onEvent.mock.calls[0][0].assistantMessageEvent).toMatchObject({ id: 'call_1', toolName: 'write' });
+    expect(onEvent.mock.calls[0][0]).not.toHaveProperty('message');
+  });
+
   it('forwards embedded child events with sessionPath and source=subagent', async () => {
     const { runtime } = makeRuntime();
     const { handle, onEvent } = makeHandle(runtime);

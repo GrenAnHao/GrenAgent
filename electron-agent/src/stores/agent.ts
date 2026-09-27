@@ -6,10 +6,13 @@ import {
   messagesFromAgent,
   excludedFromAgent,
   assistantStopFromMessages,
+  materializeToolDrafts,
+  LARGE_PARSE_INTERVAL_MS,
   type AgentState,
   type ChatMessage,
   type UserImage,
 } from './agentReducer';
+import { parsePartialArgs } from '../lib/streamingJson';
 import { pi, onPiEvent, onPiExit, type AgentEvent, type AgentMessage } from '../lib/pi';
 import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurations';
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
@@ -157,9 +160,22 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   // 结果直接蹦出来」；权限确认走 pi://ui-request、MCP 状态走 setStatus，都有各自通道，
   // 因此 AppEvent 已整体移除。
   let queue: AgentEvent[] = [];
+  let streamEpoch = 0;
   let rafId: number | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let active = true;
+
+  const hasDirtyDraft = (state: AgentState) =>
+    Boolean(state.toolDrafts && Object.values(state.toolDrafts).some((draft) => draft.dirty));
+
+  const scheduleDraftParse = () => {
+    if (draftTimer != null) return;
+    draftTimer = setTimeout(() => {
+      draftTimer = null;
+      flush();
+    }, LARGE_PARSE_INTERVAL_MS);
+  };
 
   /** 推理结束后把实时计出的时长按消息 timestamp 落盘（供切换会话后回填）。 */
   const persistThinkingDurations = (state: AgentState) => {
@@ -181,7 +197,14 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     if (timeoutId != null) clearTimeout(timeoutId);
     rafId = null;
     timeoutId = null;
-    if (!queue.length) return;
+    if (!queue.length) {
+      const current = useStore.getState();
+      if (!hasDirtyDraft(current)) return;
+      const { state: materialized, deferred } = materializeToolDrafts(current, Date.now(), parsePartialArgs);
+      setFullState(materialized);
+      if (deferred) scheduleDraftParse();
+      return;
+    }
     const events = queue;
     queue = [];
     let state = useStore.getState();
@@ -194,8 +217,16 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       } catch {
         continue;
       }
-      if (ev.type === 'message_end' || ev.type === 'agent_end') reachedEnd = true;
+      if (ev.type === 'agent_start' || ev.type === 'agent_end' || ev.type === 'agent_settled') {
+        streamEpoch += 1;
+      }
+      if (ev.type === 'message_end' || ev.type === 'agent_end' || (ev.type === 'compaction_end' && ev.aborted !== true)) {
+        reachedEnd = true;
+      }
     }
+    const { state: materialized, deferred } = materializeToolDrafts(state, Date.now(), parsePartialArgs);
+    state = materialized;
+    if (deferred) scheduleDraftParse();
     setFullState(state);
     if (reachedEnd) {
       // 持久化失败（localStorage 满 / 序列化异常）不影响已渲染内容。
@@ -261,6 +292,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     }
     rafId = null;
     timeoutId = null;
+    if (draftTimer != null) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
   };
 
   onPiEvent((env) => {
@@ -519,6 +554,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     syncEntryIdsAfterAccept,
     reset,
     hasLiveActivity: () => liveActivity,
+    getStreamEpoch: () => streamEpoch,
     getLoadedSessionPath: () => loadedSessionPath,
     showCachedSession: (sessionPath) => {
       // 实时流式中不可被缓存覆盖（会冲掉正在跑的会话）。

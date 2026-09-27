@@ -41,4 +41,17 @@ describe('serialize / deserialize', () => {
   it('empty string → []', () => {
     expect(deserializeHistory('')).toEqual([]);
   });
+
+  it('serializeHistory 不输出 argsComplete', () => {
+    const done = serializeHistory([
+      { kind: 'tool', id: 't1', toolCallId: 'c1', toolName: 'write', args: { path: 'a' }, result: {}, status: 'done', argsComplete: true },
+    ]);
+    expect(done).not.toContain('argsComplete');
+    const partial = serializeHistory([
+      { kind: 'tool', id: 't2', toolCallId: 'c2', toolName: 'write', args: {}, result: undefined, status: 'running', argsComplete: false },
+    ]);
+    expect(partial).not.toContain('argsComplete');
+    expect(partial).toContain('已中断');
+    expect(partial).toContain('"status":"error"');
+  });
 });

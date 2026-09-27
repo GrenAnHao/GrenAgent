@@ -34,8 +34,20 @@ export type ChatMessage =
       /** 推理耗时（ms），推理结束（正文开始或消息结束）时定格，用于「已深度思考（用时 X 秒）」。 */
       thinkingDuration?: number;
     }
-  | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error' }
-  | { kind: 'notice'; id: string; customType: string; content: string };
+  | {
+      kind: 'tool';
+      id: string;
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      result: unknown;
+      status: 'running' | 'done' | 'error';
+      /** false = 参数仍在生成；缺省视为完整。不进历史文件。 */
+      argsComplete?: boolean;
+    }
+  | { kind: 'notice'; id: string; customType: string; content: string }
+  /** 一次成功的上下文压缩留在会话里的分隔。进行中只显示「正在压缩」，结束后写成这一条。 */
+  | { kind: 'compaction'; id: string };
 
 export interface AgentState {
   messages: ChatMessage[];
@@ -72,6 +84,23 @@ export interface AgentState {
   assistantStop?: 'stop' | 'aborted' | 'error';
   /** 最近一次 todo 清单已经做完。下一轮用户消息后任务条收起，直到出现新的 todo 结果。 */
   todoListFinished?: boolean;
+  /** 当前流式 assistant 消息里正在生成参数的工具调用草稿，按 contentIndex 存。只在内存里，不进 messages、不序列化。 */
+  toolDrafts?: Record<number, ToolDraft>;
+}
+
+export interface ToolDraft {
+  contentIndex: number;
+  /** 对应工具卡片的 ChatMessage.id；工具名未知时为 undefined（尚未建卡）。 */
+  cardId?: string;
+  /** 真实 toolCallId；未知时为 ''。 */
+  toolCallId: string;
+  toolName: string;
+  /** 累积的原始参数 JSON 片段。 */
+  json: string;
+  /** 自上次解析后有新片段。 */
+  dirty: boolean;
+  /** 上次解析的时间（ms）。 */
+  parsedAt: number;
 }
 
 export function initialAgentState(): AgentState {
@@ -231,6 +260,7 @@ function syncStreamingToolCalls(messages: ChatMessage[], msg: AgentMessage): Cha
         args: call.args,
         result: undefined,
         status: 'running',
+        argsComplete: true,
       });
       continue;
     }
@@ -238,10 +268,255 @@ function syncStreamingToolCalls(messages: ChatMessage[], msg: AgentMessage): Cha
     // 已 done/error 的卡片是终态（tool_execution_end 才是参数/结果的权威来源），流式快照不回写。
     if (cur.kind === 'tool' && cur.status === 'running') {
       ensureCloned();
-      next[idx] = { ...cur, toolName: call.toolName || cur.toolName, args: call.args };
+      next[idx] = { ...cur, toolName: call.toolName || cur.toolName, args: call.args, argsComplete: true };
     }
   }
   return next;
+}
+
+type ToolChatMessage = Extract<ChatMessage, { kind: 'tool' }>;
+
+function dropDrafts(state: AgentState, patch: Partial<AgentState> = {}): AgentState {
+  const merged: AgentState = { ...state, ...patch };
+  delete merged.toolDrafts;
+  return merged;
+}
+
+function commitDrafts(state: AgentState, messages: ChatMessage[], drafts: Record<number, ToolDraft>): AgentState {
+  if (Object.keys(drafts).length === 0) return dropDrafts(state, { messages });
+  return { ...state, messages, toolDrafts: drafts };
+}
+
+function attachToolCard(messages: ChatMessage[], draft: ToolDraft): { messages: ChatMessage[]; draft: ToolDraft } {
+  if (!draft.toolName || draft.cardId) return { messages, draft };
+  if (draft.toolCallId) {
+    const idx = lastIndex(messages, (m) => m.kind === 'tool' && m.toolCallId === draft.toolCallId);
+    if (idx >= 0) {
+      const cur = messages[idx];
+      if (cur.kind === 'tool') return { messages, draft: { ...draft, cardId: cur.id } };
+    }
+  }
+  const id = nextId();
+  const card: ToolChatMessage = {
+    kind: 'tool',
+    id,
+    toolCallId: draft.toolCallId || `pending:${id}`,
+    toolName: draft.toolName,
+    args: {},
+    result: undefined,
+    status: 'running',
+    argsComplete: false,
+  };
+  return { messages: [...messages, card], draft: { ...draft, cardId: id } };
+}
+
+function rebindToolCallId(messages: ChatMessage[], cardId: string | undefined, toolCallId: string): ChatMessage[] {
+  if (!cardId || !toolCallId) return messages;
+  const idx = lastIndex(messages, (m) => m.kind === 'tool' && m.id === cardId);
+  if (idx < 0) return messages;
+  const cur = messages[idx];
+  if (cur.kind !== 'tool' || cur.toolCallId === toolCallId) return messages;
+  const next = [...messages];
+  next[idx] = { ...cur, toolCallId };
+  return next;
+}
+
+function toolcallFields(ame: AssistantMessageEvent): { id?: string; toolName?: string; delta?: string } {
+  const raw = ame as { id?: unknown; toolName?: unknown; delta?: unknown };
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : undefined,
+    toolName: typeof raw.toolName === 'string' && raw.toolName ? raw.toolName : undefined,
+    delta: typeof raw.delta === 'string' ? raw.delta : '',
+  };
+}
+
+function applyToolcallEvent(state: AgentState, ame: AssistantMessageEvent): AgentState {
+  const contentIndex = typeof (ame as { contentIndex?: unknown }).contentIndex === 'number'
+    ? (ame as { contentIndex: number }).contentIndex
+    : 0;
+  const drafts = { ...(state.toolDrafts ?? {}) };
+  const fields = toolcallFields(ame);
+
+  if (ame.type === 'toolcall_start') {
+    if (drafts[contentIndex]) return state;
+    let draft: ToolDraft = {
+      contentIndex,
+      toolCallId: fields.id ?? '',
+      toolName: fields.toolName ?? '',
+      json: '',
+      dirty: false,
+      parsedAt: 0,
+    };
+    let messages = state.messages;
+    if (draft.toolName) {
+      const attached = attachToolCard(messages, draft);
+      messages = attached.messages;
+      draft = attached.draft;
+    }
+    drafts[contentIndex] = draft;
+    return commitDrafts(state, messages, drafts);
+  }
+
+  if (ame.type === 'toolcall_delta') {
+    let draft = drafts[contentIndex];
+    let messages = state.messages;
+    if (!draft) {
+      draft = {
+        contentIndex,
+        toolCallId: fields.id ?? '',
+        toolName: fields.toolName ?? '',
+        json: '',
+        dirty: false,
+        parsedAt: 0,
+      };
+      if (draft.toolName) {
+        const attached = attachToolCard(messages, draft);
+        messages = attached.messages;
+        draft = attached.draft;
+      }
+    }
+    draft = { ...draft, json: draft.json + (fields.delta ?? ''), dirty: true };
+    if (fields.id && fields.id !== draft.toolCallId) {
+      draft = { ...draft, toolCallId: fields.id };
+      messages = rebindToolCallId(messages, draft.cardId, fields.id);
+    }
+    if (fields.toolName && !draft.toolName) draft = { ...draft, toolName: fields.toolName };
+    if (!draft.cardId && draft.toolName) {
+      const attached = attachToolCard(messages, draft);
+      messages = attached.messages;
+      draft = attached.draft;
+    }
+    drafts[contentIndex] = draft;
+    return commitDrafts(state, messages, drafts);
+  }
+
+  if (ame.type === 'toolcall_end') {
+    const toolCall = (ame as { toolCall?: { id?: unknown; name?: unknown; arguments?: unknown } }).toolCall;
+    const id = typeof toolCall?.id === 'string' ? toolCall.id : '';
+    const name = typeof toolCall?.name === 'string' ? toolCall.name : '';
+    const args = toolCall?.arguments && typeof toolCall.arguments === 'object' && !Array.isArray(toolCall.arguments)
+      ? toolCall.arguments
+      : {};
+    const draft = drafts[contentIndex];
+    let messages = state.messages;
+    let idx = draft?.cardId ? lastIndex(messages, (m) => m.kind === 'tool' && m.id === draft.cardId) : -1;
+    if (idx < 0 && id) idx = lastIndex(messages, (m) => m.kind === 'tool' && m.toolCallId === id);
+    if (idx >= 0 && messages[idx]?.kind === 'tool') {
+      const cur = messages[idx] as ToolChatMessage;
+      const next = [...messages];
+      next[idx] = {
+        ...cur,
+        toolCallId: id || cur.toolCallId,
+        toolName: name || cur.toolName,
+        args,
+        argsComplete: true,
+      };
+      messages = next;
+    } else {
+      const cardId = nextId();
+      messages = [...messages, {
+        kind: 'tool',
+        id: cardId,
+        toolCallId: id || `pending:${cardId}`,
+        toolName: name || draft?.toolName || '',
+        args,
+        result: undefined,
+        status: 'running',
+        argsComplete: true,
+      }];
+    }
+    delete drafts[contentIndex];
+    return commitDrafts(state, messages, drafts);
+  }
+
+  return state;
+}
+
+function rebindDraftsFromContent(messages: ChatMessage[], drafts: Record<number, ToolDraft> | undefined, msg: AgentMessage): ChatMessage[] {
+  if (!drafts) return messages;
+  const content = msg.content;
+  if (!Array.isArray(content)) return messages;
+  let next = messages;
+  for (let i = 0; i < content.length; i++) {
+    const block = content[i] as { type?: unknown; id?: unknown } | null;
+    if (!block || block.type !== 'toolCall') continue;
+    const cardId = drafts[i]?.cardId;
+    const id = typeof block.id === 'string' ? block.id : '';
+    if (!cardId || !id) continue;
+    next = rebindToolCallId(next, cardId, id);
+  }
+  return next;
+}
+
+function failRunningToolCards(messages: ChatMessage[], cardIds: Set<string>, toolCallIds: Set<string>, text: string): ChatMessage[] {
+  let next = messages;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m || m.kind !== 'tool' || m.status !== 'running') continue;
+    if (!cardIds.has(m.id) && !toolCallIds.has(m.toolCallId)) continue;
+    if (next === messages) next = [...messages];
+    next[i] = {
+      ...m,
+      status: 'error',
+      argsComplete: true,
+      result: { content: [{ type: 'text', text }] },
+    };
+  }
+  return next;
+}
+
+function settleIncompleteToolCards(messages: ChatMessage[]): ChatMessage[] {
+  let touched = false;
+  const next = messages.map((m) => {
+    if (m.kind === 'assistant' && m.streaming) {
+      touched = true;
+      return { ...m, streaming: false };
+    }
+    if (m.kind === 'tool' && m.argsComplete === false) {
+      touched = true;
+      return {
+        ...m,
+        status: 'error' as const,
+        argsComplete: true,
+        result: { content: [{ type: 'text', text: '已中断' }] },
+      };
+    }
+    return m;
+  });
+  return touched ? next : messages;
+}
+
+export const LARGE_ARGS_CHARS = 64 * 1024;
+export const LARGE_PARSE_INTERVAL_MS = 150;
+
+/** 解析变脏的草稿，把半截参数写回对应卡片的 args。返回是否还有因节流被推迟的草稿。 */
+export function materializeToolDrafts(
+  state: AgentState,
+  now: number,
+  parse: (json: string) => Record<string, unknown>,
+): { state: AgentState; deferred: boolean } {
+  const drafts = state.toolDrafts;
+  if (!drafts) return { state, deferred: false };
+  let messages = state.messages;
+  let nextDrafts: Record<number, ToolDraft> | undefined;
+  let deferred = false;
+  for (const draft of Object.values(drafts)) {
+    if (!draft.dirty || !draft.cardId) continue;
+    if (draft.json.length > LARGE_ARGS_CHARS && now - draft.parsedAt < LARGE_PARSE_INTERVAL_MS) {
+      deferred = true;
+      continue;
+    }
+    const idx = lastIndex(messages, (m) => m.kind === 'tool' && m.id === draft.cardId);
+    const card = idx >= 0 ? messages[idx] : undefined;
+    if (card?.kind === 'tool' && card.argsComplete === false) {
+      if (messages === state.messages) messages = [...messages];
+      messages[idx] = { ...card, args: parse(draft.json) };
+    }
+    nextDrafts ??= { ...drafts };
+    nextDrafts[draft.contentIndex] = { ...draft, dirty: false, parsedAt: now };
+  }
+  if (!nextDrafts) return { state, deferred };
+  return { state: { ...state, messages, toolDrafts: nextDrafts }, deferred };
 }
 
 /** 把 pi toolResult 消息还原成与 tool_execution_end 一致的 result 形状。 */
@@ -276,17 +551,9 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return { ...state, isStreaming: true, runActive: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false, assistantStop: undefined };
 
     case 'agent_end': {
-      // 只克隆仍处于 streaming 的 assistant（通常 0~1 条），其余保留引用，避免每轮克隆整段历史。
-      let touched = false;
-      const messages = state.messages.map((m) => {
-        if (m.kind === 'assistant' && m.streaming) {
-          touched = true;
-          return { ...m, streaming: false };
-        }
-        return m;
-      });
-      return {
-        ...state,
+      // 收起仍在流的 assistant，并把参数没写完的工具卡标成中断（丢了 message_end 时的兜底）。
+      const messages = settleIncompleteToolCards(state.messages);
+      return dropDrafts(state, {
         isStreaming: false,
         awaitingResponse: false,
         aborting: false,
@@ -299,38 +566,31 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           (event as { messages?: TodoTranscriptMessage[] }).messages,
           state.todoListFinished,
         ),
-        messages: touched ? messages : state.messages,
-      };
+        messages,
+      });
     }
 
     case 'agent_settled': {
       // agent_settled 是 RPC 流程的最终收尾事件，晚于 agent_end（扩展的 agent_end hooks 可能仍在执行）。
       // 即使中间的历史快照刷新覆盖过状态，也必须在此清掉停止按钮对应的 streaming 标记，
-      // 避免 UI 永久停在「待停止」。
-      let touched = false;
-      const messages = state.messages.map((m) => {
-        if (m.kind === 'assistant' && m.streaming) {
-          touched = true;
-          return { ...m, streaming: false };
-        }
-        return m;
-      });
-      return {
-        ...state,
+      // 避免 UI 永久停在「待停止」。参数没写完的工具卡同样收成中断。
+      const messages = settleIncompleteToolCards(state.messages);
+      return dropDrafts(state, {
         isStreaming: false,
         runActive: false,
         awaitingResponse: false,
         aborting: false,
         compacting: false,
         waitingUiPrompt: undefined,
-        messages: touched ? messages : state.messages,
-      };
+        messages,
+      });
     }
 
     case 'message_start': {
       const ev = event as Extract<AgentEvent, { type: 'message_start' }>;
-      if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message);
-      if (ev.message.role !== 'assistant') return state;
+      const cleared = dropDrafts(state);
+      if (ev.message.role === 'custom') return applyCustomMessage(cleared, ev.message);
+      if (ev.message.role !== 'assistant') return cleared;
       const { text, thinking } = extractText(ev.message);
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
@@ -358,7 +618,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         });
       }
       // 模型可能在首帧就带上 toolCall 块（或一次性返回）：同步成 running 卡片，与流式路径一致。
-      return { ...state, messages: syncStreamingToolCalls(messages, ev.message) };
+      return { ...cleared, messages: syncStreamingToolCalls(messages, ev.message) };
     }
 
     case 'message_end': {
@@ -405,14 +665,31 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           };
         }
       }
+      // 先按 contentIndex 把草稿卡改绑到终态 toolCall id，兜住没收到 toolcall_end 的情况。
+      const rebound = rebindDraftsFromContent(messages, state.toolDrafts, ev.message);
+      const stopReason = (ev.message as { stopReason?: unknown }).stopReason;
+      if (stopReason === 'aborted' || stopReason === 'error') {
+        const failText = errMsg ?? (stopReason === 'aborted' ? '已中断' : '生成失败');
+        const cardIds = new Set<string>();
+        for (const draft of Object.values(state.toolDrafts ?? {})) {
+          if (draft.cardId) cardIds.add(draft.cardId);
+        }
+        const toolCallIds = new Set(extractToolCalls(ev.message).map((call) => call.id));
+        const failed = failRunningToolCards(rebound, cardIds, toolCallIds, failText);
+        return dropDrafts(state, { messages: failed, ...(showErr ? { lastError: showErr } : {}) });
+      }
       // 终态再 upsert 一次 toolCall：覆盖后端「只在 message_end 给完整 toolCall、不流式」的情况，
       // 让卡片即使没走流式也能在 tool_execution_start 之前带完整参数立住。
-      const synced = syncStreamingToolCalls(messages, ev.message);
-      return showErr ? { ...state, messages: synced, lastError: showErr } : { ...state, messages: synced };
+      const synced = syncStreamingToolCalls(rebound, ev.message);
+      return dropDrafts(state, { messages: synced, ...(showErr ? { lastError: showErr } : {}) });
     }
 
     case 'message_update': {
       const ev = event as Extract<AgentEvent, { type: 'message_update' }>;
+      const ame = ev.assistantMessageEvent as AssistantMessageEvent | undefined;
+      if (ame && (ame.type === 'toolcall_start' || ame.type === 'toolcall_delta' || ame.type === 'toolcall_end')) {
+        return applyToolcallEvent(state, ame);
+      }
       // pi 的流式增量事件只带 assistantMessageEvent、不带 message 快照（实测 2532/2532 条
       // message_update 均无 message 字段，只有 message_start / message_end 带完整快照）。
       // 直接读 ev.message 会因 undefined 抛 TypeError —— 修复前会中断整个 flush 批次（观感
@@ -422,8 +699,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const { text, thinking } = extractText(snapshot);
       // 有些模型（如部分 OpenAI 兼容 / MiMo）只在流式 thinking_delta 里给推理、不写进 message.content，
       // 这里把 delta 累积起来，作为 content 无 thinking 块时的兜底来源。正文同理需要 text_delta 累积。
-      const ame = ev.assistantMessageEvent as AssistantMessageEvent | undefined;
-      const delta = ame && typeof ame.delta === 'string' ? ame.delta : '';
+      const rawDelta = ame && 'delta' in ame ? ame.delta : undefined;
+      const delta = typeof rawDelta === 'string' ? rawDelta : '';
       const thinkingDelta = ame?.type === 'thinking_delta' ? delta : '';
       const textDelta = ame?.type === 'text_delta' ? delta : '';
       const messages = [...state.messages];
@@ -453,9 +730,9 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           ...thinkingTiming({}, nextThinking, nextText),
         });
       }
-      // 解析 content 里随流式渐全的 toolCall 块 → 在工具参数生成阶段就把 running 卡片立起来，
-      // 不再等 tool_execution_start（参数已写完、开始执行）才整条蹦出来。
-      return { ...state, messages: syncStreamingToolCalls(messages, snapshot) };
+      // 生产事件没有 message 快照。只有测试或上游重新带上快照时，才按 toolCall 块建卡。
+      const synced = ev.message ? syncStreamingToolCalls(messages, snapshot) : messages;
+      return { ...state, messages: synced };
     }
 
     case 'tool_execution_start': {
@@ -469,7 +746,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         const cur = state.messages[existing];
         if (cur.kind === 'tool') {
           const messages = [...state.messages];
-          messages[existing] = { ...cur, toolName: ev.toolName, args: ev.args, status: 'running' };
+          messages[existing] = { ...cur, toolName: ev.toolName, args: ev.args, status: 'running', argsComplete: true };
           return { ...state, messages };
         }
       }
@@ -485,6 +762,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             args: ev.args,
             result: undefined,
             status: 'running',
+            argsComplete: true,
           },
         ],
       };
@@ -526,9 +804,14 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'compaction_end': {
       const ev = event as Extract<AgentEvent, { type: 'compaction_end' }>;
-      // 仅在「压缩失败且不再自动重试」时把错误亮出来；正常完成 / 用户取消 / 将自动重试都只是清掉「压缩中」。
-      const lastError = ev.aborted && !ev.willRetry && ev.errorMessage ? ev.errorMessage : state.lastError;
-      return { ...state, compacting: false, lastError };
+      // pi 在上下文已超过 max token、压缩本身失败时仍会发 compaction_end，且 aborted 可能是 false。
+      // 只有没有错误信息的结束才算真正压完；失败不留「已压缩」。
+      const failed = ev.aborted || Boolean(ev.errorMessage);
+      const lastError = failed && !ev.willRetry && ev.errorMessage ? ev.errorMessage : state.lastError;
+      const messages = failed
+        ? state.messages
+        : [...state.messages, { kind: 'compaction' as const, id: nextId() }];
+      return { ...state, compacting: false, lastError, messages };
     }
 
     default: {
@@ -557,6 +840,38 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
  * steering=true 表示这是执行中注入当前回合的引导消息——不视为「新一轮等待响应」，
  * 避免触发「准备响应中」占位（AI 此刻已在响应）。
  */
+/**
+ * 发送没被会话收下时，去掉刚乐观插入的那条用户消息。
+ * 已有 entryId，或后面已经接上助手/工具输出时，返回 null，避免把已经发生的回合撤掉。
+ */
+export function dropUnpersistedUserTail(messages: readonly ChatMessage[], text: string): ChatMessage[] | null {
+  const last = messages[messages.length - 1];
+  if (!last || last.kind !== 'user' || last.entryId || last.text !== text) return null;
+  return messages.slice(0, -1);
+}
+
+/**
+ * 还没收到任何助手正文、思考或工具时，手动取消可以把刚发出的用户消息撤掉。
+ * 末尾的空助手占位不算已收到回复。已落盘则带回 entryId，调用方再截断会话。
+ */
+export function rollbackUnansweredSend(
+  messages: readonly ChatMessage[],
+  text: string,
+): { messages: ChatMessage[]; entryId?: string } | null {
+  let index = messages.length - 1;
+  while (index >= 0) {
+    const message = messages[index];
+    if (message?.kind === 'assistant' && !message.text.trim() && !message.thinking.trim()) {
+      index -= 1;
+      continue;
+    }
+    break;
+  }
+  const last = messages[index];
+  if (!last || last.kind !== 'user' || last.steering || last.text !== text) return null;
+  return { messages: messages.slice(0, index), ...(last.entryId ? { entryId: last.entryId } : {}) };
+}
+
 export function addUserMessage(
   state: AgentState,
   text: string,

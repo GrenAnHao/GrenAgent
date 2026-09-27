@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   applyEvent,
   initialAgentState,
+  materializeToolDrafts,
   messagesFromAgent,
   type AgentState,
   type ChatMessage,
 } from '../../stores/agentReducer';
+import { parsePartialArgs } from '../../lib/streamingJson';
 import { onPiEvent, pi } from '../../lib/pi';
 import { isEmbeddedChildEvent } from './subagentUtils';
 
@@ -39,7 +41,7 @@ export function useChildSessionBinding(sessionPath: string | null | undefined, r
     void seed();
     void onPiEvent((env) => {
       if (!isEmbeddedChildEvent(env, sessionPath)) return;
-      setState((s) => applyEvent(s, env.event));
+      setState((s) => materializeToolDrafts(applyEvent(s, env.event), Date.now(), parsePartialArgs).state);
     }).then((un) => {
       if (cancelled) un();
       else unlisten = un;

@@ -29,6 +29,56 @@ describe('ToolExecution web_search inspector', { timeout: 30_000 }, () => {
   });
 });
 
+describe('ToolExecution code search', { timeout: 30_000 }, () => {
+  it('标题展示检索式和命中数，展开后是文件行而不是网页空结果', async () => {
+    wrap(
+      <ToolExecution
+        toolName="search"
+        args={{ patterns: ['PddWorkbench', '跑通'] }}
+        result={{
+          content: [{ type: 'text', text: 'src/a.ts\n  12: export function PddWorkbench\n(1 matches in 1 files)' }],
+          details: {
+            matches: [{ file: 'src/a.ts', line: 12, text: 'export function PddWorkbench' }],
+            total: 1,
+            files: 1,
+            capped: false,
+          },
+        }}
+        status="done"
+      />,
+    );
+    expect(document.body.textContent).toContain('检索');
+    expect(screen.getByText('PddWorkbench | 跑通')).toBeTruthy();
+    expect(document.body.textContent).toContain('1 处');
+    expect(document.body.textContent).not.toContain('未找到结果');
+    expect(screen.queryByTestId('card-code-search')).toBeNull();
+
+    fireEvent.click(screen.getByText('PddWorkbench | 跑通'));
+    const card = screen.getByTestId('card-code-search');
+    expect(await screen.findByText('a.ts')).toBeTruthy();
+    expect(card.textContent).toContain('export function PddWorkbench');
+    expect(document.body.textContent).not.toContain('未找到结果');
+  });
+
+  it('没有 patterns 时展开显示工具原因', () => {
+    wrap(
+      <ToolExecution
+        toolName="search"
+        args={{}}
+        result={{
+          content: [{ type: 'text', text: 'search: no valid patterns.' }],
+          details: { matches: [], total: 0, files: 0, capped: false },
+        }}
+        status="done"
+      />,
+    );
+    expect(document.body.textContent).not.toContain('搜索：search');
+    fireEvent.click(screen.getByText(/检索/, { selector: 'span' }));
+    expect(document.body.textContent).toContain('search: no valid patterns.');
+    expect(document.body.textContent).not.toContain('未找到结果');
+  });
+});
+
 describe('ToolExecution skill invocation inspector', { timeout: 30_000 }, () => {
   it('read 某个 SKILL.md 时显示「使用技能 <name>」', () => {
     wrap(
@@ -236,6 +286,18 @@ describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
     expect((await screen.findAllByText('a.txt')).length).toBeGreaterThanOrEqual(2);
   });
 
+  it('shows the read line range on the row', () => {
+    wrap(
+      <ToolExecution
+        toolName="read"
+        args={{ path: 'src/CodeCollector.ts', offset: 12, limit: 20 }}
+        result={{ content: [{ type: 'text', text: 'line' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.getByText('CodeCollector.ts · 12-31')).toBeTruthy();
+  });
+
   it('renders present as a single row', () => {
     wrap(
       <ToolExecution
@@ -418,6 +480,58 @@ describe('ToolExecution todo row', () => {
     expect(screen.getByText('Error: text required')).toBeTruthy();
     expect(document.querySelector('[data-status="error"]')).toBeTruthy();
     expect(screen.queryByText('已清空')).toBeNull();
+  });
+});
+
+describe('ToolExecution 参数生成', () => {
+  it('write 参数生成中显示流式正文和生成中，完成后切到 diff', () => {
+    const { rerender } = wrap(
+      <ToolExecution
+        toolName="write"
+        args={{ path: 'notes/a.html', content: 'hello' }}
+        result={undefined}
+        status="running"
+        argsComplete={false}
+      />,
+    );
+    expect(screen.getByTestId('streaming-file-body').textContent).toContain('hello');
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    expect(document.body.textContent).toContain('a.html');
+    expect(document.body.textContent).toContain('生成中');
+    rerender(
+      <ThemeProvider themeMode="dark">
+        <ToolExecution
+          toolName="write"
+          args={{ path: 'notes/a.html', content: 'hello' }}
+          result={undefined}
+          status="running"
+          argsComplete
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByTestId('streaming-file-body')).toBeNull();
+    expect(screen.getByTestId('file-diff-block')).toBeTruthy();
+  });
+
+  it('edit 只有 oldText 时显示删除行', () => {
+    wrap(
+      <ToolExecution
+        toolName="edit"
+        args={{ path: 'a.ts', edits: [{ oldText: 'before' }] }}
+        result={undefined}
+        status="running"
+        argsComplete={false}
+      />,
+    );
+    expect(screen.getByTestId('streaming-file-body').textContent).toContain('-before');
+    expect(document.body.textContent).toContain('生成中');
+  });
+
+  it('空参数不抛错', () => {
+    expect(() => wrap(
+      <ToolExecution toolName="write" args={{}} result={undefined} status="running" argsComplete={false} />,
+    )).not.toThrow();
+    expect(screen.getByTestId('streaming-file-body').textContent).toContain('等待参数');
   });
 });
 

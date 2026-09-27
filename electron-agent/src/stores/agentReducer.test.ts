@@ -3,12 +3,17 @@ import {
   initialAgentState,
   applyEvent,
   addUserMessage,
+  dropUnpersistedUserTail,
+  rollbackUnansweredSend,
   messagesFromAgent,
   messagesFromTranscript,
   excludedFromAgent,
+  materializeToolDrafts,
+  LARGE_ARGS_CHARS,
   type AgentState,
   type ChatMessage,
 } from './agentReducer';
+import { parsePartialArgs } from '../lib/streamingJson';
 import type { AgentEvent } from '../lib/pi';
 
 function text(msg: ChatMessage): string {
@@ -49,6 +54,7 @@ describe('applyEvent', () => {
     expect(s.compacting).toBe(true);
     s = applyEvent(s, { type: 'compaction_end', reason: 'auto', aborted: false, willRetry: false } as AgentEvent);
     expect(s.compacting).toBe(false);
+    expect(s.messages.at(-1)).toMatchObject({ kind: 'compaction' });
   });
 
   it('surfaces a failed compaction (aborted, no retry, with message) as lastError', () => {
@@ -63,6 +69,21 @@ describe('applyEvent', () => {
     } as AgentEvent);
     expect(s.compacting).toBe(false);
     expect(s.lastError).toBe('boom');
+    expect(s.messages.some((message) => message.kind === 'compaction')).toBe(false);
+  });
+
+  it('does not mark compaction done when overflow recovery fails without abort', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, {
+      type: 'compaction_end',
+      reason: 'overflow',
+      aborted: false,
+      willRetry: false,
+      errorMessage: 'Context overflow recovery failed after one compact-and-retry attempt.',
+    } as AgentEvent);
+    expect(s.compacting).toBe(false);
+    expect(s.lastError).toContain('overflow');
+    expect(s.messages.some((message) => message.kind === 'compaction')).toBe(false);
   });
 
   it('does not surface an error when compaction will auto-retry', () => {
@@ -90,6 +111,60 @@ describe('applyEvent', () => {
     let s: AgentState = { ...initialAgentState(), waitingUiPrompt: { kind: 'select', title: '请求批准' } };
     s = applyEvent(s, { type: 'agent_end' } as AgentEvent);
     expect(s.waitingUiPrompt).toBeUndefined();
+  });
+
+  it('remembers a finished todo list until a later todo write, not the next run', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, {
+      type: 'tool_execution_start',
+      toolCallId: 'todo-1',
+      toolName: 'todo',
+      args: {},
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'tool_execution_end',
+      toolCallId: 'todo-1',
+      toolName: 'todo',
+      isError: false,
+      result: { details: { todos: [{ id: 1, text: '注册', status: 'completed' }], nextId: 2 } },
+    } as AgentEvent);
+    expect(s.todoListFinished).toBe(false);
+    s = applyEvent(s, {
+      type: 'agent_end',
+      messages: [
+        { role: 'toolResult', toolName: 'todo', details: { todos: [{ id: 1, text: '注册', status: 'completed' }], nextId: 2 } },
+        { role: 'assistant', stopReason: 'stop', content: 'done' },
+      ],
+    } as AgentEvent);
+    expect(s.todoListFinished).toBe(true);
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'stop', content: '下一轮没有改清单' }],
+    } as AgentEvent);
+    expect(s.todoListFinished).toBe(true);
+  });
+
+  it('records a normal stop and clears it when the next run starts', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'stop', content: 'done' }],
+    } as AgentEvent);
+    expect(s.assistantStop).toBe('stop');
+    expect(s.runActive).toBe(true);
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    expect(s.assistantStop).toBeUndefined();
+  });
+
+  it('does not treat abort as a normal stop', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, {
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'aborted', content: '' }],
+    } as AgentEvent);
+    expect(s.assistantStop).toBe('aborted');
   });
 
   it('finalizes on agent_end and clears streaming', () => {
@@ -147,6 +222,46 @@ describe('applyEvent', () => {
     const last = s.messages.at(-1)!;
     expect(last.kind).toBe('user');
     expect(text(last)).toBe('hi there');
+  });
+
+  it('dropUnpersistedUserTail removes only an unaccepted tail with the same text', () => {
+    const sent = addUserMessage(initialAgentState(), 'hello');
+    expect(dropUnpersistedUserTail(sent.messages, 'hello')).toEqual([]);
+    expect(dropUnpersistedUserTail(sent.messages, 'other')).toBeNull();
+    const kept = {
+      ...sent,
+      messages: sent.messages.map((message) =>
+        message.kind === 'user' ? { ...message, entryId: 'e1' } : message,
+      ),
+    };
+    expect(dropUnpersistedUserTail(kept.messages, 'hello')).toBeNull();
+    const withReply = addUserMessage(initialAgentState(), 'hello');
+    withReply.messages.push({
+      kind: 'assistant',
+      id: 'a1',
+      text: 'ok',
+      thinking: '',
+      streaming: false,
+    });
+    expect(dropUnpersistedUserTail(withReply.messages, 'hello')).toBeNull();
+  });
+
+  it('rollbackUnansweredSend puts an unanswered send back and ignores a real reply', () => {
+    const sent = addUserMessage(initialAgentState(), 'hello');
+    expect(rollbackUnansweredSend(sent.messages, 'hello')).toEqual({ messages: [] });
+    const kept = {
+      ...sent,
+      messages: sent.messages.map((message) =>
+        message.kind === 'user' ? { ...message, entryId: 'e1' } : message,
+      ),
+    };
+    expect(rollbackUnansweredSend(kept.messages, 'hello')).toEqual({ messages: [], entryId: 'e1' });
+    const placeholder = addUserMessage(initialAgentState(), 'hello');
+    placeholder.messages.push({ kind: 'assistant', id: 'a0', text: '', thinking: '', streaming: true });
+    expect(rollbackUnansweredSend(placeholder.messages, 'hello')?.messages).toEqual([]);
+    const withReply = addUserMessage(initialAgentState(), 'hello');
+    withReply.messages.push({ kind: 'assistant', id: 'a1', text: 'ok', thinking: '', streaming: false });
+    expect(rollbackUnansweredSend(withReply.messages, 'hello')).toBeNull();
   });
 
   it('message_end drops the empty assistant bubble for tool-only messages but keeps the tool card', () => {
@@ -528,6 +643,215 @@ describe('messagesFromAgent 提取 timestamp', () => {
       { role: 'user', content: 'hi', timestamp: 1730000000000 } as never,
     ]);
     expect(msgs[0].kind === 'user' ? msgs[0].timestamp : undefined).toBe(1730000000000);
+  });
+});
+
+function toolCards(state: AgentState) {
+  return state.messages.filter((m) => m.kind === 'tool');
+}
+
+function toolUpdate(ame: Record<string, unknown>): AgentEvent {
+  return { type: 'message_update', assistantMessageEvent: ame } as AgentEvent;
+}
+
+describe('toolcall streaming', () => {
+  it('toolcall_start 建卡：argsComplete false、running、真实 toolCallId', () => {
+    const s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'call_1', toolName: 'write',
+    }));
+    expect(toolCards(s)).toHaveLength(1);
+    expect(toolCards(s)[0]).toMatchObject({
+      kind: 'tool', toolCallId: 'call_1', toolName: 'write', status: 'running', argsComplete: false, args: {},
+    });
+  });
+
+  it('无 toolName 的 start 不建卡，带 toolName 的 delta 到来后建卡', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({ type: 'toolcall_start', contentIndex: 0, id: 'call_1' }));
+    expect(toolCards(s)).toHaveLength(0);
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '{"path":', id: 'call_1', toolName: 'write',
+    }));
+    expect(toolCards(s)).toHaveLength(1);
+    expect(toolCards(s)[0]).toMatchObject({ toolName: 'write', toolCallId: 'call_1', argsComplete: false });
+  });
+
+  it('无 id 的 start 用 pending，随后改绑且卡片 id 不变', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, toolName: 'edit',
+    }));
+    const card = toolCards(s)[0];
+    expect(card?.kind).toBe('tool');
+    if (card?.kind !== 'tool') return;
+    expect(card.toolCallId).toBe(`pending:${card.id}`);
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"a.ts"', id: 'call_9', toolName: 'edit',
+    }));
+    const rebound = toolCards(s)[0];
+    expect(rebound).toMatchObject({ id: card.id, toolCallId: 'call_9' });
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_end',
+      contentIndex: 0,
+      toolCall: { type: 'toolCall', id: 'call_9', name: 'edit', arguments: { path: 'a.ts', edits: [] } },
+    }));
+    expect(toolCards(s)[0]).toMatchObject({ id: card.id, toolCallId: 'call_9', argsComplete: true });
+    expect(s.toolDrafts).toBeUndefined();
+  });
+
+  it('多次 delta 只拼接草稿，materialize 前 args 不变', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    s = applyEvent(s, toolUpdate({ type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"a.ts",' }));
+    s = applyEvent(s, toolUpdate({ type: 'toolcall_delta', contentIndex: 0, delta: '"content":"半' }));
+    expect(s.toolDrafts?.[0]?.json).toBe('{"path":"a.ts","content":"半');
+    expect(toolCards(s)[0]).toMatchObject({ args: {} });
+    const { state, deferred } = materializeToolDrafts(s, 10_000, parsePartialArgs);
+    expect(deferred).toBe(false);
+    expect(toolCards(state)[0]).toMatchObject({ args: { path: 'a.ts', content: '半' } });
+    expect(toolCards(state)).toHaveLength(1);
+  });
+
+  it('大草稿在 150ms 内推迟解析', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    const card = toolCards(s)[0];
+    if (card?.kind !== 'tool' || !s.toolDrafts?.[0]) return;
+    s = {
+      ...s,
+      toolDrafts: {
+        0: { ...s.toolDrafts[0], json: 'x'.repeat(LARGE_ARGS_CHARS + 8), dirty: true, parsedAt: 1_000, cardId: card.id },
+      },
+    };
+    const { state, deferred } = materializeToolDrafts(s, 1_100, () => ({ huge: true }));
+    expect(deferred).toBe(true);
+    expect(toolCards(state)[0]).toMatchObject({ args: {} });
+  });
+
+  it('toolcall_end 写入完整参数，随后执行复用同一张卡', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    s = applyEvent(s, toolUpdate({ type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"a.ts","content":"x"}' }));
+    const before = s.messages.length;
+    const cardId = toolCards(s)[0] && toolCards(s)[0].kind === 'tool' ? toolCards(s)[0].id : '';
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_end',
+      contentIndex: 0,
+      toolCall: { type: 'toolCall', id: 'w1', name: 'write', arguments: { path: 'a.ts', content: 'full' } },
+    }));
+    expect(toolCards(s)[0]).toMatchObject({
+      id: cardId, toolCallId: 'w1', argsComplete: true, args: { path: 'a.ts', content: 'full' }, status: 'running',
+    });
+    expect(s.toolDrafts).toBeUndefined();
+    s = applyEvent(s, {
+      type: 'tool_execution_start', toolCallId: 'w1', toolName: 'write', args: { path: 'a.ts', content: 'full' },
+    } as AgentEvent);
+    expect(s.messages).toHaveLength(before);
+    expect(toolCards(s)[0]).toMatchObject({ id: cardId, argsComplete: true });
+    s = applyEvent(s, {
+      type: 'tool_execution_end', toolCallId: 'w1', toolName: 'write', result: { content: [{ type: 'text', text: 'ok' }] }, isError: false,
+    } as AgentEvent);
+    expect(toolCards(s)[0]).toMatchObject({ id: cardId, status: 'done', result: { content: [{ type: 'text', text: 'ok' }] } });
+  });
+
+  it('message_end aborted 把卡片标成错误，不新建 running 卡', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'aborted',
+        content: [{ type: 'toolCall', id: 'w1', name: 'write', arguments: { path: 'a.ts' } }],
+      },
+    } as AgentEvent);
+    expect(toolCards(s)).toHaveLength(1);
+    expect(toolCards(s)[0]).toMatchObject({ status: 'error', argsComplete: true });
+    expect(JSON.stringify((toolCards(s)[0] as { result?: unknown }).result)).toContain('已中断');
+    expect(toolCards(s).some((m) => m.kind === 'tool' && m.status === 'running')).toBe(false);
+  });
+
+  it('message_end error 使用 errorMessage，且不弹给主动中断', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'error',
+        errorMessage: '403 blocked',
+        content: [{ type: 'toolCall', id: 'w1', name: 'write', arguments: {} }],
+      },
+    } as AgentEvent);
+    expect(toolCards(s)[0]).toMatchObject({ status: 'error' });
+    expect(JSON.stringify((toolCards(s)[0] as { result?: unknown }).result)).toContain('403 blocked');
+    expect(s.lastError).toBe('403 blocked');
+
+    let aborted = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w2', toolName: 'write',
+    }));
+    aborted = { ...aborted, aborting: true };
+    aborted = applyEvent(aborted, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'aborted',
+        errorMessage: 'request aborted',
+        content: [{ type: 'toolCall', id: 'w2', name: 'write', arguments: {} }],
+      },
+    } as AgentEvent);
+    expect(aborted.lastError).toBeUndefined();
+    expect(toolCards(aborted)[0]).toMatchObject({ status: 'error' });
+  });
+
+  it('agent_end 兜底收尾未完成的参数卡', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
+    }));
+    s = applyEvent(s, { type: 'agent_end', messages: [] } as AgentEvent);
+    expect(s.toolDrafts).toBeUndefined();
+    expect(toolCards(s)[0]).toMatchObject({ status: 'error', argsComplete: true });
+    expect(JSON.stringify((toolCards(s)[0] as { result?: unknown }).result)).toContain('已中断');
+  });
+
+  it('只有 message_end 的提供商仍建完整参数卡', () => {
+    const s = applyEvent(initialAgentState(), {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'stop',
+        content: [{ type: 'toolCall', id: 'w1', name: 'write', arguments: { path: 'a.ts', content: 'done' } }],
+      },
+    } as AgentEvent);
+    expect(toolCards(s)).toHaveLength(1);
+    expect(toolCards(s)[0]).toMatchObject({
+      toolCallId: 'w1', status: 'running', argsComplete: true, args: { path: 'a.ts', content: 'done' },
+    });
+  });
+
+  it('messagesFromTranscript 把 toolcall 事件还原成完整参数卡', () => {
+    const transcript = [
+      JSON.stringify({ type: 'message_start', message: { role: 'assistant', content: [] } }),
+      JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 1, id: 't1', toolName: 'write' } }),
+      JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 1, delta: '{"path":"a.ts","content":"part' } }),
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'toolcall_end',
+          contentIndex: 1,
+          toolCall: { type: 'toolCall', id: 't1', name: 'write', arguments: { path: 'a.ts', content: 'done' } },
+        },
+      }),
+      JSON.stringify({
+        type: 'message_end',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'toolCall', id: 't1', name: 'write', arguments: { path: 'a.ts', content: 'done' } }] },
+      }),
+    ].join('\n');
+    const tool = messagesFromTranscript(transcript).find((m) => m.kind === 'tool');
+    expect(tool).toMatchObject({ toolName: 'write', toolCallId: 't1', args: { path: 'a.ts', content: 'done' }, argsComplete: true });
   });
 });
 

@@ -1,5 +1,5 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { memo, type ReactNode } from 'react';
+import { forwardRef, memo, type ReactNode, type UIEventHandler } from 'react';
 
 const styles = createStaticStyles(({ css }) => ({
   box: css`
@@ -32,22 +32,22 @@ const styles = createStaticStyles(({ css }) => ({
  * 展开体里的代码/输出/diff 块：淡底 + hairline + 等宽 + 限高滚动。
  * `terminal`：按命令行排版，长行横向滚动，不折行叠层。
  */
-export const CodeSurface = memo(function CodeSurface({
-  children,
-  isError,
-  terminal,
-}: {
+export const CodeSurface = memo(forwardRef<HTMLDivElement, {
   children: ReactNode;
   isError?: boolean;
   terminal?: boolean;
-}) {
+  onScroll?: UIEventHandler<HTMLDivElement>;
+  testId?: string;
+}>(function CodeSurface({ children, isError, terminal, onScroll, testId = 'code-surface' }, ref) {
   return (
     <div
+      ref={ref}
+      onScroll={onScroll}
       className={cx(styles.box, terminal && styles.terminal, isError && styles.error)}
-      data-testid="code-surface"
+      data-testid={testId}
       data-variant={terminal ? 'terminal' : undefined}
     >
       {children}
     </div>
   );
-});
+}));

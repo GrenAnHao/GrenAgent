@@ -29,3 +29,8 @@
 
 6. **两套副本** —— `electron-agent` 的 `resolve.dedupe` 三包必须仍生效；
    `require.resolve('@earendil-works/pi-ai')` 在主进程与 worker 解析到同一份。
+
+7. **`toolcall_*` 事件形状** —— 核对 `toolcall_start` / `toolcall_delta` /
+   `toolcall_end` 与 `electron-agent/electron/agent/streamingEvent.ts`。
+   `toJsonEvent` 仍不带 `id` / `toolName` 的 delta，由 `streamingEvent.ts` 从
+   partial 补发；形状变了要同步 reducer 的 `applyToolcallEvent`。

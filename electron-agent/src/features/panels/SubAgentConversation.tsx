@@ -2,9 +2,11 @@ import { useMemo, useEffect, useRef, useState } from 'react';
 import {
   applyEvent,
   initialAgentState,
+  materializeToolDrafts,
   type AgentState,
   type ChatMessage,
 } from '../../stores/agentReducer';
+import { parsePartialArgs } from '../../lib/streamingJson';
 import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
@@ -88,8 +90,9 @@ function useIncrementalMessages(transcript: string): ChatMessage[] {
       }
     }
 
-    cacheRef.current = { lineCount: lines.length, state };
-    return state.messages.map((m, i) => ({ ...m, id: `sa-${i}` }));
+    const materialized = materializeToolDrafts(state, Date.now(), parsePartialArgs).state;
+    cacheRef.current = { lineCount: lines.length, state: materialized };
+    return materialized.messages.map((m, i) => ({ ...m, id: `sa-${i}` }));
   }, [transcript]);
 }
 

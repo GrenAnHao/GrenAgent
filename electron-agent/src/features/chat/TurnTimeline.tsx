@@ -67,6 +67,7 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
           args={segment.args}
           result={segment.result}
           status={segment.status}
+          argsComplete={segment.argsComplete}
         />
       );
     default:
@@ -95,7 +96,8 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
       a.toolName === b.toolName &&
       a.status === b.status &&
       a.args === b.args &&
-      a.result === b.result
+      a.result === b.result &&
+      a.argsComplete === b.argsComplete
     );
   }
   return false;

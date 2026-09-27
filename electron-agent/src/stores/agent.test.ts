@@ -776,4 +776,37 @@ describe('createAgentStore', () => {
     // 不得整表重置：消息 id 保持，只补字段
     expect(user!.id).toBe(store.useStore.getState().messages[0]!.id);
   });
+
+  it('flush 解析工具草稿；大草稿推迟到队列空时再解析', () => {
+    vi.useFakeTimers({
+      now: 1_000_000,
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    store = createAgentStore('.');
+    emit({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write' },
+    });
+    emit({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"a.txt","content":"hi' },
+    });
+    flushRAF();
+    const first = store.useStore.getState().messages.find((m) => m.kind === 'tool');
+    expect(first).toMatchObject({ args: { path: 'a.txt', content: 'hi' } });
+
+    emit({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: 'x'.repeat(64 * 1024) },
+    });
+    flushRAF();
+    const held = store.useStore.getState().messages.find((m) => m.kind === 'tool');
+    expect(held).toMatchObject({ args: { path: 'a.txt', content: 'hi' } });
+    expect(store.useStore.getState().toolDrafts?.[0]?.dirty).toBe(true);
+
+    vi.advanceTimersByTime(150);
+    const parsed = store.useStore.getState().messages.find((m) => m.kind === 'tool');
+    expect(store.useStore.getState().toolDrafts?.[0]?.dirty).toBe(false);
+    expect(parsed?.kind === 'tool' ? JSON.stringify(parsed.args).length : 0).toBeGreaterThan(1000);
+  });
 });

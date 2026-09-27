@@ -22,6 +22,17 @@ const tool = (id: string, toolName: string, status: 'running' | 'done' | 'error'
 });
 
 describe('groupMessages', () => {
+  it('把 argsComplete 透传到工具段', () => {
+    const out = groupMessages([
+      assistant('a1'),
+      { ...tool('t1', 'write', 'running'), argsComplete: false },
+    ]);
+    const turn = out[0];
+    expect(turn?.kind).toBe('turn');
+    if (turn?.kind !== 'turn') return;
+    expect(turn.segments.find((segment) => segment.kind === 'tool')).toMatchObject({ argsComplete: false });
+  });
+
   it('expands one turn into chronological timeline segments', () => {
     const out = groupMessages([
       assistant('a1', { thinking: 'think A', thinkingDuration: 1000 }),

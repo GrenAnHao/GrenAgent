@@ -98,3 +98,31 @@ describe('TurnTimeline 产物尾栏', () => {
     expect(screen.queryByText(/已编辑/)).toBeNull();
   });
 });
+
+describe('TurnTimeline argsComplete', () => {
+  it('argsComplete 变化时从流式预览切到 diff', () => {
+    const args = { path: 'a.txt', content: 'hello' };
+    const segment = (argsComplete: boolean): TimelineSegment => ({
+      kind: 'tool',
+      id: 'w',
+      toolCallId: 'w1',
+      toolName: 'write',
+      args,
+      result: undefined,
+      status: 'running',
+      argsComplete,
+    });
+    const { rerender } = wrap([segment(false)]);
+    expect(screen.getByTestId('streaming-file-body')).toBeTruthy();
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    rerender(
+      <App>
+        <ThemeProvider themeMode="dark">
+          <TurnTimeline segments={[segment(true)]} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.queryByTestId('streaming-file-body')).toBeNull();
+    expect(screen.getByTestId('file-diff-block')).toBeTruthy();
+  });
+});

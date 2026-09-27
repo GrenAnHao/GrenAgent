@@ -3,9 +3,10 @@ import { drainByParent } from '../../../extensions/multi-agent/activation.js';
 import { registerCatalogChangeSink } from '../../../extensions/multi-agent/catalog-events.js';
 import { registerEmbeddedSubagentEventSink } from '../../../extensions/multi-agent/embedded-events.js';
 import { registerParentSessionHost } from '../../../extensions/multi-agent/parent-host.js';
-import { toJsonEvent } from '../../../cli/src/json-event.js';
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOptions } from '../../../cli/src/pi-sdk.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
+import { toRendererEvent } from './streamingEvent.js';
+import { createToolcallDeltaCoalescer } from './toolcallDeltaCoalescer.js';
 
 type TurnOrigin = 'main' | 'goal';
 export type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -61,6 +62,7 @@ export class WorkspaceHandle {
   private parentSessionPath: string | undefined;
   private unregisterParentHost: (() => void) | undefined;
   private switching = false;
+  private deltas = createToolcallDeltaCoalescer((event) => this.forward(event));
 
   constructor(private readonly options: WorkspaceHandleOptions) {
     this.ui = new SessionUiAdapter({
@@ -88,7 +90,7 @@ export class WorkspaceHandle {
       if (meta.workspace !== this.options.workspace && meta.workspace !== this.options.cwd) return;
       let downgraded = event;
       try {
-        downgraded = toJsonEvent(event as unknown as AgentSessionEvent) as unknown as Record<string, unknown>;
+        downgraded = toRendererEvent(event as unknown as AgentSessionEvent);
       } catch {
         /* already JSON-shaped */
       }
@@ -192,6 +194,7 @@ export class WorkspaceHandle {
     await this.detachParentHost(this.parentSessionPath);
     this.ui.cancelAll();
     try { await this.session.abort(); } catch { /* 清理阶段 abort 失败不阻断 */ }
+    this.deltas.flush();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.unsubChildEvents?.();
@@ -286,16 +289,17 @@ export class WorkspaceHandle {
         this.forward({ type: 'extension_error', extensionPath: err.extensionPath, event: err.event, error: err.error });
       },
     });
+    this.deltas.flush();
     this.unsubscribe?.();
     this.unsubscribe = this.session.subscribe((event: AgentSessionEvent) => {
       if (this.disposed) return;
       let downgraded: Record<string, unknown>;
       try {
-        downgraded = toJsonEvent(event) as unknown as Record<string, unknown>;
+        downgraded = toRendererEvent(event);
       } catch {
         return; // 畸形事件丢单条，不断流
       }
-      this.forward(downgraded);
+      this.deltas.push(downgraded);
       if (downgraded.type === 'agent_end' && downgraded.willRetry !== true) this.turnOrigin = 'main';
     });
   }

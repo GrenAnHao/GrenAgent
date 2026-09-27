@@ -120,6 +120,7 @@ function ContextToolGroupInner({ tools }: { tools: ToolSegment[] }) {
                 args={t.args}
                 result={t.result}
                 status={t.status}
+                argsComplete={t.argsComplete}
               />
             ))}
           </Suspense>

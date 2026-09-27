@@ -14,8 +14,10 @@ import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
 import { FileDiffBlock } from './FileDiffBlock';
+import { StreamingFileBody } from './StreamingFileBody';
+import { streamingEditPairs, streamingWritePreview } from './streamingFileModel';
 import { FileReadBlock } from './FileReadBlock';
-import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, mutationPath } from './fileDiffModel';
+import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, mutationPath, readLineRange } from './fileDiffModel';
 import { LazyHighlighter } from './LazyHighlighter';
 import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
@@ -40,6 +42,20 @@ interface ToolExecutionProps {
   args: unknown;
   result: unknown;
   status: ConvStatus;
+  /** false = 参数仍在生成。缺省视为完整。 */
+  argsComplete?: boolean;
+}
+
+function codeSearchPatterns(args: unknown): string {
+  if (!args || typeof args !== 'object') return '';
+  const raw = (args as { patterns?: unknown }).patterns;
+  if (!Array.isArray(raw)) return '';
+  return raw.filter((item): item is string => typeof item === 'string' && item.length > 0).join(' | ');
+}
+
+function codeSearchTotal(result: unknown): number | undefined {
+  const total = getDetails(result)?.total;
+  return typeof total === 'number' ? total : undefined;
 }
 
 /** 查询词高亮片段；无查询词时回退工具名。 */
@@ -88,7 +104,8 @@ function toolTitle(
   args: unknown,
   result: unknown,
   status: ConvStatus,
-): { icon: LucideIcon; name: ReactNode; args?: ReactNode; meta?: ReactNode } {
+  argsStreaming = false,
+): { icon: LucideIcon; name: ReactNode; args?: ReactNode; meta?: ReactNode; metaInline?: boolean } {
   const c = cardStyles;
   const lname = toolName.toLowerCase();
 
@@ -98,7 +115,22 @@ function toolTitle(
     return { icon: Sparkles, name: <>使用技能 <span className={c.skillName}>{skillName}</span></> };
   }
 
-  if (lname === 'web_search' || lname === 'search') {
+  if (lname === 'search') {
+    const patterns = codeSearchPatterns(args);
+    const failed = status !== 'running' && extractText(result).startsWith('search:');
+    const total = status === 'running' || failed ? undefined : codeSearchTotal(result);
+    return {
+      icon: Search,
+      name: (
+        <>
+          检索{patterns ? <> {queryFrag(patterns, '')}</> : null}
+          {total != null ? <span className={c.searchCount}> · {total} 处</span> : null}
+        </>
+      ),
+    };
+  }
+
+  if (lname === 'web_search' || lname === 'web_search_multi') {
     const query = getArgString(args, 'query');
     const details = getDetails(result);
     const countRaw = details?.count;
@@ -159,12 +191,26 @@ function toolTitle(
   const verb = fileCardVerb(toolName);
   if (verb && !skillNameFromRead(toolName, args)) {
     const path = mutationPath(args);
+    const range = verb === '读取' ? readLineRange(args) : undefined;
+    const file = path ? fileNameFromPath(path) : undefined;
+    if (argsStreaming && verb !== '读取') {
+      const streamingMeta = verb === '写入'
+        ? `生成中 · ${streamingWritePreview(args).totalLines} 行`
+        : `生成中 · ${streamingEditPairs(args).length} 处`;
+      return {
+        icon,
+        name: verb,
+        args: file ? (range ? `${file} · ${range}` : file) : range,
+        meta: streamingMeta,
+      };
+    }
     const diff = verb === '读取' ? null : fileDiffModel(toolName, args, result, status);
     return {
       icon,
       name: verb,
-      args: path ? fileNameFromPath(path) : undefined,
+      args: file ? (range ? `${file} · ${range}` : file) : range,
       meta: diff ? <DiffMeta added={diff.added} deleted={diff.deleted} /> : undefined,
+      metaInline: Boolean(diff),
     };
   }
   if (lname === 'present') {
@@ -200,12 +246,14 @@ function ToolDetail({
   result,
   status,
   workspace,
+  argsStreaming = false,
 }: {
   toolName: string;
   args: unknown;
   result: unknown;
   status: ConvStatus;
   workspace?: string;
+  argsStreaming?: boolean;
 }) {
   const extensionCard = renderExtensionCard({ toolName, args, result, status });
   if (extensionCard) {
@@ -236,6 +284,9 @@ function ToolDetail({
     if (!text) return status === 'running' ? null : <TerminalOutput text={stringifyJson(result)} isError={isError} />;
     return <FileReadBlock path={mutationPath(args)} text={text} />;
   }
+  if (argsStreaming && isFileMutation(name)) {
+    return <StreamingFileBody toolName={toolName} args={args} />;
+  }
   if (isFileMutation(name)) {
     const diff = fileDiffModel(toolName, args, result, status);
     if (!diff) {
@@ -246,9 +297,9 @@ function ToolDetail({
 
   if (name === 'search') {
     const details = getDetails(result);
-    if (Array.isArray(details?.matches)) {
-      return <CodeSearchCard result={result} />;
-    }
+    const hasHits = Array.isArray(details?.matches) && details.matches.length > 0;
+    if (status === 'running' && !text && !hasHits) return <CodeSurface>搜索中…</CodeSurface>;
+    return <CodeSearchCard result={result} />;
   }
   if (name === 'grep' || name === 'ripgrep') {
     if (status === 'running' && !text) return <CodeSurface>搜索中…</CodeSurface>;
@@ -275,19 +326,21 @@ function ToolDetail({
   );
 }
 
-function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionProps) {
+function ToolExecutionInner({ toolName, args, result, status, argsComplete }: ToolExecutionProps) {
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
   const [expanded, setExpanded] = useState(status === 'running');
   const bareName = toolName.toLowerCase();
   const isShell = bareName === 'bash' || bareName === 'shell' || bareName === 'run_terminal_cmd';
+  const argsStreaming = status === 'running' && argsComplete === false;
   const hasDetail = useMemo(() => {
+    if (argsStreaming && isFileMutation(toolName)) return true;
     if (isFileRead(toolName) && status === 'running' && !extractText(result)) return false;
     if (isFileMutation(toolName) && fileDiffModel(toolName, args, result, status)) return true;
     if (status === 'running') return true;
     if (isShell && getArgString(args, 'command')) return true;
     return Boolean(extractText(result) || getDiff(result) || stringifyJson(result));
-  }, [args, isShell, result, status, toolName]);
+  }, [args, argsStreaming, isShell, result, status, toolName]);
 
   // ask_user：运行中 → 工具行占位；完成 → 紧凑问答摘要。浮层由 ComposerPromptOverlay 渲染。
   if (bareName === 'ask_user') {
@@ -365,7 +418,7 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
     }
   }
 
-  const title = toolTitle(toolName, args, result, status);
+  const title = toolTitle(toolName, args, result, status, argsStreaming);
   const canExpand = hasDetail;
 
   return (
@@ -377,6 +430,7 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
         name={title.name}
         args={title.args}
         meta={title.meta}
+        metaInline={title.metaInline}
         open={expanded}
         onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
         body={
@@ -388,6 +442,7 @@ function ToolExecutionInner({ toolName, args, result, status }: ToolExecutionPro
                 result={result}
                 status={status}
                 workspace={workspace}
+                argsStreaming={argsStreaming}
               />
             </ErrorBoundary>
           ) : undefined
