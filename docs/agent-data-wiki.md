@@ -43,7 +43,7 @@ Wiki 采用 TencentDB MemoryKnowledge 同款引擎：每个知识库是应用数
 - **原文**：上传或录入 `.md` / `.txt`。只落盘并登记 `source`（`uploaded` / `ingested` / `failed`），不调用模型。
 - **模板**：直接编辑 `purpose.md` 与 `schema.md`；页面写入接口拒绝改 `index` / `schema` / `purpose`。
 - **开始抽取**：人显式触发；无原文则拒绝。`pending` / `processing` 返回 busy。抽取在进程内串行队列完成，不创建 `wiki.ingest` / `wiki.sync` 任务，任务面板不展示 Wiki 抽取。
-- **页面**：`ready` 时可列表与检索。页面写入注入 `locked: true`；写/删后重建该库 `index.db`。
+- **页面**：`ready` 时可列表与检索。页面写入注入 `locked: true`；写/删后重建该库 `index.db`。知识页面默认只读，点“编辑页面”后进入编辑；抽取进行中每 2 秒刷新一次状态。
 
 删除任意状态均可进行。删库驱逐读连接后删行与目录。
 
