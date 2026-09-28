@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryPanel } from './MemoryPanel';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryConversationDetail, type MemoryOverview, type ResourceNavigation } from '../../lib/agentData';
 import { conversationRecord, deferred, memoryRecord } from './memoryTestData';
@@ -9,6 +9,8 @@ import { StrictMode } from 'react';
 import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 
 const monitor = vi.hoisted(() => ({ watchedTaskVersion: 0, error: undefined as string | undefined }));
+const ask = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
 vi.mock('./AgentDataTaskProvider', () => ({ useAgentDataTaskMonitor: () => monitor }));
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { memory: { overview: vi.fn(), search: vi.fn(), list: vi.fn(), read: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), conversations: { list: vi.fn(), read: vi.fn() } } } }));
 vi.mock('../../lib/pi', () => ({ pi: { listAllSessions: vi.fn().mockResolvedValue([]) } }));
@@ -19,7 +21,7 @@ async function openRecord() { fireEvent.click(await screen.findByRole('button', 
 
 describe('MemoryPanel', () => {
   beforeEach(() => {
-    vi.resetAllMocks(); monitor.watchedTaskVersion = 0; monitor.error = undefined; vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.resetAllMocks(); monitor.watchedTaskVersion = 0; monitor.error = undefined; ask.mockResolvedValue(true);
     vi.mocked(pi.listAllSessions).mockResolvedValue([]);
     vi.mocked(agentDataApi.memory.overview).mockResolvedValue({ total: 2, byLevel: { L0: 0, L1: 2, L2: 0, L3: 0 } });
     vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [memoryRecord, record2] });
@@ -55,11 +57,11 @@ describe('MemoryPanel', () => {
     const input = screen.getByLabelText('记忆正文') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: '不可丢的导航草稿' } });
     rerender(<MemoryPanel userId="u" navigation={{ view: 'memory', id: memoryRecord.id }} navigationRequest={1} />);
-    expect(window.confirm).not.toHaveBeenCalled();
-    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    expect(ask).not.toHaveBeenCalled();
+    ask.mockResolvedValueOnce(false);
     const navigation = { view: 'memory' as const, id: record2.id };
     rerender(<MemoryPanel userId="u" navigation={navigation} navigationRequest={2} />);
-    await waitFor(() => expect(window.confirm).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
     expect(input.value).toBe('不可丢的导航草稿');
     expect(agentDataApi.memory.read).not.toHaveBeenCalledWith({ userId: 'u', id: record2.id });
     vi.mocked(agentDataApi.memory.read).mockResolvedValue(record2);
@@ -78,7 +80,7 @@ describe('MemoryPanel', () => {
     rerender(<MemoryPanel navigation={{ view: 'memory', id: record2.id }} navigationRequest={2} />);
     expect(input.value).toBe('保存中的草稿');
     expect(agentDataApi.memory.read).not.toHaveBeenCalled();
-    expect(window.confirm).not.toHaveBeenCalled();
+    expect(ask).not.toHaveBeenCalled();
     await act(async () => pending.resolve({ ...memoryRecord, id: 'created' }));
     expect(agentDataApi.memory.read).not.toHaveBeenCalledWith({ userId: 'local', id: record2.id });
   });
@@ -90,6 +92,7 @@ describe('MemoryPanel', () => {
     const pending = deferred<ManagedMemoryRecord>();
     vi.mocked(agentDataApi.memory.read).mockReturnValueOnce(pending.promise);
     fireEvent.click(screen.getByRole('button', { name: '重新载入' }));
+    await act(async () => {});
     rerender(<MemoryPanel userId="u" navigation={{ view: 'memory', id: record2.id }} navigationRequest={1} />);
     expect(input.value).toBe('等待重新载入');
     expect(agentDataApi.memory.read).not.toHaveBeenCalledWith({ userId: 'u', id: record2.id });
@@ -182,6 +185,7 @@ describe('MemoryPanel', () => {
     const pending = deferred<void>(); vi.mocked(agentDataApi.memory.delete).mockReturnValueOnce(pending.promise);
     const { rerender } = render(<MemoryPanel userId="user-a" />); await openRecord();
     fireEvent.click(screen.getByRole('button', { name: '删除记忆' }));
+    await act(async () => {});
     rerender(<MemoryPanel userId="user-b" />); await openRecord();
     await act(async () => pending.resolve());
     expect(screen.getByRole('article', { name: '记忆详情' })).toBeTruthy();
@@ -223,6 +227,7 @@ describe('MemoryPanel', () => {
     vi.mocked(agentDataApi.memory.delete).mockReturnValueOnce(pending.promise);
     vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [record2] });
     fireEvent.click(screen.getByRole('button', { name: '删除记忆' }));
+    await act(async () => {});
     expect((screen.getByRole('button', { name: '返回记忆列表' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(row('第二条记忆'));
     expect(agentDataApi.memory.read).toHaveBeenCalledTimes(1);
@@ -236,6 +241,7 @@ describe('MemoryPanel', () => {
     render(<MemoryPanel userId="u" />); await openRecord();
     const edit = screen.getByRole('button', { name: '编辑记忆' }); edit.focus(); fireEvent.click(edit);
     fireEvent.click(screen.getByRole('button', { name: '关闭编辑' }));
+    await act(async () => {});
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '编辑记忆' }));
     fireEvent.click(screen.getByRole('button', { name: '返回记忆列表' }));
     expect(document.activeElement).toBe(row());

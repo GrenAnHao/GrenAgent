@@ -8,6 +8,7 @@ import { styles } from './agentDataStyles';
 import { operationsStyles as ops } from './operationsStyles';
 import { isTerminalTask, redact, taskKey, taskStatusColors, taskStatusLabels, uniqueTaskKindOptions, workspaceFilterLabel } from './operationsPresentation';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
+import { useAskConfirm } from '../../components/askConfirm';
 
 interface JobsPanelProps {
   jobs?: AgentJob[]; tasks?: TaskView[];
@@ -31,6 +32,7 @@ function legacyTaskView(job: AgentJob): TaskView {
 
 export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTrack, onNavigate, selectedJobId, selectedTask,
   selectionRequest, visible = true, dataReady = true, nextCursor, onLoadMore, loadMore, loadingMore = false }: JobsPanelProps) {
+  const ask = useAskConfirm();
   const modern = inputTasks !== undefined;
   const [tasks, setTasks] = useState<TaskView[]>(inputTasks ?? inputJobs?.map(legacyTaskView) ?? []);
   const [query, setQuery] = useState('');
@@ -114,7 +116,11 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
   };
   const mutate = async (task: TaskView, operation: 'cancel' | 'remove') => {
     if (!visible || busyRef.current || task.ref.source !== 'user' || !task.capabilities[operation]) return;
-    if (operation === 'remove' && (!isTerminalTask(task.status) || task.cancellationRequested || !window.confirm(`确认删除任务“${task.label}”（${task.workspace ?? ''}）的记录吗？\nID：${task.ref.id}\n${deletionWarning}`))) return;
+    if (operation === 'remove' && (!isTerminalTask(task.status) || task.cancellationRequested || !(await ask({
+      title: '确认删除任务记录？',
+      content: `确认删除任务“${task.label}”（${task.workspace ?? ''}）的记录吗？\nID：${task.ref.id}\n${deletionWarning}`,
+      danger: true,
+    })))) return;
     const context = mutationContext.current;
     busyRef.current = true; setBusy(true); setError(undefined);
     try {
@@ -126,7 +132,11 @@ export function JobsPanel({ jobs: inputJobs, tasks: inputTasks, onRefresh, onTra
   };
   const clear = async () => {
     const stable = removable;
-    if (!visible || busyRef.current || !stable.length || !window.confirm(`确认清理当前筛选范围内的 ${stable.length} 条已结束任务记录吗？\n仅删除已完成、失败和已取消的用户任务记录。${deletionWarning}`)) return;
+    if (!visible || busyRef.current || !stable.length || !(await ask({
+      title: '确认清理已结束任务？',
+      content: `确认清理当前筛选范围内的 ${stable.length} 条已结束任务记录吗？\n仅删除已完成、失败和已取消的用户任务记录。${deletionWarning}`,
+      danger: true,
+    }))) return;
     const context = mutationContext.current;
     busyRef.current = true; setBusy(true); setError(undefined);
     try {

@@ -10,6 +10,9 @@ vi.mock('../../lib/agentData', () => ({
 import { agentDataApi } from '../../lib/agentData';
 import { pickSelectOption } from './antdSelectTestUtils';
 
+const ask = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
+
 const jobs = [
   { id: 'job-1', kind: 'wiki.sync', workspace: 'D:/proj/alpha', state: 'running' as const, progress: 40, createdAt: 1, updatedAt: 2 },
   { id: 'job-2', kind: 'codegraph.sync', workspace: 'D:/proj/beta', state: 'failed' as const, progress: 0, error: 'codegraph exited (1)', createdAt: 1, updatedAt: 3 },
@@ -74,7 +77,7 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.cancel).mockResolvedValue(jobs[0]);
     vi.mocked(agentDataApi.jobs.remove).mockResolvedValue({ deleted: true });
     vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: terminalJobs.map((job) => job.id) });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    ask.mockResolvedValue(true);
   });
 
   it('lists jobs from every workspace with their progress and failure reason', () => {
@@ -112,8 +115,8 @@ describe('JobsPanel', () => {
 
     await waitFor(() => expect(screen.queryByText(job.kind)).toBeNull());
     expect(agentDataApi.jobs.remove).toHaveBeenCalledWith(job.id);
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('不可恢复'));
-    const confirmation = vi.mocked(window.confirm).mock.calls[0][0];
+    expect(ask).toHaveBeenCalled();
+    const confirmation = String(ask.mock.calls[0]?.[0]?.content ?? '');
     expect(confirmation).toContain(job.kind);
     expect(confirmation).toContain('Wiki');
     expect(confirmation).toContain('索引');
@@ -128,11 +131,12 @@ describe('JobsPanel', () => {
     expect(screen.queryByRole('button', { name: '删除' })).toBeNull();
   });
 
-  it('does not delete or refresh when single-record confirmation is declined', () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
+  it('does not delete or refresh when single-record confirmation is declined', async () => {
+    ask.mockResolvedValueOnce(false);
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[terminalJobs[0]]} onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    await act(async () => {});
 
     expect(agentDataApi.jobs.remove).not.toHaveBeenCalled();
     expect(onRefresh).not.toHaveBeenCalled();
@@ -150,7 +154,7 @@ describe('JobsPanel', () => {
 
     await waitFor(() => expect(screen.queryByText(matchingJob.kind)).toBeNull());
     expect(agentDataApi.jobs.clear).toHaveBeenCalledWith([matchingJob.id]);
-    const confirmation = vi.mocked(window.confirm).mock.calls[0][0];
+    const confirmation = String(ask.mock.calls[0]?.[0]?.content ?? '');
     expect(confirmation).toContain('1');
     expect(confirmation).toContain('当前筛选');
     expect(confirmation).toContain('不可恢复');
@@ -171,7 +175,7 @@ describe('JobsPanel', () => {
     const newJob = terminalJobs[2];
     vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: [initialJob.id] });
     const { rerender } = render(<JobsPanel jobs={[initialJob]} onRefresh={onRefresh} />);
-    vi.mocked(window.confirm).mockImplementationOnce(() => {
+    ask.mockImplementationOnce(async () => {
       rerender(<JobsPanel jobs={[initialJob, newJob]} onRefresh={onRefresh} />);
       return true;
     });
@@ -182,11 +186,12 @@ describe('JobsPanel', () => {
     expect(screen.getByText(newJob.kind)).toBeTruthy();
   });
 
-  it('does not clear or refresh when bulk confirmation is declined', () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
+  it('does not clear or refresh when bulk confirmation is declined', async () => {
+    ask.mockResolvedValueOnce(false);
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={terminalJobs} onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    await act(async () => {});
 
     expect(agentDataApi.jobs.clear).not.toHaveBeenCalled();
     expect(onRefresh).not.toHaveBeenCalled();
@@ -201,7 +206,7 @@ describe('JobsPanel', () => {
     const clearButton = screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement;
     expect(clearButton.disabled).toBe(true);
     fireEvent.click(clearButton);
-    expect(window.confirm).not.toHaveBeenCalled();
+    expect(ask).not.toHaveBeenCalled();
     expect(agentDataApi.jobs.clear).not.toHaveBeenCalled();
   });
 
@@ -225,6 +230,7 @@ describe('JobsPanel', () => {
       ? within(screen.getByRole('row', { name: /wiki.sync/ })).getByRole('button', { name: '取消' })
       : screen.getByRole('button', { name: operation === 'remove' ? '删除' : '清理已结束' });
     fireEvent.click(button);
+    await act(async () => {});
 
     for (const action of screen.getAllByRole('button')) {
       expect((action as HTMLButtonElement).disabled).toBe(true);

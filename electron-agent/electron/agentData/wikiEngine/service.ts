@@ -17,7 +17,7 @@ import {
   cascadeDeleteWikiPagesWithRefs,
   deleteSourceFiles,
 } from './ingest/cascade';
-import { createLimit, getGlobalLlmConcurrency } from './ingest/concurrency';
+import { createRefreshingLimit, getGlobalLlmConcurrency } from './ingest/concurrency';
 import { runIngestIncremental } from './ingest/runIncremental';
 import {
   evictWikiDb,
@@ -387,7 +387,7 @@ export class WikiService {
   private readonly complete: CompleteFn;
   private readonly cancelled = new Set<string>();
   private readonly buildQueues = new Map<string, Promise<void>>();
-  private readonly globalLlmLimit = createLimit(getGlobalLlmConcurrency());
+  private readonly globalLlmLimit = createRefreshingLimit(getGlobalLlmConcurrency);
 
   constructor(opts: { root: string; db: DatabaseSync; complete: CompleteFn }) {
     this.root = opts.root;
@@ -1334,7 +1334,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
         asset.dir,
         oldStates,
         llm,
-        this.globalLlmLimit,
+        this.globalLlmLimit(),
       );
 
       if (this.isCancelled(wikiId)) {

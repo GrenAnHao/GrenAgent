@@ -11,7 +11,7 @@ import { classifySources, type SourceStatus } from '../indexDb';
 import type { LlmClient } from '../llm';
 import { createLogger } from '../logger';
 import { deleteSourceFiles } from './cascade';
-import { createLimit, getIngestConcurrency, type LimitFunction } from './concurrency';
+import { createLimit, getIngestConcurrency, getWikiIngestMode, type LimitFunction } from './concurrency';
 import { commitCandidates, extractSource, scanExistingPages } from './index';
 import { generateOverview } from './overview';
 
@@ -95,7 +95,7 @@ export async function runIngestIncremental(
     wikiLimit(async () => {
       try {
         const run = () =>
-          extractSource(projectPath, d.abs, {}, existingPages, { llm, mode: 'two-stage' });
+          extractSource(projectPath, d.abs, {}, existingPages, { llm, mode: getWikiIngestMode() });
         const candidates = globalLlmLimit ? await globalLlmLimit(run) : await run();
         completed += 1;
         return { ...d, ok: true as const, candidates, error: null };

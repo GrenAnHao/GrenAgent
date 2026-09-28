@@ -4,6 +4,7 @@ import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useProjectOptions } from './useProjectOptions';
 import { useSessionStore } from '../../store';
+import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
 
 beforeEach(() => {
   useSessionStore.setState({
@@ -19,6 +20,7 @@ beforeEach(() => {
     // 与上方 zeta 指向同一项目的大小写/分隔符/尾斜杠变体：朴素字符串去重无法合并它
     activeWorkspace: 'd:\\proj\\zeta\\',
   });
+  useSidebarPrefsStore.setState({ keptProjects: [] });
 });
 
 describe('useProjectOptions', () => {
@@ -29,6 +31,13 @@ describe('useProjectOptions', () => {
       { cwd: 'D:/proj/beta', name: 'beta' },
       { cwd: 'D:/proj/zeta', name: 'zeta' },
     ]);
+  });
+
+  it('includes a kept project that has no session yet', () => {
+    useSessionStore.setState({ allSessions: [], activeWorkspace: '', registeredProjects: [] });
+    useSidebarPrefsStore.setState({ keptProjects: ['D:/proj/empty'] });
+    const { result } = renderHook(() => useProjectOptions());
+    expect(result.current).toEqual([{ cwd: 'D:/proj/empty', name: 'empty' }]);
   });
 
   it('includes the active workspace even when it has no session yet', () => {

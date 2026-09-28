@@ -6,6 +6,8 @@ import { MemoryEditor } from './MemoryEditor';
 import { deferred, memoryRecord } from './memoryTestData';
 import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
 
+const ask = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
 vi.mock('../../lib/agentData', () => ({ agentDataApi: { memory: { create: vi.fn(), update: vi.fn(), read: vi.fn() } } }));
 const projects = [{ cwd: 'D:/proj/alpha', name: 'alpha' }, { cwd: 'D:/proj/beta', name: 'beta' }];
 const setup = (record?: ManagedMemoryRecord) => {
@@ -17,7 +19,7 @@ const contentInput = () => screen.getByLabelText('记忆正文') as HTMLTextArea
 
 describe('MemoryEditor', () => {
   beforeEach(() => {
-    vi.resetAllMocks(); vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.resetAllMocks(); ask.mockResolvedValue(true);
     vi.mocked(agentDataApi.memory.create).mockResolvedValue({ ...memoryRecord, origin: 'manual' });
     vi.mocked(agentDataApi.memory.update).mockResolvedValue({ ...memoryRecord, revision: 2 });
     vi.mocked(agentDataApi.memory.read).mockResolvedValue({ ...memoryRecord, revision: 2, content: '外部更新正文' });
@@ -60,11 +62,13 @@ describe('MemoryEditor', () => {
     fireEvent.click(saveButton());
     expect((await screen.findByRole('alert')).textContent).toContain('记录已被修改，你的草稿已保留');
     expect(contentInput().value).toBe('冲突草稿');
-    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    ask.mockResolvedValueOnce(false);
     fireEvent.click(screen.getByRole('button', { name: '重新载入' }));
+    await act(async () => {});
     expect(agentDataApi.memory.read).not.toHaveBeenCalled();
     const pending = deferred<ManagedMemoryRecord>(); vi.mocked(agentDataApi.memory.read).mockReturnValueOnce(pending.promise);
     fireEvent.click(screen.getByRole('button', { name: '重新载入' }));
+    await act(async () => {});
     expect(contentInput().readOnly).toBe(true);
     fireEvent.change(contentInput(), { target: { value: '载入期间不能修改' } });
     expect(contentInput().value).toBe('冲突草稿');
@@ -97,7 +101,7 @@ describe('MemoryEditor', () => {
     expect(onSaved).not.toHaveBeenCalled(); expect(contentInput().value).toBe('A 草稿'); expect(saveButton().disabled).toBe(true);
     expect(screen.getByText(/原草稿仍保留/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '载入当前记录' }));
-    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() => expect(ask).toHaveBeenCalled());
     await waitFor(() => expect(agentDataApi.memory.read).toHaveBeenCalledWith({ userId: change === 'user' ? 'user-b' : 'user-a', id: change === 'record' ? 'record-b' : memoryRecord.id }));
   });
   it('ignores a stale reload after changing records', async () => {
@@ -123,11 +127,13 @@ describe('MemoryEditor', () => {
     expect(onSaved).not.toHaveBeenCalled();
     expect(contentInput().value).toBe('保留已删除记录的草稿'); expect(saveButton().disabled).toBe(true);
   });
-  it('keeps a draft when Escape discard is cancelled and closes only after confirmation', () => {
-    const { onCancel } = setup(memoryRecord); vi.mocked(window.confirm).mockReturnValueOnce(false);
+  it('keeps a draft when Escape discard is cancelled and closes only after confirmation', async () => {
+    const { onCancel } = setup(memoryRecord); ask.mockResolvedValueOnce(false);
     fireEvent.change(contentInput(), { target: { value: '保留草稿' } });
     fireEvent.keyDown(contentInput(), { key: 'Escape' });
+    await act(async () => {});
     expect(onCancel).not.toHaveBeenCalled(); expect(contentInput().value).toBe('保留草稿');
-    fireEvent.keyDown(contentInput(), { key: 'Escape' }); expect(onCancel).toHaveBeenCalledOnce();
+    fireEvent.keyDown(contentInput(), { key: 'Escape' });
+    await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
   });
 });

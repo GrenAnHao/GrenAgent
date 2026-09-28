@@ -9,6 +9,7 @@ import { useMemoryBrowser } from './useMemoryBrowser';
 import { MemoryDetail, type MemoryDetailProps } from './MemoryDetail';
 import { MemoryList } from './MemoryList';
 import { MemoryEditor, type MemoryEditorHandle } from './MemoryEditor';
+import { useAskConfirm } from '../../components/askConfirm';
 import { memoryLevelLabels } from './memoryPresentation';
 import { memoryStyles as m } from './memoryStyles';
 
@@ -27,6 +28,7 @@ type FocusRequest = { kind: 'row'; id?: string } | { kind: 'edit' | 'new' | 'det
 const selectionKey = (selection?: Selection) => selection ? JSON.stringify([selection.userId, selection.kind, selection.id]) : '';
 
 export function MemoryPanel({ userId = 'local', initialProject, visible = true, navigation, navigationRequest = 0, onOpenSession }: MemoryPanelProps) {
+  const ask = useAskConfirm();
   const projects = useProjectOptions();
   const monitor = useAgentDataTaskMonitor();
   const [project, setProject] = useState(() => {
@@ -76,20 +78,31 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   useEffect(() => { setRemoved([]); setNotice(undefined); setDeleteError(undefined); setDeleting(false); }, [userId]);
   useEffect(() => {
     if (!visible || !navigation || handledNavigation.current === navigationKey) return;
-    handledNavigation.current = navigationKey;
-    if ((!navigation.id && navigation.mode !== 'create') || deleteRuntime.current.busy) return;
-    if (navigation.id && editor?.userId === userId && editor.record?.id === navigation.id) return;
-    if (!(editorHandle.current?.confirmLeave() ?? true) || !current.current.visible || currentNavigation.current !== navigationKey) return;
-    detailEpoch.current++;
-    setKind('memory'); setNotice(undefined); setDeleteError(undefined);
-    if (navigation.mode === 'create' && !navigation.id) {
-      setSelected(undefined); setEditorVersion((value) => value + 1); setEditor({ userId, trigger: 'new' });
-    } else if (navigation.id) {
-      setEditor(undefined); setProject(''); setQuery(''); setLevel('all');
-      setSelected({ userId, kind: 'memory', id: navigation.id });
-      setNavigationVersion((value) => value + 1);
+    if ((!navigation.id && navigation.mode !== 'create') || deleteRuntime.current.busy) {
+      handledNavigation.current = navigationKey;
+      return;
     }
-    setFocusRequest({ kind: 'detail' });
+    if (navigation.id && editor?.userId === userId && editor.record?.id === navigation.id) {
+      handledNavigation.current = navigationKey;
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const ok = await (editorHandle.current?.confirmLeave() ?? true);
+      if (cancelled || !ok || !current.current.visible || currentNavigation.current !== navigationKey) return;
+      handledNavigation.current = navigationKey;
+      detailEpoch.current++;
+      setKind('memory'); setNotice(undefined); setDeleteError(undefined);
+      if (navigation.mode === 'create' && !navigation.id) {
+        setSelected(undefined); setEditorVersion((value) => value + 1); setEditor({ userId, trigger: 'new' });
+      } else if (navigation.id) {
+        setEditor(undefined); setProject(''); setQuery(''); setLevel('all');
+        setSelected({ userId, kind: 'memory', id: navigation.id });
+        setNavigationVersion((value) => value + 1);
+      }
+      setFocusRequest({ kind: 'detail' });
+    })();
+    return () => { cancelled = true; };
   }, [navigationKey, visible]);
   useEffect(() => {
     if (!visible) return;
@@ -159,7 +172,8 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   };
   const remove = async () => {
     const value = activeDetail?.value;
-    if (value?.kind !== 'memory' || deleteRuntime.current.busy || !window.confirm('确认删除这条记忆？来源对话记录不会被删除。')) return;
+    if (value?.kind !== 'memory' || deleteRuntime.current.busy) return;
+    if (!(await ask({ title: '确认删除这条记忆？', content: '来源对话记录不会被删除。', danger: true }))) return;
     const target = { id: value.record.id, userId };
     const state = deleteRuntime.current;
     const epoch = ++state.epoch;

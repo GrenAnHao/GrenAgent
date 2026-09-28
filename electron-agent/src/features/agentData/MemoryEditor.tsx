@@ -3,9 +3,10 @@ import { Alert, Button, Input, Select, Typography } from 'antd';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryDraft, type MemoryLevel } from '../../lib/agentData';
 import { memoryLevelLabels } from './memoryPresentation';
 import { memoryStyles as m } from './memoryStyles';
+import { useAskConfirm } from '../../components/askConfirm';
 
 interface Props { userId: string; record?: ManagedMemoryRecord; projects: Array<{ cwd: string; name: string }>; unavailable?: boolean; onUnavailable?(): void; onSaved(record: ManagedMemoryRecord): void; onCancel(): void }
-export interface MemoryEditorHandle { confirmLeave(): boolean }
+export interface MemoryEditorHandle { confirmLeave(): Promise<boolean> }
 interface DraftState { targetKey: string; userId: string; base?: ManagedMemoryRecord; content: string; level: MemoryLevel; owner: string; source: string }
 const ownerValue = (record?: ManagedMemoryRecord) => record ? record.scope === 'global' ? 'global' : `project:${record.sourceProjectId ?? ''}` : '';
 const newDraft = (userId: string, targetKey: string, base?: ManagedMemoryRecord): DraftState => ({ userId, targetKey, base, content: base?.content ?? '', level: base?.level ?? 1, owner: ownerValue(base), source: base?.source ?? '' });
@@ -14,6 +15,7 @@ function hasErrorCode(cause: unknown, code: string) {
 }
 
 export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function MemoryEditor({ userId, record, projects, unavailable = false, onUnavailable, onSaved, onCancel }, ref) {
+  const ask = useAskConfirm();
   const targetKey = JSON.stringify([userId, record?.id]);
   const [draft, setDraft] = useState(() => newDraft(userId, targetKey, record));
   const [busy, setBusy] = useState<'save' | 'reload'>();
@@ -44,12 +46,13 @@ export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function Memor
   }, []);
   const validOwner = draft.owner === 'global' || (draft.owner.startsWith('project:') && draft.owner.length > 'project:'.length);
   const canSave = !!draft.content.trim() && validOwner && !busy && !targetMismatch && !deleted && !unavailable;
-  const confirmLeave = () => {
+  const confirmLeave = async () => {
     if (runtime.current.busy) return false;
-    return !dirty || window.confirm('放弃未保存的记忆修改？');
+    if (!dirty) return true;
+    return ask({ title: '放弃未保存的记忆修改？' });
   };
   useImperativeHandle(ref, () => ({ confirmLeave }));
-  const close = () => { if (confirmLeave()) onCancel(); };
+  const close = () => { void confirmLeave().then((ok) => { if (ok) onCancel(); }); };
   const save = async () => {
     if (!canSave || runtime.current.busy) return;
     const state = runtime.current;
@@ -79,7 +82,7 @@ export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function Memor
     const targetUser = targetMismatch ? userId : draft.userId;
     const state = runtime.current;
     const beforeConfirmation = state.epoch;
-    if (dirty && !window.confirm('放弃未保存修改并重新载入？')) return;
+    if (dirty && !(await ask({ title: '放弃未保存修改并重新载入？' }))) return;
     if (beforeConfirmation !== state.epoch || !state.mounted) return;
     if (!target) { apply(undefined, targetUser); return; }
     const epoch = ++state.epoch;

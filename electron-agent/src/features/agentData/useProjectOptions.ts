@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useSessionStore } from '../../store';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
+import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
 
 export interface ProjectOption { cwd: string; name: string }
 
@@ -16,6 +17,7 @@ function basename(path: string): string {
 export function useProjectOptions(): ProjectOption[] {
   const allSessions = useSessionStore((state) => state.allSessions);
   const registeredProjects = useSessionStore((state) => state.registeredProjects);
+  const keptProjects = useSidebarPrefsStore((state) => state.keptProjects);
   const activeWorkspace = useSessionStore((state) => state.activeWorkspace);
   const worksDir = useSessionStore((state) => state.worksDir);
 
@@ -23,6 +25,7 @@ export function useProjectOptions(): ProjectOption[] {
     const candidates = [
       ...allSessions.map((session) => session.cwd ?? ''),
       ...registeredProjects,
+      ...keptProjects,
       activeWorkspace,
     ].filter((cwd) => cwd && !(worksDir && isUnder(cwd, worksDir)));
 
@@ -35,5 +38,5 @@ export function useProjectOptions(): ProjectOption[] {
       const duplicated = unique.some((other) => other !== cwd && basename(other).toLowerCase() === name.toLowerCase());
       return { cwd, name: duplicated ? `${name} · ${cwd.replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]+$/, '')}` : name };
     });
-  }, [allSessions, registeredProjects, activeWorkspace, worksDir]);
+  }, [allSessions, registeredProjects, keptProjects, activeWorkspace, worksDir]);
 }
