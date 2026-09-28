@@ -5,19 +5,19 @@ import { memoryLevelLabels } from './memoryPresentation';
 import { memoryStyles as m } from './memoryStyles';
 import { useAskConfirm } from '../../components/askConfirm';
 
-interface Props { userId: string; record?: ManagedMemoryRecord; projects: Array<{ cwd: string; name: string }>; unavailable?: boolean; onUnavailable?(): void; onSaved(record: ManagedMemoryRecord): void; onCancel(): void }
+interface Props { userId: string; record?: ManagedMemoryRecord; initialLevel?: 1 | 2 | 3; projects: Array<{ cwd: string; name: string }>; unavailable?: boolean; onUnavailable?(): void; onSaved(record: ManagedMemoryRecord): void; onCancel(): void }
 export interface MemoryEditorHandle { confirmLeave(): Promise<boolean> }
 interface DraftState { targetKey: string; userId: string; base?: ManagedMemoryRecord; content: string; level: MemoryLevel; owner: string; source: string }
 const ownerValue = (record?: ManagedMemoryRecord) => record ? record.scope === 'global' ? 'global' : `project:${record.sourceProjectId ?? ''}` : '';
-const newDraft = (userId: string, targetKey: string, base?: ManagedMemoryRecord): DraftState => ({ userId, targetKey, base, content: base?.content ?? '', level: base?.level ?? 1, owner: ownerValue(base), source: base?.source ?? '' });
+const newDraft = (userId: string, targetKey: string, base?: ManagedMemoryRecord, initialLevel: MemoryLevel = 1): DraftState => ({ userId, targetKey, base, content: base?.content ?? '', level: base?.level ?? initialLevel, owner: ownerValue(base), source: base?.source ?? '' });
 function hasErrorCode(cause: unknown, code: string) {
   return (typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === code) || String(cause).includes(code);
 }
 
-export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function MemoryEditor({ userId, record, projects, unavailable = false, onUnavailable, onSaved, onCancel }, ref) {
+export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function MemoryEditor({ userId, record, initialLevel = 1, projects, unavailable = false, onUnavailable, onSaved, onCancel }, ref) {
   const ask = useAskConfirm();
   const targetKey = JSON.stringify([userId, record?.id]);
-  const [draft, setDraft] = useState(() => newDraft(userId, targetKey, record));
+  const [draft, setDraft] = useState(() => newDraft(userId, targetKey, record, initialLevel));
   const [busy, setBusy] = useState<'save' | 'reload'>();
   const [error, setError] = useState<string>();
   const [deleted, setDeleted] = useState(false);
@@ -28,11 +28,11 @@ export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function Memor
     runtime.current.epoch++;
     runtime.current.busy = false;
   }
-  const dirty = draft.content !== (draft.base?.content ?? '') || draft.level !== (draft.base?.level ?? 1) || draft.owner !== ownerValue(draft.base) || draft.source !== (draft.base?.source ?? '');
+  const dirty = draft.content !== (draft.base?.content ?? '') || draft.level !== (draft.base?.level ?? initialLevel ?? 1) || draft.owner !== ownerValue(draft.base) || draft.source !== (draft.base?.source ?? '');
   const targetMismatch = draft.targetKey !== targetKey;
   const backgroundUpdated = !targetMismatch && !!record && !!draft.base && record.revision > draft.base.revision;
   const apply = (next: ManagedMemoryRecord | undefined, nextUser = userId) => {
-    setDraft(newDraft(nextUser, targetKey, next));
+    setDraft(newDraft(nextUser, targetKey, next, initialLevel));
     setError(undefined); setDeleted(false); setBusy(undefined); runtime.current.busy = false;
   };
   useEffect(() => {
@@ -110,11 +110,13 @@ export const MemoryEditor = forwardRef<MemoryEditorHandle, Props>(function Memor
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
   }}>
     <div className={m.toolbar}>
-      <Button disabled={!!busy} onClick={close}>关闭编辑</Button>
-      <Button type="primary" disabled={!canSave} onClick={() => void save()}>保存记忆</Button>
-      {draft.base || targetMismatch ? <Button disabled={!!busy} onClick={() => void reload()}>{targetMismatch ? '载入当前记录' : '重新载入'}</Button> : null}
       {dirty ? <Typography.Text role="status">未保存修改</Typography.Text> : null}
       {busy ? <Typography.Text role="status">{busy === 'save' ? '正在保存…' : '正在重新载入…'}</Typography.Text> : null}
+      <span style={{ marginInlineStart: 'auto', display: 'inline-flex', gap: 8 }}>
+        <Button disabled={!!busy} onClick={close}>关闭编辑</Button>
+        <Button type="primary" disabled={!canSave} onClick={() => void save()}>保存记忆</Button>
+        {draft.base || targetMismatch ? <Button disabled={!!busy} onClick={() => void reload()}>{targetMismatch ? '载入当前记录' : '重新载入'}</Button> : null}
+      </span>
     </div>
     {error ? <Alert type="error" showIcon title={error} /> : null}
     {unavailable && !deleted ? <Alert type="error" showIcon title="原记录不可写；草稿内容仍可复制。" /> : null}

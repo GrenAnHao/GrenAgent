@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Empty, Input, Select, Spin, Tabs, Typography } from 'antd';
+import { Button, Empty, Input, Modal, Radio, Select, Spin, Typography } from 'antd';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryFilter, type MemoryItem, type MemoryLevel, type MemoryOverview, type ResourceNavigation } from '../../lib/agentData';
 import { pathsEquivalent } from '../../lib/pathUtils';
-import { styles } from './agentDataStyles';
 import { useProjectOptions } from './useProjectOptions';
 import { useAgentDataTaskMonitor } from './AgentDataTaskProvider';
 import { useMemoryBrowser } from './useMemoryBrowser';
@@ -11,6 +10,10 @@ import { MemoryList } from './MemoryList';
 import { MemoryEditor, type MemoryEditorHandle } from './MemoryEditor';
 import { useAskConfirm } from '../../components/askConfirm';
 import { memoryLevelLabels } from './memoryPresentation';
+import { PageHeader } from './workbench/PageHeader';
+import { PageBanner } from './workbench/PageBanner';
+import { SplitPane } from './workbench/SplitPane';
+import { workbenchStyles as w } from './workbench/workbenchStyles';
 import { memoryStyles as m } from './memoryStyles';
 
 interface MemoryPanelProps {
@@ -18,7 +21,7 @@ interface MemoryPanelProps {
   /** 仅用于首次打开；切换聊天不会重设筛选器。 */
   initialProject?: string;
   visible?: boolean;
-  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  /** 统一刷新令牌；变化时重新读取列表与总数。 */
   refreshToken?: number;
   navigation?: Extract<ResourceNavigation, { view: 'memory' }>;
   navigationRequest?: number;
@@ -27,9 +30,10 @@ interface MemoryPanelProps {
 interface Selection { userId: string; kind: MemoryItem['kind']; id: string; snippet?: string }
 interface DetailState { key: string; value?: MemoryDetailProps['value']; loading: boolean; error?: string }
 type FocusRequest = { kind: 'row'; id?: string } | { kind: 'edit' | 'new' | 'detail' };
+type Group = '0' | '1' | '2' | '3' | 'conversation';
 const selectionKey = (selection?: Selection) => selection ? JSON.stringify([selection.userId, selection.kind, selection.id]) : '';
 
-export function MemoryPanel({ userId = 'local', initialProject, visible = true, navigation, navigationRequest = 0, onOpenSession }: MemoryPanelProps) {
+export function MemoryPanel({ userId = 'local', initialProject, visible = true, refreshToken = 0, navigation, navigationRequest = 0, onOpenSession }: MemoryPanelProps) {
   const ask = useAskConfirm();
   const projects = useProjectOptions();
   const monitor = useAgentDataTaskMonitor();
@@ -37,10 +41,11 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
     const found = initialProject && projects.find((option) => pathsEquivalent(option.cwd, initialProject));
     return found ? `project:${found.cwd}` : '';
   });
-  const [kind, setKind] = useState<MemoryItem['kind']>('memory');
+  const [group, setGroup] = useState<Group>('2');
   const [query, setQuery] = useState('');
-  const [level, setLevel] = useState<'all' | '0' | '1' | '2' | '3'>('all');
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const kind: MemoryItem['kind'] = group === 'conversation' ? 'conversation' : 'memory';
+  const level = group === 'conversation' ? undefined : Number(group) as MemoryLevel;
   const [overview, setOverview] = useState<{ userId: string; value?: MemoryOverview; error?: string }>({ userId });
   const [selected, setSelected] = useState<Selection>();
   const [detail, setDetail] = useState<DetailState>({ key: '', loading: false });
@@ -54,6 +59,7 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   const [editorVersion, setEditorVersion] = useState(0);
   const editorHandle = useRef<MemoryEditorHandle>(null);
   const handledNavigation = useRef<string | undefined>(undefined);
+  const navigatedSelection = useRef<string | undefined>(undefined);
   const navigationKey = navigation ? JSON.stringify([userId, navigation.id, navigation.mode, navigationRequest]) : '';
   const currentNavigation = useRef(navigationKey);
   currentNavigation.current = navigationKey;
@@ -66,8 +72,8 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   const deleteRuntime = useRef({ userId, epoch: 0, busy: false });
   if (deleteRuntime.current.userId !== userId) deleteRuntime.current = { userId, epoch: deleteRuntime.current.epoch + 1, busy: false };
   const filter = useMemo<MemoryFilter>(() => project === 'global' ? { scope: 'global' } : project.startsWith('project:') ? { scope: 'project', projectId: project.slice('project:'.length) } : { scope: 'all' }, [project]);
-  const reloadVersion = monitor.watchedTaskVersion + refreshVersion;
-  const browser = useMemoryBrowser({ userId, filter, query, kind, level: level === 'all' ? undefined : Number(level) as MemoryLevel, visible, reloadVersion });
+  const reloadVersion = monitor.watchedTaskVersion + refreshVersion + refreshToken;
+  const browser = useMemoryBrowser({ userId, filter, query, kind, level, visible, reloadVersion });
   const items = browser.items.filter((item) => item.kind !== 'memory' || !removed.includes(item.record.id));
   const activeDetail = detail.key === key ? detail : undefined;
   const locked = !!editor || deleting;
@@ -94,11 +100,12 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
       if (cancelled || !ok || !current.current.visible || currentNavigation.current !== navigationKey) return;
       handledNavigation.current = navigationKey;
       detailEpoch.current++;
-      setKind('memory'); setNotice(undefined); setDeleteError(undefined);
+      setNotice(undefined); setDeleteError(undefined);
       if (navigation.mode === 'create' && !navigation.id) {
         setSelected(undefined); setEditorVersion((value) => value + 1); setEditor({ userId, trigger: 'new' });
       } else if (navigation.id) {
-        setEditor(undefined); setProject(''); setQuery(''); setLevel('all');
+        setEditor(undefined); setProject(''); setQuery('');
+        navigatedSelection.current = navigation.id;
         setSelected({ userId, kind: 'memory', id: navigation.id });
         setNavigationVersion((value) => value + 1);
       }
@@ -129,6 +136,10 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
       if (!isCurrent()) return;
       if (!record) throw new Error('NOT_FOUND: 记录不存在');
       const value = target.kind === 'memory' ? { kind: 'memory' as const, record: record as ManagedMemoryRecord } : { kind: 'conversation' as const, record: { ...record as Extract<MemoryDetailProps['value'], { kind: 'conversation' }>['record'], ...(target.snippet === undefined ? {} : { snippet: target.snippet }) } };
+      if (value.kind === 'memory' && navigatedSelection.current === target.id) {
+        navigatedSelection.current = undefined;
+        setGroup(String(value.record.level) as Group);
+      }
       setDetail({ key, value, loading: false });
     }).catch((cause) => {
       if (!isCurrent()) return;
@@ -164,10 +175,13 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
     setFocusRequest({ kind: 'row', id: activeSelection?.id }); setSelected(undefined); setDeleteError(undefined);
   };
   const clearSelection = () => { setSelected(undefined); setNotice(undefined); setDeleteError(undefined); };
+  const openCreate = () => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); };
   const saved = (record: ManagedMemoryRecord) => {
     const inScope = filter.scope === 'all' || (filter.scope === 'global' ? record.scope === 'global' : record.scope === 'project' && !!record.sourceProjectId && pathsEquivalent(record.sourceProjectId, filter.projectId));
-    const matches = inScope && (level === 'all' || Number(level) === record.level) && (!query.trim() || record.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-    setNotice(matches ? '记忆已保存。' : '已保存，但当前筛选不包含这条记忆。');
+    const matches = inScope && level === record.level && (!query.trim() || record.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+    const moved = record.level !== level && group !== 'conversation';
+    if (moved) setGroup(String(record.level) as Group);
+    setNotice(moved ? `已保存，已移到 L${record.level}` : matches ? '记忆已保存。' : '已保存，但当前筛选不包含这条记忆。');
     const next = { userId, kind: 'memory' as const, id: record.id };
     setSelected(next); setDetail({ key: selectionKey(next), value: { kind: 'memory', record }, loading: false });
     setFocusRequest({ kind: editor?.trigger ?? 'new' }); setEditor(undefined); refresh();
@@ -193,40 +207,49 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   };
   const overviewValue = overview.userId === userId ? overview : undefined;
   const editorRecord = editor?.record && activeDetail?.value?.kind === 'memory' && editor.record.id === activeDetail.value.record.id ? activeDetail.value.record : editor?.record;
+  const editing = !!editor && editor.trigger === 'edit';
+  const detailOpen = !!activeSelection || editing;
+  const listPane = <div data-memory-list-pane>
+    {browser.error ? <PageBanner type="error" items={[{ message: `${browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}${browser.error}` }]} /> : null}
+    {browser.loading && !browser.loaded ? <Spin description="正在加载 Memory…" /> : !browser.loaded ? <Empty description={kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'} /> : items.length === 0 ? <Empty description={query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'} /> : null}
+    {browser.refreshing ? <Typography.Text role="status" type="secondary" style={{ fontSize: 12 }}>正在刷新列表…</Typography.Text> : null}
+    <MemoryList items={items} selectedId={activeSelection?.id} nextCursor={browser.nextCursor} refreshing={browser.refreshing} onSelect={choose} onLoadMore={browser.loadMore} />
+  </div>;
+  const mainPane = editing ? <MemoryEditor ref={editorHandle} key={JSON.stringify([editor!.userId, editor!.record?.id, editorVersion])} userId={userId} record={editorRecord} projects={projects} unavailable={editor!.userId === userId && editor!.unavailable} onUnavailable={() => { setSelected(undefined); setEditor((previous) => previous ? { ...previous, unavailable: true } : undefined); }} onSaved={saved} onCancel={() => { setFocusRequest({ kind: editor!.trigger }); setEditor(undefined); }} />
+    : activeSelection ? <>
+      <div className={m.toolbar}><Button data-memory-back className={m.backButton} disabled={deleting} onClick={closeDetail}>返回记忆列表</Button>{activeDetail?.error ? <Button onClick={refresh}>重试详情</Button> : null}{deleting ? <Typography.Text role="status">正在删除…</Typography.Text> : null}</div>
+      {deleteError ? <PageBanner type="error" items={[{ message: deleteError }]} /> : null}
+      {activeDetail?.error ? <PageBanner type="error" items={[{ message: activeDetail.error }]} /> : null}
+      {activeDetail?.value ? <MemoryDetail value={activeDetail.value} visible={visible} onEdit={deleting ? undefined : () => { if (activeDetail.value?.kind === 'memory') { setEditor({ userId, record: activeDetail.value.record, trigger: 'edit' }); setFocusRequest({ kind: 'detail' }); } }} onDelete={deleting ? undefined : () => void remove()} onOpenSession={onOpenSession} /> : <Typography.Text type="secondary">{activeDetail?.loading ? '正在读取详情…' : '详情尚未读取成功'}</Typography.Text>}
+    </> : <div className={w.empty}><Empty description="选择一条记录查看全文和来源" /></div>;
   return <section ref={root} className={m.root} data-testid="memory-panel">
-    <div className={styles.sectionHeading}><Typography.Title level={5} style={{ margin: 0 }}>Memory</Typography.Title><Typography.Text type="secondary">本用户记忆总数：{overviewValue?.value?.total ?? '—'}</Typography.Text></div>
-    <Tabs id="memory-browser" size="small" activeKey={kind} onChange={(next) => { setKind(next as MemoryItem['kind']); clearSelection(); }} items={(['memory', 'conversation'] as const).map((tab) => ({ key: tab, label: tab === 'memory' ? '记忆' : '对话记录', disabled: locked }))} />
-    <div className={styles.toolbar}>
-      <Input aria-label="搜索记忆" placeholder={kind === 'memory' ? '搜索记忆内容' : '搜索对话记录'} value={query} disabled={locked} onChange={(event) => { setQuery(event.target.value); clearSelection(); }} style={{ flex: 1, minWidth: 220 }} />
-      <Select aria-label="项目范围" value={project} disabled={locked} onChange={(value) => { setProject(value); clearSelection(); }} options={[
-        { value: '', label: '全部项目' },
-        { value: 'global', label: '全局' },
-        ...(project.startsWith('project:') && !projects.some((option) => `project:${option.cwd}` === project) ? [{ value: project, label: '所选项目已不可用', disabled: true }] : []),
-        ...projects.map((option) => ({ value: `project:${option.cwd}`, label: option.name })),
+    <PageHeader title="Memory" subtitle={`${overviewValue?.value?.total ?? '—'} 条记忆`} actions={<Button type="primary" data-memory-new disabled={locked} onClick={openCreate}>新增记忆</Button>} />
+    <Radio.Group aria-label="记忆分组" optionType="button" value={group} disabled={locked} className={m.groups} onChange={(event) => { setGroup(event.target.value); clearSelection(); }}
+      options={[
+        ...(['0', '1', '2', '3'] as const).map((value) => ({ value, label: <span title="全部项目的总数">L{value}<span className={m.count}>{overviewValue?.value?.byLevel[`L${value}`] ?? '—'}</span></span> })),
+        { value: 'conversation', label: '对话记录', className: m.gap },
       ]} />
-      {kind === 'memory' ? <Select aria-label="记忆层级" value={level} disabled={locked} onChange={(value) => { setLevel(value as typeof level); clearSelection(); }} options={[{ value: 'all', label: '全部层级' }, ...([1, 2, 3, 0] as const).map((value) => ({ value: String(value), label: memoryLevelLabels[value] }))]} /> : null}
-      <Button aria-label="刷新 Memory" onClick={refresh} disabled={deleting || browser.refreshing || browser.loading}>刷新</Button>
-      {kind === 'memory' ? <Button type="primary" data-memory-new disabled={locked} onClick={() => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); setFocusRequest({ kind: 'detail' }); }}>新增记忆</Button> : null}
-    </div>
-    {kind === 'conversation' ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。</Typography.Text> : null}
-    {monitor.error ? <Alert type="error" showIcon title={`任务状态读取失败：${monitor.error}`} /> : null}
-    {overviewValue?.error ? <Alert type="error" showIcon title={`记忆总数：${overviewValue.error}`} /> : null}
+    <PageBanner type="error" items={[
+      ...(monitor.error ? [{ message: `任务状态读取失败：${monitor.error}` }] : []),
+      ...(overviewValue?.error ? [{ source: '记忆总数', message: overviewValue.error }] : []),
+    ]} />
     {notice ? <Typography.Text role="status">{notice}</Typography.Text> : null}
-    <div className={m.layout} data-detail-open={!!activeSelection || !!editor}>
-      <div data-memory-list-pane>
-        {browser.error ? <Alert type="error" showIcon title={`${browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}${browser.error}`} /> : null}
-        {browser.loading && !browser.loaded ? <Spin description="正在加载 Memory…" /> : !browser.loaded ? <Empty description={kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'} /> : items.length === 0 ? <Empty description={query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'} /> : null}
-        {browser.refreshing ? <Typography.Text role="status" type="secondary" style={{ fontSize: 12 }}>正在刷新列表…</Typography.Text> : null}
-        <MemoryList items={items} selectedId={activeSelection?.id} nextCursor={browser.nextCursor} refreshing={browser.refreshing} onSelect={choose} onLoadMore={browser.loadMore} />
+    <div className={w.panel}>
+      <div className={w.panelToolbar}>
+        <Typography.Text type="secondary">{group === 'conversation' ? '对话记录只读。对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。' : memoryLevelLabels[Number(group) as MemoryLevel]}</Typography.Text>
+        <span className={w.spacer} />
+        <Input aria-label="搜索记忆" placeholder="搜索内容" value={query} disabled={locked} onChange={(event) => { setQuery(event.target.value); clearSelection(); }} style={{ width: 200 }} />
+        <Select aria-label="项目范围" value={project} disabled={locked} onChange={(value) => { setProject(value); clearSelection(); }} options={[
+          { value: '', label: '全部项目' },
+          { value: 'global', label: '全局' },
+          ...(project.startsWith('project:') && !projects.some((option) => `project:${option.cwd}` === project) ? [{ value: project, label: '所选项目已不可用', disabled: true }] : []),
+          ...projects.map((option) => ({ value: `project:${option.cwd}`, label: option.name })),
+        ]} />
       </div>
-      <div className={m.detail} data-memory-detail-pane>
-        {editor ? <MemoryEditor ref={editorHandle} key={JSON.stringify([editor.userId, editor.record?.id, editorVersion])} userId={userId} record={editorRecord} projects={projects} unavailable={editor.userId === userId && editor.unavailable} onUnavailable={() => { setSelected(undefined); setEditor((previous) => previous ? { ...previous, unavailable: true } : undefined); }} onSaved={saved} onCancel={() => { setFocusRequest({ kind: editor.trigger }); setEditor(undefined); }} /> : activeSelection ? <>
-          <div className={m.toolbar}><Button data-memory-back disabled={deleting} onClick={closeDetail}>返回记忆列表</Button>{activeDetail?.error ? <Button onClick={refresh}>重试详情</Button> : null}{deleting ? <Typography.Text role="status">正在删除…</Typography.Text> : null}</div>
-          {deleteError ? <Alert type="error" showIcon title={deleteError} /> : null}
-          {activeDetail?.error ? <Alert type="error" showIcon title={activeDetail.error} /> : null}
-          {activeDetail?.value ? <MemoryDetail value={activeDetail.value} visible={visible} onEdit={deleting ? undefined : () => { if (activeDetail.value?.kind === 'memory') { setEditor({ userId, record: activeDetail.value.record, trigger: 'edit' }); setFocusRequest({ kind: 'detail' }); } }} onDelete={deleting ? undefined : () => void remove()} onOpenSession={onOpenSession} /> : <Typography.Text type="secondary">{activeDetail?.loading ? '正在读取详情…' : '详情尚未读取成功'}</Typography.Text>}
-        </> : <Empty description="选择一条记录查看全文和来源" />}
-      </div>
+      <SplitPane detailOpen={detailOpen} side={listPane} main={mainPane} />
     </div>
+    <Modal open={editor?.trigger === 'new'} title="新增记忆" footer={null} destroyOnHidden onCancel={() => void (editorHandle.current?.confirmLeave() ?? Promise.resolve(true)).then((ok) => { if (ok) setEditor(undefined); })}>
+      {editor?.trigger === 'new' ? <MemoryEditor ref={editorHandle} key={`new:${editorVersion}`} userId={userId} initialLevel={group === '1' || group === '3' ? Number(group) as 1 | 3 : 2} projects={projects} onSaved={saved} onCancel={() => setEditor(undefined)} /> : null}
+    </Modal>
   </section>;
 }

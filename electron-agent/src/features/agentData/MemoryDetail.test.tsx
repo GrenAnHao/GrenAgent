@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pi, type SessionInfo } from '../../lib/pi';
 import { MemoryDetail } from './MemoryDetail';
 import { conversationRecord, deferred, memoryRecord, sourceSession } from './memoryTestData';
+import { mockWikiBrowser } from './wiki/wikiTestSupport';
 
 vi.mock('../../lib/pi', () => ({ pi: { listAllSessions: vi.fn() } }));
 describe('MemoryDetail', () => {
-  beforeEach(() => { vi.resetAllMocks(); vi.mocked(pi.listAllSessions).mockResolvedValue([sourceSession]); });
-  afterEach(cleanup);
+  beforeEach(() => { vi.resetAllMocks(); mockWikiBrowser(); vi.mocked(pi.listAllSessions).mockResolvedValue([sourceSession]); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   it('renders JSON as readable fields and arrays with collapsed raw JSON', async () => {
     render(<MemoryDetail value={{ kind: 'memory', record: { ...memoryRecord, content: '{"偏好":"中文","语言":["TypeScript","Rust"]}' } }} onEdit={vi.fn()} onDelete={vi.fn()} />);
     expect(screen.getByText('偏好')).toBeTruthy(); expect(screen.getByText('中文')).toBeTruthy();
@@ -81,5 +83,13 @@ describe('MemoryDetail', () => {
     rerender(<MemoryDetail visible={false} value={{ kind: 'memory', record: memoryRecord }} onOpenSession={open} />);
     await act(async () => pending.resolve([sourceSession]));
     expect(open).not.toHaveBeenCalled();
+  });
+  it('offers delete and open-session in the more menu', async () => {
+    const onDelete = vi.fn();
+    render(<MemoryDetail value={{ kind: 'memory', record: memoryRecord }} onEdit={vi.fn()} onDelete={onDelete} onOpenSession={vi.fn()} />);
+    await screen.findByText('已有来源会话');
+    fireEvent.click(screen.getByRole('button', { name: '记忆更多操作' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '删除记忆' }));
+    expect(onDelete).toHaveBeenCalledOnce();
   });
 });

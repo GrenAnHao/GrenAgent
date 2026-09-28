@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Divider, Listy, Typography } from 'antd';
+import { Alert, Button, Descriptions, Divider, Listy, Tag, Typography } from 'antd';
 import type { ManagedMemoryRecord, MemoryConversationDetail } from '../../lib/agentData';
 import { pi, type SessionInfo } from '../../lib/pi';
 import { findSourceSession, memoryLevelLabels, sourceSessionId } from './memoryPresentation';
+import { MoreMenu } from './workbench/MoreMenu';
 import { memoryStyles as m } from './memoryStyles';
 export interface MemoryDetailProps {
   value: { kind: 'memory'; record: ManagedMemoryRecord } | { kind: 'conversation'; record: MemoryConversationDetail };
@@ -60,9 +61,14 @@ export function MemoryDetail({ value, visible = true, onEdit, onDelete, onOpenSe
   const status = lookup.key === key ? lookup : { key, state: 'loading' as const };
   return <article className={m.document} aria-label={value.kind === 'memory' ? '记忆详情' : '对话记录详情'}>
     <div className={m.toolbar}>
-      <Typography.Title level={5} style={{ margin: 0 }}>{value.kind === 'memory' ? memoryLevelLabels[value.record.level] : '对话记录 · 只读'}</Typography.Title>
+      {value.kind === 'memory' ? <Tag color="processing">L{value.record.level}</Tag> : <Tag>对话记录</Tag>}
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{value.kind === 'memory' ? memoryLevelLabels[value.record.level] : '只读'}</Typography.Text>
+      <span style={{ marginInlineStart: 'auto' }} />
       {value.kind === 'memory' && onEdit ? <Button data-memory-edit onClick={onEdit}>编辑记忆</Button> : null}
-      {value.kind === 'memory' && onDelete ? <Button danger onClick={onDelete}>删除记忆</Button> : null}
+      {value.kind === 'memory' && (onDelete || onOpenSession) ? <MoreMenu label="记忆更多操作" items={[
+        ...(onOpenSession ? [{ key: 'open', label: '打开来源会话', disabled: !status.session, title: !id ? '未记录来源' : status.state === 'error' ? '来源状态未获取' : status.session ? undefined : '会话已移除' }] : []),
+        ...(onDelete ? [{ key: 'delete', label: '删除记忆', danger: true }] : []),
+      ]} onSelect={(key) => { if (key === 'open') void open(); if (key === 'delete') onDelete?.(); }} /> : null}
     </div>
     <div className={m.meta}>
       <Typography.Text type="secondary">更新时间：{new Date(value.record.updatedAt).toLocaleString()}</Typography.Text>

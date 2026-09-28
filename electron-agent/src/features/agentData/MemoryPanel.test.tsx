@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
+import { ConfigProvider } from 'antd';
+import { createElement, type ReactElement } from 'react';
 import { MemoryPanel } from './MemoryPanel';
 import { agentDataApi, type ManagedMemoryRecord, type MemoryConversationDetail, type MemoryOverview, type ResourceNavigation } from '../../lib/agentData';
 import { conversationRecord, deferred, memoryRecord } from './memoryTestData';
 import { pi } from '../../lib/pi';
 import { StrictMode } from 'react';
 import { expectSelectDisplay, openSelect, pickSelectOption } from './antdSelectTestUtils';
+import { mockWikiBrowser } from './wiki/wikiTestSupport';
+
+const wrapper = ({ children }: { children: React.ReactNode }) => createElement(ConfigProvider, { theme: { token: { motion: false } } }, children);
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 const monitor = vi.hoisted(() => ({ watchedTaskVersion: 0, error: undefined as string | undefined }));
 const ask = vi.hoisted(() => vi.fn(async () => true));
@@ -18,10 +25,15 @@ vi.mock('./useProjectOptions', () => ({ useProjectOptions: () => [{ cwd: 'D:/pro
 const record2: ManagedMemoryRecord = { ...memoryRecord, id: 'memory-2', content: '第二条记忆', source: undefined, sourceSessionId: undefined };
 const row = (text = memoryRecord.content) => screen.getByRole('button', { name: new RegExp(text) });
 async function openRecord() { fireEvent.click(await screen.findByRole('button', { name: new RegExp(memoryRecord.content) })); await screen.findByRole('button', { name: '编辑记忆' }); }
+async function chooseMenu(label: string, item: string) {
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
 
 describe('MemoryPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks(); monitor.watchedTaskVersion = 0; monitor.error = undefined; ask.mockResolvedValue(true);
+    mockWikiBrowser();
     vi.mocked(pi.listAllSessions).mockResolvedValue([]);
     vi.mocked(agentDataApi.memory.overview).mockResolvedValue({ total: 2, byLevel: { L0: 0, L1: 2, L2: 0, L3: 0 } });
     vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [memoryRecord, record2] });
@@ -32,7 +44,7 @@ describe('MemoryPanel', () => {
     vi.mocked(agentDataApi.memory.conversations.list).mockResolvedValue({ items: [conversationRecord] });
     vi.mocked(agentDataApi.memory.conversations.read).mockResolvedValue(conversationRecord);
   });
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   it('opens an initial navigation request under StrictMode', async () => {
     render(<StrictMode><MemoryPanel navigation={{ view: 'memory', mode: 'create' }} navigationRequest={1} /></StrictMode>);
     expect(await screen.findByLabelText('记忆正文')).toBeTruthy();
@@ -103,25 +115,25 @@ describe('MemoryPanel', () => {
     render(<MemoryPanel />);
     const recent = await screen.findByRole('button', { name: new RegExp(memoryRecord.content) });
     expect(recent.getAttribute('title')).toBe(memoryRecord.content);
-    expect(agentDataApi.memory.list).toHaveBeenCalledWith({ userId: 'local', filter: { scope: 'all' }, limit: 50 });
-    expect(screen.getByText('本用户记忆总数：2')).toBeTruthy();
+    expect(agentDataApi.memory.list).toHaveBeenCalledWith({ userId: 'local', filter: { scope: 'all' }, level: 2, limit: 50 });
+    expect(screen.getByText('2 条记忆')).toBeTruthy();
     await pickSelectOption('项目范围', '全局');
-    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'local', filter: { scope: 'global' }, limit: 50 }));
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'local', filter: { scope: 'global' }, level: 2, limit: 50 }));
     expect(agentDataApi.memory.overview).toHaveBeenCalledTimes(1);
   });
   it('retains the selected project across unrelated chat changes and ignores non-project initial workspaces', async () => {
     const { rerender } = render(<MemoryPanel userId="u" initialProject="D:/temporary/works/session" />);
-    await screen.findByText('本用户记忆总数：2');
+    await screen.findByText('2 条记忆');
     expectSelectDisplay('项目范围', '全部项目');
     await openSelect('项目范围');
     expect(screen.queryByRole('option', { name: /temporary/ })).toBeNull();
     await pickSelectOption('项目范围', 'alpha');
     rerender(<MemoryPanel userId="u" initialProject="D:/proj/beta" />);
-    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'project', projectId: 'D:/proj/alpha' }, limit: 50 }));
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'project', projectId: 'D:/proj/alpha' }, level: 2, limit: 50 }));
   });
   it('shows conversations as read-only captures with no global memory tier or deletion', async () => {
-    render(<MemoryPanel userId="u" />); await screen.findByText('本用户记忆总数：2');
-    fireEvent.click(screen.getByRole('tab', { name: '对话记录' }));
+    render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
+    fireEvent.click(screen.getByRole('radio', { name: '对话记录' }));
     expect(screen.queryByLabelText('记忆层级')).toBeNull(); expect(screen.getByText(/对话捕获没有全局层/)).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(conversationRecord.snippet) }));
     await screen.findByText(/完整对话正文/);
@@ -135,8 +147,8 @@ describe('MemoryPanel', () => {
     const pending = deferred<MemoryConversationDetail>();
     vi.mocked(agentDataApi.memory.conversations.list).mockResolvedValue({ items: [{ ...conversationRecord, snippet }] });
     vi.mocked(agentDataApi.memory.conversations.read).mockReturnValueOnce(pending.promise);
-    render(<MemoryPanel userId="u" />); await screen.findByText('本用户记忆总数：2');
-    fireEvent.click(screen.getByRole('tab', { name: '对话记录' }));
+    render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
+    fireEvent.click(screen.getByRole('radio', { name: '对话记录' }));
     fireEvent.change(screen.getByLabelText('搜索记忆'), { target: { value: 'tail-only' } });
     await waitFor(() => expect(agentDataApi.memory.conversations.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'all' }, query: 'tail-only', limit: 50 }));
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(snippet) }));
@@ -158,9 +170,9 @@ describe('MemoryPanel', () => {
     const { rerender } = render(<MemoryPanel userId="u" />);
     await screen.findByText(/list unavailable/); expect(screen.queryByText('暂无记忆')).toBeNull();
     expect(screen.getByText('记忆列表尚未读取成功')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '刷新 Memory' })); await openRecord();
+    rerender(<MemoryPanel userId="u" refreshToken={1} />); await openRecord();
     vi.mocked(agentDataApi.memory.read).mockRejectedValueOnce(new Error('detail unavailable'));
-    monitor.watchedTaskVersion++; rerender(<MemoryPanel userId="u" />);
+    monitor.watchedTaskVersion++; rerender(<MemoryPanel userId="u" refreshToken={1} />);
     await screen.findByText(/detail unavailable/);
     expect(screen.getByRole('article', { name: '记忆详情' }).textContent).toContain(memoryRecord.content);
   });
@@ -184,7 +196,7 @@ describe('MemoryPanel', () => {
   it('does not let an old user deletion clear a newer user detail', async () => {
     const pending = deferred<void>(); vi.mocked(agentDataApi.memory.delete).mockReturnValueOnce(pending.promise);
     const { rerender } = render(<MemoryPanel userId="user-a" />); await openRecord();
-    fireEvent.click(screen.getByRole('button', { name: '删除记忆' }));
+    await chooseMenu('记忆更多操作', '删除记忆');
     await act(async () => {});
     rerender(<MemoryPanel userId="user-b" />); await openRecord();
     await act(async () => pending.resolve());
@@ -208,25 +220,25 @@ describe('MemoryPanel', () => {
     expect(screen.getByText(/数据已更新/)).toBeTruthy();
   });
   it('ignores hidden overview results and preserves prior user data if resumed refresh fails', async () => {
-    const { rerender } = render(<MemoryPanel userId="u" />); await screen.findByText('本用户记忆总数：2');
+    const { rerender } = render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
     rerender(<MemoryPanel userId="u" visible={false} />);
     const pending = deferred<MemoryOverview>(); vi.mocked(agentDataApi.memory.overview).mockReturnValueOnce(pending.promise);
     rerender(<MemoryPanel userId="u" visible />); rerender(<MemoryPanel userId="u" visible={false} />);
     await act(async () => pending.resolve({ total: 99, byLevel: { L0: 99, L1: 0, L2: 0, L3: 0 } }));
-    expect(screen.getByText('本用户记忆总数：2')).toBeTruthy();
+    expect(screen.getByText('2 条记忆')).toBeTruthy();
     vi.mocked(agentDataApi.memory.overview).mockRejectedValueOnce(new Error('overview refresh failed'));
     rerender(<MemoryPanel userId="u" visible />); await screen.findByText(/overview refresh failed/);
-    expect(screen.getByText('本用户记忆总数：2')).toBeTruthy();
+    expect(screen.getByText('2 条记忆')).toBeTruthy();
   });
   it('retains deletion failures, freezes navigation, deletes stable ids, and restores adjacent focus after commit', async () => {
     const pending = deferred<void>();
     render(<MemoryPanel userId="u" />); await openRecord();
     vi.mocked(agentDataApi.memory.delete).mockRejectedValueOnce(new Error('delete unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: '删除记忆' })); await screen.findByText(/delete unavailable/);
+    await chooseMenu('记忆更多操作', '删除记忆'); await screen.findByText(/delete unavailable/);
     expect(screen.getByRole('article', { name: '记忆详情' })).toBeTruthy();
     vi.mocked(agentDataApi.memory.delete).mockReturnValueOnce(pending.promise);
     vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [record2] });
-    fireEvent.click(screen.getByRole('button', { name: '删除记忆' }));
+    await chooseMenu('记忆更多操作', '删除记忆');
     await act(async () => {});
     expect((screen.getByRole('button', { name: '返回记忆列表' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(row('第二条记忆'));
@@ -247,7 +259,8 @@ describe('MemoryPanel', () => {
     expect(document.activeElement).toBe(row());
   });
   it('does not append a newly saved record outside the active ownership filter', async () => {
-    render(<MemoryPanel userId="u" />); await screen.findByText('本用户记忆总数：2');
+    render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
+    vi.mocked(agentDataApi.memory.create).mockResolvedValue({ ...memoryRecord, id: 'created', level: 2, scope: 'project', sourceProjectId: 'D:/proj/beta', origin: 'manual' });
     await pickSelectOption('项目范围', '全局');
     fireEvent.click(screen.getByRole('button', { name: '新增记忆' }));
     fireEvent.change(screen.getByLabelText('记忆正文'), { target: { value: '其它项目记忆' } });
@@ -276,7 +289,7 @@ describe('MemoryPanel', () => {
     expect(screen.getByRole('alert').textContent).toBe('任务状态读取失败：jobs connection lost');
     expect(row()).toBeTruthy();
     expect((screen.getByLabelText('记忆正文') as HTMLTextAreaElement).value).toBe('监控失败时仍保留的草稿');
-    expect(screen.getByText('本用户记忆总数：2')).toBeTruthy();
+    expect(screen.getByText('2 条记忆')).toBeTruthy();
     monitor.error = undefined; rerender(<MemoryPanel userId="u" />);
     expect(screen.queryByRole('alert')).toBeNull();
     expect((screen.getByLabelText('记忆正文') as HTMLTextAreaElement).value).toBe('监控失败时仍保留的草稿');
@@ -295,6 +308,44 @@ describe('MemoryPanel', () => {
     expect(document.activeElement).toBe(screen.getByLabelText('记忆正文'));
     expect((screen.getByRole('button', { name: '保存记忆' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '保存记忆' }));
-    await waitFor(() => expect(agentDataApi.memory.create).toHaveBeenCalledWith({ userId: 'u', draft: { content: '与原记录无关的新草稿', level: 1, owner: { scope: 'global' } } }));
+    await waitFor(() => expect(agentDataApi.memory.create).toHaveBeenCalledWith({ userId: 'u', draft: { content: '与原记录无关的新草稿', level: 2, owner: { scope: 'global' } } }));
+  });
+  it('groups by level with totals and requests the chosen level from the server', async () => {
+    vi.mocked(agentDataApi.memory.overview).mockResolvedValue({ total: 7, byLevel: { L0: 1, L1: 2, L2: 3, L3: 1 } });
+    render(<MemoryPanel userId="u" />);
+    expect(await screen.findByText('7 条记忆')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /L2.*3/ })).toBeChecked();
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'all' }, level: 2, limit: 50 }));
+    fireEvent.click(screen.getByRole('radio', { name: /L3/ }));
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'all' }, level: 3, limit: 50 }));
+    expect(screen.queryByRole('radio', { name: '全部' })).toBeNull();
+  });
+  it('moves to the saved level and says so', async () => {
+    vi.mocked(agentDataApi.memory.list).mockResolvedValue({ items: [{ ...memoryRecord, level: 2 }] });
+    vi.mocked(agentDataApi.memory.read).mockResolvedValue({ ...memoryRecord, level: 2 });
+    vi.mocked(agentDataApi.memory.update).mockResolvedValue({ ...memoryRecord, level: 3, revision: 2 });
+    render(<MemoryPanel userId="u" />); await openRecord();
+    fireEvent.click(screen.getByRole('button', { name: '编辑记忆' }));
+    await pickSelectOption('编辑记忆层级', /L3/);
+    fireEvent.click(screen.getByRole('button', { name: '保存记忆' }));
+    expect(await screen.findByText('已保存，已移到 L3')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /L3/ })).toBeChecked();
+  });
+  it('creates in a modal defaulting to the current group level', async () => {
+    render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
+    fireEvent.click(screen.getByRole('radio', { name: /L3/ }));
+    fireEvent.click(screen.getByRole('button', { name: '新增记忆' }));
+    const dialog = await screen.findByRole('dialog');
+    expectSelectDisplay('编辑记忆层级', /L3/);
+    fireEvent.change(within(dialog).getByLabelText('记忆正文'), { target: { value: '新条目' } });
+    await pickSelectOption('归属范围', '全局');
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记忆' }));
+    await waitFor(() => expect(agentDataApi.memory.create).toHaveBeenCalledWith({ userId: 'u', draft: { content: '新条目', level: 3, owner: { scope: 'global' } } }));
+  });
+  it('reloads its list when the shared refresh token changes', async () => {
+    const { rerender } = render(<MemoryPanel userId="u" refreshToken={0} />);
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenCalledTimes(1));
+    rerender(<MemoryPanel userId="u" refreshToken={1} />);
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenCalledTimes(2));
   });
 });
