@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Empty, Flex, Input, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Card, ConfigProvider, DatePicker, Empty, Flex, Input, Modal, Segmented, Select, Space, Table, Typography } from 'antd';
+import { cssVar } from 'antd-style';
 import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { agentDataApi } from '../../lib/agentData';
 import type { AuditExport, AuditQuery, AuditView, DiagnosticItem, DiagnosticReport, ResourceNavigation, ResourceRef } from '../../../electron/agentData/operationsContracts';
-import { styles } from './agentDataStyles';
 import { operationsStyles as ops } from './operationsStyles';
+import { overviewStyles as o } from './overviewStyles';
+import { PageHeader } from './workbench/PageHeader';
+import { PageBanner } from './workbench/PageBanner';
+import { StatusTag, statusLabel } from './workbench/StatusTag';
+import { workbenchStyles as w } from './workbench/workbenchStyles';
 import { redact, resourceNavigation } from './operationsPresentation';
 export { redact } from './operationsPresentation';
 
@@ -18,26 +23,20 @@ interface Props {
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const resourceKey = (resource?: ResourceRef) => resource ? `${resource.type}:${resource.id}` : '';
 const uniqueEvents = (items: AuditView[]) => [...new Map(items.map((item) => [item.id, item])).values()];
-const stateLabel = { ok: '正常', action_required: '需要处理', unchecked: '未检查' };
-const stateColors = { ok: 'success', action_required: 'warning', unchecked: 'default' };
-// antd 会为「恰好两个汉字且无图标」的按钮插入空格（关闭 → 关 闭），改变可访问名称与读屏结果。
-const autoInsertSpace = false;
 
-export function AuditDiagnosticsPanel({ visible = true, navigation, resourceFilter, selectionRequest, onNavigate, onRefresh }: Props) {
-  const [tab, setTab] = useState<'audit' | 'diagnostics'>('audit');
+export function AuditDiagnosticsPanel({ visible = true, navigation, resourceFilter, selectionRequest, refreshToken = 0, onNavigate }: Props) {
+  const [tab, setTab] = useState<'audit' | 'diagnostics'>('diagnostics');
   const resource = navigation?.resource ?? resourceFilter;
   const request = navigation?.request ?? selectionRequest;
   useEffect(() => { if (resource || request !== undefined) setTab('audit'); }, [resourceKey(resource), request]);
   return <section data-testid="audit-diagnostics-panel" className={`${ops.root} ${ops.auditRoot}`}>
-    <div className={styles.sectionHeading} style={{ flex: '0 0 auto' }}><Typography.Title level={5} style={{ margin: 0 }}>审计与诊断</Typography.Title><Typography.Text type="secondary">查看记录与运行状态</Typography.Text></div>
-    <Tabs id="audit-diagnostics" className={styles.bodyTabs} activeKey={tab} onChange={(key) => setTab(key as 'audit' | 'diagnostics')} items={[
-      { key: 'audit', label: '操作记录', children: <div className={ops.scrollPanel}><AuditRecords visible={visible && tab === 'audit'} resourceFilter={resource} selectionRequest={request} onNavigate={onNavigate} /></div> },
-      { key: 'diagnostics', label: '运行诊断', children: <div className={ops.scrollPanel}><Diagnostics visible={visible && tab === 'diagnostics'} onNavigate={onNavigate} /></div> },
-    ]} />
+    <PageHeader title="审计诊断" actions={<Segmented value={tab} onChange={(value) => setTab(value as typeof tab)} options={[{ value: 'diagnostics', label: '运行诊断' }, { value: 'audit', label: '操作记录' }]} />} />
+    <div hidden={tab !== 'diagnostics'} className={ops.scrollPanel}><Diagnostics visible={visible && tab === 'diagnostics'} refreshToken={refreshToken} onNavigate={onNavigate} /></div>
+    <div hidden={tab !== 'audit'} className={ops.scrollPanel}><AuditRecords visible={visible && tab === 'audit'} resourceFilter={resource} selectionRequest={request} refreshToken={refreshToken} onNavigate={onNavigate} /></div>
   </section>;
 }
 
-function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }: Pick<Props, 'resourceFilter' | 'selectionRequest' | 'onNavigate'> & { visible: boolean }) {
+function AuditRecords({ visible, resourceFilter, selectionRequest, refreshToken = 0, onNavigate }: Pick<Props, 'resourceFilter' | 'selectionRequest' | 'refreshToken' | 'onNavigate'> & { visible: boolean }) {
   const [action, setAction] = useState('');
   const [resourceType, setResourceType] = useState<ResourceRef['type'] | ''>(resourceFilter?.type ?? '');
   const [resourceId, setResourceId] = useState(resourceFilter?.id ?? '');
@@ -120,7 +119,7 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }:
       })();
     }, 150);
     return () => { clearTimeout(timer); epoch.current++; exportEpoch.current++; };
-  }, [signature, visible, refreshRequest, filterError]);
+  }, [signature, visible, refreshRequest, refreshToken, filterError]);
 
   useEffect(() => {
     if (!visible || !loaded || !scrollPending.current) return;
@@ -185,8 +184,8 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }:
   ];
 
   return <Flex vertical gap={12}>
-    <Card size="small">
-      <Flex wrap gap={12} align="flex-end">
+    <div className={w.panel}>
+      <div className={w.panelToolbar}>
         <Flex vertical gap={4}><Typography.Text type="secondary">动作</Typography.Text><Input aria-label="审计动作" placeholder="如 wiki.ingest" value={action} onChange={(e) => setAction(e.target.value)} style={{ width: 200 }} /></Flex>
         <Flex vertical gap={4}><Typography.Text type="secondary">资源类型</Typography.Text><Select aria-label="审计资源类型" value={resourceType} onChange={(value) => setResourceType(value as ResourceRef['type'] | '')} style={{ width: 160 }} options={[
           { value: '', label: '全部资源' },
@@ -197,27 +196,26 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }:
         <Flex vertical gap={4}><Typography.Text type="secondary">资源 ID</Typography.Text><Input aria-label="审计资源ID" value={resourceId} disabled={!resourceType} onChange={(e) => setResourceId(e.target.value)} style={{ width: 200 }} /></Flex>
         <Flex vertical gap={4}><Typography.Text type="secondary">开始日期</Typography.Text><DatePicker aria-label="开始日期" value={fromDate} onChange={(date) => setFromDate(date)} /></Flex>
         <Flex vertical gap={4}><Typography.Text type="secondary">结束日期</Typography.Text><DatePicker aria-label="结束日期" value={toDate} onChange={(date) => setToDate(date)} /></Flex>
-        <Space size={8} wrap style={{ marginInlineStart: 'auto' }}>
-          <Button disabled={!visible || loading || loadingMore} onClick={() => setRefreshRequest((value) => value + 1)}>刷新记录</Button>
-          <Button disabled={!visible || exporting || !!filterError} onClick={() => void exportFilter()}>{exporting ? '正在导出…' : '导出当前筛选'}</Button>
-        </Space>
-      </Flex>
-    </Card>
-    <Typography.Text type="secondary">日期按本地时区整日筛选。记录只读；导出仅限当前筛选，最多 500 条，复制与下载均已脱敏。</Typography.Text>
-    {filterError || error ? <Alert type="error" showIcon title={`${filterError || error}${loaded ? '（保留上次结果）' : ''}`} /> : null}
-    {transferError ? <Alert type="error" showIcon title={transferError} /> : null}
-    {notice ? <Typography.Text type="success" role="status">{notice}</Typography.Text> : null}
-    {loading ? <Typography.Text type="secondary">{loaded ? '正在刷新记录…' : '正在加载操作记录…'}</Typography.Text> : null}
-    {loaded && !rows.length && !error ? <Empty description="暂无操作记录" /> : null}
-    {rows.length ? <Table<AuditView>
-      rowKey={(event) => event.id}
-      size="small"
-      tableLayout="fixed"
-      pagination={false}
-      columns={columns}
-      dataSource={safeRows}
-      locale={{ emptyText: '暂无操作记录' }}
-    /> : null}
+        <Button className={w.spacer} disabled={!visible || exporting || !!filterError} onClick={() => void exportFilter()}>{exporting ? '正在导出…' : '导出当前筛选'}</Button>
+      </div>
+      <div style={{ padding: 12 }}>
+        <Typography.Text type="secondary">日期按本地时区整日筛选。记录只读；导出仅限当前筛选，最多 500 条，复制与下载均已脱敏。</Typography.Text>
+        {filterError || error ? <PageBanner type="error" items={[{ message: `${filterError || error}${loaded ? '（保留上次结果）' : ''}` }]} /> : null}
+        {transferError ? <PageBanner type="error" items={[{ message: transferError }]} /> : null}
+        {notice ? <Typography.Text type="success" role="status">{notice}</Typography.Text> : null}
+        {loading ? <Typography.Text type="secondary">{loaded ? '正在刷新记录…' : '正在加载操作记录…'}</Typography.Text> : null}
+        {loaded && !rows.length && !error ? <Empty description="暂无操作记录" /> : null}
+        {rows.length ? <Table<AuditView>
+          rowKey={(event) => event.id}
+          size="small"
+          tableLayout="fixed"
+          pagination={false}
+          columns={columns}
+          dataSource={safeRows}
+          locale={{ emptyText: '暂无操作记录' }}
+        /> : null}
+      </div>
+    </div>
     {nextCursor ? <Button disabled={!visible || !!filterError || loading || loadingMore} onClick={() => void loadMore()}>{loadingMore ? '正在加载…' : '加载更多记录'}</Button> : null}
     {loaded ? <Typography.Text type="secondary">已加载 {rows.length} 条记录</Typography.Text> : null}
     {exported ? <Card size="small">
@@ -227,12 +225,11 @@ function AuditRecords({ visible, resourceFilter, selectionRequest, onNavigate }:
   </Flex>;
 }
 
-function Diagnostics({ visible, onNavigate }: Pick<Props, 'onNavigate' | 'onRefresh'> & { visible: boolean }) {
+function Diagnostics({ visible, refreshToken = 0, onNavigate }: Pick<Props, 'refreshToken' | 'onNavigate'> & { visible: boolean }) {
   const [report, setReport] = useState<DiagnosticReport>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [category, setCategory] = useState('');
-  const [resource, setResource] = useState('');
   const [openBusy, setOpenBusy] = useState<string>();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [guide, setGuide] = useState<DiagnosticItem>();
@@ -252,7 +249,7 @@ function Diagnostics({ visible, onNavigate }: Pick<Props, 'onNavigate' | 'onRefr
     openEpoch.current++; setOpenBusy(undefined);
     if (visible) void check();
     return () => { epoch.current++; openEpoch.current++; };
-  }, [visible]);
+  }, [visible, refreshToken]);
   const open = async (item: DiagnosticItem) => {
     if (!visible || openBusy) return;
     const request = ++openEpoch.current;
@@ -261,38 +258,44 @@ function Diagnostics({ visible, onNavigate }: Pick<Props, 'onNavigate' | 'onRefr
     catch (cause) { if (request === openEpoch.current && current.current.visible) setRowErrors((errors) => ({ ...errors, [item.id]: message(cause) })); }
     finally { if (request === openEpoch.current && current.current.visible) setOpenBusy(undefined); }
   };
-  const items = report?.items.filter((item) => (!resource || resourceKey(item.resource) === resource)
-    && (!category || (item.resource?.type === 'project' ? 'codegraph' : item.resource?.type ?? item.id.split(':')[0]) === category)) ?? [];
-  const resourceOptions = [...new Map(report?.items.filter((item) => item.resource).map((item) => [resourceKey(item.resource), item.resource!]) ?? []).entries()];
+  const categoryOf = (item: DiagnosticItem) => item.resource?.type === 'project' ? 'codegraph' : item.resource?.type ?? item.id.split(':')[0];
+  const categoryLabels: Record<string, string> = { codegraph: '代码索引', code: '代码索引', wiki: '知识库', memory: '记忆', runtime: '运行服务' };
+  const order = { action_required: 0, unchecked: 1, ok: 2 } as const;
+  const present = [...new Set((report?.items ?? []).map((item) => categoryLabels[categoryOf(item)] ? categoryOf(item) : 'other'))];
+  const items = (report?.items ?? []).filter((item) => !category || categoryOf(item) === category).sort((a, b) => order[a.state] - order[b.state]);
+  const stateColors: Record<string, string> = { action_required: cssVar.colorError as string, unchecked: cssVar.colorTextQuaternary as string, ok: cssVar.colorSuccess as string };
   return <Flex vertical gap={12}>
-    <Flex wrap gap={8}>
-      <Select aria-label="诊断分类" value={category} onChange={(value) => setCategory(value)} style={{ width: 200 }} options={[
-        { value: '', label: '全部分类' },
-        { value: 'wiki', label: '知识库' },
-        { value: 'codegraph', label: '代码索引' },
-        { value: 'memory', label: '记忆' },
-        { value: 'runtime', label: '运行服务' }
-      ]} />
-      <Select aria-label="诊断资源" value={resource} onChange={(value) => setResource(value)} style={{ width: 200 }} options={[
-        { value: '', label: '全部资源' },
-        ...resourceOptions.map(([key, value]) => ({ value: key, label: value.id }))
-      ]} />
-      <Button disabled={!visible || loading} onClick={() => void check()}>{loading ? '正在检查…' : '重新检查'}</Button>
-    </Flex>
-    <Typography.Text type="secondary">检查只读取状态，不会自动调用模型、重建索引或安装工具。</Typography.Text>
-    {report ? <Typography.Text type="secondary">检查时间：{new Date(report.checkedAt).toLocaleString()}{error ? ' · 上次结果，可能已过期' : ''}</Typography.Text> : !loading && !error ? <Typography.Text type="secondary">尚未检查</Typography.Text> : null}
-    {error ? <Alert type="error" showIcon title={error} /> : null}
+    <Typography.Text type="secondary">{report ? `检查于 ${new Date(report.checkedAt).toLocaleTimeString()}${error ? ' · 上次结果，可能已过期' : ''} · ` : ''}只读取状态，不会自动调用模型、重建索引或安装工具。</Typography.Text>
+    <div><Button disabled={!visible || loading} onClick={() => void check()}>{loading ? '正在检查…' : '重新检查'}</Button></div>
+    <div role="group" aria-label="诊断计数" className={o.kpis}>{(['action_required', 'unchecked', 'ok'] as const).map((state) => <div key={state} className={o.kpi}>
+      <span className={o.kpiValue} data-count={state}>{report?.items.filter((item) => item.state === state).length ?? '—'}</span>
+      <span className={o.kpiLabel}>{statusLabel('diagnostic', state)}</span>
+    </div>)}</div>
+    {present.length > 1 ? <div role="radiogroup" aria-label="诊断分类"><Segmented value={category} onChange={(value) => setCategory(String(value))} options={[{ value: '', label: '全部' }, ...present.map((key) => ({ value: key, label: categoryLabels[key] ?? '其他' }))]} /></div> : null}
+    {error ? <PageBanner type="error" items={[{ message: error }]} /> : null}
     {report && !items.length ? <Typography.Text type="secondary">{report.items.length ? '没有匹配的诊断项目' : '没有返回诊断项目，状态尚未确认'}</Typography.Text> : null}
+    {!report && !loading && !error ? <Typography.Text type="secondary">尚未检查</Typography.Text> : null}
     {items.length ? <Flex vertical gap={8}>{items.map((item) => <Card key={item.id} size="small">
-      <Flex wrap gap={8} align="center"><Tag color={stateColors[item.state]}>{stateLabel[item.state]}</Tag><Typography.Text strong>{String(redact(item.message))}</Typography.Text></Flex>
-      <Typography.Text type="secondary">{item.resource ? `${item.resource.type} · ${item.resource.id}` : item.id} · {new Date(item.checkedAt).toLocaleString()}</Typography.Text>
+      <Flex wrap gap={8} align="center">
+        <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: stateColors[item.state], display: 'inline-block' }} />
+        <StatusTag domain="diagnostic" status={item.state} />
+        <Typography.Text strong>{String(redact(item.message))}</Typography.Text>
+      </Flex>
+      <Typography.Text type="secondary">{categoryLabels[categoryOf(item)] ?? '其他'} · {item.resource ? (item.resource.type === 'project' ? item.resource.id.split(/[\\/]/).pop() || item.resource.id : item.resource.id) : item.id}</Typography.Text>
       <Space size={8} wrap>
-        {item.resource && onNavigate ? <Button size="small" onClick={() => onNavigate(resourceNavigation(item.resource!))}>查看关联资源</Button> : null}
+        {item.resource && onNavigate ? <Button size="small" aria-label="查看关联资源" onClick={() => onNavigate(resourceNavigation(item.resource!))}>前往 →</Button> : null}
         {item.action === 'open_file' ? <Button size="small" disabled={!!openBusy} onClick={() => void open(item)}>打开问题文件</Button> : null}
-        {item.action === 'configure_codegraph' ? <Button size="small" onClick={() => setGuide(item)}>查看配置说明</Button> : null}
+        {item.action === 'configure_codegraph' ? <Button size="small" aria-label="查看配置说明" onClick={() => setGuide(item)}>配置说明</Button> : null}
       </Space>
-      {rowErrors[item.id] ? <Alert type="error" showIcon title={rowErrors[item.id]} /> : null}
+      {rowErrors[item.id] ? <PageBanner type="error" items={[{ message: rowErrors[item.id] }]} /> : null}
     </Card>)}</Flex> : null}
-    {guide ? <Card size="small"><p>请先在本机配置 CodeGraph CLI，并在项目代码页检查连接与索引状态。这里不会自动安装或执行修复。</p>{onNavigate ? <Button onClick={() => onNavigate({ view: 'code', ...(guide.resource?.type === 'project' ? { workspace: guide.resource.id } : {}) })}>前往代码配置</Button> : null}</Card> : null}
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <Modal open={!!guide} title="CodeGraph 配置说明" onCancel={() => setGuide(undefined)} footer={[
+        <Button key="close" autoInsertSpace={false} onClick={() => setGuide(undefined)}>关闭</Button>,
+        onNavigate ? <Button key="go" type="primary" onClick={() => { const target = guide; setGuide(undefined); onNavigate({ view: 'code', ...(target?.resource?.type === 'project' ? { workspace: target.resource.id } : {}) }); }}>前往代码索引</Button> : null,
+      ]}>
+        <p>请先在本机配置 CodeGraph CLI，并在项目代码页检查连接与索引状态。这里不会自动安装或执行修复。</p>
+      </Modal>
+    </ConfigProvider>
   </Flex>;
 }

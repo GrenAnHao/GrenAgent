@@ -43,8 +43,8 @@ async function typeInInput(label: string, value: string) {
 describe('操作记录', () => {
   it('loads only the active subpage and recursively redacts displayed and copied audit details', async () => {
     render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     expect(await screen.findByText('页面生成失败')).toBeInTheDocument();
-    expect(agentDataApi.checks.check).not.toHaveBeenCalled();
     const row = screen.getByRole('row', { name: /页面生成失败/ });
     fireEvent.click(within(row).getByText('展开详情'));
     expect(row.textContent).not.toMatch(/secret-value|token-value|Bearer abc|secret-bearer/);
@@ -75,11 +75,12 @@ describe('操作记录', () => {
     const second = { ...auditEvent, id: 'second', summary: '第二页事件' };
     vi.mocked(agentDataApi.audits.query).mockImplementation(async (input) => input?.cursor ? { items: [second] } : { items: [auditEvent], nextCursor: 'next' });
     render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     fireEvent.click(await screen.findByRole('button', { name: '加载更多记录' }));
     expect(await screen.findByText('第二页事件')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
+    fireEvent.click(screen.getByRole('radio', { name: '运行诊断' }));
     await screen.findByText('知识库状态需要人工确认');
-    fireEvent.click(screen.getByRole('tab', { name: '操作记录' }));
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     expect(screen.getByText('第二页事件')).toBeInTheDocument();
     await waitFor(() => expect(agentDataApi.audits.query).toHaveBeenCalledTimes(4));
     expect(screen.getByText('第二页事件')).toBeInTheDocument();
@@ -100,6 +101,7 @@ describe('操作记录', () => {
     const { rerender } = render(<AuditDiagnosticsPanel visible={false} />);
     expect(agentDataApi.audits.query).not.toHaveBeenCalled();
     rerender(<AuditDiagnosticsPanel visible />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     await screen.findByText('页面生成失败');
     vi.mocked(agentDataApi.audits.export).mockReturnValueOnce(exportResult.promise);
     fireEvent.click(screen.getByRole('button', { name: '导出当前筛选' }));
@@ -116,13 +118,14 @@ describe('操作记录', () => {
   });
   it('keeps rows on refresh failure but does not display an initial failure as an empty list', async () => {
     vi.mocked(agentDataApi.audits.query).mockRejectedValueOnce(new Error('审计存储不可用'));
-    render(<AuditDiagnosticsPanel />);
+    const { rerender } = render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('审计存储不可用');
     expect(screen.queryByText('暂无操作记录')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '刷新记录' }));
+    rerender(<AuditDiagnosticsPanel refreshToken={1} />);
     await screen.findByText('页面生成失败');
     vi.mocked(agentDataApi.audits.query).mockRejectedValueOnce(new Error('刷新失败'));
-    fireEvent.click(screen.getByRole('button', { name: '刷新记录' }));
+    rerender(<AuditDiagnosticsPanel refreshToken={2} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败');
     expect(screen.getByText('页面生成失败')).toBeInTheDocument();
   });
@@ -148,6 +151,7 @@ describe('操作记录', () => {
     vi.mocked(agentDataApi.audits.query).mockImplementation(async (input) => input?.cursor
       ? { items: [second] } : { items: [auditEvent], nextCursor: 'next' });
     const { rerender } = render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     await screen.findByRole('button', { name: '加载更多记录' });
     // Set incomplete filter via prop
     rerender(<AuditDiagnosticsPanel resourceFilter={{ type: 'wiki', id: '' }} />);
@@ -163,6 +167,7 @@ describe('操作记录', () => {
   });
   it('invalidates an already exported unfiltered result when resource type becomes incomplete', async () => {
     const { rerender } = render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     await screen.findByText('页面生成失败');
     fireEvent.click(screen.getByRole('button', { name: '导出当前筛选' }));
     await screen.findByRole('button', { name: '复制导出JSON' });
@@ -182,6 +187,7 @@ describe('操作记录', () => {
     const pending = deferred<AuditExport>();
     vi.mocked(agentDataApi.audits.export).mockReturnValueOnce(pending.promise);
     render(<AuditDiagnosticsPanel />);
+    fireEvent.click(screen.getByRole('radio', { name: '操作记录' }));
     await screen.findByText('页面生成失败');
     fireEvent.click(screen.getByRole('button', { name: '导出当前筛选' }));
     await user.type(screen.getByLabelText('审计动作'), ' ');
@@ -195,13 +201,11 @@ describe('操作记录', () => {
 describe('运行诊断', () => {
   it('checks only when its tab is visible and labels unknown states rather than green or zero', async () => {
     render(<AuditDiagnosticsPanel />);
-    await screen.findByText('页面生成失败');
-    expect(agentDataApi.checks.check).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     expect(await screen.findByText('CodeGraph CLI 尚未配置')).toBeInTheDocument();
-    expect(screen.getByText('未检查')).toBeInTheDocument();
-    expect(screen.getByText('需要处理')).toBeInTheDocument();
-    expect(screen.getByText(/检查时间/)).toBeInTheDocument();
+    expect(agentDataApi.audits.query).not.toHaveBeenCalled();
+    expect(screen.getAllByText('未检查').length > 0).toBe(true);
+    expect(screen.getAllByText('需要处理').length > 0).toBe(true);
+    expect(screen.getByText(/检查于/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重建页面清单' })).toBeNull();
   });
   it('opens a validated diagnostic ID, never its returned path, and keeps errors local', async () => {
@@ -209,7 +213,6 @@ describe('运行诊断', () => {
     vi.mocked(agentDataApi.checks.check).mockResolvedValue({ ...report, items: [...report.items, fileItem] });
     vi.mocked(agentDataApi.checks.open).mockRejectedValueOnce(new Error('文件已移除'));
     render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     fireEvent.click(await screen.findByRole('button', { name: '打开问题文件' }));
     expect(agentDataApi.checks.open).toHaveBeenCalledWith('wiki:kb-a:file');
     expect(await screen.findByRole('alert')).toHaveTextContent('文件已移除');
@@ -217,7 +220,6 @@ describe('运行诊断', () => {
   });
   it('does not expose wiki reindex entry points', async () => {
     render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     expect(await screen.findByText('知识库状态需要人工确认')).toBeInTheDocument();
     expect(screen.queryByText('重建页面清单')).toBeNull();
     expect(screen.queryByText('确认重建')).toBeNull();
@@ -225,7 +227,6 @@ describe('运行诊断', () => {
   it('keeps a prior partial report on refresh error and never loads the other hidden tab', async () => {
     const late = deferred<DiagnosticReport>();
     const { rerender } = render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     await screen.findByText('知识库状态需要人工确认');
     const auditCount = vi.mocked(agentDataApi.audits.query).mock.calls.length;
     vi.mocked(agentDataApi.checks.check).mockRejectedValueOnce(new Error('诊断刷新失败'));
@@ -243,16 +244,14 @@ describe('运行诊断', () => {
   it('offers configuration guidance and resource navigation without auto-installation', async () => {
     const onNavigate = vi.fn();
     render(<AuditDiagnosticsPanel onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     fireEvent.click(await screen.findByRole('button', { name: '查看配置说明' }));
     expect(screen.getByText(/不会自动安装/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '前往代码配置' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往代码索引' }));
     expect(onNavigate).toHaveBeenCalledWith({ view: 'code' });
   });
   it('does not claim a healthy state for an empty diagnostic response', async () => {
     vi.mocked(agentDataApi.checks.check).mockResolvedValue({ items: [], checkedAt: 3 });
     render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     expect(await screen.findByText('没有返回诊断项目，状态尚未确认')).toBeInTheDocument();
     expect(screen.queryByText('未发现需要处理的问题')).toBeNull();
   });
@@ -261,12 +260,19 @@ describe('运行诊断', () => {
     vi.mocked(agentDataApi.checks.open).mockReturnValueOnce(pending.promise);
     vi.mocked(agentDataApi.checks.check).mockResolvedValue({ ...report, items: [{ ...report.items[0], action: 'open_file', message: '坏文件' }] });
     render(<AuditDiagnosticsPanel />);
-    fireEvent.click(screen.getByRole('tab', { name: '运行诊断' }));
     fireEvent.click(await screen.findByRole('button', { name: '打开问题文件' }));
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
     await waitFor(() => expect(agentDataApi.checks.check).toHaveBeenCalledTimes(2));
     await act(async () => pending.reject(new Error('文件已移除')));
     expect(await screen.findByRole('alert')).toHaveTextContent('文件已移除');
     expect(screen.getByRole('button', { name: '打开问题文件' })).toBeEnabled();
+  });
+  it('counts states and lists only present categories', async () => {
+    render(<AuditDiagnosticsPanel />);
+    await screen.findByText('知识库状态需要人工确认');
+    expect(within(screen.getByRole('group', { name: '诊断计数' })).getByText('1', { selector: '[data-count="action_required"]' })).toBeInTheDocument();
+    const categories = screen.getByRole('radiogroup', { name: '诊断分类' });
+    expect(within(categories).getAllByRole('radio').map((node) => node.closest('label')?.textContent)).toEqual(['全部', '知识库', '代码索引']);
+    expect(screen.queryByLabelText('诊断资源')).toBeNull();
   });
 });
