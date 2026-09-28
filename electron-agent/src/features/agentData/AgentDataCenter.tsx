@@ -108,7 +108,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
       case 'jobs':
         return <>
           {monitor.error ? <PageBanner type="error" items={[{ source: '任务', message: monitor.error }]} /> : null}
-          <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} refreshToken={refreshToken} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
+          <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
         </>;
       case 'audit':
         return <AuditDiagnosticsPanel visible={visible && tab === 'audit'} refreshToken={refreshToken} navigation={navigation?.target.view === 'audit' ? { resource: navigation.target.resource, request: navigation.request } : undefined} onNavigate={navigate} onRefresh={async () => { await monitor.refresh(); await refreshResources(); }} />;

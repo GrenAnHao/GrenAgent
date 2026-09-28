@@ -496,7 +496,7 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
     const dir = join(this.root, wikiId, 'raw', 'sources');
     try {
       if (!existsSync(dir)) return 0;
-      return readdirSync(dir).filter((name) => (name.endsWith('.md') || name.endsWith('.txt')) && statSync(join(dir, name)).isFile()).length;
+      return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.txt'))).length;
     } catch { return null; }
   }
 
