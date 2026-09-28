@@ -30,7 +30,7 @@ describe('CodeRetrievalPanel task ownership', () => {
   it('creates an index only on a user click and refreshes status after a tracked terminal transition', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/a', connected: false, indexed: false });
     const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
-    const build = await screen.findByRole('button', { name: '建立索引' });
+    const build = (await screen.findAllByRole('button', { name: '建立索引' }))[0];
     expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
     fireEvent.click(build);
     await waitFor(() => expect(monitor.track).toHaveBeenCalledWith('job-1'));

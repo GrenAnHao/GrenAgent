@@ -45,9 +45,9 @@ describe('CodeRelations', () => {
   it('uses the selected relation tool with the symbol and its disambiguating file', async () => {
     render(<CodeRelations workspace="D:/repo" symbol="parse" file="src/a.ts" visible />);
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/repo', tool: 'codegraph_callers', args: { symbol: 'parse', file: 'src/a.ts' } }));
-    fireEvent.click(screen.getByRole('tab', { name: '被调用者' }));
+    fireEvent.click(screen.getByRole('radio', { name: '被调用者' }));
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/repo', tool: 'codegraph_callees', args: { symbol: 'parse', file: 'src/a.ts' } }));
-    fireEvent.click(screen.getByRole('tab', { name: '影响' }));
+    fireEvent.click(screen.getByRole('radio', { name: '影响' }));
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/repo', tool: 'codegraph_impact', args: { symbol: 'parse', file: 'src/a.ts' } }));
   });
 
@@ -55,7 +55,7 @@ describe('CodeRelations', () => {
     const old = deferred<unknown>();
     vi.mocked(agentDataApi.code.call).mockReturnValueOnce(old.promise).mockResolvedValue({ structuredContent: [{ symbol: 'callee' }] });
     render(<CodeRelations workspace="D:/repo" symbol="parse" visible />);
-    fireEvent.click(screen.getByRole('tab', { name: '被调用者' }));
+    fireEvent.click(screen.getByRole('radio', { name: '被调用者' }));
     await screen.findByText('callee');
     await act(async () => { old.resolve({ structuredContent: [{ file: 'old.ts' }] }); });
     expect(screen.queryByText('old.ts')).toBeNull();
@@ -99,10 +99,10 @@ describe('CodeRelations', () => {
 
   it('preserves previous rows when the same relation refresh returns an MCP error', async () => {
     vi.mocked(agentDataApi.code.call).mockResolvedValueOnce({ structuredContent: [{ file: 'caller.ts', symbol: 'caller' }] });
-    render(<CodeRelations workspace="D:/repo" symbol="parse" visible />);
+    const { rerender } = render(<CodeRelations workspace="D:/repo" symbol="parse" visible reloadVersion={0} />);
     await screen.findByText('caller');
     vi.mocked(agentDataApi.code.call).mockResolvedValue({ isError: true, content: [{ type: 'text', text: 'connection lost' }] });
-    fireEvent.click(screen.getByRole('button', { name: '刷新关系' }));
+    rerender(<CodeRelations workspace="D:/repo" symbol="parse" visible reloadVersion={1} />);
     await screen.findByRole('alert');
     expect(screen.getByText('caller')).toBeTruthy();
     expect(screen.getByText(/保留上次/)).toBeTruthy();

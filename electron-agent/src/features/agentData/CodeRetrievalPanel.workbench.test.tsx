@@ -80,7 +80,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
     await screen.findByText('src/a.ts');
     expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_search', args: { query: 'parse', limit: 20 } });
-    fireEvent.click(screen.getByRole('button', { name: '相关上下文' }));
+    fireEvent.click(screen.getByRole('radio', { name: '相关上下文' }));
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_explore', args: { query: 'parse', limit: 20 } }));
     expect(agentDataApi.code.search).not.toHaveBeenCalled();
   });
@@ -119,7 +119,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
     vi.mocked(agentDataApi.code.call).mockReturnValue(pending.promise);
     render(<CodeRetrievalPanel initialProject="D:/a" />);
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: '符号搜索' }));
+    fireEvent.click(screen.getByRole('radio', { name: '符号' }));
     await act(async () => { pending.resolve(rows('current.ts')); });
     expect(screen.getByText('current.ts')).toBeTruthy();
   });
@@ -207,7 +207,7 @@ describe('CodeRetrievalPanel workbench isolation', () => {
   it('rejects in-flight project references and status when hidden', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/a', connected: true, indexed: true, files: 12 });
     const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
-    await screen.findByText('12 / 未提供 / 未提供');
+    await screen.findByText('12 文件');
     const oldStatus = deferred<CodeGraphStatus>();
     const oldProjects = deferred<{ workspace: string; indexed: boolean }[]>();
     vi.mocked(agentDataApi.code.status).mockReturnValueOnce(oldStatus.promise);
@@ -219,8 +219,8 @@ describe('CodeRetrievalPanel workbench isolation', () => {
       oldStatus.resolve({ workspace: 'D:/a', connected: true, indexed: false, files: 99 });
       oldProjects.resolve([{ workspace: 'D:/b', indexed: false }]);
     });
-    expect(screen.getByText('12 / 未提供 / 未提供')).toBeTruthy();
-    expect(screen.queryByText('该项目尚未建立 CodeGraph 索引')).toBeNull();
+    expect(screen.getByText('12 文件')).toBeTruthy();
+    expect(screen.queryByText('这个项目还没有索引')).toBeNull();
     await openSelect('项目');
     expect(screen.getByRole('option', { name: /B.*未检查/ })).toBeTruthy();
   });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Listy, Tabs, Typography } from 'antd';
+import { Alert, Button, Empty, Listy, Segmented, Typography } from 'antd';
 import { agentDataApi, type CodeTool } from '../../lib/agentData';
 import { decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
 import { codeStyles as styles } from './codeStyles';
@@ -17,7 +17,6 @@ const listyItemFlush = { item: { padding: 0 } };
 
 export function CodeRelations({ workspace, symbol, nodeId, file, visible, reloadVersion = 0 }: CodeRelationsProps) {
   const [tab, setTab] = useState<RelationTool>('codegraph_callers');
-  const [version, setVersion] = useState(0);
   const key = `${workspace}\0${nodeId ?? symbol}\0${file ?? ''}\0${tab}`;
   const epoch = useRef(0);
   const [state, setState] = useState<{ key: string; result?: CodeResultView; retained?: CodeResultView; error?: string; loading: boolean }>({ key, loading: false });
@@ -37,12 +36,11 @@ export function CodeRelations({ workspace, symbol, nodeId, file, visible, reload
         if (request === epoch.current) setState((old) => ({ ...old, loading: false, error: codeRequestError(cause) }));
       });
     return () => { epoch.current++; };
-  }, [workspace, symbol, nodeId, file, tab, key, visible, version, reloadVersion]);
+  }, [workspace, symbol, nodeId, file, tab, key, visible, reloadVersion]);
 
-  return <section className={styles.card} aria-label="代码关系">
-    <Tabs id="code-relations" size="small" activeKey={tab} onChange={(next) => { if (next !== tab) { epoch.current++; setTab(next as RelationTool); } }} items={relationTabs.map((item) => ({ key: item.tool, label: item.label }))} />
+  return <section aria-label="代码关系">
+    <Segmented id="code-relations" size="small" value={tab} onChange={(next) => { if (next !== tab) { epoch.current++; setTab(next as RelationTool); } }} options={relationTabs.map((item) => ({ value: item.tool, label: item.label }))} />
     <Typography.Text type="secondary">当前符号：{symbol}{file ? ` · ${file}` : ' · 未提供文件位置'}</Typography.Text>
-    <Button size="small" disabled={!visible || current?.loading} onClick={() => setVersion((value) => value + 1)}>刷新关系</Button>
     {current?.loading ? <Typography.Text type="secondary" role="status">正在查询关系…</Typography.Text> : null}
     {current?.error ? <Alert type="error" showIcon title={`${current.error}${current.result ? ' 当前显示上次成功读取的结果。' : ''}`} /> : null}
     {current?.result ? <CodeResultContent result={current.result} retained={current.retained} /> : null}

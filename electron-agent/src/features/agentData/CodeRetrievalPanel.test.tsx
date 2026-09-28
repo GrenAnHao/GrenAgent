@@ -49,8 +49,8 @@ describe('CodeRetrievalPanel project and status', () => {
   it('does not query an unindexed project and offers an explicit build action only', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/proj/beta', connected: false, indexed: false });
     render(<CodeRetrievalPanel initialProject="D:/proj/beta" />);
-    expect(await screen.findByText('该项目尚未建立 CodeGraph 索引')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '建立索引' })).toBeTruthy();
+    expect(await screen.findByText('这个项目还没有索引')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '建立索引' })[0]).toBeTruthy();
     expect(agentDataApi.code.call).not.toHaveBeenCalled();
     expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
   });
@@ -81,14 +81,16 @@ describe('CodeRetrievalPanel project and status', () => {
     expect(screen.getByRole('option', { name: /alpha.*未检查/ })).toBeTruthy();
     expect(screen.queryByText('该项目尚未建立 CodeGraph 索引')).toBeNull();
     await act(async () => { pending.resolve({ workspace: 'D:/proj/alpha', connected: true, indexed: true }); });
-    expect(screen.getByText('未提供 / 未提供 / 未提供')).toBeTruthy();
-    expect(screen.queryByText('0 / 0 / 0')).toBeNull();
+    expect(screen.getByText('未提供 文件')).toBeTruthy();
+    expect(screen.queryByText('0 文件')).toBeNull();
   });
 
   it('preserves real zero values when the backend explicitly supplies counts', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/proj/alpha', connected: true, indexed: true, files: 0, nodes: 0, edges: 0 });
     render(<CodeRetrievalPanel initialProject="D:/proj/alpha" />);
-    expect(await screen.findByText('0 / 0 / 0')).toBeTruthy();
+    expect(await screen.findByText('0 文件')).toBeTruthy();
+    expect(screen.getByText('0 节点')).toBeTruthy();
+    expect(screen.getByText('0 边')).toBeTruthy();
   });
 
   it.each([
@@ -101,7 +103,7 @@ describe('CodeRetrievalPanel project and status', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(expected);
     if (message === 'Connection refused') expect(screen.queryByText(/CLI 不可用/)).toBeNull();
     expect(screen.queryByRole('button', { name: /安装|建立索引|同步索引/ })).toBeNull();
-    expect(screen.getByText('尚未获取 CodeGraph 索引状态')).toBeTruthy();
+    expect(screen.getByText('未获取')).toBeTruthy();
   });
 
   it('preserves old content and counts on a same-project failed refresh', async () => {
@@ -115,7 +117,7 @@ describe('CodeRetrievalPanel project and status', () => {
     rerender(<CodeRetrievalPanel />);
     await waitFor(() => expect(screen.getAllByRole('alert').some((node) => node.textContent?.includes('Search unavailable'))).toBe(true));
     expect(screen.getByText('src/a.ts')).toBeTruthy();
-    expect(screen.getByText('12 / 34 / 56')).toBeTruthy();
+    expect(screen.getByText('12 文件')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '同步索引' })).toBeNull();
   });
 
@@ -125,9 +127,9 @@ describe('CodeRetrievalPanel project and status', () => {
     const { unmount } = render(<CodeRetrievalPanel initialProject="D:/proj/alpha" />);
     unmount();
     render(<CodeRetrievalPanel initialProject="D:/proj/beta" />);
-    await screen.findByText('8 / 未提供 / 未提供');
+    await screen.findByText('8 文件');
     await act(async () => { oldStatus.resolve({ workspace: 'D:/proj/alpha', connected: true, indexed: true, files: 99 }); });
-    expect(screen.queryByText(/99 \/ /)).toBeNull();
+    expect(screen.queryByText(/^99 文件/)).toBeNull();
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(1);
     expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/proj/beta', tool: 'codegraph_files', args: { format: 'flat' } });
   });

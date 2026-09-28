@@ -8,18 +8,8 @@ export const codeStyles = createStaticStyles(({ css }) => ({
     font-size: 13px;
     overflow-wrap: anywhere;
   `,
-  layout: css`
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    min-width: 0;
-    gap: 16px;
-    &[data-detail='true'] { grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.5fr); }
-    @container code-workbench (max-width: 799px) {
-      &[data-detail='true'] { grid-template-columns: minmax(0, 1fr); }
-      &[data-detail='true'] > [data-code-list] { display: none; }
-    }
-  `,
   column: css`min-width: 0;`,
+  stats: css`display: flex; flex-wrap: wrap; gap: 12px; color: ${cssVar.colorTextTertiary}; font-size: 12px;`,
   heading: css`
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px; flex-wrap: wrap; margin-bottom: 12px;

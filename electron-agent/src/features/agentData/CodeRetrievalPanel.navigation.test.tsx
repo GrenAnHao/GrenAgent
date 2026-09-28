@@ -67,7 +67,7 @@ describe('CodeRetrievalPanel resource navigation', () => {
   it('does not open source in an unindexed project', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'D:/a', indexed: false, connected: true });
     render(<CodeRetrievalPanel navigation={{ view: 'code', workspace: 'D:/a', file: 'a.ts' }} navigationRequest={1} />);
-    await screen.findByText('该项目尚未建立 CodeGraph 索引');
+    await screen.findByText('这个项目还没有索引');
     expect(files.read).not.toHaveBeenCalled();
     expect(agentDataApi.jobs.create).not.toHaveBeenCalled();
   });

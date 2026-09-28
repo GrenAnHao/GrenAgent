@@ -5,14 +5,13 @@ import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { openPath } from '../../platform/runtime';
 import { codeStyles as styles } from './codeStyles';
 
-export interface CodeSourceDetailProps { workspace: string; file: string; line?: number; visible?: boolean; onClose?: () => void }
+export interface CodeSourceDetailProps { workspace: string; file: string; line?: number; visible?: boolean; reloadVersion?: number; onClose?: () => void }
 interface ReadSource { key: string; content: string; absolute: string; relative: string }
 
-export function CodeSourceDetail({ workspace, file, line, visible = true, onClose }: CodeSourceDetailProps) {
+export function CodeSourceDetail({ workspace, file, line, visible = true, reloadVersion = 0, onClose }: CodeSourceDetailProps) {
   const key = `${workspace}\0${file}`;
   const [source, setSource] = useState<ReadSource>();
   const [readState, setReadState] = useState<{ key: string; loading: boolean; error?: string }>({ key, loading: false });
-  const [refreshVersion, setRefreshVersion] = useState(0);
   const [jump, setJump] = useState<{ key: string; indexedLine?: number; line: number; version: number }>();
   const [jumpInput, setJumpInput] = useState('');
   const [actionError, setActionError] = useState<{ key: string; message: string }>();
@@ -52,7 +51,7 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, onClos
         if (version === epoch.current) setReadState({ key, loading: false, error: `源码读取失败：${errorText(cause)}` });
       });
     return () => { epoch.current++; };
-  }, [key, workspace, file, visible, refreshVersion]);
+  }, [key, workspace, file, visible, reloadVersion]);
 
   useEffect(() => {
     if (!visible || !target || !currentSource) return;
@@ -88,7 +87,6 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, onClos
     <div className={styles.heading}><Typography.Title level={5} style={{ margin: 0 }}>{currentSource?.relative ?? file}</Typography.Title>{onClose ? <Button onClick={onClose}>关闭源码</Button> : null}</div>
     <Typography.Text type="secondary" style={{ fontSize: 12 }}>项目根目录：{workspace}</Typography.Text>
     <div className={styles.toolbar}>
-      <Button disabled={!visible || state?.loading} onClick={() => setRefreshVersion((value) => value + 1)}>重新读取源码</Button>
       {validatedSource ? <>
         <Button onClick={() => void copyPath()}>复制相对路径</Button>
         <Button onClick={() => void openFile()}>使用系统打开文件</Button>

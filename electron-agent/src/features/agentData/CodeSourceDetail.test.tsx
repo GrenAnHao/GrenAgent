@@ -40,7 +40,7 @@ describe('CodeSourceDetail', () => {
     expect(scroll).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: '跳转到行' }));
     expect(scroll).toHaveBeenCalledTimes(3);
-    fireEvent.click(screen.getByRole('button', { name: '重新读取源码' }));
+    rerender(<CodeSourceDetail workspace="D:/repo" file="src/a.ts" line={2} reloadVersion={1} />);
     await waitFor(() => expect(files.read).toHaveBeenCalledTimes(2));
     expect(scroll).toHaveBeenCalledTimes(3);
   });
@@ -83,7 +83,7 @@ describe('CodeSourceDetail', () => {
     const { rerender } = render(<CodeSourceDetail workspace="D:/repo" file="src/a.ts" line={2} />);
     await screen.findByText('second');
     vi.mocked(files.read).mockRejectedValue(new Error('File too large to preview (max 512KB)'));
-    fireEvent.click(screen.getByRole('button', { name: '重新读取源码' }));
+    rerender(<CodeSourceDetail workspace="D:/repo" file="src/a.ts" line={2} reloadVersion={1} />);
     expect((await screen.findByRole('alert')).textContent).toContain('512KB');
     expect(screen.getByText('second')).toBeTruthy();
     rerender(<CodeSourceDetail workspace="D:/repo" file="src/b.ts" line={2} />);
@@ -133,12 +133,12 @@ describe('CodeSourceDetail', () => {
     await screen.findByText('second');
     const pending = deferred<string>();
     vi.mocked(files.read).mockReturnValueOnce(pending.promise).mockResolvedValue('first\nnew second\nthird');
-    fireEvent.click(screen.getByRole('button', { name: '重新读取源码' }));
-    rerender(<CodeSourceDetail workspace="D:/repo" file="a.ts" line={2} visible={false} />);
+    rerender(<CodeSourceDetail workspace="D:/repo" file="a.ts" line={2} reloadVersion={1} />);
+    rerender(<CodeSourceDetail workspace="D:/repo" file="a.ts" line={2} visible={false} reloadVersion={1} />);
     await act(async () => { pending.resolve('hidden stale'); });
     expect(screen.queryByText('hidden stale')).toBeNull();
     expect(files.read).toHaveBeenCalledTimes(2);
-    rerender(<CodeSourceDetail workspace="D:/repo" file="a.ts" line={2} />);
+    rerender(<CodeSourceDetail workspace="D:/repo" file="a.ts" line={2} reloadVersion={1} />);
     await screen.findByText('new second');
     expect(files.read).toHaveBeenCalledTimes(3);
     expect(scroll).toHaveBeenCalledTimes(1);
