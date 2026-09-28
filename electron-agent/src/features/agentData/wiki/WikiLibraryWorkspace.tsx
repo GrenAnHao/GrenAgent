@@ -129,11 +129,13 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
 
   useEffect(() => { void reload(); return () => { requestSequence.current++; }; }, [reload, refreshToken]);
 
+  // 处理中每 2 秒重读一次；用 pollTick 驱动下一轮，避免后端返回相同 version/updatedAt 时轮询停摆。
+  const [pollTick, setPollTick] = useState(0);
   useEffect(() => {
     if (!visible || library?.status !== 'processing' || ingesting) return;
-    const timer = setTimeout(() => { void reload(); }, 2000);
+    const timer = setTimeout(() => { void reload().finally(() => setPollTick((value) => value + 1)); }, 2000);
     return () => clearTimeout(timer);
-  }, [visible, library?.status, library?.version, library?.updatedAt, ingesting, reload]);
+  }, [visible, library?.status, ingesting, reload, pollTick]);
 
   useEffect(() => {
     if (!visible || !selectedSource) { if (!selectedSource) setSourceContent(undefined); return; }
