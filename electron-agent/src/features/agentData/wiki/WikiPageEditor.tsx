@@ -3,6 +3,7 @@ import { Alert, Button, Input, Modal } from 'antd';
 import { agentDataApi } from '../../../lib/agentData';
 import { LazyMarkdown } from '../../chat/LazyMarkdown';
 import { wikiStyles as w } from './wikiStyles';
+import { workbenchStyles as s } from '../workbench/workbenchStyles';
 
 interface Props {
   wikiId: string;
@@ -14,12 +15,11 @@ interface Props {
   confirmationVisible?: boolean;
   onSaved(): void;
   onClose(): void;
-  onDeleted?(): void;
 }
 export interface WikiPageEditorHandle { confirmDiscard(): Promise<boolean>; isDirty(): boolean }
 
 export const WikiPageEditor = forwardRef<WikiPageEditorHandle, Props>(function WikiPageEditor({
-  wikiId, pageId, title, content = '', readOnly, visible = true, confirmationVisible = visible, onSaved, onClose, onDeleted,
+  wikiId, pageId, title, content = '', readOnly, visible = true, confirmationVisible = visible, onSaved, onClose,
 }, ref) {
   const [draftTitle, setTitle] = useState(title);
   const [draftContent, setContent] = useState(content);
@@ -28,7 +28,6 @@ export const WikiPageEditor = forwardRef<WikiPageEditorHandle, Props>(function W
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const discardResolver = useRef<((discard: boolean) => void) | undefined>(undefined);
   const dirty = draftTitle !== baseTitle || draftContent !== baseContent;
 
@@ -73,22 +72,11 @@ export const WikiPageEditor = forwardRef<WikiPageEditorHandle, Props>(function W
     finally { setSaving(false); }
   };
 
-  const remove = async () => {
-    if (readOnly || deleting) return;
-    setDeleting(true); setError(undefined);
-    try {
-      await agentDataApi.wiki.pageRemove(wikiId, pageId);
-      onDeleted?.();
-      onClose();
-    } catch (cause) { setError(String(cause)); }
-    finally { setDeleting(false); }
-  };
-
   return <div className={w.editor}>
     <div className={w.toolbar}>
-      <Button aria-label="关闭页面详情" size="small" onClick={() => void confirmDiscard().then((ok) => { if (ok) onClose(); })}>← 返回页面列表</Button>
+      <span className={s.spacer} />
+      <Button aria-label="关闭页面详情" size="small" autoInsertSpace={false} onClick={() => void confirmDiscard().then((ok) => { if (ok) onClose(); })}>取消</Button>
       <Button type="primary" disabled={readOnly || !dirty} loading={saving} onClick={() => void save()}>保存页面</Button>
-      <Button danger disabled={readOnly} loading={deleting} onClick={() => void remove()}>删除页面</Button>
     </div>
     {error ? <Alert type="error" title={error} showIcon /> : null}
     <label className={w.field}>标题<Input aria-label="页面标题" value={draftTitle} disabled={readOnly} onChange={(event) => setTitle(event.target.value)} /></label>

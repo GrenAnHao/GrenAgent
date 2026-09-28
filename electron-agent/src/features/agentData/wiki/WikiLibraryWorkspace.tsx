@@ -289,7 +289,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
           </div>
           <div className={w.document}><LazyMarkdown prose={false}>{sourceContent ?? '正在读取资料…'}</LazyMarkdown></div>
         </> : <div className={w.emptyState}>选择原始资料查看内容</div>}</div>
-        <div hidden={tab !== 'pages'}>{showPage && selectedPageId ? <WikiPageEditor ref={editor} key={`${kbId}:${selectedPageId}`} wikiId={kbId} pageId={selectedPageId} title={pages.find((item) => item.id === selectedPageId)?.title ?? selectedPageId} content={selectedPageContent} readOnly={readOnly} visible={visible} confirmationVisible={confirmationVisible} onSaved={() => void reload()} onClose={() => { setShowPage(false); setSelectedPageId(undefined); setSelectedPageContent(undefined); }} onDeleted={() => { setShowPage(false); setSelectedPageId(undefined); void reload(); }} /> : <div className={w.emptyState}>选择知识页面</div>}</div>
+        <div hidden={tab !== 'pages'}>{showPage && selectedPageId ? <WikiPageEditor ref={editor} key={`${kbId}:${selectedPageId}`} wikiId={kbId} pageId={selectedPageId} title={pages.find((item) => item.id === selectedPageId)?.title ?? selectedPageId} content={selectedPageContent} readOnly={readOnly} visible={visible} confirmationVisible={confirmationVisible} onSaved={() => void reload()} onClose={() => { setShowPage(false); setSelectedPageId(undefined); setSelectedPageContent(undefined); }} /> : <div className={w.emptyState}>选择知识页面</div>}</div>
         <div hidden={tab !== 'templates'}>
           <label className={w.field}>purpose.md
             <Input.TextArea aria-label="purpose.md" rows={8} value={purposeDraft} disabled={readOnly} onChange={(event) => setPurposeDraft(event.target.value)} />

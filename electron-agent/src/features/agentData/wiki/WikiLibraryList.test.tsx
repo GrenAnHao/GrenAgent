@@ -12,11 +12,11 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('browses without searching and keeps rows on refresh failure', async () => {
   const onOpen = vi.fn();
-  render(<WikiLibraryList visible onOpen={onOpen} refreshVersion={0} />);
+  const { rerender } = render(<WikiLibraryList visible onOpen={onOpen} refreshVersion={0} refreshToken={0} />);
   expect(await screen.findByText('团队说明')).toBeVisible();
   expect(screen.queryByLabelText('关联项目筛选')).toBeNull();
   vi.mocked(agentDataApi.wiki.list).mockRejectedValueOnce(new Error('连接已断开'));
-  fireEvent.click(screen.getByRole('button', { name: '刷新知识库' }));
+  rerender(<WikiLibraryList visible onOpen={onOpen} refreshVersion={0} refreshToken={1} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('连接已断开');
   fireEvent.click(screen.getByRole('button', { name: '打开知识库 产品' }));
   expect(onOpen).toHaveBeenCalledTimes(1);
@@ -25,16 +25,16 @@ it('browses without searching and keeps rows on refresh failure', async () => {
 
 it('invalidates in-flight reads while hidden and refreshes once', async () => {
   const pending = deferred<typeof wikiAsset[]>();
-  const { rerender } = render(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} />);
+  const { rerender } = render(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} refreshToken={0} />);
   await screen.findByText('团队说明');
   vi.mocked(agentDataApi.wiki.list).mockReturnValueOnce(pending.promise);
-  fireEvent.click(screen.getByRole('button', { name: '刷新知识库' }));
+  rerender(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} refreshToken={1} />);
   await waitFor(() => expect(agentDataApi.wiki.list).toHaveBeenCalledTimes(2));
-  rerender(<WikiLibraryList visible={false} onOpen={vi.fn()} refreshVersion={5} />);
+  rerender(<WikiLibraryList visible={false} onOpen={vi.fn()} refreshVersion={5} refreshToken={1} />);
   await act(async () => pending.resolve([{ ...wikiAsset, name: '迟到结果' }]));
   expect(screen.queryByText('迟到结果')).toBeNull();
   expect(agentDataApi.wiki.list).toHaveBeenCalledTimes(2);
-  rerender(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={5} />);
+  rerender(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={5} refreshToken={1} />);
   await waitFor(() => expect(agentDataApi.wiki.list).toHaveBeenCalledTimes(3));
 });
 
@@ -63,9 +63,17 @@ it('deletes a wiki after name confirmation', async () => {
   const onDeleted = vi.fn();
   render(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} onDeleted={onDeleted} />);
   await screen.findByText('团队说明');
-  fireEvent.click(screen.getByRole('button', { name: '删除知识库 产品' }));
+  fireEvent.click(screen.getByRole('button', { name: '知识库 产品 更多操作' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: '删除知识库' }));
   fireEvent.change(await screen.findByLabelText('输入知识库名称确认'), { target: { value: '产品' } });
   fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
   await waitFor(() => expect(agentDataApi.wiki.remove).toHaveBeenCalledWith('k'));
   expect(onDeleted).toHaveBeenCalledWith('k');
+});
+
+it('shows source and page counts on the card', async () => {
+  vi.mocked(agentDataApi.wiki.list).mockResolvedValue([{ ...wikiAsset, pageCount: 3, sourceCount: 2 }]);
+  render(<WikiLibraryList visible onOpen={vi.fn()} refreshVersion={0} />);
+  expect(await screen.findByText('3 页 · 2 份资料')).toBeVisible();
+  expect(screen.queryByLabelText('知识库排序')).toBeNull();
 });

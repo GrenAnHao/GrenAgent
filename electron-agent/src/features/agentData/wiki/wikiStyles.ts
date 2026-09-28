@@ -89,8 +89,8 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     margin-block-end: 16px;
   `,
   list: css`
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 12px;
   `,
   libraryHeader: css`
@@ -203,4 +203,8 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
   preview: css`padding: 16px; min-height: 100px; border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 6px; background: ${cssVar.colorBgContainer};`,
   field: css`display: flex; flex-direction: column; gap: 6px; margin-block: 12px;`,
   diagnostics: css`padding: 12px; margin-block: 12px; border: 1px solid ${cssVar.colorWarningBorder}; border-radius: 6px; overflow-wrap: anywhere; background: ${cssVar.colorWarningBg};`,
+  crumb: css`padding-inline: 0; height: auto; font-size: inherit;`,
+  back: css`padding-inline: 4px;`,
+  templateGrid: css`display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;`,
+  templateCol: css`display: flex; flex-direction: column; gap: 8px; min-width: 0;`,
 }));

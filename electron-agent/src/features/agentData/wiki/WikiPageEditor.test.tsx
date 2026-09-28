@@ -19,11 +19,3 @@ it('saves pages through pageWrite without lock dialogs', async () => {
   await waitFor(() => expect(agentDataApi.wiki.pageWrite).toHaveBeenCalled());
   expect(onSaved).toHaveBeenCalled();
 });
-
-it('deletes pages through pageRemove', async () => {
-  const onDeleted = vi.fn();
-  render(<WikiPageEditor wikiId="k" pageId="concepts/auth" title="说明" content="# 原文" readOnly={false} onSaved={vi.fn()} onClose={vi.fn()} onDeleted={onDeleted} />);
-  fireEvent.click(screen.getByRole('button', { name: '删除页面' }));
-  await waitFor(() => expect(agentDataApi.wiki.pageRemove).toHaveBeenCalledWith('k', 'concepts/auth'));
-  expect(onDeleted).toHaveBeenCalled();
-});
