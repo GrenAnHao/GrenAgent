@@ -146,6 +146,7 @@ it('cancels from the drawer after rechecking capability', async () => {
   render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} onRefresh={onRefresh} />);
   fireEvent.click(await screen.findByRole('button', { name: '取消任务' }));
   await waitFor(() => expect(agentDataApi.jobs.cancel).toHaveBeenCalledWith(task.ref.id));
-  expect(agentDataApi.tasks.read).toHaveBeenCalledTimes(2);
+  // 初次读取 + 取消前复查 + 取消后重读详情。
+  await waitFor(() => expect(agentDataApi.tasks.read).toHaveBeenCalledTimes(3));
   expect(onRefresh).toHaveBeenCalled();
 });

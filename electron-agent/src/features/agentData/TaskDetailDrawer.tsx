@@ -89,6 +89,8 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
       if (!latest || latest.ref.source !== 'user' || !latest.capabilities.cancel) throw new Error('当前不允许取消此任务，请刷新后重试');
       await agentDataApi.jobs.cancel(stable.id);
       await onRefresh?.();
+      // 取消后重读详情，让事件时间线与执行摘要跟上。
+      if (valid(request)) setLoadRequest((value) => value + 1);
     } catch (cause) { if (valid(request)) setMutationError(message(cause)); }
     finally { if (valid(request)) { busyRef.current = false; setBusy(false); } }
   };
