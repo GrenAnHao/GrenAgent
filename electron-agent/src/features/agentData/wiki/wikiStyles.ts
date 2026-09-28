@@ -68,12 +68,6 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     gap: 8px;
     flex: 0 0 auto;
   `,
-  tabs: css`
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-block-end: 12px;
-  `,
   muted: css`color: ${cssVar.colorTextSecondary}; font-size: 12px; overflow-wrap: anywhere;`,
   listHeader: css`
     display: flex;
@@ -113,35 +107,6 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
       align-items: center;
       gap: 4px;
     }
-  `,
-  workspace: css`
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
-    gap: 16px;
-    flex: 1;
-    min-height: 0;
-    @container (max-width: 799px) {
-      grid-template-columns: minmax(0, 1fr);
-      &[data-detail='true'] > [data-wiki-list] { display: none; }
-      &[data-detail='false'] > [data-wiki-detail] { display: none; }
-    }
-  `,
-  sidebar: css`
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    min-width: 0;
-    padding: 16px;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorBgContainer};
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    align-self: start;
-  `,
-  sidebarActions: css`
-    display: flex;
-    gap: 8px;
-    padding-block-end: 12px;
-    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
   `,
   resourceList: css`
     flex: 1;
@@ -197,7 +162,6 @@ export const wikiStyles = createStaticStyles(({ css }) => ({
     text-align: center;
     font-size: 13px;
   `,
-  propertyButton: css`display: inline-flex;`,
   document: css`width: 100%; max-width: 760px; margin-inline: auto; line-height: 1.65; overflow-wrap: anywhere; pre { white-space: pre-wrap; overflow-wrap: anywhere; } img { max-width: 100%; }`,
   editor: css`display: flex; flex-direction: column; gap: 12px; min-width: 0;`,
   preview: css`padding: 16px; min-height: 100px; border: 1px solid ${cssVar.colorBorderSecondary}; border-radius: 6px; background: ${cssVar.colorBgContainer};`,

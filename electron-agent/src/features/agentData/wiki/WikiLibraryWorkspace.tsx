@@ -1,8 +1,14 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Alert, Button, Drawer, Dropdown, Input, Modal, Tag } from 'antd';
-import { Ellipsis, Info, RefreshCw } from 'lucide-react';
+import { Alert, Button, Input, Modal, Segmented, Tag } from 'antd';
 import { agentDataApi, type WikiAssetDetail, type WikiRawSource, type WikiSearchHit } from '../../../lib/agentData';
 import { openPath } from '../../../platform/runtime';
+import { PageHeader } from '../workbench/PageHeader';
+import { PageBanner } from '../workbench/PageBanner';
+import { MoreMenu } from '../workbench/MoreMenu';
+import { SplitPane } from '../workbench/SplitPane';
+import { workbenchStyles as s } from '../workbench/workbenchStyles';
+import { useAskConfirm } from '../../../components/askConfirm';
+import { StatusTag } from '../workbench/StatusTag';
 import { LazyMarkdown } from '../../chat/LazyMarkdown';
 import { WikiLibraryDialog } from './WikiLibraryDialog';
 import { WikiSourceDialog } from './WikiSourceDialog';
@@ -19,20 +25,21 @@ interface Props {
   onBack(): void;
   onViewTask?(id: string): void;
   onDeleted?(wikiId: string): void;
+  refreshToken?: number;
 }
 export interface WikiLibraryWorkspaceHandle { confirmLeave(): Promise<boolean> }
 
-const statusLabels: Record<string, string> = {
-  draft: '草稿', pending: '待抽取', processing: '处理中', ready: '可用', failed: '失败',
-};
 const rawLabels: Record<string, string> = {
   uploaded: '已上传', ingested: '已抽取', failed: '抽取失败',
+};
+const stageLabels: Record<string, string> = {
+  scanning: '扫描原文', ingesting: '抽取页面', 'rebuilding-index': '重建索引',
 };
 
 type PageSummary = { id: string; title: string; type: string; relPath: string };
 
 export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props>(function WikiLibraryWorkspace({
-  visible, confirmationVisible = visible, kbId, navigationPageId, navigationMode, navigationRequest = 0, onBack, onDeleted,
+  visible, confirmationVisible = visible, kbId, navigationPageId, navigationMode, navigationRequest = 0, onBack, onDeleted, refreshToken,
 }, ref) {
   const [library, setLibrary] = useState<WikiAssetDetail>();
   const [sources, setSources] = useState<WikiRawSource[]>([]);
@@ -50,6 +57,8 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
   const [selectedPageId, setSelectedPageId] = useState<string>();
   const [selectedPageContent, setSelectedPageContent] = useState<string>();
   const [showPage, setShowPage] = useState(false);
+  const [editingPage, setEditingPage] = useState(false);
+  const [pageDeleteOpen, setPageDeleteOpen] = useState(false);
   const [purposeDraft, setPurposeDraft] = useState('');
   const [schemaDraft, setSchemaDraft] = useState('');
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
@@ -63,13 +72,13 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [properties, setProperties] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [ingestNotice, setIngestNotice] = useState<string>();
   const [resetting, setResetting] = useState(false);
   const requestSequence = useRef(0);
   const pageSequence = useRef(0);
   const editor = useRef<WikiPageEditorHandle>(null);
+  const ask = useAskConfirm();
   const mounted = useRef(true);
   const currentKb = useRef(kbId);
   const currentVisible = useRef(visible);
@@ -86,6 +95,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
     setLibrary(undefined); setSources([]); setPages([]); setErrors({}); setSelectedSource(undefined); setSelectedPageId(undefined);
     setSourcesLoaded(false); setPagesLoaded(false); setUnavailable(false); setSourceContent(undefined); setSelectedPageContent(undefined);
     setShowPage(false); setTemplatesLoaded(false); setPurposeDraft(''); setSchemaDraft(''); setSearchHits([]); setGraphEdges([]);
+    setEditingPage(false); setPageDeleteOpen(false);
     setIngestNotice(undefined); setTab('sources'); setSourceQuery(''); setPageQuery(''); setSearchQuery('');
     return () => { requestSequence.current++; pageSequence.current++; };
   }, [kbId]);
@@ -117,7 +127,13 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
     setErrors(nextErrors); setLoading(false);
   }, [kbId, visible, onBack, onDeleted]);
 
-  useEffect(() => { void reload(); return () => { requestSequence.current++; }; }, [reload]);
+  useEffect(() => { void reload(); return () => { requestSequence.current++; }; }, [reload, refreshToken]);
+
+  useEffect(() => {
+    if (!visible || library?.status !== 'processing' || ingesting) return;
+    const timer = setTimeout(() => { void reload(); }, 2000);
+    return () => clearTimeout(timer);
+  }, [visible, library?.status, library?.version, library?.updatedAt, ingesting, reload]);
 
   useEffect(() => {
     if (!visible || !selectedSource) { if (!selectedSource) setSourceContent(undefined); return; }
@@ -135,6 +151,7 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
       if (request !== pageSequence.current) return;
       setSelectedPageContent(content);
       setShowPage(true);
+      setEditingPage(false);
     }).catch((cause) => {
       if (request === pageSequence.current) setErrors((current) => ({ ...current, 页面正文: String(cause) }));
     });
@@ -216,103 +233,123 @@ export const WikiLibraryWorkspace = forwardRef<WikiLibraryWorkspaceHandle, Props
   };
 
   const reportPathError = (cause: unknown) => setErrors((current) => ({ ...current, 打开位置: String(cause) }));
-  const propertiesContent = <><h4>知识库属性</h4><p>{library?.pageCount ?? pages.length} 个页面 · {sources.length} 份原文</p><p>状态：{library ? statusLabels[library.status] ?? library.status : '未获取'}</p>{library?.dir ? <><p>{library.dir}</p><Button onClick={() => { void openPath(library.dir).catch(reportPathError); }}>打开存储位置</Button></> : null}</>;
+
+  const closePage = async () => {
+    if (editingPage && !(await (editor.current?.confirmDiscard() ?? Promise.resolve(true)))) return;
+    setShowPage(false); setSelectedPageId(undefined); setSelectedPageContent(undefined); setEditingPage(false);
+  };
+  const pageMenu = <MoreMenu label="页面更多操作" items={[{ key: 'delete', label: '删除页面', danger: true, disabled: readOnly }]} onSelect={(key) => { if (key === 'delete') setPageDeleteOpen(true); }} />;
 
   return <section hidden={!visible} className={w.root} data-testid="wiki-library-workspace">
-    <header className={w.header}>
-      <div>
-        <div className={w.headerTitle}>
-          <Button onClick={() => onBack()} aria-label="返回知识库列表" size="small">← 知识库列表</Button>
-          <h3>{library?.name ?? '知识库'}</h3>
-        </div>
-        {library?.summary ? <p>{library.summary}</p> : null}
-        <div className={w.headerMeta}>
-          <span>{sources.length} 份资料</span>
-          <span>{library?.pageCount ?? pages.length} 个页面</span>
-          <span>状态：{library ? statusLabels[library.status] ?? library.status : '未获取'}</span>
-          {busy ? <Tag color="processing" data-testid="wiki-busy-tag">处理中</Tag> : null}
-        </div>
-      </div>
-      <div className={w.toolbar}>
-        <Button aria-label="刷新当前知识库" disabled={loading} icon={<RefreshCw size={14} />} onClick={() => void reload()} />
-        <Button className={w.propertyButton} aria-label="查看知识库属性" icon={<Info size={14} />} onClick={() => setProperties(true)} />
-        <Button type="primary" disabled={readOnly || !sources.length || ingesting} onClick={() => void startIngest()}>{ingesting || library?.status === 'processing' ? '处理中' : '开始抽取'}</Button>
-        <Button disabled={!canReset || resetting} autoInsertSpace={false} onClick={() => void resetDraft()}>重置状态</Button>
-        <Dropdown trigger={['click']} menu={{ items: [
-          { key: 'properties', label: '知识库属性' },
+    <PageHeader
+      title={<nav aria-label="面包屑"><Button type="link" className={w.crumb} aria-label="返回知识库列表" onClick={() => onBack()}>知识库</Button> / {library?.name ?? '知识库'}</nav>}
+      extra={library ? <StatusTag domain="wiki" status={library.status} /> : null}
+      subtitle={`${sourcesLoaded ? sources.length : '未获取'} 份资料 · ${library?.pageCount ?? pages.length} 页`}
+      actions={<>
+        <Button type="primary" autoInsertSpace={false} disabled={readOnly || !sources.length || ingesting} onClick={() => void startIngest()}>{busy ? '抽取中…' : '开始抽取'}</Button>
+        <MoreMenu label="知识库更多操作" items={[
+          { key: 'props', label: '编辑属性' },
+          { key: 'open', label: '打开存储位置', disabled: !library?.dir },
+          { key: 'reset', label: '重置为草稿', disabled: !canReset || resetting },
           { key: 'delete', label: '删除知识库', danger: true, disabled: !library || unavailable },
-        ], onClick: ({ key }) => { if (key === 'properties') setLibraryDialog(true); if (key === 'delete') { setConfirmName(''); setDeleteOpen(true); } } }}><Button aria-label="知识库更多操作" icon={<Ellipsis size={16} />} /></Dropdown>
-      </div>
-    </header>
-    {Object.entries(errors).map(([domain, error]) => <Alert key={domain} type="error" title={`${domain}：${error}`} showIcon />)}
+        ]} onSelect={(key) => {
+          if (key === 'props') setLibraryDialog(true);
+          if (key === 'open' && library?.dir) void openPath(library.dir).catch(reportPathError);
+          if (key === 'reset') void resetDraft();
+          if (key === 'delete') { setConfirmName(''); setDeleteOpen(true); }
+        }} />
+      </>} />
+    {library?.status === 'processing' ? <PageBanner type="info" items={[{ message: `正在抽取，完成前内容只读${library.internalStatus ? ` · ${stageLabels[library.internalStatus] ?? library.internalStatus}` : ''}` }]} /> : null}
+    {library?.status === 'failed' && library.syncError ? <PageBanner type="error" items={[{ source: '抽取失败', message: library.syncError }]} /> : null}
+    <PageBanner type="error" items={Object.entries(errors).map(([source, message]) => ({ source, message }))} />
     {ingestNotice ? <Alert type="info" title={ingestNotice} data-testid="wiki-ingest-notice" /> : null}
     {unavailable ? <Alert type="warning" title="知识库已删除。" /> : null}
+    {library?.summary ? <p className={w.muted}>{library.summary}</p> : null}
     {!library && loading ? <p role="status">正在加载知识库…</p> : null}
-    <div className={w.tabs} role="tablist" aria-label="知识库内容">
-      <Button role="tab" type={tab === 'sources' ? 'primary' : 'text'} aria-selected={tab === 'sources'} onClick={() => setTab('sources')}>原始资料 ({sourcesLoaded ? sources.length : '未获取'})</Button>
-      <Button role="tab" type={tab === 'pages' ? 'primary' : 'text'} aria-selected={tab === 'pages'} onClick={() => setTab('pages')}>知识页面 ({pagesLoaded ? pages.length : '未获取'})</Button>
-      <Button role="tab" type={tab === 'templates' ? 'primary' : 'text'} aria-selected={tab === 'templates'} onClick={() => setTab('templates')}>抽取模板</Button>
-      <Button role="tab" type={tab === 'search' ? 'primary' : 'text'} aria-selected={tab === 'search'} onClick={() => setTab('search')}>检索与图谱</Button>
+    <div className={s.panelToolbar}>
+      <Segmented value={tab} onChange={(value) => setTab(value as typeof tab)} options={[
+        { value: 'sources', label: `原始资料 (${sourcesLoaded ? sources.length : '未获取'})` },
+        { value: 'pages', label: `知识页面 (${pagesLoaded ? pages.length : '未获取'})` },
+        { value: 'templates', label: '抽取模板' },
+        { value: 'search', label: '检索' },
+      ]} />
+      <span className={s.spacer} />
+      {tab === 'sources' ? <Input aria-label="搜索原始资料" placeholder="搜索资料" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} size="small" style={{ width: 200 }} /> : null}
+      {tab === 'pages' ? <Input aria-label="搜索知识页面" placeholder="搜索页面" value={pageQuery} onChange={(event) => setPageQuery(event.target.value)} size="small" style={{ width: 200 }} /> : null}
+      {tab === 'sources' ? <Button size="small" disabled={readOnly || library?.status === 'processing'} onClick={() => setSourceDialog(true)} aria-label="上传原文">上传原文</Button> : null}
     </div>
-    <div className={w.workspace} data-detail={tab === 'sources' ? !!selectedSource : showPage}>
-      <aside className={w.sidebar} data-wiki-list>
-        <div className={w.sidebarActions}>
-          <Button disabled={readOnly || library?.status === 'processing'} onClick={() => setSourceDialog(true)} size="small" block aria-label="上传原文">上传原文</Button>
-        </div>
-        <div hidden={tab !== 'sources'}>
-          <Input aria-label="搜索原始资料" placeholder="搜索资料" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} size="small" />
+    <div hidden={tab !== 'sources'}>
+      <SplitPane detailOpen={!!selectedSource}
+        side={<>
           <div className={w.resourceList} aria-label="原始资料列表">
             {sources.filter((item) => item.filename.toLowerCase().includes(sourceQuery.toLowerCase())).map((item) => <Button key={item.filename} block className={w.resource} aria-label={`查看资料 ${item.filename}`} aria-pressed={selectedSource === item.filename} onClick={() => setSelectedSource(item.filename)}>{item.filename}<small>{rawLabels[item.status] ?? item.status}</small></Button>)}
           </div>
           {sourcesLoaded && !sources.length && !loading ? <p className={w.muted}>上传原文后可开始抽取。</p> : null}
-        </div>
-        <div hidden={tab !== 'pages'}>
-          <Input aria-label="搜索知识页面" placeholder="搜索页面" value={pageQuery} onChange={(event) => setPageQuery(event.target.value)} size="small" />
+        </>}
+        main={selectedSource ? <>
+          <div className={s.detailHeader}>
+            <Button className={w.back} aria-label="关闭资料详情" onClick={() => setSelectedSource(undefined)} size="small">←</Button>
+            <h3>{selectedSource}</h3><span className={s.spacer} />
+            <Button danger autoInsertSpace={false} disabled={readOnly || library?.status === 'processing'} onClick={async () => { if (await ask({ title: `删除资料 ${selectedSource}？`, content: '删除后需要重新上传。', danger: true })) void agentDataApi.wiki.rawRemove(kbId, selectedSource).then(() => { setSelectedSource(undefined); void reload(); }).catch((cause) => setErrors((current) => ({ ...current, 删除资料: String(cause) }))); }}>删除资料</Button>
+          </div>
+          <div className={w.document}><LazyMarkdown prose={false}>{sourceContent ?? '正在读取资料…'}</LazyMarkdown></div>
+        </> : <div className={w.emptyState}>选择原始资料查看内容</div>} />
+    </div>
+    <div hidden={tab !== 'pages'}>
+      <SplitPane detailOpen={showPage}
+        side={<>
           <div className={w.resourceList} aria-label="知识页面列表">
             {pages.filter((item) => item.title.toLowerCase().includes(pageQuery.toLowerCase())).map((item) => <Button key={item.id} block className={w.resource} aria-label={`查看页面 ${item.title}`} aria-pressed={selectedPageId === item.id} onClick={() => { setSelectedPageId(item.id); setShowPage(true); }}>{item.title}<small>{item.type}</small></Button>)}
           </div>
           {pagesLoaded && !pages.length && !loading ? <p className={w.muted}>还没有知识页面。</p> : null}
-        </div>
-        <div hidden={tab !== 'templates'}>
-          <p className={w.muted}>编辑 purpose.md / schema.md，不走页面锁定写入。</p>
-        </div>
-        <div hidden={tab !== 'search'}>
-          <p className={w.muted}>图谱边：{graphEdges.length}</p>
-        </div>
-      </aside>
-      <div className={w.detail} data-wiki-detail>
-        <div hidden={tab !== 'sources'}>{selectedSource ? <>
-          <Button aria-label="关闭资料详情" onClick={() => setSelectedSource(undefined)} size="small">← 返回资料列表</Button>
-          <h3>{selectedSource}</h3>
-          <div className={w.toolbar}>
-            <Button danger disabled={readOnly || library?.status === 'processing'} onClick={() => void agentDataApi.wiki.rawRemove(kbId, selectedSource).then(() => { setSelectedSource(undefined); void reload(); }).catch((cause) => setErrors((current) => ({ ...current, 删除资料: String(cause) })))}>删除资料</Button>
-          </div>
-          <div className={w.document}><LazyMarkdown prose={false}>{sourceContent ?? '正在读取资料…'}</LazyMarkdown></div>
-        </> : <div className={w.emptyState}>选择原始资料查看内容</div>}</div>
-        <div hidden={tab !== 'pages'}>{showPage && selectedPageId ? <WikiPageEditor ref={editor} key={`${kbId}:${selectedPageId}`} wikiId={kbId} pageId={selectedPageId} title={pages.find((item) => item.id === selectedPageId)?.title ?? selectedPageId} content={selectedPageContent} readOnly={readOnly} visible={visible} confirmationVisible={confirmationVisible} onSaved={() => void reload()} onClose={() => { setShowPage(false); setSelectedPageId(undefined); setSelectedPageContent(undefined); }} /> : <div className={w.emptyState}>选择知识页面</div>}</div>
-        <div hidden={tab !== 'templates'}>
-          <label className={w.field}>purpose.md
-            <Input.TextArea aria-label="purpose.md" rows={8} value={purposeDraft} disabled={readOnly} onChange={(event) => setPurposeDraft(event.target.value)} />
+        </>}
+        main={showPage && selectedPageId ? <>
+          {editingPage
+            ? <WikiPageEditor ref={editor} key={`${kbId}:${selectedPageId}`} wikiId={kbId} pageId={selectedPageId} title={pages.find((item) => item.id === selectedPageId)?.title ?? selectedPageId} content={selectedPageContent} readOnly={readOnly} visible={visible} confirmationVisible={confirmationVisible} onSaved={() => { setEditingPage(false); void reload(); }} onClose={() => setEditingPage(false)} />
+            : <>
+              <div className={s.detailHeader}>
+                <Button className={w.back} aria-label="关闭页面详情" onClick={() => void closePage()} size="small">←</Button>
+                <h3>{pages.find((item) => item.id === selectedPageId)?.title ?? selectedPageId}</h3>
+                <Tag>{pages.find((item) => item.id === selectedPageId)?.type ?? '页面'}</Tag>
+                <span className={s.spacer} />
+                <Button disabled={readOnly} onClick={() => setEditingPage(true)}>编辑页面</Button>
+                {pageMenu}
+              </div>
+              <div className={w.document}><LazyMarkdown prose={false}>{selectedPageContent ?? '正在读取页面…'}</LazyMarkdown></div>
+            </>}
+          {/* 编辑中也保留删除入口：编辑器自身不再带删除按钮。 */}
+          {editingPage ? <div className={s.detailHeader}><span className={s.spacer} />{pageMenu}</div> : null}
+          <Modal open={pageDeleteOpen} title="确认删除页面" okText="确认删除" cancelText="取消" okButtonProps={{ danger: true, autoInsertSpace: false }} onCancel={() => setPageDeleteOpen(false)} onOk={() => void agentDataApi.wiki.pageRemove(kbId, selectedPageId).then(() => { setPageDeleteOpen(false); setEditingPage(false); setShowPage(false); setSelectedPageId(undefined); setSelectedPageContent(undefined); void reload(); }).catch((cause) => setErrors((current) => ({ ...current, 删除页面: String(cause) })))}>
+            <p>删除后不可恢复。</p>
+          </Modal>
+        </> : <div className={w.emptyState}>选择知识页面</div>} />
+    </div>
+    <div className={w.detail} hidden={tab !== 'templates'}>
+      <div className={w.templateGrid}>
+        <div className={w.templateCol}>
+          <label className={w.field}>purpose.md<small className={w.muted}>这个库用来做什么</small>
+            <Input.TextArea aria-label="purpose.md" rows={12} value={purposeDraft} disabled={readOnly} onChange={(event) => setPurposeDraft(event.target.value)} />
           </label>
           <Button type="primary" disabled={readOnly} loading={savingTemplate === 'purpose'} onClick={() => void saveTemplate('purpose')}>保存 purpose.md</Button>
-          <label className={w.field}>schema.md
-            <Input.TextArea aria-label="schema.md" rows={8} value={schemaDraft} disabled={readOnly} onChange={(event) => setSchemaDraft(event.target.value)} />
+        </div>
+        <div className={w.templateCol}>
+          <label className={w.field}>schema.md<small className={w.muted}>抽取出哪些页面类型</small>
+            <Input.TextArea aria-label="schema.md" rows={12} value={schemaDraft} disabled={readOnly} onChange={(event) => setSchemaDraft(event.target.value)} />
           </label>
           <Button disabled={readOnly} loading={savingTemplate === 'schema'} onClick={() => void saveTemplate('schema')}>保存 schema.md</Button>
         </div>
-        <div hidden={tab !== 'search'}>
-          <div className={w.toolbar}>
-            <Input aria-label="检索知识库" placeholder="输入检索词" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
-            <Button type="primary" loading={searching} aria-label="执行检索" autoInsertSpace={false} onClick={() => void runSearch()}>检索</Button>
-          </div>
-          <div className={w.resourceList} aria-label="检索结果">
-            {searchHits.map((hit) => <Button key={`${hit.path}:${hit.score}`} block className={w.resource} onClick={() => { setTab('pages'); setSelectedPageId(hit.path.replace(/^wiki\//, '').replace(/\.md$/, '')); setShowPage(true); }}>{hit.title}<small>{hit.snippet}</small></Button>)}
-          </div>
-          {!searchHits.length ? <p className={w.muted}>输入关键词后检索。</p> : null}
-        </div>
       </div>
     </div>
-    <Drawer open={visible && properties} title="知识库属性" onClose={() => setProperties(false)}>{propertiesContent}</Drawer>
+    <div className={w.detail} hidden={tab !== 'search'}>
+      <div className={w.toolbar}>
+        <Input aria-label="检索知识库" placeholder="输入检索词" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+        <Button type="primary" loading={searching} aria-label="执行检索" autoInsertSpace={false} onClick={() => void runSearch()}>检索</Button>
+      </div>
+      <div className={w.resourceList} aria-label="检索结果">
+        {searchHits.map((hit) => <Button key={`${hit.path}:${hit.score}`} block className={w.resource} onClick={() => { setTab('pages'); setSelectedPageId(hit.path.replace(/^wiki\//, '').replace(/\.md$/, '')); setShowPage(true); }}>{hit.title}<small>{hit.snippet}</small></Button>)}
+      </div>
+      {!searchHits.length ? <p className={w.muted}>图谱共 {graphEdges.length} 条边</p> : null}
+    </div>
     <WikiLibraryDialog open={libraryDialog} visible={visible} library={library} onClose={() => setLibraryDialog(false)} onSaved={(saved) => { setLibrary(saved); setLibraryDialog(false); void reload(); }} />
     <WikiSourceDialog open={sourceDialog} visible={visible} wikiId={kbId} disabled={readOnly || library?.status === 'processing'} onClose={() => setSourceDialog(false)} onSaved={() => void reload()} />
     <Modal open={visible && deleteOpen} title="确认删除知识库" closable={!deleting} keyboard={!deleting} onCancel={() => { if (!deleting) setDeleteOpen(false); }} onOk={() => void confirmDelete()} okText="确认删除" cancelText="取消" confirmLoading={deleting} okButtonProps={{ danger: true, disabled: !library || confirmName !== library.name, autoInsertSpace: false }}>

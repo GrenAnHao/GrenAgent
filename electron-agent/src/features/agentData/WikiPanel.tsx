@@ -10,14 +10,14 @@ interface WikiPanelProps {
   /** 保留一期调用兼容；知识库导航不跟随聊天项目。 */
   initialProject?: string;
   visible?: boolean;
-  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  /** 统一刷新令牌；顶栏刷新时递增，透传给列表与工作区并入读取 effect 依赖。 */
   refreshToken?: number;
   navigation?: Extract<ResourceNavigation, { view: 'wiki' }>;
   navigationRequest?: number;
   onOpenTask?: (id: string) => void;
 }
 
-export function WikiPanel({ visible = true, navigation, navigationRequest = 0, onOpenTask }: WikiPanelProps) {
+export function WikiPanel({ visible = true, refreshToken = 0, navigation, navigationRequest = 0, onOpenTask }: WikiPanelProps) {
   const monitor = useAgentDataTaskMonitor();
   const [selectedKbId, setSelectedKbId] = useState<string>();
   const [showWorkspace, setShowWorkspace] = useState(false);
@@ -67,8 +67,8 @@ export function WikiPanel({ visible = true, navigation, navigationRequest = 0, o
   };
 
   return <section data-testid="wiki-panel" className={wikiStyles.root}>
-    <WikiLibraryList visible={visible && !showWorkspace} onOpen={(kbId) => void openLibrary(kbId)} refreshVersion={refreshVersion + monitor.watchedTaskVersion} onBeforeDelete={(kbId) => currentSelection.current === kbId ? workspace.current?.confirmLeave() ?? Promise.resolve(true) : Promise.resolve(true)} onDeleted={libraryDeleted} />
-    {selectedKbId ? <WikiLibraryWorkspace ref={workspace} key={selectedKbId} visible={visible && showWorkspace} confirmationVisible={visible} kbId={selectedKbId} navigationPageId={pageNavigation?.kbId === selectedKbId ? pageNavigation.pageId : undefined} navigationMode={pageNavigation?.kbId === selectedKbId ? pageNavigation.mode : undefined} navigationRequest={pageNavigation?.kbId === selectedKbId ? pageNavigation.request : undefined} onBack={() => { navigationSequence.current++; setShowWorkspace(false); setRefreshVersion((value) => value + 1); }} onViewTask={onOpenTask} onDeleted={libraryDeleted} /> : null}
+    <WikiLibraryList visible={visible && !showWorkspace} onOpen={(kbId) => void openLibrary(kbId)} refreshVersion={refreshVersion + monitor.watchedTaskVersion} refreshToken={refreshToken} onBeforeDelete={(kbId) => currentSelection.current === kbId ? workspace.current?.confirmLeave() ?? Promise.resolve(true) : Promise.resolve(true)} onDeleted={libraryDeleted} />
+    {selectedKbId ? <WikiLibraryWorkspace ref={workspace} key={selectedKbId} visible={visible && showWorkspace} confirmationVisible={visible} kbId={selectedKbId} refreshToken={refreshToken} navigationPageId={pageNavigation?.kbId === selectedKbId ? pageNavigation.pageId : undefined} navigationMode={pageNavigation?.kbId === selectedKbId ? pageNavigation.mode : undefined} navigationRequest={pageNavigation?.kbId === selectedKbId ? pageNavigation.request : undefined} onBack={() => { navigationSequence.current++; setShowWorkspace(false); setRefreshVersion((value) => value + 1); }} onViewTask={onOpenTask} onDeleted={libraryDeleted} /> : null}
     <WikiLibraryDialog open={createDialog} visible={visible} onClose={() => setCreateDialog(false)} onSaved={(saved) => { setCreateDialog(false); setSelectedKbId(saved.wikiId); setShowWorkspace(true); setPageNavigation(undefined); setRefreshVersion((value) => value + 1); }} />
   </section>;
 }
