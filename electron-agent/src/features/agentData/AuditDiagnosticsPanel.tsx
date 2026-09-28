@@ -261,8 +261,9 @@ function Diagnostics({ visible, refreshToken = 0, onNavigate }: Pick<Props, 'ref
   const categoryOf = (item: DiagnosticItem) => item.resource?.type === 'project' ? 'codegraph' : item.resource?.type ?? item.id.split(':')[0];
   const categoryLabels: Record<string, string> = { codegraph: '代码索引', code: '代码索引', wiki: '知识库', memory: '记忆', runtime: '运行服务' };
   const order = { action_required: 0, unchecked: 1, ok: 2 } as const;
-  const present = [...new Set((report?.items ?? []).map((item) => categoryLabels[categoryOf(item)] ? categoryOf(item) : 'other'))];
-  const items = (report?.items ?? []).filter((item) => !category || categoryOf(item) === category).sort((a, b) => order[a.state] - order[b.state]);
+  const bucketOf = (item: DiagnosticItem) => categoryLabels[categoryOf(item)] ? categoryOf(item) : 'other';
+  const present = [...new Set((report?.items ?? []).map(bucketOf))];
+  const items = (report?.items ?? []).filter((item) => !category || bucketOf(item) === category).sort((a, b) => order[a.state] - order[b.state]);
   const stateColors: Record<string, string> = { action_required: cssVar.colorError as string, unchecked: cssVar.colorTextQuaternary as string, ok: cssVar.colorSuccess as string };
   return <Flex vertical gap={12}>
     <Typography.Text type="secondary">{report ? `检查于 ${new Date(report.checkedAt).toLocaleTimeString()}${error ? ' · 上次结果，可能已过期' : ''} · ` : ''}只读取状态，不会自动调用模型、重建索引或安装工具。</Typography.Text>
@@ -271,7 +272,7 @@ function Diagnostics({ visible, refreshToken = 0, onNavigate }: Pick<Props, 'ref
       <span className={o.kpiValue} data-count={state}>{report?.items.filter((item) => item.state === state).length ?? '—'}</span>
       <span className={o.kpiLabel}>{statusLabel('diagnostic', state)}</span>
     </div>)}</div>
-    {present.length > 1 ? <div role="radiogroup" aria-label="诊断分类"><Segmented value={category} onChange={(value) => setCategory(String(value))} options={[{ value: '', label: '全部' }, ...present.map((key) => ({ value: key, label: categoryLabels[key] ?? '其他' }))]} /></div> : null}
+    {present.length > 1 ? <Segmented aria-label="诊断分类" value={category} onChange={(value) => setCategory(String(value))} options={[{ value: '', label: '全部' }, ...present.map((key) => ({ value: key, label: categoryLabels[key] ?? '其他' }))]} /> : null}
     {error ? <PageBanner type="error" items={[{ message: error }]} /> : null}
     {report && !items.length ? <Typography.Text type="secondary">{report.items.length ? '没有匹配的诊断项目' : '没有返回诊断项目，状态尚未确认'}</Typography.Text> : null}
     {!report && !loading && !error ? <Typography.Text type="secondary">尚未检查</Typography.Text> : null}
