@@ -277,7 +277,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     {createdTask ? <PageBanner type="info" items={[{ message: <>{`已加入任务 · ${nameOf(createdTask.workspace)} · ${createdTask.workspace} · `}<span>{taskSummary ? `${monitor.error ? '上次获取：' : ''}${taskSummary}` : '任务状态未获取'}</span></> }]}
       action={<Button autoInsertSpace={false} onClick={() => onOpenTask?.(createdTask.id)} disabled={!onOpenTask}>查看任务</Button>} /> : null}
     {view.banner ? <PageBanner type={view.banner.type} items={[{ message: view.banner.message }]}
-      action={view.banner.sync ? <Button size="small" onClick={() => void sync()}>同步</Button> : undefined} /> : null}
+      action={view.banner.sync ? <Button size="small" autoInsertSpace={false} onClick={() => void sync()}>同步</Button> : undefined} /> : null}
     {showExtraMessage ? <PageBanner type="error" items={[{ message: currentStatus!.message! }]} /> : null}
     {!project ? <Empty description="请选择一个项目" /> : view.primary === 'build' ? <div className={w.empty}>
       这个项目还没有索引
