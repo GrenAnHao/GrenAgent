@@ -130,4 +130,15 @@ describe('wiki raw sources', () => {
       expect.objectContaining({ filename: '产品.md', status: 'uploaded' }),
     ]);
   });
+
+  it('reports the raw source count on the asset detail', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wiki-raw-'));
+    const service = new WikiService({ root, db: new DatabaseSync(':memory:'), complete: async () => '' });
+    const wiki = service.create({ name: '计数' });
+    expect(service.read(wiki.wikiId).sourceCount).toBe(0);
+    service.writeRaw(wiki.wikiId, 'a.md', 'a');
+    service.writeRaw(wiki.wikiId, 'b.txt', 'b');
+    expect(service.read(wiki.wikiId).sourceCount).toBe(2);
+    expect(service.list()[0].sourceCount).toBe(2);
+  });
 });

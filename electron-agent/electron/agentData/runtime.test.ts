@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentDataRuntime } from './runtime';
 import { AgentDataClient } from './client';
+import type { WorkbenchOverview } from './operationsContracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -266,6 +267,16 @@ describe('AgentDataRuntime', () => {
     await expect(client.request('codeRetrieval.admin.projects')).resolves.toEqual([]);
     await expect(client.request('codeRetrieval.admin.status', { workspace: '/repo' })).resolves.toMatchObject({ connected: false, indexed: false });
 
+    await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('includes ownership on recent overview memories', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-runtime-recent-'));
+    const runtime = new AgentDataRuntime({ dataPath: join(dir, 'data.db') });
+    const client = new AgentDataClient(await runtime.start());
+    await client.request('memory.upsert', { userId: 'u', workspace: '/repo-a', level: 2, content: 'scoped fact' });
+    const overview = await runtime.requestAdmin<WorkbenchOverview>('admin.overview', { userId: 'u' });
+    expect(overview.recentMemories[0]).toMatchObject({ content: 'scoped fact', level: 2, scope: 'project', sourceProjectId: '/repo-a' });
     await client.close(); runtime.close(); rmSync(dir, { recursive: true, force: true });
   });
 });

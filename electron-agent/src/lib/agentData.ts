@@ -14,7 +14,7 @@ export interface AgentJob { id: string; kind: string; workspace: string; state: 
 export interface AgentConfig { version: number; value: Record<string, unknown> }
 export interface MemoryScope { userId: string; workspace?: string; projectId?: string; sessionId?: string; includeOtherProjects?: boolean }
 export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
-export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number }
+export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number; lastIndexedAt?: number | null }
 export interface CodeGraphProject { workspace: string; indexed: boolean }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
 export type CodeKind = 'file'|'module'|'class'|'struct'|'interface'|'trait'|'protocol'|'function'|'method'|'property'|'field'|'variable'|'constant'|'enum'|'enum_member'|'type_alias'|'namespace'|'parameter'|'import'|'export'|'route'|'component'|'union'|'type';

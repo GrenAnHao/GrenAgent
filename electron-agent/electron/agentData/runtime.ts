@@ -252,7 +252,7 @@ export class AgentDataRuntime {
         result.libraries.pages += library.pageCount ?? 0;
       }
     } catch { result.errors.push({ domain: 'wiki', message: '知识库概览暂不可用' }); }
-    try { result.recentMemories = this.memory!.list({ userId, filter: { scope: 'all' }, limit: 5 }).items.map(({ id, content, level, updatedAt }) => ({ id, content: content.slice(0, 240), level, updatedAt })); }
+    try { result.recentMemories = this.memory!.list({ userId, filter: { scope: 'all' }, limit: 5 }).items.map(({ id, content, level, updatedAt, scope, sourceProjectId }) => ({ id, content: content.slice(0, 240), level, updatedAt, scope, ...(sourceProjectId ? { sourceProjectId } : {}) })); }
     catch { result.errors.push({ domain: 'memory', message: '最近记忆暂不可用' }); }
     try {
       const counts = this.storage!.db.prepare("SELECT SUM(active) AS active,SUM(failed) AS failed FROM (SELECT state IN ('pending','running') AS active,state='failed' AS failed FROM agent_jobs UNION ALL SELECT status IN ('pending','queued','running','blocked') AS active,status='failed' AS failed FROM service_tasks)").get()!;

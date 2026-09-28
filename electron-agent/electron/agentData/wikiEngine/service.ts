@@ -114,6 +114,7 @@ export type WikiAssetDetail = WikiAsset & {
   lastSyncAt: string | null;
   createdAt: string;
   updatedAt: string;
+  sourceCount: number | null;
 };
 
 export type WikiRawSource = {
@@ -486,7 +487,17 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
       lastSyncAt: row.last_sync_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      sourceCount: this.countSources(row.wiki_id),
     };
+  }
+
+  /** raw/sources 下 .md / .txt 文件数；读目录失败时返回 null，不抛错。 */
+  private countSources(wikiId: string): number | null {
+    const dir = join(this.root, wikiId, 'raw', 'sources');
+    try {
+      if (!existsSync(dir)) return 0;
+      return readdirSync(dir).filter((name) => (name.endsWith('.md') || name.endsWith('.txt')) && statSync(join(dir, name)).isFile()).length;
+    } catch { return null; }
   }
 
   private selectDetail(wikiId: string): WikiAssetDetail {

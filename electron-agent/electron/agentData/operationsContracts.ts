@@ -53,7 +53,7 @@ export type ResourceNavigation =
 export interface WorkbenchOverview {
   libraries?: { total: number; pendingSources: number; pages: number };
   recentPages: Array<{ kbId: string; pageId: string; title: string; libraryName: string; updatedAt: number }>;
-  recentMemories: Array<{ id: string; content: string; level: number; updatedAt: number }>;
+  recentMemories: Array<{ id: string; content: string; level: number; updatedAt: number; scope?: 'global' | 'project'; sourceProjectId?: string }>;
   activeTasks?: number; failedTasks?: number;
   diagnostics?: { actionRequired: number; unchecked: number };
   errors: Array<{ domain: 'wiki' | 'memory' | 'tasks' | 'diagnostics'; message: string }>;
