@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { openBrowserPopupTab } from '../dock/browser/openBrowserPopupTab';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
 import { formatUrlLabel } from './input/editor/urlPaste';
 
@@ -85,7 +86,15 @@ export function renderMessageTags(text: string): ReactNode {
       );
     }
     if (seg.type === 'link') {
-      return <ChatTagView key={i} category="link" label={formatUrlLabel(seg.url)} value={seg.url} />;
+      return (
+        <ChatTagView
+          key={i}
+          category="link"
+          label={formatUrlLabel(seg.url)}
+          value={seg.url}
+          onOpen={() => openBrowserPopupTab({ url: seg.url, disposition: 'new-window' })}
+        />
+      );
     }
     return <span key={i}>{seg.text}</span>;
   });

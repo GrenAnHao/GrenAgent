@@ -1,6 +1,7 @@
 import { Icon } from '@lobehub/ui';
 import { Link2, ToyBrick } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import FileIcon from '../../../../../components/FileIcon';
 import { CATEGORY_ICON as CMD_CATEGORY_ICON, COMMAND_ICON } from '../../commandIcons';
@@ -48,9 +49,16 @@ const styles = createStaticStyles(({ css }) => ({
     color: #bce641;
     background: color-mix(in srgb, #bce641 16%, transparent);
   `,
+  // 链接对齐 Codex 的 --color-token-text-link-foreground（亮色 blue-300，暗色 blue-100），不加底色。
   link: css`
-    color: ${cssVar.cyan};
-    background: color-mix(in srgb, ${cssVar.cyan} 16%, transparent);
+    color: #339cff;
+
+    html[data-theme='dark'] & {
+      color: #99ceff;
+    }
+  `,
+  openable: css`
+    cursor: pointer;
   `,
 }));
 
@@ -60,19 +68,38 @@ export function ChatTagView({
   commandGroup,
   label,
   value,
+  onOpen,
 }: {
   category: ChatTagCategory;
   commandGroup?: ChatTagCommandGroup;
   label: string;
   value: string;
+  /** 只在只读展示处（消息气泡）传入；输入框里的 chip 不传，避免编辑时误触打开。 */
+  onOpen?: () => void;
 }) {
   // 工具命令(extension) chip 用 #BCE641 突出；其它命令/文件/目录沿用各自类目色。
   const colorClass =
     category === 'command' && commandGroup === 'extension' ? styles.toolCommand : styles[category];
   const fileName = label.split('/').pop() || label;
   const isFileLike = category === 'file' || category === 'directory';
+  const openProps = onOpen
+    ? {
+        role: 'link',
+        tabIndex: 0,
+        onClick: onOpen,
+        onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          onOpen();
+        },
+      }
+    : {};
   return (
-    <span className={cx(styles.tag, colorClass)} title={category === 'link' ? value : undefined}>
+    <span
+      className={cx(styles.tag, colorClass, onOpen && styles.openable)}
+      title={category === 'link' ? value : undefined}
+      {...openProps}
+    >
       {isFileLike ? (
         <FileIcon fileName={fileName} isDirectory={category === 'directory'} size={13} variant="raw" />
       ) : (
