@@ -1,6 +1,6 @@
 import { ActionIcon, Icon, Mermaid as LobeMermaid } from '@lobehub/ui';
 import type { MenuProps } from 'antd';
-import { Dropdown } from 'antd';
+import { ConfigProvider, Dropdown } from 'antd';
 import { createStaticStyles, cssVar, cx, useTheme } from 'antd-style';
 import { renderMermaidSVG, THEMES } from 'beautiful-mermaid';
 import { Braces, Check, Copy, FileCode, FileImage, Loader2, Sparkles, TriangleAlert } from 'lucide-react';
@@ -40,6 +40,12 @@ const styles = createStaticStyles(({ css }) => ({
       0 1px 2px -0.5px ${cssVar.colorBorder},
       0 2px 2px -1px ${cssVar.colorBorderSecondary},
       0 3px 6px -4px ${cssVar.colorBorderSecondary};
+  `,
+  // 放大预览是 antd Image 的独立图层，透明画布叠在深色遮罩上看不清，给整张预览图铺上卡片底色。
+  previewCanvas: css`
+    .ant-image-preview-img {
+      background: ${cssVar.colorBgContainer};
+    }
   `,
   loading: css`
     display: flex;
@@ -147,6 +153,9 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
   `,
 }));
+
+// 只包住 LobeMermaid，预览根节点带上 previewCanvas，不影响应用里其他图片预览。
+const PREVIEW_IMAGE_CONFIG = { classNames: { popup: { root: styles.previewCanvas } } };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -480,19 +489,21 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
       <div className={styles.diagramFrame}>
         <div className={styles.actionHost}>
           <MermaidRenderBoundary fallback={fallback}>
-            <LobeMermaid
-              fullFeatured
-              copyable={false}
-              defaultExpand
-              actionsRender={actionsRender}
-              // lobe-theme keeps the SVG background transparent so LobeHub's
-              // enlarged preview does not carry the diagram canvas with it.
-              theme="lobe-theme"
-              styles={{ content: { background: cssVar.colorBgContainer } }}
-              variant="filled"
-            >
-              {prepared}
-            </LobeMermaid>
+            <ConfigProvider image={PREVIEW_IMAGE_CONFIG}>
+              <LobeMermaid
+                fullFeatured
+                copyable={false}
+                defaultExpand
+                actionsRender={actionsRender}
+                // lobe-theme keeps the SVG canvas transparent and follows antd's
+                // CSS variables; the enlarged preview gets its canvas from previewCanvas.
+                theme="lobe-theme"
+                styles={{ content: { background: cssVar.colorBgContainer } }}
+                variant="filled"
+              >
+                {prepared}
+              </LobeMermaid>
+            </ConfigProvider>
           </MermaidRenderBoundary>
           {fixed ? <span className={styles.fixedBadge}>{persistedFix?.ai ? '已由 AI 修复' : '已自动修正语法'}</span> : null}
         </div>

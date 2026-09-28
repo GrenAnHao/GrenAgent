@@ -14,29 +14,40 @@ const { mermaidMock } = vi.hoisted(() => ({
 
 vi.mock('mermaid', () => ({ default: mermaidMock }));
 
-vi.mock('@lobehub/ui', () => ({
-  ActionIcon: ({ title }: { title?: string }) => <button title={title} />,
-  Icon: () => null,
-  Mermaid: ({ children, bodyRender, copyable, fullFeatured, theme, styles }: {
-    children: string;
-    bodyRender?: (props: { content: string; originalNode: React.ReactNode }) => React.ReactNode;
-    copyable?: boolean;
-    fullFeatured?: boolean;
-    theme?: string;
-    styles?: { content?: { background?: string } };
-  }) => (
-    <div
-      data-testid="lobehub-mermaid"
-      data-custom-body={Boolean(bodyRender)}
-      data-copyable={String(copyable)}
-      data-full-featured={String(fullFeatured)}
-      data-theme={theme}
-      data-content-background={styles?.content?.background}
-    >
-      {bodyRender ? bodyRender({ content: children, originalNode: null }) : children}
-    </div>
-  ),
-}));
+vi.mock('@lobehub/ui', async () => {
+  const { ConfigProvider } = await import('antd');
+  const { useContext } = await import('react');
+  return {
+    ActionIcon: ({ title }: { title?: string }) => <button title={title} />,
+    Icon: () => null,
+    Mermaid: function MockMermaid({ children, bodyRender, copyable, fullFeatured, theme, styles }: {
+      children: string;
+      bodyRender?: (props: { content: string; originalNode: React.ReactNode }) => React.ReactNode;
+      copyable?: boolean;
+      fullFeatured?: boolean;
+      theme?: string;
+      styles?: { content?: { background?: string } };
+    }) {
+      // LobeHub 的放大预览是内部的 antd Image，这里读出它会拿到的 ConfigProvider 配置。
+      const imageClassNames = useContext(ConfigProvider.ConfigContext).image?.classNames as
+        | { popup?: { root?: string } }
+        | undefined;
+      return (
+        <div
+          data-testid="lobehub-mermaid"
+          data-custom-body={Boolean(bodyRender)}
+          data-copyable={String(copyable)}
+          data-full-featured={String(fullFeatured)}
+          data-theme={theme}
+          data-content-background={styles?.content?.background}
+          data-preview-root={imageClassNames?.popup?.root}
+        >
+          {bodyRender ? bodyRender({ content: children, originalNode: null }) : children}
+        </div>
+      );
+    },
+  };
+});
 
 import { Mermaid } from './Mermaid';
 
@@ -82,6 +93,28 @@ describe('Mermaid adapter', () => {
       }
     });
     expect(cssRules.some((rule) => /font-size-adjust:\s*none/i.test(rule))).toBe(true);
+  });
+
+  // 放大预览里 SVG 画布是透明的，叠在深色遮罩上看不清：预览根节点要带上给整张图铺底色的类。
+  it('gives the enlarged preview image an opaque canvas', async () => {
+    wrap(<Mermaid code={'flowchart LR\n  Preview1 --> Preview2'} />);
+
+    const component = await screen.findByTestId('lobehub-mermaid');
+    const previewRoot = component.getAttribute('data-preview-root');
+    expect(previewRoot).toBeTruthy();
+    const cssRules = [...document.styleSheets].flatMap((sheet) => {
+      try {
+        return [...sheet.cssRules].map((rule) => rule.cssText);
+      } catch {
+        return [];
+      }
+    });
+    expect(
+      cssRules.some(
+        (rule) =>
+          rule.includes(`.${previewRoot} .ant-image-preview-img`) && /background:\s*var\(--ant-color-bg-container\)/.test(rule),
+      ),
+    ).toBe(true);
   });
 
   it('keeps the project error card when Mermaid parsing fails', async () => {
