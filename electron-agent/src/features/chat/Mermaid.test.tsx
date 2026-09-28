@@ -91,4 +91,32 @@ describe('Mermaid adapter', () => {
     expect(await screen.findByText('Mermaid 图表渲染失败')).toBeInTheDocument();
     expect(screen.getByText('parse failed')).toBeInTheDocument();
   });
+
+  // 虚拟列表把离屏条目卸载后再挂回来：首帧必须就是终态，不能退回 Loading 占位（高度会先缩再涨）。
+  it('renders a previously prepared diagram on the first frame after remount', async () => {
+    const code = 'flowchart LR\n  Remount1 --> Remount2';
+    const first = wrap(<Mermaid code={code} />);
+    await screen.findByTestId('lobehub-mermaid');
+    first.unmount();
+    mermaidMock.parse.mockClear();
+
+    wrap(<Mermaid code={code} />);
+
+    expect(screen.getByTestId('lobehub-mermaid')).toBeInTheDocument();
+    expect(screen.queryByText('Loading diagram…')).not.toBeInTheDocument();
+    expect(mermaidMock.parse).not.toHaveBeenCalled();
+  });
+
+  it('renders a previously failed diagram as the error card on the first frame after remount', async () => {
+    mermaidMock.parse.mockRejectedValue(new Error('parse failed'));
+    const code = 'remount invalid diagram';
+    const first = wrap(<Mermaid code={code} />);
+    expect(await screen.findByText('Mermaid 图表渲染失败')).toBeInTheDocument();
+    first.unmount();
+
+    wrap(<Mermaid code={code} />);
+
+    expect(screen.getByText('Mermaid 图表渲染失败')).toBeInTheDocument();
+    expect(screen.queryByText('Loading diagram…')).not.toBeInTheDocument();
+  });
 });

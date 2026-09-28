@@ -171,6 +171,23 @@ async function prepareMermaid(code: string): Promise<{ code: string; autofixed: 
   throw new Error('Mermaid 语法修复超过最大重试次数');
 }
 
+type PrepareOutcome = { code: string; autofixed: boolean } | { error: string };
+
+// 预检（动态加载 mermaid + parse）是异步的，而 virtua 会卸载离屏条目、回到缓冲区时重新挂载。
+// 每次挂载都从空状态重跑预检的话，图表会先退回「Loading diagram…」占位再长回真实高度：
+// 含图的长消息在视口上方反复变矮/变高，virtua 跟着修正 scrollTop，列表就会自己往上弹。
+// 按源码记住预检结果，重挂载首帧直接渲染上次的图（或错误卡），条目高度保持不变。
+const PREPARE_CACHE_LIMIT = 200;
+const prepareOutcomes = new Map<string, PrepareOutcome>();
+
+function rememberOutcome(source: string, outcome: PrepareOutcome): void {
+  if (prepareOutcomes.size >= PREPARE_CACHE_LIMIT) {
+    const oldest = prepareOutcomes.keys().next().value;
+    if (oldest !== undefined) prepareOutcomes.delete(oldest);
+  }
+  prepareOutcomes.set(source, outcome);
+}
+
 async function renderExportSvg(code: string, dark: boolean): Promise<string> {
   try {
     // Keep exports on the same engine as the LobeHub component. Otherwise the
@@ -332,33 +349,48 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
   const context = useOptionalAgentStoreContext();
   const persistedFix = useMermaidFixStore((state) => state.fixes[code]);
   const source = persistedFix?.code ?? code;
-  const [prepared, setPrepared] = useState('');
-  const [error, setError] = useState('');
-  const [autofixed, setAutofixed] = useState(false);
+  const settled = prepareOutcomes.get(source);
+  const [prepared, setPrepared] = useState(settled && 'code' in settled ? settled.code : '');
+  const [error, setError] = useState(settled && 'error' in settled ? settled.error : '');
+  const [autofixed, setAutofixed] = useState(settled && 'code' in settled ? settled.autofixed : false);
   const [aiFixing, setAiFixing] = useState(false);
   const [aiError, setAiError] = useState('');
   const [copied, setCopied] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const errorRef = useRef('');
+  const errorRef = useRef(settled && 'error' in settled ? settled.error : '');
 
   useEffect(() => {
+    const apply = (outcome: PrepareOutcome) => {
+      if ('error' in outcome) {
+        errorRef.current = outcome.error;
+        setPrepared('');
+        setAutofixed(false);
+        setError(outcome.error);
+        return;
+      }
+      setError('');
+      setPrepared(outcome.code);
+      setAutofixed(outcome.autofixed);
+      if (outcome.autofixed && outcome.code !== source) useMermaidFixStore.getState().setFix(code, outcome.code, false);
+    };
+    setAiError('');
+    const cached = prepareOutcomes.get(source);
+    if (cached) {
+      apply(cached);
+      return;
+    }
     let alive = true;
     setPrepared('');
     setError('');
-    setAiError('');
     setAutofixed(false);
     void prepareMermaid(source)
-      .then(({ code: nextCode, autofixed: fixed }) => {
-        if (!alive) return;
-        setPrepared(nextCode);
-        setAutofixed(fixed);
-        if (fixed && nextCode !== source) useMermaidFixStore.getState().setFix(code, nextCode, false);
-      })
-      .catch((reason: unknown) => {
-        if (!alive) return;
-        const message = errorMessage(reason);
-        errorRef.current = message;
-        setError(message);
+      .then(
+        (result): PrepareOutcome => result,
+        (reason: unknown): PrepareOutcome => ({ error: errorMessage(reason) }),
+      )
+      .then((outcome) => {
+        rememberOutcome(source, outcome);
+        if (alive) apply(outcome);
       });
     return () => {
       alive = false;
