@@ -1,53 +1,56 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OverviewPanel } from './OverviewPanel';
+import { task } from './operationsTestData';
+import { wikiAsset } from './wiki/wikiTestData';
 import type { WorkbenchOverview } from '../../lib/agentData';
 
 afterEach(cleanup);
+const workbench: WorkbenchOverview = { libraries: { total: 2, pendingSources: 0, pages: 4 }, recentPages: [], recentMemories: [{ id: 'm1', content: '偏好中文', level: 2, updatedAt: Date.now(), scope: 'project', sourceProjectId: 'D:/proj/alpha' }], activeTasks: 1, failedTasks: 2, diagnostics: { actionRequired: 1, unchecked: 0 }, errors: [] };
+const base = {
+  memory: { loading: false, data: { total: 5, byLevel: { L0: 1, L1: 2, L2: 1, L3: 1 } } },
+  workbench: { loading: false, data: workbench },
+  libraries: { loading: false, data: [wikiAsset] },
+  codeProjects: { loading: false, data: [{ workspace: 'D:/a', indexed: true }, { workspace: 'D:/b', indexed: false }] },
+  tasks: [task], tasksLoaded: true,
+};
 
 describe('OverviewPanel', () => {
-  it('opens exact library/page pairs and composite tasks while keeping partial overview data', () => {
+  it('shows the four KPI cells from real sources', () => {
+    render(<OverviewPanel {...base} onNavigate={vi.fn()} onOpenResource={vi.fn()} />);
+    expect(within(screen.getByRole('button', { name: /条记忆/ })).getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('L0 1 · L1 2 · L2 1 · L3 1')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /个知识页面/ })).getByText('4')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /个项目已索引/ })).getByText('1 / 2')).toBeInTheDocument();
+    expect(screen.getByText('2 个失败')).toBeInTheDocument();
+  });
+  it('shows the diagnostics banner and navigates to audit', () => {
+    const onNavigate = vi.fn();
+    render(<OverviewPanel {...base} onNavigate={onNavigate} onOpenResource={vi.fn()} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('有 1 项诊断需要处理');
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    expect(onNavigate).toHaveBeenCalledWith('audit');
+  });
+  it('opens a recent task, library and memory', () => {
     const onOpenResource = vi.fn();
-    const recentMemory = 'on 后置阶段抽象 case ## 字段规范 === 7027 total === tests/integration: gemini-cli.integration.test.ts jshook-e2e.integration.test.ts';
-    const data: WorkbenchOverview = { libraries: { total: 2, pendingSources: 3, pages: 4 }, recentPages: [{ kbId: 'kb-b', pageId: 'same-page', title: 'Shared title', libraryName: 'B', updatedAt: 1 }], recentMemories: [{ id: 'memory-id', content: recentMemory, level: 1, updatedAt: 1 }], activeTasks: 1, failedTasks: 2, errors: [{ domain: 'diagnostics', message: 'not checked' }] };
-    render(<OverviewPanel memory={{ loading: false }} wiki={{ loading: false }} jobs={[]} jobsLoaded jobsLoading={false} onNavigate={vi.fn()} onOpenTask={vi.fn()} workbench={{ data, loading: false }} onOpenResource={onOpenResource} />);
-    fireEvent.click(screen.getByRole('button', { name: /打开页面 Shared title/ }));
-    expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'wiki', kbId: 'kb-b', pageId: 'same-page' });
-    const memoryButton = screen.getByRole('button', { name: new RegExp(`打开记忆 ${recentMemory}`) });
-    expect(memoryButton.getAttribute('title')).toBe(recentMemory);
-    fireEvent.click(memoryButton);
-    expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'memory', id: 'memory-id' });
+    render(<OverviewPanel {...base} onNavigate={vi.fn()} onOpenResource={onOpenResource} />);
+    fireEvent.click(screen.getByRole('button', { name: /查看任务 生成知识页面/ }));
+    expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'jobs', task: task.ref });
+    fireEvent.click(screen.getByRole('button', { name: /打开知识库 产品/ }));
+    expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'wiki', kbId: 'k' });
+    const memory = screen.getByRole('button', { name: /打开记忆 偏好中文/ });
+    expect(memory).toHaveTextContent('L2 · alpha');
+    fireEvent.click(memory);
+    expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'memory', id: 'm1' });
     fireEvent.click(screen.getByRole('button', { name: '新建知识库' }));
     expect(onOpenResource).toHaveBeenLastCalledWith({ view: 'wiki', mode: 'create' });
-    expect(screen.getByText('not checked')).toBeTruthy();
   });
-
-  it('does not invent an empty task result before loading and retains a known zero during refresh', () => {
-    const props = { memory: { loading: false }, wiki: { loading: false }, jobs: [], jobsLoading: false, onNavigate: vi.fn(), onOpenTask: vi.fn() };
-    const { rerender } = render(<OverviewPanel {...props} jobsLoaded={false} />);
-    expect(within(screen.getByRole('button', { name: /^任务/ })).getByText('未获取')).toBeTruthy();
-    expect(screen.queryByText('暂无任务')).toBeNull();
-    rerender(<OverviewPanel {...props} jobsLoaded jobsLoading />);
-    expect(within(screen.getByRole('button', { name: /^任务/ })).getByText('0')).toBeTruthy();
-    rerender(<OverviewPanel {...props} jobsLoaded jobsError="offline" />);
-    expect(within(screen.getByRole('button', { name: /^任务/ })).getByText('0')).toBeTruthy();
-  });
-  it('distinguishes unavailable data from real zero and retains successful metrics on partial failure', () => {
-    render(<OverviewPanel memory={{ loading: false, error: 'memory unavailable' }} wiki={{ loading: false, data: { pages: 0, latestUpdatedAt: null } }} jobs={[]} jobsLoading={false} jobsLoaded onNavigate={vi.fn()} onOpenTask={vi.fn()} />);
-    expect(within(screen.getByRole('button', { name: /Memory/ })).getByText('未获取')).toBeTruthy();
-    expect(within(screen.getByRole('button', { name: /Wiki 页面/ })).getByText('0')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('memory unavailable');
-    expect(screen.queryByText('ready')).toBeNull();
-  });
-
-  it('opens an existing panel or a selected recent task without inventing a creation action', () => {
-    const onNavigate = vi.fn(); const onOpenTask = vi.fn();
-    render(<OverviewPanel memory={{ loading: false, data: { total: 1, byLevel: { L0: 0, L1: 1, L2: 0, L3: 0 } } }} wiki={{ loading: false }} jobs={[{ id: 'j1', kind: 'wiki.sync', workspace: '/repo', state: 'completed', progress: 100, createdAt: 1, updatedAt: 1 }]} jobsLoading={false} jobsLoaded onNavigate={onNavigate} onOpenTask={onOpenTask} />);
-    fireEvent.click(screen.getByRole('button', { name: /Wiki 页面/ }));
-    expect(onNavigate).toHaveBeenCalledWith('wiki');
-    fireEvent.click(screen.getByRole('button', { name: '查看任务 wiki.sync' }));
-    expect(onOpenTask).toHaveBeenCalledWith('j1');
-    expect(screen.queryByRole('button', { name: '新建知识库' })).toBeNull();
+  it('says 未获取 instead of zero when a source failed', () => {
+    render(<OverviewPanel {...base} memory={{ loading: false, error: 'memory unavailable' }} codeProjects={{ loading: false, error: 'x' }} tasksLoaded={false} onNavigate={vi.fn()} onOpenResource={vi.fn()} />);
+    expect(within(screen.getByRole('button', { name: /条记忆/ })).getByText('未获取')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /个项目已索引/ })).getByText('未获取')).toBeInTheDocument();
+    expect(screen.getByText(/memory unavailable/)).toBeInTheDocument();
   });
 });

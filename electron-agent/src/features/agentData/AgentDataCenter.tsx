@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Badge, Button, Tabs } from 'antd';
 import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
-import { agentDataApi, type AgentDataStatus, type MemoryOverview, type WikiOverview, type ResourceNavigation, type WorkbenchOverview } from '../../lib/agentData';
+import { agentDataApi, type AgentDataStatus, type CodeGraphProject, type MemoryOverview, type ResourceNavigation, type WikiAssetDetail, type WorkbenchOverview } from '../../lib/agentData';
 import { MemoryPanel } from './MemoryPanel';
 import { WikiPanel } from './WikiPanel';
 import { CodeRetrievalPanel } from './CodeRetrievalPanel';
@@ -43,7 +43,8 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   const [visited, setVisited] = useState<Set<AgentDataTab>>(() => new Set([tab]));
   const [status, setStatus] = useState<ResourceState<AgentDataStatus>>({ loading: true });
   const [memory, setMemory] = useState<ResourceState<MemoryOverview>>({ loading: true });
-  const [wiki, setWiki] = useState<ResourceState<WikiOverview>>({ loading: true });
+  const [libraries, setLibraries] = useState<ResourceState<WikiAssetDetail[]>>({ loading: true });
+  const [codeProjects, setCodeProjects] = useState<ResourceState<CodeGraphProject[]>>({ loading: true });
   const [workbench, setWorkbench] = useState<ResourceState<WorkbenchOverview>>({ loading: true });
   const [navigation, setNavigation] = useState<{ target: ResourceNavigation; request: number }>();
   const [refreshToken, setRefreshToken] = useState(0);
@@ -54,19 +55,23 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     const epoch = ++requestEpoch.current;
     setStatus((current) => ({ ...current, loading: true }));
     setMemory((current) => ({ ...current, loading: true }));
-    setWiki((current) => ({ ...current, loading: true }));
+    setLibraries((current) => ({ ...current, loading: true }));
+    setCodeProjects((current) => ({ ...current, loading: true }));
     setWorkbench((current) => ({ ...current, loading: true }));
-    const [statusResult, memoryResult, wikiResult, aggregateResult] = await Promise.allSettled([
-      agentDataApi.status(),
-      userId ? agentDataApi.memory.overview({ userId, includeOtherProjects: true }) : Promise.resolve(undefined),
-      agentDataApi.wiki.overview(),
-      agentDataApi.overview({ userId: userId ?? 'local' }),
+    const settle = <T,>(run: () => Promise<T> | undefined) => { try { return Promise.resolve(run()); } catch (cause) { return Promise.reject(cause); } };
+    const [statusResult, memoryResult, librariesResult, aggregateResult, codeResult] = await Promise.allSettled([
+      settle(() => agentDataApi.status()),
+      settle(() => userId ? agentDataApi.memory.overview({ userId, includeOtherProjects: true }) : undefined),
+      settle(() => agentDataApi.wiki.list()),
+      settle(() => agentDataApi.overview({ userId: userId ?? 'local' })),
+      settle(() => agentDataApi.code.projects()),
     ]);
     if (epoch !== requestEpoch.current) return;
     setStatus((current) => applyResult(current, statusResult));
     setMemory((current) => applyResult(current, memoryResult));
-    setWiki((current) => applyResult(current, wikiResult));
+    setLibraries((current) => applyResult(current, librariesResult));
     setWorkbench((current) => applyResult(current, aggregateResult));
+    setCodeProjects((current) => applyResult(current, codeResult));
   }, [userId, visible]);
 
   useEffect(() => {
@@ -93,7 +98,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   function panelContent(id: AgentDataTab): ReactNode {
     switch (id) {
       case 'overview':
-        return <OverviewPanel memory={memory} wiki={wiki} jobs={monitor.jobs} tasks={monitor.tasks} workbench={workbench} jobsLoading={monitor.loading} jobsLoaded={monitor.loaded} jobsError={monitor.error} onNavigate={selectTab} onOpenTask={openTask} onOpenResource={navigate} />;
+        return <OverviewPanel memory={memory} workbench={workbench} libraries={libraries} codeProjects={codeProjects} tasks={monitor.tasks} tasksLoaded={monitor.loaded} tasksError={monitor.error} onNavigate={selectTab} onOpenResource={navigate} />;
       case 'memory':
         return <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} refreshToken={refreshToken} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />;
       case 'wiki':
@@ -110,7 +115,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     }
   }
 
-  const refreshing = status.loading || memory.loading || wiki.loading;
+  const refreshing = status.loading || memory.loading || workbench.loading;
   const runtimeState = status.error ? 'error' : status.data?.state ?? 'unknown';
   let runtimeLabel = status.loading ? '连接中' : '未获取';
   if (status.data) runtimeLabel = status.data.state === 'closed' ? '已关闭' : `Runtime v${status.data.version}`;

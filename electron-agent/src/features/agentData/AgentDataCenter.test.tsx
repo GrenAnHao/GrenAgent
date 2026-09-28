@@ -37,7 +37,7 @@ describe('AgentDataCenter', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     vi.mocked(agentDataApi.status).mockResolvedValue({ state: 'ready', version: 1 });
     vi.mocked(agentDataApi.jobs.list).mockResolvedValue([]);
-    vi.mocked(agentDataApi.overview).mockResolvedValue({ recentPages: [], recentMemories: [], errors: [] });
+    vi.mocked(agentDataApi.overview).mockResolvedValue({ libraries: { total: 1, pendingSources: 0, pages: 12 }, recentPages: [], recentMemories: [], errors: [] });
     vi.mocked(agentDataApi.tasks.list).mockImplementation(async () => ({ items: (await agentDataApi.jobs.list()).map((job) => ({
       ref: { source: 'user' as const, id: job.id }, key: `user:${job.id}`, label: job.kind, kind: job.kind, workspace: job.workspace, status: job.state,
       progress: job.progress, cancellationRequested: false, createdAt: job.createdAt, updatedAt: job.updatedAt, capabilities: { cancel: true, retry: false, remove: false },
@@ -68,7 +68,7 @@ describe('AgentDataCenter', () => {
     render(<AgentDataCenter userId="u" />);
     expect(await screen.findByText('248')).toBeTruthy();
     expect(agentDataApi.memory.overview).toHaveBeenCalledWith({ userId: 'u', includeOtherProjects: true });
-    expect(agentDataApi.wiki.overview).toHaveBeenCalled();
+    expect(agentDataApi.wiki.list).toHaveBeenCalled();
     expect(agentDataApi.code.status).not.toHaveBeenCalled();
   });
 
@@ -118,7 +118,7 @@ describe('AgentDataCenter', () => {
     render(<AgentDataCenter userId="u" />);
     expect(await screen.findByText('12')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('memory unavailable');
-    expect(within(screen.getByRole('button', { name: /^Memory/ })).getByText('未获取')).toBeTruthy();
+    expect(within(screen.getByRole('button', { name: /条记忆/ })).getByText('未获取')).toBeTruthy();
   });
 
   it('retains the previous data after a background refresh fails', async () => {
