@@ -8,6 +8,7 @@ import { deferred, systemTask, task, taskDetail } from './operationsTestData';
 import type { TaskDetail, TaskView } from '../../../electron/agentData/operationsContracts';
 vi.mock('../../lib/agentData', () => ({ agentDataApi: {
   tasks: { read: vi.fn(), previewRetry: vi.fn(), retry: vi.fn() },
+  jobs: { cancel: vi.fn() },
 } }));
 beforeEach(() => {
   vi.resetAllMocks();
@@ -65,7 +66,7 @@ it('retains confirmation when the backend reports a changed model instead of res
   render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '重试任务' }));
   fireEvent.click(await screen.findByRole('button', { name: '确认重试' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('模型配置已变化');
+  await waitFor(() => expect(screen.queryAllByRole('alert').some((el) => el.textContent?.includes('模型配置已变化'))).toBe(true));
   expect(screen.getByRole('button', { name: '确认重试' })).toBeEnabled();
   expect(agentDataApi.tasks.retry).toHaveBeenCalledOnce();
 });
@@ -135,4 +136,16 @@ it('groups detail metadata, execution summary, and events for visual scanning', 
   expect(screen.getByRole('heading', { name: '执行摘要', exact: true })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '任务事件', exact: true })).toBeInTheDocument();
   expect(screen.getByText(task.ref.id)).toBeInTheDocument();
+});
+
+it('cancels from the drawer after rechecking capability', async () => {
+  const running = { ...taskDetail, status: 'running' as const, capabilities: { cancel: true, retry: false, remove: false } };
+  vi.mocked(agentDataApi.tasks.read).mockResolvedValue(running);
+  vi.mocked(agentDataApi.jobs.cancel).mockResolvedValue(undefined);
+  const onRefresh = vi.fn();
+  render(<TaskDetailDrawer taskRef={task.ref} onClose={vi.fn()} onRefresh={onRefresh} />);
+  fireEvent.click(await screen.findByRole('button', { name: '取消任务' }));
+  await waitFor(() => expect(agentDataApi.jobs.cancel).toHaveBeenCalledWith(task.ref.id));
+  expect(agentDataApi.tasks.read).toHaveBeenCalledTimes(2);
+  expect(onRefresh).toHaveBeenCalled();
 });

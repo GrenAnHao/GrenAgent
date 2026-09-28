@@ -8,7 +8,6 @@ vi.mock('../../lib/agentData', () => ({
   agentDataApi: { jobs: { list: vi.fn(), cancel: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
 }));
 import { agentDataApi } from '../../lib/agentData';
-import { pickSelectOption } from './antdSelectTestUtils';
 
 const ask = vi.hoisted(() => vi.fn(async () => true));
 vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
@@ -82,8 +81,9 @@ describe('JobsPanel', () => {
 
   it('lists jobs from every workspace with their progress and failure reason', () => {
     render(<JobsPanel jobs={jobs} />);
+    fireEvent.click(screen.getByRole('radio', { name: /全部/ }));
     expect(screen.getByText('wiki.sync')).toBeTruthy();
-    expect(screen.getByText('D:/proj/beta')).toBeTruthy();
+    expect(screen.getByText('beta')).toBeTruthy();
     expect(screen.getByText('codegraph exited (1)')).toBeTruthy();
     expect(screen.getByText('40%')).toBeTruthy();
   });
@@ -96,9 +96,11 @@ describe('JobsPanel', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
-  it('filters by state', async () => {
+  it('groups active and history tasks', async () => {
     render(<JobsPanel jobs={jobs} />);
-    await pickSelectOption('任务状态', '失败');
+    expect(screen.getByText('wiki.sync')).toBeTruthy();
+    expect(screen.queryByText('codegraph.sync')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
     expect(screen.queryByText('wiki.sync')).toBeNull();
     expect(screen.getByText('codegraph.sync')).toBeTruthy();
   });
@@ -111,6 +113,7 @@ describe('JobsPanel', () => {
   it.each(terminalJobs)('deletes a $state job record after confirmation', async (job) => {
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[job]} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
     await waitFor(() => expect(screen.queryByText(job.kind)).toBeNull());
@@ -135,6 +138,7 @@ describe('JobsPanel', () => {
     ask.mockResolvedValueOnce(false);
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[terminalJobs[0]]} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     await act(async () => {});
 
@@ -148,9 +152,9 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: [matchingJob.id] });
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[...activeJobs, ...terminalJobs, matchingJob]} onRefresh={onRefresh} />);
-    fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'alpha' } });
-    await pickSelectOption('任务状态', '失败');
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'matching' } });
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
 
     await waitFor(() => expect(screen.queryByText(matchingJob.kind)).toBeNull());
     expect(agentDataApi.jobs.clear).toHaveBeenCalledWith([matchingJob.id]);
@@ -165,7 +169,7 @@ describe('JobsPanel', () => {
     expect(agentDataApi.jobs.list).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: '' } });
-    await pickSelectOption('任务状态', '全部状态');
+    fireEvent.click(screen.getByRole('radio', { name: /全部/ }));
     for (const job of [...activeJobs, ...terminalJobs]) expect(screen.getByText(job.kind)).toBeTruthy();
   });
 
@@ -179,7 +183,8 @@ describe('JobsPanel', () => {
       rerender(<JobsPanel jobs={[initialJob, newJob]} onRefresh={onRefresh} />);
       return true;
     });
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
 
     await waitFor(() => expect(screen.queryByText(initialJob.kind)).toBeNull());
     expect(agentDataApi.jobs.clear).toHaveBeenCalledWith([initialJob.id]);
@@ -190,7 +195,8 @@ describe('JobsPanel', () => {
     ask.mockResolvedValueOnce(false);
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={terminalJobs} onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
     await act(async () => {});
 
     expect(agentDataApi.jobs.clear).not.toHaveBeenCalled();
@@ -203,7 +209,7 @@ describe('JobsPanel', () => {
     { name: 'active-only queue', input: activeJobs },
   ])('disables bulk cleanup for an $name', ({ input }) => {
     render(<JobsPanel jobs={input} />);
-    const clearButton = screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement;
+    const clearButton = screen.getByRole('button', { name: /^清理已结束/ }) as HTMLButtonElement;
     expect(clearButton.disabled).toBe(true);
     fireEvent.click(clearButton);
     expect(ask).not.toHaveBeenCalled();
@@ -212,11 +218,11 @@ describe('JobsPanel', () => {
 
   it('disables bulk cleanup when the current filter has no terminal records', async () => {
     render(<JobsPanel jobs={[...activeJobs, ...terminalJobs]} />);
-    await pickSelectOption('任务状态', '运行中');
-    expect((screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement).disabled).toBe(true);
-    await pickSelectOption('任务状态', '全部状态');
+    fireEvent.click(screen.getByRole('radio', { name: /进行中/ }));
+    expect((screen.getByRole('button', { name: /^清理已结束/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('radio', { name: /全部/ }));
     fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'no-such-workspace' } });
-    expect((screen.getByRole('button', { name: '清理已结束' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /^清理已结束/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it.each(['cancel', 'remove', 'clear'] as const)('disables all mutation buttons while %s is pending', async (operation) => {
@@ -226,9 +232,10 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.remove).mockImplementation(async () => { await pending; return { deleted: true }; });
     vi.mocked(agentDataApi.jobs.clear).mockImplementation(async () => { await pending; return { deletedIds: [terminalJobs[0].id] }; });
     render(<JobsPanel jobs={[...activeJobs, terminalJobs[0]]} onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByRole('radio', { name: /全部/ }));
     const button = operation === 'cancel'
       ? within(screen.getByRole('row', { name: /wiki.sync/ })).getByRole('button', { name: '取消' })
-      : screen.getByRole('button', { name: operation === 'remove' ? '删除' : '清理已结束' });
+      : screen.getByRole('button', { name: operation === 'remove' ? '删除' : /^清理已结束/ });
     fireEvent.click(button);
     await act(async () => {});
 
@@ -245,7 +252,8 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs[operation]).mockRejectedValue(new Error('记录清理失败'));
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[terminalJobs[0]]} onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByRole('button', { name: operation === 'remove' ? '删除' : '清理已结束' }));
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
+    fireEvent.click(screen.getByRole('button', { name: operation === 'remove' ? '删除' : /^清理已结束/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('记录清理失败'));
     expect(screen.getByText(terminalJobs[0].kind)).toBeTruthy();
@@ -257,6 +265,7 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.remove).mockResolvedValue({ deleted: false });
     const onRefresh = vi.fn();
     render(<JobsPanel jobs={[terminalJobs[0]]} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole('radio', { name: /历史/ }));
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledOnce());
@@ -268,7 +277,8 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: [terminalJobs[0].id] });
     vi.mocked(agentDataApi.jobs.list).mockResolvedValue([becameActive, ...activeJobs]);
     render(<JobsPanel jobs={[terminalJobs[0], terminalJobs[1], ...activeJobs]} />);
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    fireEvent.click(screen.getByRole('radio', { name: /全部/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
 
     await waitFor(() => expect(screen.queryByText(terminalJobs[0].kind)).toBeNull());
     expect(agentDataApi.jobs.clear).toHaveBeenCalledWith([terminalJobs[0].id, terminalJobs[1].id]);
@@ -280,8 +290,9 @@ describe('JobsPanel', () => {
     vi.mocked(agentDataApi.jobs.list).mockResolvedValueOnce([terminalJobs[0]]).mockResolvedValueOnce([terminalJobs[2]]);
     vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: [terminalJobs[0].id] });
     render(<JobsPanel />);
+    fireEvent.click(await screen.findByRole('radio', { name: /历史/ }));
     await screen.findByText(terminalJobs[0].kind);
-    fireEvent.click(screen.getByRole('button', { name: operation === 'remove' ? '删除' : '清理已结束' }));
+    fireEvent.click(screen.getByRole('button', { name: operation === 'remove' ? '删除' : /^清理已结束/ }));
 
     await screen.findByText(terminalJobs[2].kind);
     expect(screen.queryByText(terminalJobs[0].kind)).toBeNull();

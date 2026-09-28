@@ -3,6 +3,7 @@ import { Alert, Button, Card, Collapse, Descriptions, Drawer, Flex, Space, Tag, 
 import { agentDataApi } from '../../lib/agentData';
 import type { ResourceNavigation, TaskDetail, TaskRef, TaskRetryPreview, TaskView } from '../../../electron/agentData/operationsContracts';
 import { redact, resourceNavigation, taskKey, taskStatusColors, taskStatusLabels } from './operationsPresentation';
+import { PageBanner } from './workbench/PageBanner';
 
 interface Props {
   taskRef?: TaskRef; taskView?: TaskView; visible?: boolean; retryRequest?: number; onClose(): void;
@@ -78,6 +79,20 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
     void prepareRetry();
   }, [readDetail, retryRequest, key, visible]);
 
+  const cancel = async () => {
+    if (!selected || busyRef.current || !visible) return;
+    const stable = selected; const request = epoch.current;
+    busyRef.current = true; setBusy(true); setMutationError(undefined);
+    try {
+      const latest = await agentDataApi.tasks.read(stable);
+      if (!valid(request)) return;
+      if (!latest || latest.ref.source !== 'user' || !latest.capabilities.cancel) throw new Error('当前不允许取消此任务，请刷新后重试');
+      await agentDataApi.jobs.cancel(stable.id);
+      await onRefresh?.();
+    } catch (cause) { if (valid(request)) setMutationError(message(cause)); }
+    finally { if (valid(request)) { busyRef.current = false; setBusy(false); } }
+  };
+
   const retry = async () => {
     if (!preview || !selected || taskKey(preview.ref) !== key || busyRef.current || !visible) return;
     const stable = preview; const request = epoch.current;
@@ -97,7 +112,7 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
     detail?.outputSummary ? { key: 'output', label: '结果摘要', children: <pre>{JSON.stringify(redact(detail.outputSummary), null, 2)}</pre> } : null,
   ].filter(Boolean) as { key: string; label: string; children: ReactNode }[];
 
-  return <Drawer open={visible && !!selected} title="任务详情" size="min(560px, 100vw)" closable={!busy} keyboard={!busy} maskClosable={!busy}
+  return <Drawer open={visible && !!selected} title="任务详情" extra={detail?.ref.source === 'user' ? <Space size={8}>{detail.capabilities.cancel && !detail.cancellationRequested ? <Button disabled={busy} onClick={() => void cancel()}>取消任务</Button> : null}<Button disabled={busy || !detail.capabilities.retry} onClick={() => void prepareRetry()}>重试任务</Button></Space> : null} size="min(560px, 100vw)" closable={!busy} keyboard={!busy} maskClosable={!busy}
     onClose={() => { if (!busyRef.current) onClose(); }} styles={{ wrapper: { maxWidth: '100vw' }, header: { padding: '16px clamp(16px, 3vw, 24px)' }, body: { minWidth: 0, padding: '20px clamp(16px, 3vw, 24px) 32px' } }}>
     <Space orientation="vertical" size={20} style={{ width: '100%' }}>
       {loading ? <Typography.Text type="secondary">正在读取任务详情…</Typography.Text> : null}
@@ -108,6 +123,8 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
           <div><Typography.Text type="secondary">任务详情</Typography.Text><Typography.Title level={4} style={{ margin: 0 }}>{detail.label}</Typography.Title></div>
           <Tag color={taskStatusColors[detail.status]}>{detail.cancellationRequested ? '正在取消' : taskStatusLabels[detail.status]}</Tag>
         </Flex>
+        {detail.error ? <PageBanner type="error" items={[{ message: String(redact(detail.error)) }]}
+          action={detail.resource && onNavigate ? <Button size="small" disabled={busy} onClick={() => onNavigate(resourceNavigation(detail.resource!))}>查看关联资源</Button> : undefined} /> : null}
         <section aria-labelledby="task-info-heading">
           <Typography.Title level={5} id="task-info-heading">任务信息</Typography.Title>
           <Descriptions column={1} size="small" items={[
@@ -124,7 +141,7 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
             { key: 'target', label: '目标', children: resourceTarget(detail) },
             { key: 'workspace', label: '工作区', children: detail.workspace || '—' },
           ]} />
-          {detail.resource && onNavigate ? <Button disabled={busy} onClick={() => onNavigate(resourceNavigation(detail.resource!))}>查看关联资源</Button> : null}
+          {detail.resource && onNavigate && !detail.error ? <Button disabled={busy} onClick={() => onNavigate(resourceNavigation(detail.resource!))}>查看关联资源</Button> : null}
         </section>
         <section aria-labelledby="task-execution-heading">
           <Typography.Title level={5} id="task-execution-heading">执行摘要</Typography.Title>
@@ -137,8 +154,6 @@ export function TaskDetailDrawer({ taskRef, taskView, visible = true, retryReque
             ...(detail.retryOf ? [{ key: 'retryOf', label: '重试来源', children: detail.retryOf }] : []),
           ]} />
           {summaries.length ? <Collapse size="small" ghost defaultActiveKey={summaries.map((item) => item.key)} items={summaries} /> : null}
-          {detail.error ? <Typography.Text type="danger">{String(redact(detail.error))}</Typography.Text> : null}
-          {detail.ref.source === 'user' ? <Button disabled={busy || !detail.capabilities.retry} onClick={() => void prepareRetry()}>重试任务</Button> : null}
         </section>
         <section aria-labelledby="task-events-heading">
           <Typography.Title level={5} id="task-events-heading">任务事件</Typography.Title>

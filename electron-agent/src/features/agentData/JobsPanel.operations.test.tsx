@@ -11,6 +11,8 @@ vi.mock('../../lib/agentData', () => ({ agentDataApi: {
   jobs: { list: vi.fn(), cancel: vi.fn(), remove: vi.fn(), clear: vi.fn() },
   tasks: { read: vi.fn(), previewRetry: vi.fn(), retry: vi.fn() },
 } }));
+const ask = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../components/askConfirm', () => ({ useAskConfirm: () => ask }));
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(agentDataApi.jobs.list).mockResolvedValue([]);
@@ -19,11 +21,12 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   vi.mocked(agentDataApi.tasks.read).mockImplementation(async (ref) => ref.source === 'system' ? { ...systemTask, events: [] } : { ...taskDetail, ref });
   vi.mocked(agentDataApi.jobs.clear).mockResolvedValue({ deletedIds: [] });
+  ask.mockResolvedValue(true);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('统一任务操作', () => {
   it('collapses system tasks and distinguishes matching IDs without fabricating progress', async () => {
-    const { rerender } = render(<JobsPanel tasks={[task, systemTask]} onRefresh={vi.fn()} />);
+    const { rerender } = render(<JobsPanel tasks={[task, systemTask]} initialGroup="all" onRefresh={vi.fn()} />);
     expect(screen.queryByText('后台维护')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /系统后台任务/ }));
     expect(screen.getByText('后台维护')).toBeInTheDocument();
@@ -32,20 +35,20 @@ describe('统一任务操作', () => {
     expect(within(row).queryByRole('button', { name: '删除' })).toBeNull();
     expect(within(row).queryByRole('button', { name: '取消' })).toBeNull();
     expect(within(row).getByText('系统只读')).toBeInTheDocument();
-    rerender(<JobsPanel tasks={[task, systemTask]} selectedTask={systemTask.ref} selectionRequest={1} />);
+    rerender(<JobsPanel tasks={[task, systemTask]} initialGroup="all" selectedTask={systemTask.ref} selectionRequest={1} />);
     await waitFor(() => expect(agentDataApi.tasks.read).toHaveBeenCalledWith(systemTask.ref));
     expect(row).toHaveAttribute('aria-selected', 'true');
   });
   it('uses capabilities instead of guessing mutations from failed status', () => {
-    render(<JobsPanel tasks={[{ ...task, capabilities: { cancel: false, retry: false, remove: false } }]} />);
+    render(<JobsPanel tasks={[{ ...task, capabilities: { cancel: false, retry: false, remove: false } }]} initialGroup="all" />);
     const row = screen.getByRole('row', { name: /生成知识页面/ });
     expect(within(row).getByRole('button', { name: '删除' })).toBeDisabled();
     expect(within(row).getByRole('button', { name: '重试' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '清理已结束' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^清理已结束/ })).toBeDisabled();
   });
   it('rechecks removal capability and keeps records when permission changed', async () => {
     vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...taskDetail, cancellationRequested: true, capabilities: { cancel: false, retry: false, remove: false } });
-    render(<JobsPanel tasks={[task]} onRefresh={vi.fn()} />);
+    render(<JobsPanel tasks={[task]} initialGroup="all" onRefresh={vi.fn()} />);
     fireEvent.click(within(screen.getByRole('row', { name: /生成知识页面/ })).getByRole('button', { name: '删除' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('当前不允许删除');
     expect(agentDataApi.jobs.remove).not.toHaveBeenCalled();
@@ -53,29 +56,29 @@ describe('统一任务操作', () => {
   });
   it('cleans only permitted user terminal IDs, excluding system and cancelling rows', async () => {
     const cancelling = { ...task, ref: { source: 'user' as const, id: 'cancelling' }, key: 'user:cancelling', label: '取消中的任务', status: 'running' as const, cancellationRequested: true, capabilities: { cancel: false, retry: false, remove: false } };
-    render(<JobsPanel tasks={[task, systemTask, cancelling]} onRefresh={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    render(<JobsPanel tasks={[task, systemTask, cancelling]} initialGroup="all" onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
     await waitFor(() => expect(agentDataApi.jobs.clear).toHaveBeenCalledWith(['same-id']));
     expect(screen.getByText('正在取消，等待确认')).toBeInTheDocument();
   });
   it('retains all rows after a failed batch and only removes returned IDs on success', async () => {
     vi.mocked(agentDataApi.jobs.clear).mockRejectedValueOnce(new Error('批量清理失败')).mockResolvedValueOnce({ deletedIds: ['same-id'] });
-    render(<JobsPanel tasks={[task, { ...task, ref: { source: 'user', id: 'b' }, key: 'user:b', label: '第二任务' }]} onRefresh={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    render(<JobsPanel tasks={[task, { ...task, ref: { source: 'user', id: 'b' }, key: 'user:b', label: '第二任务' }]} initialGroup="all" onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent('批量清理失败');
     expect(screen.getByText('生成知识页面')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '清理已结束' }));
+    fireEvent.click(screen.getByRole('button', { name: /^清理已结束/ }));
     await waitFor(() => expect(screen.queryByText('生成知识页面')).toBeNull());
     expect(screen.getByText('第二任务')).toBeInTheDocument();
   });
   it('does not fetch detail while hidden and does not re-scroll for monitor updates', async () => {
     const scroll = vi.fn();
     Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scroll });
-    const { rerender } = render(<JobsPanel tasks={[task]} selectedTask={task.ref} visible={false} />);
+    const { rerender } = render(<JobsPanel tasks={[task]} initialGroup="all" selectedTask={task.ref} visible={false} />);
     expect(agentDataApi.tasks.read).not.toHaveBeenCalled();
-    rerender(<JobsPanel tasks={[task]} selectedTask={task.ref} visible />);
+    rerender(<JobsPanel tasks={[task]} initialGroup="all" selectedTask={task.ref} visible />);
     await waitFor(() => expect(scroll).toHaveBeenCalledOnce());
-    rerender(<JobsPanel tasks={[{ ...task, updatedAt: 3 }]} selectedTask={task.ref} visible />);
+    rerender(<JobsPanel tasks={[{ ...task, updatedAt: 3 }]} initialGroup="all" selectedTask={task.ref} visible />);
     expect(scroll).toHaveBeenCalledOnce();
     Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
   });
@@ -83,7 +86,7 @@ describe('统一任务操作', () => {
     const running = { ...task, status: 'running' as const, capabilities: { cancel: true, retry: false, remove: false } };
     vi.mocked(agentDataApi.tasks.read).mockResolvedValue({ ...running, events: [] });
     vi.mocked(agentDataApi.jobs.cancel).mockRejectedValueOnce(new Error('取消请求未送达'));
-    render(<JobsPanel tasks={[running]} onRefresh={vi.fn()} />);
+    render(<JobsPanel tasks={[running]} initialGroup="all" onRefresh={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('取消请求未送达');
     expect(screen.getByText('生成知识页面')).toBeInTheDocument();
@@ -92,10 +95,10 @@ describe('统一任务操作', () => {
   it('keeps mutations fixed to their original source and ID while selection changes', async () => {
     const response = deferred<{ deleted: boolean }>();
     vi.mocked(agentDataApi.jobs.remove).mockReturnValue(response.promise);
-    const { rerender } = render(<JobsPanel tasks={[task, systemTask]} onRefresh={vi.fn()} />);
+    const { rerender } = render(<JobsPanel tasks={[task, systemTask]} initialGroup="all" onRefresh={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     await waitFor(() => expect(agentDataApi.jobs.remove).toHaveBeenCalledWith('same-id'));
-    rerender(<JobsPanel tasks={[task, systemTask]} selectedTask={systemTask.ref} onRefresh={vi.fn()} />);
+    rerender(<JobsPanel tasks={[task, systemTask]} initialGroup="all" selectedTask={systemTask.ref} onRefresh={vi.fn()} />);
     await act(async () => response.resolve({ deleted: true }));
     expect(await screen.findByRole('row', { name: /后台维护/ })).toBeInTheDocument();
     expect(agentDataApi.jobs.remove).toHaveBeenCalledOnce();
@@ -103,38 +106,38 @@ describe('统一任务操作', () => {
   it('does not reuse a previous retry intent when opening a different detail normally', async () => {
     const second = { ...task, ref: { source: 'user' as const, id: 'second' }, key: 'user:second', label: '第二任务' };
     vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: false });
-    render(<JobsPanel tasks={[task, second]} />);
+    render(<JobsPanel tasks={[task, second]} initialGroup="all" />);
     fireEvent.click(within(screen.getByRole('row', { name: /生成知识页面/ })).getByRole('button', { name: '重试' }));
     await screen.findByRole('button', { name: '确认重试' });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.click(within(screen.getByRole('row', { name: /第二任务/ })).getByRole('button', { name: '详情' }));
+    fireEvent.click(screen.getByRole('row', { name: /第二任务/ }));
     await waitFor(() => expect(agentDataApi.tasks.read).toHaveBeenCalledWith(second.ref));
     expect(agentDataApi.tasks.previewRetry).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: '确认重试' })).toBeNull();
   });
   it('updates the open detail from its monitor without reloading or clearing a retry confirmation', async () => {
     vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: false });
-    const { rerender } = render(<JobsPanel tasks={[task]} />);
+    const { rerender } = render(<JobsPanel tasks={[task]} initialGroup="all" />);
     fireEvent.click(within(screen.getByRole('row', { name: /生成知识页面/ })).getByRole('button', { name: '重试' }));
     await screen.findByRole('button', { name: '确认重试' });
     const reads = vi.mocked(agentDataApi.tasks.read).mock.calls.length;
-    rerender(<JobsPanel tasks={[{ ...task, stage: '新阶段', updatedAt: 42 }]} />);
+    rerender(<JobsPanel tasks={[{ ...task, stage: '新阶段', updatedAt: 42 }]} initialGroup="all" />);
     expect(within(screen.getByRole('dialog')).getByText('新阶段')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认重试' })).toBeEnabled();
     expect(agentDataApi.tasks.read).toHaveBeenCalledTimes(reads);
   });
   it('hides unsafe progress on a modern task with non-finite data', () => {
-    render(<JobsPanel tasks={[{ ...task, progress: Number.NaN }]} />);
+    render(<JobsPanel tasks={[{ ...task, progress: Number.NaN }]} initialGroup="all" />);
     expect(screen.queryByText('NaN%')).toBeNull();
     expect(screen.getByText('未提供百分比')).toBeInTheDocument();
   });
   it('can open a fresh retry confirmation for the same task after closing it', async () => {
     vi.mocked(agentDataApi.tasks.previewRetry).mockResolvedValue({ ref: task.ref, label: task.label, callsModel: false });
-    render(<JobsPanel tasks={[task]} />);
+    render(<JobsPanel tasks={[task]} initialGroup="all" />);
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await screen.findByRole('button', { name: '确认重试' });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.click(screen.getByRole('button', { name: '详情' }));
+    fireEvent.click(screen.getByRole('row', { name: /生成知识页面/ }));
     await screen.findByRole('button', { name: '重试任务' });
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
@@ -143,7 +146,7 @@ describe('统一任务操作', () => {
   });
   it('redacts recognizable credentials in task row and operation error messages', async () => {
     vi.mocked(agentDataApi.jobs.remove).mockRejectedValueOnce(new Error('delete failed Bearer mutation-credential'));
-    render(<JobsPanel tasks={[{ ...task, error: 'request failed Bearer row-credential' }]} />);
+    render(<JobsPanel tasks={[{ ...task, error: 'request failed Bearer row-credential' }]} initialGroup="all" />);
     expect(screen.queryByText(/row-credential/)).toBeNull();
     expect(screen.getByText('request failed Bearer [redacted]')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
@@ -151,12 +154,29 @@ describe('统一任务操作', () => {
     expect(screen.queryByText(/mutation-credential/)).toBeNull();
   });
 
+  it('opens detail from the row with Enter but not from row actions', async () => {
+    render(<JobsPanel tasks={[task]} initialGroup="all" />);
+    const row = screen.getByRole('row', { name: /生成知识页面/ });
+    ask.mockResolvedValueOnce(false);
+    fireEvent.click(within(row).getByRole('button', { name: '删除' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    row.focus();
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await waitFor(() => expect(agentDataApi.tasks.read).toHaveBeenCalledWith(task.ref));
+  });
+  it('shows an empty active group with a way to history', () => {
+    render(<JobsPanel tasks={[task]} />);
+    expect(screen.getByText('没有进行中的任务')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看历史' }));
+    expect(screen.getByText('生成知识页面')).toBeInTheDocument();
+  });
+
   it('keeps long workspace paths as one-line summaries while retaining the full value for access', () => {
     const workspace = 'D:/OneDrive/Project Files/mcp/JSReverser-MCP/a-very-long-workspace-name';
-    render(<JobsPanel tasks={[{ ...task, workspace }]} />);
+    render(<JobsPanel tasks={[{ ...task, workspace }]} initialGroup="all" />);
     const row = screen.getByRole('row', { name: /生成知识页面/ });
     const path = within(row).getByTitle(workspace);
-    expect(path).toHaveTextContent(workspace);
+    expect(path).toHaveTextContent('a-very-long-workspace-name');
   });
 
   it('uniqueTaskKindOptions 用中文 label 去重 kind', () => {
@@ -182,7 +202,7 @@ describe('统一任务操作', () => {
       task,
       { ...task, ref: { source: 'user', id: 'mem' }, key: 'user:mem', kind: 'memory_extract', label: '记忆提取', workspace: 'C:\\Users\\rxstudio\\Temp\\evox' },
       { ...task, ref: { source: 'user', id: 'twin' }, key: 'user:twin', kind: 'wiki_page_generate', label: 'Wiki 页面生成', workspace: 'D:/other/alpha' },
-    ]} />);
+    ]} initialGroup="all" />);
     await openSelect('任务类型');
     const typeTexts = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'))
       .map((item) => item.textContent?.trim());

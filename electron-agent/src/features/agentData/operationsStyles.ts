@@ -19,6 +19,12 @@ export const operationsStyles = createStaticStyles(({ css }) => ({
     pre { margin: 8px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; background: ${cssVar.colorFillQuaternary}; border-radius: 6px; font-size: 11px; }
   `,
   section: css`display: flex; flex-direction: column; gap: 12px; align-items: start; margin-block-start: 16px;`,
+  /** 行内操作：默认隐藏，行 hover/focus 时显现；触屏设备始终可见。 */
+  rowActions: css`
+    display: inline-flex; gap: 4px; opacity: 0;
+    tr:hover &, tr:focus-within & { opacity: 1; }
+    @media (hover: none) { opacity: 1; }
+  `,
   /** 筛选下拉按选项内容撑开，避免路径/名称被截成 memory_extr... */
   filterPopup: css`
     .ant-select-item-option-content {
