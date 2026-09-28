@@ -180,4 +180,23 @@ describe('AgentDataCenter', () => {
     expect(memory.getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('wiki-panel')).toBeNull();
   });
+
+  it('shows task and diagnostic badges on their tabs', async () => {
+    vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [], activeCount: 2 });
+    vi.mocked(agentDataApi.overview).mockResolvedValue({ recentPages: [], recentMemories: [], errors: [], diagnostics: { actionRequired: 1, unchecked: 0 } });
+    render(<AgentDataCenter userId="u" />);
+    await waitFor(() => expect(within(screen.getByRole('tab', { name: /任务/ })).getByText('2')).toBeTruthy());
+    expect(within(screen.getByRole('tab', { name: /审计诊断/ })).getByText('1')).toBeTruthy();
+    expect(screen.queryByText(/已加载 \d+ 个任务/)).toBeNull();
+  });
+
+  it('broadcasts one refresh token to every visited panel', async () => {
+    render(<AgentDataCenter userId="u" />);
+    await screen.findByText('248');
+    fireEvent.click(screen.getByRole('tab', { name: 'Memory' }));
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenCalled());
+    const before = vi.mocked(agentDataApi.memory.list).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '刷新 Agent 数据' }));
+    await waitFor(() => expect(vi.mocked(agentDataApi.memory.list).mock.calls.length).toBeGreaterThan(before));
+  });
 });

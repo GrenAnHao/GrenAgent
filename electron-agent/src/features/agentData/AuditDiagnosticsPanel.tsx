@@ -11,6 +11,8 @@ export { redact } from './operationsPresentation';
 
 interface Props {
   visible?: boolean; navigation?: { resource?: ResourceRef; request?: number }; resourceFilter?: ResourceRef; selectionRequest?: number;
+  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  refreshToken?: number;
   onNavigate?(navigation: ResourceNavigation): void; onRefresh?(): Promise<void> | void;
 }
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);

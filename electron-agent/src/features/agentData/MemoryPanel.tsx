@@ -18,6 +18,8 @@ interface MemoryPanelProps {
   /** 仅用于首次打开；切换聊天不会重设筛选器。 */
   initialProject?: string;
   visible?: boolean;
+  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  refreshToken?: number;
   navigation?: Extract<ResourceNavigation, { view: 'memory' }>;
   navigationRequest?: number;
   onOpenSession?(cwd: string, path: string): void | Promise<void>;

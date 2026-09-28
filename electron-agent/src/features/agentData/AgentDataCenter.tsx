@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Badge, Button, Tabs, Typography } from 'antd';
+import { Badge, Button, Tabs } from 'antd';
 import { BrainCircuit, BriefcaseBusiness, Code2, Database, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import { agentDataApi, type AgentDataStatus, type MemoryOverview, type WikiOverview, type ResourceNavigation, type WorkbenchOverview } from '../../lib/agentData';
 import { MemoryPanel } from './MemoryPanel';
@@ -9,6 +9,7 @@ import { JobsPanel } from './JobsPanel';
 import { AuditDiagnosticsPanel } from './AuditDiagnosticsPanel';
 import { OverviewPanel, type ResourceState } from './OverviewPanel';
 import { AgentDataTaskProvider, useAgentDataTaskMonitor } from './AgentDataTaskProvider';
+import { PageBanner } from './workbench/PageBanner';
 import type { AgentDataTab } from './agentDataViewTypes';
 import { styles } from './agentDataStyles';
 
@@ -45,6 +46,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   const [wiki, setWiki] = useState<ResourceState<WikiOverview>>({ loading: true });
   const [workbench, setWorkbench] = useState<ResourceState<WorkbenchOverview>>({ loading: true });
   const [navigation, setNavigation] = useState<{ target: ResourceNavigation; request: number }>();
+  const [refreshToken, setRefreshToken] = useState(0);
   const requestEpoch = useRef(0);
 
   const refreshResources = useCallback(async () => {
@@ -93,18 +95,18 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
       case 'overview':
         return <OverviewPanel memory={memory} wiki={wiki} jobs={monitor.jobs} tasks={monitor.tasks} workbench={workbench} jobsLoading={monitor.loading} jobsLoaded={monitor.loaded} jobsError={monitor.error} onNavigate={selectTab} onOpenTask={openTask} onOpenResource={navigate} />;
       case 'memory':
-        return <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />;
+        return <MemoryPanel userId={userId} initialProject={initialProject} visible={visible && tab === 'memory'} refreshToken={refreshToken} onOpenSession={onOpenSession} navigation={navigation?.target.view === 'memory' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'memory' ? navigation.request : undefined} />;
       case 'wiki':
-        return <WikiPanel initialProject={initialProject} visible={visible && tab === 'wiki'} onOpenTask={openTask} navigation={navigation?.target.view === 'wiki' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'wiki' ? navigation.request : undefined} />;
+        return <WikiPanel initialProject={initialProject} visible={visible && tab === 'wiki'} refreshToken={refreshToken} onOpenTask={openTask} navigation={navigation?.target.view === 'wiki' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'wiki' ? navigation.request : undefined} />;
       case 'code':
-        return <CodeRetrievalPanel initialProject={initialProject} visible={visible && tab === 'code'} onOpenTask={openTask} navigation={navigation?.target.view === 'code' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'code' ? navigation.request : undefined} />;
+        return <CodeRetrievalPanel initialProject={initialProject} visible={visible && tab === 'code'} refreshToken={refreshToken} onOpenTask={openTask} navigation={navigation?.target.view === 'code' ? navigation.target : undefined} navigationRequest={navigation?.target.view === 'code' ? navigation.request : undefined} />;
       case 'jobs':
         return <>
-          {monitor.error ? <Alert type="error" showIcon title={monitor.error} /> : null}
-          <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
+          {monitor.error ? <PageBanner type="error" items={[{ source: '任务', message: monitor.error }]} /> : null}
+          <JobsPanel jobs={monitor.jobs} tasks={monitor.tasks} dataReady={monitor.loaded} refreshToken={refreshToken} onRefresh={monitor.refresh} onTrack={monitor.track} selectedTask={navigation?.target.view === 'jobs' ? navigation.target.task : undefined} selectionRequest={navigation?.target.view === 'jobs' ? navigation.request : undefined} visible={visible && tab === 'jobs'} onNavigate={navigate} nextCursor={monitor.nextCursor} onLoadMore={monitor.loadMore} loadingMore={monitor.loadingMore} />
         </>;
       case 'audit':
-        return <AuditDiagnosticsPanel visible={visible && tab === 'audit'} navigation={navigation?.target.view === 'audit' ? { resource: navigation.target.resource, request: navigation.request } : undefined} onNavigate={navigate} onRefresh={async () => { await monitor.refresh(); await refreshResources(); }} />;
+        return <AuditDiagnosticsPanel visible={visible && tab === 'audit'} refreshToken={refreshToken} navigation={navigation?.target.view === 'audit' ? { resource: navigation.target.resource, request: navigation.request } : undefined} onNavigate={navigate} onRefresh={async () => { await monitor.refresh(); await refreshResources(); }} />;
     }
   }
 
@@ -114,34 +116,36 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
   if (status.data) runtimeLabel = status.data.state === 'closed' ? '已关闭' : `Runtime v${status.data.version}`;
   if (status.error) runtimeLabel = '连接异常';
 
+  const activeTasks = monitor.activeCount;
+  const actionRequired = workbench.data?.diagnostics?.actionRequired;
+  const refreshAll = () => { setRefreshToken((value) => value + 1); void refreshResources(); void monitor.refresh(); };
+  const badge = (id: AgentDataTab) => {
+    if (id === 'jobs' && activeTasks) return <Badge count={activeTasks} size="small" title="进行中任务（含后台）" />;
+    if (id === 'audit' && actionRequired) return <Badge count={actionRequired} size="small" color="red" title="需要处理的诊断" />;
+    return null;
+  };
+
   return <section className={styles.root} data-testid="agent-data-center">
-    <header className={styles.header}>
-      <div className={styles.identity}><span className={styles.icon}><BrainCircuit size={18} /></span><div>
-        <Typography.Title level={5} className={styles.title}>Agent 数据</Typography.Title>
-        <Typography.Text type="secondary" className={styles.subtitle}>全部项目 · {monitor.loaded ? `已加载 ${monitor.tasks.length} 个任务` : '任务未获取'}</Typography.Text>
-      </div></div>
-      <div className={styles.headerActions}>
-        <Badge
-          status={runtimeState === 'ready' ? 'success' : runtimeState === 'closed' || runtimeState === 'error' ? 'warning' : 'default'}
-          text={runtimeLabel}
-          data-testid="agent-data-runtime"
-          data-state={runtimeState}
-        />
-        <Button type="text" aria-label="刷新 Agent 数据" title="刷新 Agent 数据" icon={<RefreshCw size={15} />} disabled={!visible || refreshing} onClick={() => { void refreshResources(); void monitor.refresh(); }} />
-      </div>
-    </header>
-    {status.error ? <Alert type="error" showIcon title={`运行时：${status.error}`} /> : null}
     <Tabs
       id="agent-data"
       activeKey={tab}
       onChange={(key) => selectTab(key as AgentDataTab)}
       className={styles.bodyTabs}
-      tabBarStyle={{ paddingInline: 24 }}
+      tabBarExtraContent={{
+        left: <div className={styles.brand}><i aria-hidden="true"><BrainCircuit size={14} /></i><span>Agent 数据</span></div>,
+        right: <div className={styles.runtime}>
+          <Badge status={runtimeState === 'ready' ? 'success' : runtimeState === 'closed' || runtimeState === 'error' ? 'warning' : 'default'} text={runtimeLabel} data-testid="agent-data-runtime" data-state={runtimeState} />
+          <Button type="text" aria-label="刷新 Agent 数据" title="刷新 Agent 数据" icon={<RefreshCw size={15} />} disabled={!visible || refreshing} onClick={refreshAll} />
+        </div>,
+      }}
       items={tabs.map(({ id, label, Icon }) => ({
         key: id,
-        label: <><Icon size={14} /> {label}</>,
+        label: <span className={styles.tabLabel} title={label}><Icon size={14} aria-hidden="true" /><span data-tab-text>{label}</span>{badge(id)}</span>,
         forceRender: visited.has(id),
-        children: <div className={styles.panel}>{visited.has(id) ? panelContent(id) : null}</div>,
+        children: <div className={styles.panel}>
+          {id === tab && status.error ? <PageBanner type="error" items={[{ source: '运行时', message: status.error }]} /> : null}
+          {visited.has(id) ? panelContent(id) : null}
+        </div>,
       }))}
     />
   </section>;

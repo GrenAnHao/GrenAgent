@@ -10,6 +10,8 @@ interface WikiPanelProps {
   /** 保留一期调用兼容；知识库导航不跟随聊天项目。 */
   initialProject?: string;
   visible?: boolean;
+  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  refreshToken?: number;
   navigation?: Extract<ResourceNavigation, { view: 'wiki' }>;
   navigationRequest?: number;
   onOpenTask?: (id: string) => void;

@@ -16,6 +16,8 @@ interface JobsPanelProps {
   onNavigate?: (navigation: ResourceNavigation) => void;
   selectedJobId?: string; selectedTask?: TaskRef; selectionRequest?: number;
   visible?: boolean; dataReady?: boolean;
+  /** 统一刷新令牌；本任务仅声明以保持类型正确，面板刷新逻辑在任务 7 接入。 */
+  refreshToken?: number;
   nextCursor?: string; onLoadMore?: () => Promise<void> | void; loadMore?: () => Promise<void> | void; loadingMore?: boolean;
 }
 const deletionWarning = '删除后不可恢复；仅删除任务记录，不会影响 Wiki、索引或审计记录。';

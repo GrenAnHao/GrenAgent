@@ -11,53 +11,20 @@ export const styles = createStaticStyles(({ css }) => ({
     min-width: 0;
     color: ${cssVar.colorText};
     background: ${cssVar.colorBgLayout};
+    container: agent-data / inline-size;
   `,
-  header: css`
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 52px;
-    padding: 10px 24px 0;
-    background: ${cssVar.colorBgContainer};
+  brand: css`
+    display: flex; align-items: center; gap: 8px; margin-inline: 20px 16px; white-space: nowrap; font-weight: 600;
+    > i { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; font-style: normal;
+      background: ${cssVar.colorPrimaryBg}; color: ${cssVar.colorPrimary}; }
+    @container agent-data (max-width: 759px) { > span { display: none; } }
   `,
-  identity: css`
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  `,
-  icon: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    flex: 0 0 auto;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorPrimaryBg};
-    color: ${cssVar.colorPrimary};
-  `,
-  title: css`
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.3;
-  `,
-  subtitle: css`
-    overflow: hidden;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
-    line-height: 1.4;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  `,
-  headerActions: css`
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
+  runtime: css`display: flex; align-items: center; gap: 8px; margin-inline-end: 20px; white-space: nowrap; color: ${cssVar.colorTextTertiary}; font-size: 12px;`,
+  tabLabel: css`
+    display: inline-flex; align-items: center; gap: 6px;
+    @container agent-data (max-width: 759px) {
+      [data-tab-text] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    }
   `,
   /**
    * Tabs 作为主体容器：nav 在顶，内容区撑满剩余高度，滚动发生在 panel 内。
@@ -69,6 +36,7 @@ export const styles = createStaticStyles(({ css }) => ({
     min-height: 0;
     display: flex;
     flex-direction: column;
+    & > .ant-tabs-nav { margin: 0; min-height: 48px; background: ${cssVar.colorBgContainer}; }
     & > .ant-tabs-body-holder { flex: 1; min-height: 0; overflow: hidden; }
     & > .ant-tabs-body-holder > .ant-tabs-body { height: 100%; }
     & > .ant-tabs-body-holder > .ant-tabs-body > .ant-tabs-content { height: 100%; }
