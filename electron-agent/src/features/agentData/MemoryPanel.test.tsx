@@ -348,4 +348,16 @@ describe('MemoryPanel', () => {
     rerender(<MemoryPanel userId="u" refreshToken={1} />);
     await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenCalledTimes(2));
   });
+  it('merges the moved-level and out-of-filter notices when a cross-level save leaves the project filter', async () => {
+    vi.mocked(agentDataApi.memory.create).mockResolvedValue({ ...memoryRecord, id: 'created', level: 1, scope: 'global', origin: 'manual' });
+    render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');
+    await pickSelectOption('项目范围', 'alpha');
+    fireEvent.click(screen.getByRole('button', { name: '新增记忆' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('记忆正文'), { target: { value: '跨层记忆' } });
+    await pickSelectOption('归属范围', '全局');
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记忆' }));
+    expect(await screen.findByText('已保存，已移到 L1，但当前筛选不包含这条记忆。')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /L1/ })).toBeChecked();
+  });
 });

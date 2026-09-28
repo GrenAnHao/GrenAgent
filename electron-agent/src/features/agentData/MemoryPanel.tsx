@@ -178,10 +178,11 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   const openCreate = () => { setEditor({ userId, trigger: 'new' }); setNotice(undefined); };
   const saved = (record: ManagedMemoryRecord) => {
     const inScope = filter.scope === 'all' || (filter.scope === 'global' ? record.scope === 'global' : record.scope === 'project' && !!record.sourceProjectId && pathsEquivalent(record.sourceProjectId, filter.projectId));
-    const matches = inScope && level === record.level && (!query.trim() || record.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
     const moved = record.level !== level && group !== 'conversation';
+    // 层级由 moved 决定（会切到 record.level），matches 只判归属范围与搜索。
+    const matches = inScope && (moved || level === record.level) && (!query.trim() || record.content.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
     if (moved) setGroup(String(record.level) as Group);
-    setNotice(moved ? `已保存，已移到 L${record.level}` : matches ? '记忆已保存。' : '已保存，但当前筛选不包含这条记忆。');
+    setNotice(moved ? (matches ? `已保存，已移到 L${record.level}` : `已保存，已移到 L${record.level}，但当前筛选不包含这条记忆。`) : matches ? '记忆已保存。' : '已保存，但当前筛选不包含这条记忆。');
     const next = { userId, kind: 'memory' as const, id: record.id };
     setSelected(next); setDetail({ key: selectionKey(next), value: { kind: 'memory', record }, loading: false });
     setFocusRequest({ kind: editor?.trigger ?? 'new' }); setEditor(undefined); refresh();
