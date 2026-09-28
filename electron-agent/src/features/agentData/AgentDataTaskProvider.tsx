@@ -14,6 +14,8 @@ interface AgentDataTaskMonitor {
   refresh(): Promise<void>;
   track(ref: string | TaskRef): void;
   watchedTaskVersion: number;
+  /** 服务端活动任务计数（含系统任务）；未获取时为 undefined。 */
+  activeCount?: number;
 }
 
 interface MonitorRuntime {
@@ -56,6 +58,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [watchedTaskVersion, setWatchedTaskVersion] = useState(0);
+  const [serverActiveCount, setServerActiveCount] = useState<number>();
   const runtime = useRef<MonitorRuntime>({
     visible, view: activeView, focused: false, mounted: false, awake: false, generation: 0,
     tasks: [], pages: 1, moreRequested: false, tracked: new Map(), settled: new Set(), refreshAgain: false,
@@ -135,6 +138,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
           state.pages = Math.max(1, fetched);
           state.nextCursor = cursor;
           setTasks(unique); setNextCursor(cursor);
+          setServerActiveCount(activeCount !== undefined && Number.isSafeInteger(activeCount) && activeCount >= 0 ? activeCount : undefined);
           setJobs(nextJobs);
           setLoaded(true);
           setError(undefined);
@@ -213,7 +217,7 @@ export function AgentDataTaskProvider({ visible, activeView, children }: { visib
     await refresh();
   }, [refresh]);
 
-  return <Context.Provider value={{ jobs, tasks, nextCursor, loadingMore, loadMore, error, loading, loaded, refresh, track, watchedTaskVersion }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ jobs, tasks, nextCursor, loadingMore, loadMore, error, loading, loaded, refresh, track, watchedTaskVersion, activeCount: serverActiveCount }}>{children}</Context.Provider>;
 }
 
 function projectJob(task: TaskView): AgentJob {

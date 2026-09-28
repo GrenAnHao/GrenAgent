@@ -35,6 +35,7 @@ function Consumer({ name = 'first' }: { name?: string }) {
     <span>{value.jobs.map(({ id, state }) => `${id}:${state}`).join(',')}</span>
     <span>{value.error}</span>
     <output>{value.watchedTaskVersion}</output>
+    <data value={String(value.activeCount ?? '')} data-testid={`${name}-active`} />
   </div>;
 }
 function tree(view: AgentDataTab = 'overview', visible = true, two = false) {
@@ -67,6 +68,13 @@ afterEach(() => {
 });
 
 describe('AgentDataTaskProvider', () => {
+  it('exposes the server active count including background tasks', async () => {
+    vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [asTask(job())], activeCount: 3 });
+    render(tree('overview'));
+    await flush();
+    expect(screen.getByTestId('first-active').getAttribute('value')).toBe('3');
+  });
+
   it('stops polling paged history but observes active work beyond the loaded page', async () => {
     vi.mocked(agentDataApi.tasks.list).mockResolvedValue({ items: [asTask(job('history', 'completed'))], nextCursor: 'more', activeCount: 0 });
     render(tree('jobs')); await flush(); await tick(6000);
