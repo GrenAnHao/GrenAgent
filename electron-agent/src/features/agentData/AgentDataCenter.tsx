@@ -115,7 +115,7 @@ function AgentDataContent({ userId, initialProject, visible, tab, onSelectTab, o
     }
   }
 
-  const refreshing = status.loading || memory.loading || workbench.loading;
+  const refreshing = status.loading || memory.loading || workbench.loading || libraries.loading || codeProjects.loading;
   const runtimeState = status.error ? 'error' : status.data?.state ?? 'unknown';
   let runtimeLabel = status.loading ? '连接中' : '未获取';
   if (status.data) runtimeLabel = status.data.state === 'closed' ? '已关闭' : `Runtime v${status.data.version}`;
