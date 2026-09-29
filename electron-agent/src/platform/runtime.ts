@@ -11,6 +11,8 @@ export interface GrenWindowApi {
   toggleMaximize(): Promise<void>;
   isMaximized(): Promise<boolean>;
   close(): Promise<void>;
+  /** 原生窗口底色（窗口出现到首帧之间、resize 露出处），主进程会记住给下次启动用。 */
+  setBackgroundColor(color: string): Promise<void>;
   onResized(handler: () => void): Promise<UnlistenFn>;
 }
 
@@ -63,6 +65,7 @@ const browserPreviewBridge: GrenRuntimeBridge = {
     toggleMaximize: async () => {},
     isMaximized: async () => false,
     close: async () => {},
+    setBackgroundColor: async () => {},
     onResized: async () => () => {},
   },
   webview: {
@@ -130,6 +133,7 @@ export function getCurrentWindow(): GrenWindowApi {
     toggleMaximize: async () => {},
     isMaximized: async () => false,
     close: async () => {},
+    setBackgroundColor: async () => {},
     onResized: async () => () => {},
   };
 }

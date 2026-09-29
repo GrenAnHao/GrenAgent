@@ -1,5 +1,6 @@
 import { useLayoutEffect } from 'react';
 import { useTheme } from 'antd-style';
+import { getCurrentWindow } from '../platform/runtime';
 import { useFontSizeSync } from '../theme/useFontSizeSync';
 
 /**
@@ -24,6 +25,15 @@ export function ThemeBridge() {
     // 让 --ant-* 在根元素上就有定义，全树（含非 antd 元素）都能继承到当前明暗的真实值。
     document.documentElement.classList.add(ANTD_CSS_VAR_KEY);
     document.documentElement.dataset.theme = theme.appearance;
+    // 原生窗口底色对齐当前明暗下的首屏底色（index.html 按 data-theme 切换的 --boot-bg），主进程记下给下次
+    // 启动的窗口用：窗口出现到首帧画出之间（约 0.5s）露出的是它，不对齐的话浅色主题启动会先闪一下深色。
+    const bootBg = getComputedStyle(document.documentElement).getPropertyValue('--boot-bg').trim();
+    // window.gren 由 preload 暴露：dev 下渲染层热更新、preload 需重启 Electron 进程才重建，两者会版本错配——
+    // 老 preload 没有 setBackgroundColor。缺了就跳过（重启后自然生效），不要让 layout effect 抛错拖垮整棵树。
+    const win = getCurrentWindow();
+    if (bootBg && typeof win.setBackgroundColor === 'function') {
+      win.setBackgroundColor(bootBg).catch((error: unknown) => console.warn('[GrenAgent] 同步窗口底色失败：', error));
+    }
     // html 与 body 都要接管：index.html 为首屏骨架把 `html, body` 写死成 #0b0d12，只改 body
     // 的话 <html> 在亮色主题下仍是深色底，会在 body 未覆盖处（首帧、窗口 resize、overscroll）
     // 露出深色。

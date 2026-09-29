@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('gren', {
     toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
     isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.windowIsMaximized),
     close: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
+    setBackgroundColor: (color: string) => ipcRenderer.invoke(IPC_CHANNELS.windowSetBackground, color),
     onResized: (handler: () => void) => subscribe('window-resized', () => handler()),
   },
   webview: {

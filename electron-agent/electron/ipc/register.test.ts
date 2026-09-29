@@ -288,6 +288,21 @@ describe('registerIpcHandlers', () => {
     expect(window.unmaximize).toHaveBeenCalledOnce();
   });
 
+  it('sets the owner window background and remembers it for the next launch', async () => {
+    const window = { setBackgroundColor: vi.fn() };
+    const windowBackground = { save: vi.fn().mockResolvedValue(undefined) };
+    const event = { sender: { getOwnerBrowserWindow: () => window } };
+    registerIpcHandlers({ windowBackground: windowBackground as never });
+
+    await handler(IPC_CHANNELS.windowSetBackground)(event, '#ffffff');
+    expect(window.setBackgroundColor).toHaveBeenCalledWith('#ffffff');
+    expect(windowBackground.save).toHaveBeenCalledWith('#ffffff');
+
+    await expect(handler(IPC_CHANNELS.windowSetBackground)(event, 'url(evil)')).rejects.toThrow();
+    expect(window.setBackgroundColor).toHaveBeenCalledOnce();
+    expect(windowBackground.save).toHaveBeenCalledOnce();
+  });
+
   it('enhance_prompt 从 onChunk.__grenChannelId 推 delta，abort 调 service.abort', async () => {
     const run = vi.fn(async (_input: unknown, emit: (chunk: string) => void) => {
       emit('chunk-1');

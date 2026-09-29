@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { dismissBootSplash } from '../lib/bootSplash';
 
 interface RootErrorBoundaryProps {
   children: ReactNode;
@@ -9,8 +10,9 @@ interface RootErrorBoundaryState {
 }
 
 /**
- * 应用根错误边界：任何渲染期崩溃都在此兜住，显示可读错误 + 重载按钮，
- * 而不是让 index.html 的静态首屏（boot-splash）永久停在加载态。同时打日志，
+ * 应用根错误边界：任何渲染期崩溃都在此兜住，显示可读错误 + 重载按钮。
+ * index.html 的静态首屏（boot-splash）在 #root 之外，不会被错误界面替换，这里要主动收起，
+ * 否则它的整屏拖拽区压在错误界面下，「重新加载」按钮点不动。同时打日志，
  * 便于在 devtools / 启动终端看到真实堆栈。
  */
 export class RootErrorBoundary extends Component<RootErrorBoundaryProps, RootErrorBoundaryState> {
@@ -21,6 +23,7 @@ export class RootErrorBoundary extends Component<RootErrorBoundaryProps, RootErr
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    dismissBootSplash();
     console.error('[GrenAgent] 应用渲染崩溃：', error, info.componentStack);
   }
 

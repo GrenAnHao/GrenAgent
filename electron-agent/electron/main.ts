@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
 import { browserWindowOptions, resolveAppIcon, resolveRendererHtml } from "./mainConfig";
+import { WindowBackgroundStore } from "./app/windowBackground";
 import { SettingsService } from "./app/settingsService";
 import { McpPolicyService } from "./app/mcpPolicyService";
 import { McpConfigService } from "./app/mcpConfigService";
@@ -46,9 +47,11 @@ import { runHostOneshot } from "./agent/hostOneshotAdapter";
 import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
 import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
 
-export function createWindow() {
+/** backgroundColor：上次运行时按明暗记下的底色，没有就用 browserWindowOptions 的默认深色。 */
+export function createWindow(backgroundColor?: string) {
   const window = new BrowserWindow({
     ...browserWindowOptions,
+    ...(backgroundColor ? { backgroundColor } : {}),
     icon: resolveAppIcon(app.isPackaged, app.getAppPath(), __dirname),
   });
   attachWebviewSecurity(window.webContents);
@@ -70,6 +73,7 @@ if (!process.env.VITEST) {
       join(app.getPath('appData'), 'com.rxstudio.grenagent'),
     ].filter((dir) => dir !== app.getPath('userData')));
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
+    const windowBackground = new WindowBackgroundStore(app.getPath('userData'));
     let piRuntime: PiRuntimeService | undefined;
     let agentData: AgentDataService;
     const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
@@ -257,6 +261,7 @@ if (!process.env.VITEST) {
       enhancePrompt,
       permissions,
       plugins,
+      windowBackground,
       // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。
       dev: app.isPackaged ? undefined : new DevService(),
     });
@@ -283,7 +288,7 @@ if (!process.env.VITEST) {
         app.quit();
       });
     });
-    createWindow();
+    createWindow(windowBackground.read());
   });
   app.on("window-all-closed", () => app.quit());
 }

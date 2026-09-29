@@ -22,6 +22,7 @@ import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
 import type { PiPackageService } from '../app/piPackageService';
+import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -51,6 +52,8 @@ export interface IpcServices {
   permissions?: PermissionManager;
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
   piPackages?: PiPackageService;
+  /** 记住原生窗口底色，供下次启动建窗口时使用。 */
+  windowBackground?: Pick<WindowBackgroundStore, 'save'>;
   /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
   dev?: DevService;
 }
@@ -92,6 +95,11 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   });
   ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
   ipcMain.handle(IPC_CHANNELS.windowClose, (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.handle(IPC_CHANNELS.windowSetBackground, async (event, color: unknown) => {
+    if (!isHexColor(color)) throw new Error('backgroundColor must be a hex color');
+    BrowserWindow.fromWebContents(event.sender)?.setBackgroundColor(color);
+    await services.windowBackground?.save(color);
+  });
 
   if (services.settings) registerSettingsCommands(services.settings);
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);

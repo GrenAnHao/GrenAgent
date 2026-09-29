@@ -23,7 +23,7 @@ import { RightPanelShell, SidebarShell, TerminalShell } from './features/layout/
 import { ModuleRail } from './features/layout/ModuleRail';
 import { ModuleContainer } from './features/workspace/ModuleContainer';
 import { useModuleStore } from './stores/moduleStore';
-import { FullscreenLoading } from './components/FullscreenLoading';
+import { dismissBootSplash } from './lib/bootSplash';
 import { onPiEvent, pi, type OpenWorkspaceResult } from './lib/pi';
 import { readUiHistoryForSession, sessionKeyFromPath } from './lib/uiHistory';
 import { pickDirectory } from './lib/dialog';
@@ -266,6 +266,11 @@ const Workspace = memo(function Workspace() {
   const { store, workspace, setWorkspaceReady, appBooted } = useAgentStoreContext();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const prevWorkspaceRef = useRef(workspace);
+
+  // 冷启动加载页是 index.html 的静态首屏，首个对话就绪后收起。
+  useEffect(() => {
+    if (appBooted) dismissBootSplash();
+  }, [appBooted]);
 
   // 切换工作区：dispose 旧终端（TerminalBody 卸载会停 shell）、终端重置为 1 个 idle，page 结构保留。
   // 同时把主列视图重置回「对话」，避免带着上个项目的工具面板（检查点/审查等）切到新项目看到错配内容。
@@ -793,7 +798,6 @@ const Workspace = memo(function Workspace() {
           />
         </Flexbox>
       </Flexbox>
-      <FullscreenLoading visible={!appBooted} />
     </Flexbox>
   );
 });

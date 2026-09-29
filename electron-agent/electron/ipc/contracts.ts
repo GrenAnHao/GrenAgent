@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   windowToggleMaximize: 'gren:window:toggle-maximize',
   windowIsMaximized: 'gren:window:is-maximized',
   windowClose: 'gren:window:close',
+  windowSetBackground: 'gren:window:set-background',
   eventPrefix: 'gren:event:',
 } as const;
 
