@@ -1,7 +1,9 @@
 import { execSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
+import { authProviderError, authProviderName } from "./oauthRules.js";
 
 export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+export type McpConfigSource = "desktop" | "global" | "project" | "extension";
 
 const EXPOSURES = new Set<McpExposure>(["codemode", "deferred", "direct", "hidden"]);
 
@@ -21,12 +23,16 @@ export interface McpMergeServer {
   timeout?: number;
   oauth?: unknown;
   auth?: unknown;
+  /** 这条服务器来自哪一层。项目层不能使用 auth.provider。 */
+  source?: McpConfigSource;
 }
 
 export interface McpMergeLayersInput {
   desktop: McpMergeServer[];
   global: McpMergeServer[];
   project: McpMergeServer[];
+  /** 扩展登记。同名时文件层覆盖它。缺省没有。 */
+  extension?: McpMergeServer[];
   globalDisabled: string[];
   projectDisabled: string[];
   globalAutoEnableCodemode: boolean | undefined;
@@ -64,8 +70,9 @@ export function normalizeExposure(value: unknown): McpExposure | undefined {
 export function mergeMcpLayers(input: McpMergeLayersInput): McpMergeResult {
   const map = new Map<string, McpMergeServer>();
   const errors: string[] = [];
-  for (const entry of input.desktop) map.set(entry.name, { ...entry });
-  for (const entry of input.global) map.set(entry.name, { ...entry });
+  for (const entry of input.extension ?? []) map.set(entry.name, { ...entry, source: "extension" });
+  for (const entry of input.desktop) map.set(entry.name, { ...entry, source: "desktop" });
+  for (const entry of input.global) map.set(entry.name, { ...entry, source: "global" });
   for (const entry of input.project) applyProjectEntry(map, entry, errors);
 
   const disabled = new Set([...input.globalDisabled, ...input.projectDisabled]);
@@ -80,6 +87,14 @@ export function mergeMcpLayers(input: McpMergeLayersInput): McpMergeResult {
     if (exposure === undefined) {
       errors.push(`服务器 ${server.name} 的 exposure 无效`);
       continue;
+    }
+    const provider = authProviderName(server.auth);
+    if (provider) {
+      const error = authProviderError({ source: server.source ?? "project", provider, url: server.url });
+      if (error) {
+        errors.push(`服务器 ${server.name}：${error}`);
+        continue;
+      }
     }
     servers.push({ ...server, exposure });
   }
@@ -124,7 +139,7 @@ export function expandConfigValues<T extends ExpandConfigInput>(config: T, conte
 
 function applyProjectEntry(map: Map<string, McpMergeServer>, entry: McpMergeServer, errors: string[]): void {
   if (entry.command !== undefined || entry.url !== undefined) {
-    map.set(entry.name, { ...entry });
+    map.set(entry.name, { ...entry, source: "project" });
     return;
   }
   const existing = map.get(entry.name);

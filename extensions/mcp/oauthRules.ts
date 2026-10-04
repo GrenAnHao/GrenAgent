@@ -99,3 +99,28 @@ function metadataUrlError(value: string): string | undefined {
 export function credentialKey(name: string, url: string): string {
   return JSON.stringify([name, url]);
 }
+
+/** `auth: { provider }` 里的供应商 id。不是这种形状则没有。 */
+export function authProviderName(auth: unknown): string | undefined {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return undefined;
+  const provider = (auth as { provider?: unknown }).provider;
+  return typeof provider === "string" && provider.length > 0 ? provider : undefined;
+}
+
+/**
+ * 接受则返回 undefined。
+ * 项目级 mcp.json 不能声明 auth.provider。
+ * 其余来源的 URL 必须是 https，或者 http 落在本机回环上。
+ */
+export function authProviderError(input: { source: string; provider: string; url?: string }): string | undefined {
+  if (input.source === "project") return "项目级 mcp.json 不能使用 auth.provider";
+  let url: URL | undefined;
+  try {
+    url = input.url ? new URL(input.url) : undefined;
+  } catch {
+    url = undefined;
+  }
+  if (url?.protocol === "https:") return undefined;
+  if (url?.protocol === "http:" && isLoopbackHost(url.hostname)) return undefined;
+  return "auth.provider 需要 https，或本机回环上的 http";
+}

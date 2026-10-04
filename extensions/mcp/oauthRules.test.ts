@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  authProviderError,
   authorizationIssMatches,
   callbackUrl,
   credentialKey,
@@ -77,6 +78,18 @@ describe("oauthConfigError", () => {
     expect(oauthConfigError({ authServerMetadataUrl: "http://127.0.0.1:9/metadata" })).toBeUndefined();
     expect(oauthConfigError({ authServerMetadataUrl: "http://localhost/metadata" })).toBeUndefined();
     expect(oauthConfigError({ authServerMetadataUrl: "http://[::1]/metadata" })).toBeUndefined();
+  });
+});
+
+describe("authProviderError", () => {
+  it("rejects auth.provider from a project file and from plain http", () => {
+    expect(authProviderError({ source: "project", provider: "openai", url: "https://x/mcp" })).toMatch(/项目/);
+    expect(authProviderError({ source: "global", provider: "openai", url: "http://example.com/mcp" })).toMatch(/https/);
+    expect(authProviderError({ source: "global", provider: "openai", url: "http://127.0.0.1/mcp" })).toBeUndefined();
+    expect(authProviderError({ source: "desktop", provider: "openai", url: "https://x/mcp" })).toBeUndefined();
+    expect(authProviderError({ source: "global", provider: "openai", url: "http://localhost/mcp" })).toBeUndefined();
+    expect(authProviderError({ source: "global", provider: "openai", url: "http://[::1]/mcp" })).toBeUndefined();
+    expect(authProviderError({ source: "extension", provider: "openai", url: "https://x/mcp" })).toBeUndefined();
   });
 });
 

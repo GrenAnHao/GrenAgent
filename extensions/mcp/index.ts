@@ -191,11 +191,42 @@ function lastServerSummary(sessionManager: { buildContextEntries?: () => readonl
   return undefined;
 }
 
+/** ModelRuntime.getAuth 暴露的当前供应商登录态。只取 apiKey，和 ModelRegistry.getApiKeyForProvider 一致。 */
+interface ProviderTokenRuntime {
+  getAuth(providerId: string): Promise<{ auth?: { apiKey?: string } } | undefined>;
+}
+
+function providerRuntimeOf(ctx: unknown): ProviderTokenRuntime | undefined {
+  if (!ctx || typeof ctx !== "object") return undefined;
+  const registry = (ctx as { modelRegistry?: unknown }).modelRegistry;
+  if (!registry || typeof registry !== "object") return undefined;
+  const runtime = (registry as { runtime?: unknown }).runtime;
+  if (!runtime || typeof runtime !== "object") return undefined;
+  if (typeof (runtime as { getAuth?: unknown }).getAuth !== "function") return undefined;
+  return runtime as ProviderTokenRuntime;
+}
+
+async function providerTokenFromRuntime(runtime: ProviderTokenRuntime, provider: string): Promise<string | undefined> {
+  try {
+    const key = (await runtime.getAuth(provider))?.auth?.apiKey;
+    return typeof key === "string" && key.length > 0 ? key : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlPort = desktopControl()): void {
   let alive = false;
   let unsub: (() => void) | undefined;
+  let tokenRuntime: ProviderTokenRuntime | undefined;
 
   pi.on("session_start", (_event, ctx) => {
+    const runtime = providerRuntimeOf(ctx);
+    // 进程内共享同一份 ModelRuntime。后来的会话拿到同一对象时不换回调。
+    if (runtime && runtime !== tokenRuntime) {
+      tokenRuntime = runtime;
+      mgr.getProviderToken = (provider) => providerTokenFromRuntime(runtime, provider);
+    }
     mgr.init();
     alive = true;
     const render = (snap: McpSnapshot): void => {

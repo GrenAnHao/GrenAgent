@@ -133,6 +133,41 @@ describe("createManager", () => {
     expect(mgr.snapshot().autoEnableCodemode).toBe(true);
   });
 
+  it("fails a remote auth.provider server when the login token is missing and does not connect", async () => {
+    const connect = vi.fn(async () => fakeClient([]));
+    const mgr = createManager({
+      connect,
+      getProviderToken: async () => undefined,
+      readServers: () => [{ name: "vendor", transport: "http", url: "https://x/mcp", auth: { provider: "openai" } }],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("vendor")?.status === "failed");
+    expect(mgr.snapshot().servers.get("vendor")).toMatchObject({ status: "failed", error: "没有供应商登录态", auth: "provider" });
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("calls the current getProviderToken when connecting a provider server", async () => {
+    const seen: string[] = [];
+    const connect = vi.fn(async (_server: McpServerConfig, hooks?: { getProviderToken?: (provider: string) => Promise<string | undefined> }) => {
+      seen.push((await hooks?.getProviderToken?.("openai")) ?? "");
+      return fakeClient([{ name: "alpha" }]);
+    });
+    const mgr = createManager({
+      connect,
+      getProviderToken: async () => "tok-1",
+      readServers: () => [{ name: "vendor", transport: "http", url: "https://x/mcp", auth: { provider: "openai" } }],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("vendor")?.status === "connected");
+    mgr.getProviderToken = async () => "tok-2";
+    await mgr.reloadServer("vendor");
+    expect(seen).toEqual(["tok-1", "tok-2"]);
+  });
+
   it("subscribe delivers snapshots and unsub stops them", async () => {
     const connect = async () => fakeClient([{ name: "alpha" }]);
     const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });

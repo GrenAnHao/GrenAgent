@@ -282,6 +282,29 @@ describe("bind", () => {
     expect(control.request).toHaveBeenCalledWith('mcp.state.publish', { workspace: 'C:/work', servers: [{ name: 'a', status: 'connected', tools: 1, toolNames: ['mcp__a__x'], exposure: 'codemode', auth: 'none' }] });
   });
 
+  it("reads the provider token from the shared runtime and does not replace that callback", async () => {
+    const pi = fakePiWithOn();
+    const mgr = fakeBindMgr(snap({ a: { status: "connected", tools: ["x"] } }));
+    bind(pi as never, mgr as never);
+    const runtime = {
+      getAuth: vi.fn(async () => ({ auth: { apiKey: "tok-1" } })),
+    };
+    pi.fire("session_start", {}, { hasUI: false, modelRegistry: { runtime } });
+    const read = mgr.getProviderToken as (provider: string) => Promise<string | undefined>;
+    expect(await read("openai")).toBe("tok-1");
+
+    runtime.getAuth.mockResolvedValue({ auth: { apiKey: "tok-2" } });
+    pi.fire("session_start", {}, { hasUI: false, modelRegistry: { runtime } });
+    expect(mgr.getProviderToken).toBe(read);
+    expect(await read("openai")).toBe("tok-2");
+
+    const other = { getAuth: vi.fn(async () => ({ auth: { apiKey: "other" } })) };
+    pi.fire("session_start", {}, { hasUI: false, modelRegistry: { runtime: other } });
+    expect(mgr.getProviderToken).not.toBe(read);
+    expect(await (mgr.getProviderToken as typeof read)("anthropic")).toBe("other");
+    expect(other.getAuth).toHaveBeenCalledWith("anthropic");
+  });
+
   it("before_agent_start waits only for direct servers and appends the summary when it changes", async () => {
     let release: () => void = () => {};
     const direct = new Promise<void>((resolve) => { release = resolve; });

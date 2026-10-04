@@ -12,6 +12,7 @@ import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { remoteTransportKind, type McpServerConfig } from "./config.js";
 import {
+  authProviderName,
   authorizationIssMatches,
   callbackUrl,
   credentialKey,
@@ -27,6 +28,8 @@ export interface OAuthConnectHooks {
   onLoginUrl?: (url: string) => void;
   /** 测试或宿主可以替换系统浏览器。缺省用操作系统打开。 */
   openLoginUrl?: (url: string) => Promise<void>;
+  /** 每次 HTTP 请求现读供应商登录态。管理器注入，传输层不保存 pi 会话。 */
+  getProviderToken?: (provider: string) => Promise<string | undefined> | string | undefined;
 }
 
 export interface McpTransportAuth {
@@ -89,16 +92,36 @@ export function createMcpTransport(s: McpServerConfig, authOptions?: McpTranspor
   return new StreamableHTTPClientTransport(new URL(s.url), opts);
 }
 
+/** 每次请求现读 token，并写成 Bearer。没有 token 时不发出请求。 */
+export function createProviderTokenFetch(
+  getToken: () => Promise<string | undefined> | string | undefined,
+  baseFetch: FetchLike = fetch,
+): FetchLike {
+  return async (input, init) => {
+    const token = await getToken();
+    if (!token) throw new Error("没有供应商登录态");
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    headers.set("Authorization", `Bearer ${token}`);
+    return baseFetch(input, { ...init, headers });
+  };
+}
+
 /**
  * HTTP / SSE 且配置了 oauth 时，走 SDK 的 `auth` 与 `OAuthClientProvider`。
  * 第一次连接若需要登录，会在浏览器回来之后先核对 iss，再交换 code，然后只再连一次。
  * 没有 oauth 时直接连，不额外包一层。
+ * 配置了 auth.provider 时，每次请求用 getProviderToken 的当前值做 Bearer，不走 OAuth。
  */
 export async function establishMcpConnection<T>(
   server: McpServerConfig,
   hooks: OAuthConnectHooks | undefined,
   connectTransport: (transport: Transport) => Promise<T>,
 ): Promise<T> {
+  const provider = authProviderName(server.auth);
+  if (provider && (server.transport === "http" || server.transport === "sse") && server.url) {
+    const fetchFn = createProviderTokenFetch(() => hooks?.getProviderToken?.(provider));
+    return connectTransport(createMcpTransport(server, { fetch: fetchFn }));
+  }
   const session = await startOAuthSession(server, hooks);
   if (!session) return connectTransport(createMcpTransport(server));
   try {

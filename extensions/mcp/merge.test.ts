@@ -45,6 +45,39 @@ describe("mergeMcpLayers", () => {
     expect(merged.autoEnableCodemode).toBe(false);
   });
 
+  it("tags each server with its source and drops illegal auth.provider entries", () => {
+    const http = (name: string, url: string, sourceAuth = true) => ({
+      name,
+      transport: "http" as const,
+      url,
+      ...(sourceAuth ? { auth: { provider: "openai" } } : {}),
+    });
+    const merged = mergeMcpLayers({
+      extension: [http("ext", "https://ext.example/mcp")],
+      desktop: [http("desk", "https://desk.example/mcp"), http("loop", "http://127.0.0.1/mcp")],
+      global: [http("plain", "http://example.com/mcp"), http("kept", "https://kept.example/mcp")],
+      project: [
+        http("proj", "https://proj.example/mcp"),
+        { name: "kept", exposure: "direct" },
+      ],
+      globalDisabled: [],
+      projectDisabled: [],
+      globalAutoEnableCodemode: undefined,
+      projectAutoEnableCodemode: undefined,
+    });
+    expect(merged.servers.map((s) => [s.name, s.source])).toEqual([
+      ["ext", "extension"],
+      ["desk", "desktop"],
+      ["loop", "desktop"],
+      ["kept", "global"],
+    ]);
+    expect(merged.servers.find((s) => s.name === "kept")?.exposure).toBe("direct");
+    expect(merged.errors).toEqual([
+      "服务器 plain：auth.provider 需要 https，或本机回环上的 http",
+      "服务器 proj：项目级 mcp.json 不能使用 auth.provider",
+    ]);
+  });
+
   it("records an error when a project override names an unknown server", () => {
     const merged = mergeMcpLayers({
       desktop: [],

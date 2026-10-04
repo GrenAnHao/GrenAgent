@@ -6,6 +6,7 @@ import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers, sanitize } from "./config.js";
 import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
+import { authProviderName } from "./oauthRules.js";
 import { establishMcpConnection, loginUrlOf, type OAuthConnectHooks } from "./transport.js";
 import { diffServers } from "./diff.js";
 import type { ProbeResult } from "./probe.js";
@@ -55,12 +56,16 @@ export interface McpClient {
   close(): Promise<void>;
 }
 
+export type GetProviderToken = (provider: string) => Promise<string | undefined> | string | undefined;
+
 export interface ManagerDeps {
   workspace?: string;
   connect?: (s: McpServerConfig, hooks?: OAuthConnectHooks) => Promise<McpClient>;
   readServers?: () => McpServerConfig[];
   watch?: (cb: () => void) => () => void;
   writeCache?: (name: string, r: ProbeResult) => void;
+  /** 测试可预置。正式路径由 bind() 在 init 之前写入。 */
+  getProviderToken?: GetProviderToken;
 }
 
 export interface McpManager {
@@ -78,6 +83,11 @@ export interface McpManager {
   closeAll(): void;
   /** 该服务器仍在连接时返回本次连接的 promise。已结束则没有。 */
   connectPromise(name: string): Promise<void> | undefined;
+  /**
+   * 现读供应商登录态。bind() 把它设成读取进程内那一份 ModelRuntime。
+   * 管理器只留这个函数，不留 pi 会话或运行时对象。
+   */
+  getProviderToken?: GetProviderToken;
 }
 
 const DEFAULT_CALL_TIMEOUT_SECONDS = 60;
@@ -226,13 +236,28 @@ function readWorkspaceMcp(workspace: string): { servers: McpServerConfig[]; auto
 }
 
 function classifyAuth(server: { oauth?: unknown; auth?: unknown }): McpAuthKind {
-  const auth = server.auth;
-  if (auth && typeof auth === "object" && !Array.isArray(auth)) {
-    const provider = (auth as { provider?: unknown }).provider;
-    if (typeof provider === "string" && provider.length > 0) return "provider";
-  }
+  if (authProviderName(server.auth)) return "provider";
   if (server.oauth !== undefined && server.oauth !== null) return "oauth";
   return "none";
+}
+
+const MISSING_PROVIDER_TOKEN = "没有供应商登录态";
+
+function usesProviderAuth(server: McpServerConfig): string | undefined {
+  const provider = authProviderName(server.auth);
+  if (!provider) return undefined;
+  if ((server.transport !== "http" && server.transport !== "sse") || !server.url) return undefined;
+  return provider;
+}
+
+async function readProviderToken(read: GetProviderToken | undefined, provider: string): Promise<string | undefined> {
+  if (!read) return undefined;
+  try {
+    const token = await read(provider);
+    return typeof token === "string" && token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function serverSnapshotMeta(server: McpServerConfig): Pick<ServerEntry, "exposure" | "toolExposure" | "description" | "auth" | "timeout"> {
@@ -333,6 +358,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       };
     });
   const writeCache = deps.writeCache ?? writeToolsCacheEntry;
+  let providerToken = deps.getProviderToken;
 
   const clients = new Map<string, McpClient>();
   const catalog = new Map<string, ServerEntry>();
@@ -377,7 +403,23 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     catalog.set(s.name, { status: "connecting", tools: [], ...meta });
     emit();
     try {
+      const provider = usesProviderAuth(s);
+      if (provider) {
+        const token = await readProviderToken(providerToken, provider);
+        if (generation.get(s.name) !== gen) return;
+        if (!token) {
+          catalog.set(s.name, { status: "failed", error: MISSING_PROVIDER_TOKEN, tools: [], ...meta });
+          try {
+            writeCache(s.name, { ok: false, toolNames: [], error: MISSING_PROVIDER_TOKEN });
+          } catch {
+            // best-effort 缓存
+          }
+          emit();
+          return;
+        }
+      }
       const client = await connect(s, {
+        getProviderToken: (name) => providerToken?.(name),
         onLoginUrl(url) {
           if (generation.get(s.name) !== gen) return;
           const current = catalog.get(s.name);
@@ -476,6 +518,12 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   };
 
   return {
+    get getProviderToken() {
+      return providerToken;
+    },
+    set getProviderToken(value) {
+      providerToken = value;
+    },
     init: start,
     async reloadServer(name) {
       if (!started) {
