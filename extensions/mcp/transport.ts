@@ -427,11 +427,12 @@ class FileOAuthProvider implements OAuthClientProvider {
   }
 }
 
-function createOAuthFetch(grantedScope: () => string | undefined): FetchLike {
+/** SDK 在 401 以及 403 + insufficient_scope 时从 WWW-Authenticate 读 scope，再发起登录。 */
+export function createOAuthFetch(grantedScope: () => string | undefined): FetchLike {
   return async (input, init) => {
     const response = await fetch(input, init);
     const www = response.headers.get("WWW-Authenticate");
-    if (response.status === 401 && www) {
+    if ((response.status === 401 || response.status === 403) && www) {
       const rewritten = rewriteInsufficientScope(www, grantedScope());
       if (rewritten !== www) {
         const headers = new Headers(response.headers);
