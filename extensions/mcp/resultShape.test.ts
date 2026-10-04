@@ -18,4 +18,20 @@ describe("shapeMcpResult", () => {
     expect(shaped.content).toEqual([{ type: "text", text: "" }]);
     expect(shaped.isError).toBe(false);
   });
+
+  it("keeps image blocks when there is no text", () => {
+    const image = { type: "image", data: "abc", mimeType: "image/png" };
+    const shaped = shapeMcpResult({ content: [image] });
+    expect(shaped.isError).toBe(false);
+    expect(shaped.content).toEqual([{ type: "text", text: "" }, image]);
+  });
+
+  it("keeps image blocks after a short text block", () => {
+    const image = { type: "image", data: "abc", mimeType: "image/png" };
+    const shaped = shapeMcpResult({ content: [{ type: "text", text: "ok" }, image] });
+    expect(shaped.content).toContainEqual(image);
+    expect(shaped.content.findIndex((b) => b.type === "image")).toBeGreaterThan(
+      shaped.content.findIndex((b) => b.type === "text"),
+    );
+  });
 });

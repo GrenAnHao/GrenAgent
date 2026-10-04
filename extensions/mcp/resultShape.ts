@@ -71,7 +71,7 @@ export function shapeMcpResult(raw: McpRawCallToolResult): ShapedMcpResult {
 
   if (textBlocks.length === 0) {
     return {
-      content: [{ type: "text", text: "" }],
+      content: [{ type: "text", text: "" }, ...nonTextBlocks],
       isError,
       structuredContent,
     };
