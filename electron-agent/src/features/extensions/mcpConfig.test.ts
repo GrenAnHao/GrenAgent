@@ -54,6 +54,23 @@ describe('mcpConfig', () => {
     expect(config).toEqual({ url: 'https://x', headers: { Authorization: 'Bearer abc' } });
   });
 
+  it('serializeForm keeps oauth and exposure when only the command changes', () => {
+    const form = configToForm('gh', {
+      command: 'npx',
+      args: ['-y', 'pkg'],
+      oauth: { clientId: 'abc' },
+      exposure: 'direct',
+    } as never);
+    const { name, config } = serializeForm({ ...form, command: 'node' });
+    expect(name).toBe('gh');
+    expect(config).toEqual({
+      command: 'node',
+      args: ['-y', 'pkg'],
+      oauth: { clientId: 'abc' },
+      exposure: 'direct',
+    });
+  });
+
   it('configToForm round-trips bearer auth back from headers', () => {
     const f = configToForm('r', { url: 'https://x', headers: { Authorization: 'Bearer abc', 'X-Y': '1' } });
     expect(f.type).toBe('remote');

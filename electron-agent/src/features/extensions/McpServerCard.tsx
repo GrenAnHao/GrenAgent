@@ -2,9 +2,15 @@ import { Segmented, Switch } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ChevronDown, ChevronRight, PencilLine, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import type { McpConfigScope } from '../../lib/pi';
+import { openUrl } from '../../platform/runtime';
+import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { transportOf, type McpConfig } from './mcpConfig';
 import { getToolPerm, shortToolName, type Perm } from './mcpPolicy';
-import type { McpConfigScope } from '../../lib/pi';
+
+type RuntimeStatus = 'connecting' | 'connected' | 'failed' | 'needs-login';
+type AuthLabel = 'none' | 'oauth' | 'provider';
 
 interface McpServerCardProps {
   name: string;
@@ -12,8 +18,11 @@ interface McpServerCardProps {
   enabled: boolean;
   scope?: McpConfigScope;
   cachedTools?: string[];
-  runtimeStatus?: 'connecting' | 'connected' | 'failed';
+  runtimeStatus?: RuntimeStatus;
   runtimeToolNames?: string[];
+  loginUrl?: string;
+  exposure?: string;
+  auth?: AuthLabel;
   probing?: boolean;
   probeError?: string;
   policyRaw?: Record<string, unknown>;
@@ -31,7 +40,8 @@ const PERM_OPTIONS = [
   { label: '禁用', value: 'disabled' },
 ];
 
-function statusText(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: McpServerCardProps['runtimeStatus']): string {
+function statusText(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: RuntimeStatus): string {
+  if (runtimeStatus === 'needs-login') return '需要登录';
   if (runtimeStatus === 'connecting') return '连接中…';
   if (runtimeStatus === 'failed') return '连接失败';
   if (runtimeStatus === 'connected') return count > 0 ? `${count} 工具` : '已连接';
@@ -41,8 +51,8 @@ function statusText(probing: boolean, probeError: string | undefined, count: num
   return '未探测';
 }
 
-function statusColor(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: McpServerCardProps['runtimeStatus']): string {
-  if (runtimeStatus === 'connecting') return cssVar.colorWarning;
+function statusColor(probing: boolean, probeError: string | undefined, count: number, runtimeStatus?: RuntimeStatus): string {
+  if (runtimeStatus === 'needs-login' || runtimeStatus === 'connecting') return cssVar.colorWarning;
   if (runtimeStatus === 'failed') return cssVar.colorError;
   if (runtimeStatus === 'connected') return cssVar.colorSuccess;
   if (probing) return cssVar.colorWarning;
@@ -93,6 +103,13 @@ const styles = createStaticStyles(({ css }) => ({
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
     text-transform: uppercase;
+  `,
+  authLabel: css`
+    padding: 1px 8px;
+    border-radius: 6px;
+    background: ${cssVar.colorFillTertiary};
+    color: ${cssVar.colorTextSecondary};
+    font-size: 11px;
   `,
   grow: css`
     flex: 1;
@@ -153,15 +170,105 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
+  loginRow: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
+    padding: 8px 14px;
+  `,
+  loginUrl: css`
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: ${cssVar.colorTextSecondary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  loginBtn: css`
+    flex: 0 0 auto;
+    padding: 2px 10px;
+    border: none;
+    border-radius: 6px;
+    background: ${cssVar.colorPrimary};
+    color: ${cssVar.colorBgContainer};
+    font-size: 12px;
+    cursor: pointer;
+  `,
+  copyBtn: css`
+    flex: 0 0 auto;
+    padding: 2px 10px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: 6px;
+    background: transparent;
+    color: ${cssVar.colorText};
+    font-size: 12px;
+    cursor: pointer;
+  `,
 }));
 
+function usePublishedServer(name: string): McpServerStatus | undefined {
+  const workspace = useOptionalAgentStoreContext()?.workspace ?? '';
+  return useMcpStatusStore((state) => {
+    const list = workspace ? (state.serversByWorkspace[workspace] ?? []) : state.servers;
+    return list.find((server) => server.name === name);
+  });
+}
+
+function textField(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+function configExposure(config: McpConfig): string | undefined {
+  return textField((config as { exposure?: unknown }).exposure);
+}
+
+function configAuth(config: McpConfig): AuthLabel | undefined {
+  const value = (config as { auth?: unknown }).auth;
+  return value === 'oauth' || value === 'provider' ? value : undefined;
+}
+
+function resolveStatus(raw: RuntimeStatus | undefined, loginUrl: string | undefined): RuntimeStatus | undefined {
+  if (raw === 'needs-login') return 'needs-login';
+  if (loginUrl && raw && raw !== 'connected') return 'needs-login';
+  return raw;
+}
+
+function authText(auth: AuthLabel | undefined): string | null {
+  if (auth === 'oauth') return 'OAuth';
+  if (auth === 'provider') return '供应商登录';
+  return null;
+}
+
 export function McpServerCard({
-  name, config, enabled, scope, cachedTools = [], runtimeStatus, runtimeToolNames, probing = false, probeError, policyRaw = {},
+  name, config, enabled, scope, cachedTools = [], runtimeStatus, runtimeToolNames, loginUrl, exposure, auth,
+  probing = false, probeError, policyRaw = {},
   onToggle, onEdit, onDelete, onReload, onPermChange, onOpenRules,
 }: McpServerCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const tools = runtimeToolNames ?? cachedTools;
-  const color = statusColor(probing, probeError, tools.length, runtimeStatus);
+  const [copyVisible, setCopyVisible] = useState(false);
+  const published = usePublishedServer(name);
+  const tools = runtimeToolNames ?? published?.toolNames ?? cachedTools;
+  const url = loginUrl ?? published?.loginUrl;
+  const shownExposure = exposure ?? published?.exposure ?? configExposure(config);
+  const shownAuth = auth ?? published?.auth ?? configAuth(config);
+  const status = resolveStatus(runtimeStatus ?? published?.status, url);
+  const color = statusColor(probing, probeError, tools.length, status);
+  const authLabel = authText(shownAuth);
+
+  const openLogin = () => {
+    if (!url) return;
+    void openUrl(url).then(
+      () => setCopyVisible(false),
+      () => setCopyVisible(true),
+    );
+  };
+  const copyLogin = () => {
+    if (!url || !navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(url).catch(() => {});
+  };
   return (
     <div className={styles.wrap} data-testid={`mcp-server-${name}`}>
       <div className={`${styles.card} ${enabled ? '' : styles.disabled}`}>
@@ -176,16 +283,21 @@ export function McpServerCard({
         <span className={styles.dot} style={{ background: color }} />
         <span className={styles.name}>{name}</span>
         <span className={styles.pill}>{transportOf(config)}</span>
+        {shownExposure ? <span className={styles.pill}>{shownExposure}</span> : null}
+        {authLabel ? <span className={styles.authLabel}>{authLabel}</span> : null}
         {scope ? <span className={styles.pill}>{scope === 'global' ? '全局' : scope === 'project' ? '项目' : '应用'}</span> : null}
         <span className={styles.grow} />
-        <span className={styles.status} style={{ color }}>{statusText(probing, probeError, tools.length, runtimeStatus)}</span>
+        <span className={styles.status} style={{ color }}>{statusText(probing, probeError, tools.length, status)}</span>
         <span className={styles.ops}>
+          {status === 'needs-login' && url ? (
+            <button type="button" className={styles.loginBtn} onClick={openLogin}>登录</button>
+          ) : null}
           <button
             type="button"
             className={styles.iconbtn}
             title="重载"
             data-testid={`mcp-reload-${name}`}
-            disabled={!enabled || probing || runtimeStatus === 'connecting'}
+            disabled={!enabled || probing || status === 'connecting'}
             onClick={onReload}
           >
             <RefreshCw size={14} className={probing ? styles.spin : undefined} />
@@ -199,6 +311,14 @@ export function McpServerCard({
           </button>
         </span>
       </div>
+      {status === 'needs-login' && url ? (
+        <div className={styles.loginRow}>
+          <span className={styles.loginUrl}>{url}</span>
+          {copyVisible ? (
+            <button type="button" className={styles.copyBtn} onClick={copyLogin}>复制</button>
+          ) : null}
+        </div>
+      ) : null}
       {expanded ? (
         <div className={styles.tools}>
           {tools.length === 0 ? (

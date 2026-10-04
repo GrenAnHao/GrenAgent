@@ -10,6 +10,7 @@ function snap(
     toolExposure?: Record<string, string>;
     description?: string;
     auth?: "none" | "oauth" | "provider";
+    loginUrl?: string;
   }>,
   options?: { autoEnableCodemode?: boolean },
 ): McpSnapshot {
@@ -25,6 +26,7 @@ function snap(
           ...(v.toolExposure ? { toolExposure: v.toolExposure } : {}),
           ...(v.description !== undefined ? { description: v.description } : {}),
           ...(v.auth ? { auth: v.auth } : {}),
+          ...(v.loginUrl ? { loginUrl: v.loginUrl } : {}),
         },
       ]),
     ),
@@ -72,6 +74,20 @@ describe("summary", () => {
       { name: "direct", status: "connected", tools: 1, toolNames: ["mcp__direct__x"], exposure: "direct", auth: "oauth" },
       { name: "vendor", status: "failed", tools: 0, toolNames: [], exposure: "codemode", auth: "provider" },
     ]);
+  });
+
+  it("includes loginUrl on the published summary when present", () => {
+    const out = summary(snap({
+      vendor: { status: "failed", tools: [], auth: "oauth", loginUrl: "https://auth.example/login" },
+      plain: { status: "connected", tools: ["x"] },
+    }));
+    expect(out[0]).toMatchObject({
+      name: "vendor",
+      exposure: "codemode",
+      auth: "oauth",
+      loginUrl: "https://auth.example/login",
+    });
+    expect(out[1]).not.toHaveProperty("loginUrl");
   });
 });
 

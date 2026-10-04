@@ -27,6 +27,7 @@ export interface ServerSummary {
   toolNames: string[];
   exposure: McpExposure;
   auth: McpAuthKind;
+  loginUrl?: string;
 }
 type McpToolDetails = { server: string; tool: string; error?: 'denied' | 'blocked' };
 
@@ -44,7 +45,7 @@ function summaryAuth(auth: string | undefined): McpAuthKind {
   return auth === "oauth" || auth === "provider" ? auth : "none";
 }
 
-// 每 server 的 status / 工具数 / 注册全名，加上 exposure 与 auth（权限面板依赖）。
+// 每 server 的 status / 工具数 / 注册全名，加上 exposure、auth，以及需要登录时的 loginUrl。
 export function summary(snap: McpSnapshot): ServerSummary[] {
   return [...snap.servers.entries()].map(([name, e]) => ({
     name,
@@ -53,6 +54,7 @@ export function summary(snap: McpSnapshot): ServerSummary[] {
     toolNames: e.tools.map((t) => `mcp__${sanitize(name)}__${sanitize(t.name)}`),
     exposure: normalizeExposure(e.exposure) ?? "codemode",
     auth: summaryAuth(e.auth),
+    ...(e.loginUrl ? { loginUrl: e.loginUrl } : {}),
   }));
 }
 

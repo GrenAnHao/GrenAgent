@@ -1,6 +1,11 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { openUrl } from '../../platform/runtime';
 import { McpServerCard } from './McpServerCard';
+
+vi.mock('../../platform/runtime', () => ({
+  openUrl: vi.fn(() => Promise.resolve()),
+}));
 
 afterEach(cleanup);
 
@@ -65,5 +70,78 @@ describe('McpServerCard', () => {
       />,
     );
     expect((screen.getByTestId('mcp-reload-gh') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('shows a login button and the login url when the server needs login', () => {
+    render(
+      <McpServerCard
+        name="gh"
+        config={{ url: 'https://mcp.example/sse' }}
+        enabled
+        runtimeStatus="needs-login"
+        loginUrl="https://auth.example/login"
+        onToggle={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '登录' })).toBeTruthy();
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('https://auth.example/login');
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('需要登录');
+  });
+
+  it('shows exposure and the short auth label', () => {
+    const { rerender } = render(
+      <McpServerCard
+        name="gh"
+        config={{ url: 'https://mcp.example/sse' }}
+        enabled
+        exposure="direct"
+        auth="oauth"
+        onToggle={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('direct');
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('OAuth');
+
+    rerender(
+      <McpServerCard
+        name="gh"
+        config={{ url: 'https://mcp.example/sse' }}
+        enabled
+        exposure="codemode"
+        auth="provider"
+        onToggle={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('codemode');
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('供应商登录');
+  });
+
+  it('keeps the login url and shows copy when opening the url fails', async () => {
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('open failed'));
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(
+      <McpServerCard
+        name="gh"
+        config={{ url: 'https://mcp.example/sse' }}
+        enabled
+        runtimeStatus="needs-login"
+        loginUrl="https://auth.example/login"
+        onToggle={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    expect(await screen.findByRole('button', { name: '复制' })).toBeTruthy();
+    expect(screen.getByTestId('mcp-server-gh').textContent).toContain('https://auth.example/login');
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://auth.example/login'));
   });
 });

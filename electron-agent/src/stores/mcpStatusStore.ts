@@ -3,9 +3,12 @@ import { create } from 'zustand';
 export interface McpServerStatus {
   name: string;
   transport: string;
-  status: 'connecting' | 'connected' | 'failed';
+  status: 'connecting' | 'connected' | 'failed' | 'needs-login';
   tools: number;
   toolNames?: string[];
+  exposure?: string;
+  auth?: 'none' | 'oauth' | 'provider';
+  loginUrl?: string;
 }
 
 interface McpStatusState {

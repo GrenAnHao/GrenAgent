@@ -37,6 +37,8 @@ export interface McpFormValues {
   auth?: AuthKind;
   token?: string;
   headers?: Array<[string, string]>;
+  /** 快速表单不编辑的原始字段（oauth、exposure 等）。写回时合并。 */
+  extra?: Record<string, unknown>;
 }
 
 export type ImportResult =
@@ -103,30 +105,49 @@ function objToKv(o?: Record<string, string>): Array<[string, string]> {
   return Object.entries(o ?? {});
 }
 
-/** 表单值 → {name, config}。Bearer 落到 headers.Authorization。 */
+const EDITED_KEYS = ['command', 'args', 'url', 'headers', 'env', 'cwd'] as const;
+
+function unknownFields(raw: object, known: readonly string[]): Record<string, unknown> | undefined {
+  const extra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (known.includes(key) || value === undefined) continue;
+    extra[key] = value;
+  }
+  return Object.keys(extra).length ? extra : undefined;
+}
+
+function withoutEditedKeys(extra?: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...(extra ?? {}) };
+  for (const key of EDITED_KEYS) delete out[key];
+  return out;
+}
+
+/** 表单值 → {name, config}。Bearer 落到 headers.Authorization。extra 合并回去，表单改过的键覆盖同名项。 */
 export function serializeForm(v: McpFormValues): { name: string; config: McpConfig } {
   const name = v.name.trim();
+  const rest = withoutEditedKeys(v.extra);
   if (v.type === 'stdio') {
-    const config: McpStdioConfig = { command: (v.command ?? '').trim() };
+    const config: Record<string, unknown> = { ...rest, command: (v.command ?? '').trim() };
     const args = (v.args ?? '').trim();
     if (args) config.args = args.split(/\s+/);
     const env = kvToObj(v.env);
     if (Object.keys(env).length) config.env = env;
     const cwd = (v.cwd ?? '').trim();
     if (cwd) config.cwd = cwd;
-    return { name, config };
+    return { name, config: config as McpConfig };
   }
   const headers = kvToObj(v.headers);
   if (v.auth === 'bearer' && (v.token ?? '').trim()) {
     headers.Authorization = `Bearer ${(v.token ?? '').trim()}`;
   }
-  const config: McpRemoteConfig = { url: (v.url ?? '').trim() };
+  const config: Record<string, unknown> = { ...rest, url: (v.url ?? '').trim() };
   if (Object.keys(headers).length) config.headers = headers;
-  return { name, config };
+  return { name, config: config as McpConfig };
 }
 
-/** {name, config} → 表单值。headers.Authorization=Bearer xxx 反解为 Bearer 选项。 */
+/** {name, config} → 表单值。headers.Authorization=Bearer xxx 反解为 Bearer 选项。未知字段放进 extra。 */
 export function configToForm(name: string, c: McpConfig): McpFormValues {
+  const raw = c as object;
   if (transportOf(c) === 'stdio') {
     const s = c as McpStdioConfig;
     return {
@@ -136,6 +157,7 @@ export function configToForm(name: string, c: McpConfig): McpFormValues {
       args: (s.args ?? []).join(' '),
       env: objToKv(s.env),
       cwd: s.cwd,
+      extra: unknownFields(raw, ['command', 'args', 'env', 'cwd']),
     };
   }
   const r = c as McpRemoteConfig;
@@ -147,7 +169,15 @@ export function configToForm(name: string, c: McpConfig): McpFormValues {
     token = headers.Authorization.slice('Bearer '.length);
     delete headers.Authorization;
   }
-  return { type: 'remote', name, url: r.url, auth, token, headers: objToKv(headers) };
+  return {
+    type: 'remote',
+    name,
+    url: r.url,
+    auth,
+    token,
+    headers: objToKv(headers),
+    extra: unknownFields(raw, ['url', 'headers']),
+  };
 }
 
 /** 校验表单，返回错误信息（null 表示通过）。existingNames 用于唯一性（编辑时排除自身）。 */
