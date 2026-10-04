@@ -152,8 +152,12 @@ function pushExtensionServers(mgr: McpManager, servers: readonly RegisteredMcpSe
   return mgr.applyExtensionServers((servers ?? []).map(extensionServerConfig));
 }
 
+function isProjectedMcpName(name: string): boolean {
+  return name.startsWith("mcp__") || (RESOURCE_TOOL_NAMES as readonly string[]).includes(name);
+}
+
 // 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
-// codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 一律去掉。
+// codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 与三个资源工具一律去掉。
 export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: ResourceManager, control?: DesktopControlPort): void {
   const direct: string[] = [];
   let hasCodemodeServer = false;
@@ -273,7 +277,7 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: ResourceManag
   }
   try {
     const active = pi.getActiveTools();
-    const next = active.filter((n) => !n.startsWith("mcp__") || direct.includes(n));
+    const next = active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
     for (const n of direct) if (!next.includes(n)) next.push(n);
     if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
     if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");

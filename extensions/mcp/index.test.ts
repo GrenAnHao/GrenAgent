@@ -252,6 +252,17 @@ describe("project", () => {
     expect(pi.registered).toContain("mcp__plain__y");
   });
 
+  it("drops previously active list_mcp_resources when every resource server is hidden", () => {
+    const pi = fakeProjectPi();
+    pi.setActiveTools(["read", "list_mcp_resources"]);
+    project(pi as never, snap({
+      secret: { status: "connected", tools: ["x"], exposure: "hidden", resources: true },
+    }), fakeMgr());
+    expect(pi.active).toEqual(["read"]);
+    expect(pi.active).not.toContain("list_mcp_resources");
+    expect(pi.registered).not.toContain("list_mcp_resources");
+  });
+
   it("calls listResources, listResourceTemplates, and readResource by tool name and shapes the result", async () => {
     const pi = fakeProjectPi();
     const listResources = vi.fn(async () => ({ content: [{ type: "text", text: "resources" }] }));

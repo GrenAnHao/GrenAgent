@@ -821,6 +821,37 @@ describe("resources", () => {
     expect(String((templated.content?.[0] as { text?: string } | undefined)?.text)).toContain("file://{id}");
     expect(String((body.content?.[0] as { text?: string } | undefined)?.text)).toContain("body");
   });
+
+  it("passes cursor to the SDK and includes nextCursor in the list result", async () => {
+    const resourceArgs: unknown[] = [];
+    const templateArgs: unknown[] = [];
+    const connect = vi.fn(async () => ({
+      ...fakeClient([{ name: "alpha" }]),
+      listResources: async (params?: { cursor?: string }) => {
+        resourceArgs.push(params);
+        return { resources: [{ uri: "file://a", name: "a" }], nextCursor: "res-2" };
+      },
+      listResourceTemplates: async (params?: { cursor?: string }) => {
+        templateArgs.push(params);
+        return { resourceTemplates: [{ uriTemplate: "file://{id}", name: "t" }], nextCursor: "tpl-2" };
+      },
+    }));
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    resourceArgs.length = 0;
+    templateArgs.length = 0;
+
+    const listed = await mgr.listResources({ server: "a", cursor: "res-1" });
+    const templated = await mgr.listResourceTemplates({ server: "a", cursor: "tpl-1" });
+
+    expect(resourceArgs).toEqual([{ cursor: "res-1" }]);
+    expect(templateArgs).toEqual([{ cursor: "tpl-1" }]);
+    expect(listed.structuredContent).toEqual(expect.objectContaining({ nextCursor: "res-2" }));
+    expect(templated.structuredContent).toEqual(expect.objectContaining({ nextCursor: "tpl-2" }));
+    expect(String((listed.content?.[0] as { text?: string } | undefined)?.text)).toContain("res-2");
+    expect(String((templated.content?.[0] as { text?: string } | undefined)?.text)).toContain("tpl-2");
+  });
 });
 
 describe("getMcpManagerFor", () => {

@@ -59,8 +59,8 @@ export interface McpClient {
     structuredContent?: unknown;
   }>;
   close(): Promise<void>;
-  listResources?(): Promise<{ resources?: unknown[] }>;
-  listResourceTemplates?(): Promise<{ resourceTemplates?: unknown[] }>;
+  listResources?(params?: { cursor?: string }): Promise<{ resources?: unknown[]; nextCursor?: string }>;
+  listResourceTemplates?(params?: { cursor?: string }): Promise<{ resourceTemplates?: unknown[]; nextCursor?: string }>;
   readResource?(args: { uri: string }): Promise<{ contents?: Array<{ uri?: string; text?: string; blob?: string }> }>;
 }
 
@@ -191,8 +191,8 @@ async function realConnect(s: McpServerConfig, hooks?: OAuthConnectHooks): Promi
           structuredContent: raw.structuredContent,
         };
       },
-      listResources: () => client.listResources(),
-      listResourceTemplates: () => client.listResourceTemplates(),
+      listResources: (params) => client.listResources(params),
+      listResourceTemplates: (params) => client.listResourceTemplates(params),
       readResource: (args) => client.readResource(args),
       close: () => client.close(),
     };
@@ -640,18 +640,24 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     }
     const items: unknown[] = [];
     const errors: { server: string; error: string }[] = [];
+    const params = typeof args.cursor === "string" && args.cursor.length > 0 ? { cursor: args.cursor } : undefined;
+    let nextCursor: string | undefined;
     for (const name of names) {
       const client = clients.get(name);
       const run = kind === "resources" ? client?.listResources : client?.listResourceTemplates;
       if (!run) continue;
       try {
-        const listed = await withTimeout(run(), callTimeoutMs(catalog.get(name)?.timeout)) as {
+        const listed = await withTimeout(params ? run(params) : run(), callTimeoutMs(catalog.get(name)?.timeout)) as {
           resources?: unknown[];
           resourceTemplates?: unknown[];
+          nextCursor?: string;
         };
         const batch = kind === "resources" ? listed.resources : listed.resourceTemplates;
         for (const item of batch ?? []) {
           items.push(item && typeof item === "object" ? { server: name, ...(item as Record<string, unknown>) } : { server: name });
+        }
+        if (names.length === 1 && typeof listed.nextCursor === "string" && listed.nextCursor) {
+          nextCursor = listed.nextCursor;
         }
       } catch (error) {
         errors.push({ server: name, error: error instanceof Error ? error.message : String(error) });
@@ -661,6 +667,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     return resourceText({
       ...(typeof args.server === "string" && args.server.trim() ? { server: args.server.trim() } : {}),
       [key]: items,
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
       ...(errors.length > 0 ? { errors } : {}),
     }, items.length === 0 && errors.length > 0);
   };
