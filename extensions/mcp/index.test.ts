@@ -225,7 +225,7 @@ function fakePiWithOn() {
     setActiveTools: (n: string[]) => {
       active = n;
     },
-    fire: (ev: string, ...args: unknown[]) => (handlers.get(ev) ?? []).forEach((h) => h(...args)),
+    fire: (ev: string, ...args: unknown[]) => Promise.all((handlers.get(ev) ?? []).map((h) => h(...args))),
   };
 }
 
@@ -280,5 +280,61 @@ describe("bind", () => {
     pi.fire('session_start', {}, { cwd: 'C:/work', hasUI: true, ui: { setStatus: vi.fn() } });
 
     expect(control.request).toHaveBeenCalledWith('mcp.state.publish', { workspace: 'C:/work', servers: [{ name: 'a', status: 'connected', tools: 1, toolNames: ['mcp__a__x'], exposure: 'codemode', auth: 'none' }] });
+  });
+
+  it("before_agent_start waits only for direct servers and appends the summary when it changes", async () => {
+    let release: () => void = () => {};
+    const direct = new Promise<void>((resolve) => { release = resolve; });
+    const background = new Promise<void>(() => {});
+    const seen: string[] = [];
+    const pi = fakePiWithOn();
+    const appendMessage = vi.fn();
+    const entries: Array<{ type: string; customType: string; content: string; display: boolean }> = [];
+    const mgr = {
+      ...fakeBindMgr(snap({
+        docs: { status: "connecting", tools: [], exposure: "direct", description: "Docs\nsecond" },
+        vendor: { status: "connecting", tools: [], exposure: "codemode", description: "Vendor" },
+        picked: { status: "connecting", tools: [], exposure: "codemode", toolExposure: { read: "direct" }, description: "Picked" },
+      })),
+      connectPromise(name: string) {
+        seen.push(name);
+        if (name === "vendor") return background;
+        return direct;
+      },
+    };
+    bind(pi as never, mgr as never);
+    const ctx = { sessionManager: { buildContextEntries: () => entries, appendMessage } };
+    let finished = false;
+    const pending = pi.fire("before_agent_start", {}, ctx).then((results) => {
+      finished = true;
+      return results;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finished).toBe(false);
+    expect(seen).toEqual(["docs", "picked"]);
+    release();
+    const outcome = await Promise.race([
+      pending.then((results) => ({ ok: true as const, results })),
+      new Promise<{ ok: false }>((resolve) => setTimeout(() => resolve({ ok: false }), 300)),
+    ]);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const message = (outcome.results[0] as { message?: { customType: string; content: string; display: boolean } }).message;
+    expect(message).toEqual({
+      customType: "mcp-servers",
+      content: "docs direct Docs\nvendor codemode Vendor\npicked codemode Picked",
+      display: false,
+    });
+    expect(appendMessage).toHaveBeenCalledWith({
+      role: "custom",
+      customType: "mcp-servers",
+      content: message?.content,
+      display: false,
+      timestamp: expect.any(Number),
+    });
+    entries.push({ type: "custom_message", customType: "mcp-servers", content: message?.content ?? "", display: false });
+    const again = await pi.fire("before_agent_start", {}, ctx);
+    expect(again[0]).toBeUndefined();
+    expect(appendMessage).toHaveBeenCalledTimes(1);
   });
 });

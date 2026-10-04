@@ -29,6 +29,8 @@ export interface ServerEntry {
   toolExposure?: Record<string, string>;
   description?: string;
   auth?: McpAuthKind;
+  /** 服务器配置的调用超时，单位秒。缺省时调用按 60 秒计。 */
+  timeout?: number;
 }
 export interface McpSnapshot {
   servers: Map<string, ServerEntry>;
@@ -39,7 +41,11 @@ export interface McpSnapshot {
 /** 管理器需要的最小 MCP 客户端能力（真实 SDK Client 结构兼容）。 */
 export interface McpClient {
   listTools(): Promise<{ tools: McpToolDef[] }>;
-  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{
+  callTool(args: {
+    name: string;
+    arguments: Record<string, unknown>;
+    onProgress?: () => void;
+  }): Promise<{
     content?: unknown;
     isError?: boolean;
     structuredContent?: unknown;
@@ -68,6 +74,17 @@ export interface McpManager {
   /** 配置已落盘后立刻重读（不依赖 fs.watch）。未 init 时为空操作。 */
   reconcile(): void;
   closeAll(): void;
+  /** 该服务器仍在连接时返回本次连接的 promise。已结束则没有。 */
+  connectPromise(name: string): Promise<void> | undefined;
+}
+
+const DEFAULT_CALL_TIMEOUT_SECONDS = 60;
+
+function callTimeoutMs(timeoutSeconds: number | undefined): number {
+  if (typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+    return timeoutSeconds * 1000;
+  }
+  return DEFAULT_CALL_TIMEOUT_SECONDS * 1000;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -75,6 +92,36 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     p,
     new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
   ]);
+}
+
+function callWithProgressTimeout<T>(run: (onProgress: () => void) => Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = setTimeout(expire, timeoutMs);
+    function expire() {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`timeout after ${timeoutMs}ms`));
+    }
+    function onProgress() {
+      clearTimeout(timer);
+      timer = setTimeout(expire, timeoutMs);
+    }
+    run(onProgress).then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function realConnect(s: McpServerConfig): Promise<McpClient> {
@@ -89,7 +136,16 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
   return {
     listTools: () => client.listTools(),
     callTool: async (args) => {
-      const result = await client.callTool(args);
+      const timeoutMs = callTimeoutMs(s.timeout);
+      const result = await client.callTool(
+        { name: args.name, arguments: args.arguments },
+        undefined,
+        {
+          timeout: timeoutMs,
+          resetTimeoutOnProgress: true,
+          onprogress: () => args.onProgress?.(),
+        },
+      );
       const raw = result as { content?: unknown; isError?: boolean; structuredContent?: unknown };
       return {
         content: "content" in result ? raw.content : undefined,
@@ -175,12 +231,13 @@ function classifyAuth(server: { oauth?: unknown; auth?: unknown }): McpAuthKind 
   return "none";
 }
 
-function serverSnapshotMeta(server: McpServerConfig): Pick<ServerEntry, "exposure" | "toolExposure" | "description" | "auth"> {
+function serverSnapshotMeta(server: McpServerConfig): Pick<ServerEntry, "exposure" | "toolExposure" | "description" | "auth" | "timeout"> {
   return {
     exposure: server.exposure,
     ...(server.toolExposure ? { toolExposure: { ...server.toolExposure } } : {}),
     ...(server.description !== undefined ? { description: server.description } : {}),
     auth: classifyAuth(server),
+    ...(typeof server.timeout === "number" ? { timeout: server.timeout } : {}),
   };
 }
 
@@ -419,9 +476,28 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     },
     snapshot,
     async callTool(server, tool, args) {
-      const c = clients.get(server);
-      if (!c) throw new Error(`MCP server not connected: ${server}`);
-      return c.callTool({ name: tool, arguments: args ?? {} });
+      while (catalog.get(server)?.status === "connecting") {
+        const pending = inflight.get(server);
+        if (!pending) break;
+        await pending;
+      }
+      const entry = catalog.get(server);
+      if (entry?.status === "failed") {
+        return {
+          content: [{ type: "text", text: entry.error ?? "" }],
+          isError: true,
+        };
+      }
+      const client = clients.get(server);
+      if (!client) throw new Error(`MCP server not connected: ${server}`);
+      return callWithProgressTimeout(
+        (onProgress) => client.callTool({ name: tool, arguments: args ?? {}, onProgress }),
+        callTimeoutMs(entry?.timeout),
+      );
+    },
+    connectPromise(name) {
+      if (catalog.get(name)?.status !== "connecting") return undefined;
+      return inflight.get(name);
     },
     subscribe(listener) {
       listeners.add(listener);

@@ -590,6 +590,82 @@ describe("reloadServer", () => {
     expect(["connected", "failed"]).toContain(entry?.status);
     expect(entry?.tools.map((t) => t.name)).toEqual(["second"]);
   });
+
+  it("waits while that server is connecting and returns a failed server error without calling the transport", async () => {
+    const transport = vi.fn(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    let release: () => void = () => {};
+    const connect = (server: McpServerConfig) => {
+      if (server.name === "bad") return Promise.reject(new Error("boom"));
+      return new Promise<McpClient>((resolve) => {
+        release = () => resolve({
+          listTools: async () => ({ tools: [{ name: "alpha" }] }),
+          callTool: transport,
+          close: async () => {},
+        });
+      });
+    };
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("slow"), srv("bad")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("bad")?.status === "failed");
+    await expect(mgr.callTool("bad", "alpha", {})).resolves.toEqual({
+      content: [{ type: "text", text: "boom" }],
+      isError: true,
+    });
+    expect(transport).not.toHaveBeenCalled();
+
+    let done = false;
+    const pending = mgr.callTool("slow", "alpha", {}).then((value) => {
+      done = true;
+      return value;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(done).toBe(false);
+    expect(mgr.snapshot().servers.get("slow")?.status).toBe("connecting");
+    release();
+    await expect(pending).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
+  it("a second progress notification clears a timer that would already have fired", async () => {
+    let onProgress: (() => void) | undefined;
+    let resolveCall: (value: { content: Array<{ type: string; text: string }> }) => void = () => {};
+    const connect = async () => ({
+      listTools: async () => ({ tools: [{ name: "alpha" }] }),
+      callTool: (args: { onProgress?: () => void }) => {
+        onProgress = args.onProgress;
+        return new Promise<{ content: Array<{ type: string; text: string }> }>((resolve) => {
+          resolveCall = resolve;
+        });
+      },
+      close: async () => {},
+    });
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = mgr.callTool("a", "alpha", {});
+      expect(onProgress).toBeTypeOf("function");
+      onProgress!();
+      await vi.advanceTimersByTimeAsync(59_000);
+      onProgress!();
+      await vi.advanceTimersByTimeAsync(59_000);
+      resolveCall({ content: [{ type: "text", text: "late" }] });
+      await expect(pending).resolves.toEqual({ content: [{ type: "text", text: "late" }] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("getMcpManagerFor", () => {

@@ -10,6 +10,7 @@ import { registerToolName } from "./naming.js";
 import { shapeMcpResult } from "./resultShape.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 import { currentCwd } from "../_shared/workspace-context.js";
+import { waitForDirect } from "./wait.js";
 
 export const pluginManifest = {
   id: "mcp",
@@ -140,6 +141,56 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
   }
 }
 
+function serverIncludesDirect(entry: { exposure?: string; toolExposure?: Record<string, string>; tools: { name: string }[] }): boolean {
+  if (entry.tools.some((tool) => exposureForTool(tool.name, entry) === "direct")) return true;
+  if (entry.tools.length > 0) return false;
+  if ((normalizeExposure(entry.exposure) ?? "codemode") === "direct") return true;
+  const overrides = entry.toolExposure;
+  if (!overrides) return false;
+  return Object.values(overrides).some((value) => normalizeExposure(value) === "direct");
+}
+
+function oneLineDescription(description: string | undefined): string {
+  if (!description) return "";
+  return (description.split("\n", 1)[0] ?? "").trim();
+}
+
+function formatServerSummary(snap: McpSnapshot): string {
+  const lines: string[] = [];
+  for (const [name, entry] of snap.servers) {
+    const exposure = normalizeExposure(entry.exposure) ?? "codemode";
+    const description = oneLineDescription(entry.description);
+    lines.push(description ? `${name} ${exposure} ${description}` : `${name} ${exposure}`);
+  }
+  return lines.join("\n");
+}
+
+function entryText(content: unknown): string | undefined {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.flatMap((part) => {
+    if (!part || typeof part !== "object") return [];
+    const text = (part as { type?: unknown; text?: unknown }).text;
+    return (part as { type?: unknown }).type === "text" && typeof text === "string" ? [text] : [];
+  });
+  return parts.length > 0 ? parts.join("") : undefined;
+}
+
+function lastServerSummary(sessionManager: { buildContextEntries?: () => readonly unknown[]; getEntries?: () => readonly unknown[] } | undefined): string | undefined {
+  const entries = sessionManager?.buildContextEntries?.() ?? sessionManager?.getEntries?.() ?? [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as {
+      type?: string;
+      customType?: string;
+      content?: unknown;
+      message?: { customType?: string; content?: unknown };
+    } | undefined;
+    if (entry?.type === "custom_message" && entry.customType === "mcp-servers") return entryText(entry.content);
+    if (entry?.message?.customType === "mcp-servers") return entryText(entry.message.content);
+  }
+  return undefined;
+}
+
 export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlPort = desktopControl()): void {
   let alive = false;
   let unsub: (() => void) | undefined;
@@ -163,6 +214,27 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     alive = false;
     unsub?.();
     unsub = undefined;
+  });
+
+  pi.on("before_agent_start", async (_event, ctx) => {
+    const pendings: Promise<unknown>[] = [];
+    for (const [name, entry] of mgr.snapshot().servers) {
+      if (!serverIncludesDirect(entry)) continue;
+      const pending = mgr.connectPromise(name);
+      if (pending) pendings.push(pending);
+    }
+    await waitForDirect(pendings, 10_000);
+    const content = formatServerSummary(mgr.snapshot());
+    const sessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
+      appendMessage?: (message: { role: "custom"; customType: string; content: string; display: boolean; timestamp: number }) => void;
+    };
+    const previous = lastServerSummary(sessionManager);
+    if (content === (previous ?? "")) return undefined;
+    const message = { customType: "mcp-servers", content, display: false as const };
+    if (typeof sessionManager.appendMessage === "function") {
+      sessionManager.appendMessage({ role: "custom", ...message, timestamp: Date.now() });
+    }
+    return { message };
   });
 }
 
