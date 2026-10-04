@@ -108,4 +108,28 @@ describe("expandServerVars", () => {
     );
     expect(out[0]).toMatchObject({ url: "http://x//ws", headers: { "X-Root": "/ws/k" } });
   });
+
+  it("omits a server when a bang command fails and keeps the others", () => {
+    const logged: string[] = [];
+    const error = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    };
+    let out: ReturnType<typeof expandServerVars> | undefined;
+    try {
+      expect(() => {
+        out = expandServerVars(
+          [
+            { name: "bad", transport: "http", url: "https://example.com", headers: { A: "!node -e process.exit(1)" } },
+            { name: "good", transport: "stdio", command: "npx", args: [], env: {} },
+          ],
+          "/ws",
+        );
+      }).not.toThrow();
+    } finally {
+      console.error = error;
+    }
+    expect(out?.map((server) => server.name)).toEqual(["good"]);
+    expect(logged.some((line) => line.includes("bad"))).toBe(true);
+  });
 });

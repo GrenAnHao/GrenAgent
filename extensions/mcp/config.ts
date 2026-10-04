@@ -197,5 +197,14 @@ export function expandServerVars(servers: McpServerConfig[], cwd: string): McpSe
     home: homedir(),
     sessionCwd: cwd,
   };
-  return servers.map((server) => expandConfigValues(server, context));
+  const expanded: McpServerConfig[] = [];
+  for (const server of servers) {
+    try {
+      expanded.push(expandConfigValues(server, context));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`服务器 ${server.name} 配置展开失败: ${message}`);
+    }
+  }
+  return expanded;
 }
