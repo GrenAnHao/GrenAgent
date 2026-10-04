@@ -58,8 +58,8 @@ function fakeSession(
     pendingMessageCount: 0,
     prompt:
       behavior?.prompt ??
-      vi.fn(async (_task: string, opts?: { preflightResult?: (ok: boolean) => void }) => {
-        opts?.preflightResult?.(true);
+      vi.fn(async (_task: string, opts?: { preflightResult?: (disposition: unknown) => void }) => {
+        opts?.preflightResult?.("started");
       }),
     waitForIdle: behavior?.waitForIdle ?? vi.fn(async () => {}),
     bindExtensions: vi.fn(async () => {}),
