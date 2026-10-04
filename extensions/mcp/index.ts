@@ -4,7 +4,10 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { sanitize } from "./config.js";
-import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
+import { getMcpManager, type McpAuthKind, type McpManager, type McpSnapshot } from "./manager.js";
+import { exposureForTool, normalizeExposure, type McpExposure } from "./merge.js";
+import { registerToolName } from "./naming.js";
+import { shapeMcpResult } from "./resultShape.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 import { currentCwd } from "../_shared/workspace-context.js";
 
@@ -21,16 +24,34 @@ export interface ServerSummary {
   status: string;
   tools: number;
   toolNames: string[];
+  exposure: McpExposure;
+  auth: McpAuthKind;
 }
 type McpToolDetails = { server: string; tool: string; error?: 'denied' | 'blocked' };
 
-// 与旧 summary() 形状一致：每 server 的 status / 工具数 / 注册全名（权限面板依赖）。
+const mcpResultOutputSchema = {
+  type: "object",
+  properties: {
+    content: { type: "array", items: { type: "object" } },
+    isError: { type: "boolean" },
+    structuredContent: {},
+  },
+  required: ["content"],
+};
+
+function summaryAuth(auth: string | undefined): McpAuthKind {
+  return auth === "oauth" || auth === "provider" ? auth : "none";
+}
+
+// 每 server 的 status / 工具数 / 注册全名，加上 exposure 与 auth（权限面板依赖）。
 export function summary(snap: McpSnapshot): ServerSummary[] {
   return [...snap.servers.entries()].map(([name, e]) => ({
     name,
     status: e.status,
     tools: e.tools.length,
     toolNames: e.tools.map((t) => `mcp__${sanitize(name)}__${sanitize(t.name)}`),
+    exposure: normalizeExposure(e.exposure) ?? "codemode",
+    auth: summaryAuth(e.auth),
   }));
 }
 
@@ -40,44 +61,82 @@ interface ProjectablePi {
   setActiveTools: ExtensionAPI["setActiveTools"];
 }
 
-// 把当前目录投射进会话：登记已连工具，激活它们，停用已不在连接中的 mcp__ 工具。
+// 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
+// codemode / deferred / hidden 不进入。停用已不在本次连接中的 mcp__ 工具。
 export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">, control?: DesktopControlPort): void {
   const connected: string[] = [];
+  const direct: string[] = [];
+  let hasCodemodeServer = false;
+  let hasDeferred = false;
+  const taken = new Set<string>();
+
   for (const [server, entry] of snap.servers) {
     if (entry.status !== "connected") continue;
+    const serverExposure = normalizeExposure(entry.exposure) ?? "codemode";
+    if (serverExposure === "codemode") hasCodemodeServer = true;
+    if (serverExposure === "deferred") hasDeferred = true;
+    const namespace = {
+      name: `mcp__${server.replace(/-/g, "_")}`,
+      description: entry.description,
+    };
     for (const t of entry.tools) {
-      const full = `mcp__${sanitize(server)}__${sanitize(t.name)}`;
-      connected.push(full);
+      const { name, originalToolName } = registerToolName(server, t.name, taken);
+      taken.add(name);
+      connected.push(name);
+      const exposure = exposureForTool(t.name, { exposure: entry.exposure, toolExposure: entry.toolExposure });
+      if (exposure === "codemode") hasCodemodeServer = true;
+      if (exposure === "deferred") hasDeferred = true;
+      if (exposure === "direct") direct.push(name);
       pi.registerTool({
-        name: full,
+        name,
+        originalToolName,
         label: `${server}: ${t.name}`,
         description: t.description ?? `MCP tool "${t.name}" from server "${server}".`,
         promptSnippet: t.description?.trim() || `MCP tool "${t.name}" from server "${server}".`,
         parameters: Type.Unsafe(t.inputSchema ?? { type: "object" }),
+        exposure,
+        namespace,
+        outputSchema: mcpResultOutputSchema,
         async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
           if (control) {
             const authorization = await authorizeDesktopOperation(control, {
               kind: 'mcp.call',
               workspace: typeof ctx?.cwd === 'string' ? ctx.cwd : currentCwd(),
               server,
-              toolName: t.name,
+              toolName: originalToolName,
               args: params ?? {},
             });
             if (authorization.status !== 'allowed') {
-              return { content: [{ type: 'text', text: `MCP 调用已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停' : '拒绝'}` }], details: { server, tool: t.name, error: authorization.status } };
+              return {
+                content: [{ type: 'text', text: `MCP 调用已被 Electron 权限策略${authorization.status === 'blocked' ? '暂停' : '拒绝'}` }],
+                details: { server, tool: originalToolName, error: authorization.status },
+                isError: true,
+              };
             }
           }
-          const r = await mgr.callTool(server, t.name, (params ?? {}) as Record<string, unknown>);
-          return { content: [{ type: "text", text: r.text }], details: { server, tool: t.name } };
+          const raw = await mgr.callTool(server, originalToolName, (params ?? {}) as Record<string, unknown>);
+          const shaped = shapeMcpResult({
+            content: Array.isArray(raw.content) ? raw.content as { type: string }[] : undefined,
+            isError: raw.isError,
+            structuredContent: raw.structuredContent,
+          });
+          return {
+            content: shaped.content as AgentToolResult<McpToolDetails>["content"],
+            details: { server, tool: originalToolName },
+            isError: shaped.isError,
+            structuredContent: shaped.structuredContent as AgentToolResult<McpToolDetails>["structuredContent"],
+          };
         },
-      });
+      } as Parameters<ProjectablePi["registerTool"]>[0]);
     }
   }
   try {
     const connectedSet = new Set(connected);
     const active = pi.getActiveTools();
     const next = active.filter((n) => !n.startsWith("mcp__") || connectedSet.has(n));
-    for (const n of connected) if (!next.includes(n)) next.push(n);
+    for (const n of direct) if (!next.includes(n)) next.push(n);
+    if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
+    if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
     pi.setActiveTools(next);
   } catch {
     // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活

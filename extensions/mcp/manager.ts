@@ -20,19 +20,30 @@ export interface McpToolDef {
   inputSchema?: unknown;
 }
 export type McpStatus = "connecting" | "connected" | "failed";
+export type McpAuthKind = "none" | "oauth" | "provider";
 export interface ServerEntry {
   status: McpStatus;
   error?: string;
   tools: McpToolDef[];
+  exposure?: string;
+  toolExposure?: Record<string, string>;
+  description?: string;
+  auth?: McpAuthKind;
 }
 export interface McpSnapshot {
   servers: Map<string, ServerEntry>;
+  /** 来自 mergeMcpLayers。缺省 true：项目层优先，两层都没写则为 true。 */
+  autoEnableCodemode?: boolean;
 }
 
 /** 管理器需要的最小 MCP 客户端能力（真实 SDK Client 结构兼容）。 */
 export interface McpClient {
   listTools(): Promise<{ tools: McpToolDef[] }>;
-  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{ content?: unknown }>;
+  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{
+    content?: unknown;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
   close(): Promise<void>;
 }
 
@@ -48,7 +59,11 @@ export interface McpManager {
   init(): void;
   reloadServer(name: string): Promise<void>;
   snapshot(): McpSnapshot;
-  callTool(server: string, tool: string, args: Record<string, unknown>): Promise<{ text: string }>;
+  callTool(server: string, tool: string, args: Record<string, unknown>): Promise<{
+    content?: unknown;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
   subscribe(listener: (snap: McpSnapshot) => void): () => void;
   /** 配置已落盘后立刻重读（不依赖 fs.watch）。未 init 时为空操作。 */
   reconcile(): void;
@@ -75,7 +90,12 @@ async function realConnect(s: McpServerConfig): Promise<McpClient> {
     listTools: () => client.listTools(),
     callTool: async (args) => {
       const result = await client.callTool(args);
-      return { content: "content" in result ? result.content : undefined };
+      const raw = result as { content?: unknown; isError?: boolean; structuredContent?: unknown };
+      return {
+        content: "content" in result ? raw.content : undefined,
+        isError: raw.isError,
+        structuredContent: raw.structuredContent,
+      };
     },
     close: () => client.close(),
   };
@@ -113,7 +133,7 @@ function overlayMcpServers(base: McpServerConfig[] | undefined, overlay: McpServ
   return [...map.values()];
 }
 
-function defaultReadServers(workspace: string): McpServerConfig[] {
+function readWorkspaceMcp(workspace: string): { servers: McpServerConfig[]; autoEnableCodemode: boolean } {
   rememberAlsConfig(workspace);
   const captured = alsConfigByWorkspace.get(workspace);
   const als = currentWorkspaceContext()?.config;
@@ -142,7 +162,26 @@ function defaultReadServers(workspace: string): McpServerConfig[] {
     readToolsCache(),
     process.arch,
   );
-  return expandServerVars(servers, workspace);
+  return { servers: expandServerVars(servers, workspace), autoEnableCodemode: merged.autoEnableCodemode };
+}
+
+function classifyAuth(server: { oauth?: unknown; auth?: unknown }): McpAuthKind {
+  const auth = server.auth;
+  if (auth && typeof auth === "object" && !Array.isArray(auth)) {
+    const provider = (auth as { provider?: unknown }).provider;
+    if (typeof provider === "string" && provider.length > 0) return "provider";
+  }
+  if (server.oauth !== undefined && server.oauth !== null) return "oauth";
+  return "none";
+}
+
+function serverSnapshotMeta(server: McpServerConfig): Pick<ServerEntry, "exposure" | "toolExposure" | "description" | "auth"> {
+  return {
+    exposure: server.exposure,
+    ...(server.toolExposure ? { toolExposure: { ...server.toolExposure } } : {}),
+    ...(server.description !== undefined ? { description: server.description } : {}),
+    auth: classifyAuth(server),
+  };
 }
 
 function isRuntimeServer(server: McpMergeServer): server is McpServerConfig {
@@ -216,7 +255,12 @@ export function managedServers(raw: string | undefined): McpServerConfig[] | und
 export function createManager(deps: ManagerDeps = {}): McpManager {
   const workspace = deps.workspace ?? currentWorkspaceContext()?.workspace ?? process.cwd();
   const connect = deps.connect ?? realConnect;
-  const readServers = deps.readServers ?? (() => defaultReadServers(workspace));
+  let autoEnableCodemode = true;
+  const readServers = deps.readServers ?? (() => {
+    const loaded = readWorkspaceMcp(workspace);
+    autoEnableCodemode = loaded.autoEnableCodemode;
+    return loaded.servers;
+  });
   const watch =
     deps.watch ??
     ((cb: () => void) => {
@@ -239,8 +283,17 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   let unwatch: (() => void) | undefined;
 
   const snapshot = (): McpSnapshot => ({
+    autoEnableCodemode,
     servers: new Map(
-      [...catalog.entries()].map(([k, v]) => [k, { status: v.status, error: v.error, tools: [...v.tools] }]),
+      [...catalog.entries()].map(([k, v]) => [k, {
+        status: v.status,
+        error: v.error,
+        tools: [...v.tools],
+        exposure: v.exposure,
+        toolExposure: v.toolExposure ? { ...v.toolExposure } : undefined,
+        description: v.description,
+        auth: v.auth,
+      }]),
     ),
   });
 
@@ -258,7 +311,8 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   const connectServer = async (s: McpServerConfig): Promise<void> => {
     const gen = (generation.get(s.name) ?? 0) + 1;
     generation.set(s.name, gen);
-    catalog.set(s.name, { status: "connecting", tools: [] });
+    const meta = serverSnapshotMeta(s);
+    catalog.set(s.name, { status: "connecting", tools: [], ...meta });
     emit();
     try {
       const client = await connect(s);
@@ -275,7 +329,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         }
         return;
       }
-      catalog.set(s.name, { status: "connected", tools });
+      catalog.set(s.name, { status: "connected", tools, ...meta });
       try {
         // 写「全名」mcp__server__tool（与 probe.ts、运行时工具注册、mcp-policy 查询一致）。
         // 原先写裸名 t.name 导致 UI/策略 key 与扩展查的全名对不上 → 权限设置不生效。
@@ -286,7 +340,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     } catch (e) {
       if (generation.get(s.name) !== gen) return;
       const msg = e instanceof Error ? e.message : String(e);
-      catalog.set(s.name, { status: "failed", error: msg, tools: [] });
+      catalog.set(s.name, { status: "failed", error: msg, tools: [], ...meta });
       try {
         writeCache(s.name, { ok: false, toolNames: [], error: msg });
       } catch {
@@ -311,7 +365,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       await existing.close().catch(() => {});
       clients.delete(s.name);
     }
-    catalog.set(s.name, { status: "connecting", tools: [] });
+    catalog.set(s.name, { status: "connecting", tools: [], ...serverSnapshotMeta(s) });
     emit();
     await runConnect(s);
   };
@@ -367,14 +421,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     async callTool(server, tool, args) {
       const c = clients.get(server);
       if (!c) throw new Error(`MCP server not connected: ${server}`);
-      const r = await c.callTool({ name: tool, arguments: args ?? {} });
-      const blocks = Array.isArray((r as { content?: unknown }).content) ? (r as { content: unknown[] }).content : [];
-      const text =
-        blocks
-          .filter((b): b is { type: "text"; text: string } => !!b && (b as { type?: string }).type === "text")
-          .map((b) => b.text)
-          .join("\n") || "(no output)";
-      return { text };
+      return c.callTool({ name: tool, arguments: args ?? {} });
     },
     subscribe(listener) {
       listeners.add(listener);

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -86,21 +86,51 @@ describe("createManager", () => {
     expect(writeCache).toHaveBeenCalledWith("bad", expect.objectContaining({ ok: false, error: "boom" }));
   });
 
-  it("routes callTool to the connected client and extracts text", async () => {
-    const connect = async () => fakeClient([{ name: "alpha" }], { content: [{ type: "text", text: "hi" }] });
+  it("routes callTool to the connected client and returns the raw result", async () => {
+    const connect = async () => fakeClient([{ name: "alpha" }], {
+      content: [{ type: "text", text: "hi" }],
+      isError: false,
+      structuredContent: { echoed: true },
+    });
     const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
     mgr.init();
     await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
-    expect(await mgr.callTool("a", "alpha", {})).toEqual({ text: "hi" });
+    const result = await mgr.callTool("a", "alpha", {});
+    expect(result.content).toEqual([{ type: "text", text: "hi" }]);
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toEqual({ echoed: true });
     await expect(mgr.callTool("nope", "x", {})).rejects.toThrow(/not connected/);
   });
 
-  it("returns the fallback text when a tool result omits content", async () => {
+  it("returns the raw result when a tool result omits content", async () => {
     const connect = async () => fakeClient([{ name: "alpha" }], {});
     const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
     mgr.init();
     await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
-    expect(await mgr.callTool("a", "alpha", {})).toEqual({ text: "(no output)" });
+    expect(await mgr.callTool("a", "alpha", {})).toEqual({});
+  });
+
+  it("keeps exposure, description, and auth on the snapshot", async () => {
+    const connect = async () => fakeClient([{ name: "alpha" }]);
+    const mgr = createManager({
+      connect,
+      readServers: () => [
+        { ...srv("docs"), exposure: "direct", description: "Docs", toolExposure: { alpha: "direct" }, oauth: { clientId: "c" } },
+        { ...srv("vendor"), auth: { provider: "openai" } },
+      ],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("docs")?.status === "connected" && s.servers.get("vendor")?.status === "connected");
+    expect(mgr.snapshot().servers.get("docs")).toMatchObject({
+      exposure: "direct",
+      description: "Docs",
+      toolExposure: { alpha: "direct" },
+      auth: "oauth",
+    });
+    expect(mgr.snapshot().servers.get("vendor")?.auth).toBe("provider");
+    expect(mgr.snapshot().autoEnableCodemode).toBe(true);
   });
 
   it("subscribe delivers snapshots and unsub stops them", async () => {
@@ -151,6 +181,31 @@ describe("createManager", () => {
     mgr.init();
     await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
     expect(good).toBeGreaterThan(0);
+  });
+});
+
+describe("autoEnableCodemode snapshot", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("threads project autoEnableCodemode false onto the snapshot", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-flag-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "mcp.json"), JSON.stringify({
+      autoEnableCodemode: false,
+      mcpServers: { a: { command: "x" } },
+    }));
+    const mgr = createManager({
+      workspace: dir,
+      connect: async () => fakeClient([{ name: "t" }]),
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    expect(mgr.snapshot().autoEnableCodemode).toBe(false);
   });
 });
 
