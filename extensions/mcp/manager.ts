@@ -104,20 +104,21 @@ function callWithProgressTimeout<T>(run: (onProgress: () => void) => Promise<T>,
       reject(new Error(`timeout after ${timeoutMs}ms`));
     }
     function onProgress() {
+      if (settled) return;
       clearTimeout(timer);
       timer = setTimeout(expire, timeoutMs);
     }
     run(onProgress).then(
       (value) => {
+        clearTimeout(timer);
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         resolve(value);
       },
       (error) => {
+        clearTimeout(timer);
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         reject(error);
       },
     );

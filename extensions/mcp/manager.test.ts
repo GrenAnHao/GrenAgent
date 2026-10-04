@@ -666,6 +666,51 @@ describe("reloadServer", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a progress notification after the call has settled does not leave a timer", async () => {
+    let onProgress: (() => void) | undefined;
+    let resolveCall: (value: { content: Array<{ type: string; text: string }> }) => void = () => {};
+    const connect = async () => ({
+      listTools: async () => ({ tools: [{ name: "alpha" }] }),
+      callTool: (args: { onProgress?: () => void }) => {
+        onProgress = args.onProgress;
+        return new Promise<{ content: Array<{ type: string; text: string }> }>((resolve) => {
+          resolveCall = resolve;
+        });
+      },
+      close: async () => {},
+    });
+    const mgr = createManager({
+      connect,
+      readServers: () => [srv("a")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = mgr.callTool("a", "alpha", {});
+      expect(onProgress).toBeTypeOf("function");
+      resolveCall({ content: [{ type: "text", text: "done" }] });
+      await expect(pending).resolves.toEqual({ content: [{ type: "text", text: "done" }] });
+      onProgress!();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const timedOut = mgr.callTool("a", "alpha", {});
+      const timeoutAssertion = expect(timedOut).rejects.toThrow("timeout after 60000ms");
+      await vi.advanceTimersByTimeAsync(60_000);
+      await timeoutAssertion;
+      onProgress!();
+      resolveCall({ content: [{ type: "text", text: "ignored" }] });
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("getMcpManagerFor", () => {
