@@ -1,6 +1,8 @@
 // 进程级 MCP 连接管理器：跨会话存活，绝不引用 pi/ctx。
 // 按 workspace 分 Map，同一 workspace 共享一套 manager。
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
@@ -11,10 +13,24 @@ import { establishMcpConnection, loginUrlOf, type OAuthConnectHooks } from "./tr
 import { diffServers } from "./diff.js";
 import { serverNamesConflict } from "./naming.js";
 import type { ProbeResult } from "./probe.js";
+import { appendCappedLog } from "./logRotate.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
 import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
 export const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
+
+function mcpLogPath(): string {
+  return join(homedir(), ".pi", "agent", "mcp.log");
+}
+
+function logMcp(server: string, event: string, detail?: string): void {
+  const text = detail ? `${event} ${detail}` : event;
+  try {
+    appendCappedLog(mcpLogPath(), `${new Date().toISOString()} [${server}] ${text}\n`);
+  } catch {
+    // 日志写失败不打断连接
+  }
+}
 
 export interface McpToolDef {
   name: string;
@@ -476,6 +492,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     const meta = serverSnapshotMeta(s);
     catalog.set(s.name, { status: "connecting", tools: [], ...meta });
     emit();
+    logMcp(s.name, "connect");
     try {
       const provider = usesProviderAuth(s);
       if (provider) {
@@ -483,6 +500,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         if (generation.get(s.name) !== gen) return;
         if (!token) {
           catalog.set(s.name, { status: "failed", error: MISSING_PROVIDER_TOKEN, tools: [], ...meta });
+          logMcp(s.name, "failed", MISSING_PROVIDER_TOKEN);
           try {
             writeCache(s.name, { ok: false, toolNames: [], error: MISSING_PROVIDER_TOKEN });
           } catch {
@@ -499,6 +517,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
           const current = catalog.get(s.name);
           if (!current || current.status === "connected") return;
           catalog.set(s.name, { ...current, loginUrl: url });
+          logMcp(s.name, "login", url);
           emit();
         },
       });
@@ -517,6 +536,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         return;
       }
       catalog.set(s.name, { status: "connected", tools, hasResources, ...meta });
+      logMcp(s.name, "connect", "connected");
       try {
         // 写「全名」mcp__server__tool（与 probe.ts、运行时工具注册、mcp-policy 查询一致）。
         // 原先写裸名 t.name 导致 UI/策略 key 与扩展查的全名对不上 → 权限设置不生效。
@@ -529,6 +549,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       const msg = e instanceof Error ? e.message : String(e);
       const loginUrl = loginUrlOf(e) ?? catalog.get(s.name)?.loginUrl;
       catalog.set(s.name, { status: "failed", error: msg, tools: [], ...meta, ...(loginUrl ? { loginUrl } : {}) });
+      logMcp(s.name, "failed", msg);
       try {
         writeCache(s.name, { ok: false, toolNames: [], error: msg });
       } catch {

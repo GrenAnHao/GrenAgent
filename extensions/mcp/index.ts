@@ -158,7 +158,57 @@ function isProjectedMcpName(name: string): boolean {
 
 // 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
 // codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 与三个资源工具一律去掉。
-export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: ResourceManager, control?: DesktopControlPort): void {
+// 已经 registerTool 的非 direct 名字保持去掉。savedMcpNames 里还没登记的名字再放回去。
+/** 把恢复出来、当前还没 registerTool 的 mcp__ 名字补回激活集。已在 active 里的不重复。 */
+export function retainDeferredNames(savedMcpNames: readonly string[], active: readonly string[]): string[] {
+  const next = [...active];
+  for (const name of savedMcpNames) {
+    if (!next.includes(name)) next.push(name);
+  }
+  return next;
+}
+
+const RESTORE_REASONS = new Set(["startup", "reload", "resume", "fork"]);
+
+function toolNameOf(tool: unknown): string | undefined {
+  if (!tool || typeof tool !== "object") return undefined;
+  const name = (tool as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
+}
+
+function restoredMcpNames(sessionManager: { buildSessionProjection?: () => { messages?: readonly unknown[] } } | undefined): string[] {
+  const messages = sessionManager?.buildSessionProjection?.().messages;
+  if (!Array.isArray(messages)) return [];
+  const names = new Set<string>();
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const record = message as { role?: unknown; toolsRemoved?: unknown; toolsAdded?: unknown };
+    if (record.role !== "system") continue;
+    for (const tool of Array.isArray(record.toolsRemoved) ? record.toolsRemoved : []) {
+      const name = toolNameOf(tool);
+      if (name) names.delete(name);
+    }
+    for (const tool of Array.isArray(record.toolsAdded) ? record.toolsAdded : []) {
+      const name = toolNameOf(tool);
+      if (name?.startsWith("mcp__")) names.add(name);
+    }
+  }
+  return [...names];
+}
+
+function registeredNames(pi: ExtensionAPI): Set<string> {
+  const read = (pi as { getAllTools?: () => Array<{ name: string }> }).getAllTools;
+  if (typeof read !== "function") return new Set();
+  return new Set(read().map((tool) => tool.name));
+}
+
+export function project(
+  pi: ProjectablePi,
+  snap: McpSnapshot,
+  mgr: ResourceManager,
+  control?: DesktopControlPort,
+  savedMcpNames: readonly string[] = [],
+): string[] {
   const direct: string[] = [];
   let hasCodemodeServer = false;
   let hasDeferred = false;
@@ -275,16 +325,18 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: ResourceManag
       } as Parameters<ProjectablePi["registerTool"]>[0]);
     }
   }
+  const pending = savedMcpNames.filter((name) => name.startsWith("mcp__") && !taken.has(name));
   try {
     const active = pi.getActiveTools();
     const next = active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
     for (const n of direct) if (!next.includes(n)) next.push(n);
     if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
     if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
-    pi.setActiveTools(next);
+    pi.setActiveTools(retainDeferredNames(pending, next));
   } catch {
     // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活
   }
+  return pending;
 }
 
 function serverIncludesDirect(entry: { exposure?: string; toolExposure?: Record<string, string>; tools: { name: string }[] }): boolean {
@@ -365,8 +417,9 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
   let alive = false;
   let unsub: (() => void) | undefined;
   let tokenRuntime: ProviderTokenRuntime | undefined;
+  let savedMcpNames: string[] = [];
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
     const runtime = providerRuntimeOf(ctx);
     // 进程内共享同一份 ModelRuntime。后来的会话拿到同一对象时不换回调。
     if (runtime && runtime !== tokenRuntime) {
@@ -375,9 +428,19 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     }
     mgr.init();
     alive = true;
+    if (RESTORE_REASONS.has(event.reason)) {
+      const registered = registeredNames(pi);
+      const names = new Set<string>([
+        ...pi.getActiveTools().filter((name) => name.startsWith("mcp__")),
+        ...restoredMcpNames(ctx.sessionManager),
+      ]);
+      savedMcpNames = [...names].filter((name) => !registered.has(name));
+    } else {
+      savedMcpNames = [];
+    }
     const render = (snap: McpSnapshot): void => {
       if (!alive) return;
-      project(pi, snap, mgr, control);
+      savedMcpNames = project(pi, snap, mgr, control, savedMcpNames);
       void control.request('mcp.state.publish', {
         workspace: typeof ctx.cwd === 'string' ? ctx.cwd : currentCwd(),
         servers: summary(snap),

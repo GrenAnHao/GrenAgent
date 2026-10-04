@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
 import { createManager, type McpSnapshot } from "./manager";
-import { bind, project, summary } from "./index";
+import { bind, project, retainDeferredNames, summary } from "./index";
 
 const RESOURCE_TOOLS = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] as const;
 
@@ -93,6 +93,13 @@ describe("summary", () => {
       loginUrl: "https://auth.example/login",
     });
     expect(out[1]).not.toHaveProperty("loginUrl");
+  });
+});
+
+describe("retainDeferredNames", () => {
+  it("keeps a saved MCP name that the current registry has not registered yet", () => {
+    const active = retainDeferredNames(["mcp__a__search"], ["read"]);
+    expect(active).toEqual(expect.arrayContaining(["read", "mcp__a__search"]));
   });
 });
 
@@ -340,6 +347,30 @@ function fakeBindMgr(s: McpSnapshot) {
 }
 
 describe("bind", () => {
+  it("keeps an unregistered MCP name on reload and drops it once registered as non-direct", async () => {
+    const pi = fakePiWithOn();
+    pi.setActiveTools(["read", "mcp__a__search"]);
+    const mgr = fakeBindMgr(snap({ a: { status: "connecting", tools: [] } }));
+    bind(pi as never, mgr as never);
+
+    await pi.fire("session_start", { type: "session_start", reason: "reload" }, { hasUI: false });
+    expect(pi.getActiveTools()).toEqual(expect.arrayContaining(["read", "mcp__a__search"]));
+
+    mgr.emit(snap({ a: { status: "connected", tools: ["search"], exposure: "deferred" } }));
+    expect(pi.registered).toContain("mcp__a__search");
+    expect(pi.getActiveTools()).not.toContain("mcp__a__search");
+  });
+
+  it("keeps an unregistered MCP name when a session is restored", async () => {
+    const pi = fakePiWithOn();
+    pi.setActiveTools(["read", "mcp__a__search"]);
+    const mgr = fakeBindMgr(snap({ a: { status: "connecting", tools: [] } }));
+    bind(pi as never, mgr as never);
+
+    await pi.fire("session_start", { type: "session_start", reason: "resume" }, { hasUI: false });
+    expect(pi.getActiveTools()).toEqual(expect.arrayContaining(["read", "mcp__a__search"]));
+  });
+
   it("init + project + subscribe on session_start, re-project on emit, unsub on shutdown", () => {
     const pi = fakePiWithOn();
     const mgr = fakeBindMgr(snap({ a: { status: "connected", tools: ["x"] } }));
