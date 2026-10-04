@@ -302,7 +302,109 @@ describe("project", () => {
     expect(body.content[0].text).toContain("body");
     expect(body.isError).toBe(false);
   });
+
+  it("does not clear an outstanding unregistered MCP name when projecting another server", () => {
+    const pi = piWithPendingRule({
+      active: ["read", "mcp__a__x"],
+      pending: ["mcp__b__search"],
+      registered: ["read", "codemode", "tool_search", "mcp__a__x"],
+    });
+
+    const kept = project(
+      pi as never,
+      snap({ a: { status: "connected", tools: ["x"] } }),
+      fakeMgr(),
+      undefined,
+      ["mcp__b__search"],
+    );
+
+    expect(pi.pending.has("mcp__b__search")).toBe(true);
+    expect(kept).toEqual(["mcp__b__search"]);
+    expect(pi.calls[0]).not.toContain("mcp__b__search");
+    expect(pi.active).toEqual(expect.arrayContaining(["read", "codemode", "mcp__a__x"]));
+    expect(pi.active).not.toContain("mcp__b__search");
+
+    const after = project(
+      pi as never,
+      snap({
+        a: { status: "connected", tools: ["x"] },
+        b: { status: "connected", tools: ["search"], exposure: "deferred" },
+      }),
+      fakeMgr(),
+      undefined,
+      kept,
+    );
+
+    expect(pi.registered).toContain("mcp__b__search");
+    expect(after).toEqual([]);
+    expect(pi.active).not.toContain("mcp__b__search");
+    expect(pi.active).not.toContain("mcp__a__x");
+    expect(pi.active).toEqual(expect.arrayContaining(["read", "codemode", "tool_search"]));
+  });
+
+  it("drops a failed server name and keeps an unknown or still-connecting name", () => {
+    const pi = piWithPendingRule({
+      active: ["read", "mcp__a__x"],
+      pending: ["mcp__b__search", "mcp__c__gone", "mcp__d__find"],
+      registered: ["read", "codemode", "tool_search", "mcp__a__x"],
+    });
+
+    const kept = project(
+      pi as never,
+      snap({
+        a: { status: "connected", tools: ["x"] },
+        c: { status: "failed", tools: [] },
+        d: { status: "connecting", tools: [] },
+      }),
+      fakeMgr(),
+      undefined,
+      ["mcp__b__search", "mcp__c__gone", "mcp__d__find"],
+    );
+
+    expect(kept).toEqual(["mcp__b__search", "mcp__d__find"]);
+    expect(pi.pending.has("mcp__b__search")).toBe(true);
+    expect(pi.pending.has("mcp__d__find")).toBe(true);
+    expect(pi.active).toContain("mcp__a__x");
+    expect(pi.calls.every((names) => !names.includes("mcp__c__gone"))).toBe(true);
+  });
 });
+
+function piWithPendingRule(initial: { active: string[]; pending: string[]; registered: string[] }) {
+  const registry = new Set(initial.registered);
+  let active = [...initial.active];
+  let pending = new Set(initial.pending);
+  const registered: string[] = [];
+  const tools: Array<Record<string, unknown>> = [];
+  const calls: string[][] = [];
+  return {
+    registered,
+    tools,
+    calls,
+    get active() {
+      return active;
+    },
+    get pending() {
+      return pending;
+    },
+    registerTool: (t: { name: string }) => {
+      registry.add(t.name);
+      registered.push(t.name);
+      tools.push(t);
+      if (pending.has(t.name)) {
+        pending.delete(t.name);
+        if (!active.includes(t.name)) active = [...active, t.name];
+      }
+    },
+    getActiveTools: () => active,
+    setActiveTools: (names: string[]) => {
+      calls.push([...names]);
+      const applied = names.filter((name) => registry.has(name));
+      if (active.some((name) => !applied.includes(name))) pending = new Set();
+      for (const name of applied) pending.delete(name);
+      active = applied;
+    },
+  };
+}
 
 function fakePiWithOn() {
   const handlers = new Map<string, Array<(...a: unknown[]) => unknown>>();

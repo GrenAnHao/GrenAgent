@@ -157,9 +157,11 @@ function isProjectedMcpName(name: string): boolean {
 }
 
 // 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
-// codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 与三个资源工具一律去掉。
-// 已经 registerTool 的非 direct 名字保持去掉。savedMcpNames 里还没登记的名字再放回去。
-/** 把恢复出来、当前还没 registerTool 的 mcp__ 名字补回激活集。已在 active 里的不重复。 */
+// codemode / deferred / hidden 不进入。
+// 还有未登记、且服务器未失败的 mcp__ 名字时，setActiveTools 只追加。
+// 少传任何一个当前激活名，Pi 会清掉其余 pending。未登记的名字不传给 setActiveTools，
+// 留在返回值里交给下一次 project。pending 清空后再去掉非 direct 的 mcp__ 和三个资源工具。
+/** 把 saved 里还不在 active 的名字补进去。未登记的名字不能靠这次调用留在 Pi 的激活集里。 */
 export function retainDeferredNames(savedMcpNames: readonly string[], active: readonly string[]): string[] {
   const next = [...active];
   for (const name of savedMcpNames) {
@@ -200,6 +202,19 @@ function registeredNames(pi: ExtensionAPI): Set<string> {
   const read = (pi as { getAllTools?: () => Array<{ name: string }> }).getAllTools;
   if (typeof read !== "function") return new Set();
   return new Set(read().map((tool) => tool.name));
+}
+
+// 名字还没 registerTool，并且对得上的服务器里有一台仍在连接，或快照里还没有这台服务器。
+// 对得上的服务器都已列出工具或已失败时，这个名字可以离开保存列表。
+function outstandingMcpName(name: string, snap: McpSnapshot, registeredNow: ReadonlySet<string>): boolean {
+  if (!name.startsWith("mcp__") || registeredNow.has(name)) return false;
+  let matched = false;
+  for (const [server, entry] of snap.servers) {
+    if (!name.startsWith(`mcp__${sanitize(server)}__`)) continue;
+    matched = true;
+    if (entry.status !== "connected" && entry.status !== "failed") return true;
+  }
+  return !matched;
 }
 
 export function project(
@@ -325,14 +340,22 @@ export function project(
       } as Parameters<ProjectablePi["registerTool"]>[0]);
     }
   }
-  const pending = savedMcpNames.filter((name) => name.startsWith("mcp__") && !taken.has(name));
+  const pending = savedMcpNames.filter((name) => outstandingMcpName(name, snap, taken));
   try {
     const active = pi.getActiveTools();
-    const next = active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
+    const preservePending = pending.length > 0;
+    const next = preservePending
+      ? [...active]
+      : active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
     for (const n of direct) if (!next.includes(n)) next.push(n);
     if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
     if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
-    pi.setActiveTools(retainDeferredNames(pending, next));
+    if (preservePending) {
+      const changed = next.length !== active.length || next.some((name, index) => name !== active[index]);
+      if (changed) pi.setActiveTools(next);
+    } else {
+      pi.setActiveTools(retainDeferredNames(pending, next));
+    }
   } catch {
     // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活
   }

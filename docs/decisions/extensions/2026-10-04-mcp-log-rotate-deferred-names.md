@@ -1,6 +1,6 @@
 ---
 title: MCP 日志轮转，并在重载时留住还没登记的工具名
-status: active
+status: superseded
 date: 2026-10-04
 scope: extensions
 files:
@@ -8,8 +8,10 @@ files:
   - extensions/mcp/manager.ts
   - extensions/mcp/index.ts
 supersedes:
-superseded_by:
+superseded_by: 2026-10-04-mcp-pending-loadout-keeps-names.md
 ---
+
+> 已过时 → 见 2026-10-04-mcp-pending-loadout-keeps-names.md
 
 ## 背景
 
