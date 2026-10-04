@@ -20,6 +20,8 @@ export interface McpServerConfig {
   timeout?: number;
   oauth?: unknown;
   auth?: unknown;
+  /** 这条服务器来自哪一层。扩展登记为 extension，同名时文件配置优先。 */
+  source?: "desktop" | "global" | "project" | "extension";
 }
 
 /** 没有 command/url 的项目条目，只覆盖已有服务器的这几项。 */

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { McpSnapshot } from "./manager";
+import type { McpServerConfig } from "./config";
+import { createManager, type McpSnapshot } from "./manager";
 import { bind, project, summary } from "./index";
+
+const RESOURCE_TOOLS = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] as const;
 
 function snap(
   servers: Record<string, {
@@ -11,6 +14,7 @@ function snap(
     description?: string;
     auth?: "none" | "oauth" | "provider";
     loginUrl?: string;
+    resources?: boolean;
   }>,
   options?: { autoEnableCodemode?: boolean },
 ): McpSnapshot {
@@ -27,6 +31,7 @@ function snap(
           ...(v.description !== undefined ? { description: v.description } : {}),
           ...(v.auth ? { auth: v.auth } : {}),
           ...(v.loginUrl ? { loginUrl: v.loginUrl } : {}),
+          ...(v.resources !== undefined ? { hasResources: v.resources } : {}),
         },
       ]),
     ),
@@ -223,6 +228,62 @@ describe("project", () => {
       expect.objectContaining({ operation: expect.objectContaining({ workspace: "D:/proj-a" }) }),
     );
   });
+
+  it("registers resource tools at the widest exposure when any resource server is direct", () => {
+    const pi = fakeProjectPi();
+    pi.setActiveTools(["read"]);
+    project(pi as never, snap({
+      wiki: { status: "connected", tools: ["x"], exposure: "codemode", resources: true },
+      docs: { status: "connected", tools: ["y"], exposure: "direct", resources: true },
+    }), fakeMgr());
+    const resourceTools = pi.tools.filter((tool) => RESOURCE_TOOLS.includes(tool.name as typeof RESOURCE_TOOLS[number]));
+    expect(resourceTools.map((tool) => tool.name)).toEqual([...RESOURCE_TOOLS]);
+    expect(resourceTools.map((tool) => tool.exposure)).toEqual(["direct", "direct", "direct"]);
+    for (const name of RESOURCE_TOOLS) expect(pi.active).toContain(name);
+  });
+
+  it("does not register resource tools when every resource server is hidden", () => {
+    const pi = fakeProjectPi();
+    project(pi as never, snap({
+      secret: { status: "connected", tools: ["x"], exposure: "hidden", resources: true },
+      plain: { status: "connected", tools: ["y"], exposure: "codemode" },
+    }), fakeMgr());
+    for (const name of RESOURCE_TOOLS) expect(pi.registered).not.toContain(name);
+    expect(pi.registered).toContain("mcp__plain__y");
+  });
+
+  it("calls listResources, listResourceTemplates, and readResource by tool name and shapes the result", async () => {
+    const pi = fakeProjectPi();
+    const listResources = vi.fn(async () => ({ content: [{ type: "text", text: "resources" }] }));
+    const listResourceTemplates = vi.fn(async () => ({ content: [{ type: "text", text: "templates" }] }));
+    const readResource = vi.fn(async () => ({ content: [{ type: "text", text: "body" }] }));
+    const definitions: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
+    pi.registerTool = (tool: any) => {
+      pi.registered.push(tool.name);
+      pi.tools.push(tool);
+      definitions.push(tool);
+    };
+    project(pi as never, snap({
+      docs: { status: "connected", tools: ["x"], exposure: "direct", resources: true },
+    }), { callTool: async () => ({ text: "x" }), listResources, listResourceTemplates, readResource } as never);
+
+    const list = definitions.find((tool) => tool.name === "list_mcp_resources");
+    const templates = definitions.find((tool) => tool.name === "list_mcp_resource_templates");
+    const read = definitions.find((tool) => tool.name === "read_mcp_resource");
+    expect(list).toBeDefined();
+    const listed = await list!.execute("call", { server: "docs" }, undefined);
+    const templated = await templates!.execute("call", {}, undefined);
+    const body = await read!.execute("call", { server: "docs", uri: "file://a" }, undefined);
+
+    expect(listResources).toHaveBeenCalledWith({ server: "docs" });
+    expect(listResourceTemplates).toHaveBeenCalledWith({});
+    expect(readResource).toHaveBeenCalledWith({ server: "docs", uri: "file://a" });
+    expect(listed.content[0].text).toContain("resources");
+    expect(listed.structuredContent).toMatchObject({ content: [{ type: "text", text: "resources" }] });
+    expect(templated.content[0].text).toContain("templates");
+    expect(body.content[0].text).toContain("body");
+    expect(body.isError).toBe(false);
+  });
 });
 
 function fakePiWithOn() {
@@ -241,6 +302,7 @@ function fakePiWithOn() {
     setActiveTools: (n: string[]) => {
       active = n;
     },
+    getMcpServers: (): Array<{ name: string; config: { command?: string; url?: string }; extensionPath: string }> => [],
     fire: (ev: string, ...args: unknown[]) => Promise.all((handlers.get(ev) ?? []).map((h) => h(...args))),
   };
 }
@@ -375,5 +437,99 @@ describe("bind", () => {
     const again = await pi.fire("before_agent_start", {}, ctx);
     expect(again[0]).toBeUndefined();
     expect(appendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives mcp_servers_change servers to the manager and does not override a file entry of the same name", async () => {
+    const connect = vi.fn(async (server: McpServerConfig) => ({
+      listTools: async () => ({ tools: [{ name: "x" }] }),
+      callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      close: async () => {},
+    }));
+    const mgr = createManager({
+      connect,
+      readServers: () => [{ name: "docs", transport: "stdio", command: "file-bin", args: [] }],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    const pi = fakePiWithOn();
+    pi.getMcpServers = () => [];
+    bind(pi as never, mgr as never);
+    await pi.fire("session_start", { type: "session_start", reason: "startup" }, { hasUI: false });
+    await pi.fire("mcp_servers_change", {
+      type: "mcp_servers_change",
+      servers: [
+        { name: "docs", config: { command: "ext-bin" }, extensionPath: "ext.ts" },
+        { name: "extra", config: { command: "extra-bin" }, extensionPath: "ext.ts" },
+      ],
+    }, {});
+
+    const errors = mgr.snapshot().errors ?? [];
+    const visible = `${errors.join("\n")}\n${JSON.stringify(summary(mgr.snapshot()))}`;
+    expect(visible).toContain("docs");
+    expect(errors.join("\n")).toContain("扩展登记的服务器 docs 被配置文件盖住");
+    expect(connect.mock.calls.some((call) => call[0]?.command === "ext-bin")).toBe(false);
+    await vi.waitFor(() => {
+      expect(connect.mock.calls.some((call) => call[0]?.name === "extra" && call[0]?.source === "extension")).toBe(true);
+    });
+    expect(connect.mock.calls.some((call) => call[0]?.name === "docs" && call[0]?.command === "file-bin")).toBe(true);
+  });
+
+  it("rejects an extension server whose name only differs by dash versus underscore", async () => {
+    const connect = vi.fn(async () => ({
+      listTools: async () => ({ tools: [{ name: "x" }] }),
+      callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      close: async () => {},
+    }));
+    const mgr = createManager({
+      connect,
+      readServers: () => [{ name: "dev-radius", transport: "stdio", command: "file-bin", args: [] }],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    const pi = fakePiWithOn();
+    pi.getMcpServers = () => [{ name: "dev_radius", config: { command: "ext-bin" }, extensionPath: "ext.ts" }];
+    bind(pi as never, mgr as never);
+    await pi.fire("session_start", { type: "session_start", reason: "startup" }, { hasUI: false });
+
+    const errors = mgr.snapshot().errors ?? [];
+    expect(errors.join("\n")).toContain("dev_radius");
+    expect(connect.mock.calls.map((call) => call[0]?.name)).not.toContain("dev_radius");
+    await vi.waitFor(() => {
+      expect(connect.mock.calls.some((call) => call[0]?.name === "dev-radius")).toBe(true);
+    });
+    expect(connect.mock.calls.map((call) => call[0]?.name)).not.toContain("dev_radius");
+  });
+
+  it("disconnects a removed extension server and projects again", async () => {
+    const connect = vi.fn(async () => ({
+      listTools: async () => ({ tools: [{ name: "x" }] }),
+      callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      close: async () => {},
+    }));
+    const mgr = createManager({
+      connect,
+      readServers: () => [],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    const pi = fakePiWithOn();
+    let projections = 0;
+    const setActiveTools = pi.setActiveTools;
+    pi.setActiveTools = (names: string[]) => {
+      projections += 1;
+      setActiveTools(names);
+    };
+    pi.getMcpServers = () => [{ name: "extra", config: { command: "extra-bin" }, extensionPath: "ext.ts" }];
+    bind(pi as never, mgr as never);
+    await pi.fire("session_start", { type: "session_start", reason: "startup" }, { hasUI: false });
+    await vi.waitFor(() => {
+      expect(mgr.snapshot().servers.get("extra")?.status).toBe("connected");
+    });
+    const before = projections;
+    await pi.fire("mcp_servers_change", { type: "mcp_servers_change", servers: [] }, {});
+    await vi.waitFor(() => {
+      expect(mgr.snapshot().servers.has("extra")).toBe(false);
+    });
+    expect(projections).toBeGreaterThan(before);
   });
 });

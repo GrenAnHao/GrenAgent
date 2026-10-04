@@ -9,6 +9,7 @@ import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
 import { authProviderName } from "./oauthRules.js";
 import { establishMcpConnection, loginUrlOf, type OAuthConnectHooks } from "./transport.js";
 import { diffServers } from "./diff.js";
+import { serverNamesConflict } from "./naming.js";
 import type { ProbeResult } from "./probe.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
 import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
@@ -34,11 +35,15 @@ export interface ServerEntry {
   timeout?: number;
   /** 需要登录时的授权地址。打开浏览器失败时仍保留，供面板复制。 */
   loginUrl?: string;
+  /** 连接后是否列出了资源或资源模板。列举失败为 false，不因此把服务器标失败。 */
+  hasResources?: boolean;
 }
 export interface McpSnapshot {
   servers: Map<string, ServerEntry>;
   /** 来自 mergeMcpLayers。缺省 true：项目层优先，两层都没写则为 true。 */
   autoEnableCodemode?: boolean;
+  /** 扩展登记被配置文件盖住，或和已有服务器只差 - / _ 时的说明。 */
+  errors?: string[];
 }
 
 /** 管理器需要的最小 MCP 客户端能力（真实 SDK Client 结构兼容）。 */
@@ -54,6 +59,9 @@ export interface McpClient {
     structuredContent?: unknown;
   }>;
   close(): Promise<void>;
+  listResources?(): Promise<{ resources?: unknown[] }>;
+  listResourceTemplates?(): Promise<{ resourceTemplates?: unknown[] }>;
+  readResource?(args: { uri: string }): Promise<{ contents?: Array<{ uri?: string; text?: string; blob?: string }> }>;
 }
 
 export type GetProviderToken = (provider: string) => Promise<string | undefined> | string | undefined;
@@ -83,6 +91,23 @@ export interface McpManager {
   closeAll(): void;
   /** 该服务器仍在连接时返回本次连接的 promise。已结束则没有。 */
   connectPromise(name: string): Promise<void> | undefined;
+  /** 用扩展登记替换上一份。同名文件服务器保留，只差 - / _ 的名字不进入连接列表。 */
+  applyExtensionServers(servers: McpServerConfig[]): Promise<void>;
+  listResources(args: Record<string, unknown>): Promise<{
+    content?: unknown;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
+  listResourceTemplates(args: Record<string, unknown>): Promise<{
+    content?: unknown;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
+  readResource(args: Record<string, unknown>): Promise<{
+    content?: unknown;
+    isError?: boolean;
+    structuredContent?: unknown;
+  }>;
   /**
    * 现读供应商登录态。bind() 把它设成读取进程内那一份 ModelRuntime。
    * 管理器只留这个函数，不留 pi 会话或运行时对象。
@@ -166,6 +191,9 @@ async function realConnect(s: McpServerConfig, hooks?: OAuthConnectHooks): Promi
           structuredContent: raw.structuredContent,
         };
       },
+      listResources: () => client.listResources(),
+      listResourceTemplates: () => client.listResourceTemplates(),
+      readResource: (args) => client.readResource(args),
       close: () => client.close(),
     };
   });
@@ -270,6 +298,46 @@ function serverSnapshotMeta(server: McpServerConfig): Pick<ServerEntry, "exposur
   };
 }
 
+function filterExtensionServers(
+  file: McpServerConfig[],
+  incoming: McpServerConfig[],
+): { accepted: McpServerConfig[]; errors: string[] } {
+  const errors: string[] = [];
+  const accepted: McpServerConfig[] = [];
+  for (const server of incoming) {
+    if (file.some((entry) => entry.name === server.name)) {
+      errors.push(`扩展登记的服务器 ${server.name} 被配置文件盖住`);
+      continue;
+    }
+    const conflict = [...file, ...accepted].find((entry) => serverNamesConflict(entry.name, server.name));
+    if (conflict) {
+      errors.push(`扩展登记的服务器 ${server.name} 与 ${conflict.name} 冲突`);
+      continue;
+    }
+    accepted.push({ ...server, source: "extension" });
+  }
+  return { accepted, errors };
+}
+
+async function probeResources(client: McpClient): Promise<boolean> {
+  const listed = async <T>(run: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await withTimeout(run(), MCP_TIMEOUT_MS);
+    } catch {
+      return undefined;
+    }
+  };
+  if (typeof client.listResources === "function") {
+    const result = await listed(() => client.listResources!());
+    if ((result?.resources?.length ?? 0) > 0) return true;
+  }
+  if (typeof client.listResourceTemplates === "function") {
+    const result = await listed(() => client.listResourceTemplates!());
+    if ((result?.resourceTemplates?.length ?? 0) > 0) return true;
+  }
+  return false;
+}
+
 function isRuntimeServer(server: McpMergeServer): server is McpServerConfig {
   return server.transport === "stdio" || server.transport === "sse" || server.transport === "http";
 }
@@ -366,11 +434,16 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
   const generation = new Map<string, number>();
   const listeners = new Set<(snap: McpSnapshot) => void>();
   let current: McpServerConfig[] = [];
+  let fileList: McpServerConfig[] = [];
+  let extensionRequested: McpServerConfig[] = [];
+  let extensionErrors: string[] = [];
+  let reconcileChain: Promise<void> = Promise.resolve();
   let started = false;
   let unwatch: (() => void) | undefined;
 
   const snapshot = (): McpSnapshot => ({
     autoEnableCodemode,
+    errors: [...extensionErrors],
     servers: new Map(
       [...catalog.entries()].map(([k, v]) => [k, {
         status: v.status,
@@ -380,6 +453,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         toolExposure: v.toolExposure ? { ...v.toolExposure } : undefined,
         description: v.description,
         auth: v.auth,
+        hasResources: v.hasResources === true,
         ...(v.loginUrl ? { loginUrl: v.loginUrl } : {}),
       }]),
     ),
@@ -434,6 +508,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       }
       clients.set(s.name, client);
       const { tools } = await withTimeout(client.listTools(), MCP_TIMEOUT_MS);
+      const hasResources = await probeResources(client);
       if (generation.get(s.name) !== gen) {
         if (clients.get(s.name) === client) {
           clients.delete(s.name);
@@ -441,7 +516,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         }
         return;
       }
-      catalog.set(s.name, { status: "connected", tools, ...meta });
+      catalog.set(s.name, { status: "connected", tools, hasResources, ...meta });
       try {
         // 写「全名」mcp__server__tool（与 probe.ts、运行时工具注册、mcp-policy 查询一致）。
         // 原先写裸名 t.name 导致 UI/策略 key 与扩展查的全名对不上 → 权限设置不生效。
@@ -497,24 +572,97 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     emit();
   };
 
+  const reconcile = (): Promise<void> => {
+    if (!started) return Promise.resolve();
+    // 和原来的配置回调一样，读服务器发生在返回之前，watch 测试能立刻数到这次读取。
+    const fileNow = readServers();
+    const run = reconcileChain.then(async () => {
+      if (!started) return;
+      fileList = fileNow;
+      const filtered = filterExtensionServers(fileList, extensionRequested);
+      const errorsChanged = extensionErrors.join("\n") !== filtered.errors.join("\n");
+      extensionErrors = filtered.errors;
+      const desired = [...fileList, ...filtered.accepted];
+      const { added, removed, changed } = diffServers(current, desired);
+      if (!added.length && !removed.length && !changed.length) {
+        if (errorsChanged) emit();
+        return;
+      }
+      current = desired;
+      await Promise.all([...removed, ...changed.map((entry) => entry.name)].map(disconnectServer));
+      await Promise.all([...added, ...changed].map(runConnect));
+    });
+    reconcileChain = run.then(() => undefined, () => undefined);
+    return run;
+  };
+
   const onConfigChange = (): void => {
     if (!started) return;
-    void (async () => {
-      const desired = readServers();
-      const { added, removed, changed } = diffServers(current, desired);
-      if (!added.length && !removed.length && !changed.length) return;
-      current = desired;
-      await Promise.all([...removed, ...changed.map((c) => c.name)].map(disconnectServer));
-      await Promise.all([...added, ...changed].map(runConnect));
-    })();
+    void reconcile();
   };
 
   const start = (): void => {
     if (started) return;
     started = true;
-    current = readServers();
-    for (const s of current) void runConnect(s);
+    fileList = readServers();
+    const filtered = filterExtensionServers(fileList, extensionRequested);
+    extensionErrors = filtered.errors;
+    current = [...fileList, ...filtered.accepted];
+    for (const server of current) void runConnect(server);
     unwatch = watch(onConfigChange);
+  };
+
+  const resourceTargets = (args: Record<string, unknown>): { names: string[]; missing?: string } => {
+    const serverName = typeof args.server === "string" && args.server.trim() ? args.server.trim() : undefined;
+    const names: string[] = [];
+    for (const [name, entry] of catalog) {
+      if (entry.status !== "connected" || entry.hasResources !== true) continue;
+      if (serverName && name !== serverName) continue;
+      names.push(name);
+    }
+    if (serverName && names.length === 0) return { names: [], missing: serverName };
+    return { names };
+  };
+
+  const resourceText = (payload: unknown, isError = false) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+    isError,
+    structuredContent: payload,
+  });
+
+  const listKind = async (
+    kind: "resources" | "resourceTemplates",
+    args: Record<string, unknown>,
+  ) => {
+    const { names, missing } = resourceTargets(args);
+    if (missing) {
+      return { content: [{ type: "text" as const, text: `MCP server "${missing}" has no resources` }], isError: true };
+    }
+    const items: unknown[] = [];
+    const errors: { server: string; error: string }[] = [];
+    for (const name of names) {
+      const client = clients.get(name);
+      const run = kind === "resources" ? client?.listResources : client?.listResourceTemplates;
+      if (!run) continue;
+      try {
+        const listed = await withTimeout(run(), callTimeoutMs(catalog.get(name)?.timeout)) as {
+          resources?: unknown[];
+          resourceTemplates?: unknown[];
+        };
+        const batch = kind === "resources" ? listed.resources : listed.resourceTemplates;
+        for (const item of batch ?? []) {
+          items.push(item && typeof item === "object" ? { server: name, ...(item as Record<string, unknown>) } : { server: name });
+        }
+      } catch (error) {
+        errors.push({ server: name, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const key = kind === "resources" ? "resources" : "resourceTemplates";
+    return resourceText({
+      ...(typeof args.server === "string" && args.server.trim() ? { server: args.server.trim() } : {}),
+      [key]: items,
+      ...(errors.length > 0 ? { errors } : {}),
+    }, items.length === 0 && errors.length > 0);
   };
 
   return {
@@ -560,6 +708,39 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     connectPromise(name) {
       if (catalog.get(name)?.status !== "connecting") return undefined;
       return inflight.get(name);
+    },
+    applyExtensionServers(servers) {
+      extensionRequested = servers.map((server) => ({ ...server, source: "extension" }));
+      if (!started) return Promise.resolve();
+      return reconcile();
+    },
+    listResources(args) {
+      return listKind("resources", args ?? {});
+    },
+    listResourceTemplates(args) {
+      return listKind("resourceTemplates", args ?? {});
+    },
+    async readResource(args) {
+      const serverName = typeof args?.server === "string" ? args.server.trim() : "";
+      const uri = typeof args?.uri === "string" ? args.uri : "";
+      const entry = catalog.get(serverName);
+      const client = clients.get(serverName);
+      if (!client?.readResource || entry?.status !== "connected" || entry.hasResources !== true) {
+        return { content: [{ type: "text", text: `MCP server "${serverName}" has no resources` }], isError: true };
+      }
+      try {
+        const result = await withTimeout(client.readResource({ uri }), callTimeoutMs(entry.timeout));
+        const text = (result.contents ?? [])
+          .map((item) => (typeof item.text === "string" ? item.text : JSON.stringify(item)))
+          .join("\n");
+        return {
+          content: [{ type: "text", text: text || JSON.stringify(result) }],
+          structuredContent: result,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: message }], isError: true };
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

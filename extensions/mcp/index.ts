@@ -1,9 +1,10 @@
 // mcp: 把外部 MCP server（stdio/SSE）的工具暴露给 agent，名为 mcp__<server>__<tool>。
 // 连接/热更新在进程级管理器（manager.ts），跨会话存活；本文件只做每会话薄绑定：
 // session_start 用新鲜 pi 登记+激活当前目录并订阅变化，session_shutdown 解绑。
-import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, RegisteredMcpServer } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { sanitize } from "./config.js";
+import { toolPrompt } from "../_shared/toolPrompt.js";
+import { remoteTransportKind, sanitize, type McpServerConfig } from "./config.js";
 import { getMcpManager, type McpAuthKind, type McpManager, type McpSnapshot } from "./manager.js";
 import { exposureForTool, normalizeExposure, type McpExposure } from "./merge.js";
 import { registerToolName } from "./naming.js";
@@ -64,9 +65,96 @@ interface ProjectablePi {
   setActiveTools: ExtensionAPI["setActiveTools"];
 }
 
+const RESOURCE_TOOL_NAMES = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] as const;
+type ResourceToolName = (typeof RESOURCE_TOOL_NAMES)[number];
+
+const LIST_RESOURCE_PARAMETERS = {
+  type: "object",
+  properties: {
+    server: { type: "string", description: "MCP server name. Omit to list every server with resources." },
+    cursor: { type: "string", description: "Opaque cursor from a previous call with the same server." },
+  },
+  additionalProperties: false,
+};
+
+const READ_RESOURCE_PARAMETERS = {
+  type: "object",
+  properties: {
+    server: { type: "string", description: "MCP server name exactly as configured." },
+    uri: { type: "string", description: "Resource URI to read." },
+  },
+  required: ["server", "uri"],
+  additionalProperties: false,
+};
+
+const RESOURCE_COPY: Record<ResourceToolName, { description: string; snippet: string; guideline: string }> = {
+  list_mcp_resources: {
+    description: "Lists resources provided by connected MCP servers. Pass server to limit the list to one server.",
+    snippet: "List resources from connected MCP servers.",
+    guideline: "Use list_mcp_resources to list MCP resources; pass server when only one server should be listed.",
+  },
+  list_mcp_resource_templates: {
+    description: "Lists resource templates provided by connected MCP servers. Pass server to limit the list to one server.",
+    snippet: "List resource templates from connected MCP servers.",
+    guideline: "Use list_mcp_resource_templates to list MCP resource templates; pass server when only one server should be listed.",
+  },
+  read_mcp_resource: {
+    description: "Reads one MCP resource by server name and URI.",
+    snippet: "Read one MCP resource by server name and URI.",
+    guideline: "Use read_mcp_resource with the server name and resource URI returned by list_mcp_resources.",
+  },
+};
+
+type ResourceManager = Pick<McpManager, "callTool"> & Partial<Pick<McpManager, "listResources" | "listResourceTemplates" | "readResource">>;
+
+function widestResourceExposure(snap: McpSnapshot): McpExposure | undefined {
+  const exposures: McpExposure[] = [];
+  for (const entry of snap.servers.values()) {
+    if (entry.status !== "connected" || entry.hasResources !== true) continue;
+    exposures.push(normalizeExposure(entry.exposure) ?? "codemode");
+  }
+  if (exposures.length === 0 || exposures.every((exposure) => exposure === "hidden")) return undefined;
+  if (exposures.includes("direct")) return "direct";
+  if (exposures.includes("codemode")) return "codemode";
+  if (exposures.includes("deferred")) return "deferred";
+  return undefined;
+}
+
+async function callResource(mgr: ResourceManager, name: ResourceToolName, args: Record<string, unknown>) {
+  if (name === "list_mcp_resources") return mgr.listResources?.(args);
+  if (name === "list_mcp_resource_templates") return mgr.listResourceTemplates?.(args);
+  return mgr.readResource?.(args);
+}
+
+function extensionServerConfig(server: RegisteredMcpServer): McpServerConfig {
+  const config = server.config;
+  const command = "command" in config ? config.command : undefined;
+  const url = "url" in config ? config.url : undefined;
+  const transport = command ? "stdio" : url ? remoteTransportKind(url) : "stdio";
+  return {
+    name: server.name,
+    transport,
+    source: "extension",
+    ...(command ? { command, args: config.args, env: config.env, cwd: "cwd" in config ? config.cwd : undefined } : {}),
+    ...(url ? { url, headers: "headers" in config ? config.headers : undefined } : {}),
+    ...(config.exposure !== undefined ? { exposure: config.exposure } : {}),
+    ...(config.toolExposure ? { toolExposure: config.toolExposure } : {}),
+    ...(config.description !== undefined ? { description: config.description } : {}),
+    ...(config.enabled !== undefined ? { enabled: config.enabled } : {}),
+    ...(typeof config.timeout === "number" ? { timeout: config.timeout } : {}),
+    ...("oauth" in config && config.oauth !== undefined ? { oauth: config.oauth } : {}),
+    ...("auth" in config && config.auth !== undefined ? { auth: config.auth } : {}),
+  };
+}
+
+function pushExtensionServers(mgr: McpManager, servers: readonly RegisteredMcpServer[] | undefined): Promise<void> | undefined {
+  if (typeof mgr.applyExtensionServers !== "function") return undefined;
+  return mgr.applyExtensionServers((servers ?? []).map(extensionServerConfig));
+}
+
 // 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
 // codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 一律去掉。
-export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">, control?: DesktopControlPort): void {
+export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: ResourceManager, control?: DesktopControlPort): void {
   const direct: string[] = [];
   let hasCodemodeServer = false;
   let hasDeferred = false;
@@ -124,6 +212,58 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
           return {
             content: shaped.content as AgentToolResult<McpToolDetails>["content"],
             details: { server, tool: originalToolName },
+            isError: shaped.isError,
+            structuredContent: shaped.structuredContent as AgentToolResult<McpToolDetails>["structuredContent"],
+          };
+        },
+      } as Parameters<ProjectablePi["registerTool"]>[0]);
+    }
+  }
+  const resourcesExposure = widestResourceExposure(snap);
+  if (resourcesExposure) {
+    if (resourcesExposure === "codemode") hasCodemodeServer = true;
+    if (resourcesExposure === "deferred") hasDeferred = true;
+    if (resourcesExposure === "direct") {
+      for (const name of RESOURCE_TOOL_NAMES) direct.push(name);
+    }
+    for (const name of RESOURCE_TOOL_NAMES) {
+      const copy = RESOURCE_COPY[name];
+      pi.registerTool({
+        name,
+        label: name,
+        description: copy.description,
+        ...toolPrompt(copy.snippet, [copy.guideline]),
+        parameters: Type.Unsafe(name === "read_mcp_resource" ? READ_RESOURCE_PARAMETERS : LIST_RESOURCE_PARAMETERS),
+        exposure: resourcesExposure,
+        outputSchema: mcpResultOutputSchema,
+        async execute(_toolCallId, params, _signal, _update, ctx): Promise<AgentToolResult<McpToolDetails>> {
+          const args = (params ?? {}) as Record<string, unknown>;
+          const server = typeof args.server === "string" ? args.server : "";
+          if (control) {
+            const authorization = await authorizeDesktopOperation(control, {
+              kind: "mcp.call",
+              workspace: typeof ctx?.cwd === "string" ? ctx.cwd : currentCwd(),
+              server,
+              toolName: name,
+              args,
+            });
+            if (authorization.status !== "allowed") {
+              return {
+                content: [{ type: "text", text: `MCP 调用已被 Electron 权限策略${authorization.status === "blocked" ? "暂停" : "拒绝"}` }],
+                details: { server, tool: name, error: authorization.status },
+                isError: true,
+              };
+            }
+          }
+          const raw = await callResource(mgr, name, args);
+          const shaped = shapeMcpResult({
+            content: Array.isArray(raw?.content) ? raw.content as { type: string }[] : undefined,
+            isError: raw?.isError,
+            structuredContent: raw?.structuredContent,
+          });
+          return {
+            content: shaped.content as AgentToolResult<McpToolDetails>["content"],
+            details: { server, tool: name },
             isError: shaped.isError,
             structuredContent: shaped.structuredContent as AgentToolResult<McpToolDetails>["structuredContent"],
           };
@@ -241,6 +381,13 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     };
     render(mgr.snapshot());
     unsub = mgr.subscribe(render);
+    const listed = typeof pi.getMcpServers === "function" ? pi.getMcpServers() : [];
+    return pushExtensionServers(mgr, listed);
+  });
+
+  pi.on("mcp_servers_change", (event) => {
+    if (!alive) return;
+    return pushExtensionServers(mgr, event.servers);
   });
 
   pi.on("session_shutdown", () => {

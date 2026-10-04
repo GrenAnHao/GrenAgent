@@ -748,6 +748,81 @@ describe("reloadServer", () => {
   });
 });
 
+describe("resources", () => {
+  it("sets hasResources when listResources returns an item", async () => {
+    const connect = vi.fn(async () => ({
+      ...fakeClient([{ name: "alpha" }]),
+      listResources: async () => ({ resources: [{ uri: "file://a", name: "a" }] }),
+    }));
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    expect(mgr.snapshot().servers.get("a")?.hasResources).toBe(true);
+  });
+
+  it("sets hasResources when resource templates exist and the resource list is empty", async () => {
+    const connect = vi.fn(async () => ({
+      ...fakeClient([{ name: "alpha" }]),
+      listResources: async () => ({ resources: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [{ uriTemplate: "file://{id}", name: "t" }] }),
+    }));
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    expect(mgr.snapshot().servers.get("a")?.hasResources).toBe(true);
+  });
+
+  it("stays connected with hasResources false when resource listing fails", async () => {
+    const connect = vi.fn(async () => ({
+      ...fakeClient([{ name: "alpha" }]),
+      listResources: async () => {
+        throw new Error("no resources");
+      },
+      listResourceTemplates: async () => {
+        throw new Error("no templates");
+      },
+    }));
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    const entry = mgr.snapshot().servers.get("a");
+    expect(entry?.status).toBe("connected");
+    expect(entry?.hasResources).toBe(false);
+    expect(entry?.tools.map((tool) => tool.name)).toEqual(["alpha"]);
+  });
+
+  it("calls the SDK resource methods from the manager by tool name", async () => {
+    const listResources = vi.fn(async () => ({ resources: [{ uri: "file://a", name: "a" }] }));
+    const listResourceTemplates = vi.fn(async () => ({ resourceTemplates: [{ uriTemplate: "file://{id}", name: "t" }] }));
+    const readResource = vi.fn(async () => ({ contents: [{ uri: "file://a", text: "body" }] }));
+    const connect = vi.fn(async () => ({
+      ...fakeClient([{ name: "alpha" }]),
+      listResources,
+      listResourceTemplates,
+      readResource,
+    }));
+    const mgr = createManager({ connect, readServers: () => [srv("a")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("a")?.status === "connected");
+    expect(mgr.snapshot().servers.get("a")?.hasResources).toBe(true);
+    listResources.mockClear();
+    listResourceTemplates.mockClear();
+    readResource.mockClear();
+
+    const listed = await mgr.listResources({ server: "a" });
+    const templated = await mgr.listResourceTemplates({});
+    const body = await mgr.readResource({ server: "a", uri: "file://a" });
+
+    expect(listResources).toHaveBeenCalled();
+    expect(listResourceTemplates).toHaveBeenCalled();
+    expect(readResource).toHaveBeenCalledWith({ uri: "file://a" });
+    expect(listed.content?.[0]).toMatchObject({ type: "text" });
+    expect(String((listed.content?.[0] as { text?: string } | undefined)?.text)).toContain("file://a");
+    expect(String((templated.content?.[0] as { text?: string } | undefined)?.text)).toContain("file://{id}");
+    expect(String((body.content?.[0] as { text?: string } | undefined)?.text)).toContain("body");
+  });
+});
+
 describe("getMcpManagerFor", () => {
   it("按 workspace 分键，同键返回同一实例", () => {
     const a = getMcpManagerFor("D:/a");
