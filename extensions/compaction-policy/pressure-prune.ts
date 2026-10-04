@@ -1,5 +1,7 @@
 // 按压力裁旧工具结果：缓存冷时定案（planPressurePrune），热时把同一份计划原样重放（applyPrunePlan）。
 // 只改发往模型的副本，不原地修改消息对象。计划按 toolCallId 认消息：context 钩子每次拿到的是新克隆。
+import { isCacheCold } from "./cache-warmth.js";
+import { classify } from "./pressure.js";
 import { textLength } from "./prune.js";
 
 export const RECENT_KEEP_CHARS = 160_000;
@@ -141,4 +143,56 @@ export function applyPrunePlan<T extends PruneMessageLike>(messages: T[], plan: 
     return m;
   });
   return { messages: applied ? out : messages, savedChars, applied };
+}
+
+export interface ContextUsageLike {
+  tokens?: number | null;
+  contextWindow?: number;
+  percent?: number | null;
+}
+
+/** 把上一次请求省下的字符按 4 字符约 1 token 折回，得到未裁时的占用百分比。 */
+export function unprunedPercent(usage: ContextUsageLike | undefined, savedChars: number): number | null {
+  const percent = usage?.percent;
+  if (percent == null || !Number.isFinite(percent)) return null;
+  const contextWindow = usage?.contextWindow ?? 0;
+  if (!(contextWindow > 0) || !(savedChars > 0)) return percent;
+  return percent + (savedChars / 4 / contextWindow) * 100;
+}
+
+export interface PruneState {
+  plan: PrunePlan;
+  /** 上一次请求按计划省下的字符数。 */
+  savedChars: number;
+}
+
+export const emptyPruneState = (): PruneState => ({ plan: new Map(), savedChars: 0 });
+
+export interface PressurePruneInput<T> {
+  messages: T[];
+  now: number;
+  lastActivity: number | undefined;
+  ttlMs: number;
+  usage: ContextUsageLike | undefined;
+  keepRecentTurns: number;
+  minBodyChars: number;
+}
+
+/** 冷：按未裁占用重新定案；热：沿用已有计划。返回本次要发的消息和新状态。 */
+export function runPressurePrune<T extends PruneMessageLike>(
+  state: PruneState,
+  input: PressurePruneInput<T>,
+): { messages: T[]; state: PruneState } {
+  let plan = state.plan;
+  if (isCacheCold(input.now, input.lastActivity, input.ttlMs)) {
+    const percent = unprunedPercent(input.usage, state.savedChars);
+    const level = percent == null ? 0 : classify(percent).level;
+    plan = planPressurePrune(input.messages, {
+      level,
+      keepRecentTurns: input.keepRecentTurns,
+      minBodyChars: input.minBodyChars,
+    });
+  }
+  const res = applyPrunePlan(input.messages, plan);
+  return { messages: res.messages, state: { plan, savedChars: res.savedChars } };
 }

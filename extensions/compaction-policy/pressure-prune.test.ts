@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyPrunePlan,
+  emptyPruneState,
   planPressurePrune,
   prunePlaceholder,
   RECENT_KEEP_CHARS,
+  runPressurePrune,
   softTrimText,
+  unprunedPercent,
 } from "./pressure-prune.js";
 
 type Msg = { role: string; content: unknown; toolCallId?: string; toolName?: string; timestamp?: number };
@@ -137,5 +140,101 @@ describe("applyPrunePlan", () => {
   it("soft 遇到不超过 4096 的正文保持原文", () => {
     const msgs = [tr("x", "short")];
     expect(applyPrunePlan(msgs, new Map([["x", "soft"]])).messages).toBe(msgs);
+  });
+});
+
+describe("unprunedPercent", () => {
+  it("把省下的字符折回百分比", () => {
+    expect(unprunedPercent({ percent: 45, contextWindow: 100_000 }, 40_000)).toBe(55);
+  });
+
+  it("百分比缺失时返回 null", () => {
+    expect(unprunedPercent({ percent: null, contextWindow: 100_000 }, 0)).toBeNull();
+    expect(unprunedPercent(undefined, 0)).toBeNull();
+  });
+});
+
+describe("runPressurePrune", () => {
+  const base = { keepRecentTurns: 1, minBodyChars: 1000, ttlMs: 300_000 };
+  const now = 10_000_000;
+
+  it("冷时定案并套用，热时沿用同一份计划，即使占用已掉到 0 级", () => {
+    const cold = runPressurePrune(emptyPruneState(), {
+      ...base,
+      messages: scenario(),
+      now,
+      lastActivity: now - 600_000,
+      usage: { percent: 60, contextWindow: 200_000 },
+    });
+    const trimmed = textOf(cold.messages[3]);
+    expect(trimmed).toContain("[... trimmed, removed");
+    expect(cold.state.plan.get("old")).toBe("soft");
+    expect(cold.state.savedChars).toBeGreaterThan(0);
+
+    const next = [...scenario(), asst([], now - 1_000)];
+    const warm = runPressurePrune(cold.state, {
+      ...base,
+      messages: next,
+      now,
+      lastActivity: now - 1_000,
+      usage: { percent: 10, contextWindow: 200_000 },
+    });
+    expect(textOf(warm.messages[3])).toBe(trimmed);
+    expect(warm.state.plan).toBe(cold.state.plan);
+  });
+
+  it("热且没有计划时，高占用也不裁", () => {
+    const msgs = scenario();
+    const res = runPressurePrune(emptyPruneState(), {
+      ...base,
+      messages: msgs,
+      now,
+      lastActivity: now - 1_000,
+      usage: { percent: 95, contextWindow: 200_000 },
+    });
+    expect(res.messages).toBe(msgs);
+  });
+
+  it("再次变冷时按新等级重算", () => {
+    const first = runPressurePrune(emptyPruneState(), {
+      ...base,
+      messages: scenario(),
+      now,
+      lastActivity: now - 600_000,
+      usage: { percent: 60, contextWindow: 200_000 },
+    });
+    const again = runPressurePrune(first.state, {
+      ...base,
+      messages: scenario(),
+      now,
+      lastActivity: now - 600_000,
+      usage: { percent: 5, contextWindow: 200_000 },
+    });
+    expect(again.state.plan.size).toBe(0);
+  });
+
+  it("上一次省下的字符折回后等级不下降", () => {
+    const state = { plan: new Map(), savedChars: 40_000 };
+    const res = runPressurePrune(state, {
+      ...base,
+      messages: scenario(),
+      now,
+      lastActivity: now - 600_000,
+      usage: { percent: 45, contextWindow: 100_000 },
+    });
+    expect(res.state.plan.get("old")).toBe("soft");
+  });
+
+  it("百分比缺失时冷定案为空计划", () => {
+    const msgs = scenario();
+    const res = runPressurePrune(emptyPruneState(), {
+      ...base,
+      messages: msgs,
+      now,
+      lastActivity: undefined,
+      usage: { percent: null, contextWindow: 200_000 },
+    });
+    expect(res.messages).toBe(msgs);
+    expect(res.state.plan.size).toBe(0);
   });
 });
