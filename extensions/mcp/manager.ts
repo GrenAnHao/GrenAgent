@@ -1,14 +1,16 @@
 // 进程级 MCP 连接管理器：跨会话存活，绝不引用 pi/ctx。
 // 按 workspace 分 Map，同一 workspace 共享一套 manager。
+import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
-import { expandServerVars, injectDefaultServers, type McpServerConfig, parseMcpServers, sanitize } from "./config.js";
+import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers, sanitize } from "./config.js";
+import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
 import { createMcpTransport } from "./transport.js";
 import { diffServers } from "./diff.js";
 import type { ProbeResult } from "./probe.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
-import { readLayeredMcpServersSync, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
+import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
 export const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
 
@@ -119,16 +121,80 @@ function defaultReadServers(workspace: string): McpServerConfig[] {
     ? captured.PI_MCP_CONFIG
     : (als?.PI_MCP_CONFIG ?? captured?.PI_MCP_CONFIG ?? getConfig("PI_MCP_CONFIG"));
   const all = { ...getAllConfig(), ...captured, ...als };
-  // PI_MCP_CONFIG 是回合开始时的 ALS 快照，watch/中途写入读不到它。
-  // 现场分层文件（MCP_SERVERS + mcp.json）覆盖同名项，并补上快照里没有的新 server。
+  // PI_MCP_CONFIG 是回合开始时的 ALS 快照。桌面 MCP_SERVERS 覆盖同名项，
+  // 再与全局/项目 mcp.json 合并（禁用名单、enabled:false、exposure）。
+  const paths = mcpConfigPaths(workspace);
+  const globalLayer = readScopeLayer(paths.global);
+  const projectLayer = readScopeLayer(paths.project);
+  const merged = mergeMcpLayers({
+    desktop: overlayMcpServers(managedServers(raw), parseMcpServers(getConfig("MCP_SERVERS") ?? "")),
+    global: globalLayer.servers,
+    project: projectLayer.entries,
+    globalDisabled: globalLayer.disabled,
+    projectDisabled: projectLayer.disabled,
+    globalAutoEnableCodemode: globalLayer.autoEnableCodemode,
+    projectAutoEnableCodemode: projectLayer.autoEnableCodemode,
+  });
   const servers = injectDefaultServers(
-    overlayMcpServers(managedServers(raw), readLayeredMcpServersSync(workspace, getConfig("MCP_SERVERS") ?? "")),
+    merged.servers.filter(isRuntimeServer),
     all,
     process.platform,
     readToolsCache(),
     process.arch,
   );
   return expandServerVars(servers, workspace);
+}
+
+function isRuntimeServer(server: McpMergeServer): server is McpServerConfig {
+  return server.transport === "stdio" || server.transport === "sse" || server.transport === "http";
+}
+
+interface ScopeLayer {
+  servers: McpServerConfig[];
+  entries: McpLayerEntry[];
+  disabled: string[];
+  autoEnableCodemode: boolean | undefined;
+}
+
+function readScopeLayer(filePath: string): ScopeLayer {
+  const empty: ScopeLayer = { servers: [], entries: [], disabled: [], autoEnableCodemode: undefined };
+  let text: string;
+  try {
+    text = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return empty;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`MCP 配置 JSON 损坏: ${filePath}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`MCP 配置必须是对象: ${filePath}`);
+  }
+  const root = parsed as Record<string, unknown>;
+  if (root.mcpServers !== undefined && (!root.mcpServers || typeof root.mcpServers !== "object" || Array.isArray(root.mcpServers))) {
+    throw new Error(`mcpServers 必须是对象: ${filePath}`);
+  }
+  if (root.disabledMcpServers !== undefined && (!root.disabledMcpServers || typeof root.disabledMcpServers !== "object" || Array.isArray(root.disabledMcpServers))) {
+    throw new Error(`disabledMcpServers 必须是对象: ${filePath}`);
+  }
+  const disabledRoot = root.disabledMcpServers;
+  const disabled = disabledRoot && typeof disabledRoot === "object" && !Array.isArray(disabledRoot)
+    ? Object.keys(disabledRoot)
+    : [];
+  const serversRoot = root.mcpServers && typeof root.mcpServers === "object" && !Array.isArray(root.mcpServers)
+    ? root.mcpServers
+    : {};
+  const json = JSON.stringify({ mcpServers: serversRoot });
+  return {
+    servers: parseMcpServers(json),
+    entries: parseMcpLayerEntries(json),
+    disabled,
+    autoEnableCodemode: typeof root.autoEnableCodemode === "boolean" ? root.autoEnableCodemode : undefined,
+  };
 }
 
 export function managedServers(raw: string | undefined): McpServerConfig[] | undefined {

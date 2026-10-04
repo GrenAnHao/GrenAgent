@@ -1,5 +1,7 @@
 // Pure helpers for the mcp extension: parse the MCP_SERVERS JSON config and
 // sanitize names for tool registration. No I/O so the logic stays testable.
+import { homedir } from "node:os";
+import { expandConfigValues } from "./merge.js";
 
 export interface McpServerConfig {
   name: string;
@@ -11,7 +13,25 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
   /** stdio server 工作目录（透传给 StdioClientTransport）。 */
   cwd?: string;
+  exposure?: string;
+  toolExposure?: Record<string, string>;
+  description?: string;
+  enabled?: boolean;
+  timeout?: number;
+  oauth?: unknown;
+  auth?: unknown;
 }
+
+/** 没有 command/url 的项目条目，只覆盖已有服务器的这几项。 */
+export interface McpServerOverride {
+  name: string;
+  exposure?: string;
+  toolExposure?: Record<string, string>;
+  description?: string;
+  enabled?: boolean;
+}
+
+export type McpLayerEntry = McpServerConfig | McpServerOverride;
 
 /** `/sse` 走旧 SSE 传输，其余 remote URL 走 Streamable HTTP。 */
 export function remoteTransportKind(url: string): "sse" | "http" {
@@ -42,6 +62,15 @@ function asStrRecord(v: unknown): Record<string, string> {
 // Parse a `{ name: { command/args/env } | { url } }` map. `url` ⇒ SSE, `command` ⇒ stdio.
 // Tolerates empty / invalid JSON and entries missing both command and url.
 export function parseMcpServers(json: string): McpServerConfig[] {
+  return collectMcpEntries(json, false).filter((entry): entry is McpServerConfig => "transport" in entry);
+}
+
+/** 与 parseMcpServers 相同，另外保留只写 exposure / enabled 等覆盖字段的条目。 */
+export function parseMcpLayerEntries(json: string): McpLayerEntry[] {
+  return collectMcpEntries(json, true);
+}
+
+function collectMcpEntries(json: string, includeOverrides: boolean): McpLayerEntry[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -52,32 +81,72 @@ export function parseMcpServers(json: string): McpServerConfig[] {
   // Standard format `{ "mcpServers": { name: {...} } }` (like .cursor/mcp.json /
   // Claude Desktop); also accept a bare `{ name: {...} }` map for convenience.
   const source = "mcpServers" in root ? asRecord(root.mcpServers) : root;
-  const servers: McpServerConfig[] = [];
+  const servers: McpLayerEntry[] = [];
   for (const [name, raw] of Object.entries(source)) {
-    const cfg = asRecord(raw);
-    const url = typeof cfg.url === "string" ? cfg.url : undefined;
-    const command = typeof cfg.command === "string" ? cfg.command : undefined;
-    if (url) {
-      const headers = asStrRecord(cfg.headers);
-      servers.push({
-        name,
-        transport: remoteTransportKind(url),
-        url,
-        ...(Object.keys(headers).length ? { headers } : {}),
-      });
-    } else if (command) {
-      const cwd = typeof cfg.cwd === "string" ? cfg.cwd : undefined;
-      servers.push({
-        name,
-        transport: "stdio",
-        command,
-        args: asStrArray(cfg.args),
-        env: asStrRecord(cfg.env),
-        ...(cwd ? { cwd } : {}),
-      });
-    }
+    const entry = serverFromRaw(name, raw, includeOverrides);
+    if (entry) servers.push(entry);
   }
   return servers;
+}
+
+function serverFromRaw(name: string, raw: unknown, includeOverrides: boolean): McpLayerEntry | undefined {
+  const cfg = asRecord(raw);
+  const extras = optionalServerFields(cfg);
+  const url = typeof cfg.url === "string" ? cfg.url : undefined;
+  const command = typeof cfg.command === "string" ? cfg.command : undefined;
+  if (url) {
+    const headers = asStrRecord(cfg.headers);
+    return {
+      name,
+      transport: remoteTransportKind(url),
+      url,
+      ...(Object.keys(headers).length ? { headers } : {}),
+      ...extras,
+    };
+  }
+  if (command) {
+    const cwd = typeof cfg.cwd === "string" ? cfg.cwd : undefined;
+    return {
+      name,
+      transport: "stdio",
+      command,
+      args: asStrArray(cfg.args),
+      env: asStrRecord(cfg.env),
+      ...(cwd ? { cwd } : {}),
+      ...extras,
+    };
+  }
+  if (!includeOverrides || !hasServerOverride(cfg)) return undefined;
+  return { name, ...overrideFields(cfg) };
+}
+
+function optionalServerFields(cfg: Record<string, unknown>): Partial<McpServerConfig> {
+  return {
+    ...overrideFields(cfg),
+    ...(typeof cfg.timeout === "number" && Number.isFinite(cfg.timeout) ? { timeout: cfg.timeout } : {}),
+    ...("oauth" in cfg && cfg.oauth !== undefined ? { oauth: cfg.oauth } : {}),
+    ...("auth" in cfg && cfg.auth !== undefined ? { auth: cfg.auth } : {}),
+  };
+}
+
+function overrideFields(cfg: Record<string, unknown>): Partial<McpServerOverride> {
+  const out: Partial<McpServerOverride> = {};
+  if (typeof cfg.exposure === "string") out.exposure = cfg.exposure;
+  if (isPlainRecord(cfg.toolExposure)) out.toolExposure = asStrRecord(cfg.toolExposure);
+  if (typeof cfg.description === "string") out.description = cfg.description;
+  if (typeof cfg.enabled === "boolean") out.enabled = cfg.enabled;
+  return out;
+}
+
+function hasServerOverride(cfg: Record<string, unknown>): boolean {
+  return typeof cfg.exposure === "string"
+    || isPlainRecord(cfg.toolExposure)
+    || typeof cfg.description === "string"
+    || typeof cfg.enabled === "boolean";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 // 默认内置服务注入：
@@ -118,20 +187,15 @@ export function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
-// Expand VSCode-style ${workspaceFolder} / ${cwd} placeholders in a server's
-// command/args/url/env against the agent's cwd. pi has no built-in expansion, so
-// without this a config like `some-server --root ${workspaceFolder}` receives the
-// literal string and the server fails to start. Applied for BOTH main and sub
-// agents (see manager.defaultReadServers).
+// Expand ${workspaceFolder} / ${cwd} / ${ENV}, a whole-value !command, and cwd ~/
+// or relative paths. Applied for BOTH main and sub agents (see manager.defaultReadServers).
 export function expandServerVars(servers: McpServerConfig[], cwd: string): McpServerConfig[] {
-  const sub = (s: string): string => s.replace(/\$\{workspaceFolder\}/g, cwd).replace(/\$\{cwd\}/g, cwd);
-  return servers.map((srv) => ({
-    ...srv,
-    command: srv.command ? sub(srv.command) : srv.command,
-    args: srv.args ? srv.args.map(sub) : srv.args,
-    url: srv.url ? sub(srv.url) : srv.url,
-    cwd: srv.cwd ? sub(srv.cwd) : srv.cwd,
-    env: srv.env ? Object.fromEntries(Object.entries(srv.env).map(([k, v]) => [k, sub(v)])) : srv.env,
-    headers: srv.headers ? Object.fromEntries(Object.entries(srv.headers).map(([k, v]) => [k, sub(v)])) : srv.headers,
-  }));
+  const context = {
+    ...process.env,
+    workspaceFolder: cwd,
+    cwd,
+    home: homedir(),
+    sessionCwd: cwd,
+  };
+  return servers.map((server) => expandConfigValues(server, context));
 }
