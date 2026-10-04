@@ -6,7 +6,7 @@ import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
 import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers, sanitize } from "./config.js";
 import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
-import { createMcpTransport } from "./transport.js";
+import { establishMcpConnection, loginUrlOf, type OAuthConnectHooks } from "./transport.js";
 import { diffServers } from "./diff.js";
 import type { ProbeResult } from "./probe.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
@@ -31,6 +31,8 @@ export interface ServerEntry {
   auth?: McpAuthKind;
   /** 服务器配置的调用超时，单位秒。缺省时调用按 60 秒计。 */
   timeout?: number;
+  /** 需要登录时的授权地址。打开浏览器失败时仍保留，供面板复制。 */
+  loginUrl?: string;
 }
 export interface McpSnapshot {
   servers: Map<string, ServerEntry>;
@@ -55,7 +57,7 @@ export interface McpClient {
 
 export interface ManagerDeps {
   workspace?: string;
-  connect?: (s: McpServerConfig) => Promise<McpClient>;
+  connect?: (s: McpServerConfig, hooks?: OAuthConnectHooks) => Promise<McpClient>;
   readServers?: () => McpServerConfig[];
   watch?: (cb: () => void) => () => void;
   writeCache?: (name: string, r: ProbeResult) => void;
@@ -125,37 +127,38 @@ function callWithProgressTimeout<T>(run: (onProgress: () => void) => Promise<T>,
   });
 }
 
-async function realConnect(s: McpServerConfig): Promise<McpClient> {
-  const client = new Client({ name: "grenagent", version: "0.1.0" });
-  const transport = createMcpTransport(s);
-  try {
-    await withTimeout(client.connect(transport), MCP_TIMEOUT_MS);
-  } catch (e) {
-    await client.close().catch(() => {});
-    throw e;
-  }
-  return {
-    listTools: () => client.listTools(),
-    callTool: async (args) => {
-      const timeoutMs = callTimeoutMs(s.timeout);
-      const result = await client.callTool(
-        { name: args.name, arguments: args.arguments },
-        undefined,
-        {
-          timeout: timeoutMs,
-          resetTimeoutOnProgress: true,
-          onprogress: () => args.onProgress?.(),
-        },
-      );
-      const raw = result as { content?: unknown; isError?: boolean; structuredContent?: unknown };
-      return {
-        content: "content" in result ? raw.content : undefined,
-        isError: raw.isError,
-        structuredContent: raw.structuredContent,
-      };
-    },
-    close: () => client.close(),
-  };
+async function realConnect(s: McpServerConfig, hooks?: OAuthConnectHooks): Promise<McpClient> {
+  return establishMcpConnection(s, hooks, async (transport) => {
+    const client = new Client({ name: "grenagent", version: "0.1.0" });
+    try {
+      await withTimeout(client.connect(transport), MCP_TIMEOUT_MS);
+    } catch (e) {
+      await client.close().catch(() => {});
+      throw e;
+    }
+    return {
+      listTools: () => client.listTools(),
+      callTool: async (args) => {
+        const timeoutMs = callTimeoutMs(s.timeout);
+        const result = await client.callTool(
+          { name: args.name, arguments: args.arguments },
+          undefined,
+          {
+            timeout: timeoutMs,
+            resetTimeoutOnProgress: true,
+            onprogress: () => args.onProgress?.(),
+          },
+        );
+        const raw = result as { content?: unknown; isError?: boolean; structuredContent?: unknown };
+        return {
+          content: "content" in result ? raw.content : undefined,
+          isError: raw.isError,
+          structuredContent: raw.structuredContent,
+        };
+      },
+      close: () => client.close(),
+    };
+  });
 }
 
 const managers = new Map<string, McpManager>();
@@ -351,6 +354,7 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
         toolExposure: v.toolExposure ? { ...v.toolExposure } : undefined,
         description: v.description,
         auth: v.auth,
+        ...(v.loginUrl ? { loginUrl: v.loginUrl } : {}),
       }]),
     ),
   });
@@ -373,7 +377,15 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     catalog.set(s.name, { status: "connecting", tools: [], ...meta });
     emit();
     try {
-      const client = await connect(s);
+      const client = await connect(s, {
+        onLoginUrl(url) {
+          if (generation.get(s.name) !== gen) return;
+          const current = catalog.get(s.name);
+          if (!current || current.status === "connected") return;
+          catalog.set(s.name, { ...current, loginUrl: url });
+          emit();
+        },
+      });
       if (generation.get(s.name) !== gen) {
         await client.close().catch(() => {});
         return;
@@ -398,7 +410,8 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     } catch (e) {
       if (generation.get(s.name) !== gen) return;
       const msg = e instanceof Error ? e.message : String(e);
-      catalog.set(s.name, { status: "failed", error: msg, tools: [], ...meta });
+      const loginUrl = loginUrlOf(e) ?? catalog.get(s.name)?.loginUrl;
+      catalog.set(s.name, { status: "failed", error: msg, tools: [], ...meta, ...(loginUrl ? { loginUrl } : {}) });
       try {
         writeCache(s.name, { ok: false, toolNames: [], error: msg });
       } catch {
