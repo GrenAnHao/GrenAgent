@@ -8,7 +8,7 @@ export interface PruneOptions {
 
 type MessageLike = { role?: string; content?: unknown; toolName?: string };
 
-function textLength(content: unknown): number {
+export function textLength(content: unknown): number {
   if (!Array.isArray(content)) return 0;
   return content
     .filter((c): c is { type: string; text: string } => !!c && typeof c === "object" && (c as { type?: string }).type === "text")

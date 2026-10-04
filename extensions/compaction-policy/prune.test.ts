@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuseOversizeToolResults, pruneMessages } from "./prune.js";
+import { fuseOversizeToolResults, pruneMessages, textLength } from "./prune.js";
 
 const tr = (toolName: string, text: string) => ({ role: "toolResult", toolName, content: [{ type: "text", text }] });
 const user = (t: string) => ({ role: "user", content: t });
@@ -26,6 +26,13 @@ describe("pruneMessages", () => {
     const res = pruneMessages(msgs, { keepRecentTurns: 1, minBodyChars: 1000 });
     expect(res.prunedCount).toBe(0);
     expect(res.messages).toEqual(msgs);
+  });
+});
+
+describe("textLength", () => {
+  it("只加总文本块", () => {
+    expect(textLength([{ type: "text", text: "abc" }, { type: "image" }, { type: "text", text: "de" }])).toBe(5);
+    expect(textLength("plain")).toBe(0);
   });
 });
 
