@@ -29,10 +29,7 @@ export async function runWorker(): Promise<void> {
   // 1.0.2 的 MainOptions 只有 extensionFactories，没有 --extensions。
   // main() 会把 builtInExtensions 放在前面；同名且 builtin: true 的后项覆盖这张 Map，
   // 空工厂替换 builtin:mcp，因此不会执行 createMcpExtension。
-  // -builtin:mcp 是 settings 里的排除项，不是 CLI flag。argv 已包含该标记时不再追加。
   // 不在这里追加 codemode / tool_search：main() 的内置扩展已经各加载一次。
-  const extensionFactories: InlineExtension[] = argv.some((arg) => arg === "-builtin:mcp" || arg.includes("-builtin:mcp"))
-    ? allExtensions
-    : [...allExtensions, { name: "mcp", builtin: true, factory() {} }];
+  const extensionFactories: InlineExtension[] = [...allExtensions, { name: "mcp", builtin: true, factory() {} }];
   await main(argv, { extensionFactories });
 }
