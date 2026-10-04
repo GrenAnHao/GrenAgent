@@ -88,6 +88,14 @@ describe("project", () => {
     expect(pi.active).not.toContain("mcp__old__gone");
   });
 
+  it("drops already-active non-direct MCP tools", () => {
+    const pi = fakeProjectPi();
+    pi.setActiveTools(["mcp__a__x", "read"]);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x"] } }), fakeMgr());
+    expect(pi.active).toEqual(["read", "codemode"]);
+    expect(pi.active).not.toContain("mcp__a__x");
+  });
+
   it("activates a direct tool without adding codemode because of it", () => {
     const pi = fakeProjectPi();
     pi.setActiveTools(["read"]);

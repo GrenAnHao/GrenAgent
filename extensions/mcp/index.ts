@@ -62,9 +62,8 @@ interface ProjectablePi {
 }
 
 // 把当前目录投射进会话：按 exposure 登记已连工具。direct 进入激活集；
-// codemode / deferred / hidden 不进入。停用已不在本次连接中的 mcp__ 工具。
+// codemode / deferred / hidden 不进入。激活集里非 direct 的 mcp__ 一律去掉。
 export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManager, "callTool">, control?: DesktopControlPort): void {
-  const connected: string[] = [];
   const direct: string[] = [];
   let hasCodemodeServer = false;
   let hasDeferred = false;
@@ -82,7 +81,6 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
     for (const t of entry.tools) {
       const { name, originalToolName } = registerToolName(server, t.name, taken);
       taken.add(name);
-      connected.push(name);
       const exposure = exposureForTool(t.name, { exposure: entry.exposure, toolExposure: entry.toolExposure });
       if (exposure === "codemode") hasCodemodeServer = true;
       if (exposure === "deferred") hasDeferred = true;
@@ -131,9 +129,8 @@ export function project(pi: ProjectablePi, snap: McpSnapshot, mgr: Pick<McpManag
     }
   }
   try {
-    const connectedSet = new Set(connected);
     const active = pi.getActiveTools();
-    const next = active.filter((n) => !n.startsWith("mcp__") || connectedSet.has(n));
+    const next = active.filter((n) => !n.startsWith("mcp__") || direct.includes(n));
     for (const n of direct) if (!next.includes(n)) next.push(n);
     if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
     if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
