@@ -1,5 +1,11 @@
 node_modules/
 dist/
+
+# 所有以点开头的目录（编辑器 / agent 工具状态、临时目录）一律忽略，任意层级。
+# 要入库的点目录在这里放行。
+.*/
+!.github/
+
 .vite/
 .worktrees/
 output/
