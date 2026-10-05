@@ -9,6 +9,7 @@ import {
   MORE_BUTTON_WIDTH,
   type ActionKey,
 } from './config';
+import { ContextUsageTag } from './ContextUsageTag';
 import { resolveToolbarOverflow } from './toolbarOverflow';
 
 interface ActionBarProps {
@@ -40,11 +41,12 @@ export function ActionBar({ actions }: ActionBarProps) {
   );
 
   return (
-    <Flexbox horizontal align="center" gap={2} flex={1} ref={ref} style={{ minWidth: 0, overflow: 'hidden' }}>
+    <Flexbox horizontal align="center" gap={10} flex={1} ref={ref} style={{ minWidth: 0, overflow: 'hidden' }}>
       {visible.map((key) => {
         const Render = actionMap[key];
         return <Render key={key} />;
       })}
+      <ContextUsageTag />
       {collapsed.length > 0 && (
         <Popover
           arrow={false}

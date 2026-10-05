@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   initialAgentState,
   applyEvent,
+  nextRunStartedAt,
+  pinRunClock,
   addUserMessage,
   dropUnpersistedUserTail,
   rollbackUnansweredSend,
@@ -15,6 +17,8 @@ import {
 } from './agentReducer';
 import { parsePartialArgs } from '../lib/streamingJson';
 import type { AgentEvent } from '../lib/pi';
+import { groupMessages } from '../features/chat/groupMessages';
+import { buildTurnRows } from '../features/chat/turnRows';
 
 function text(msg: ChatMessage): string {
   return msg.kind === 'assistant' || msg.kind === 'user' ? msg.text : '';
@@ -100,6 +104,19 @@ describe('applyEvent', () => {
     expect(s.lastError).toBeUndefined();
   });
 
+  it('clears an abort error when compaction starts', () => {
+    let s: AgentState = { ...initialAgentState(), lastError: 'Request was aborted' };
+    s = applyEvent(s, { type: 'compaction_start', reason: 'manual' } as AgentEvent);
+    expect(s.compacting).toBe(true);
+    expect(s.lastError).toBeUndefined();
+  });
+
+  it('keeps a real error when compaction starts', () => {
+    let s: AgentState = { ...initialAgentState(), lastError: 'context length exceeded' };
+    s = applyEvent(s, { type: 'compaction_start', reason: 'manual' } as AgentEvent);
+    expect(s.lastError).toBe('context length exceeded');
+  });
+
   it('clears compacting on agent_end (defensive)', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'compaction_start', reason: 'auto' } as AgentEvent);
@@ -174,6 +191,131 @@ describe('applyEvent', () => {
     expect(s.isStreaming).toBe(false);
   });
 
+  it('keeps runStartedAt from the first agent_start through retries and past settled', () => {
+    let s = applyEvent(initialAgentState(), { type: 'agent_start' } as AgentEvent);
+    const started = s.runStartedAt;
+    expect(started).toEqual(expect.any(Number));
+    s = applyEvent(s, { type: 'agent_end', messages: [] } as AgentEvent);
+    expect(s.runStartedAt).toBe(started);
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    expect(s.runStartedAt).toBe(started);
+    s = applyEvent(s, { type: 'agent_settled' } as AgentEvent);
+    expect(s.runStartedAt).toBe(started);
+    expect(s.runActive).toBe(false);
+  });
+
+  describe('正在处理的计时起点', () => {
+    const user = (text: string) => ({ type: 'message_start', message: { role: 'user', content: text, timestamp: 1 } }) as unknown as AgentEvent;
+    const custom = (customType: string) =>
+      ({ type: 'message_start', message: { role: 'custom', customType, content: 'x', display: false, timestamp: 1 } }) as unknown as AgentEvent;
+    const system = { type: 'message_start', message: { role: 'system', content: '', timestamp: 1 } } as unknown as AgentEvent;
+    const assistant = { type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } } as unknown as AgentEvent;
+    const settledRun = (startedAt: number): AgentState => ({
+      ...initialAgentState(),
+      runStartedAt: startedAt,
+      runActive: false,
+      isStreaming: false,
+    });
+
+    it('子代理回报 / 压缩续跑这类自定义消息开的回合接着上一轮计时', () => {
+      let s = applyEvent(settledRun(1000), { type: 'agent_start' } as AgentEvent);
+      expect(s.runOpening).toBe(true);
+      s = applyEvent(s, system);
+      expect(s.runOpening).toBe(true);
+      s = applyEvent(s, custom('subagent-settled'));
+      expect(s.runStartedAt).toBe(1000);
+      expect(s.runOpening).toBe(false);
+    });
+
+    it('没有消息、直接续写助手的回合也沿用', () => {
+      let s = applyEvent(settledRun(1000), { type: 'agent_start' } as AgentEvent);
+      s = applyEvent(s, assistant);
+      expect(s.runStartedAt).toBe(1000);
+      expect(s.runOpening).toBe(false);
+    });
+
+    it('界面没钉过的用户消息开新回合：从现在重新起算', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(50_000);
+      try {
+        let s = applyEvent(settledRun(1000), { type: 'agent_start' } as AgentEvent);
+        s = applyEvent(s, user('别处发来的新请求'));
+        expect(s.runStartedAt).toBe(50_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('跟进被推迟到上一轮 settled 之后：界面钉过，接着上一轮计时', () => {
+      let s: AgentState = { ...initialAgentState(), runStartedAt: 1000, runActive: true };
+      s = applyEvent(s, { type: 'agent_end', messages: [] } as AgentEvent);
+      s = { ...s, ...pinRunClock(s) };
+      expect(s.runStartedAt).toBe(1000);
+      s = applyEvent(s, { type: 'agent_settled' } as AgentEvent);
+      s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+      s = applyEvent(s, user('跟进'));
+      expect(s.runStartedAt).toBe(1000);
+      expect(s.runOriginPinned).toBe(false);
+    });
+
+    it('空闲时发送：用发送那一刻做起点，不被稍晚到达的用户消息往后推', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(20_000);
+      try {
+        let s: AgentState = { ...settledRun(1000) };
+        s = { ...s, ...pinRunClock(s) };
+        expect(s.runStartedAt).toBe(20_000);
+        vi.setSystemTime(23_000);
+        s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+        s = applyEvent(s, user('新问题'));
+        expect(s.runStartedAt).toBe(20_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('界面钉过的自定义消息回合（计划执行）用钉的起点', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(30_000);
+      try {
+        let s: AgentState = { ...settledRun(1000) };
+        s = { ...s, ...pinRunClock(s) };
+        s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+        s = applyEvent(s, custom('plan-build'));
+        expect(s.runStartedAt).toBe(30_000);
+        expect(s.runOriginPinned).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('回合中途的引导不动起点，只用掉钉定', () => {
+      let s = applyEvent(settledRun(1000), { type: 'agent_start' } as AgentEvent);
+      s = applyEvent(s, custom('subagent-settled'));
+      s = { ...s, ...pinRunClock(s) };
+      expect(s.runStartedAt).toBe(1000);
+      s = applyEvent(s, user('引导'));
+      expect(s.runStartedAt).toBe(1000);
+      expect(s.runOriginPinned).toBe(false);
+    });
+
+    it('重试带来的 agent_start 不当成新回合', () => {
+      let s = applyEvent(settledRun(1000), { type: 'agent_start' } as AgentEvent);
+      s = applyEvent(s, custom('auto-compact-resume'));
+      s = applyEvent(s, { type: 'agent_end', willRetry: true, messages: [] } as AgentEvent);
+      s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+      expect(s.runOpening).toBe(false);
+      s = applyEvent(s, user('引导'));
+      expect(s.runStartedAt).toBe(1000);
+    });
+  });
+
+  it('nextRunStartedAt starts a fresh clock unless this run is still going', () => {
+    expect(nextRunStartedAt({ runStartedAt: 50 })).toBeGreaterThan(50);
+    expect(nextRunStartedAt({ runActive: true, runStartedAt: 50 })).toBe(50);
+    expect(nextRunStartedAt({ isStreaming: true, runStartedAt: 50 })).toBe(50);
+  });
+
   it('keeps runActive from agent_start until agent_settled, not agent_end', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
@@ -214,6 +356,62 @@ describe('applyEvent', () => {
     } as AgentEvent);
     const tool = s.messages.find((m) => m.kind === 'tool' && m.toolCallId === 'c1');
     expect(tool && tool.kind === 'tool' ? tool.status : '').toBe('done');
+  });
+
+  it('nests a child tool call under the parent tool card', () => {
+    let s = initialAgentState();
+    s = applyEvent(s, {
+      type: 'tool_execution_start',
+      toolCallId: 'parent',
+      toolName: 'codemode',
+      args: {},
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'tool_execution_start',
+      toolCallId: 'parent/1',
+      parentToolCallId: 'parent',
+      toolName: 'mcp__a__x',
+      args: {},
+    } as AgentEvent);
+    const child = s.messages.find((m) => m.kind === 'tool' && m.toolCallId === 'parent/1');
+    expect(child && child.kind === 'tool' ? child.parentToolCallId : undefined).toBe('parent');
+
+    const turn = groupMessages(s.messages).find((m) => m.kind === 'turn');
+    const segments = turn && turn.kind === 'turn' ? turn.segments : [];
+    const rows = buildTurnRows(segments);
+    const topLevelTools = rows.filter(
+      (row) => row.kind === 'segment' && row.segment.kind === 'tool',
+    );
+    expect(topLevelTools).toHaveLength(1);
+    const parentRow = topLevelTools[0];
+    if (!parentRow || parentRow.kind !== 'segment' || parentRow.segment.kind !== 'tool') {
+      throw new Error('expected parent tool row');
+    }
+    expect(parentRow.segment.toolCallId).toBe('parent');
+    expect(parentRow.segment.children?.map((item) => item.toolCallId)).toEqual(['parent/1']);
+  });
+
+  it('times execution from tool_execution_start and freezes the duration on end', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-29T00:00:00.000Z'));
+    try {
+      let s = initialAgentState();
+      s = applyEvent(s, {
+        type: 'tool_execution_start', toolCallId: 'c1', toolName: 'bash', args: { command: 'sleep 3' },
+      } as AgentEvent);
+      const running = s.messages.find((m) => m.kind === 'tool' && m.toolCallId === 'c1');
+      expect(running?.kind === 'tool' ? running.startedAt : undefined).toBe(Date.now());
+      expect(running?.kind === 'tool' ? running.durationMs : 0).toBeUndefined();
+
+      vi.advanceTimersByTime(3_200);
+      s = applyEvent(s, {
+        type: 'tool_execution_end', toolCallId: 'c1', toolName: 'bash', result: { content: [] }, isError: false,
+      } as AgentEvent);
+      const done = s.messages.find((m) => m.kind === 'tool' && m.toolCallId === 'c1');
+      expect(done?.kind === 'tool' ? done.durationMs : undefined).toBe(3_200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('addUserMessage appends a user message', () => {
@@ -533,6 +731,39 @@ describe('applyEvent', () => {
     expect(text(s.messages.at(-1)!)).toBe('答案内容');
   });
 
+  it('message_end does not append a second copy of an already finished assistant', () => {
+    let s = initialAgentState();
+    s = {
+      ...s,
+      messages: [{
+        kind: 'assistant',
+        id: 'a1',
+        text: 'Step 4 — run both test targets',
+        thinking: '先看测试',
+        streaming: false,
+      }, {
+        kind: 'tool',
+        id: 't1',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        args: { command: 'cargo test' },
+        status: 'running',
+      }],
+    };
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '先看测试' },
+          { type: 'text', text: 'Step 4 — run both test targets' },
+        ],
+      },
+    } as AgentEvent);
+    expect(s.messages.filter((m) => m.kind === 'assistant')).toHaveLength(1);
+    expect(s.messages.at(-1)?.kind).toBe('tool');
+  });
+
   it('message_end finalizes streaming assistant text', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);
@@ -711,6 +942,54 @@ describe('toolcall streaming', () => {
     expect(toolCards(state)).toHaveLength(1);
   });
 
+  it('spawn_agent 未闭合的 tasks 和 task 不写进卡片', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'call_p', toolName: 'spawn_agent',
+    }));
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: '{"tasks":["review server", "review desk',
+    }));
+    const partial = materializeToolDrafts(s, 10_000, parsePartialArgs);
+    const partialArgs = toolCards(partial.state)[0];
+    expect(partialArgs?.kind === 'tool' ? partialArgs.args : {}).toEqual({ tasks: ['review server'] });
+
+    let single = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'call_s', toolName: 'spawn_agent',
+    }));
+    single = applyEvent(single, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '{"task":"审查',
+    }));
+    const growing = materializeToolDrafts(single, 10_000, parsePartialArgs);
+    const growingCard = toolCards(growing.state)[0];
+    expect(growingCard?.kind === 'tool' ? growingCard.args : { task: 'kept' }).toEqual({});
+
+    single = applyEvent(single, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '服务端"}',
+    }));
+    const closed = materializeToolDrafts(single, 10_000, parsePartialArgs);
+    expect(toolCards(closed.state)[0]).toMatchObject({ args: { task: '审查服务端' } });
+  });
+
+  it('spawn_agent 的 title 等字符串闭合后才写进卡片', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_start', contentIndex: 0, id: 'call_title', toolName: 'spawn_agent',
+    }));
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '{"title":"审服',
+    }));
+    const growing = materializeToolDrafts(s, 10_000, parsePartialArgs);
+    const growingCard = toolCards(growing.state)[0];
+    expect(growingCard?.kind === 'tool' ? growingCard.args : { title: 'kept' }).toEqual({});
+
+    s = applyEvent(s, toolUpdate({
+      type: 'toolcall_delta', contentIndex: 0, delta: '务端","task":"请完整审查"}',
+    }));
+    const closed = materializeToolDrafts(s, 10_000, parsePartialArgs);
+    expect(toolCards(closed.state)[0]).toMatchObject({ args: { title: '审服务端', task: '请完整审查' } });
+  });
+
   it('大草稿在 150ms 内推迟解析', () => {
     let s = applyEvent(initialAgentState(), toolUpdate({
       type: 'toolcall_start', contentIndex: 0, id: 'w1', toolName: 'write',
@@ -852,6 +1131,49 @@ describe('toolcall streaming', () => {
     ].join('\n');
     const tool = messagesFromTranscript(transcript).find((m) => m.kind === 'tool');
     expect(tool).toMatchObject({ toolName: 'write', toolCallId: 't1', args: { path: 'a.ts', content: 'done' }, argsComplete: true });
+  });
+});
+
+describe('引导状态', () => {
+  it('发送引导先记为已收下、尚未注入', () => {
+    const state = addUserMessage(initialAgentState(), '改用 chrome', undefined, true);
+    expect(state.messages[0]).toMatchObject({ steering: true, steerState: 'written', text: '改用 chrome' });
+  });
+
+  it('注入当前回合后标成已引导', () => {
+    let state = addUserMessage(initialAgentState(), '改用 chrome', undefined, true);
+    state = applyEvent(state, {
+      type: 'message_start',
+      message: { role: 'user', content: [{ type: 'text', text: '改用 chrome' }] },
+    } as AgentEvent);
+    expect(state.messages[0]).toMatchObject({ steerState: 'consumed' });
+  });
+
+  it('正文对不上且只有一条未确认引导时，仍标成已引导', () => {
+    let state = addUserMessage(initialAgentState(), '/skill:x 改一下', undefined, true);
+    state = applyEvent(state, {
+      type: 'message_start',
+      message: { role: 'user', content: '展开后的引导' },
+    } as AgentEvent);
+    expect(state.messages[0]).toMatchObject({ steerState: 'consumed' });
+  });
+
+  it('这一轮结束前没注入的引导改成独立再跑', () => {
+    let state = addUserMessage(initialAgentState(), '改用 chrome', undefined, true);
+    state = applyEvent(state, { type: 'agent_end', messages: [], willRetry: true } as AgentEvent);
+    expect(state.messages[0]).toMatchObject({ steerState: 'written' });
+    state = applyEvent(state, { type: 'agent_settled' } as AgentEvent);
+    expect(state.messages[0]).toMatchObject({ steerState: 'requeued' });
+  });
+
+  it('已经注入的引导在回合结束时保持已引导', () => {
+    let state = addUserMessage(initialAgentState(), '改用 chrome', undefined, true);
+    state = applyEvent(state, {
+      type: 'message_start',
+      message: { role: 'user', content: '改用 chrome' },
+    } as AgentEvent);
+    state = applyEvent(state, { type: 'agent_end', messages: [] } as AgentEvent);
+    expect(state.messages[0]).toMatchObject({ steerState: 'consumed' });
   });
 });
 

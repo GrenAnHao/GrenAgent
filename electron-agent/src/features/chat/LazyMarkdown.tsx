@@ -1,10 +1,21 @@
 import { Component, lazy, memo, Suspense, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 
-import { Mermaid } from './Mermaid';
+import { MermaidLoading } from './MermaidLoading';
 import { splitMermaid } from './splitMermaid';
 import { stripInlineImages } from './splitDataImages';
 
-const Markdown = lazy(() => import('@lobehub/ui').then((m) => ({ default: m.Markdown })));
+// 经 lobeHeavy 中转再动态导入：直接 import('@lobehub/ui') 会把整包（katex、rehype、elkjs …）留在首包里。
+const Markdown = lazy(() => import('../../lib/lobeHeavy').then((m) => ({ default: m.Markdown })));
+// Mermaid 带 beautiful-mermaid 和 elkjs，只有正文里出现图表时才加载。
+const Mermaid = lazy(() => import('./Mermaid').then((m) => ({ default: m.Mermaid })));
+
+function LazyMermaid(props: { code: string; streaming?: boolean }) {
+  return (
+    <Suspense fallback={<MermaidLoading />}>
+      <Mermaid {...props} />
+    </Suspense>
+  );
+}
 
 type MarkdownProps = ComponentProps<typeof Markdown>;
 
@@ -86,7 +97,7 @@ function renderMermaidAware(content: string, enableMermaid: boolean, rest: Markd
     <>
       {segments.map((segment, index) =>
         segment.type === 'mermaid' ? (
-          <Mermaid code={segment.content} key={`mermaid-${index}`} streaming={rest.animated} />
+          <LazyMermaid code={segment.content} key={`mermaid-${index}`} streaming={rest.animated} />
         ) : (
           <MarkdownBlock key={`md-${index}`} {...rest}>
             {segment.content}

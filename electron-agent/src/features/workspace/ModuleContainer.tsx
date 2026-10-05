@@ -1,13 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useModuleStore, type ModuleId } from '../../stores/moduleStore';
-import { SettingsPanel } from '../settings/SettingsPanel';
-import { ConnectionsPanel } from '../connections/ConnectionsPanel';
-import { ExtensionsPanel } from '../extensions/ExtensionsPanel';
-import { UsagePanel } from '../usage/UsagePanel';
-import { AgentDataCenter } from '../agentData/AgentDataCenter';
-import { DevWorkbench } from '../devtools/DevWorkbench';
 import { useSessionStore } from '../../store';
 import { IS_DEV } from '../../lib/devMode';
+
+// 除对话外的模块都按需加载：启动只显示对话，这些面板连同图表库、日期选择器等不该进首包。
+const SettingsPanel = lazy(() => import('../settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })));
+const ConnectionsPanel = lazy(() => import('../connections/ConnectionsPanel').then((m) => ({ default: m.ConnectionsPanel })));
+const ExtensionsPanel = lazy(() => import('../extensions/ExtensionsPanel').then((m) => ({ default: m.ExtensionsPanel })));
+const UsagePanel = lazy(() => import('../usage/UsagePanel').then((m) => ({ default: m.UsagePanel })));
+const AgentDataCenter = lazy(() => import('../agentData/AgentDataCenter').then((m) => ({ default: m.AgentDataCenter })));
+const DevWorkbench = lazy(() => import('../devtools/DevWorkbench').then((m) => ({ default: m.DevWorkbench })));
 
 /** 全局模块面板（应用级，或以全局数据为主）：相对较轻，按需挂载/卸载即可。 */
 function ActivePanel({ module }: { module: ModuleId }) {
@@ -61,9 +63,15 @@ export function ModuleContainer({ chat, onOpenSession }: { chat: ReactNode; onOp
         hidden={!isAgentData}
         style={{ display: isAgentData ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
       >
-        <AgentDataCenter userId="local" initialProject={agentData.initialProject} visible={isAgentData} onOpenSession={onOpenSession} />
+        <Suspense fallback={null}>
+          <AgentDataCenter userId="local" initialProject={agentData.initialProject} visible={isAgentData} onOpenSession={onOpenSession} />
+        </Suspense>
       </div> : null}
-      {isChat || isAgentData ? null : <ActivePanel module={activeModule} />}
+      {isChat || isAgentData ? null : (
+        <Suspense fallback={null}>
+          <ActivePanel module={activeModule} />
+        </Suspense>
+      )}
     </>
   );
 }

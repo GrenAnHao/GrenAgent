@@ -2,9 +2,10 @@ export type { Todo, TodoState, TodoStatus } from "../_shared/todo-model.js";
 export { emptyTodoState, normalizeTodos } from "../_shared/todo-model.js";
 
 import {
+  closeFinishedTodos,
+  coerceTodoStatus,
   emptyTodoState,
   isPositiveInt,
-  isTodoStatus,
   normalizeTodos,
   type Todo,
   type TodoState,
@@ -12,7 +13,7 @@ import {
 } from "../_shared/todo-model.js";
 
 export interface TodoWriteInput {
-  todos: Array<{ id?: number; text: string; status: TodoStatus }>;
+  todos: Array<{ id?: number; text: string; status: string }>;
 }
 
 export interface TodoResult {
@@ -47,7 +48,7 @@ export function applyTodo(state: TodoState, input: TodoWriteInput): TodoResult {
   for (const row of rows) {
     const text = typeof row.text === "string" ? row.text.trim() : "";
     if (!text) return { state, message: "Error: text required", error: "text required" };
-    if (!isTodoStatus(row.status)) return { state, message: "Error: invalid status", error: "invalid status" };
+    if (!coerceTodoStatus(row.status)) return { state, message: "Error: invalid status", error: "invalid status" };
     if (row.id !== undefined) {
       if (!isPositiveInt(row.id)) return { state, message: "Error: invalid id", error: "invalid id" };
       if (seen.has(row.id)) return { state, message: "Error: duplicate id", error: "duplicate id" };
@@ -68,7 +69,7 @@ export function applyTodo(state: TodoState, input: TodoWriteInput): TodoResult {
       seen.add(id);
       cursor += 1;
     }
-    return { id, text, status: row.status };
+    return { id, text, status: coerceTodoStatus(row.status) as TodoStatus };
   });
   const nextId = Math.max(state.nextId, Math.max(...todos.map((t) => t.id)) + 1);
   return { state: { todos, nextId }, message: countMessage(todos) };
@@ -99,4 +100,74 @@ export function reconstructFromEntries(entries: readonly BranchEntryLike[]): Tod
     if (next) state = next;
   }
   return state;
+}
+
+interface TodoContextMessage {
+  role?: string;
+  toolName?: string;
+  stopReason?: string;
+  isError?: boolean;
+  content?: unknown;
+  details?: unknown;
+}
+
+/**
+ * 本轮正常 stop 且没有 pending 时，把进行中收成 completed。
+ * 下一轮用户消息已经出现，且清单已经做完时，改成空列表。
+ */
+export function closeTodosInContext<T extends TodoContextMessage>(messages: readonly T[]): T[] | undefined {
+  let index = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || message.role !== "toolResult" || message.toolName !== "todo" || message.isError === true) continue;
+    if (typeof message.details !== "object" || message.details === null) continue;
+    if ("error" in message.details && (message.details as { error?: unknown }).error != null) continue;
+    index = i;
+    break;
+  }
+  if (index < 0) return undefined;
+
+  let stopAfterTodo: string | undefined;
+  for (let i = messages.length - 1; i > index; i--) {
+    if (messages[i]?.role !== "assistant") continue;
+    stopAfterTodo = messages[i]?.stopReason;
+    break;
+  }
+  const current = messages[index];
+  const normalized = normalizeTodos(current.details);
+  if (!normalized) return undefined;
+  const laterUser = messages.slice(index + 1).some((message) => message?.role === "user");
+  const noPending = normalized.todos.length > 0 && !normalized.todos.some((todo) => todo.status === "pending");
+  const allCompleted = noPending && normalized.todos.every((todo) => todo.status === "completed");
+  if (laterUser && (allCompleted || (noPending && stopAfterTodo === "stop"))) {
+    return replaceTodoMessage(messages, index, current, [], normalized.nextId);
+  }
+  if (stopAfterTodo !== "stop") return undefined;
+  const closed = closeFinishedTodos(normalized.todos);
+  if (!closed) return undefined;
+  return replaceTodoMessage(messages, index, current, closed, normalized.nextId);
+}
+
+function replaceTodoMessage<T extends TodoContextMessage>(
+  messages: readonly T[],
+  index: number,
+  current: T,
+  todos: Todo[],
+  nextId: number,
+): T[] {
+  const text = countMessage(todos);
+  const content = Array.isArray(current.content)
+    ? current.content.map((part, partIndex) => {
+        if (partIndex !== 0 || typeof part !== "object" || part === null) return part;
+        if ((part as { type?: unknown }).type !== "text") return part;
+        return { ...part, text };
+      })
+    : current.content;
+  const next = messages.slice();
+  next[index] = {
+    ...current,
+    content,
+    details: { ...(current.details as object), todos, nextId },
+  };
+  return next;
 }

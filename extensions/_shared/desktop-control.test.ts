@@ -28,6 +28,27 @@ describe('evaluateToolCall', () => {
     await expect(evaluateToolCall(client, CALL)).resolves.toEqual({ decision: 'deny', auditId: undefined });
   });
 
+  it('retries once when the channel times out, so a stalled event loop does not deny', async () => {
+    const timeout = Object.assign(new Error('agent data request timed out'), { code: 'ETIMEDOUT' });
+    const client = { request: vi.fn().mockRejectedValueOnce(timeout).mockResolvedValueOnce({ decision: 'allow', auditId: 'a2' }) };
+    await expect(evaluateToolCall(client, CALL)).resolves.toEqual({ decision: 'allow', auditId: 'a2' });
+    expect(client.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks a deny as unavailable when the channel keeps failing', async () => {
+    const reset = Object.assign(new Error('closed'), { code: 'ECONNRESET' });
+    const client = { request: vi.fn(async () => { throw reset; }) };
+    await expect(evaluateToolCall(client, CALL)).resolves.toEqual({ decision: 'deny', auditId: undefined, unavailable: true });
+    expect(client.request).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an error frame from the host', async () => {
+    const rejected = Object.assign(new Error('invalid tool call: flags'), { code: 'INVALID_REQUEST' });
+    const client = { request: vi.fn(async () => { throw rejected; }) };
+    await expect(evaluateToolCall(client, CALL)).resolves.toEqual({ decision: 'deny', auditId: undefined });
+    expect(client.request).toHaveBeenCalledTimes(1);
+  });
+
   it('denies when the host returns a malformed decision', async () => {
     await expect(evaluateToolCall(port({ decision: 'maybe' }), CALL)).resolves.toMatchObject({ decision: 'deny' });
     await expect(evaluateToolCall(port(null), CALL)).resolves.toMatchObject({ decision: 'deny' });

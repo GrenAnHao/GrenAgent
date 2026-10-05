@@ -19,13 +19,25 @@ export interface StreamingSource {
  */
 export function awaitStreamingEnd(
   source: StreamingSource,
-  opts: { startTimeoutMs?: number } = {},
+  opts: {
+    startTimeoutMs?: number;
+    /**
+     * 画面换成了另一个会话时返回 true。这时 isStreaming 反映的是新会话，不能当成本轮结束的信号；
+     * 直接放行，调用方自己判断已经离开、不再处理结果。
+     */
+    isDetached?: () => boolean;
+  } = {},
 ): Promise<void> {
   const startTimeoutMs = opts.startTimeoutMs ?? 15000;
+  const detached = opts.isDetached ?? (() => false);
   return new Promise<void>((resolve) => {
+    if (detached()) {
+      resolve();
+      return;
+    }
     if (source.getState().isStreaming) {
       const unsub = source.subscribe((s) => {
-        if (!s.isStreaming) {
+        if (detached() || !s.isStreaming) {
           unsub();
           resolve();
         }
@@ -42,7 +54,8 @@ export function awaitStreamingEnd(
       resolve();
     };
     unsub = source.subscribe((s) => {
-      if (s.isStreaming) started = true;
+      if (detached()) finish();
+      else if (s.isStreaming) started = true;
       else if (started) finish();
     });
     startTimer = setTimeout(() => {

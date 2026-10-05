@@ -29,6 +29,7 @@ const mockState: {
   awaitingResponse?: boolean;
   retrying?: { attempt: number; max: number };
   runActive?: boolean;
+  compacting?: boolean;
   excluded: Set<number>;
   waitingUiPrompt?: { kind: 'select' | 'confirm' | 'input' | 'editor' | 'custom'; title?: string };
 } = {
@@ -61,6 +62,7 @@ afterEach(() => {
   delete mockState.awaitingResponse;
   delete mockState.retrying;
   delete mockState.runActive;
+  delete mockState.compacting;
   mockState.excluded = new Set();
   delete mockState.waitingUiPrompt;
   useSessionStore.setState({ activeSessionPath: null });
@@ -123,7 +125,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(document.querySelector('[data-testid="chat-scroll"]')).not.toBeNull();
   });
 
-  it('streaming 且助手尚无内容时显示「准备响应中…」加载态', () => {
+  it('streaming 且助手尚无内容时显示正在处理', () => {
     mockState.isStreaming = true;
     setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
     render(
@@ -131,10 +133,51 @@ describe('ChatListView', { timeout: 60_000 }, () => {
         <ChatListView />
       </ThemeProvider>,
     );
-    expect(screen.getByText('准备响应中…')).toBeTruthy();
+    expect(screen.getByText('正在处理…')).toBeTruthy();
   });
 
-  it('助手已有正文时不显示加载态', () => {
+  it('回合还在跑、末尾工具已结束时显示正在处理', () => {
+    mockState.runActive = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'tool', id: 't1', toolCallId: 'tc1', toolName: 'present', args: {}, result: {}, status: 'done' } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('正在处理…')).toBeTruthy();
+  });
+
+  it('工具仍在执行时仍显示正在处理', () => {
+    mockState.runActive = true;
+    setMessages([
+      { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
+      { kind: 'tool', id: 't1', toolCallId: 'tc1', toolName: 'bash', args: {}, result: {}, status: 'running' } as ChatMessage,
+    ]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('正在处理…')).toBeTruthy();
+  });
+
+  it('压缩进行中在列表末尾显示压缩状态行', () => {
+    mockState.compacting = true;
+    mockState.isStreaming = true;
+    setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
+    render(
+      <ThemeProvider themeMode="dark">
+        <ChatListView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('compaction-indicator').textContent).toContain('正在压缩');
+    expect(screen.queryByText('正在处理…')).toBeNull();
+  });
+
+  it('助手正在输出时仍显示正在处理', () => {
     mockState.isStreaming = true;
     setMessages([
       { kind: 'user', id: 'u1', text: 'hi' } as ChatMessage,
@@ -145,10 +188,10 @@ describe('ChatListView', { timeout: 60_000 }, () => {
         <ChatListView />
       </ThemeProvider>,
     );
-    expect(screen.queryByText('准备响应中…')).toBeNull();
+    expect(screen.getByText('正在处理…')).toBeTruthy();
   });
 
-  it('等待批准时显示「等待批准…」而不是「准备响应中…」', () => {
+  it('等待批准时显示「等待批准…」而不是正在处理', () => {
     mockState.isStreaming = true;
     mockState.waitingUiPrompt = { kind: 'select', title: '请求批准' };
     setMessages([{ kind: 'user', id: 'u1', text: 'hi' } as ChatMessage]);
@@ -158,7 +201,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
       </ThemeProvider>,
     );
     expect(screen.getByText('等待批准…')).toBeTruthy();
-    expect(screen.queryByText('准备响应中…')).toBeNull();
+    expect(screen.queryByText('正在处理…')).toBeNull();
   });
 
   it('已有工具卡片时仍显示等待批准脚注', () => {
@@ -192,7 +235,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
     expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
   });
 
-  it('末尾有本地 command-input 时，已有助手正文仍不显示准备态', () => {
+  it('末尾有本地 command-input 时，会话未结束仍显示正在处理', () => {
     useSessionStore.getState().setActiveSession('/tmp/s.json');
     useCommandInputStore.getState().append('/tmp/s.json', { command: '/goal', rest: '写完' });
     mockState.isStreaming = true;
@@ -206,7 +249,7 @@ describe('ChatListView', { timeout: 60_000 }, () => {
       </ThemeProvider>,
     );
 
-    expect(screen.queryByText('准备响应中…')).toBeNull();
+    expect(screen.getByText('正在处理…')).toBeTruthy();
     expect(document.querySelector('[data-testid="command-input"]')).not.toBeNull();
   });
 

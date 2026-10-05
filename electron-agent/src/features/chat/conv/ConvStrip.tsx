@@ -2,6 +2,7 @@ import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import type { LucideIcon } from 'lucide-react';
 import { memo, type MouseEvent, type ReactNode } from 'react';
+import { ModelNameTag } from '../ModelNameTag';
 import { Disclosure } from './Disclosure';
 import { StatusGlyph, type ConvStatus } from './StatusGlyph';
 
@@ -24,6 +25,15 @@ const styles = createStaticStyles(({ css }) => ({
 
     &:hover {
       border-color: ${cssVar.colorBorder};
+    }
+
+    /* 运行态：默认转圈，悬停换成停止方块。规则必须挂在 .conv-strip 自身上。 */
+    &:hover [data-role='run-spinner'] {
+      display: none;
+    }
+
+    &:hover [data-role='run-stop'] {
+      display: inline-flex;
     }
   `,
   l1: css`
@@ -53,22 +63,27 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   right: css`
     display: flex;
-    flex: none;
+    flex: 0 1 auto;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    max-width: 46%;
   `,
-  model: css`
-    max-width: 40%;
-    overflow: hidden;
-    font-family: ${cssVar.fontFamilyCode};
-    font-size: 11px;
-    color: ${cssVar.colorTextSecondary};
-    padding: 1px 6px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
+  chevron: css`
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    margin: -2px;
+    border: none;
     border-radius: 4px;
-    background: ${cssVar.colorFillTertiary};
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      background: ${cssVar.colorFillTertiary};
+    }
   `,
   l2: css`
     padding-inline-start: 22px;
@@ -89,7 +104,7 @@ interface ConvStripProps {
   role?: ReactNode;
   /** 第二行（实时步骤 / 终态摘要）。 */
   line2?: ReactNode;
-  /** 模型 chip（第一行最右）。 */
+  /** 模型名（第一行最右）。字符串渲染成标签；空白不占位。 */
   model?: ReactNode;
   /** 运行可停止：传入后左侧状态图标 hover 变停止键。 */
   onStop?: (e: MouseEvent) => void;
@@ -97,6 +112,8 @@ interface ConvStripProps {
   actions?: ReactNode;
   open?: boolean;
   onToggle?: () => void;
+  /** 点横条本体时调用（如在右坞打开详情）。提供后展开/收起只走右侧折叠箭头。 */
+  onOpen?: () => void;
   'data-testid'?: string;
 }
 
@@ -112,11 +129,16 @@ export const ConvStrip = memo(function ConvStrip({
   actions,
   open = false,
   onToggle,
+  onOpen,
   'data-testid': testId,
 }: ConvStripProps) {
   const stop = (e: MouseEvent) => e.stopPropagation();
+  const toggle = (e: MouseEvent) => {
+    e.stopPropagation();
+    onToggle?.();
+  };
   return (
-    <div className={`conv-strip ${styles.strip}`} data-testid={testId} onClick={onToggle}>
+    <div className={`conv-strip ${styles.strip}`} data-testid={testId} onClick={onOpen ?? onToggle}>
       <div className={styles.l1}>
         <StatusGlyph status={status} onStop={onStop} />
         <Icon icon={icon} size={14} style={{ color: cssVar.colorInfo, flex: 'none' }} />
@@ -137,8 +159,25 @@ export const ConvStrip = memo(function ConvStrip({
         )}
         <div className={styles.right} onClick={stop}>
           {actions}
-          {model != null ? <span className={styles.model}>{model}</span> : null}
-          {onToggle ? <Disclosure open={open} /> : null}
+          {typeof model === 'string' ? (
+            <ModelNameTag name={model} testId="conv-strip-model" />
+          ) : (
+            model || null
+          )}
+          {onToggle && onOpen ? (
+            <button
+              type="button"
+              className={styles.chevron}
+              aria-label={open ? '收起' : '展开'}
+              aria-expanded={open}
+              title={open ? '收起' : '展开'}
+              onClick={toggle}
+            >
+              <Disclosure open={open} />
+            </button>
+          ) : onToggle ? (
+            <Disclosure open={open} />
+          ) : null}
         </div>
       </div>
       {line2 != null ? <div className={styles.l2}>{line2}</div> : null}

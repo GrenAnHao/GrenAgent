@@ -49,3 +49,25 @@ npx vitest run prompt-metadata.test.ts
 ```
 
 该测试要求所有静态注册工具都有非空 `promptSnippet`，并检查 AgentData 工具的 guidelines 点了名。
+
+## 决策记录（docs/decisions/）
+
+`docs/architecture.md` 只写事实：系统当前如何运转。改动背后的「为什么」写进 `docs/decisions/`，两者不混写。
+
+- 完成**非平凡改动**后，新增一篇笔记，与代码在同一次提交。非平凡 = 命中下列任意一条；未命中就不写，不要写流水账。
+  1. 改了对外契约、接口签名或数据格式。
+  2. 新增、移除或替换了依赖。
+  3. 在多个可行方案之间做了选择。
+  4. 修了一个「光看代码看不出原因」的 bug。
+  5. 推翻了以前的决定。
+- 笔记必须含「放弃的方案」一节；确实没有备选时写明为什么显而易见。
+- 正文永不修改。要推翻结论：新笔记 frontmatter 用 `supersedes` 指向旧的，并在旧笔记顶部加一行墓碑 `> 已过时 → 见 <新笔记相对路径>`。
+- 禁止维护总索引；检索靠 `scope` 目录 + grep。文件名为 `YYYY-MM-DD-<短语>.md`。
+- 开工前先 grep `docs/decisions/` 确认该模块没有已否决的方案。
+- 模板见 `docs/decisions/_template.md`，约定详见 `docs/decisions/README.md`。
+
+提交前跑（已挂 `.git/hooks/pre-commit`）：
+
+```bash
+node scripts/check-notes.mjs
+```

@@ -41,4 +41,8 @@ describe('pastedText 阈值', () => {
   it('pastedLabel 含行数', () => {
     expect(pastedLabel({ lines: 19, chars: 100 })).toContain('19');
   });
+
+  it('pastedLabel 优先用 label 而不是文件名', () => {
+    expect(pastedLabel({ lines: 6, chars: 20, label: 'li.aca_algo', source: 'a.html' })).toBe('li.aca_algo · 6 行');
+  });
 });

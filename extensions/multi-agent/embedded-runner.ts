@@ -10,7 +10,9 @@ import {
   SessionManager,
   type AgentSessionEvent,
   type ExtensionUIContext,
+  type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
+import { promptWasAccepted } from "../_shared/promptDisposition.js";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
 import { continuableReturnGuidance } from "./adjacent-tools.js";
@@ -27,6 +29,7 @@ import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { wipeSessionFile, writeSeed } from "./fork-seed.js";
 import { readMaxDepth } from "./depth.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
+import { appendTranscriptTail, transcriptLineFromEvent } from "./transcript-tail.js";
 import {
   createStructuredCapture,
   STRUCTURED_OUTPUT_TOOL,
@@ -73,7 +76,7 @@ export interface EmbeddedChildHandle {
     ) => Promise<unknown>;
   };
   sessionManager: {
-    appendMessage: (m: unknown) => void;
+    appendMessage: (message: Parameters<SessionManager["appendMessage"]>[0]) => void;
     appendCustomEntry: (type: string, data: unknown) => void;
     appendModelChange: (provider: string, id: string) => void;
     getSessionFile: () => string | undefined;
@@ -132,8 +135,8 @@ const CORE_ALWAYS_ON = new Set([
   "visual-companion",
 ]);
 
-async function filterExtensionFactories(): Promise<Array<(...args: never[]) => unknown>> {
-  const { manifestExtensions } = await import("../index.js");
+async function filterExtensionFactories(): Promise<InlineExtension[]> {
+  const { manifestExtensions } = await import("../deferred-manifest.js");
   const profile = (getConfig("EXTENSIONS_PROFILE") as "project" | "chat") ?? "project";
   let exts = manifestExtensions;
   if (profile === "chat") {
@@ -190,7 +193,7 @@ const noopUi: ExtensionUIContext = {
   setFooter: () => {},
   setHeader: () => {},
   setTitle: () => {},
-  custom: async () => undefined,
+  custom: (async () => undefined) as ExtensionUIContext["custom"],
   pasteToEditor: () => {},
   setEditorText: () => {},
   getEditorText: () => "",
@@ -210,18 +213,16 @@ function firstLine(text: string): string {
   return line.replace(/\r$/, "").trim();
 }
 
-function eventToJsonLine(event: AgentSessionEvent): string {
-  try {
-    return `${JSON.stringify(event)}\n`;
-  } catch {
-    return "";
-  }
-}
-
 function streamingDeltaFromEvent(event: AgentSessionEvent, prev: string): string {
   const ev = event as Record<string, unknown>;
+  const msg = ev.message as { role?: string } | undefined;
+  const assistantBoundary =
+    (ev.type === "message_start" || ev.type === "message_end") &&
+    (!msg?.role || msg.role === "assistant");
+  if (assistantBoundary) return "";
   if (ev.type !== "message_update") return prev;
   const ame = ev.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
+  if (ame?.type === "text_start") return "";
   if (ame?.type === "text_delta" && typeof ame.delta === "string") return prev + ame.delta;
   return prev;
 }
@@ -235,6 +236,7 @@ type PreparedEmbedded = {
     workspace: string;
     cwd: string;
     config: Record<string, string>;
+    sessionId?: () => string | undefined;
   };
   cleanup: () => void;
 };
@@ -249,6 +251,8 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
   });
   const parentPath = opts.parentSessionPath?.trim() || undefined;
   const workspace = currentWorkspaceContext()?.workspace ?? opts.cwd;
+  // 子代理沿用父会话身份：审批档 / 模式按父会话读，不退回项目默认。
+  const parentSessionId = currentWorkspaceContext()?.sessionId;
   return {
     childConfig,
     parentPath,
@@ -258,6 +262,7 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
       workspace,
       cwd: opts.cwd,
       config: childConfig,
+      ...(parentSessionId ? { sessionId: parentSessionId } : {}),
     },
     cleanup: rc.cleanup,
   };
@@ -340,7 +345,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
       : {}),
     ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     excludeTools,
-    sessionStartEvent: { type: "session_start", cwd: opts.cwd },
+    sessionStartEvent: { type: "session_start", reason: "startup" },
   });
 
   const sessionPath = sessionManager.getSessionFile();
@@ -405,8 +410,8 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
   }
 
   const unsub = session.subscribe((event: AgentSessionEvent) => {
-    const line = eventToJsonLine(event);
-    if (line) transcript += line;
+    // 原始事件仍交给界面；这里只留剥掉快照后的 64KB 尾部，避免 partial 按输出长度平方留在堆上。
+    transcript = appendTranscriptTail(transcript, transcriptLineFromEvent(event));
     streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
     scheduleEmit();
     emitEmbeddedSubagentEvent(event as unknown as Record<string, unknown>, {
@@ -454,15 +459,47 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       const { session, sessionPath, unsub, clearEmitTimer } = child;
       transcript = child.getTranscript();
 
+      // 空闲超时只管「卡死」：子会话每来一个事件就算有活动，计时从头算。原先只在开头 arm 一次，
+      // 等于 5 分钟硬杀，干活中的子代理一到点就被 abort。和进程子代理（runner.ts）同一套口径：
+      // 首个模型输出前用更长的启动宽限，另有 idle×10 的硬上限兜住一直滴答输出的情况。
       const idleMs = opts.timeoutMs ?? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000);
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      const armIdle = (): void => {
-        if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => {
-          void session.abort();
-        }, idleMs);
+      const startupMs = Number(getConfig("SUBAGENT_STARTUP_MS") ?? "") || Math.max(idleMs * 2, 300_000);
+      const maxMs = Number(getConfig("SUBAGENT_MAX_MS") ?? "") || idleMs * 10;
+      let timedOut: string | undefined;
+      let sawOutput = false;
+      let lastActivity = Date.now();
+      const expire = (reason: string): void => {
+        if (aborted) return;
+        timedOut = reason;
+        aborted = true;
+        void session.abort();
       };
-      armIdle();
+      // 每个事件只记时间戳，不重建定时器：流式 delta 很密，到点时再按最后一次活动顺延。
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const armIdle = (delay: number): void => {
+        idleTimer = setTimeout(() => {
+          const limit = sawOutput ? idleMs : startupMs;
+          const left = lastActivity + limit - Date.now();
+          if (left > 0) return armIdle(left);
+          expire(
+            sawOutput
+              ? `idle timeout: no activity for ${Math.round(idleMs / 1000)}s`
+              : `startup timeout: no output for ${Math.round(startupMs / 1000)}s`,
+          );
+        }, delay);
+      };
+      armIdle(startupMs);
+      const hardTimer = setTimeout(() => expire(`hard timeout after ${Math.round(maxMs / 1000)}s`), maxMs);
+      const unsubActivity = session.subscribe((event: AgentSessionEvent) => {
+        lastActivity = Date.now();
+        const type = (event as { type?: string }).type;
+        if (!sawOutput && (type === "message_update" || type === "tool_execution_start" || type === "tool_execution_update")) {
+          // 启动宽限结束：换成常规空闲窗口重新计时，否则要等整段宽限过完才开始查空闲。
+          sawOutput = true;
+          if (idleTimer) clearTimeout(idleTimer);
+          armIdle(idleMs);
+        }
+      });
 
       const onAbort = (): void => {
         aborted = true;
@@ -473,24 +510,37 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       let result: EmbeddedSubagentResult;
       try {
         await new Promise<void>((resolve, reject) => {
+          let accepted = false;
           void session
-            .prompt(opts.task, { source: "rpc", preflightResult: (ok) => ok && resolve() })
-            .catch(reject);
+            .prompt(opts.task, {
+              source: "rpc",
+              preflightResult: (disposition) => {
+                if (!promptWasAccepted(disposition)) return;
+                accepted = true;
+                resolve();
+              },
+            })
+            .then(() => {
+              if (!accepted) reject(new Error("embedded sub-agent: prompt not accepted"));
+            })
+            .catch((error) => {
+              if (!accepted) reject(error);
+            });
         });
         await session.waitForIdle();
         const streamingDelta = child.getStreamingDelta();
         transcript = child.getTranscript();
-        const { output, stopReason } = extractAssistantOutput(session.messages, {
-          streamingDelta,
-          aborted,
-          skipPrefix: child.inheritedEventCount,
-        });
-        const ok = !aborted && output.trim().length > 0 && stopReason !== "error";
+        const { output, stopReason } = extractAssistantOutput(
+          session.messages as Parameters<typeof extractAssistantOutput>[0],
+          { streamingDelta, aborted, skipPrefix: child.inheritedEventCount },
+        );
+        const interrupted = aborted || stopReason === "aborted";
+        const ok = !interrupted && stopReason === "completed" && output.trim().length > 0;
         result = {
           ok,
           output,
-          exitCode: ok ? 0 : aborted ? -1 : 1,
-          error: ok ? undefined : output.trim() ? undefined : aborted ? "aborted" : "(no output)",
+          exitCode: ok ? 0 : interrupted ? -1 : 1,
+          error: ok ? undefined : interrupted ? (timedOut ?? "aborted") : output.trim() ? undefined : "(no output)",
           transcript,
           sessionPath,
           stopReason,
@@ -500,16 +550,15 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       } catch (e) {
         const streamingDelta = child.getStreamingDelta();
         transcript = child.getTranscript();
-        const { output, stopReason } = extractAssistantOutput(session.messages, {
-          streamingDelta,
-          aborted,
-          skipPrefix: child.inheritedEventCount,
-        });
+        const { output, stopReason } = extractAssistantOutput(
+          session.messages as Parameters<typeof extractAssistantOutput>[0],
+          { streamingDelta, aborted, skipPrefix: child.inheritedEventCount },
+        );
         result = {
           ok: false,
           output,
           exitCode: aborted ? -1 : 1,
-          error: aborted ? "aborted" : String((e as Error)?.message ?? e),
+          error: aborted ? (timedOut ?? "aborted") : String((e as Error)?.message ?? e),
           transcript,
           sessionPath,
           stopReason,
@@ -518,7 +567,9 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         };
       } finally {
         unsub();
+        unsubActivity();
         if (idleTimer) clearTimeout(idleTimer);
+        clearTimeout(hardTimer);
         clearEmitTimer();
         opts.signal?.removeEventListener("abort", onAbort);
         try {
@@ -547,15 +598,22 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
 
 function acceptPrompt(session: EmbeddedChildHandle["session"], text: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    let accepted = false;
     void session
       .prompt(text, {
         source: "rpc",
-        preflightResult: (ok) => {
-          if (ok) resolve();
-          else reject(new Error("embedded sub-agent: prompt not accepted"));
+        preflightResult: (disposition) => {
+          if (!promptWasAccepted(disposition)) return;
+          accepted = true;
+          resolve();
         },
       })
-      .catch(reject);
+      .then(() => {
+        if (!accepted) reject(new Error("embedded sub-agent: prompt not accepted"));
+      })
+      .catch((error) => {
+        if (!accepted) reject(error);
+      });
   });
 }
 

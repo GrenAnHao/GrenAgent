@@ -31,8 +31,22 @@
  *
  * 选 A（预编译入仓）：产出 bin/pi-sandbox-win.exe 并提交，免 CI 装 MSVC。
  * 复现：node scripts/build-sandbox-helper.mjs
- *   gcc -O2 -o bin/pi-sandbox-win.exe helper.c -ladvapi32 -lshell32
- *   cl /O2 /Fe:bin\pi-sandbox-win.exe helper.c advapi32.lib shell32.lib
+ * Account launch (Codex elevated shape, without a service):
+ *   pi-sandbox-win.exe --logon-user NAME --logon-blob DPAPI_FILE
+ *                      --sandbox-home PROFILE --temp DIR [--workspace DIR]
+ *                      -- command [args...]
+ * CreateProcessWithLogonW starts pi-sandbox-launch.exe (Windows subsystem, no
+ * console) as that local account. The launcher starts the real command with
+ * CREATE_NO_WINDOW. CreateProcessWithTokenW needs SeImpersonatePrivilege, which
+ * this process does not have (Win32 error 1314). The account SID owns named
+ * pipes, so node/vitest piped spawn passes. File writes depend on ACLs granted
+ * to the account before launch, not on a capability SID. --sandbox-home rewrites
+ * USERNAME, USERPROFILE, HOMEDRIVE, HOMEPATH, APPDATA, LOCALAPPDATA, and
+ * TEMP/TMP/TMPDIR onto that profile. PATH is copied from the caller. --temp is
+ * accepted and ignored on this path so older argv still parses.
+ *
+ *   gcc -O2 -o bin/pi-sandbox-win.exe helper.c -ladvapi32 -lshell32 -lcrypt32
+ *   cl /O2 /Fe:bin\pi-sandbox-win.exe helper.c advapi32.lib shell32.lib crypt32.lib
  */
 
 #ifndef _WIN32_WINNT
@@ -50,6 +64,7 @@
 #include <shellapi.h>
 #include <sddl.h>
 #include <aclapi.h>
+#include <wincrypt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +72,23 @@
 #ifdef _MSC_VER
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "crypt32.lib")
+#endif
+
+#ifndef CRYPTPROTECT_UI_FORBIDDEN
+#define CRYPTPROTECT_UI_FORBIDDEN 0x1
+#endif
+#ifndef LOGON_WITH_PROFILE
+#define LOGON_WITH_PROFILE 0x00000001
+#endif
+#ifndef LOGON32_LOGON_INTERACTIVE
+#define LOGON32_LOGON_INTERACTIVE 2
+#endif
+#ifndef LOGON32_PROVIDER_DEFAULT
+#define LOGON32_PROVIDER_DEFAULT 0
+#endif
+#ifndef CREATE_NO_WINDOW
+#define CREATE_NO_WINDOW 0x08000000
 #endif
 
 #ifndef DISABLE_MAX_PRIVILEGE
@@ -354,6 +386,380 @@ static wchar_t *buildCommandLine(int argc, wchar_t **argv) {
     return buf;
 }
 
+static int env_key_is(const wchar_t *entry, const wchar_t *key) {
+    size_t n = wcslen(key);
+    return _wcsnicmp(entry, key, n) == 0 && entry[n] == L'=';
+}
+
+/* Copy the caller environment, then make identity match the sandbox account.
+ * TEMP stays inside that account's profile, not under the signed-in user's AppData. */
+static wchar_t *env_for_sandbox(LPCWSTR home, LPCWSTR username) {
+    wchar_t *src = GetEnvironmentStringsW();
+    wchar_t *dst;
+    wchar_t *p;
+    size_t cap;
+    size_t used = 0;
+    wchar_t drive[8];
+    wchar_t rest[MAX_PATH];
+    wchar_t temp[MAX_PATH];
+    wchar_t appdata[MAX_PATH];
+    wchar_t localapp[MAX_PATH];
+
+    if (!src) {
+        return NULL;
+    }
+    drive[0] = L'\0';
+    rest[0] = L'\0';
+    temp[0] = L'\0';
+    appdata[0] = L'\0';
+    localapp[0] = L'\0';
+    if (home && home[0] && home[1] == L':') {
+        drive[0] = home[0];
+        drive[1] = L':';
+        drive[2] = L'\0';
+        _snwprintf(rest, MAX_PATH, L"%s", wcschr(home, L'\\') ? wcschr(home, L'\\') : L"\\");
+        _snwprintf(localapp, MAX_PATH, L"%s\\AppData\\Local", home);
+        _snwprintf(appdata, MAX_PATH, L"%s\\AppData\\Roaming", home);
+        _snwprintf(temp, MAX_PATH, L"%s\\Temp", localapp);
+    }
+    cap = 8;
+    for (p = src; *p; p += wcslen(p) + 1) {
+        cap += wcslen(p) + 1;
+    }
+    if (home) {
+        cap += (wcslen(home) + 64) * 12;
+    }
+    if (username) {
+        cap += wcslen(username) + 16;
+    }
+    dst = (wchar_t *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cap * sizeof(wchar_t));
+    if (!dst) {
+        FreeEnvironmentStringsW(src);
+        return NULL;
+    }
+    for (p = src; *p; ) {
+        const wchar_t *copy = p;
+        size_t len = wcslen(p);
+        wchar_t *replaced = NULL;
+        const wchar_t *key = NULL;
+
+        if (temp[0] && env_key_is(p, L"TEMP")) {
+            key = L"TEMP";
+        } else if (temp[0] && env_key_is(p, L"TMP")) {
+            key = L"TMP";
+        } else if (temp[0] && env_key_is(p, L"TMPDIR")) {
+            key = L"TMPDIR";
+        } else if (username && env_key_is(p, L"USERNAME")) {
+            key = L"USERNAME";
+        } else if (home && env_key_is(p, L"USERPROFILE")) {
+            key = L"USERPROFILE";
+        } else if (drive[0] && env_key_is(p, L"HOMEDRIVE")) {
+            key = L"HOMEDRIVE";
+        } else if (rest[0] && env_key_is(p, L"HOMEPATH")) {
+            key = L"HOMEPATH";
+        } else if (appdata[0] && env_key_is(p, L"APPDATA")) {
+            key = L"APPDATA";
+        } else if (localapp[0] && env_key_is(p, L"LOCALAPPDATA")) {
+            key = L"LOCALAPPDATA";
+        }
+        if (key) {
+            const wchar_t *value = temp;
+            size_t n;
+            if (wcscmp(key, L"USERNAME") == 0) value = username;
+            else if (wcscmp(key, L"USERPROFILE") == 0) value = home;
+            else if (wcscmp(key, L"HOMEDRIVE") == 0) value = drive;
+            else if (wcscmp(key, L"HOMEPATH") == 0) value = rest;
+            else if (wcscmp(key, L"APPDATA") == 0) value = appdata;
+            else if (wcscmp(key, L"LOCALAPPDATA") == 0) value = localapp;
+            n = wcslen(key) + 1 + wcslen(value) + 1;
+            replaced = (wchar_t *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n * sizeof(wchar_t));
+            if (!replaced) {
+                HeapFree(GetProcessHeap(), 0, dst);
+                FreeEnvironmentStringsW(src);
+                return NULL;
+            }
+            _snwprintf(replaced, n, L"%s=%s", key, value);
+            copy = replaced;
+            len = wcslen(replaced);
+        }
+        if (used + len + 2 >= cap) {
+            if (replaced) {
+                HeapFree(GetProcessHeap(), 0, replaced);
+            }
+            HeapFree(GetProcessHeap(), 0, dst);
+            FreeEnvironmentStringsW(src);
+            return NULL;
+        }
+        memcpy(dst + used, copy, len * sizeof(wchar_t));
+        used += len;
+        dst[used++] = L'\0';
+        if (replaced) {
+            HeapFree(GetProcessHeap(), 0, replaced);
+        }
+        p += wcslen(p) + 1;
+    }
+    dst[used] = L'\0';
+    FreeEnvironmentStringsW(src);
+    return dst;
+}
+
+static wchar_t *password_from_blob(LPCWSTR path) {
+    HANDLE file;
+    DWORD size;
+    DWORD read = 0;
+    BYTE *bytes;
+    DATA_BLOB in;
+    DATA_BLOB out;
+    int chars;
+    wchar_t *wide;
+
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        fail("CreateFileW");
+    }
+    size = GetFileSize(file, NULL);
+    if (size == INVALID_FILE_SIZE || size == 0 || size > 1024 * 1024) {
+        CloseHandle(file);
+        fail("GetFileSize");
+    }
+    bytes = (BYTE *)HeapAlloc(GetProcessHeap(), 0, size);
+    if (!bytes) {
+        CloseHandle(file);
+        fail("HeapAlloc");
+    }
+    if (!ReadFile(file, bytes, size, &read, NULL) || read != size) {
+        HeapFree(GetProcessHeap(), 0, bytes);
+        CloseHandle(file);
+        fail("ReadFile");
+    }
+    CloseHandle(file);
+    in.pbData = bytes;
+    in.cbData = size;
+    ZeroMemory(&out, sizeof(out));
+    if (!CryptUnprotectData(&in, NULL, NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+        HeapFree(GetProcessHeap(), 0, bytes);
+        fail("CryptUnprotectData");
+    }
+    HeapFree(GetProcessHeap(), 0, bytes);
+    chars = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)out.pbData, (int)out.cbData, NULL, 0);
+    if (chars <= 0) {
+        SecureZeroMemory(out.pbData, out.cbData);
+        LocalFree(out.pbData);
+        fail("MultiByteToWideChar");
+    }
+    wide = (wchar_t *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ((size_t)chars + 1) * sizeof(wchar_t));
+    if (!wide) {
+        SecureZeroMemory(out.pbData, out.cbData);
+        LocalFree(out.pbData);
+        fail("HeapAlloc");
+    }
+    MultiByteToWideChar(CP_UTF8, 0, (LPCCH)out.pbData, (int)out.cbData, wide, chars);
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return wide;
+}
+
+static void wipe_password(wchar_t *password) {
+    if (!password) {
+        return;
+    }
+    SecureZeroMemory(password, wcslen(password) * sizeof(wchar_t));
+    HeapFree(GetProcessHeap(), 0, password);
+}
+
+/* Run command as the dedicated sandbox account. Named pipes it creates are owned
+ * by that account, so piped grandchild spawn (node --test, vitest) is allowed.
+ * Workspace writes are granted to the account before this process starts. */
+static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, int argc, wchar_t **argv, int commandIndex) {
+    wchar_t *password;
+    wchar_t *commandLine;
+    wchar_t *env;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    SECURITY_ATTRIBUTES sa;
+    HANDLE nul = NULL;
+    HANDLE job = NULL;
+    DWORD wait;
+    DWORD exitCode;
+
+    if (commandIndex < 0 || commandIndex >= argc) {
+        fail("argv");
+    }
+    password = password_from_blob(blobPath);
+    commandLine = buildCommandLine(argc - commandIndex, argv + commandIndex);
+    env = env_for_sandbox(sandboxHome, username);
+    if (!env) {
+        wipe_password(password);
+        HeapFree(GetProcessHeap(), 0, commandLine);
+        fail("GetEnvironmentStringsW");
+    }
+
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    if (!si.hStdInput || si.hStdInput == INVALID_HANDLE_VALUE) {
+        nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+        si.hStdInput = nul;
+    }
+    if (si.hStdInput && si.hStdInput != INVALID_HANDLE_VALUE) {
+        SetHandleInformation(si.hStdInput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+    if (si.hStdOutput && si.hStdOutput != INVALID_HANDLE_VALUE) {
+        SetHandleInformation(si.hStdOutput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+    if (si.hStdError && si.hStdError != INVALID_HANDLE_VALUE) {
+        SetHandleInformation(si.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+
+    /*
+     * CreateProcessWithTokenW returns 1314 here: this process lacks
+     * SeImpersonatePrivilege. CreateProcessWithLogonW does not need it, but it
+     * rejects CREATE_NO_WINDOW, so the logged-on process is the windowless
+     * launcher beside this exe. The launcher starts the real command hidden.
+     */
+    {
+        wchar_t launcher[MAX_PATH];
+        wchar_t *wrapped;
+        DWORD selfLen;
+        wchar_t *slash;
+        const wchar_t *launchName = L"pi-sandbox-launch.exe";
+        size_t cap;
+
+        selfLen = GetModuleFileNameW(NULL, launcher, MAX_PATH);
+        if (selfLen == 0 || selfLen >= MAX_PATH) {
+            fail("GetModuleFileNameW");
+        }
+        slash = wcsrchr(launcher, L'\\');
+        if (!slash || (size_t)(slash + 1 - launcher) + wcslen(launchName) + 1 > MAX_PATH) {
+            fail("GetModuleFileNameW");
+        }
+        wcscpy(slash + 1, launchName);
+        if (GetFileAttributesW(launcher) == INVALID_FILE_ATTRIBUTES) {
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            fail("pi-sandbox-launch.exe");
+        }
+        cap = wcslen(launcher) * 2 + wcslen(commandLine) + 8;
+        wrapped = (wchar_t *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cap * sizeof(wchar_t));
+        if (!wrapped) {
+            fail("HeapAlloc");
+        }
+        {
+            size_t used = quoteArg(launcher, wrapped, cap);
+            if (used + 1 + wcslen(commandLine) + 1 >= cap) {
+                fail("HeapAlloc");
+            }
+            wrapped[used++] = L' ';
+            memcpy(wrapped + used, commandLine, (wcslen(commandLine) + 1) * sizeof(wchar_t));
+        }
+        si.dwFlags |= STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        ZeroMemory(&pi, sizeof(pi));
+        {
+            /* NULL cwd makes a new logon start in System32. Use this process cwd,
+             * which operations set to the session workspace. */
+            wchar_t workDir[MAX_PATH];
+            DWORD workLen = GetCurrentDirectoryW(MAX_PATH, workDir);
+            LPCWSTR cwd = (workLen > 0 && workLen < MAX_PATH) ? workDir : NULL;
+            job = CreateJobObjectW(NULL, NULL);
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo;
+            int attempt;
+            if (!job) {
+                fail("CreateJobObjectW");
+            }
+            ZeroMemory(&jobInfo, sizeof(jobInfo));
+            /* No BREAKAWAY_OK: detached children stay in the job and die when it closes. */
+            jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo))) {
+                CloseHandle(job);
+                fail("SetInformationJobObject");
+            }
+            {
+                size_t wrappedLen = wcslen(wrapped);
+                if (wrappedLen > 1000) {
+                    fprintf(stderr, "pi-sandbox-win: command line too long (%zu chars, limit ~1024)\n", wrappedLen);
+                    CloseHandle(job);
+                    HeapFree(GetProcessHeap(), 0, wrapped);
+                    wipe_password(password);
+                    HeapFree(GetProcessHeap(), 0, commandLine);
+                    HeapFree(GetProcessHeap(), 0, env);
+                    if (nul) CloseHandle(nul);
+                    return HELPER_FAIL_EXIT;
+                }
+            }
+            for (attempt = 0; attempt < 3; attempt++) {
+                /* CREATE_SUSPENDED deadlocks CreateProcessWithLogonW: the logon
+                 * thread never finishes profile load, and the waiter blocks forever. */
+                DWORD flags = CREATE_UNICODE_ENVIRONMENT;
+                if (CreateProcessWithLogonW(
+                        username,
+                        L".",
+                        password,
+                        LOGON_WITH_PROFILE,
+                        launcher,
+                        wrapped,
+                        flags,
+                        env,
+                        cwd,
+                        &si,
+                        &pi)) {
+                    break;
+                }
+                if (GetLastError() != ERROR_INVALID_PARAMETER || attempt == 2) {
+                    CloseHandle(job);
+                    HeapFree(GetProcessHeap(), 0, wrapped);
+                    wipe_password(password);
+                    HeapFree(GetProcessHeap(), 0, commandLine);
+                    HeapFree(GetProcessHeap(), 0, env);
+                    if (nul) {
+                        CloseHandle(nul);
+                    }
+                    fail("CreateProcessWithLogonW");
+                }
+                Sleep(50);
+            }
+            if (!AssignProcessToJobObject(job, pi.hProcess)) {
+                fprintf(stderr, "pi-sandbox-win: AssignProcessToJobObject failed %lu\n", (unsigned long)GetLastError());
+                CloseHandle(job);
+                job = NULL;
+            }
+            CloseHandle(pi.hThread);
+            pi.hThread = NULL;
+        }
+        HeapFree(GetProcessHeap(), 0, wrapped);
+    }
+    wipe_password(password);
+    HeapFree(GetProcessHeap(), 0, commandLine);
+    HeapFree(GetProcessHeap(), 0, env);
+    if (nul) {
+        CloseHandle(nul);
+    }
+    if (pi.hThread) {
+        CloseHandle(pi.hThread);
+    }
+    wait = WaitForSingleObject(pi.hProcess, INFINITE);
+    if (wait != WAIT_OBJECT_0) {
+        fail("WaitForSingleObject");
+    }
+    if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
+        fail("GetExitCodeProcess");
+    }
+    CloseHandle(pi.hProcess);
+    /* Last job handle: KILL_ON_JOB_CLOSE reaps detached descendants that outlived the launcher. */
+    if (job) {
+        CloseHandle(job);
+    }
+    if (exitCode == ERROR_ACCESS_DENIED || exitCode == NTSTATUS_ACCESS_DENIED) {
+        return DENIAL_EXIT;
+    }
+    return (int)exitCode;
+}
+
 static void addInheritHandle(HANDLE *list, DWORD *n, HANDLE h) {
     DWORD i;
     if (!h || h == INVALID_HANDLE_VALUE) {
@@ -373,6 +779,9 @@ static int run(int argc, wchar_t **argv) {
     LPCWSTR workspaceSidText = NULL;
     LPCWSTR tempPath = NULL;
     LPCWSTR tempSidText = NULL;
+    LPCWSTR logonUser = NULL;
+    LPCWSTR logonBlob = NULL;
+    LPCWSTR sandboxHome = NULL;
     int commandIndex = -1;
     int i;
     HANDLE processToken = NULL;
@@ -434,7 +843,35 @@ static int run(int argc, wchar_t **argv) {
             tempSidText = argv[++i];
             continue;
         }
+        if (wcscmp(argv[i], L"--logon-user") == 0) {
+            if (i + 1 >= argc) {
+                fail("argv");
+            }
+            logonUser = argv[++i];
+            continue;
+        }
+        if (wcscmp(argv[i], L"--logon-blob") == 0) {
+            if (i + 1 >= argc) {
+                fail("argv");
+            }
+            logonBlob = argv[++i];
+            continue;
+        }
+        if (wcscmp(argv[i], L"--sandbox-home") == 0) {
+            if (i + 1 >= argc) {
+                fail("argv");
+            }
+            sandboxHome = argv[++i];
+            continue;
+        }
         fail("argv");
+    }
+
+    if (logonUser || logonBlob) {
+        if (!logonUser || !logonBlob) {
+            fail("argv");
+        }
+        return run_as_user(logonUser, logonBlob, sandboxHome, argc, argv, commandIndex);
     }
 
     if (commandIndex < 0 || commandIndex >= argc) {

@@ -22,7 +22,9 @@ import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
 import type { PiPackageService } from '../app/piPackageService';
+import type { JobsBridgeService } from '../app/jobsBridge';
 import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
+import { recordIpc } from '../runtimeDiag';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -52,6 +54,8 @@ export interface IpcServices {
   permissions?: PermissionManager;
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
   piPackages?: PiPackageService;
+  /** 后台 job 的界面通道：快照与用户停止（实时帧走 pi://jobs 广播）。 */
+  jobs?: JobsBridgeService;
   /** 记住原生窗口底色，供下次启动建窗口时使用。 */
   windowBackground?: Pick<WindowBackgroundStore, 'save'>;
   /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
@@ -73,7 +77,12 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     if (!isInvokeRequest(request)) throw new Error('Invalid Electron invoke request');
     const handler = commandHandlers.get(request.command);
     if (!handler) throw new Error(`Electron command is not registered: ${request.command}`);
-    return handler(event, request.args ?? {});
+    const started = performance.now();
+    try {
+      return await handler(event, request.args ?? {});
+    } finally {
+      recordIpc(request.command, performance.now() - started);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.pickDirectory, async () => {
@@ -108,6 +117,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.plugins) registerPluginCommands(services.plugins);
   if (services.piPackages) registerPiPackageCommands(services.piPackages);
   if (services.subagent) registerSubagentCommands(services.subagent);
+  if (services.jobs) registerJobCommands(services.jobs);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
   if (services.usage) registerCommand('usage_report', () => services.usage!.report());
@@ -308,8 +318,22 @@ function registerPermissionCommands(service: PermissionManager): void {
   ));
 }
 
+function registerJobCommands(service: JobsBridgeService): void {
+  registerCommand('job_snapshot', (_event, args) => service.snapshot(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
+  registerCommand('job_kill', (_event, args) => service.kill(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
+}
+
+function readFiniteNumber(args: Record<string, unknown>, key: string): number {
+  const value = args[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${key} must be a finite number`);
+  return value;
+}
+
 function registerSubagentCommands(service: SubagentService): void {
-  registerCommand('subagent_list', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('subagent_list', (_event, args) => service.list(
+    readString(args, 'workspace'),
+    typeof args.sessionPath === 'string' && args.sessionPath.trim() ? args.sessionPath : undefined,
+  ));
   registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
     readString(args, 'workspace'), readString(args, 'agentId'),
   ));
@@ -407,6 +431,7 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
     return service.pruneOrphanConversations(keep);
   });
   registerCommand('list_all_sessions', () => service.listAllSessions());
+  registerCommand('list_projects', () => service.listProjects());
   registerCommand('list_pi_sessions', (_event, args) => service.listSessions(readString(args, 'workspace')));
   registerCommand('set_session_display_name', (_event, args) =>
     service.setSessionDisplayName(readString(args, 'sessionPath'), readText(args, 'name')),
@@ -441,7 +466,9 @@ function registerGitCommands(service: GitService): void {
   registerCommand('get_git_log_graph', (_event, args) => {
     const limit = args.limit;
     if (limit !== null && limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new Error('limit must be a positive integer or null');
-    return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined);
+    const skip = args.skip ?? 0;
+    if (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0) throw new Error('skip must be a non-negative integer');
+    return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined, skip);
   });
 }
 
@@ -473,11 +500,12 @@ function registerShellCommands(service: ShellService): void {
 
 function registerPiCommands(service: PiRuntimeService): void {
   registerCommand('open_workspace', (_event, args) => service.openWorkspace(readString(args, 'workspace')));
+  registerCommand('agent_list_running_turns', () => service.listRunningTurns());
   registerCommand('warm_workspace', (_event, args) => service.warmWorkspace(readString(args, 'workspace')));
   registerCommand('close_workspace', (_event, args) => service.closeWorkspace(readString(args, 'workspace')));
   registerCommand('extension_ui_respond', (_event, args) => service.respondUi(readString(args, 'workspace'), readRecord(args, 'response')));
   for (const command of [
-    'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_set_model', 'agent_cycle_model',
+    'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_set_model', 'agent_cycle_model',
     'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
     'agent_set_approval', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',

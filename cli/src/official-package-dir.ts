@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Official `getThemesDir()` layouts: bun-binary `theme/`, or src|dist `modes/interactive/theme/`. */
@@ -9,19 +9,6 @@ export function hasPiThemes(packageDir: string, exists: (path: string) => boolea
     exists(join(packageDir, "dist", "modes", "interactive", "theme", "dark.json")) ||
     exists(join(packageDir, "src", "modes", "interactive", "theme", "dark.json"))
   );
-}
-
-function packageRootFrom(startDir: string): string | undefined {
-  let dir = startDir;
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, "package.json"))) {
-      const parent = dirname(dir);
-      if (basename(dir) === "dist" && existsSync(join(parent, "package.json"))) return parent;
-      return dir;
-    }
-    dir = dirname(dir);
-  }
-  return undefined;
 }
 
 function walkNodeModules(fromDir: string): string | undefined {
@@ -45,13 +32,10 @@ function thisModuleDir(): string | undefined {
 }
 
 export function resolveInstalledPiPackageDir(): string | undefined {
-  try {
-    const resolved = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const fromEntry = packageRootFrom(dirname(fileURLToPath(resolved)));
-    if (fromEntry) return fromEntry;
-  } catch {
-    /* CJS/exports or compiled binary: fall through to node_modules walk */
-  }
+  // Production main is CJS bytecode: rolldown replaces `import.meta.resolve` with
+  // `{}.resolve`. This package's exports map is import-only, so `require.resolve`
+  // throws ERR_PACKAGE_PATH_NOT_EXPORTED. Walk ancestors instead. `import.meta.url`
+  // is rewritten to the output file, which still sits above node_modules.
   return walkNodeModules(thisModuleDir() ?? process.cwd());
 }
 

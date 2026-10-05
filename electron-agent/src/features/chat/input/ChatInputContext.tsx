@@ -49,6 +49,8 @@ export interface ChatInputContextValue {
   followUp: string[];
   /** 把跟进条立刻作为引导注入当前回合。 */
   steerQueued: (id: string) => void;
+  /** 先停掉当前回复，再把这条跟进作为新消息发出。 */
+  interruptQueued: (id: string) => void | Promise<void>;
   /** 输入栏本地跟进条是否还有未发出的条目。 */
   hasComposerQueue: boolean;
   /**
@@ -56,7 +58,10 @@ export interface ChatInputContextValue {
    * 停止按钮用这个，而不是只看 isStreaming——否则失败重试时会只剩发送、无法取消。
    */
   inFlight: boolean;
-  send: () => void | Promise<void>;
+  /** 发送失败、错误横幅还没出来的自动重试。算进 inFlight；输入为空时同一个按钮显示停止。 */
+  retrying: boolean;
+  /** interrupt 为 Ctrl+Enter：先停掉当前回复再发出。普通回车和发送按钮不传。 */
+  send: (options?: { interrupt?: boolean }) => void | Promise<void>;
   stop: () => void;
   /** 草稿滚到边缘时把滚轮交给对话列表；空会话不传。 */
   scrollTranscript?: (deltaY: number) => void;

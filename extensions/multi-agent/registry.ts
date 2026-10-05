@@ -85,6 +85,10 @@ export class SubAgentRegistry {
     if (!cols.some((c) => c.name === "parentId")) db.exec("ALTER TABLE subagents ADD COLUMN parentId TEXT");
     if (!cols.some((c) => c.name === "depth")) db.exec("ALTER TABLE subagents ADD COLUMN depth INTEGER NOT NULL DEFAULT 0");
     if (!cols.some((c) => c.name === "jobId")) db.exec("ALTER TABLE subagents ADD COLUMN jobId TEXT");
+    // 列表索引：parentId / sessionPath / createdAt 都排在 transcript 后面，大 transcript 在溢出页里，
+    // 不走索引时每次列表都要顺着所有行的溢出链读到行尾（百兆级 transcript 时一次上百毫秒，
+    // 且在 Electron 主线程上）。覆盖索引让「按时间取最新 N 条」和「按会话收归属」都不碰表行。
+    db.exec("CREATE INDEX IF NOT EXISTS idx_subagents_listing ON subagents(createdAt, id, parentId, sessionPath)");
     this.db = db;
   }
 

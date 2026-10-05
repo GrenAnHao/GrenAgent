@@ -70,7 +70,11 @@ export async function writeMcpServer(input: AddMcpServerInput, cwd: string, home
   const paths = mcpConfigPaths(cwd, home); const path = paths[input.scope]; const doc = await readMcpDocument(path);
   const conflict = await findMcpConflict(input.name, cwd, desktopJson, home);
   if (conflict && !input.replace) throw new Error("MCP \"" + input.name + "\" 已存在，请显式设置 replace=true");
-  const config: McpFileServer = input.transport === "sse" ? { url: input.url } : { command: input.command, args: input.args ?? [], env: input.env, cwd: input.cwd };
+  const remote = input.transport !== "stdio";
+  const headers = input.headers && Object.keys(input.headers).length ? { headers: input.headers } : {};
+  const config: McpFileServer = remote
+    ? { url: input.url, ...headers }
+    : { command: input.command, args: input.args ?? [], env: input.env, cwd: input.cwd };
   doc.mcpServers[input.name] = config; delete doc.disabledMcpServers[input.name];
   await mkdir(dirname(path), { recursive: true }); const tmp = path + "." + randomUUID() + ".tmp";
   try { await writeFile(tmp, JSON.stringify({ mcpServers: doc.mcpServers, ...(Object.keys(doc.disabledMcpServers).length ? { disabledMcpServers: doc.disabledMcpServers } : {}) }, null, 2), { mode: 0o600 }); await rename(tmp, path); } catch (e) { await rm(tmp, { force: true }).catch(() => {}); throw e; }

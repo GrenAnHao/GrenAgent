@@ -113,9 +113,42 @@ describe('SubagentService', () => {
     const service = new SubagentService();
 
     expect(service.list(workspace)).toEqual([
-      { id: 'newer', task: 'latest task', profile: '{"fs":"readonly"}', model: null, status: 'running', output: null, error: null, exitCode: null, transcript: null, createdAt: 5, updatedAt: 6 },
-      { id: 'older', task: 'first task', profile: null, model: 'm1', status: 'done', output: 'result', error: null, exitCode: 0, transcript: null, createdAt: 1, updatedAt: 2 },
+      { id: 'newer', task: 'latest task', profile: '{"fs":"readonly"}', model: null, sessionPath: null, status: 'running', output: null, error: null, exitCode: null, transcript: null, createdAt: 5, updatedAt: 6 },
+      { id: 'older', task: 'first task', profile: null, model: 'm1', sessionPath: null, status: 'done', output: 'result', error: null, exitCode: 0, transcript: null, createdAt: 1, updatedAt: 2 },
     ]);
+  });
+
+  it('scopes the list to one session and its descendants when an owner session path is given', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'electron-agent-subagent-'));
+    directories.push(workspace);
+    const folder = join(workspace, '.pi', 'subagents');
+    await mkdir(folder, { recursive: true });
+    const db = new DatabaseSync(join(folder, 'registry.db'));
+    db.exec(`CREATE TABLE subagents (
+      id TEXT PRIMARY KEY, task TEXT NOT NULL, profile TEXT, model TEXT, status TEXT NOT NULL,
+      output TEXT, error TEXT, exitCode INTEGER, transcript TEXT, sessionPath TEXT, parentId TEXT,
+      createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+    )`);
+    const insert = db.prepare(`INSERT INTO subagents (id, task, status, sessionPath, parentId, createdAt, updatedAt) VALUES (?, ?, 'running', ?, ?, ?, ?)`);
+    insert.run('sa-a1', 'a child', 'C:\\s\\2026-10-04T00-00-01-000Z_sa-a1.jsonl', 'sid-a', 1, 1);
+    insert.run('sa-a2', 'a grandchild', null, 'sa-a1', 2, 2);
+    insert.run('sa-b1', 'b child', null, 'sid-b', 3, 3);
+    insert.run('sa-old', 'legacy', null, null, 4, 4);
+    db.close();
+    const service = new SubagentService();
+
+    const owned = service.list(workspace, 'C:/sessions/2026-10-04T00-00-00-000Z_sid-a.jsonl');
+    expect(owned.map((row) => row.id)).toEqual(['sa-a2', 'sa-a1']);
+    expect(service.list(workspace, 'C:/sessions/2026-10-04T00-00-00-000Z_sid-b.jsonl').map((row) => row.id)).toEqual(['sa-b1']);
+    expect(service.list(workspace).map((row) => row.id)).toEqual(['sa-old', 'sa-b1', 'sa-a2', 'sa-a1']);
+  });
+
+  it('returns nothing for an owner session when the registry predates parentId', async () => {
+    const { workspace, db } = await createRegistry();
+    db.prepare(`INSERT INTO subagents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('older', 'first task', null, 'm1', 'done', 'result', null, 0, null, 1, 2);
+    db.close();
+    expect(new SubagentService().list(workspace, 'C:/s/2026-10-04T00-00-00-000Z_sid-a.jsonl')).toEqual([]);
   });
 
   it('returns an individual transcript and remains compatible with registries lacking that column', async () => {

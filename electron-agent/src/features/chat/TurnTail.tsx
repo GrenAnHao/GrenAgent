@@ -100,9 +100,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   changeRow: css`
     display: flex;
-    gap: 12px;
+    gap: 8px;
     align-items: center;
-    justify-content: space-between;
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
@@ -123,6 +122,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   changeName: css`
     overflow: hidden;
+    flex: 0 1 auto;
     min-width: 0;
     text-overflow: ellipsis;
     white-space: nowrap;

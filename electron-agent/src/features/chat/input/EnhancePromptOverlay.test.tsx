@@ -47,12 +47,14 @@ afterEach(() => {
 function overlayTree(anchorRef: RefObject<HTMLDivElement | null>) {
   return (
     <MockAgent.Provider value={{ workspace: agent.workspace }}>
-      <div
-        ref={anchorRef}
-        data-testid="composer-surface"
-        style={{ width: 400, height: 80 }}
-      />
-      <EnhancePromptOverlay anchorRef={anchorRef} />
+      <div data-chat-column="">
+        <div
+          ref={anchorRef}
+          data-testid="composer-surface"
+          style={{ width: 400, height: 80 }}
+        />
+        <EnhancePromptOverlay anchorRef={anchorRef} />
+      </div>
     </MockAgent.Provider>
   );
 }
@@ -237,5 +239,23 @@ describe('EnhancePromptOverlay', () => {
     expect(setValue).not.toHaveBeenCalled();
     expect(abortEnhancePrompt).toHaveBeenCalledWith('/ws');
     expect(useEnhancePromptStore.getState().byWorkspace['/ws']?.status).toBe('idle');
+  });
+
+  // 主进程的 enhance_prompt_abort 要求 workspace 非空，启动时还没选项目就是空串。
+  it('workspace 为空时卸载不 abort', () => {
+    agent.workspace = '';
+    const view = renderOverlay();
+    view.unmount();
+    expect(abortEnhancePrompt).not.toHaveBeenCalled();
+  });
+
+  it('从空 workspace 切到真实 workspace 不 abort 空串', () => {
+    agent.workspace = '';
+    const view = renderOverlay();
+
+    agent.workspace = '/ws';
+    view.rerenderOverlay();
+
+    expect(abortEnhancePrompt).not.toHaveBeenCalled();
   });
 });

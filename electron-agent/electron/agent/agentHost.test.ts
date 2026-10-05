@@ -186,4 +186,54 @@ describe('AgentHost', () => {
     watchCb?.({ PI_RELOAD_REV: 'next' });
     await vi.waitFor(() => expect(handle.reload).toHaveBeenCalledTimes(1));
   });
+
+  it('openAdditional 不替换前景；focus 之后 get 指向新 handle', async () => {
+    const first = stub();
+    const second = stub();
+    const createHandle = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const { host } = makeHost(createHandle);
+    await host.open('D:/p', 'D:/p');
+    const extra = await host.openAdditional('D:/p', 'D:/p');
+    expect(extra).toBe(second);
+    expect(host.get('D:/p')).toBe(first);
+    expect(host.list('D:/p')).toEqual([first, second]);
+    host.focus('D:/p', second as never);
+    expect(host.get('D:/p')).toBe(second);
+  });
+
+  it('close 释放同一项目的全部 handle', async () => {
+    const first = stub();
+    const second = stub();
+    const createHandle = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const { host } = makeHost(createHandle);
+    await host.open('D:/p', 'D:/p');
+    await host.openAdditional('D:/p', 'D:/p');
+    await host.close('D:/p');
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    expect(second.dispose).toHaveBeenCalledTimes(1);
+    expect(host.get('D:/p')).toBeUndefined();
+    expect(host.list('D:/p')).toEqual([]);
+  });
+
+  it('workspaceForCwd 把发布 cwd 映射成面板 workspace key', async () => {
+    const handle = { ...stub(), workspace: 'D:/ws', cwd: 'D:/resolved' };
+    const { host } = makeHost(vi.fn(async () => handle) as never);
+    await host.open('D:/ws', 'D:/resolved');
+    expect(host.workspaceForCwd('D:/resolved')).toBe('D:/ws');
+    expect(host.workspaceForCwd('D:/other')).toBe('D:/other');
+    expect(host.workspaceForCwd('D:/ws')).toBe('D:/ws');
+  });
+
+  it('evict 只拆坏掉的 handle，前景落到剩下的那个', async () => {
+    const first = stub();
+    const second = stub();
+    const createHandle = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const { host } = makeHost(createHandle);
+    await host.open('D:/p', 'D:/p');
+    await host.openAdditional('D:/p', 'D:/p');
+    await host.evict('D:/p', first as never);
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    expect(second.dispose).not.toHaveBeenCalled();
+    expect(host.get('D:/p')).toBe(second);
+  });
 });

@@ -20,6 +20,7 @@ export interface SubagentItem {
   task: string;
   status: string;
   model: string | null;
+  sessionPath: string | null;
   profile: string | null;
   output: string | null;
   error: string | null;
@@ -32,18 +33,41 @@ export interface SubagentItem {
 export class SubagentService {
   constructor(private readonly sandbox?: SandboxManager) {}
 
-  list(workspace: string): SubagentItem[] {
+  /**
+   * 项目内的子代理登记。给了 ownerSessionPath 时只返回这份会话派出去的（含子代理再派的孙级）：
+   * 登记的 parentId 是发起会话的 sessionId。老库没有 parentId 列，归不到任何会话。
+   */
+  list(workspace: string, ownerSessionPath?: string): SubagentItem[] {
     const db = this.openRegistry(workspace);
     if (!db) return [];
     try {
       if (!hasTable(db, 'subagents')) return [];
-      const rows = db.prepare(`SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile
-        FROM subagents ORDER BY createdAt DESC LIMIT ?`).all(50) as Array<Record<string, unknown>>;
+      const sessionColumn = hasColumn(db, 'subagents', 'sessionPath');
+      const parentColumn = hasColumn(db, 'subagents', 'parentId');
+      const owner = ownerSessionPath?.trim();
+      if (owner && !parentColumn) return [];
+      const columns = `${sessionColumn ? ', sessionPath' : ''}${parentColumn ? ', parentId' : ''}`;
+      const select = `SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile${columns} FROM subagents`;
+      let rows: Array<Record<string, unknown>>;
+      if (owner) {
+        // 先只拿归属要用的短列（有 idx_subagents_listing 时不碰表行），收出归属于这份会话的 id 后，
+        // 再按主键取这几行的完整列。整表扫带大 transcript 的行在主线程上一次上百毫秒。
+        const skeleton = db.prepare(`SELECT id${columns} FROM subagents ORDER BY createdAt DESC LIMIT ?`)
+          .all(OWNED_SCAN_LIMIT) as Array<Record<string, unknown>>;
+        const ids = rowsOwnedBy(skeleton, sessionIdFromFileName(owner)).slice(0, LIST_LIMIT).map((row) => asString(row.id));
+        if (ids.length === 0) return [];
+        const full = db.prepare(`${select} WHERE id IN (${ids.map(() => '?').join(', ')})`).all(...ids) as Array<Record<string, unknown>>;
+        const byId = new Map(full.map((row) => [asString(row.id), row]));
+        rows = ids.map((id) => byId.get(id)).filter((row): row is Record<string, unknown> => Boolean(row));
+      } else {
+        rows = db.prepare(`${select} ORDER BY createdAt DESC LIMIT ?`).all(LIST_LIMIT) as Array<Record<string, unknown>>;
+      }
       return rows.map((row) => ({
         id: asString(row.id),
         task: asString(row.task),
         status: asString(row.status),
         model: asNullableString(row.model),
+        sessionPath: sessionColumn ? asNullableString(row.sessionPath) : null,
         profile: asNullableString(row.profile),
         output: asNullableString(row.output),
         error: asNullableString(row.error),
@@ -140,6 +164,38 @@ export class SubagentService {
 
 function subagentsDir(workspace: string): string {
   return join(workspace, '.pi', 'subagents');
+}
+
+const LIST_LIMIT = 50;
+/** 按会话筛时多看一些行：同项目别的会话的记录会挤占最新 50 条。 */
+const OWNED_SCAN_LIMIT = 500;
+
+/** Pi 会话文件名是 `<时间戳>_<sessionId>.jsonl`；子代理会话的 sessionId 就是它的 agentId。 */
+function sessionIdFromFileName(path: string | null | undefined): string {
+  const name = (path ?? '').replace(/\\/g, '/').split('/').pop() ?? '';
+  return name.match(/^\d{4}-\d{2}-\d{2}T[^_]+_(.+)\.jsonl$/)?.[1] ?? '';
+}
+
+/** 从根会话顺着 parentId 往下收：子代理再派的孙级挂在子代理自己的 sessionId 下。保持传入顺序。 */
+function rowsOwnedBy(rows: Array<Record<string, unknown>>, rootSessionId: string): Array<Record<string, unknown>> {
+  if (!rootSessionId) return [];
+  const owners = new Set([rootSessionId]);
+  const picked = new Set<Record<string, unknown>>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const row of rows) {
+      if (picked.has(row)) continue;
+      const parent = asNullableString(row.parentId);
+      if (!parent || !owners.has(parent)) continue;
+      picked.add(row);
+      owners.add(asString(row.id));
+      const childSession = sessionIdFromFileName(asNullableString(row.sessionPath));
+      if (childSession) owners.add(childSession);
+      grew = true;
+    }
+  }
+  return rows.filter((row) => picked.has(row));
 }
 
 function hasTable(db: DatabaseSync, table: string): boolean {

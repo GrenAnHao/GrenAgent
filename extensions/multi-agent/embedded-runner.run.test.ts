@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const appendMessage = vi.fn();
 const appendCustomEntry = vi.fn();
@@ -435,5 +435,71 @@ describe("outputSchema", () => {
     const r2 = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-s3", outputSchema: schema as never });
     expect(r2).not.toHaveProperty("structured");
     expect(r2.stopReason).toBe("completed");
+  });
+});
+
+describe("idle timeout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetActivationsForTest();
+    resolveCliModel.mockImplementation(({ cliModel }: { cliModel: string }) => {
+      const [provider, id] = cliModel.split("/");
+      return { model: { provider, id }, error: undefined };
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function hangingSession() {
+    const listeners: Array<(event: unknown) => void> = [];
+    let release!: () => void;
+    const idle = new Promise<void>((r) => (release = r));
+    const session = fakeSession({ provider: "a", id: "b" }, { waitForIdle: vi.fn(() => idle) });
+    session.subscribe = vi.fn((fn: (event: unknown) => void) => {
+      listeners.push(fn);
+      return () => {};
+    }) as typeof session.subscribe;
+    session.abort = vi.fn(async () => release());
+    const emit = (type: string) => {
+      for (const fn of listeners) fn({ type });
+    };
+    return { session, emit };
+  }
+
+  it("keeps a child that keeps producing events alive past the idle window", async () => {
+    vi.useFakeTimers();
+    const { session, emit } = hangingSession();
+    createAgentSessionFromServices.mockResolvedValue({ session });
+    const p = runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-busy", timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(0);
+    emit("message_update");
+    for (let i = 0; i < 6; i += 1) {
+      await vi.advanceTimersByTimeAsync(600);
+      emit(i % 2 ? "message_update" : "tool_execution_update");
+    }
+    expect(session.abort).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(session.abort).toHaveBeenCalled();
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.exitCode).toBe(-1);
+    expect(r.error).toBe("idle timeout: no activity for 1s");
+  });
+
+  it("caps a child that never goes quiet at idle x10", async () => {
+    vi.useFakeTimers();
+    const { session, emit } = hangingSession();
+    createAgentSessionFromServices.mockResolvedValue({ session });
+    const p = runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-chatty", timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 25 && !session.abort.mock.calls.length; i += 1) {
+      emit("message_update");
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    const r = await p;
+    expect(r.error).toBe("hard timeout after 10s");
   });
 });

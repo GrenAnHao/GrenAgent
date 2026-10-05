@@ -12,7 +12,7 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/repo' }),
 }));
 vi.mock('../../../../stores/gitStore', () => ({
-  useGitInfo: () => ({ current: '', branches: [] }),
+  useGitInfo: () => ({ current: '', branches: [], changes: [], loading: false, loaded: true }),
   useGitStore: { getState: () => ({ load: vi.fn() }) },
 }));
 vi.mock('./TaskTray', () => ({ TaskTray: () => <span data-testid="task-tray" /> }));
@@ -33,6 +33,7 @@ describe('WorkspaceBar', () => {
     expect(screen.queryByTestId('project-context-card')).toBeNull();
     expect(screen.queryByRole('dialog', { name: /项目上下文/ })).toBeNull();
     expect(screen.getByTestId('task-tray')).toBeTruthy();
+    expect(screen.getByText('没有可用的本地分支')).toBeTruthy();
   });
 
   it('accepts a typed project context reference callback', () => {

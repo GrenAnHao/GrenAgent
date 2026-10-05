@@ -16,6 +16,25 @@ describe("resource stores", () => {
     expect(JSON.parse(await readFile(mcpConfigPaths(workspace, home).global, "utf8")).mcpServers.same.command).toBe("global");
   });
 
+  it("writes a remote MCP with headers and leaves stdio fields out", async () => {
+    const home = await mkdtemp(join(tmpdir(), "resource-home-"));
+    const workspace = await mkdtemp(join(tmpdir(), "resource-ws-"));
+    await writeMcpServer({
+      name: "anysearch",
+      scope: "project",
+      transport: "http",
+      url: "https://api.anysearch.com/mcp",
+      headers: { Authorization: "Bearer ${ANYSEARCH_API_KEY}" },
+    }, workspace, home);
+
+    const saved = JSON.parse(await readFile(mcpConfigPaths(workspace, home).project, "utf8")).mcpServers.anysearch;
+    expect(saved).toEqual({
+      url: "https://api.anysearch.com/mcp",
+      headers: { Authorization: "Bearer ${ANYSEARCH_API_KEY}" },
+    });
+    expect(saved.command).toBeUndefined();
+  });
+
   it("lets a higher-priority disabled entry mask the same server from lower layers", async () => {
     const home = await mkdtemp(join(tmpdir(), "resource-home-"));
     const workspace = await mkdtemp(join(tmpdir(), "resource-ws-"));

@@ -1,7 +1,8 @@
-import { memo, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { Tooltip } from 'antd';
 import { Icon, Image } from '@lobehub/ui';
-import { EyeOff } from 'lucide-react';
-import { createStaticStyles } from 'antd-style';
+import { AtSign, CircleHelp, EyeOff } from 'lucide-react';
+import { createStaticStyles, cx, keyframes } from 'antd-style';
 import { ChatItemShell } from './ChatItemShell';
 import { chatStyles } from './chatStyles';
 import { MessageActionBar } from './messageActions/MessageActionBar';
@@ -11,10 +12,12 @@ import { parseAttachments } from './attachment';
 import { AttachmentCard } from './AttachmentCard';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
-import type { ChatMessage, UserImage } from '../../stores/agentReducer';
+import type { ChatMessage, SteerState, UserImage } from '../../stores/agentReducer';
 import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
 import { MessageEditBox } from './MessageEditBox';
+import { TaskPromptFrame } from './TaskPromptFrame';
+import { isBeforeLatestCompaction } from './compactionBoundary';
 import type { PromptImage } from './input/ChatInputContext';
 
 interface UserMessageProps {
@@ -24,7 +27,22 @@ interface UserMessageProps {
   timestamp?: number;
   /** 会话条目 id：截断目标。缺失时回退/编辑发送/重生成/删除不可用。 */
   entryId?: string;
+  /** 执行中注入当前回合的引导。steerState 标明是否已经接进这一轮。 */
+  steering?: boolean;
+  steerState?: SteerState;
+  /** 任务提示词：限高放在这条气泡里面。 */
+  promptFrame?: boolean;
 }
+
+const steerPulse = keyframes`
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+`;
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   col: css`
@@ -45,6 +63,50 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
+  steer: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 20px;
+  `,
+  steerPending: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: ${cssVar.colorTextTertiary};
+    font-weight: 500;
+
+    @media (prefers-reduced-motion: no-preference) {
+      animation: ${steerPulse} 1.4s ease-in-out infinite;
+    }
+  `,
+  steerApplied: css`
+    color: ${cssVar.colorPrimary};
+    font-weight: 600;
+  `,
+  steerMissed: css`
+    color: ${cssVar.colorTextTertiary};
+  `,
+  steerHelp: css`
+    display: inline-flex;
+    color: ${cssVar.colorTextQuaternary};
+    cursor: help;
+  `,
+  appliedBubble: css`
+    background: ${cssVar.colorPrimaryBg};
+    border-color: ${cssVar.colorPrimaryBorder};
+  `,
+  framedCol: css`
+    align-items: stretch;
+    width: 100%;
+  `,
+  framedBubble: css`
+    width: 100%;
+    padding: 0;
+    overflow: hidden;
+    white-space: normal;
+  `,
   editWrap: css`
     width: 100%;
   `,
@@ -55,6 +117,40 @@ const gridStyle: CSSProperties = {
   flexWrap: 'wrap',
   gap: 6,
 };
+
+const STEER_PENDING_HELP = '正在重定向正在运行的这一轮，尚未确认。';
+
+function SteerMark({ state }: { state: SteerState }) {
+  if (state === 'consumed') {
+    return (
+      <span className={`${styles.steer} ${styles.steerApplied}`} data-testid="steer-status">
+        <Icon icon={AtSign} size={12} />
+        已引导到正在运行的这一轮
+      </span>
+    );
+  }
+  if (state === 'requeued') {
+    return (
+      <span className={`${styles.steer} ${styles.steerMissed}`} data-testid="steer-status">
+        <Icon icon={AtSign} size={12} />
+        这一轮在此生效前已结束，此消息作为独立消息运行。
+      </span>
+    );
+  }
+  return (
+    <span className={styles.steer} data-testid="steer-status">
+      <span className={styles.steerPending}>
+        <Icon icon={AtSign} size={12} />
+        正在引导…
+      </span>
+      <Tooltip title={STEER_PENDING_HELP}>
+        <span className={styles.steerHelp} aria-label={STEER_PENDING_HELP}>
+          <Icon icon={CircleHelp} size={12} />
+        </span>
+      </Tooltip>
+    </span>
+  );
+}
 
 function bodyTextOf(text: string): string {
   return parseAttachments(text)
@@ -67,6 +163,32 @@ function bodyTextOf(text: string): string {
 function toUserImages(images?: PromptImage[]): UserImage[] | undefined {
   if (!images?.length) return undefined;
   return images.map((img) => ({ mimeType: img.mimeType, data: img.data }));
+}
+
+function hasReplyAfterUser(
+  messages: ChatMessage[],
+  entryId: string | undefined,
+  timestamp: number | undefined,
+): boolean {
+  let index = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || message.kind !== 'user') continue;
+    const sameEntry = Boolean(entryId && message.entryId && message.entryId === entryId);
+    const sameTime = timestamp != null && message.timestamp != null && message.timestamp === timestamp;
+    if (sameEntry || sameTime) {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) return false;
+  for (let i = index + 1; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message) continue;
+    if (message.kind === 'user') return false;
+    if (message.kind === 'assistant' || message.kind === 'tool') return true;
+  }
+  return false;
 }
 
 function isLastInContextUser(
@@ -88,7 +210,7 @@ function isLastInContextUser(
 
 /** 纯展示（不含 hooks）：供「带 store 订阅」与「无 store 降级」两条路径复用。 */
 function renderUserMessage(
-  { text, images, timestamp, entryId }: UserMessageProps,
+  { text, images, timestamp, entryId, steering, steerState, promptFrame }: UserMessageProps,
   excluded: boolean,
   onEdit?: () => void,
 ): ReactNode {
@@ -112,16 +234,23 @@ function renderUserMessage(
   ) : undefined;
 
   return (
-    <ChatItemShell placement="right" bubble={false} actions={actions}>
-      <div className={excluded ? `${styles.col} ${styles.dimmed}` : styles.col}>
+    <ChatItemShell placement="right" bubble={false} actions={actions} fullWidth={promptFrame}>
+      <div className={excluded ? `${styles.col} ${styles.dimmed}` : cx(styles.col, promptFrame && styles.framedCol)}>
         {excluded ? (
           <span className={styles.excludedTag}>
             <Icon icon={EyeOff} size="small" />
             已移出上下文
           </span>
         ) : null}
+        {steering ? <SteerMark state={steerState ?? 'written'} /> : null}
         {hasBubble ? (
-          <div className={chatStyles.bubble}>
+          <div
+            className={cx(
+              chatStyles.bubble,
+              steerState === 'consumed' && styles.appliedBubble,
+              promptFrame && styles.framedBubble,
+            )}
+          >
             {hasImages ? (
               // PreviewGroup：点击任一图片放大查看，多图可左右切换。
               <Image.PreviewGroup>
@@ -140,10 +269,14 @@ function renderUserMessage(
               </Image.PreviewGroup>
             ) : null}
             {bodyText ? (
-              <StructuredMessageBody
-                formatted={formatStructuredMessageText(bodyText)}
-                fallback={<span style={{ whiteSpace: 'pre-wrap' }}>{renderMessageTags(bodyText)}</span>}
-              />
+              promptFrame ? (
+                <TaskPromptFrame text={bodyText} />
+              ) : (
+                <StructuredMessageBody
+                  formatted={formatStructuredMessageText(bodyText)}
+                  fallback={<span style={{ whiteSpace: 'pre-wrap' }}>{renderMessageTags(bodyText)}</span>}
+                />
+              )
             ) : null}
           </div>
         ) : null}
@@ -155,29 +288,32 @@ function renderUserMessage(
   );
 }
 
-/** 有 store 上下文 + 带 timestamp：订阅排除态以灰显。 */
-function ExcludableUserMessage(
-  props: UserMessageProps & { store: AgentStoreApi; timestamp: number; onEdit?: () => void },
-) {
-  const excluded = props.store.useStore((s) => s.excluded.has(props.timestamp));
-  return renderUserMessage(props, excluded, excluded ? undefined : props.onEdit);
-}
-
-function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps) {
-  const storeCtx = useOptionalAgentStoreContext();
-  const [editing, setEditing] = useState(false);
+/**
+ * store 订阅必须在这个子组件里无条件调用。
+ * 父组件若按 timestamp 是否存在决定要不要 useStore，回填 timestamp 后会多出一个 Hook，整棵树崩溃。
+ */
+function StoreBackedUserMessage({
+  text,
+  images,
+  timestamp,
+  entryId,
+  steering,
+  steerState,
+  promptFrame,
+  store,
+  editing,
+  setEditing,
+}: UserMessageProps & {
+  store: AgentStoreApi;
+  editing: boolean;
+  setEditing: Dispatch<SetStateAction<boolean>>;
+}) {
   const bodyText = bodyTextOf(text);
-
-  const isBusy = storeCtx
-    ? storeCtx.store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse))
-    : false;
-  const canEditLast = storeCtx
-    ? storeCtx.store.useStore((s) => isLastInContextUser(s.messages, s.excluded, entryId, timestamp))
-    : false;
-  const excludedNow =
-    storeCtx && timestamp != null
-      ? storeCtx.store.useStore((s) => s.excluded.has(timestamp))
-      : false;
+  const isBusy = store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse));
+  const canEditLast = store.useStore((s) => isLastInContextUser(s.messages, s.excluded, entryId, timestamp));
+  const hasReply = store.useStore((s) => hasReplyAfterUser(s.messages, entryId, timestamp));
+  const aboveCompaction = store.useStore((s) => isBeforeLatestCompaction(s.messages, entryId, timestamp));
+  const excludedNow = store.useStore((s) => timestamp != null && s.excluded.has(timestamp));
 
   if (editing) {
     return (
@@ -189,11 +325,11 @@ function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps
             onCancel={() => setEditing(false)}
             onSend={(nextText, nextImages) => {
               void (async () => {
-                if (!storeCtx || !entryId) {
+                if (!entryId) {
                   setEditing(false);
                   return;
                 }
-                const result = await storeCtx.store.editAndSend(entryId, nextText, toUserImages(nextImages));
+                const result = await store.editAndSend(entryId, nextText, toUserImages(nextImages));
                 if (result === 'truncate-failed') return;
                 setEditing(false);
               })();
@@ -204,25 +340,45 @@ function UserMessageInner({ text, images, timestamp, entryId }: UserMessageProps
     );
   }
 
-  // 编辑：仅当前上下文最后一条用户消息，且对话停下；excluded / 无 store 不给。
   const onEdit =
-    storeCtx && bodyText && entryId && !isBusy && canEditLast && !excludedNow
-      ? () => setEditing(true)
+    bodyText && entryId && !isBusy && canEditLast && !excludedNow && !aboveCompaction
+      ? () => {
+          // 后面已经有回复：就地改完再发送。还没有回复：不打开编辑框，原文直接回到底部输入框。
+          if (hasReply) {
+            setEditing(true);
+            return;
+          }
+          void store.rewindAndLoad(entryId, bodyText);
+        }
       : undefined;
 
-  if (storeCtx && timestamp != null) {
-    return (
-      <ExcludableUserMessage
-        text={text}
-        images={images}
-        timestamp={timestamp}
-        entryId={entryId}
-        store={storeCtx.store}
-        onEdit={onEdit}
-      />
-    );
+  return renderUserMessage(
+    { text, images, timestamp, entryId, steering, steerState, promptFrame },
+    excludedNow,
+    onEdit,
+  );
+}
+
+function UserMessageInner({ text, images, timestamp, entryId, steering, steerState, promptFrame }: UserMessageProps) {
+  const storeCtx = useOptionalAgentStoreContext();
+  const [editing, setEditing] = useState(false);
+  if (!storeCtx) {
+    return renderUserMessage({ text, images, timestamp, entryId, steering, steerState, promptFrame }, false);
   }
-  return renderUserMessage({ text, images, timestamp, entryId }, false, onEdit);
+  return (
+    <StoreBackedUserMessage
+      text={text}
+      images={images}
+      timestamp={timestamp}
+      entryId={entryId}
+      steering={steering}
+      steerState={steerState}
+      promptFrame={promptFrame}
+      store={storeCtx.store}
+      editing={editing}
+      setEditing={setEditing}
+    />
+  );
 }
 
 export const UserMessage = memo(UserMessageInner);

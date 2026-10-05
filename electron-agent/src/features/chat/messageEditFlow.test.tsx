@@ -171,6 +171,22 @@ describe('messageEditFlow', () => {
     cleanup();
   });
 
+  it('最后一条尚无回复时，编辑直接把原文放回输入框', async () => {
+    store.useStore.setState({
+      ...store.useStore.getState(),
+      messages: [{ kind: 'user', id: 'local-1', text: '原文', entryId: 'entry-u1', timestamp: 1000 }],
+    } as AgentState);
+    render(wrap(store, <UserMessage text="原文" entryId="entry-u1" timestamp={1000} />));
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('msg-action-bar-edit'));
+    });
+
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(truncateTo).toHaveBeenCalledWith('/ws', 'entry-u1', 'drop-target');
+    expect(composerValues).toContain('原文');
+  });
+
   it('编辑取消不调用截断', async () => {
     seedUser(store, 'entry-u1', '原文');
     render(wrap(store, <UserMessage text="原文" entryId="entry-u1" timestamp={1000} />));
@@ -212,7 +228,7 @@ describe('messageEditFlow', () => {
 
   it('回退确认调用截断后，下一次发送不再带截断', async () => {
     seedUser(store, 'entry-u1', '原文');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(App.useApp().modal, 'confirm');
     const onSend = vi.fn(() => Promise.resolve());
     getDocument.mockReturnValue('原文');
     setDocument.mockClear();

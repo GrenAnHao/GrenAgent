@@ -15,6 +15,11 @@ export interface ShortCallInput {
   temperature?: number;
   /** 推理档位。改写/抽取类任务传 'minimal'，压低模型输出自我解说（改动说明/对照表）的倾向。 */
   reasoning?: ThinkingLevel;
+  /**
+   * 额外采样参数，经 OpenAI 兼容适配器原样合并进请求体（如 top_p / top_k）。
+   * 不传则不覆盖 provider/模型默认；非 OpenAI 兼容 API 会忽略。
+   */
+  samplingParams?: Record<string, unknown>;
 }
 
 export interface ModelRuntimeHostOptions {
@@ -86,9 +91,15 @@ export class ModelRuntimeHost {
     const runtime = await this.ensure();
     const model = await this.resolveCallModel(input, runtime);
     // 条件透传：undefined 不覆盖 provider/模型自带的采样配置，保持「不传即默认」语义。
-    const options: { signal?: AbortSignal; temperature?: number; reasoning?: ThinkingLevel } = { signal: input.signal };
+    const options: {
+      signal?: AbortSignal;
+      temperature?: number;
+      reasoning?: ThinkingLevel;
+      samplingParams?: Record<string, unknown>;
+    } = { signal: input.signal };
     if (input.temperature !== undefined) options.temperature = input.temperature;
     if (input.reasoning !== undefined) options.reasoning = input.reasoning;
+    if (input.samplingParams !== undefined) options.samplingParams = input.samplingParams;
     for await (const ev of runtime.streamSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },

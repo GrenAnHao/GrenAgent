@@ -210,9 +210,15 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
   const editorRecord = editor?.record && activeDetail?.value?.kind === 'memory' && editor.record.id === activeDetail.value.record.id ? activeDetail.value.record : editor?.record;
   const editing = !!editor && editor.trigger === 'edit';
   const detailOpen = !!activeSelection || editing;
+  const levelTotal = kind === 'memory' ? overviewValue?.value?.byLevel[`L${level}`] ?? 0 : 0;
+  const scopeName = filter.scope === 'global' ? '全局' : filter.scope === 'project' ? (projects.find((option) => pathsEquivalent(option.cwd, filter.projectId))?.name ?? '当前项目') : '';
+  // 等级角标是全部项目的总数，不随归属筛选变化。筛选把这一层滤空时，不能再说「暂无记忆」。
+  const hiddenByScope = kind === 'memory' && !query.trim() && scopeName !== '' && levelTotal > 0;
+  const emptyDescription = query ? '暂无匹配记录' : hiddenByScope ? `${scopeName}范围内没有 L${level} 记忆。上方 L${level} 的 ${levelTotal} 是全部项目的总数。` : kind === 'memory' ? '暂无记忆' : '暂无对话记录';
+  const showAllProjects = () => { setProject(''); clearSelection(); };
   const listPane = <div data-memory-list-pane>
     {browser.error ? <PageBanner type="error" items={[{ message: `${browser.loaded ? '刷新失败，已保留当前列表：' : '读取失败：'}${browser.error}` }]} /> : null}
-    {browser.loading && !browser.loaded ? <Spin description="正在加载 Memory…" /> : !browser.loaded ? <Empty description={kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'} /> : items.length === 0 ? <Empty description={query ? '暂无匹配记录' : kind === 'memory' ? '暂无记忆' : '暂无对话记录'} /> : null}
+    {browser.loading && !browser.loaded ? <Spin description="正在加载 Memory…" /> : !browser.loaded ? <Empty description={kind === 'memory' ? '记忆列表尚未读取成功' : '对话列表尚未读取成功'} /> : items.length === 0 ? <Empty description={emptyDescription}>{hiddenByScope ? <Button onClick={showAllProjects}>查看全部项目</Button> : null}</Empty> : null}
     {browser.refreshing ? <Typography.Text role="status" type="secondary" style={{ fontSize: 12 }}>正在刷新列表…</Typography.Text> : null}
     <MemoryList items={items} selectedId={activeSelection?.id} nextCursor={browser.nextCursor} refreshing={browser.refreshing} onSelect={choose} onLoadMore={browser.loadMore} />
   </div>;
@@ -235,7 +241,7 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
       ...(overviewValue?.error ? [{ source: '记忆总数', message: overviewValue.error }] : []),
     ]} />
     {notice ? <Typography.Text role="status">{notice}</Typography.Text> : null}
-    <div className={w.panel}>
+    <div className={`${w.panel} ${m.fill}`}>
       <div className={w.panelToolbar}>
         <Typography.Text type="secondary">{group === 'conversation' ? '对话记录只读。对话捕获没有全局层，按原始项目保存；此处仅查看，不支持编辑或删除。' : memoryLevelLabels[Number(group) as MemoryLevel]}</Typography.Text>
         <span className={w.spacer} />
@@ -247,7 +253,7 @@ export function MemoryPanel({ userId = 'local', initialProject, visible = true, 
           ...projects.map((option) => ({ value: `project:${option.cwd}`, label: option.name })),
         ]} />
       </div>
-      <SplitPane detailOpen={detailOpen} side={listPane} main={mainPane} />
+      <SplitPane className={m.split} detailOpen={detailOpen} side={listPane} main={mainPane} />
     </div>
     <Modal open={editor?.trigger === 'new'} title="新增记忆" footer={null} destroyOnHidden onCancel={() => void (editorHandle.current?.confirmLeave() ?? Promise.resolve(true)).then((ok) => { if (ok) setEditor(undefined); })}>
       {editor?.trigger === 'new' ? <MemoryEditor ref={editorHandle} key={`new:${editorVersion}`} userId={userId} initialLevel={group === '1' || group === '3' ? Number(group) as 1 | 3 : 2} projects={projects} onSaved={saved} onCancel={() => setEditor(undefined)} /> : null}

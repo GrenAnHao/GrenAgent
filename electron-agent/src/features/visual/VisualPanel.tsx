@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { X } from 'lucide-react';
-import { ActionIcon } from '@lobehub/ui';
+import { HtmlPreview } from '@lobehub/ui';
 import { useVisualStore } from '../../stores/visualStore';
 import { buildSrcDoc } from './frameAssets';
 import { extensionUiRespond } from '../../lib/pi';
@@ -27,10 +26,8 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    font-weight: 700;
-    color: ${cssVar.colorPrimary};
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    font-weight: 600;
+    color: ${cssVar.colorTextSecondary};
   `,
   dot: css`
     width: 6px;
@@ -40,9 +37,10 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   frame: css`
     flex: 1;
-    border: none;
     width: 100%;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
   `,
   empty: css`
     flex: 1;
@@ -54,11 +52,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-interface VisualPanelProps {
-  onClose?: () => void;
-}
-
-export const VisualPanel = memo(function VisualPanel({ onClose }: VisualPanelProps) {
+export const VisualPanel = memo(function VisualPanel() {
   const { workspace } = useAgentStoreContext();
   const html = useVisualStore((s) => s.html);
   const sessionId = useVisualStore((s) => s.sessionId);
@@ -89,24 +83,30 @@ export const VisualPanel = memo(function VisualPanel({ onClose }: VisualPanelPro
 
   return (
     <div className={styles.root}>
-      <div className={styles.header}>
-        <span className={styles.title}>
-          <span className={styles.dot} />
-          Visual
-          {submitted ? ' · 已选择' : pending ? ' · 等待选择' : ''}
-        </span>
-        {onClose && (
-          <ActionIcon icon={X} size="small" onClick={onClose} title="关闭面板" />
-        )}
-      </div>
+      {submitted || pending ? (
+        <div className={styles.header}>
+          <span className={styles.title}>
+            <span className={styles.dot} />
+            {submitted ? '已选择' : '等待选择'}
+          </span>
+        </div>
+      ) : null}
       {html ? (
-        <iframe
+        <HtmlPreview
           key={sessionId}
+          animated={false}
           className={styles.frame}
-          sandbox="allow-scripts"
-          srcDoc={buildSrcDoc(html)}
-          title="Visual Companion Panel"
-        />
+          copyable={false}
+          defaultHeight={320}
+          defaultMode="preview"
+          downloadable={false}
+          style={{ flex: 1, height: '100%', minHeight: 0 }}
+          styles={{ iframe: { flex: 1, width: '100%', height: '100%', minHeight: 0 } }}
+          theme="dark"
+          variant="borderless"
+        >
+          {buildSrcDoc(html, { fill: true })}
+        </HtmlPreview>
       ) : (
         <div className={styles.empty}>等待 Agent 推送内容…</div>
       )}

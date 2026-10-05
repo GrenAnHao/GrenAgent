@@ -181,7 +181,7 @@ describe('FullAccessConfirmModal', () => {
     fireEvent.click(screen.getByTestId('full-access-ok'));
     await pending;
 
-    expect(setApproval).toHaveBeenCalledWith('/ws', 'full');
+    expect(setApproval).toHaveBeenCalledWith('/ws', 'full', null);
     expect(useFullAccessConfirmStore.getState().open).toBe(false);
 
     unmount();
@@ -195,7 +195,7 @@ describe('FullAccessConfirmModal', () => {
     fireEvent.click(screen.getByTestId('full-access-ok'));
     await vi.waitFor(() => expect(messageError).toHaveBeenCalledWith('RUNTIME_CONFIG_UNAVAILABLE'));
 
-    expect(setApproval).toHaveBeenLastCalledWith('/other', 'full');
+    expect(setApproval).toHaveBeenLastCalledWith('/other', 'full', null);
     expect(useFullAccessConfirmStore.getState()).toMatchObject({ open: true, busy: false });
     expect(screen.getByLabelText('我已了解风险，并愿意继续')).toBeChecked();
 

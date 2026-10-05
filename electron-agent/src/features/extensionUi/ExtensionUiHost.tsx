@@ -15,6 +15,20 @@ import { useVisualStore } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 import { isGoalReceiptNotify } from './goalReceiptNotify';
+import { stashInlineQuestion, stashUiPrompt } from '../../stores/backgroundUiRequests';
+import { pathsEquivalent } from '../../lib/pathUtils';
+import type { PiUiRequestEnvelope } from '../../lib/pi';
+
+/** 请求来自同项目里不在画面上的会话时返回它的路径；当前会话或无法判断时返回 undefined。 */
+export function backgroundSessionPathOf(e: PiUiRequestEnvelope): string | undefined {
+  if (!e.sessionPath) return undefined;
+  const store = agentStoreRegistry.get(e.workspace);
+  if (!store) return undefined;
+  const loaded = store.getLoadedSessionPath();
+  if (loaded) return pathsEquivalent(loaded, e.sessionPath) ? undefined : e.sessionPath;
+  // 画面是还没绑定的草稿：请求只能来自已经停到后台的会话（草稿首发前不会有交互请求）。
+  return store.hasLiveActivity() ? undefined : e.sessionPath;
+}
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -155,7 +169,12 @@ export function ExtensionUiHost() {
         const r = e.request as { statusKey?: unknown; statusText?: unknown };
         const text = typeof r.statusText === 'string' ? r.statusText : undefined;
         if (r.statusKey === 'agent-mode') {
-          // 当前模式由 agent-mode 扩展推送（agent/ask/debug/plan），供模式选择器回读高亮。
+          // 模式按会话：带 sessionPath 的记到那份会话；没有会话身份的（启动早期）当项目默认。
+          if (isAgentMode(r.statusText)) {
+            if (e.sessionPath) useModeStore.getState().setSessionMode(e.sessionPath, r.statusText);
+            else useModeStore.getState().setMode(e.workspace, r.statusText);
+          }
+        } else if (r.statusKey === 'agent-mode-default') {
           if (isAgentMode(r.statusText)) useModeStore.getState().setMode(e.workspace, r.statusText);
         } else if (r.statusKey === 'plan-mode') {
           usePlanModeStore.getState().setStatus(text);
@@ -189,8 +208,14 @@ export function ExtensionUiHost() {
             /* ignore malformed payload */
           }
         } else if (r.statusKey === 'approval-policy') {
+          if (isApprovalPolicy(r.statusText)) {
+            if (e.sessionPath) useApprovalStore.getState().setSessionLevel(e.sessionPath, r.statusText);
+            else useApprovalStore.getState().setLevel(e.workspace, r.statusText);
+          }
+        } else if (r.statusKey === 'approval-policy-default') {
           if (isApprovalPolicy(r.statusText)) useApprovalStore.getState().setLevel(e.workspace, r.statusText);
         } else if (r.statusKey === 'ui-prompt') {
+          if (backgroundSessionPathOf(e)) return;
           agentStoreRegistry.get(e.workspace)?.useStore.setState({
             waitingUiPrompt: parseWaitingUiPrompt(r.statusText),
           });
@@ -212,16 +237,21 @@ export function ExtensionUiHost() {
         }
         return;
       }
+      // 同项目另一个在跑的会话发来的交互请求先按会话暂存，切到它时再显示。
+      const backgroundPath = backgroundSessionPathOf(e);
       // ask_user 富卡：经 ctx.ui.input 载荷传来，内联渲染到消息流末尾（而非输入框上方）。
       if (method === 'input') {
         const data = parseAskUserPayload((e.request as { title?: unknown }).title);
         if (data) {
-          useInlineQuestionStore.getState().setRequest({
+          const item = {
             workspace: e.workspace,
             id: e.request.id,
             data,
-            mode: 'live',
-          });
+            mode: 'live' as const,
+            ...(e.sessionPath ? { sessionPath: e.sessionPath } : {}),
+          };
+          if (backgroundPath) stashInlineQuestion(backgroundPath, item);
+          else useInlineQuestionStore.getState().setRequest(item);
           return;
         }
         // visual choice 哨兵：read_visual_choice 阻塞中，标记 pending 并记录 requestId
@@ -237,7 +267,9 @@ export function ExtensionUiHost() {
       }
       // 其余交互请求 → 输入框上方内联卡片（PromptRequestCard 渲染并回传），不弹窗。
       if (method === 'confirm' || method === 'select' || method === 'input') {
-        useUiPromptStore.getState().setRequest({ workspace: e.workspace, request: e.request });
+        const item = { workspace: e.workspace, request: e.request, ...(e.sessionPath ? { sessionPath: e.sessionPath } : {}) };
+        if (backgroundPath) stashUiPrompt(backgroundPath, item);
+        else useUiPromptStore.getState().setRequest(item);
       }
     }));
     return () => {

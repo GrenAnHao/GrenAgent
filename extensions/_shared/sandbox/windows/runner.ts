@@ -46,6 +46,55 @@ export function windowsHelperArgv(
   return [...prefix, "--", ...argv];
 }
 
+export interface SandboxLogon {
+  username: string;
+  blobPath: string;
+  /** Profile directory the account owns, for example C:\\Users\\PiSandbox. */
+  home?: string;
+}
+
+/** Launch the command as the dedicated sandbox account. No capability SIDs. */
+export function windowsAccountArgv(
+  policy: { mode: "read-only" | "workspace-write"; workspaceRoot: string },
+  argv: string[],
+  helperPath: string,
+  tempDir: string,
+  identity: SandboxLogon,
+): string[] {
+  const prefix = [
+    helperPath,
+    "--logon-user",
+    identity.username,
+    "--logon-blob",
+    identity.blobPath,
+    "--temp",
+    tempDir,
+  ];
+  if (identity.home) {
+    prefix.push("--sandbox-home", identity.home);
+  }
+  if (policy.mode === "workspace-write") {
+    prefix.push("--workspace", policy.workspaceRoot);
+  }
+  return [...prefix, "--", ...argv];
+}
+
+export function windowsAccountConfined(
+  policy: SandboxPolicy,
+  argv: string[],
+  helperPath: string,
+  tempDir: string,
+  identity: SandboxLogon,
+): ConfinedArgv {
+  return {
+    argv: windowsAccountArgv(policy, argv, helperPath, tempDir, identity),
+    enforcement: "partial",
+    denialExitCodes: [SANDBOX_DENIAL_EXIT],
+    denialSignatures: [...DENIAL_SIGNATURES],
+    runnerFailureRules: RUNNER_FAILURE_RULES,
+  };
+}
+
 export function windowsConfined(
   policy: SandboxPolicy,
   argv: string[],

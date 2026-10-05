@@ -34,12 +34,32 @@ export function mutationPath(args: unknown): string {
   return '';
 }
 
+function argNumber(args: unknown, key: string): number | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : undefined;
+}
+
+/** 读取带 offset/limit 时的行号范围。offset 为 1-based 起始行，limit 为行数。全文读取返回空。 */
+export function readLineRange(args: unknown): string | undefined {
+  const offset = argNumber(args, 'offset');
+  const limit = argNumber(args, 'limit');
+  if (offset == null && limit == null) return undefined;
+  const start = offset != null && offset >= 1 ? Math.floor(offset) : 1;
+  if (limit != null && limit >= 1) {
+    const end = start + Math.floor(limit) - 1;
+    return start === end ? String(start) : `${start}-${end}`;
+  }
+  return `${start}-`;
+}
+
 export function contentLines(text: string): string[] {
   if (text === '') return [];
   return text.replace(/(?:\r?\n)+$/u, '').split(/\r?\n/);
 }
 
-function totals(rows: DiffRow[]): { added: number; deleted: number } {
+export function totals(rows: DiffRow[]): { added: number; deleted: number } {
   let added = 0;
   let deleted = 0;
   for (const row of rows) {
@@ -121,6 +141,29 @@ function parseUnifiedDiff(diff: string): DiffRow[] | null {
     else return null;
   }
   return rows.length ? rows : null;
+}
+
+/**
+ * `git diff` 的单文件 patch → 行级 diff。只收 hunk 里的行；文件头、mode、`\ No newline` 等元信息跳过。
+ * hunk 内 `--- x` 是删掉的一行 `-- x`，不是文件头，所以按是否已进 hunk 判断而不是看前缀。
+ */
+export function rowsFromGitPatch(patch: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let inHunk = false;
+  for (const line of patch.split(/\r?\n/)) {
+    if (line.startsWith('@@')) {
+      inHunk = true;
+      continue;
+    }
+    if (line.startsWith('diff ')) {
+      inHunk = false;
+      continue;
+    }
+    if (!inHunk) continue;
+    const head = line[0];
+    if (head === '+' || head === '-' || head === ' ') rows.push({ marker: head, text: line.slice(1) });
+  }
+  return rows;
 }
 
 function rowsFromApplied(diff: string): DiffRow[] | null {

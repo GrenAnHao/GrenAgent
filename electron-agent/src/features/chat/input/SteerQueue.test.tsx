@@ -2,8 +2,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { steerQueued, agentState } = vi.hoisted(() => ({
+const { steerQueued, interruptQueued, agentState } = vi.hoisted(() => ({
   steerQueued: vi.fn(),
+  interruptQueued: vi.fn(),
   agentState: {
     composerQueue: [] as Array<{ id: string; text: string }>,
   },
@@ -22,13 +23,14 @@ vi.mock('../../../stores/AgentStoreContext', () => ({
 }));
 
 vi.mock('./ChatInputContext', () => ({
-  useChatInput: () => ({ steerQueued }),
+  useChatInput: () => ({ steerQueued, interruptQueued }),
 }));
 
 import { SteerQueue } from './SteerQueue';
 
 beforeEach(() => {
   steerQueued.mockClear();
+  interruptQueued.mockClear();
   agentState.composerQueue = [{ id: 'cq-1', text: '先别再测了' }];
 });
 
@@ -37,14 +39,21 @@ afterEach(() => {
 });
 
 describe('SteerQueue', () => {
-  it('渲染跟进条和三个操作', () => {
+  it('单条跟进直接露出一行，不收进排队', () => {
     render(<SteerQueue />);
     expect(screen.getByTestId('steer-queue')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /排队/ })).toBeTruthy();
-    expect(screen.queryByText('先别再测了')).toBeNull();
-    expect(screen.queryByRole('button', { name: '发送引导' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '编辑消息' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '删除这条' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /排队/ })).toBeNull();
+    expect(screen.getByText('先别再测了')).toBeTruthy();
+    const hotkeys = screen.getByTestId('follow-up-hotkeys');
+    expect(hotkeys.textContent).toContain('引导');
+    expect(hotkeys.textContent).toContain('Enter');
+    expect(hotkeys.textContent).toContain('截断');
+    expect(hotkeys.textContent).toContain('Ctrl');
+    expect(screen.getByRole('button', { name: '引导' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '截断发送' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '编辑消息' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '删除这条' })).toBeTruthy();
+    expect(screen.queryByTestId('queue-drag-handle')).toBeNull();
   });
 
   it('收起时显示条数和第一条原文', () => {
@@ -59,30 +68,43 @@ describe('SteerQueue', () => {
     expect(screen.queryByText('第二条')).toBeNull();
   });
 
-  it('第一条没有文字时标题只有条数', () => {
-    agentState.composerQueue = [{ id: 'cq-1', text: '   ' }];
+  it('多条且第一条没有文字时标题只有条数', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '   ' },
+      { id: 'cq-2', text: '第二条' },
+    ];
     render(<SteerQueue />);
-    expect(screen.getByRole('button', { name: '排队 · 1' }).textContent).toBe('排队 · 1');
+    expect(screen.getByRole('button', { name: '排队 · 2' }).textContent).toBe('排队 · 2');
   });
 
-  it('点标题才展开每条跟进', () => {
+  it('多条默认收起，点标题才展开每一行', () => {
+    agentState.composerQueue = [
+      { id: 'cq-1', text: '先别再测了' },
+      { id: 'cq-2', text: '第二条' },
+    ];
     render(<SteerQueue />);
-    expect(screen.queryByRole('button', { name: '发送引导' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '引导' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /排队/ }));
     expect(screen.getByText('先别再测了')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '发送引导' })).toBeTruthy();
+    expect(screen.getByText('第二条')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '引导' })).toHaveLength(2);
   });
 
-  it('点发送引导会把这条交给 steerQueued', () => {
+  it('点引导会把这条交给 steerQueued', () => {
     render(<SteerQueue />);
-    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
-    fireEvent.click(screen.getByRole('button', { name: '发送引导' }));
+    fireEvent.click(screen.getByRole('button', { name: '引导' }));
     expect(steerQueued).toHaveBeenCalledWith('cq-1');
+  });
+
+  it('点截断发送会把这条交给 interruptQueued', () => {
+    render(<SteerQueue />);
+    fireEvent.click(screen.getByRole('button', { name: '截断发送' }));
+    expect(interruptQueued).toHaveBeenCalledWith('cq-1');
+    expect(steerQueued).not.toHaveBeenCalled();
   });
 
   it('点删除这条会从本地队列拿走', () => {
     const { rerender } = render(<SteerQueue />);
-    fireEvent.click(screen.getByRole('button', { name: /排队/ }));
     fireEvent.click(screen.getByRole('button', { name: '删除这条' }));
     expect(agentState.composerQueue).toEqual([]);
     rerender(<SteerQueue />);
@@ -133,7 +155,7 @@ describe('SteerQueue', () => {
     ];
     render(<SteerQueue />);
     fireEvent.click(screen.getByRole('button', { name: /排队/ }));
-    fireEvent.click(screen.getAllByRole('button', { name: '发送引导' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '引导' })[0]!);
     expect(agentState.composerQueue.map((item) => item.id)).toEqual(['cq-1', 'cq-2']);
     expect(steerQueued).toHaveBeenCalledWith('cq-1');
   });

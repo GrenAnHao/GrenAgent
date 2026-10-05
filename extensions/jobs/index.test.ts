@@ -43,13 +43,39 @@ describe("jobs extension · tools", () => {
     const h = harness();
     await h.handlers.session_start({ type: "session_start" }, sessionCtx("s1"));
     const { id, resolve } = startFor("s1");
-    expect((await h.tools.job_output("t", { job_id: id }, null, null, sessionCtx("s1"))).content[0].text).toBe("[status: running]");
-    expect((await h.tools.job_list("t", {}, null, null, sessionCtx("s1"))).content[0].text).toContain(id);
-    expect((await h.tools.job_kill("t", { job_id: id, reason: "r" }, null, null, sessionCtx("s1"))).content[0].text).toBe(`cancellation requested for job ${id}`);
+    expect((await h.tools.job_output("t", { job_id: id }, null, null, sessionCtx("s1"))).content[0].text).toBe("(no new output)\n[status: running]");
+    expect((await h.tools.job_list("t", {}, null, null, sessionCtx("s1"))).content[0].text).toBe(`${id} [subagent] running — L`);
+    expect((await h.tools.job_kill("t", { job_id: id, reason: "r" }, null, null, sessionCtx("s1"))).content[0].text).toBe(`requested cancellation of job ${id}`);
     resolve({ status: "completed", output: "out" });
     const r = await h.tools.job_output("t", { job_id: id, wait: true, timeout_ms: 100 }, null, null, sessionCtx("s1"));
-    expect(r.content[0].text).toBe("[status: completed]\nout");
-    expect((await h.tools.job_kill("t", { job_id: id }, null, null, sessionCtx("s1"))).content[0].text).toContain("had already finished");
+    expect(r.content[0].text).toBe("out\n[status: completed]");
+    expect((await h.tools.job_kill("t", { job_id: id }, null, null, sessionCtx("s1"))).content[0].text).toBe(`job ${id} had already finished [status: completed]`);
+  });
+
+  it("job_list with no jobs", async () => {
+    const h = harness();
+    expect((await h.tools.job_list("t", {}, null, null, sessionCtx("s1"))).content[0].text).toBe("(no background jobs)");
+  });
+
+  it("job_output on a stream job: increments, status line with detail last, bounded by outputLimitBytes keeping the tail", async () => {
+    const h = harness();
+    let append!: (text: string) => void;
+    let finish!: (o: { status: "completed"; detail: string }) => void;
+    const id = jobs.start({
+      kind: "bash", label: "build", owner: "s1", workspace: "/ws", outputLimitBytes: 80,
+      run: (job) => {
+        append = (text) => job.append(text);
+        return { cancel: () => {}, done: new Promise((r) => (finish = r)) };
+      },
+    });
+    append("step 1\n");
+    expect((await h.tools.job_output("t", { job_id: id }, null, null, sessionCtx("s1"))).content[0].text).toBe("step 1\n[status: running]");
+    append(`${"x".repeat(200)}\nFAILED: target\n`);
+    finish({ status: "completed", detail: "exit code: 1" });
+    const text = (await h.tools.job_output("t", { job_id: id, wait: true, timeout_ms: 1000 }, null, null, sessionCtx("s1"))).content[0].text;
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(80);
+    expect(text).toContain("FAILED: target");
+    expect(text.endsWith("\n[output truncated]\n[status: completed, exit code: 1]")).toBe(true);
   });
 
   it("non-owner gets isError with the ownership message", async () => {
@@ -83,6 +109,32 @@ describe("jobs extension · notice delivery", () => {
     expect(msg.content.split("\n")[0]).toBe("Background job subagent-1 (subagent: L) finished completed.");
     expect(opts).toEqual({ triggerTurn: false, deliverAs: "steer" });
     expect(jobs.snapshot("subagent-1")?.reported).toBe(true);
+  });
+
+  it("no notice for a settlement the model already collected: a released job_output wait, or its own job_kill", async () => {
+    const h = harness();
+    await h.handlers.session_start({ type: "session_start" }, sessionCtx("s1", false));
+    const a = startFor("s1");
+    const waiting = h.tools.job_output("t", { job_id: a.id, wait: true, timeout_ms: 1000 }, null, null, sessionCtx("s1"));
+    a.resolve({ status: "completed", output: "o" });
+    expect((await waiting).content[0].text).toBe("o\n[status: completed]");
+
+    let finish!: (o: { status: "killed" }) => void;
+    const b = jobs.start({ kind: "subagent", label: "L", owner: "s1", workspace: "/ws", run: () => ({ cancel: () => {}, done: new Promise((r) => (finish = r)) }) });
+    await h.tools.job_kill("t", { job_id: b }, null, null, sessionCtx("s1"));
+    finish({ status: "killed" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a kill not requested by the model (spawn_agent cancel, user) still notifies", async () => {
+    const h = harness();
+    await h.handlers.session_start({ type: "session_start" }, sessionCtx("s1", false));
+    let finish!: (o: { status: "killed" }) => void;
+    const id = jobs.start({ kind: "subagent", label: "L", owner: "s1", workspace: "/ws", run: () => ({ cancel: () => {}, done: new Promise((r) => (finish = r)) }) });
+    jobs.kill(id, "s1", "cancelled by the user");
+    finish({ status: "killed" });
+    await vi.waitFor(() => expect(h.sendMessage).toHaveBeenCalledTimes(1));
   });
 
   it("idle owner → wake up to JOBS_WAKE_BUDGET times, then inject only; input resets", async () => {

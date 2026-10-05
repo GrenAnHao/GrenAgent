@@ -36,6 +36,26 @@ describe('GitService', () => {
     await expect(service.diff(workspace, 'new.txt')).resolves.toContain('+new file');
   });
 
+  it('pages log history across all branches, children before parents', async () => {
+    const workspace = await repository();
+    const service = new GitService();
+    await service.createBranch(workspace, 'side', true);
+    await writeFile(join(workspace, 'side.txt'), 'side\n');
+    await execFile('git', ['add', 'side.txt'], { cwd: workspace });
+    await execFile('git', ['commit', '-m', 'on side'], { cwd: workspace });
+    await service.checkout(workspace, 'master').catch(() => service.checkout(workspace, 'main'));
+    await writeFile(join(workspace, 'main.txt'), 'main\n');
+    await execFile('git', ['add', 'main.txt'], { cwd: workspace });
+    await execFile('git', ['commit', '-m', 'on main'], { cwd: workspace });
+
+    const all = await service.logGraph(workspace, 10);
+    expect(all.map((c) => c.subject).sort()).toEqual(['initial', 'on main', 'on side']);
+    expect(all.at(-1)?.subject).toBe('initial');
+    const first = await service.logGraph(workspace, 2);
+    const rest = await service.logGraph(workspace, 2, 2);
+    expect([...first, ...rest].map((c) => c.hash)).toEqual(all.map((c) => c.hash));
+  });
+
   it('creates, checks out and lists branches', async () => {
     const workspace = await repository();
     const service = new GitService();
@@ -55,6 +75,7 @@ describe('GitService', () => {
     const service = new GitService();
 
     await expect(service.logGraph(workspace, 1)).resolves.toMatchObject([{ subject: 'initial', parents: [] }]);
+    await expect(service.logGraph(workspace, 1, 1)).resolves.toEqual([]);
     await expect(service.status(nonRepository)).resolves.toEqual([]);
     await expect(service.branches(nonRepository)).resolves.toEqual({ current: '', branches: [] });
   });

@@ -77,4 +77,23 @@ describe('Electron runtime bridge', () => {
   it('keeps browser previews alive when Electron preload is absent', async () => {
     await expect(listen('pi://event', () => {})).resolves.toEqual(expect.any(Function));
   });
+
+  it('exposes getBrowser attachGuest', async () => {
+    const attachGuest = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal('window', {
+      gren: {
+        invoke: async () => ({ ok: true }),
+        subscribe: async () => () => {},
+        pickDirectory: async () => null,
+        openUrl: async () => {},
+        openPath: async () => {},
+        revealItemInDir: async () => {},
+        window: {},
+        webview: {},
+        browser: { attachGuest, detachGuest: async () => ({ ok: true }) },
+      },
+    });
+    const { getBrowser } = await import('./runtime');
+    await expect(getBrowser().attachGuest({ tabId: 't', webContentsId: 1 })).resolves.toEqual({ ok: true });
+  });
 });

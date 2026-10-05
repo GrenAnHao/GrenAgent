@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const winDir = join(repoRoot, "extensions", "_shared", "sandbox", "windows");
 const src = join(winDir, "helper.c");
+const launchSrc = join(winDir, "launch.c");
 const outDir = join(winDir, "bin");
 const out = join(outDir, "pi-sandbox-win.exe");
+const launchOut = join(outDir, "pi-sandbox-launch.exe");
 
 mkdirSync(outDir, { recursive: true });
 
@@ -30,9 +32,11 @@ function run(cmd, args) {
 }
 
 if (hasCommand("gcc")) {
-  run("gcc", ["-O2", "-o", out, src, "-ladvapi32", "-lshell32"]);
+  run("gcc", ["-O2", "-o", out, src, "-ladvapi32", "-lshell32", "-lcrypt32"]);
+  run("gcc", ["-O2", "-mwindows", "-o", launchOut, launchSrc]);
 } else if (hasCommand("cl")) {
-  run("cl", ["/nologo", "/O2", `/Fe:${out}`, src, "advapi32.lib", "shell32.lib"]);
+  run("cl", ["/nologo", "/O2", `/Fe:${out}`, src, "advapi32.lib", "shell32.lib", "crypt32.lib"]);
+  run("cl", ["/nologo", "/O2", "/SUBSYSTEM:WINDOWS", `/Fe:${launchOut}`, launchSrc]);
 } else {
   console.error("build-sandbox-helper: gcc or cl not found");
   process.exit(1);

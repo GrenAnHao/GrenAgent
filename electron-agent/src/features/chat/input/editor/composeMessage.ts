@@ -2,15 +2,17 @@ import { wrapAttachment } from '../../attachment';
 import type { PastedText } from './types';
 
 /**
- * 把编辑器序列化出的 markdown 与暂存的「粘贴文本 / 文件块」拼成最终发送文本。
- * 每个块用 <pi:attachment> 标记包裹（见 features/chat/attachment.ts），
- * 渲染侧据此切出附件卡片；块按插入顺序附在正文之后，块间空行分隔。
+ * 把编辑器序列化出的 markdown 与暂存的「粘贴文本 / 文件引用」拼成最终发送文本。
+ * 文件引用（拖入的文件）只发路径：所有 `@path` 放在正文后同一行，空格分隔。
+ * 粘贴文本用 <pi:attachment> 标记包裹（见 features/chat/attachment.ts），渲染侧据此切出附件卡片；
+ * 块按插入顺序附在引用之后，块间空行分隔。
  */
 export function composeMessage(markdown: string, pastedTexts: PastedText[]): string {
   const base = markdown.trim();
+  const references = pastedTexts.filter((p) => p.referenceOnly && p.source).map((p) => `@${p.source}`);
   const blocks = pastedTexts
+    .filter((p) => !(p.referenceOnly && p.source))
     .map((p) => {
-      if (p.referenceOnly && p.source) return `@${p.source}`;
       const content = p.text.replace(/\s+$/, '');
       if (!content) return '';
       return wrapAttachment({
@@ -22,5 +24,5 @@ export function composeMessage(markdown: string, pastedTexts: PastedText[]): str
       });
     })
     .filter(Boolean);
-  return [base, ...blocks].filter(Boolean).join('\n\n');
+  return [base, references.join(' '), ...blocks].filter(Boolean).join('\n\n');
 }

@@ -7,11 +7,12 @@ import { isUnder } from '../../../../lib/pathUtils';
 import { useSessionStore } from '../../../../store/session';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useDockStore } from '../../../../stores/dockStore';
-import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
+import { useGitStore } from '../../../../stores/gitStore';
 import { BranchPicker } from './BranchPicker';
 import { TaskTray } from './TaskTray';
 import { wsStyles as s } from './styles';
 import type { PastedText } from '../editor/types';
+import { useComposerCompact } from '../composerCompact';
 
 export interface WorkspaceBarProps {
   /** 保留输入区引用回调兼容性，项目上下文入口由右侧 Dock 承载。 */
@@ -25,16 +26,16 @@ function workspaceName(ws: string): string {
 }
 
 /**
- * 工作区 / Git 功能栏：当前工作区 + 分支(改动数；气泡内含「查看改动」diff 与「Git 图谱」) + 后台任务。
- * 渲染于输入框上方（MessageEditor 的 zone，与 GoalPill 同层）。
+ * 工作区 / Git 功能栏：当前工作区 + 分支(改动数；气泡内含「查看改动」diff 与「Git 历史」) + 后台任务。
+ * 渲染于输入卡片外侧底部。
  * 首次挂载 / agent_end / tool_execution_end 时刷新 git 概况。
  */
 export function WorkspaceBar(_props: WorkspaceBarProps) {
   const { workspace } = useAgentStoreContext();
   const worksDir = useSessionStore((state) => state.worksDir);
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
-  const git = useGitInfo(workspace);
   const openProjectContext = useDockStore((state) => state.openProjectContext);
+  const compact = useComposerCompact();
 
   useEffect(() => {
     if (!workspace || isConversation) return;
@@ -53,15 +54,13 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
 
   if (!workspace || isConversation) return null;
 
-  const isRepo = git.current !== '' || git.branches.length > 0;
-
   return (
-    <div className={s.bar}>
+    <div className={cx(s.bar, compact && s.barCompact)}>
       <span className={cx(s.chip, s.chipReadonly)} title={workspace}>
         <Icon icon={FolderGit2} size={14} />
-        <span className={s.chipName}>{workspaceName(workspace)}</span>
+        {compact ? null : <span className={s.chipName}>{workspaceName(workspace)}</span>}
       </span>
-      {isRepo ? <BranchPicker /> : null}
+      <BranchPicker />
       <TaskTray />
       <button
         aria-label="项目上下文"
@@ -71,7 +70,7 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
         onClick={() => openProjectContext(workspace)}
       >
         <Icon icon={BookOpenText} size={14} />
-        <span>项目上下文</span>
+        {compact ? null : <span>项目上下文</span>}
       </button>
     </div>
   );

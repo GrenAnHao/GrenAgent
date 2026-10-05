@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSessionStore } from '../../store/session';
@@ -8,12 +8,14 @@ import { useLayoutStore } from '../../stores/layoutStore';
 const { ctx } = vi.hoisted(() => ({ ctx: { workspace: '/repo' } }));
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ctx,
+  useOptionalAgentStoreContext: () => ctx,
   useAgentStore: () => ({
     useStore: (selector: (s: { messages: unknown[] }) => unknown) => selector({ messages: [] }),
   }),
 }));
 
 import { DockPanel } from './DockPanel';
+import { useDockSessionSwitch } from './useDockSessionSwitch';
 
 function renderPanel(region: 'right' | 'bottom' = 'right', onCollapse?: () => void) {
   return render(
@@ -27,7 +29,7 @@ describe('DockPanel empty launcher', () => {
   beforeEach(() => {
     localStorage.clear();
     useDockStore.setState({ tabs: [], closedTabs: [], activeByRegion: { right: null, bottom: null } });
-    useLayoutStore.setState({ rightPanelOpen: true, terminalOpen: true });
+    useLayoutStore.setState({ rightPanelOpen: true, terminalOpen: true, rightPanelFill: false });
     useSessionStore.setState({ worksDir: '/home/.pi/agent/works' });
     ctx.workspace = '/repo';
   });
@@ -42,6 +44,14 @@ describe('DockPanel empty launcher', () => {
     expect(screen.queryByTitle('新建标签')).toBeNull();
     expect(screen.queryByTitle('搜索标签页')).toBeNull();
     expect(screen.getByTitle('Collapse panel')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '占满界面' })).toBeTruthy();
+  });
+
+  it('占满按钮在右侧面板里切换成还原', () => {
+    renderPanel('right', () => undefined);
+    fireEvent.click(screen.getByRole('button', { name: '占满界面' }));
+    expect(screen.getByRole('button', { name: '还原面板' })).toBeTruthy();
+    expect(useLayoutStore.getState().rightPanelFill).toBe(true);
   });
 
   it('shows the tab strip with list and add buttons once a tab exists', () => {
@@ -67,5 +77,57 @@ describe('DockPanel empty launcher', () => {
     expect(screen.queryByTitle('新建终端')).toBeNull();
     expect(screen.queryByTitle('新建标签')).toBeNull();
     expect(screen.queryByTestId('dock-strip-bottom')).toBeNull();
+    expect(screen.queryByRole('button', { name: '占满界面' })).toBeNull();
+  });
+});
+
+describe('DockPanel session-owned tabs', () => {
+  function Harness() {
+    useDockSessionSwitch();
+    return (
+      <DndContext>
+        <DockPanel region="right" />
+      </DndContext>
+    );
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    useDockStore.setState({
+      tabs: [],
+      closedTabs: [],
+      activeByRegion: { right: null, bottom: null },
+      activeBySession: {},
+      rightOpenBySession: {},
+    });
+    useLayoutStore.setState({ rightPanelOpen: false, terminalOpen: false, rightPanelFill: false });
+    useSessionStore.setState({ worksDir: '/home/.pi/agent/works', activeSessionPath: '/ws/a.jsonl', activeWorkspace: '/ws' });
+  });
+  afterEach(cleanup);
+
+  async function switchSession(path: string, workspace = '/ws') {
+    await act(async () => {
+      useSessionStore.setState({ activeSessionPath: path, activeWorkspace: workspace });
+      await Promise.resolve();
+    });
+  }
+
+  it('does not carry a subagent tab from session A into session B', async () => {
+    render(<Harness />);
+    act(() => {
+      useDockStore.getState().openSubAgent({ messageId: 'm1', toolCallId: 'c1', subIndex: 2, title: '#2 接着完成「子账号」' });
+    });
+    expect(screen.getByText('#2 接着完成「子账号」')).toBeTruthy();
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+
+    await switchSession('/other/b.jsonl', '/other');
+    expect(screen.queryByText('#2 接着完成「子账号」')).toBeNull();
+    expect(screen.getByTestId('dock-launcher-right')).toBeTruthy();
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+
+    await switchSession('/ws/a.jsonl');
+    expect(screen.getByText('#2 接着完成「子账号」')).toBeTruthy();
+    expect(screen.getByTestId('dock-body-m1#2').style.display).toBe('flex');
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
   });
 });

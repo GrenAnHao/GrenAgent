@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
+import { SessionManager } from '../../../cli/src/pi-sdk.js';
 
 const fsRenameControl = vi.hoisted(() => ({ failNext: false }));
 
@@ -488,6 +489,40 @@ describe('PiRuntimeService', () => {
     }
   });
 
+  it('带 targetSessionPath 切模式 / 审批档只钉那份会话，并写会话条目', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-controls-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
+    __resetApprovalForTest();
+    __resetAgentModeForTest();
+    const appendCustomEntry = vi.fn();
+    const setStatus = vi.fn();
+    const handle = fakeHandle();
+    handle.session.sessionId = 'sid-a';
+    handle.session.sessionFile = 'C:/work/a.jsonl';
+    handle.session.sessionManager = { getLeafId: () => 'leaf', appendCustomEntry };
+    handle.ui = { respond: vi.fn(), context: { setStatus } };
+    const { host } = fakeAgentHost(handle);
+    await host.open('C:/work', 'C:/work');
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, runtimeConfigPath });
+    try {
+      await service.send('C:/work', 'agent_set_approval', { level: 'readonly', targetSessionPath: 'C:/work/a.jsonl' });
+      await service.send('C:/work', 'agent_set_mode', { mode: 'plan', targetSessionPath: 'C:/work/a.jsonl' });
+      expect(getApprovalPolicy('C:/work', 'sid-a')).toBe('readonly');
+      expect(getAgentMode('C:/work', 'sid-a')).toBe('plan');
+      // 别的会话只继承项目默认（最近一次选择），不受 a 已钉住的值约束。
+      __resetApprovalForTest();
+      expect(getApprovalPolicy('C:/work', 'sid-b')).toBe('auto');
+      expect(appendCustomEntry).toHaveBeenCalledWith('session-controls', { approval: 'readonly' });
+      expect(appendCustomEntry).toHaveBeenCalledWith('session-controls', { mode: 'plan' });
+      expect(setStatus).toHaveBeenCalledWith('agent-mode', 'plan');
+    } finally {
+      __resetApprovalForTest();
+      __resetAgentModeForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('对话中切审批档立刻打进内存，不跟盘上旧值', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-approval-live-'));
     const runtimeConfigPath = join(root, 'runtime-settings.json');
@@ -889,6 +924,74 @@ describe('进程内宿主交互路径', () => {
     const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: { createThread: async (i: never) => i, createTurn: async (i: never) => i, updateTurn: async (i: never) => i } as never });
     await service.send('C:/work', 'agent_prompt', { message: 'x' });
     await expect(service.send('C:/work', 'agent_new_session', {})).rejects.toThrow('SESSION_BUSY');
+    expect(handle.newSession).not.toHaveBeenCalled();
+  });
+
+  it('agent_prompt 活跃时切到另一会话会停靠忙 handle，而不是只改 id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-session-park-'));
+    const sourceFile = join(root, 'source.jsonl');
+    const targetFile = join(root, 'target.jsonl');
+    await writeFile(sourceFile, JSON.stringify({ type: 'session', id: 'source-session', cwd: 'C:/work' }) + '\n');
+    await writeFile(targetFile, JSON.stringify({ type: 'session', id: 'target-session', cwd: 'C:/work' }) + '\n');
+    const busy = fakeHandle({
+      sessionId: 'source-session',
+      sessionFile: sourceFile,
+      messages: [{ role: 'user', content: 'from-a' }],
+    });
+    busy.getState = vi.fn(() => ({ sessionFile: sourceFile, sessionId: 'source-session' }));
+    const handles = [busy];
+    let foreground = busy;
+    const host = {
+      open: vi.fn(async () => { foreground = busy; return busy; }),
+      get: vi.fn(() => foreground),
+      close: vi.fn(async () => {}),
+      workspaces: vi.fn(() => ['C:/work']),
+      list: vi.fn(() => handles),
+      focus: vi.fn((_workspace: string, handle: typeof busy) => { foreground = handle; }),
+      openAdditional: vi.fn(async () => {
+        const extra = fakeHandle({
+          sessionId: 'fresh',
+          sessionFile: join(root, 'fresh.jsonl'),
+          messages: [{ role: 'user', content: 'from-b' }],
+        });
+        extra.switchSession = vi.fn(async (sessionPath: string) => {
+          extra.session.sessionFile = sessionPath;
+          extra.session.sessionId = sessionPath === targetFile ? 'target-session' : extra.session.sessionId;
+          extra.getState = vi.fn(() => ({ sessionFile: sessionPath, sessionId: extra.session.sessionId }));
+          return { cancelled: false };
+        });
+        handles.push(extra);
+        return extra;
+      }),
+    } as AgentHostPort;
+    const service = new PiRuntimeService({
+      agentDir: 'C:/a',
+      agentHost: host,
+      modelRuntimeHost: noopModelHost,
+      threadStore: { createThread: async (i: never) => i, createTurn: async (i: never) => i, updateTurn: async (i: never) => i } as never,
+    });
+    try {
+      await service.openWorkspace('C:/work');
+      await service.send('C:/work', 'agent_prompt', { message: 'still running' });
+      await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: targetFile })).resolves.toEqual({ cancelled: false });
+      expect(busy.switchSession).not.toHaveBeenCalled();
+      expect(host.openAdditional).toHaveBeenCalledTimes(1);
+      const extra = handles[1];
+      expect(extra.switchSession).toHaveBeenCalledWith(targetFile);
+      await expect(service.send('C:/work', 'agent_get_messages', {})).resolves.toEqual({
+        messages: [{ role: 'user', content: 'from-b' }],
+      });
+      await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: sourceFile })).resolves.toEqual({ cancelled: false });
+      expect(host.openAdditional).toHaveBeenCalledTimes(1);
+      await expect(service.send('C:/work', 'agent_get_messages', {})).resolves.toEqual({
+        messages: [{ role: 'user', content: 'from-a' }],
+      });
+      expect(service.listRunningTurns()).toEqual([
+        expect.objectContaining({ workspace: 'C:/work', sessionId: 'source-session', sessionPath: sourceFile }),
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('agent_set_mode 写 runtime config，不发斜杠 prompt', async () => {
@@ -917,6 +1020,35 @@ describe('进程内宿主交互路径', () => {
     expect(handle.session.abort).toHaveBeenCalledTimes(1);
   });
 
+  it('暂停后取走引导队列，并把跟进按原样放回', async () => {
+    const { host, handle } = fakeAgentHost();
+    handle.session.clearQueue.mockReturnValue({ steering: ['第一条', '第二条'], followUp: ['稍后'] });
+    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await expect(service.send('C:/work', 'agent_take_steering', {})).resolves.toEqual({
+      steering: ['第一条', '第二条'],
+    });
+    expect(handle.session.clearQueue).toHaveBeenCalledTimes(1);
+    expect(handle.session.followUp).toHaveBeenCalledWith('稍后');
+  });
+
+  it('refreshModelRegistry 同一模型仍在时换上新快照，不记一次模型切换', async () => {
+    const stale = { provider: 'custom', id: 'claude-opus-5.5', thinkingLevelMap: { low: 'low' } };
+    const live = { provider: 'custom', id: 'claude-opus-5.5', thinkingLevelMap: { off: '', low: 'low' } };
+    const state = { model: stale as unknown };
+    const handle = fakeHandle({
+      model: stale,
+      state,
+      modelRuntime: { getAvailableSnapshot: () => [live] },
+    });
+    const { host } = fakeAgentHost(handle);
+    host.workspaces = vi.fn(() => ['C:/work']);
+    host.get = vi.fn(() => handle);
+    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await service.refreshModelRegistry();
+    expect(state.model).toBe(live);
+    expect(handle.session.setModel).not.toHaveBeenCalled();
+  });
+
   it('refreshModelRegistry 在供应商消失后把会话模型切到仍可用的第一项', async () => {
     const fallback = { provider: 'openai', id: 'gpt' };
     const handle = fakeHandle({
@@ -929,5 +1061,133 @@ describe('进程内宿主交互路径', () => {
     const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
     await expect(service.refreshModelRegistry()).resolves.toEqual({ refreshed: ['C:/work'], failed: [] });
     expect(handle.session.setModel).toHaveBeenCalledWith(fallback);
+  });
+
+  it('listRunningTurns 回报仍在流式的会话，空闲会话不在列', () => {
+    const streaming = fakeHandle({ isStreaming: true, sessionId: 'live', sessionFile: 'C:/sessions/live.jsonl' });
+    const { host } = fakeAgentHost(streaming);
+    host.workspaces = vi.fn(() => ['C:/work']);
+    host.get = vi.fn(() => streaming);
+    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    expect(service.listRunningTurns()).toEqual([
+      { workspace: 'C:/work', sessionId: 'live', sessionPath: 'C:/sessions/live.jsonl' },
+    ]);
+
+    streaming.session.isStreaming = false;
+    expect(service.listRunningTurns()).toEqual([]);
+  });
+
+  describe('同项目多份会话的路由', () => {
+    const threadStore = () => ({
+      createThread: vi.fn(async (i: never) => i),
+      createTurn: vi.fn(async (i: never) => i),
+      updateTurn: vi.fn(async (i: never) => i),
+    });
+    function twoHandles() {
+      const parked = fakeHandle({ sessionId: 'parked', sessionFile: 'C:/sessions/parked.jsonl', isStreaming: true });
+      const front = fakeHandle({ sessionId: 'front', sessionFile: 'C:/sessions/front.jsonl' });
+      const handles = [parked, front];
+      let foreground = front;
+      const host = {
+        open: vi.fn(async () => foreground),
+        get: vi.fn(() => foreground),
+        close: vi.fn(async () => {}),
+        workspaces: vi.fn(() => ['C:/work']),
+        list: vi.fn(() => [...handles]),
+        focus: vi.fn((_w: string, handle: typeof front) => { foreground = handle; }),
+        evict: vi.fn(async (_w: string, handle: typeof front) => {
+          handles.splice(handles.indexOf(handle), 1);
+          if (foreground === handle) foreground = handles[0];
+        }),
+      } as AgentHostPort & { evict: ReturnType<typeof vi.fn> };
+      return { parked, front, handles, host, foreground: () => foreground };
+    }
+
+    it('带 targetSessionPath 的 prompt / abort 打到停在后台的 handle，前景不变', async () => {
+      const { parked, front, host, foreground } = twoHandles();
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: threadStore() as never });
+      await service.send('C:/work', 'agent_prompt', { message: 'to parked', targetSessionPath: 'C:\\sessions\\parked.jsonl' });
+      expect(parked.prompt).toHaveBeenCalledWith('to parked', expect.anything(), 'main');
+      expect(front.prompt).not.toHaveBeenCalled();
+      await service.send('C:/work', 'agent_abort', { targetSessionPath: 'C:/sessions/parked.jsonl' });
+      expect(parked.session.abort).toHaveBeenCalledTimes(1);
+      expect(front.session.abort).not.toHaveBeenCalled();
+      expect(foreground()).toBe(front);
+      expect(host.focus).not.toHaveBeenCalled();
+      await service.send('C:/work', 'agent_prompt', { message: 'to front' });
+      expect(front.prompt).toHaveBeenCalledWith('to front', expect.anything(), 'main');
+    });
+
+    it('目标会话已不在任何 handle 上时 abort 不落到别的会话', async () => {
+      const { parked, front, host } = twoHandles();
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      await expect(service.send('C:/work', 'agent_abort', { targetSessionPath: 'C:/sessions/gone.jsonl' })).resolves.toBeUndefined();
+      expect(parked.session.abort).not.toHaveBeenCalled();
+      expect(front.session.abort).not.toHaveBeenCalled();
+    });
+
+    it('要快照的会话不在任何 handle 上时读它自己的文件，不拿前景顶替', async () => {
+      const { front, host } = twoHandles();
+      front.session.messages = [{ role: 'user', content: 'front only' }];
+      const dir = await mkdtemp(join(tmpdir(), 'pi-detached-'));
+      try {
+        const sm = SessionManager.create('C:/work', dir);
+        sm.appendMessage({ role: 'user', content: 'from disk', timestamp: 1 } as never);
+        const path = sm.getSessionFile()!;
+        await writeFile(path, [sm.getHeader(), ...sm.getEntries()].map((item) => JSON.stringify(item)).join('\n') + '\n');
+        const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+        const result = await service.send('C:/work', 'agent_get_messages', { targetSessionPath: path }) as { messages: Array<Record<string, unknown>> };
+        expect(result.messages).toEqual([expect.objectContaining({ role: 'user', content: 'from disk', entryId: expect.any(String) })]);
+        await expect(service.send('C:/other', 'agent_get_messages', { targetSessionPath: path })).rejects.toThrow('SESSION_WORKSPACE_MISMATCH');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('respondUi 按挂起的请求 id 回到对应 handle', async () => {
+      const { parked, front, host } = twoHandles();
+      parked.ui = { respond: vi.fn(), hasPending: vi.fn((id: string) => id === 'req-parked') };
+      front.ui = { respond: vi.fn(), hasPending: vi.fn(() => false) };
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      await service.respondUi('C:/work', { id: 'req-parked', confirmed: true });
+      expect(parked.ui.respond).toHaveBeenCalledWith('req-parked', { id: 'req-parked', confirmed: true });
+      expect(front.ui.respond).not.toHaveBeenCalled();
+      await service.rejectUiRequest('C:/work', undefined, 'req-parked');
+      expect(parked.ui.respond).toHaveBeenLastCalledWith('req-parked', { cancelled: true });
+    });
+
+    it('后台会话回合结束且空闲后拆掉它，前景保留', async () => {
+      const { parked, front, host } = twoHandles();
+      parked.session.isStreaming = false;
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: threadStore() as never });
+      await service.send('C:/work', 'agent_prompt', { message: 'run', targetSessionPath: 'C:/sessions/parked.jsonl' });
+      await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, { sessionId: 'parked', sessionPath: 'C:/sessions/parked.jsonl', source: 'interactive' });
+      expect(host.evict).toHaveBeenCalledWith('C:/work', parked);
+      expect(host.evict).not.toHaveBeenCalledWith('C:/work', front);
+    });
+
+    it('后台会话还挂着询问时不拆', async () => {
+      const { parked, host } = twoHandles();
+      parked.session.isStreaming = false;
+      parked.ui = { respond: vi.fn(), hasPending: vi.fn(() => true), hasAnyPending: vi.fn(() => true) };
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: threadStore() as never });
+      await service.send('C:/work', 'agent_prompt', { message: 'run', targetSessionPath: 'C:/sessions/parked.jsonl' });
+      await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, { sessionId: 'parked', source: 'interactive' });
+      expect(host.evict).not.toHaveBeenCalled();
+    });
+
+    it('refreshModelRegistry 也刷新停在后台的 handle', async () => {
+      const live = { provider: 'custom', id: 'm' };
+      const { parked, front, host } = twoHandles();
+      for (const handle of [parked, front]) {
+        handle.session.model = { provider: 'custom', id: 'm' };
+        handle.session.state = { model: handle.session.model };
+        handle.session.modelRuntime = { getAvailableSnapshot: () => [live] };
+      }
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      await service.refreshModelRegistry();
+      expect(parked.session.state.model).toBe(live);
+      expect(front.session.state.model).toBe(live);
+    });
   });
 });

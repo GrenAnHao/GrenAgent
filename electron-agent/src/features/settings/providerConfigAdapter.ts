@@ -72,37 +72,20 @@ interface ProviderEntry {
 // 各兼容协议「官方原生推理档位」→ models.json 的 thinkingLevelMap（pi 内部档位 → 供应商原生取值，null = 隐藏）。
 // pi 内部档位只作传输；选择器直接拿这里的供应商原生取值当标签，做到照搬各家而非迁就 pi。依据各家 API 文档：
 //  - OpenAI reasoning_effort: minimal/low/medium/high/xhigh（pi 同名直传）
-//  - Anthropic effort: low/medium/high/xhigh/max（无 minimal；pi 5 个推理档整体上移映射）。最高档随模型而异：
-//    仅 opus-4-6 系支持 "max"，其余（4-7/4-8/fable-5/sonnet-4-6 等）最高到 "xhigh"——故非 4-6 把 pi-xhigh 隐藏(null)，
-//    顶档落在 pi-high→原生 "xhigh"，避免发出该模型不支持的 "max" 被拒。见 anthropicThinkingLevelMap。
+//  - Anthropic effort: low/medium/high/xhigh/max（无 minimal；pi 5 个推理档整体上移）。不按模型 ID 裁剪，默认全部露出。
 //  - Gemini thinking_level: minimal/low/medium/high（无 xhigh）
 const OPENAI_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
 const GOOGLE_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: null };
-
-/** 该 anthropic 模型最高档是否支持原生 effort "max"（仅 opus-4-6 系；其余封顶到 "xhigh"）。 */
-function anthropicSupportsMaxEffort(modelId: string | undefined): boolean {
-  return !!modelId && /opus-4-6/i.test(modelId);
-}
-
-/** anthropic 原生 effort 阶梯（pi 档位整体上移）；最高档按模型能力：4-6 用 "max"，其余封顶 "xhigh"（pi-xhigh 隐藏）。 */
-function anthropicThinkingLevelMap(modelId: string | undefined): ThinkingLevelMap {
-  return {
-    minimal: 'low',
-    low: 'medium',
-    medium: 'high',
-    high: 'xhigh',
-    xhigh: anthropicSupportsMaxEffort(modelId) ? 'max' : null,
-  };
-}
+const ANTHROPIC_THINKING_MAP: ThinkingLevelMap = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
 
 /**
  * 按供应商 API 类型给出官方原生推理档位映射；勾「推理」时写入自定义模型，让 pi 按各家原生档位生效、不会钳回 off。
- * anthropic 的最高档与具体模型有关，故可传入 modelId（缺省时按「不支持 max」封顶到 xhigh）。
+ * modelId 保留给调用方，Anthropic 不再按模型区分最高档。
  */
-export function defaultThinkingLevelMap(api: string | undefined, modelId?: string): ThinkingLevelMap | undefined {
+export function defaultThinkingLevelMap(api: string | undefined, _modelId?: string): ThinkingLevelMap | undefined {
   switch (api) {
     case 'anthropic-messages':
-      return anthropicThinkingLevelMap(modelId);
+      return ANTHROPIC_THINKING_MAP;
     case 'google-generative-ai':
       return GOOGLE_THINKING_MAP;
     case 'openai-completions':
@@ -111,6 +94,18 @@ export function defaultThinkingLevelMap(api: string | undefined, modelId?: strin
     default:
       return undefined;
   }
+}
+
+/**
+ * 供应商 API 类型切换后，已勾选推理的模型改用该协议的官方思考档位。
+ * 未勾推理的模型保持原样；之后再勾推理时由模型卡片按当前 API 补默认。
+ */
+export function modelsWithApiThinkingLevels<T extends UiModel>(models: T[], api: string | undefined): T[] {
+  return models.map((m) => {
+    if (!m.reasoning) return m;
+    const next = defaultThinkingLevelMap(api, m.id);
+    return { ...m, thinkingLevelMap: next ? { ...next } : undefined };
+  });
 }
 
 function parseRoutingObject(raw: unknown): unknown {
@@ -187,14 +182,32 @@ function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
  * - 非推理模型清掉映射。
  * - compat 按当前 API 过滤；thinkingFormat 写入 compat。
  */
+/**
+ * Pi 的 models.json schema 要求 cost 一旦出现，input/output/cacheRead/cacheWrite 四个数字都必须在。
+ * 设置页只编辑输入/输出价格；缺任一字段时整份文件会被拒绝，自定义供应商会全部从模型列表消失。
+ */
+function completeCost(cost: ModelCost | undefined): ModelCost | undefined {
+  if (!cost) return undefined;
+  const rates = [cost.input, cost.output, cost.cacheRead, cost.cacheWrite];
+  if (rates.every((value) => typeof value !== 'number')) return undefined;
+  return {
+    input: cost.input ?? 0,
+    output: cost.output ?? 0,
+    cacheRead: cost.cacheRead ?? 0,
+    cacheWrite: cost.cacheWrite ?? 0,
+  };
+}
+
 function serializeModel(m: UiModel, api: string | undefined): ModelEntry {
-  const { forceAdaptiveThinking, thinkingFormat, compat, ...rest } = m;
+  const { forceAdaptiveThinking, thinkingFormat, compat, cost, ...rest } = m;
   void forceAdaptiveThinking;
   void thinkingFormat;
   void compat;
-  if (!m.reasoning) return { ...rest, thinkingLevelMap: undefined, compat: serializeCompat(m, api) };
+  const priced = completeCost(cost);
+  const base: ModelEntry = priced ? { ...rest, cost: priced } : { ...rest };
+  if (!m.reasoning) return { ...base, thinkingLevelMap: undefined, compat: serializeCompat(m, api) };
   return {
-    ...rest,
+    ...base,
     thinkingLevelMap: m.thinkingLevelMap ?? defaultThinkingLevelMap(api, m.id),
     compat: serializeCompat(m, api),
   };

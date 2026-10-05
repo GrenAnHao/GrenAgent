@@ -115,11 +115,11 @@ bun run package        # electron-builder，产物在 release/
 
 | 类别 | 扩展 | 说明 |
 | --- | --- | --- |
-| 安全与策略 | `safety`、`approval`、`sandbox`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、OS 沙箱、死循环检测、声明式规则、MCP 工具权限 |
+| 安全与策略 | `safety`、`approval`、`sandbox`、`loop-guard`、`rulebook`、`mcp-policy` | 工具拦截、审批策略、OS 沙箱、相同调用提醒、声明式规则、MCP 工具权限 |
 | 会话管理 | `auto-title`、`compaction-policy`、`session-memory`、`goal`、`todo` | 自动标题、上下文压缩、会话状态、目标驱动、待办 |
 | 模式与交互 | `agent-mode`、`diagram-hint` | Agent / Ask / Debug / Plan 模式；Mermaid / KaTeX 渲染提示 |
 | 知识与记忆 | `memory`、`wiki-rag`、`session-memory` | 本地 L0-L3 记忆、Wiki 检索和当前会话压缩状态 |
-| 联网与信息 | `web-fetch`、`web-search` | 单页抓取（`fetch_url`）；多引擎搜索与站点抓取（`web_search` 等） |
+| 联网与信息 | `web-fetch`、`web-search` | 单页抓取（`fetch_url`，用 `format` 选正文形式）；多引擎搜索（`web_search`） |
 | MCP | `mcp` | 连接外部 MCP server，工具名 `mcp__<server>__<tool>` |
 | 媒体生成 | `image-gen`、`tts` | 文生图（`generate_image`）；语音合成（`speak`） |
 | 代码智能 | `code-retrieval`、`ast-tools`、`lsp`、`hashline`、`batch-tools`、`code-exec`、`debug-tools`、`dap`、`diagnostics` | CodeGraph 代码检索、AST 编辑、LSP、行号编辑、批量读写、执行、调试与诊断 |

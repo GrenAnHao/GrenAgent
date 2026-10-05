@@ -1,13 +1,12 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { applyTodo, emptyTodoState, reconstructFromEntries, type TodoDetails, type TodoState } from "./todo.js";
+import { applyTodo, closeTodosInContext, emptyTodoState, reconstructFromEntries, type TodoDetails, type TodoState } from "./todo.js";
 
 const TodoParams = Type.Object({
   todos: Type.Array(Type.Object({
     id: Type.Optional(Type.Number({ description: "Existing item id; omit to allocate" })),
     text: Type.String({ description: "Todo text" }),
-    status: StringEnum(["pending", "in_progress", "completed"] as const),
+    status: Type.String({ description: "pending, in_progress, or completed. done is accepted as completed." }),
   })),
 });
 
@@ -20,6 +19,10 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", async (_event, ctx) => reconstruct(ctx));
   pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
+  pi.on("context", async (event) => {
+    const messages = closeTodosInContext(event.messages);
+    return messages ? { messages } : undefined;
+  });
 
   pi.registerTool({
     name: "todo",
@@ -30,7 +33,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "Submit the complete todo list on every todo tool call; never partial updates.",
       "Mark the step you are working on as in_progress; you may mark multiple items in_progress when working in parallel.",
-      "Mark items completed immediately when finished; do not leave stale in_progress entries.",
+      "Use todo to mark a finished step completed immediately; done is accepted as completed. When no item is still pending, mark every in_progress item completed before the final reply. After the list is fully completed, the next user turn starts empty; do not resubmit that finished list.",
       "Do not use the todo tool for trivial single-step tasks that need no tracking.",
     ],
     parameters: TodoParams,

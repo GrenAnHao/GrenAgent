@@ -1,4 +1,4 @@
-import type { ChatMessage, UserImage } from '../../stores/agentReducer';
+import type { ChatMessage, SteerState, UserImage } from '../../stores/agentReducer';
 
 export type ToolSegment = {
   kind: 'tool';
@@ -9,6 +9,14 @@ export type ToolSegment = {
   result: unknown;
   status: 'running' | 'done' | 'error';
   argsComplete?: boolean;
+  /** 开始执行的时刻；运行中据此实时计时。 */
+  startedAt?: number;
+  /** 执行耗时（ms），结束后定格。 */
+  durationMs?: number;
+  /** 嵌套调用的父工具 id。有值且父段存在时，buildTurnRows 把它从顶层摘到父段 children。 */
+  parentToolCallId?: string;
+  /** 挂在本段输出下面的嵌套工具，由 buildTurnRows 按出现顺序填入。 */
+  children?: ToolSegment[];
 };
 
 export type ThinkingSegment = {
@@ -18,6 +26,8 @@ export type ThinkingSegment = {
   streaming: boolean;
   /** 推理耗时（ms），结束后用于展示「已深度思考 · X 秒」；流式中通常为 undefined。 */
   durationMs?: number;
+  /** 首个 thinking 出现的时刻。流式中用来显示「正在深度思考 · 时间」。 */
+  startedAt?: number;
 };
 
 export type TextSegment = {
@@ -30,9 +40,9 @@ export type TextSegment = {
 export type TimelineSegment = ThinkingSegment | TextSegment | ToolSegment;
 
 export type DisplayMessage =
-  | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; timestamp?: number; entryId?: string }
+  | { kind: 'user'; id: string; text: string; images?: UserImage[]; steering?: boolean; steerState?: SteerState; timestamp?: number; entryId?: string; promptFrame?: boolean }
   | { kind: 'turn'; id: string; segments: TimelineSegment[]; timestamp?: number }
-  | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error'; argsComplete?: boolean }
+  | { kind: 'tool'; id: string; toolCallId: string; toolName: string; args: unknown; result: unknown; status: 'running' | 'done' | 'error'; argsComplete?: boolean; startedAt?: number; durationMs?: number }
   | { kind: 'notice'; id: string; customType: string; content: string }
   | { kind: 'compaction'; id: string }
   | { kind: 'command-input'; id: string; command: string; rest: string; beforeCount: number };
@@ -78,6 +88,7 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             // 本条 assistant 仍在流式且尚未产出正文 → 推理段活跃。
             streaming: msg.streaming && !text,
             durationMs: msg.thinkingDuration,
+            startedAt: msg.thinkingStartedAt,
           });
         }
         if (text) {
@@ -117,6 +128,9 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             result: msg.result,
             status: msg.status,
             argsComplete: msg.argsComplete,
+            startedAt: msg.startedAt,
+            durationMs: msg.durationMs,
+            ...(msg.parentToolCallId ? { parentToolCallId: msg.parentToolCallId } : {}),
           });
         }
         break;

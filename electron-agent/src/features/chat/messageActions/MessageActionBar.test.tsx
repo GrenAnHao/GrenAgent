@@ -103,12 +103,13 @@ describe('MessageActionBar 流式门控（ContextBar）', () => {
     expect(screen.getByTestId('msg-action-bar-rewind')).toBeTruthy();
   });
 
-  it('流式进行中：仍渲染操作栏，有回退、没有编辑', () => {
+  it('流式进行中：仍渲染操作栏，有回退、没有复制和编辑', () => {
     storeState.isStreaming = true;
     storeState.messages = [{ kind: 'user', entryId: 'e-last', timestamp: 1000 }];
     renderContextBar();
     expect(screen.getByTestId('message-action-bar')).toBeTruthy();
     expect(screen.getByTestId('msg-action-bar-rewind')).toBeTruthy();
+    expect(screen.queryByTestId('msg-action-bar-copy')).toBeNull();
     expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
   });
 
@@ -159,7 +160,26 @@ describe('MessageActionBar 流式门控（ContextBar）', () => {
     expect(within(menu).getByText('回退到此')).toBeTruthy();
   });
 
-  it('最后一条用户消息且后面有回复、对话停下：有编辑和重新生成', async () => {
+  it('已压缩分隔之前没有回退和编辑', async () => {
+    storeState.messages = [
+      { kind: 'user', entryId: 'e-old', timestamp: 1000 },
+      { kind: 'assistant' },
+      { kind: 'compaction' },
+      { kind: 'user', entryId: 'e-new', timestamp: 2000 },
+      { kind: 'assistant' },
+    ];
+    renderContextBar({
+      ctx: { role: 'user', text: 'old', timestamp: 1000, entryId: 'e-old', onEdit: () => {} },
+    });
+    expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
+    expect(screen.queryByTestId('msg-action-bar-rewind')).toBeNull();
+    screen.getByRole('button', { name: '更多' }).click();
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).queryByText('编辑')).toBeNull();
+    expect(within(menu).queryByText('回退到此')).toBeNull();
+  });
+
+  it('已压缩之后的最后一条仍可编辑', async () => {
     storeState.isStreaming = false;
     storeState.messages = [
       { kind: 'user', entryId: 'e-last', timestamp: 1000 },

@@ -26,7 +26,7 @@ import { DevService } from "./app/devService";
 import { createEnhancePrompt } from "./app/enhancePrompt";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
-import { attachWebviewSecurity } from "./webviewSecurity";
+import { attachEmbeddedWebview } from "./browser/attachEmbeddedWebview";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
 import { AgentDataStorage } from "./agentData/storage";
@@ -38,14 +38,19 @@ import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
 import { resolveWorkerEntry } from "./agent/workerEntry";
+import { subscribeSessionTitleWritten } from "../../extensions/auto-title/notify.js";
 import { AgentHost } from "./agent/agentHost";
 import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
+import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
+import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
 import { collectModels } from "../../cli/src/probe-models.js";
 import { runHostOneshot } from "./agent/hostOneshotAdapter";
 import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
 import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
+import { startJobsBridge } from "./app/jobsBridge";
+import { canSendTo, recordDroppedSend, recordEventSend, startRuntimeDiag } from "./runtimeDiag";
 
 /** backgroundColor：上次运行时按明暗记下的底色，没有就用 browserWindowOptions 的默认深色。 */
 export function createWindow(backgroundColor?: string) {
@@ -54,7 +59,7 @@ export function createWindow(backgroundColor?: string) {
     ...(backgroundColor ? { backgroundColor } : {}),
     icon: resolveAppIcon(app.isPackaged, app.getAppPath(), __dirname),
   });
-  attachWebviewSecurity(window.webContents);
+  attachEmbeddedWebview(window.webContents);
   attachDevToolsShortcut(window);
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 
@@ -67,6 +72,7 @@ export function createWindow(backgroundColor?: string) {
 
 if (!process.env.VITEST) {
   app.whenReady().then(async () => {
+    startRuntimeDiag();
     // userData 随应用名变化（dev 用 package.json name，打包用 productName），
     // 早期版本的数据留在旧目录；读不到时回退到 com.rxstudio.grenagent。
     const settings = new SettingsService(app.getPath('userData'), [
@@ -75,6 +81,7 @@ if (!process.env.VITEST) {
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
     const windowBackground = new WindowBackgroundStore(app.getPath('userData'));
     let piRuntime: PiRuntimeService | undefined;
+    let agentHost: AgentHost | undefined;
     let agentData: AgentDataService;
     const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
       const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
@@ -101,9 +108,18 @@ if (!process.env.VITEST) {
         return { provider: defaults.getDefaultProvider() ?? '', modelId: defaults.getDefaultModel() ?? '' };
       },
     });
+    const agentDataModelRaw = () => {
+      refreshConfig();
+      return getConfig('agentDataModel');
+    };
+    const completeAgentData = (input: { user: string; systemPrompt?: string; signal?: AbortSignal }) =>
+      modelRuntimeHost.completeSimple(applyAgentDataModel(input, agentDataModelRaw()));
     const systemWorker = new SystemWorkerManager({
-      describeModel: () => modelRuntimeHost.describeModel(),
-      complete: (input) => modelRuntimeHost.completeSimple(input),
+      describeModel: async () => {
+        const model = agentDataModelOverride(agentDataModelRaw());
+        return model ? `${model.provider}/${model.modelId}` : modelRuntimeHost.describeModel();
+      },
+      complete: (input) => completeAgentData(input),
     });
     const knownWorkspaces = new Set<string>();
     const codeGraph = new CodeGraphService({ listWorkspaces: () => [...knownWorkspaces] });
@@ -118,7 +134,7 @@ if (!process.env.VITEST) {
       dataPath,
       validateProject: (project) => validateProject(project, worksDir),
       resolveSession: (project, sessionId) => piRuntime?.ownsSession(project, sessionId) ?? false,
-      completeSimple: (input) => modelRuntimeHost.completeSimple(input),
+      completeSimple: (input) => completeAgentData(input),
       executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
       jobRunners: {
         'codegraph.sync': codeGraphJobs,
@@ -147,10 +163,24 @@ if (!process.env.VITEST) {
             typeof params.profile === 'string' ? params.profile : 'workspace',
           );
         },
-        // pi 子进程会主动调这个 RPC 推送 MCP 连接状态。AppEvent 已移除，此处不再转发；
-        // UI 的 MCP 状态由 pi://ui-request 的 setStatus 分支填充（见 ExtensionUiHost）。
-        // 保留方法本身（返回 null）以免 pi 侧收到 "unknown method" 错误。
-        'mcp.state.publish': () => null,
+        // pi 子进程推送 MCP 连接状态。转成 setStatus('mcp')，面板才能看到 exposure、auth 和 loginUrl。
+        // 扩展发的是 ctx.cwd；面板按 AgentStore workspace 读。对上活 handle 就改成 handle.workspace。
+        'mcp.state.publish': (params) => {
+          const published = typeof params.workspace === 'string' ? params.workspace : '';
+          const workspace = agentHost?.workspaceForCwd(published) ?? published;
+          const servers = Array.isArray(params.servers) ? params.servers : [];
+          broadcastPiEvent('pi://ui-request', {
+            workspace,
+            source: 'interactive',
+            request: {
+              id: 'mcp-state',
+              method: 'setStatus',
+              statusKey: 'mcp',
+              statusText: JSON.stringify(servers),
+            },
+          });
+          return null;
+        },
       },
     });
     await agentData.start();
@@ -163,7 +193,7 @@ if (!process.env.VITEST) {
       agentDir,
       allowedPluginIds: () => plugins.allowedPluginIds(),
     });
-    const agentHost = new AgentHost({
+    agentHost = new AgentHost({
       createHandle: async (workspace, cwd) => createWorkspaceHandle({
         workspace,
         cwd,
@@ -175,6 +205,7 @@ if (!process.env.VITEST) {
             workspace: envelope.workspace,
             request: envelope.request,
             ...(envelope.sessionId ? { sessionId: envelope.sessionId } : {}),
+            ...(envelope.sessionPath ? { sessionPath: envelope.sessionPath } : {}),
             source: envelope.source,
           });
         },
@@ -189,11 +220,25 @@ if (!process.env.VITEST) {
           broadcastPiEvent('pi://event', envelope);
           void piRuntime?.handlePiEvent(workspace, event, meta).catch((error) => console.error('Pi event handling failed', error));
         },
-        onFatal: (error) => {
+        onFatal: (error, handle) => {
           console.error('WorkspaceHandle fatal', error);
-          void agentHost.close(workspace).catch(() => {});
-          broadcastPiEvent('pi://exit', { workspace, code: 1 });
-          void piRuntime?.handlePiExit(workspace, 1).catch(() => {});
+          let sessionId: string | undefined;
+          let sessionPath: string | undefined;
+          try {
+            const id = handle?.session?.sessionId;
+            if (typeof id === 'string' && id) sessionId = id;
+            const file = handle?.session?.sessionFile;
+            if (typeof file === 'string' && file) sessionPath = file;
+          } catch { /* 会话已经拆掉 */ }
+          const task = handle ? agentHost.evict(workspace, handle) : agentHost.close(workspace);
+          void task.catch(() => {});
+          broadcastPiEvent('pi://exit', {
+            workspace,
+            code: 1,
+            ...(sessionId ? { sessionId } : {}),
+            ...(sessionPath ? { sessionPath } : {}),
+          });
+          void piRuntime?.handlePiExit(workspace, 1, sessionId ? { sessionId, source: 'interactive' } : undefined).catch(() => {});
         },
       }),
     });
@@ -203,8 +248,13 @@ if (!process.env.VITEST) {
       settings: () => settings.getAll(),
       agentData,
     });
+    // 后台 bash job（含前台超时转后台的）的实时输出推给界面。
+    const jobsBridge = startJobsBridge((event, payload) => broadcastPiEvent(event, payload), {
+      workspaceForCwd: (cwd) => agentHost.workspaceForCwd(cwd) ?? cwd,
+    });
     registerIpcHandlers({
       settings,
+      jobs: jobsBridge,
       mcpPolicy: new McpPolicyService(app.getPath('home'), {
         permissionManager: permissions,
       }),
@@ -271,11 +321,22 @@ if (!process.env.VITEST) {
     });
     let shutdownStarted = false;
     let shutdownDone = false;
+    // 会话已被替换时，auto-title 把标题写进原 jsonl，不会再走当前 pi 的 session_info_changed。
+    // 补一次同名事件，侧栏会重读会话列表。workspace 留空，避免被当成当前画面上的会话事件。
+    const stopAutoTitleNotice = subscribeSessionTitleWritten(() => {
+      broadcastPiEvent('pi://event', {
+        workspace: '',
+        event: { type: 'session_info_changed' },
+        source: 'interactive',
+      });
+    });
     app.on('before-quit', (event) => {
       if (shutdownDone) return;
       event.preventDefault();
       if (shutdownStarted) return;
       shutdownStarted = true;
+      stopAutoTitleNotice();
+      jobsBridge.stop();
       void (async () => {
         await Promise.allSettled([codeGraphJobs.close()]);
         systemWorker.close();
@@ -294,8 +355,16 @@ if (!process.env.VITEST) {
 }
 
 function broadcastPiEvent(event: string, payload: unknown): void {
+  const source = (payload as { source?: unknown } | null)?.source;
   for (const window of BrowserWindow.getAllWindows()) {
+    // 渲染进程崩了或正在重载时帧已销毁，send 会为每条事件打一整段堆栈。子代理流式事件一秒几百条，
+    // 日志本身就会压垮主线程和控制台。跳过并计数，诊断日志里看 droppedSends。
+    if (!canSendTo(window.webContents)) {
+      recordDroppedSend();
+      continue;
+    }
     window.webContents.send(`${IPC_CHANNELS.eventPrefix}${event}`, payload);
+    recordEventSend(typeof source === 'string' ? `${event}:${source}` : event);
   }
 }
 

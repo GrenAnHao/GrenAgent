@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isSafeUrl } from "./html.js";
-import { fetchHtml, fetchJson, fetchMarkdown, fetchTxt } from "./fetcher.js";
+import { fetchHtml, fetchJson, fetchTxt } from "./fetcher.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
 import { headTailSlice, isUsableLlmsBody, resolveFetchMaxChars } from "./truncate.js";
 import { getConfig } from "../_shared/runtime-config.js";
@@ -52,7 +52,7 @@ function spillFullContent(cwd: string, url: string, full: string): string {
 type ToolResult = { content: { type: "text"; text: string }[]; details: Record<string, unknown> };
 
 // Assemble a tool result, applying the head+tail preview + disk-spill policy when the
-// page exceeds FETCH_MAX_CHARS. Shared by fetch_url and fetch_llms.
+// page exceeds FETCH_MAX_CHARS. Shared by every fetch_url format.
 function buildResult(full: string, sourceUrl: string, baseDetails: Record<string, unknown>, cwd: string): ToolResult {
   const maxCharsVal = maxChars();
   const truncated = maxCharsVal > 0 && full.length > maxCharsVal;
@@ -77,44 +77,13 @@ function buildResult(full: string, sourceUrl: string, baseDetails: Record<string
 
 const llmsTimeoutMs = () => Number(getConfig("FETCH_TIMEOUT_MS") ?? "15000") || 15000;
 
-const fetchUrlParams = Type.Object({
-  url: Type.String({ description: "Absolute http(s) URL" }),
-  headers: Type.Optional(
-    Type.Unsafe<Record<string, string>>({
-      type: "object",
-      additionalProperties: { type: "string" },
-      description: "Optional HTTP headers to include in the request",
-    }),
-  ),
-});
+const FETCH_FORMATS = ["markdown", "text", "html", "json", "llms"] as const;
+type FetchFormat = (typeof FETCH_FORMATS)[number];
 
-type FetchUrlParams = { url: string; headers?: Record<string, string> };
-
-function registerDirectFetchTool(
-  pi: ExtensionAPI,
-  spec: {
-    name: string;
-    label: string;
-    description: string;
-    promptSnippet: string;
-    format: "html" | "markdown" | "txt" | "json";
-    fetch: (params: FetchUrlParams, signal: AbortSignal | undefined) => Promise<string>;
-  },
-): void {
-  pi.registerTool({
-    name: spec.name,
-    label: spec.label,
-    description: spec.description,
-    promptSnippet: spec.promptSnippet,
-    parameters: fetchUrlParams,
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const safe = isSafeUrl(params.url);
-      if (!safe.ok) throw new Error(`Refused to fetch: ${safe.reason}`);
-
-      const full = await spec.fetch({ url: params.url, headers: params.headers }, signal ?? undefined);
-      return buildResult(full, params.url, { url: params.url, format: spec.format }, ctx.cwd);
-    },
-  });
+function parseFormat(value: unknown): FetchFormat {
+  if (value === undefined || value === "") return "markdown";
+  if (typeof value === "string" && (FETCH_FORMATS as readonly string[]).includes(value)) return value as FetchFormat;
+  throw new Error(`Unsupported format: ${String(value)}. Use markdown, text, html, json, or llms.`);
 }
 
 // Direct (non-crawler) probe for a site's llms.txt-style file. Returns the raw text,
@@ -138,135 +107,124 @@ async function probeLlms(url: string, signal: AbortSignal | undefined): Promise<
   }
 }
 
+async function fetchViaCrawler(url: string, signal: AbortSignal | undefined, cwd: string): Promise<ToolResult> {
+  const result = await getCrawler().crawl({ url, signal });
+  const data = result.data;
+
+  // All crawl providers failed → surface the error but don't throw.
+  if (!("contentType" in data)) {
+    return {
+      content: [{ type: "text", text: data.content }],
+      details: { url, format: "markdown", crawler: result.crawler, error: data.errorMessage },
+    };
+  }
+
+  const page = data as CrawlSuccessResult;
+  const full = (page.title ? `# ${page.title}\n\n` : "") + (page.content ?? "");
+  return buildResult(
+    full,
+    page.url,
+    {
+      url: page.url,
+      format: "markdown",
+      title: page.title,
+      crawler: result.crawler,
+      transformedUrl: result.transformedUrl,
+      contentType: page.contentType,
+    },
+    cwd,
+  );
+}
+
+async function fetchLlms(url: string, full: boolean, signal: AbortSignal | undefined, cwd: string): Promise<ToolResult> {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    throw new Error(`Invalid URL: ${url}`);
+  }
+
+  const candidates = full
+    ? [`${origin}/llms-full.txt`, `${origin}/llms.txt`]
+    : [`${origin}/llms.txt`, `${origin}/llms-full.txt`];
+
+  for (const candidate of candidates) {
+    if (!isSafeUrl(candidate).ok) continue;
+    const body = await probeLlms(candidate, signal);
+    if (!body) continue;
+    const kind = candidate.endsWith("llms-full.txt") ? "llms-full" : "llms";
+    return buildResult(`# ${candidate}\n\n${body}`, candidate, { url: candidate, origin, format: "llms", kind }, cwd);
+  }
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `No llms.txt or llms-full.txt found at ${origin}. Call fetch_url again without format=llms for the specific page.`,
+      },
+    ],
+    details: { origin, format: "llms", found: false },
+  };
+}
+
 export default function (pi: ExtensionAPI) {
-  registerDirectFetchTool(pi, {
-    name: "fetch_html",
-    label: "Fetch HTML",
-    description: "Fetch a website and return the raw HTML content.",
-    promptSnippet: "Fetch a web page and return raw HTML.",
-    format: "html",
-    fetch: fetchHtml,
-  });
-
-  registerDirectFetchTool(pi, {
-    name: "fetch_markdown",
-    label: "Fetch Markdown",
-    description: "Fetch a website and return the content converted to Markdown.",
-    promptSnippet: "Fetch a web page and return Markdown.",
-    format: "markdown",
-    fetch: fetchMarkdown,
-  });
-
-  registerDirectFetchTool(pi, {
-    name: "fetch_txt",
-    label: "Fetch Text",
-    description: "Fetch a website and return plain text (HTML tags, scripts, and styles removed).",
-    promptSnippet: "Fetch a web page and return plain text.",
-    format: "txt",
-    fetch: fetchTxt,
-  });
-
-  registerDirectFetchTool(pi, {
-    name: "fetch_json",
-    label: "Fetch JSON",
-    description: "Fetch a JSON resource from a URL and return the parsed JSON as text.",
-    promptSnippet: "Fetch a JSON file or API endpoint.",
-    format: "json",
-    fetch: fetchJson,
-  });
-
   pi.registerTool({
     name: "fetch_url",
     label: "Fetch URL",
     description:
-      "Fetch a web page over http(s) and return its main content as markdown. " +
-      "Tries multiple crawl providers (naive, Jina Reader, and optionally Firecrawl/Exa/Search1API) " +
-      "with per-site rules, so JS-heavy or bot-protected pages still come back readable. " +
-      "Use it to read documentation, articles, API references, or release notes.",
-    promptSnippet: "Fetch and read a web page (http/https) as markdown.",
+      "Fetch one http(s) URL. format selects the result: " +
+      "markdown (default) returns main content via crawl providers (naive, Jina Reader, and Firecrawl/Exa/Search1API when keyed), " +
+      "so JS-heavy or bot-protected pages stay readable; " +
+      "text is a direct request with tags, scripts, and styles removed; " +
+      "html is the raw response; " +
+      "json is parsed JSON as text; " +
+      "llms probes <origin>/llms.txt (full=true prefers llms-full.txt). " +
+      "headers apply only to text, html, and json.",
+    promptSnippet: "Fetch an http(s) page as markdown, text, HTML, JSON, or a site llms.txt index.",
+    promptGuidelines: [
+      "Use fetch_url to read an http(s) page. Leave format as markdown for ordinary pages. On documentation sites, call fetch_url with format=llms first.",
+    ],
     parameters: Type.Object({
       url: Type.String({ description: "Absolute http(s) URL" }),
-      format: Type.Optional(Type.String({ description: "'markdown' (default) or 'text' (best-effort)" })),
-    }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const safe = isSafeUrl(params.url);
-      if (!safe.ok) throw new Error(`Refused to fetch: ${safe.reason}`);
-
-      const result = await getCrawler().crawl({ url: params.url, signal: signal ?? undefined });
-      const data = result.data;
-
-      // All crawl providers failed → surface the error but don't throw.
-      if (!("contentType" in data)) {
-        return {
-          content: [{ type: "text", text: data.content }],
-          details: { url: params.url, crawler: result.crawler, error: data.errorMessage },
-        };
-      }
-
-      const page = data as CrawlSuccessResult;
-      const full = (page.title ? `# ${page.title}\n\n` : "") + (page.content ?? "");
-      return buildResult(
-        full,
-        page.url,
-        {
-          url: page.url,
-          title: page.title,
-          crawler: result.crawler,
-          transformedUrl: result.transformedUrl,
-          contentType: page.contentType,
-        },
-        ctx.cwd,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "fetch_llms",
-    label: "Fetch llms.txt",
-    description:
-      "Discover a site's AI-friendly content index. Given any http(s) URL on a site, probes " +
-      "<origin>/llms.txt (a curated index of doc links) and, with full=true, <origin>/llms-full.txt " +
-      "(the entire docs inlined). Prefer this BEFORE fetch_url on documentation sites — it is the " +
-      "cheapest, cleanest source. Returns a clear 'not found' when the site has none.",
-    promptSnippet: "Probe a site's /llms.txt (AI doc index) before crawling its docs.",
-    parameters: Type.Object({
-      url: Type.String({ description: "Any absolute http(s) URL on the target site" }),
+      format: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("markdown"),
+            Type.Literal("text"),
+            Type.Literal("html"),
+            Type.Literal("json"),
+            Type.Literal("llms"),
+          ],
+          { description: "Result form. Default markdown uses the crawler. text, html, and json are direct HTTP. llms probes the site index." },
+        ),
+      ),
       full: Type.Optional(
-        Type.Boolean({ description: "Prefer llms-full.txt (entire docs inlined) over the llms.txt index" }),
+        Type.Boolean({ description: "When format is llms, prefer llms-full.txt over llms.txt." }),
+      ),
+      headers: Type.Optional(
+        Type.Unsafe<Record<string, string>>({
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Optional HTTP headers for format text, html, or json",
+        }),
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const safe = isSafeUrl(params.url);
       if (!safe.ok) throw new Error(`Refused to fetch: ${safe.reason}`);
+      const format = parseFormat(params.format);
+      const abort = signal ?? undefined;
+      if (format === "llms") return fetchLlms(params.url, params.full === true, abort, ctx.cwd);
+      if (format === "markdown") return fetchViaCrawler(params.url, abort, ctx.cwd);
 
-      let origin: string;
-      try {
-        origin = new URL(params.url).origin;
-      } catch {
-        throw new Error(`Invalid URL: ${params.url}`);
-      }
-
-      const candidates = params.full
-        ? [`${origin}/llms-full.txt`, `${origin}/llms.txt`]
-        : [`${origin}/llms.txt`, `${origin}/llms-full.txt`];
-
-      for (const candidate of candidates) {
-        if (!isSafeUrl(candidate).ok) continue;
-        const body = await probeLlms(candidate, signal ?? undefined);
-        if (!body) continue;
-        const kind = candidate.endsWith("llms-full.txt") ? "llms-full" : "llms";
-        return buildResult(`# ${candidate}\n\n${body}`, candidate, { url: candidate, origin, kind }, ctx.cwd);
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No llms.txt or llms-full.txt found at ${origin}. Fall back to fetch_url on the specific page you need.`,
-          },
-        ],
-        details: { origin, found: false },
-      };
+      const request = { url: params.url, headers: params.headers };
+      const body =
+        format === "html"
+          ? await fetchHtml(request, abort)
+          : format === "json"
+            ? await fetchJson(request, abort)
+            : await fetchTxt(request, abort);
+      return buildResult(body, params.url, { url: params.url, format }, ctx.cwd);
     },
   });
 }

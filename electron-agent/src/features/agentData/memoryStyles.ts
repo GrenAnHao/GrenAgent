@@ -2,10 +2,15 @@ import { createStaticStyles, cssVar } from 'antd-style';
 
 export const memoryStyles = createStaticStyles(({ css }) => ({
   root: css`
-    min-width: 0; container: memory / inline-size;
+    display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden;
+    container: memory / inline-size;
     font-size: 13px; line-height: 1.5;
     summary:focus-visible { outline: 2px solid ${cssVar.colorPrimary}; outline-offset: 2px; }
   `,
+  /** 列表卡片吃掉页头以下的剩余高度，避免条目把整页撑出窗口。 */
+  fill: css`flex: 1; min-height: 0; overflow: hidden;`,
+  /** 覆盖分栏的 440px 下限，短窗口里列表仍缩进剩余高度并在栏内滚动。 */
+  split: css`&& { min-height: 0; }`,
   groups: css`margin-block-end: 12px;`,
   count: css`margin-inline-start: 6px; color: ${cssVar.colorTextQuaternary}; font-size: 12px; .ant-radio-button-wrapper-checked & { color: inherit; opacity: .75; }`,
   gap: css`margin-inline-start: 12px; border-radius: 6px !important;`,

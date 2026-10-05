@@ -8,12 +8,7 @@
 
 | 类型 | 名称 | 说明 |
 |---|---|---|
-| 工具(LLM 可调) | `fetch_url` | 抓取 `url`,返回正文 markdown(默认)或纯文本(`format:"text"`) |
-| 工具(LLM 可调) | `fetch_llms` | 探测站点 `<origin>/llms.txt`(为 AI 准备的文档索引)、`full:true` 时优先 `llms-full.txt`(全文内联)。读文档站前优先用它——命中时最省 token;站点没有则返回明确提示,回退 `fetch_url`。 |
-| 工具(LLM 可调) | `fetch_html` | 直接 HTTP 抓取,返回原始 HTML |
-| 工具(LLM 可调) | `fetch_markdown` | 直接 HTTP 抓取,HTML 转 Markdown |
-| 工具(LLM 可调) | `fetch_txt` | 直接 HTTP 抓取,返回纯文本(去 HTML/脚本/样式) |
-| 工具(LLM 可调) | `fetch_json` | 抓取 JSON URL,返回序列化后的 JSON 文本 |
+| 工具(LLM 可调) | `fetch_url` | 抓取一个 `url`。`format` 决定结果：`markdown`(默认,多提供商爬虫)、`text`(直接 HTTP,去标签)、`html`(原始 HTML)、`json`(解析后的 JSON 文本)、`llms`(探测 `<origin>/llms.txt`,`full:true` 时优先 `llms-full.txt`)。文档站先用 `format=llms`。`headers` 只对 `text` / `html` / `json` 生效。 |
 
 ## 安装 / 加载
 
@@ -46,7 +41,7 @@ pi -e ./extensions/web-fetch/index.ts
 
 ```text
 web-fetch/
-├── index.ts       # fetch_url + fetch_llms + fetch_html/markdown/txt/json 工具
+├── index.ts       # fetch_url（format: markdown / text / html / json / llms）
 ├── fetcher.ts     # 直接 HTTP 抓取(mcp-npx-fetch 能力对齐)
 ├── html.ts        # HTML → markdown / text 转换 + isSafeUrl
 ├── truncate.ts    # head+tail 截断 + llms.txt 响应校验

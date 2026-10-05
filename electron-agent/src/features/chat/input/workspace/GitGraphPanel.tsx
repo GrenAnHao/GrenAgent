@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { VList } from 'virtua';
+import { VList, type VListHandle } from 'virtua';
 import { pi, type GitLogEntry } from '../../../../lib/pi';
 import {
   buildGraph,
@@ -40,7 +40,8 @@ const g = createStaticStyles(({ css }) => ({
     flex-direction: column;
 
     width: 100%;
-    height: 520px;
+    /* lobe Modal body 默认 maxHeight 75dvh、底部内边距 16px：矮窗口里超出就会在弹窗外侧多一条滚动条。 */
+    height: min(520px, calc(75dvh - 16px));
   `,
   head: css`
     display: flex;
@@ -114,6 +115,13 @@ const g = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorSuccess};
     background: ${cssVar.colorSuccessBg};
   `,
+  foot: css`
+    flex: none;
+    padding: 6px 6px 0;
+    border-top: 1px solid ${cssVar.colorBorderSecondary};
+    font-size: 11px;
+    color: ${cssVar.colorTextTertiary};
+  `,
   center: css`
     display: flex;
     align-items: center;
@@ -132,32 +140,87 @@ function fmtDate(ts: number): string {
   return `${p(date.getMonth() + 1)}/${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}`;
 }
 
+/** 每页提交数。滚到距底部不足 PREFETCH_ROWS 行时拉下一页，直到某页不满。 */
+const PAGE = 300;
+const PREFETCH_ROWS = 60;
+
 function GraphView({ workspace }: { workspace: string }) {
   const [log, setLog] = useState<GitLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<VListHandle>(null);
+  // 换工作区就换一代；晚到的旧响应按代号丢弃。
+  const genRef = useRef(0);
+  const busyRef = useRef(false);
 
   useEffect(() => {
-    let alive = true;
+    const gen = ++genRef.current;
+    busyRef.current = false;
     setLoading(true);
-    pi.getGitLogGraph(workspace, 80)
-      .then((l) => {
-        if (alive) setLog(l);
+    setLoadingMore(false);
+    setError(null);
+    setLog([]);
+    setHasMore(false);
+    pi.getGitLogGraph(workspace, PAGE, 0)
+      .then((page) => {
+        if (gen !== genRef.current) return;
+        setLog(page);
+        setHasMore(page.length === PAGE);
       })
-      .catch(() => {
-        if (alive) setLog([]);
+      .catch((e: unknown) => {
+        if (gen === genRef.current) setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (gen === genRef.current) setLoading(false);
       });
     return () => {
-      alive = false;
+      genRef.current += 1;
     };
   }, [workspace]);
+
+  const loadMore = useCallback(() => {
+    if (busyRef.current || !hasMore) return;
+    busyRef.current = true;
+    setLoadingMore(true);
+    const gen = genRef.current;
+    pi.getGitLogGraph(workspace, PAGE, log.length)
+      .then((page) => {
+        if (gen !== genRef.current) return;
+        // 翻页间隔里有新提交时 skip 会错位，按 hash 去重，避免同一提交画两次。
+        setLog((prev) => {
+          const seen = new Set(prev.map((c) => c.hash));
+          return prev.concat(page.filter((c) => !seen.has(c.hash)));
+        });
+        setHasMore(page.length === PAGE);
+      })
+      .catch(() => {
+        if (gen === genRef.current) setHasMore(false);
+      })
+      .finally(() => {
+        if (gen !== genRef.current) return;
+        busyRef.current = false;
+        setLoadingMore(false);
+      });
+  }, [workspace, hasMore, log.length]);
+
+  const onScroll = useCallback(
+    (offset: number) => {
+      const list = listRef.current;
+      if (!list) return;
+      if (offset + list.viewportSize >= list.scrollSize - PREFETCH_ROWS * ROW_H) loadMore();
+    },
+    [loadMore],
+  );
 
   const { rows, lanes } = useMemo(() => buildGraph(log), [log]);
 
   if (loading) {
     return <div className={g.center}>加载中…</div>;
+  }
+  if (error) {
+    return <div className={g.center}>加载失败：{error}</div>;
   }
   if (rows.length === 0) {
     return <div className={g.center}>无提交记录</div>;
@@ -184,7 +247,7 @@ function GraphView({ workspace }: { workspace: string }) {
         </span>
       </div>
       <div className={g.body}>
-        <VList className={g.list} data={rows} style={{ height: '100%' }}>
+        <VList ref={listRef} className={g.list} data={rows} style={{ height: '100%' }} onScroll={onScroll}>
           {(row: GraphRow<GitLogEntry>) => (
             <div key={row.commit.hash} className={g.row} style={{ minHeight: ROW_H }}>
               <div style={{ width: colGraph, flex: 'none', display: 'flex', alignItems: 'center' }}>
@@ -207,13 +270,20 @@ function GraphView({ workspace }: { workspace: string }) {
           )}
         </VList>
       </div>
+      <div className={g.foot} data-testid="git-history-status">
+        {loadingMore
+          ? `已加载 ${rows.length} 条，正在加载更多…`
+          : hasMore
+            ? `已加载 ${rows.length} 条，向下滚动加载更多`
+            : `共 ${rows.length} 条提交（含本地、远端分支与 tag）`}
+      </div>
     </div>
   );
 }
 
 /**
- * Git 提交图谱模态框：lane 连线 + ref 标签 + 日期/作者/提交列。受控组件，由分支气泡里的
- * 「Git 图谱」入口开关；懒加载 + 虚拟化（打开才拉取与渲染）。
+ * Git 历史模态框：lane 连线 + ref 标签 + 日期/作者/提交列。受控组件，由分支气泡里的
+ * 「Git 历史」入口开关；打开才拉取，按页滚动加载，列表虚拟化。
  */
 export function GitGraphModal({
   workspace,
@@ -229,7 +299,7 @@ export function GitGraphModal({
       data-testid="git-graph-modal"
       footer={null}
       open={open}
-      title="Git 图谱"
+      title="Git 历史"
       width={880}
       onCancel={onClose}
     >

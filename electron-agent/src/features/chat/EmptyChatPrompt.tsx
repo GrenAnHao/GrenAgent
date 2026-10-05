@@ -18,6 +18,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
     gap: ${EMPTY_CHAT_BRAND_GAP}px;
   `,
   logo: css`
@@ -27,12 +28,15 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   title: css`
     margin: 0;
-    max-width: 520px;
+    min-width: 0;
+    /* 跟输入列同宽，只扣掉 π 和间距。固定 520px 会在宽画布上把长项目名提前折成两行。 */
+    max-width: calc(100% - ${EMPTY_CHAT_BRAND_SIZE + EMPTY_CHAT_BRAND_GAP}px);
     color: ${cssVar.colorText};
     font-size: 28px;
     font-weight: 500;
     line-height: 1.35;
     letter-spacing: -0.02em;
+    text-wrap: balance;
   `,
 }));
 

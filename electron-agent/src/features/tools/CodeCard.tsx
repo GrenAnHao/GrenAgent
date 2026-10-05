@@ -1,7 +1,16 @@
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { memo, type ReactNode } from 'react';
 import FileIcon from '../../components/FileIcon';
 import { languageFileName, languageLabel } from './codeLanguage';
+
+/** 读取、检索正文统一内边距。borderless 高亮会把 pre 内边距清零。 */
+export const codeCardContentClass = createStaticStyles(({ css }) => ({
+  content: css`
+    pre {
+      padding: 16px !important;
+    }
+  `,
+})).content;
 
 const styles = createStaticStyles(({ css }) => ({
   shell: css`
@@ -53,21 +62,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   body: css`
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-
-    &::-webkit-scrollbar {
-      height: 0;
-    }
-
-    &:hover {
-      scrollbar-width: thin;
-    }
-
-    &:hover::-webkit-scrollbar {
-      height: 6px;
-    }
+    max-height: min(50vh, 360px);
+    overflow: auto;
+  `,
+  bodyContained: css`
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   `,
   core: css`
     width: max-content;
@@ -79,6 +80,18 @@ const styles = createStaticStyles(({ css }) => ({
       overflow: visible !important;
     }
   `,
+  coreContained: css`
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    min-height: auto;
+
+    & * {
+      border-radius: 0 !important;
+    }
+  `,
 }));
 
 export const CodeCard = memo(function CodeCard({
@@ -86,12 +99,18 @@ export const CodeCard = memo(function CodeCard({
   language,
   added = 0,
   deleted = 0,
+  contained = false,
+  maxHeight,
   children,
 }: {
   fileName?: string;
   language?: string;
   added?: number;
   deleted?: number;
+  /** 正文不自己滚，高度交给内部组件，避免把整个子组件拖着走。 */
+  contained?: boolean;
+  /** 正文最大高度（CSS 长度）。不给就是会话卡的 `min(50vh, 360px)`。 */
+  maxHeight?: string;
   children: ReactNode;
 }) {
   const title = fileName || (language ? languageLabel(language) : '');
@@ -114,8 +133,12 @@ export const CodeCard = memo(function CodeCard({
           </div>
         ) : null}
       </div>
-      <div className={styles.body} data-testid="code-card-body">
-        <div className={styles.core}>{children}</div>
+      <div
+        className={cx(styles.body, contained && styles.bodyContained)}
+        data-testid="code-card-body"
+        style={maxHeight ? { maxHeight } : undefined}
+      >
+        <div className={contained ? styles.coreContained : styles.core}>{children}</div>
       </div>
     </div>
   );

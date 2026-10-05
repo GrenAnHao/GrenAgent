@@ -127,7 +127,6 @@ describe("gateToolCall", () => {
       "web_search",
       "web_search_multi",
       "search",
-      "fetch_web_content",
       "memory_search",
       "conversation_search",
       "git_diff",
@@ -283,5 +282,19 @@ describe("agent mode live 表", () => {
     setAgentMode("agent", "D:/a");
     expect(hasAgentMode("D:/a")).toBe(true);
     expect(getAgentMode("D:/a")).toBe("agent");
+  });
+});
+
+describe("getAgentMode 按会话", () => {
+  it("会话模式互不影响，未写过的会话回退项目默认", () => {
+    setAgentMode("agent", "D:/a");
+    setAgentMode("plan", "D:/a", "s1");
+    setAgentMode("ask", "D:/a", "s2");
+    expect(getAgentMode("D:/a", "s1")).toBe("plan");
+    expect(getAgentMode("D:/a", "s2")).toBe("ask");
+    expect(getAgentMode("D:/a", "s3")).toBe("agent");
+    setAgentMode("debug", "D:/a");
+    expect(getAgentMode("D:/a", "s1")).toBe("plan");
+    expect(getAgentMode("D:/a", "s3")).toBe("debug");
   });
 });

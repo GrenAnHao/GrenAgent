@@ -1,6 +1,6 @@
 # 架构文档
 
-本文介绍 GrenAgent 的整体架构、模块职责与运行时数据流。面向需要理解或参与开发的工程师。
+本文介绍 GrenAgent 的整体架构、模块职责与运行时数据流。面向需要理解或参与开发的工程师。本文只写**事实**——系统当前如何运转；改动背后的取舍与「为什么」见 [`decisions/`](decisions/README.md)。
 
 > **桌面端主线是 Electron。** `electron-agent/` 为当前实现。历史 Tauri 版（`tauri-agent/`，Tauri 2 + Rust）已于 2026-09-13 封存并从工作区移除，完整快照见 git 标签 `archive/tauri-agent`；文中涉及 Tauri 的段落均标注为历史，仅作迁移对照。桌面能力从 Tauri command 迁移到 Electron 的收口点见 `electron-agent/docs/tauri-api-inventory.md`。
 
@@ -53,9 +53,9 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | --- | --- | --- |
 | `safety` | 工具调用安全闸：路径保护、危险 bash 拦截、沙箱模式约束 | 策略 / 中间件，无显式工具 |
 | `approval` | 审批策略（ask / auto / full）热更新应用与 setStatus | 无 slash；宿主 `agent_set_approval` |
-| `loop-guard` | 防止相同工具死循环与单次请求工具调用发散 | 策略 / 中间件，无显式工具 |
+| `loop-guard` | 相同工具调用在第 3/5/8 次追加提醒；不拦截，不限单轮总次数 | 策略 / 中间件，无显式工具 |
 | `rulebook` | 声明式规则库（`.pi/rules.jsonc`），工具 / 文本规则拦截与纠正 | `/rules` |
-| `compaction-policy` | 上下文修剪、压力指示、删任意段 | 无 slash；宿主 `agent_exclude_entry` / `agent_restore_entry` |
+| `compaction-policy` | 超大结果熔断、按压力裁旧工具输出（缓存冷时定案、热时沿用）、压力指示、删任意段、自动压缩 | 无 slash；宿主 `agent_exclude_entry` / `agent_restore_entry` |
 | `auto-title` | 首轮结束后自动生成会话标题 | 策略 / 中间件，无显式工具 |
 | `todo` | 会话内待办清单 | `todo` |
 | `present` | 把已有文件声明为本轮产物 | `present` |
@@ -68,14 +68,16 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
 | `wiki-rag` | TencentDB 风格 Wiki 只读检索（列出 / 检索 / 阅读） | `wiki_list`、`wiki_read`、`wiki_search` |
 | `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files`、`code_status`、`code_usages`、`code_path`、`code_hierarchy`、`code_call_graph`、`code_deps`、`code_cycles`、`code_dead_code`、`code_metrics`、`code_routes`、`code_traverse`、`code_context`、`code_changed` |
-| `session-memory` | 会话结构化工作状态，压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
-| `web-fetch` | 单页 URL 抓取 | `fetch_url`、`fetch_llms`、`fetch_html`、`fetch_markdown`、`fetch_txt`、`fetch_json` |
-| `web-search` | 多引擎联网搜索与站点 / GitHub 抓取 | `web_search`、`web_search_multi`、`fetch_web_content` |
+| `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
+| `web-fetch` | 单页 URL 抓取 | `fetch_url`（`format`: markdown / text / html / json / llms） |
+| `web-search` | 多引擎联网搜索 | `web_search`、`web_search_multi` |
 | `mcp` | 外部 MCP server 工具桥接 | `mcp__<server>__<tool>`（动态） |
 | `mcp-policy` | MCP 工具权限策略与审计 | 策略 / 中间件，无显式工具 |
 | `image-gen` | 文生图 | `generate_image` |
 | `diagnostics` | 环境 / 依赖诊断 | `diagnostics` |
 | `multi-agent` | 子代理委派 | `spawn_agent` |
+| `sandbox` | 自有 bash（对外契约同 pi 1.0.2 内置 bash，不再用 `createBashToolDefinition`）：沙箱 operations（Windows 走 PowerShell），输出流式进卡片。每次调用都是 `bash-N` job，前台等 `timeout`（默认 120 秒，`BASH_FOREGROUND_TIMEOUT_SEC`），仍在跑就交出已有输出并转后台；`run_in_background: true` 直接返回 id，完整日志写临时文件。无会话或超并发上限时退回不受管前台（timeout 到点杀） | `bash`、`bash_escalate` |
+| `jobs` | 进程内后台 job 注册表（语义移植自 DSH jobs / jobs-local / tool-jobs）：每个 job 一个有界输出环（运行期 256KB、结算后 16KB），拉取源每 150ms 泵入；模型按消耗式游标读，`readAt` 非消耗；每个会话最多 10 个存活 job；结算发 `job-done` 通知，等待已收走、模型自己 `job_kill`、会话销毁的不发。`onEvent` 供宿主跟随，`observer.ts` 把事件合并成帧 | `job_output`、`job_list`、`job_kill` |
 | `lsp` | 语言服务器：定义 / 引用 / 悬停等 | `lsp_definition`、`lsp_references` 等 |
 | `ast-tools` | AST 结构化搜索与编辑 | `ast_grep`、`ast_edit` |
 | `github` | GitHub CLI 封装 | `github` |
@@ -99,13 +101,14 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 - `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（记忆与 Wiki API）等。
 - `platform/`：**后端抽象层**。`runtime.ts` 定义 `GrenRuntimeBridge` 并对接 `window.gren`，无 bridge 时降级为 `browserPreviewBridge`，使渲染层可在纯浏览器预览态运行。
 - `components/` / `theme/`：通用组件与主题，运行时注入 `--gren-*` CSS 变量。
+- 首包只含对话界面。设置 / 连接 / 扩展 / 用量 / Agent 数据 / 开发者工作台面板、终端（xterm）、Mermaid（beautiful-mermaid、elkjs），以及 @lobehub/ui 的 Markdown / 高亮 / diff（经 `src/lib/lobeHeavy.ts` 中转）都按需加载；Markdown 与代码视图的预热在浏览器空闲后进行。
 
 **主进程（`electron-agent/electron`）：**
 
 - `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
-- `app/`：服务层——`piRuntimeService`（`agent_*` 到进程内 `WorkspaceHandle`；模式 / 审批 / 删段写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。
+- `app/`：服务层——`piRuntimeService`（`agent_*` 到进程内 `WorkspaceHandle`；模式 / 审批 / 删段写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。`jobsBridge` 订阅同进程的 jobs 注册表，把后台 job 的状态与输出增量经 `pi://jobs` 广播（100ms 合并），另有 `job_snapshot` / `job_kill` 命令；渲染层 `jobLiveStore` 按字节偏移接帧，bash 卡片凭结果 details 里的 `jobId` + `jobStartedAt` 跟随后台输出并可停止。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
-- `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`。
+- `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`。同一项目里空闲会话共用前景 handle，用 `switchSession` 换文件；正在跑的会话留在自己的 handle 上，再打开另一个会话不会拆掉它。
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
@@ -132,7 +135,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 记忆提炼共用 `TaskQueue` 的系统任务通道；Wiki 抽取走进程内串行队列与 Electron 模型短调用，不再创建 `wiki.ingest` / `wiki.sync` 任务。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
-部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。
+部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。侧栏会话列表（`WorkspaceService.listAllSessions` / `listSessions`）按字节标记只解码标题、首条用户消息、子代理与旧短调用标记所在的行，并按文件大小和修改时间缓存每份会话的解析结果，文件没变时只做一次 `stat`。
 
 ### tauri-agent —— 桌面应用（已封存）
 

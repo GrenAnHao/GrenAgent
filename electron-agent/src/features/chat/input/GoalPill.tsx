@@ -10,6 +10,7 @@ import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 import { SessionGoalDrawer } from './SessionGoalDrawer';
 import { dockCard } from './dockCard';
 import { formatGoalElapsed } from './goalElapsed';
+import { useAskConfirm } from '../../../components/askConfirm';
 
 const styles = createStaticStyles(({ css }) => ({
   row: css`
@@ -130,7 +131,8 @@ function actionProps(label: string) {
 }
 
 export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps) {
-  const { workspace } = useAgentStoreContext();
+  const ask = useAskConfirm();
+  const { workspace, store } = useAgentStoreContext();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const [sessionId, setSessionId] = useState<string>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -179,7 +181,7 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
     inflight.current = true;
     setBusy(true);
     try {
-      await pi.prompt(workspace, message);
+      await pi.prompt(workspace, message, undefined, undefined, store.getLoadedSessionPath());
     } catch {
       // 动作失败不藏条；扩展回执会说明原因。
     } finally {
@@ -290,8 +292,10 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
                 icon={Trash2}
                 onClick={() => {
                   if (inflight.current || busy) return;
-                  if (!window.confirm('清除当前目标？')) return;
-                  void runCommand('/goal clear');
+                  void (async () => {
+                    if (!(await ask({ title: '清除当前目标？' }))) return;
+                    void runCommand('/goal clear');
+                  })();
                 }}
                 size="small"
               />

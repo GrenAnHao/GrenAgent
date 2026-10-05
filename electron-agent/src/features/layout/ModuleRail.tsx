@@ -1,6 +1,7 @@
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { BarChart3, BrainCircuit, type LucideIcon, MessageSquare, Plug, Settings, SquareTerminal } from 'lucide-react';
 import { type ModuleId, useModuleStore } from '../../stores/moduleStore';
+import { useLayoutStore } from '../../stores/layoutStore';
 import { IS_DEV } from '../../lib/devMode';
 
 interface ModuleDef {
@@ -102,6 +103,7 @@ export function ModuleRail() {
 
   const renderButton = ({ id, label, Icon }: ModuleDef) => {
     const active = activeModule === id;
+    const chatTab = id === 'chat';
     return (
       <button
         key={id}
@@ -109,7 +111,30 @@ export function ModuleRail() {
         title={label}
         aria-label={label}
         aria-pressed={active}
-        onClick={() => setActiveModule(id)}
+        onClick={() => {
+          if (!chatTab) useLayoutStore.getState().closeSidebarDrawer();
+          setActiveModule(id);
+        }}
+        onPointerEnter={
+          chatTab
+            ? () => {
+                const layout = useLayoutStore.getState();
+                if (useModuleStore.getState().activeModule !== 'chat') return;
+                if (layout.sidebarDrawer === 'toggle' || layout.sidebarOpen) return;
+                layout.cancelSidebarHoverClose();
+                layout.openSidebarDrawer('hover');
+              }
+            : undefined
+        }
+        onPointerLeave={
+          chatTab
+            ? (event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Element && next.closest('[data-sidebar-drawer]')) return;
+                useLayoutStore.getState().scheduleSidebarHoverClose();
+              }
+            : undefined
+        }
         className={cx(styles.item, active && styles.itemActive)}
       >
         <Icon size={20} />

@@ -11,7 +11,7 @@ import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
 import { ToolExecution } from '../tools/ToolExecution';
 import { ContextToolGroup } from '../tools/ContextToolGroup';
-import type { TimelineSegment } from './groupMessages';
+import type { TimelineSegment, ToolSegment } from './groupMessages';
 import { buildTurnRows } from './turnRows';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
@@ -26,6 +26,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
+  nestedTools: css`
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-inline-start: 12px;
+  `,
 }));
 
 interface TurnTimelineProps {
@@ -38,6 +44,53 @@ interface TurnTimelineProps {
   live?: boolean;
 }
 
+function ToolSegmentBody({ segment }: { segment: ToolSegment }) {
+  return (
+    <>
+      <ToolExecution
+        toolName={segment.toolName}
+        toolCallId={segment.toolCallId}
+        args={segment.args}
+        result={segment.result}
+        status={segment.status}
+        argsComplete={segment.argsComplete}
+        startedAt={segment.startedAt}
+        durationMs={segment.durationMs}
+      />
+      {segment.children && segment.children.length > 0 ? (
+        <div className={styles.nestedTools}>
+          {segment.children.map((child) => (
+            <ToolSegmentBody key={child.id} segment={child} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function sameTool(a: ToolSegment, b: ToolSegment): boolean {
+  if (
+    a.toolCallId !== b.toolCallId ||
+    a.toolName !== b.toolName ||
+    a.status !== b.status ||
+    a.args !== b.args ||
+    a.result !== b.result ||
+    a.argsComplete !== b.argsComplete ||
+    a.startedAt !== b.startedAt ||
+    a.durationMs !== b.durationMs ||
+    a.parentToolCallId !== b.parentToolCallId
+  ) {
+    return false;
+  }
+  const left = a.children ?? [];
+  const right = b.children ?? [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (!sameTool(left[i]!, right[i]!)) return false;
+  }
+  return true;
+}
+
 function SegmentItem({ segment }: { segment: TimelineSegment }) {
   switch (segment.kind) {
     case 'thinking':
@@ -46,6 +99,7 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
           content={segment.content}
           streaming={segment.streaming}
           durationMs={segment.durationMs}
+          startedAt={segment.startedAt}
         />
       );
     case 'text':
@@ -60,16 +114,7 @@ function SegmentItem({ segment }: { segment: TimelineSegment }) {
         />
       );
     case 'tool':
-      return (
-        <ToolExecution
-          toolName={segment.toolName}
-          toolCallId={segment.toolCallId}
-          args={segment.args}
-          result={segment.result}
-          status={segment.status}
-          argsComplete={segment.argsComplete}
-        />
-      );
+      return <ToolSegmentBody segment={segment} />;
     default:
       return null;
   }
@@ -85,20 +130,18 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
   const b = next.segment;
   if (a.kind !== b.kind || a.id !== b.id) return false;
   if (a.kind === 'thinking' && b.kind === 'thinking') {
-    return a.content === b.content && a.streaming === b.streaming && a.durationMs === b.durationMs;
+    return (
+      a.content === b.content &&
+      a.streaming === b.streaming &&
+      a.durationMs === b.durationMs &&
+      a.startedAt === b.startedAt
+    );
   }
   if (a.kind === 'text' && b.kind === 'text') {
     return a.content === b.content && a.streaming === b.streaming;
   }
   if (a.kind === 'tool' && b.kind === 'tool') {
-    return (
-      a.toolCallId === b.toolCallId &&
-      a.toolName === b.toolName &&
-      a.status === b.status &&
-      a.args === b.args &&
-      a.result === b.result &&
-      a.argsComplete === b.argsComplete
-    );
+    return sameTool(a, b);
   }
   return false;
 });

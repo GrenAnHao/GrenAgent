@@ -37,6 +37,38 @@ function renderCard(
 
 // @lobehub/ui（LazyMarkdown 等）首渲较重，并发跑时给足超时，避免默认 5s 抖动。
 describe('renderExtensionCard', { timeout: 30_000 }, () => {
+  it('add_mcp_server shows the parsed config and the tool response', () => {
+    renderCard(
+      'add_mcp_server',
+      {
+        content: [{ type: 'text', text: '已添加 MCP anysearch' }],
+        details: {
+          status: 'saved',
+          path: '/home/.pi/agent/mcp.json',
+          connection: 'connected',
+          tools: ['mcp__anysearch__search'],
+          response: '已添加 MCP anysearch',
+          parsed: {
+            name: 'anysearch',
+            transport: 'http',
+            url: 'https://api.anysearch.com/mcp',
+            headers: { Authorization: 'Bearer ${ANYSEARCH_API_KEY}' },
+            dropped: { command: 'npx', env: { ANYSEARCH_API_KEY: '[REDACTED]' } },
+          },
+        },
+      },
+      { name: 'anysearch', transport: 'sse', command: 'npx' },
+    );
+    const card = screen.getByTestId('card-add_mcp_server');
+    expect(card.textContent).toContain('参数');
+    expect(card.textContent).toContain('响应');
+    expect(card.textContent).toContain('https://api.anysearch.com/mcp');
+    expect(card.textContent).toContain('Bearer ${ANYSEARCH_API_KEY}');
+    expect(card.textContent).toContain('dropped');
+    expect(card.textContent).toContain('mcp__anysearch__search');
+    expect(card.textContent).toContain('已添加 MCP anysearch');
+  });
+
   it('returns null for unknown tools', () => {
     expect(renderExtensionCard({ toolName: 'bash', args: {}, result: {}, status: 'done' })).toBeNull();
   });
@@ -91,5 +123,38 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     expect(screen.getByText('Result Two')).toBeTruthy();
     // 结果卡显示 host（去 www），而非完整 URL。
     expect(screen.getByText('one.dev')).toBeTruthy();
+  });
+
+  it('web_search_multi shows aggregated links', () => {
+    renderCard('web_search_multi', {
+      content: [{ type: 'text', text: 'summary' }],
+      details: {
+        query: 'react 19',
+        engines: ['bing', 'baidu'],
+        count: 1,
+        results: [{ title: 'React Docs', url: 'https://react.dev', snippet: 'hooks' }],
+      },
+    });
+    expect(screen.getByTestId('card-web_search_multi')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('card-web_search_multi-toggle'));
+    expect(screen.getByText('React Docs')).toBeTruthy();
+  });
+
+  it('does not paint local code search as a web result card', () => {
+    expect(
+      renderExtensionCard({
+        toolName: 'search',
+        args: { patterns: ['PddWorkbench'] },
+        result: {
+          details: {
+            matches: [{ file: 'src/a.ts', line: 12, text: 'export function PddWorkbench' }],
+            total: 1,
+            files: 1,
+            capped: false,
+          },
+        },
+        status: 'done',
+      }),
+    ).toBeNull();
   });
 });

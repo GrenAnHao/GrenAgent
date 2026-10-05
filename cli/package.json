@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^1.0.2",
     "typebox": "*"
   },
   "devDependencies": {

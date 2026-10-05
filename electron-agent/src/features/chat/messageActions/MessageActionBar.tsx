@@ -4,15 +4,18 @@ import { App, Dropdown, type MenuProps } from 'antd';
 import { MoreHorizontal } from 'lucide-react';
 import { buildActionItem } from './slots';
 import type { MessageActionContext, MessageActionSlot, Notify } from './types';
+import { useAskConfirm } from '../../../components/askConfirm';
 import { useOptionalAgentStoreContext } from '../../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../../stores/agent';
 import type { ChatMessage } from '../../../stores/agentReducer';
+import { isBeforeLatestCompaction } from '../compactionBoundary';
 
-/** 流式/等待响应中从 bar/menu 滤掉的槽位：编辑/重生成/删除会改写会话，等回合结束后再露出。 */
-const HIDDEN_WHILE_BUSY = new Set<MessageActionSlot>(['edit', 'regenerate', 'del']);
+/** 流式/等待响应中从 bar/menu 滤掉的槽位：复制和改写会话的动作等回合结束后再露出。 */
+const HIDDEN_WHILE_BUSY = new Set<MessageActionSlot>(['copy', 'edit', 'regenerate', 'del']);
 /** 已移出上下文：不允许编辑/回退/重生成/删除。 */
 const HIDDEN_WHEN_EXCLUDED = new Set<MessageActionSlot>(['edit', 'regenerate', 'del', 'rewind']);
-/** 非当前上下文最后一条用户消息：隐藏编辑与重新生成。 */
+/** 已压缩分隔之前的消息：历史已折叠，不能再回退或编辑。 */
+const HIDDEN_ABOVE_COMPACTION = new Set<MessageActionSlot>(['edit', 'rewind', 'regenerate']);
 const HIDDEN_WHEN_NOT_LAST = new Set<MessageActionSlot>(['edit', 'regenerate']);
 
 function filterSlots(
@@ -68,10 +71,11 @@ function renderActions(
   bar: MessageActionSlot[],
   menu: MessageActionSlot[] | undefined,
   notify: Notify,
+  ask: ReturnType<typeof useAskConfirm>,
 ): ReactNode {
   const menuItems: MenuProps['items'] = menu?.map((slot, i) => {
     if (slot === 'divider') return { type: 'divider', key: `divider-${i}` };
-    const it = buildActionItem(slot, ctx, notify);
+    const it = buildActionItem(slot, ctx, notify, ask);
     return {
       key: it.key,
       label: it.label,
@@ -87,7 +91,7 @@ function renderActions(
       {bar
         .filter((slot): slot is Exclude<MessageActionSlot, 'divider'> => slot !== 'divider')
         .map((slot) => {
-          const it = buildActionItem(slot, ctx, notify);
+          const it = buildActionItem(slot, ctx, notify, ask);
           return (
             <ActionIcon
               key={it.key}
@@ -121,9 +125,10 @@ function useNotify(): Notify {
 /** 有 store 上下文 + 消息带 timestamp 或 entryId：订阅 excluded，注入上下文动作回调。 */
 function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: AgentStoreApi }) {
   const notify = useNotify();
+  const ask = useAskConfirm();
   const ts = ctx.timestamp;
   const excluded = store.useStore((s) => (ts != null ? s.excluded.has(ts) : false));
-  // 流式/等待响应中仍渲染操作栏（回退/复制可用），但滤掉 edit/regenerate/del。
+  // 流式/等待响应中仍渲染操作栏（回退可用），但滤掉复制和 edit/regenerate/del。
   const isBusy = store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse));
   const messages = store.useStore((s) => s.messages);
   const excludedSet = store.useStore((s) => s.excluded);
@@ -132,6 +137,7 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
   const isLastInContext =
     lastIdx >= 0 && matchesUserMessage(messages[lastIdx]!, ctx.entryId, ctx.timestamp);
   const canRegenerate = isLastInContext && hasReplyAfter(messages, lastIdx);
+  const aboveCompaction = isBeforeLatestCompaction(messages, ctx.entryId, ctx.timestamp);
 
   const enriched = useMemo<MessageActionContext>(
     () => ({
@@ -158,7 +164,7 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
                 notify.error('恢复失败');
               }
             },
-      onRewind: excluded
+      onRewind: excluded || aboveCompaction
         ? undefined
         : async (entryId, text) => {
             try {
@@ -169,7 +175,7 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
             }
           },
       onRegenerate:
-        excluded || !canRegenerate
+        excluded || !canRegenerate || aboveCompaction
           ? undefined
           : async (entryId, text, images) => {
               try {
@@ -188,10 +194,10 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
               notify.error('删除失败');
             }
           },
-      // excluded / 非最后一条：去掉上游 onEdit，避免菜单里仍可点。
-      onEdit: excluded || !isLastInContext ? undefined : ctx.onEdit,
+      // 压缩线之前、已移出、或不是最后一条：都不能再就地编辑。
+      onEdit: excluded || aboveCompaction || !isLastInContext ? undefined : ctx.onEdit,
     }),
-    [ctx, excluded, store, notify, ts, canRegenerate, isLastInContext],
+    [ctx, excluded, store, notify, ts, canRegenerate, isLastInContext, aboveCompaction],
   );
 
   let visibleBar = bar;
@@ -199,6 +205,9 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
   if (excluded) {
     visibleBar = filterSlots(visibleBar, HIDDEN_WHEN_EXCLUDED) ?? visibleBar;
     visibleMenu = filterSlots(visibleMenu, HIDDEN_WHEN_EXCLUDED);
+  } else if (aboveCompaction) {
+    visibleBar = filterSlots(visibleBar, HIDDEN_ABOVE_COMPACTION) ?? visibleBar;
+    visibleMenu = filterSlots(visibleMenu, HIDDEN_ABOVE_COMPACTION);
   } else if (!isLastInContext) {
     visibleBar = filterSlots(visibleBar, HIDDEN_WHEN_NOT_LAST) ?? visibleBar;
     visibleMenu = filterSlots(visibleMenu, HIDDEN_WHEN_NOT_LAST);
@@ -207,20 +216,21 @@ function ContextBar({ ctx, bar, menu, store }: MessageActionBarProps & { store: 
     visibleBar = filterSlots(visibleBar, HIDDEN_WHILE_BUSY) ?? visibleBar;
     visibleMenu = filterSlots(visibleMenu, HIDDEN_WHILE_BUSY);
   }
-  // 最后一条但尚无回复：隐藏重新生成（编辑仍可，若对话已停）。
+  // 最后一条但尚无回复：隐藏重新生成。编辑按钮仍在，点击后由消息自己退回输入框。
   if (!excluded && isLastInContext && !canRegenerate) {
     const hideRegen = new Set<MessageActionSlot>(['regenerate']);
     visibleBar = filterSlots(visibleBar, hideRegen) ?? visibleBar;
     visibleMenu = filterSlots(visibleMenu, hideRegen);
   }
 
-  return renderActions(enriched, visibleBar, visibleMenu, notify);
+  return renderActions(enriched, visibleBar, visibleMenu, notify, ask);
 }
 
 /** 无 store 上下文（如子代理对话）或缺定位键：仅渲染基础动作（copy 等）。 */
 function PlainBar({ ctx, bar, menu }: MessageActionBarProps) {
   const notify = useNotify();
-  return renderActions(ctx, bar, menu, notify);
+  const ask = useAskConfirm();
+  return renderActions(ctx, bar, menu, notify, ask);
 }
 
 /**

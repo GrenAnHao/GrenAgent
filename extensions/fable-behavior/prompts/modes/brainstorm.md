@@ -40,6 +40,9 @@ Key rules:
 - `data-choice` attribute is **required** (not `data-value`)
 - `onclick="toggleSelect(this)"` is required for visual feedback
 - Use `data-choice` values: `a`, `b`, `c`, `d` etc.
+- Clicking an option only selects it. The same click may switch which scheme is on screen. It does not submit.
+- The preview injects「确认提交」. `read_visual_choice` returns only after that button. A page mockup with no options gets「确定页面」instead.
+- For a page design, keep revising until the user confirms the page. Do not tell them that clicking an option finishes the choice.
 
 ## Transitioning to delivery
 

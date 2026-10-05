@@ -59,7 +59,7 @@ describe('buildActionItem', () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
-  it('regenerate / del 无 entryId 时禁用；有 entryId + 回调时可点', () => {
+  it('regenerate / del 无 entryId 时禁用；有 entryId + 回调时可点', async () => {
     const labels = { regenerate: '重新生成', del: '删除' } as const;
     for (const slot of ['regenerate', 'del'] as const) {
       const item = buildActionItem(slot, ctx, { success: vi.fn(), error: vi.fn() });
@@ -78,17 +78,18 @@ describe('buildActionItem', () => {
     regen.onClick!();
     expect(onRegenerate).toHaveBeenCalledWith('e1', '你好世界', undefined);
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const ask = vi.fn(async () => true);
     const onDelete = vi.fn();
     const del = buildActionItem(
       'del',
       { ...ctx, entryId: 'e1', onDelete },
       { success: vi.fn(), error: vi.fn() },
+      ask,
     );
     expect(del.disabled).toBe(false);
-    del.onClick!();
+    await del.onClick!();
+    expect(ask).toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalledWith('e1');
-    confirmSpy.mockRestore();
   });
 
   const notify = { success: vi.fn(), error: vi.fn() };
@@ -124,22 +125,23 @@ describe('buildActionItem', () => {
     expect(item.onClick).toBeUndefined();
   });
 
-  it('rewind：带 entryId/onRewind 可点击，缺失则禁用', () => {
+  it('rewind：带 entryId/onRewind 可点击，缺失则禁用', async () => {
     const onRewind = vi.fn();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const ask = vi.fn(async () => true);
     const ok = buildActionItem(
       'rewind',
       { role: 'user', text: 'x', entryId: 'e9', onRewind },
       notify,
+      ask,
     );
     expect(ok.label).toBe('回退到此');
     expect(ok.disabled).toBe(false);
-    ok.onClick!();
+    await ok.onClick!();
+    expect(ask).toHaveBeenCalled();
     expect(onRewind).toHaveBeenCalledWith('e9', 'x');
 
     const disabled = buildActionItem('rewind', { role: 'user', text: 'x' }, notify);
     expect(disabled.disabled).toBe(true);
     expect(disabled.onClick).toBeUndefined();
-    confirmSpy.mockRestore();
   });
 });

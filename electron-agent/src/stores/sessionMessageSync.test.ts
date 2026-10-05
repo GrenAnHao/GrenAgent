@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from './agentReducer';
-import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
+import { backfillEntryIds, cutMessagesAfterEntry, mergeLiveTail } from './sessionMessageSync';
 
 const user = (id: string, text: string, entryId?: string): ChatMessage => ({
   kind: 'user',
@@ -34,6 +34,47 @@ describe('cutMessagesAfterEntry', () => {
   it('找不到 entryId 返回 null，避免误写长列表', () => {
     const messages = [user('1', 'a', 'u1'), assistant('2', 'r')];
     expect(cutMessagesAfterEntry(messages, 'missing', 'drop-target')).toBeNull();
+  });
+});
+
+describe('mergeLiveTail', () => {
+  const timed = (id: string, text: string, timestamp: number, streaming = false): ChatMessage => ({
+    kind: 'assistant',
+    id,
+    text,
+    thinking: '',
+    streaming,
+    timestamp,
+  });
+  const tool = (id: string, toolCallId: string, status: 'running' | 'done', result?: unknown): ChatMessage => ({
+    kind: 'tool',
+    id,
+    toolCallId,
+    toolName: 'bash',
+    args: { command: 'ls' },
+    result,
+    status,
+  });
+
+  it('快照里已有的原位更新，没落盘的按顺序接在后面', () => {
+    const base = [user('u', 'task'), timed('a1', 'done answer', 1), tool('t1', 'call-1', 'running')];
+    const tail = [tool('x1', 'call-1', 'done', 'ok'), timed('x2', 'still typing', 2, true), tool('x3', 'call-2', 'running')];
+    const merged = mergeLiveTail(base, tail);
+    expect(merged.map((m) => m.id)).toEqual(['u', 'a1', 't1', 'x2', 'x3']);
+    expect(merged[2]).toMatchObject({ status: 'done', result: 'ok', args: { command: 'ls' } });
+  });
+
+  it('同一条助手消息两边都有时不重复，保留更新的那份', () => {
+    const merged = mergeLiveTail([timed('a1', 'par', 5)], [timed('x1', 'partial more', 5, true)]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: 'a1', text: 'partial more', streaming: true });
+  });
+
+  it('空尾巴原样返回快照，空快照返回尾巴', () => {
+    const base = [user('u', 'task')];
+    expect(mergeLiveTail(base, [])).toBe(base);
+    const tail = [timed('x', 't', 1, true)];
+    expect(mergeLiveTail([], tail)).toBe(tail);
   });
 });
 

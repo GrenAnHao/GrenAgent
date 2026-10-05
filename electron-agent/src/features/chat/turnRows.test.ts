@@ -71,6 +71,28 @@ describe('buildTurnRows', () => {
     expect(mid.kind === 'segment' && mid.segment.kind === 'tool' && mid.segment.id).toBe('myskill');
   });
 
+  it('图片读取单独成行，并打断前后的文件连读', () => {
+    const imageRead = (id: string): TimelineSegment => ({
+      kind: 'tool',
+      id,
+      toolCallId: `c-${id}`,
+      toolName: 'read',
+      args: { path: `${id}.png` },
+      result: { content: [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }] },
+      status: 'done',
+    });
+    const rows = buildTurnRows([
+      tool('r1', 'read'),
+      tool('r2', 'read'),
+      imageRead('shot'),
+      tool('r3', 'read'),
+      tool('r4', 'read'),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(['context', 'segment', 'context']);
+    const mid = rows[1];
+    expect(mid?.kind === 'segment' && mid.segment.kind === 'tool' && mid.segment.id).toBe('shot');
+  });
+
   it('search tools break a read run instead of merging into it', () => {
     const rows = buildTurnRows([
       tool('r1', 'read'),

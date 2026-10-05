@@ -1,5 +1,8 @@
 import { Copy, Eye, EyeOff, PencilLine, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import type { ConfirmOptions } from '../../../components/askConfirm';
 import type { MessageActionContext, MessageActionItem, MessageActionKey, Notify } from './types';
+
+type Ask = (options: ConfirmOptions) => Promise<boolean>;
 
 /**
  * 解析单个 slot 为动作项。copy 为真实现（写剪贴板 + 提示）；
@@ -11,6 +14,7 @@ export function buildActionItem(
   slot: MessageActionKey,
   ctx: MessageActionContext,
   notify: Notify,
+  ask?: Ask,
 ): MessageActionItem {
   switch (slot) {
     case 'copy':
@@ -68,9 +72,13 @@ export function buildActionItem(
         danger: true,
         onClick:
           entryId && handler
-            ? () => {
-                if (!window.confirm('确认删除这条消息及其后的内容？')) return;
-                void handler(entryId);
+            ? async () => {
+                const ok = await (ask ?? (async () => true))({
+                  title: '确认删除这条消息及其后的内容？',
+                  danger: true,
+                });
+                if (!ok) return;
+                await handler(entryId);
               }
             : undefined,
       };
@@ -97,9 +105,14 @@ export function buildActionItem(
         disabled: !entryId || !handler,
         onClick:
           entryId && handler
-            ? () => {
-                if (!window.confirm('确认回退到此？该条及其后的内容将被删除，原文会放入输入框。')) return;
-                void handler(entryId, ctx.text);
+            ? async () => {
+                const ok = await (ask ?? (async () => true))({
+                  title: '确认回退到此？',
+                  content: '该条及其后的内容将被删除，原文会放入输入框。',
+                  danger: true,
+                });
+                if (!ok) return;
+                await handler(entryId, ctx.text);
               }
             : undefined,
       };

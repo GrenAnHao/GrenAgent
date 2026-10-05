@@ -185,7 +185,7 @@ function Gallery() {
           <ToolExecution toolName="read" args={{ path: '.claude/skills/tdd/SKILL.md' }} result={toolResult('# TDD\nred-green-refactor')} status="done" />
         </Item>
         <Item label="bash · done">
-          <ToolExecution toolName="bash" args={{ command: 'npx vitest run multi-agent/', description: 'Run multi-agent tests' }} result={toolResult('Test Files  8 passed | 1 skipped\n     Tests  88 passed | 2 skipped')} status="done" />
+          <ToolExecution toolName="bash" args={{ command: 'npx vitest run multi-agent/', description: 'Run multi-agent tests' }} result={toolResult('Test Files  8 passed | 1 skipped\n     Tests  88 passed | 2 skipped')} status="done" startedAt={1} durationMs={80_000} />
         </Item>
         <Item label="bash · error">
           <ToolExecution toolName="bash" args={{ command: 'npm test', description: 'Run package tests' }} result={toolResult('Error: worker agent unavailable')} status="error" />
@@ -197,7 +197,7 @@ function Gallery() {
           <ToolExecution toolName="edit" args={{ path: 'src/features/tools/extensionCards.tsx' }} result={withDetails({ diff: '--- a/extensionCards.tsx\n+++ b/extensionCards.tsx\n@@\n-  font-weight: 500;\n+  font-weight: 600;' })} status="done" />
         </Item>
         <Item label="bash · running（自动展开）">
-          <ToolExecution toolName="bash" args={{ command: 'npm run build', description: 'Build the package' }} result={undefined} status="running" />
+          <ToolExecution toolName="bash" args={{ command: 'npm run build', description: 'Build the package' }} result={undefined} status="running" startedAt={Date.now() - 12_000} />
         </Item>
       </Section>
 
@@ -244,8 +244,8 @@ function Gallery() {
         <Item label="web_search · 空结果">
           {renderExtensionCard({ toolName: 'web_search', args: { query: 'zzz-no-hit' }, result: withDetails({ query: 'zzz-no-hit', results: [] }), status: 'done' })}
         </Item>
-        <Item label="search · 多引擎聚合">
-          {renderExtensionCard({ toolName: 'search', args: { query: 'react 19 use hook' }, result: withDetails({ query: 'react 19 use hook', engines: ['bing', 'duckduckgo'], results: webResults.slice(0, 2) }), status: 'done' })}
+        <Item label="web_search_multi · 多引擎聚合">
+          {renderExtensionCard({ toolName: 'web_search_multi', args: { query: 'react 19 use hook' }, result: withDetails({ query: 'react 19 use hook', engines: ['bing', 'duckduckgo'], results: webResults.slice(0, 2) }), status: 'done' })}
         </Item>
         <Item label="fetch_url · done（卡片可点开右坞）">
           {renderExtensionCard({ toolName: 'fetch_url', args: { url: 'https://ui.lobehub.com' }, result: withDetails({ url: 'https://ui.lobehub.com', title: 'LobeHub UI 组件库', chars: 5234, crawler: 'jina' }, '一套 React 组件、合理的 UI 设计与友好的开发体验。base-ui 无头基元优先。'), status: 'done' })}

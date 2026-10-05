@@ -94,7 +94,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   name: css`
     overflow: hidden;
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     text-overflow: ellipsis;
     white-space: nowrap;

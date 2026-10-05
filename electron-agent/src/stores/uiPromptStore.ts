@@ -9,6 +9,8 @@ import type { ExtensionUiRequest } from '../lib/pi';
 export interface UiPromptItem {
   workspace: string;
   request: ExtensionUiRequest;
+  /** 发起请求的会话。同项目多个会话同时在跑时用来把请求留在它自己的会话上。 */
+  sessionPath?: string;
 }
 
 interface UiPromptState {

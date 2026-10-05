@@ -47,16 +47,19 @@ interface NoticeSplitPillProps {
   content: string;
   icon: LucideIcon;
   testId: string;
+  /** 按通知类型把首行改写成给人看的摘要；模型看到的正文不变。 */
+  formatTitle?: (firstLine: string) => string;
 }
 
-function NoticeSplitPillInner({ content, icon, testId }: NoticeSplitPillProps) {
+function NoticeSplitPillInner({ content, icon, testId, formatTitle }: NoticeSplitPillProps) {
   const [expanded, setExpanded] = useState(false);
   const { title, body } = useMemo(() => {
     const newline = content.search(/\r?\n/);
     const first = (newline === -1 ? content : content.slice(0, newline)).trim();
     const rest = newline === -1 ? '' : content.slice(newline).replace(/^\r?\n/, '');
-    return { title: first || content.trim(), body: rest || content };
-  }, [content]);
+    const head = first || content.trim();
+    return { title: formatTitle ? formatTitle(head) : head, body: rest || content };
+  }, [content, formatTitle]);
   return (
     <div data-testid={testId} style={{ paddingInlineStart: 4, maxWidth: '100%' }}>
       <MutedLine icon={icon} text={title} open={expanded} onToggle={() => setExpanded((v) => !v)} />

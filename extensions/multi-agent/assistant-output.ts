@@ -24,29 +24,42 @@ function mapStopReason(raw: string | undefined, aborted: boolean): SubagentStopR
   return "completed";
 }
 
+function contentBlocks(content: unknown): unknown[] {
+  if (typeof content === "string") return content.length > 0 ? [content] : [];
+  if (!Array.isArray(content)) return [];
+  return content.filter((block) => !!block && typeof block === "object");
+}
+
 /**
- * 从子会话消息列表抽出父模型应看到的最终正文（对齐 DSH assistant-output）：
- * 1. 最后一条非空 assistant
- * 2. 否则 streamingDelta
- * 3. 否则空 + error
+ * 对齐 DSH `finalAssistantOutput`：选最后一条内容非空的 assistant（thinking、toolCall
+ * 也算非空）。只有真正的空消息才不覆盖更早的输出。没有任何非空消息时，才用 streamingDelta。
+ * 选哪一条和 stopReason 无关；交给父代理的字符串只取这一条里的 text，不回退到更早的正文。
  */
 function extractFrom(
   messages: AssistantLike[],
   options: { streamingDelta?: string; aborted?: boolean },
 ): AssistantOutputResult {
+  let terminal: AssistantLike | undefined;
+  let selected: AssistantLike | undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "assistant") continue;
-    const text = assistantTextFromContent(m.content);
-    if (text.trim()) {
-      return { output: text, stopReason: mapStopReason(m.stopReason, !!options.aborted) };
-    }
+    const message = messages[i];
+    if (message.role !== "assistant") continue;
+    if (!terminal) terminal = message;
+    if (!selected && contentBlocks(message.content).length > 0) selected = message;
+    if (terminal && selected) break;
   }
+
+  const stopReason = mapStopReason(terminal?.stopReason, !!options.aborted);
+  if (selected) {
+    return { output: assistantTextFromContent(selected.content).trim(), stopReason };
+  }
+
   const delta = options.streamingDelta?.trim() ?? "";
   if (delta) {
-    return { output: delta, stopReason: options.aborted ? "aborted" : "completed" };
+    return { output: delta, stopReason: terminal ? stopReason : options.aborted ? "aborted" : "completed" };
   }
-  return { output: "", stopReason: options.aborted ? "aborted" : "error" };
+  if (stopReason === "aborted") return { output: "", stopReason: "aborted" };
+  return { output: "", stopReason: "error" };
 }
 
 export function extractAssistantOutput(

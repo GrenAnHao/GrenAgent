@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getAgentMode } from "../agent-mode/modes.js";
@@ -9,6 +8,8 @@ import { clearPendingDenials, consumePendingDenial, peekPendingDenial } from "..
 import { createSandboxProvider } from "../_shared/sandbox/provider.js";
 import { resolvePreset } from "../_shared/sandbox/resolvePreset.js";
 import type { FileSandboxMode } from "../_shared/sandbox/types.js";
+import { jobs } from "../jobs/service.js";
+import { createGrenBashTool } from "./bashTool.js";
 import { withBashUiDescription } from "./bashUiDescription.js";
 import { annotateWindowsBashTool } from "./windowsBashPrompt.js";
 
@@ -40,10 +41,10 @@ export default function (pi: ExtensionAPI) {
     sessionId = ctx.sessionManager.getSessionId();
   });
 
-  // createBashToolDefinition 返回 ToolDefinition，才能 registerTool（createBashTool 返回 AgentTool）。
-  // 包根已导出该函数，无需深导入 dist/core/tools/bash.js。构造期 cwd 只是 SDK 兜底，执行时用 ctx.cwd。
+  // 自有 bash（不再用 pi 的 createBashToolDefinition）：契约照 pi 1.0.2，执行照 DSH——每次调用都是 jobs 里的 bash job，
+  // 前台等到 timeout 仍在跑就转后台。进程走同一套沙箱 operations。
   pi.registerTool(
-    withBashUiDescription(annotateWindowsBashTool(createBashToolDefinition(cwd, { operations }))),
+    withBashUiDescription(annotateWindowsBashTool(createGrenBashTool({ jobs, exec: operations.exec }))),
   );
 
   pi.on("user_bash", () => ({ operations }));

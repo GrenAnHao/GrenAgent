@@ -30,9 +30,27 @@ function findExisting(region: DockRegion, kind: LauncherKind, workspace?: string
   });
 }
 
+let tabNonce = 0;
+
 function uniqueId(canonical: string): string {
-  const taken = useDockStore.getState().tabs.some((t) => t.id === canonical);
-  return taken ? `${canonical}#${Date.now()}` : canonical;
+  const tabs = useDockStore.getState().tabs;
+  if (!tabs.some((t) => t.id === canonical)) return canonical;
+  tabNonce += 1;
+  return uniqueId(`${canonical}#${tabNonce}`);
+}
+
+function isBrowserIdTaken(id: string): boolean {
+  const { tabs, closedTabs } = useDockStore.getState();
+  return tabs.some((t) => t.id === id) || closedTabs.some((c) => c.id === id);
+}
+
+export function nextBrowserTabId(): string {
+  let id: string;
+  do {
+    tabNonce += 1;
+    id = `browser:${tabNonce}`;
+  } while (isBrowserIdTaken(id));
+  return id;
 }
 
 function activateExisting(tab: DockTab, region: DockRegion): void {
@@ -49,12 +67,12 @@ export function openLauncherTab(input: {
 
   if (kind === 'browser') {
     useDockStore.getState().addTab({
-      id: `browser-${Date.now()}`,
+      id: nextBrowserTabId(),
       kind: 'browser',
       region,
       title: '浏览器',
       closable: true,
-      payload: { url: 'https://example.com', title: '浏览器' },
+      payload: { url: 'about:blank', title: '浏览器' },
     });
     return;
   }

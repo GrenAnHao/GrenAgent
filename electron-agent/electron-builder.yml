@@ -3,12 +3,18 @@ productName: GrenAgent
 directories:
   output: release
   buildResources: build
+# 复制 pnpm 已安装的 Electron。仓库在 OneDrive 下时，zip 解压目录改名会返回 EPERM。
+electronDist: node_modules/electron/dist
 files:
   - dist/**
   - out/**
   - package.json
   - build/icon.ico
 asar: true
+# @homebridge/node-pty-prebuilt-multiarch 是 Node-API 预编译包。
+# 发布的 npm 包没有 src/ 与 deps/winpty，electron-rebuild 看到 binding.gyp
+# 后回退 node-gyp 会因 winpty.gyp 缺失失败。生产依赖里只有这一个 binding.gyp。
+npmRebuild: false
 electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
@@ -28,7 +34,12 @@ asarUnpack:
   # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out/main。
   # asar:true 下 exe 必须 unpack，否则无法 spawn。
   - out/main/pi-sandbox-win.exe
+  - out/main/pi-sandbox-launch.exe
   - out/main/chunks/pi-sandbox-win.exe
+  - out/main/chunks/pi-sandbox-launch.exe
+  - node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
+  - node_modules/quickjs-wasi/quickjs.wasm
+  - node_modules/.pnpm/quickjs-wasi@*/node_modules/quickjs-wasi/quickjs.wasm
 afterPack: ./scripts/package-codegraph.cjs
 win:
   icon: build/icon.ico

@@ -52,7 +52,7 @@ describe('enableFullAccess', () => {
     const pending = enableFullAccess('/ws');
     await confirmFullAccess();
     await pending;
-    expect(setApproval).toHaveBeenCalledWith('/ws', 'full');
+    expect(setApproval).toHaveBeenCalledWith('/ws', 'full', null);
     expect(useApprovalStore.getState().byWorkspace['/ws']).toBe('full');
     expect(useFullAccessConfirmStore.getState().open).toBe(false);
   });

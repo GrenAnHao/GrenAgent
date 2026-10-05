@@ -32,6 +32,7 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
 }
 
 .gren-browser {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -49,7 +50,7 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   background: var(--ant-color-bg-elevated, #fff);
 }
 
-.gren-browser-toolbar button {
+.gren-browser-toolbar > button {
   display: inline-flex;
   width: 28px;
   height: 28px;
@@ -62,14 +63,19 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   cursor: pointer;
 }
 
-.gren-browser-toolbar button:hover:not(:disabled) {
+.gren-browser-toolbar > button:hover:not(:disabled) {
   background: var(--ant-color-fill-tertiary, #f2f4f7);
   color: var(--ant-color-text, #111827);
 }
 
-.gren-browser-toolbar button:disabled {
+.gren-browser-toolbar > button:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+.gren-browser-toolbar > button[aria-pressed='true'] {
+  background: var(--ant-color-fill-tertiary, #f2f4f7);
+  color: var(--ant-color-text, #111827);
 }
 
 .gren-browser-address {
@@ -97,6 +103,144 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   font-size: 12px;
 }
 
+.gren-browser-address input::placeholder {
+  color: var(--ant-color-text-tertiary, #98a2b3);
+}
+
+.gren-browser-address-blank input:not(:focus) {
+  text-align: center;
+}
+
+.gren-browser-address-wrap {
+  position: relative;
+  z-index: 20;
+  min-width: 0;
+  flex: 1;
+}
+
+.gren-browser-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  display: flex;
+  max-height: min(60vh, 440px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary, #303030);
+  border-radius: 8px;
+  background: var(--ant-color-bg-elevated, #1f1f1f);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.gren-browser-suggest-list {
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.gren-browser-suggest-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--ant-color-text-tertiary, #9aa0a6);
+  font-size: 12px;
+}
+
+.gren-browser-suggest-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.gren-browser-suggest-item-active,
+.gren-browser-suggest-item:hover {
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.08));
+}
+
+.gren-browser-suggest-favicon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 2px;
+}
+
+.gren-browser-suggest-item > svg {
+  flex: 0 0 16px;
+  color: var(--ant-color-text-tertiary, #9aa0a6);
+}
+
+.gren-browser-suggest-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gren-browser-suggest-title,
+.gren-browser-suggest-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gren-browser-suggest-title {
+  color: var(--ant-color-text, #e8eaed);
+  font-size: 13px;
+}
+
+.gren-browser-suggest-url {
+  color: var(--ant-color-text-tertiary, #9aa0a6);
+  font-size: 12px;
+}
+
+.gren-browser-suggest-switch {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ant-color-text-secondary, #9aa0a6);
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.gren-browser-suggest-switch:hover {
+  color: var(--ant-color-text, #e8eaed);
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.12));
+}
+
+.gren-browser-suggest-footer {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--ant-color-border-secondary, #303030);
+}
+
+.gren-browser-suggest-filter {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ant-color-text-secondary, #9aa0a6);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.gren-browser-suggest-filter:hover,
+.gren-browser-suggest-filter-active {
+  color: var(--ant-color-text, #e8eaed);
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.08));
+}
+
 .gren-browser-content {
   position: relative;
   display: flex;
@@ -104,20 +248,107 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   flex: 1;
 }
 
-.gren-browser-status {
+.gren-browser-suggest-dismiss {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ant-color-text-secondary, #667085);
-  background: var(--ant-color-bg-container, #fff);
-  font-size: 12px;
-  pointer-events: none;
+  z-index: 15;
 }
 
-.gren-browser-error {
-  color: var(--ant-color-error, #d92d20);
+.gren-browser-spin {
+  animation: gren-browser-spin 0.8s linear infinite;
+}
+
+@keyframes gren-browser-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.gren-browser-error-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20vh 48px 48px;
+  overflow: auto;
+  background: var(--gren-bg-1, var(--ant-color-bg-container, #202124));
+}
+
+.gren-browser-error-sheet {
+  display: flex;
+  width: min(100%, 540px);
+  flex-direction: column;
+  align-items: flex-start;
+  color: var(--gren-fg, #e8eaed);
+}
+
+.gren-browser-error-icon {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  margin: 0 0 24px;
+  color: var(--gren-acc, #8ab4f8);
+}
+
+.gren-browser-error-title {
+  margin: 0 0 12px;
+  font-size: 1.2em;
+  font-weight: 500;
+  line-height: 1.2em;
+  color: var(--gren-fg, #e8eaed);
+}
+
+.gren-browser-error-summary {
+  margin: 0;
+  font-size: 1em;
+  line-height: 1.6;
+  color: var(--gren-fg-muted, #9aa0a6);
+}
+
+.gren-browser-error-try {
+  margin-top: 18px;
+  font-size: 1em;
+  line-height: 1.6;
+  color: var(--gren-fg-muted, #9aa0a6);
+}
+
+.gren-browser-error-try p {
+  margin: 0;
+}
+
+.gren-browser-error-try ul {
+  margin: 0;
+  padding-left: 1.25em;
+}
+
+.gren-browser-error-try li {
+  margin: 0;
+}
+
+.gren-browser-error-code {
+  margin-top: 24px;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  color: var(--gren-fg-muted, #9aa0a6);
+}
+
+.gren-browser-error-reload {
+  margin-top: 51px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--gren-fg, #e8eaed);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.gren-browser-error-reload:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .gren-browser-content webview {
@@ -127,4 +358,181 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   min-height: 0;
   flex: 1;
   border: 0;
+}
+
+.gren-browser-viewport {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.gren-browser-viewport-bar {
+  display: flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-block-end: 1px solid var(--ant-color-border-secondary, #303030);
+  color: var(--ant-color-text-secondary, #9aa0a6);
+  font-size: 12px;
+}
+
+.gren-browser-viewport-bar input {
+  width: 64px;
+  height: 22px;
+  border: 1px solid var(--ant-color-border-secondary, #3c4043);
+  border-radius: 4px;
+  color: var(--ant-color-text, #e8eaed);
+  background: var(--ant-color-bg-layout, #292a2d);
+  text-align: center;
+  font: inherit;
+}
+
+.gren-browser-viewport-canvas {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.gren-browser-viewport-canvas-active {
+  overflow: auto;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20px;
+  background: var(--gren-bg-0, var(--ant-color-bg-layout, #171717));
+}
+
+.gren-browser-viewport-frame {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.gren-browser-viewport-canvas-active .gren-browser-viewport-frame {
+  flex: none;
+  border: 1px solid var(--ant-color-border-secondary, #3c4043);
+  background: var(--gren-bg-1, var(--ant-color-bg-container, #202124));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.gren-browser-viewport-handle {
+  position: absolute;
+  z-index: 6;
+}
+
+.gren-browser-viewport-handle-e {
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.gren-browser-viewport-handle-s {
+  right: 0;
+  bottom: -3px;
+  width: 100%;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.gren-browser-viewport-handle-se {
+  right: -4px;
+  bottom: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.gren-browser-ntp {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 48px 24px 72px;
+  overflow: auto;
+  background: var(--gren-bg-1, var(--ant-color-bg-container, #202124));
+}
+
+.gren-browser-ntp-logo {
+  display: flex;
+  color: var(--gren-fg, #e8eaed);
+}
+
+.gren-browser-ntp-search {
+  display: flex;
+  width: min(100%, 560px);
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border: 1px solid var(--ant-color-border-secondary, #3c4043);
+  border-radius: 22px;
+  color: var(--ant-color-text-tertiary, #9aa0a6);
+  background: var(--ant-color-bg-elevated, #292a2d);
+  cursor: text;
+  font-size: 14px;
+}
+
+.gren-browser-ntp-search:hover {
+  border-color: var(--ant-color-border, #5f6368);
+}
+
+.gren-browser-ntp-shortcuts {
+  display: grid;
+  width: min(100%, 560px);
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px;
+}
+
+.gren-browser-ntp-shortcut {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px 12px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--ant-color-text-secondary, #9aa0a6);
+  background: transparent;
+  cursor: pointer;
+}
+
+.gren-browser-ntp-shortcut:hover {
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--ant-color-text, #e8eaed);
+}
+
+.gren-browser-ntp-favicon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.gren-browser-ntp-shortcut-title,
+.gren-browser-ntp-shortcut-url {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gren-browser-ntp-shortcut-title {
+  color: var(--ant-color-text, #e8eaed);
+  font-size: 12px;
+}
+
+.gren-browser-ntp-shortcut-url {
+  color: var(--ant-color-text-tertiary, #9aa0a6);
+  font-size: 11px;
 }

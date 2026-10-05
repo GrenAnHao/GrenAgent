@@ -1,8 +1,8 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import type { AgentSession, PromptOptions } from '../../../cli/src/pi-sdk.js';
+import { SessionManager, type AgentSession, type PromptOptions } from '../../../cli/src/pi-sdk.js';
 import { snapshotSessionModel, type WorkspaceHandle } from '../agent/workspaceHandle.js';
 import type { SessionEventMeta } from '../pi/eventAdapter';
 import type { Thread, Turn } from './appServer/types';
@@ -13,9 +13,10 @@ import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../
 import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
-import { messagesWithEntryIds } from './messagesWithEntryIds.js';
+import { messagesWithEntryIds, type SessionProjectionLike } from './messagesWithEntryIds.js';
 import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
 import { completeAskUser, finishCompleteAskUser } from '../agent/completeAskUser.js';
+import { withEstimatedContextUsage } from './contextUsageEstimate.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -25,6 +26,7 @@ const commandTypes = {
   agent_steer: 'steer',
   agent_follow_up: 'follow_up',
   agent_abort: 'abort',
+  agent_take_steering: 'abort',
   agent_set_model: 'set_model',
   agent_cycle_model: 'cycle_model',
   agent_get_available_models: 'get_available_models',
@@ -60,6 +62,13 @@ export interface AgentHostPort {
   get(workspace: string): WorkspaceHandlePort | undefined;
   close(workspace: string): Promise<void>;
   workspaces?(): string[];
+  /** 同一项目里同时活着的 handle。没有时退回 get。 */
+  list?(workspace: string): WorkspaceHandlePort[];
+  /** 再开一个 handle，不替换当前前景。 */
+  openAdditional?(workspace: string, cwd: string): Promise<WorkspaceHandlePort>;
+  focus?(workspace: string, handle: WorkspaceHandlePort): void;
+  /** 只拆这一个 handle；前景是它时落到剩下的那个。 */
+  evict?(workspace: string, handle: WorkspaceHandlePort): Promise<void>;
 }
 export type WorkspaceHandlePort = Pick<WorkspaceHandle,
   'session' | 'prompt' | 'getState' | 'getCommands' | 'newSession' | 'switchSession' | 'fork' | 'reload' | 'ui' | 'currentTurnOrigin' | 'dispose'>;
@@ -161,6 +170,41 @@ export class PiRuntimeService {
     };
   }
 
+  /**
+   * 渲染进程热更新后内存里的 isStreaming 会丢。这里把主进程仍在跑的交互回合交回去，
+   * 供界面加载完重新点亮停止按钮和侧边栏运行态。
+   */
+  listRunningTurns(): Array<{ workspace: string; sessionId?: string; sessionPath?: string }> {
+    const rows: Array<{ workspace: string; sessionId?: string; sessionPath?: string }> = [];
+    const covered = new Set<string>();
+    for (const workspace of this.options.agentHost.workspaces?.() ?? []) {
+      for (const handle of this.handlesOf(workspace)) {
+        const session = handle.session;
+        if (!session?.isStreaming) continue;
+        const sessionId = typeof session.sessionId === 'string' ? session.sessionId : undefined;
+        const sessionPath = typeof session.sessionFile === 'string' ? session.sessionFile : undefined;
+        covered.add(this.sessionKey(workspace, sessionId));
+        rows.push({
+          workspace,
+          ...(sessionId ? { sessionId } : {}),
+          ...(sessionPath ? { sessionPath } : {}),
+        });
+      }
+    }
+    for (const active of this.activeTurns.values()) {
+      if (active.source !== 'interactive') continue;
+      const key = this.sessionKey(active.workspace, active.sessionId);
+      if (covered.has(key)) continue;
+      covered.add(key);
+      rows.push({
+        workspace: active.workspace,
+        ...(active.sessionId ? { sessionId: active.sessionId } : {}),
+        ...(active.sessionPath ? { sessionPath: active.sessionPath } : {}),
+      });
+    }
+    return rows;
+  }
+
   async warmWorkspace(workspace: string): Promise<void> {
     await this.openInteractive(workspace);
   }
@@ -175,23 +219,50 @@ export class PiRuntimeService {
     await this.options.agentHost.close(workspace);
   }
 
-  async send(workspace: string, command: string, args: Record<string, unknown>): Promise<unknown> {
+  async send(workspace: string, command: string, rawArgs: Record<string, unknown>): Promise<unknown> {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
+    // targetSessionPath 只是路由提示：渲染层说明这条命令属于哪份会话。它不参与 resolveSession，
+    // 否则会把 currentSessionByWorkspace 改成后台那份。
+    const targetPath = readOptionalString(rawArgs.targetSessionPath);
+    const { targetSessionPath: _targetSessionPath, ...args } = rawArgs;
     const authorization = await this.authorize(workspace, command, args);
     if (authorization.status === 'denied') throw new Error(`Pi operation denied: ${command}`);
     if (authorization.status === 'blocked') return authorization;
     if (command === 'agent_set_mode') {
-      return this.writeAgentMode(workspace, args.mode);
+      return this.writeAgentMode(workspace, args.mode, targetPath);
     }
     if (command === 'agent_set_approval') {
-      return this.writeApprovalPolicy(workspace, args.level);
+      return this.writeApprovalPolicy(workspace, args.level, targetPath);
     }
     if (command === 'agent_exclude_entry' || command === 'agent_restore_entry') {
       return this.writeContextExclusion(workspace, command === 'agent_exclude_entry' ? 'add' : 'remove', args.timestamp);
     }
-    if (SESSION_REPLACING_COMMANDS.includes(command) && this.hasInteractiveTurn(workspace)) {
-      throw new Error('SESSION_BUSY');
+    if (targetPath && ROUTED_COMMANDS.has(command)) {
+      const owner = this.handleOwningPath(workspace, targetPath);
+      if (owner && owner !== this.options.agentHost.get(workspace)) {
+        return this.sendRouted(workspace, owner, command, args);
+      }
+      if (!owner) {
+        // 目标会话已经不在任何 handle 上：停止 / 取引导没有可作用的回合，不能落到别的会话。
+        if (command === 'agent_abort') return undefined;
+        if (command === 'agent_take_steering') return { steering: [] };
+        // 要快照的会话已经不在 handle 上（后台跑完被拆了）：读它自己的会话文件，不能拿前景那份顶替。
+        if (command === 'agent_get_messages') return this.readDetachedMessages(workspace, targetPath);
+        if (PROMPT_COMMANDS.has(command)) {
+          const switched = await this.send(workspace, 'agent_switch_session', { sessionPath: targetPath });
+          if (isCancelledResult(switched)) throw new Error('SESSION_SWITCH_CANCELLED');
+        }
+      }
+    }
+    if (command === 'agent_switch_session') {
+      const focused = await this.focusExistingSession(workspace, args);
+      if (focused) return focused;
+    }
+    if (SESSION_REPLACING_COMMANDS.includes(command) && this.foregroundIsBusy(workspace)) {
+      // 换会话 / 新建可以停靠正在跑的 handle，再开一个。fork / rewind 会改正在跑的那份，仍然拒绝。
+      const canPark = command === 'agent_switch_session' || command === 'agent_new_session';
+      if (!canPark || !await this.parkForeground(workspace)) throw new Error('SESSION_BUSY');
     }
     const session = await this.resolveSessionForCommand(workspace, command, args);
     const sourceSessionId = session.sessionId;
@@ -248,6 +319,21 @@ export class PiRuntimeService {
     if (command === 'agent_complete_ask_user') {
       const toolCallId = args.toolCallId;
       if (typeof toolCallId !== 'string' || !toolCallId) throw new Error('toolCallId must be a non-empty string');
+      // 界面重载后卡片走补写，但原回合可能还堵在 ctx.ui.input 上。这时把答案交回那次请求，
+      // 不能再 append 一条工具结果。
+      if (handle.session.isStreaming) {
+        const requestId = handle.ui.pendingAskUserRequestId();
+        if (!requestId) throw new Error('ask_user completion requires an idle session');
+        handle.ui.respond(requestId, {
+          ...(args.cancelled === true ? { cancelled: true } : {}),
+          ...(typeof args.value === 'string' ? { value: args.value } : {}),
+        });
+        const sessionFile = handle.session.sessionFile;
+        if (typeof sessionFile === 'string' && sessionFile) {
+          return finishCompleteAskUser('ok', () => deleteAskUserDraft(sessionFile));
+        }
+        return 'ok';
+      }
       const result = await completeAskUser(handle.session, {
         toolCallId,
         value: typeof args.value === 'string' ? args.value : undefined,
@@ -297,12 +383,105 @@ export class PiRuntimeService {
     }
   }
 
+  /**
+   * 命令属于停在后台的那份会话：直接打到它的 handle，前景和 currentSessionByWorkspace 都不动。
+   * 回合登记按这份会话自己的 sessionId，事件回来时才对得上。
+   */
+  private async sendRouted(workspace: string, handle: WorkspaceHandlePort, command: string, args: Record<string, unknown>): Promise<unknown> {
+    const session = this.contextOf(handle);
+    const stateKey = this.sessionKey(workspace, session.sessionId);
+    const rpcArgs = stripSessionArgs(args);
+    if (command === 'agent_prompt' && shouldFlushFollowUp(args, this.activeTurns.has(stateKey))) {
+      return this.flushFollowUpOn(workspace, handle, session);
+    }
+    if (command === 'agent_prompt' && shouldEnqueuePrompt(args, this.activeTurns.has(stateKey), this.queuedTurns.get(stateKey)?.length ?? 0)) {
+      return this.enqueueTurn(workspace, readInput(args), typeof args.permissionProfile === 'string' ? args.permissionProfile : 'workspace', session);
+    }
+    if (command === 'agent_get_state') return this.ownedState(workspace, handle.getState());
+    const adapter = this.options.threadStore && shouldTrackTurn(command, args)
+      ? await this.prepareTurn(workspace, command, args, session)
+      : undefined;
+    try {
+      return await this.runOnHandle(handle, command as PiCommand, rpcArgs, 'main');
+    } catch (error) {
+      if (adapter && command === 'agent_prompt') {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.options.threadStore!.updateTurn(adapter.turnId, { status: 'failed', completedAt: Date.now(), error: message });
+        this.emitRuntimeEvent(workspace, session, { type: 'turn.failed', error: message });
+        this.activeTurns.delete(stateKey);
+      }
+      throw error;
+    }
+  }
+
+  /** 只读地投影一份不在任何 handle 上的会话。路径必须属于这个项目。 */
+  private async readDetachedMessages(workspace: string, sessionPath: string): Promise<{ messages: unknown[] }> {
+    const identity = await readSessionIdentity(sessionPath, workspace);
+    if (!existsSync(identity.sessionPath)) return { messages: [] };
+    const manager = SessionManager.open(identity.sessionPath);
+    return { messages: messagesWithEntryIds(manager.buildSessionProjection() as unknown as SessionProjectionLike) };
+  }
+
+  private contextOf(handle: WorkspaceHandlePort): SessionContext {
+    const sessionId = typeof handle.session.sessionId === 'string' && handle.session.sessionId ? handle.session.sessionId : undefined;
+    const sessionPath = sessionFileOf(handle);
+    return { ...(sessionId ? { sessionId } : {}), ...(sessionPath ? { sessionPath } : {}), source: 'interactive' };
+  }
+
+  private handleOwningPath(workspace: string, sessionPath: string): WorkspaceHandlePort | undefined {
+    return this.handlesOf(workspace).find((handle) => {
+      const file = sessionFileOf(handle);
+      return Boolean(file && sameSessionPath(file, sessionPath));
+    });
+  }
+
+  /** 按会话身份找停在后台的 handle；前景或找不到时返回 undefined，走原来的前景路径。 */
+  private parkedHandleFor(workspace: string, session: SessionContext): WorkspaceHandlePort | undefined {
+    const foreground = this.options.agentHost.get(workspace);
+    const owner = this.handlesOf(workspace).find((handle) => {
+      if (session.sessionPath) {
+        const file = sessionFileOf(handle);
+        if (file && sameSessionPath(file, session.sessionPath)) return true;
+      }
+      return Boolean(session.sessionId && handle.session.sessionId === session.sessionId);
+    });
+    return owner && owner !== foreground ? owner : undefined;
+  }
+
+  /** 停在后台的会话跑完、没有排队也没有等待中的询问时拆掉它。前景和最后一个 handle 永远保留。 */
+  private async releaseIdleParked(workspace: string, session: SessionContext): Promise<void> {
+    const evict = this.options.agentHost.evict;
+    if (!evict) return;
+    const handle = this.parkedHandleFor(workspace, session);
+    if (!handle || this.handlesOf(workspace).length < 2) return;
+    try { await handle.session.waitForIdle?.(); } catch { return; }
+    const stateKey = this.sessionKey(workspace, session.sessionId);
+    if (handle === this.options.agentHost.get(workspace)) return;
+    if (!this.handlesOf(workspace).includes(handle) || this.handlesOf(workspace).length < 2) return;
+    if (handle.session.isStreaming || this.activeTurns.has(stateKey)) return;
+    if ((this.queuedTurns.get(stateKey)?.length ?? 0) > 0) return;
+    if ((handle.session.getFollowUpMessages?.() ?? []).length > 0) return;
+    const ui = handle.ui as { hasAnyPending?: () => boolean };
+    if (ui.hasAnyPending?.()) return;
+    await evict.call(this.options.agentHost, workspace, handle);
+  }
+
   async handlePiEvent(workspace: string, raw: Record<string, unknown>, sessionOrMetadata?: EventMeta, source?: 'interactive' | 'goal' | 'subagent'): Promise<void> {
     const eventSessionId = typeof sessionOrMetadata === 'string' ? sessionOrMetadata : sessionOrMetadata?.sessionId ?? readOptionalString(raw.sessionId);
     const eventSource = source ?? (typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.source : undefined);
     if (eventSource === 'subagent') return;
     const stateKey = this.findEventKey(workspace, eventSessionId);
-    if (!stateKey) return;
+    if (!stateKey) {
+      // 没有登记回合（未接 threadStore 或斜杠命令）时，后台会话跑完也要释放它的 handle。
+      if (raw.type === 'agent_end' && raw.willRetry !== true && eventSource !== 'goal') {
+        const eventPath = typeof sessionOrMetadata === 'object' ? sessionOrMetadata?.sessionPath : undefined;
+        void this.releaseIdleParked(workspace, {
+          ...(eventSessionId ? { sessionId: eventSessionId } : {}),
+          ...(eventPath ? { sessionPath: eventPath } : {}),
+        }).catch(() => {});
+      }
+      return;
+    }
     const active = this.activeTurns.get(stateKey);
     if (!active) return;
     if (eventSessionId && active.sessionId && eventSessionId !== active.sessionId) return;
@@ -350,6 +529,7 @@ export class PiRuntimeService {
         });
       } finally {
         await this.drainQueuedTurn(workspace, session).catch(() => {});
+        await this.releaseIdleParked(workspace, session).catch(() => {});
       }
     }
   }
@@ -391,14 +571,24 @@ export class PiRuntimeService {
   }
 
   async respondUi(workspace: string, response: Record<string, unknown>): Promise<void> {
-    const handle = this.options.agentHost.get(workspace);
-    if (!handle) return;
-    handle.ui.respond(readOptionalString(response.id) ?? '', response);
+    const requestId = readOptionalString(response.id) ?? '';
+    this.uiOwner(workspace, requestId)?.ui.respond(requestId, response);
   }
 
   async rejectUiRequest(workspace: string, _metadata: EventMeta | undefined, requestId: string): Promise<void> {
     if (!requestId.trim()) return;
-    this.options.agentHost.get(workspace)?.ui.respond(requestId, { cancelled: true });
+    this.uiOwner(workspace, requestId)?.ui.respond(requestId, { cancelled: true });
+  }
+
+  /** 哪个 handle 挂着这条 UI 请求。后台会话的确认 / 询问要回到它自己那份，找不到再落前景。 */
+  private uiOwner(workspace: string, requestId: string): WorkspaceHandlePort | undefined {
+    const handles = this.handlesOf(workspace);
+    const match = requestId ? handles.find((handle) => {
+      const ui = handle.ui as { hasPending?: (id: string) => boolean; pendingAskUserRequestId?: () => string | undefined };
+      if (typeof ui.hasPending === 'function') return ui.hasPending(requestId);
+      return typeof ui.pendingAskUserRequestId === 'function' && ui.pendingAskUserRequestId() === requestId;
+    }) : undefined;
+    return match ?? this.options.agentHost.get(workspace) ?? handles[0];
   }
 
   permissionProfile(workspace: string, sessionId?: string): string | undefined {
@@ -411,18 +601,8 @@ export class PiRuntimeService {
     const workspaces = this.options.agentHost.workspaces?.() ?? this.options.modelRuntimeHost.workspaces?.() ?? [];
     for (const workspace of workspaces) {
       try {
-        const handle = this.options.agentHost.get(workspace);
-        const snapshot = handle?.session.modelRuntime.getAvailableSnapshot() ?? [];
-        const current = handle?.session.model as { provider?: string; id?: string } | undefined;
-        const stillThere = Boolean(
-          current?.provider &&
-            current.id &&
-            snapshot.some((model) => model.provider === current.provider && model.id === current.id),
-        );
-        if (handle && current && !stillThere) {
-          const next = snapshot[0];
-          if (next) await handle.session.setModel(next);
-        }
+        // 停在后台的会话也要换上新快照，否则切回去还拿着旧的模型引用。
+        for (const handle of this.handlesOf(workspace)) await refreshHandleModel(handle);
         result.refreshed.push(workspace);
       } catch (error) {
         result.failed.push({ workspace, error: error instanceof Error ? error.message : String(error) });
@@ -475,9 +655,31 @@ export class PiRuntimeService {
     return { ok: true, op, timestamp };
   }
 
-  private async writeAgentMode(workspace: string, rawMode: unknown): Promise<{ ok: true; mode: string }> {
+  /**
+   * 模式 / 审批档按会话生效：带 targetSessionPath 时钉到那份会话（内存 + 会话条目），别的会话不动。
+   * 项目默认照旧写内存与盘（最近一次选择），只给草稿和之后新建的会话继承；已打开的会话各自钉住不跟。
+   */
+  private pinSessionControl(workspace: string, targetPath: string | undefined, patch: { mode?: string; approval?: string }): void {
+    if (!targetPath) return;
+    const handle = this.handleOwningPath(workspace, targetPath);
+    const sessionId = typeof handle?.session.sessionId === 'string' ? handle.session.sessionId : '';
+    if (!handle || !sessionId) return;
+    if (patch.mode && isAgentMode(patch.mode)) setAgentMode(patch.mode, workspace, sessionId);
+    const approval = patch.approval ? parseApproval(patch.approval) : undefined;
+    if (approval) setApprovalPolicy(approval, workspace, sessionId);
+    try {
+      handle.session.sessionManager?.appendCustomEntry?.('session-controls', patch);
+    } catch {
+      /* 内存已钉住；落条目失败只影响重启后的回读 */
+    }
+    if (patch.mode) handle.ui.context.setStatus('agent-mode', patch.mode);
+    if (approval) handle.ui.context.setStatus('approval-policy', approval);
+  }
+
+  private async writeAgentMode(workspace: string, rawMode: unknown, targetPath?: string): Promise<{ ok: true; mode: string }> {
     const mode = String(rawMode ?? '').trim().toLowerCase();
     if (!isAgentMode(mode)) throw new Error('INVALID_AGENT_MODE');
+    this.pinSessionControl(workspace, targetPath, { mode });
     setAgentMode(mode, workspace);
     const path = this.options.runtimeConfigPath;
     if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
@@ -490,9 +692,10 @@ export class PiRuntimeService {
     return { ok: true, mode };
   }
 
-  private async writeApprovalPolicy(workspace: string, rawLevel: unknown): Promise<{ ok: true; level: ApprovalPolicy }> {
+  private async writeApprovalPolicy(workspace: string, rawLevel: unknown, targetPath?: string): Promise<{ ok: true; level: ApprovalPolicy }> {
     const level = parseApproval(typeof rawLevel === 'string' ? rawLevel : String(rawLevel ?? ''));
     if (!level) throw new Error('INVALID_APPROVAL_POLICY');
+    this.pinSessionControl(workspace, targetPath, { approval: level });
     setApprovalPolicy(level, workspace);
     const path = this.options.runtimeConfigPath;
     if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
@@ -514,6 +717,11 @@ export class PiRuntimeService {
       case 'agent_steer': await s.steer(readInput(args), images); return undefined;
       case 'agent_follow_up': await s.followUp(readInput(args), images); return undefined;
       case 'agent_abort': await s.abort(); return undefined;
+      case 'agent_take_steering': {
+        const restored = s.clearQueue();
+        for (const item of restored.followUp) await s.followUp(item);
+        return { steering: restored.steering };
+      }
       case 'agent_set_model': {
         const model = s.modelRuntime.getAvailableSnapshot().find((m) => m.provider === args.provider && m.id === args.modelId);
         if (!model) throw new Error(`Model not found: ${String(args.provider)}/${String(args.modelId)}`);
@@ -529,7 +737,18 @@ export class PiRuntimeService {
       case 'agent_compact': return s.compact(typeof args.customInstructions === 'string' ? args.customInstructions : undefined);
       case 'agent_set_auto_compaction': s.setAutoCompactionEnabled(args.enabled === true); return undefined;
       case 'agent_abort_retry': s.abortRetry(); return undefined;
-      case 'agent_get_session_stats': return s.getSessionStats();
+      case 'agent_get_session_stats': {
+        let systemPrompt = '';
+        try {
+          systemPrompt = typeof s.systemPrompt === 'string' ? s.systemPrompt : '';
+        } catch {
+          systemPrompt = '';
+        }
+        return withEstimatedContextUsage(s.getSessionStats(), {
+          messages: s.messages,
+          systemPrompt,
+        });
+      }
       case 'agent_get_state': return handle.getState();
       case 'agent_get_messages': {
         const build = s.sessionManager?.buildSessionProjection;
@@ -622,6 +841,51 @@ export class PiRuntimeService {
     return this.options.agentHost.get(workspace) ?? await this.openInteractive(workspace);
   }
 
+  private handlesOf(workspace: string): WorkspaceHandlePort[] {
+    const listed = this.options.agentHost.list?.(workspace) ?? [];
+    if (listed.length > 0) return listed;
+    const current = this.options.agentHost.get(workspace);
+    return current ? [current] : [];
+  }
+
+  /** 目标会话已经在某个 handle 上时只切换前景，不调用 switchSession。 */
+  private async focusExistingSession(workspace: string, args: Record<string, unknown>): Promise<{ cancelled: false } | undefined> {
+    const targetPath = readOptionalString(args.sessionPath);
+    if (!targetPath) return undefined;
+    const current = this.options.agentHost.get(workspace) ?? await this.openInteractive(workspace);
+    const currentFile = sessionFileOf(current);
+    if (currentFile && sameSessionPath(currentFile, targetPath)) return { cancelled: false };
+    const owned = this.handlesOf(workspace).find((handle) => {
+      const file = sessionFileOf(handle);
+      return Boolean(file && sameSessionPath(file, targetPath));
+    });
+    if (!owned || owned === current) return undefined;
+    this.options.agentHost.focus?.(workspace, owned);
+    await this.refreshCurrentSession(workspace, this.handleOps(owned));
+    return { cancelled: false };
+  }
+
+  /** 前景正在跑时另开 handle 并把它设为前景。宿主不支持时返回 false，调用方抛 SESSION_BUSY。 */
+  private async parkForeground(workspace: string): Promise<boolean> {
+    const host = this.options.agentHost;
+    if (!host.openAdditional || !host.focus) return false;
+    const cwd = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
+    const extra = await host.openAdditional(workspace, cwd);
+    host.focus(workspace, extra);
+    return true;
+  }
+
+  private foregroundIsBusy(workspace: string): boolean {
+    const handle = this.options.agentHost.get(workspace);
+    if (handle?.session.isStreaming) return true;
+    const sessionId = typeof handle?.session.sessionId === 'string' ? handle.session.sessionId : undefined;
+    return [...this.activeTurns.values()].some((turn) => {
+      if (turn.workspace !== workspace || turn.source !== 'interactive') return false;
+      if (!turn.sessionId || !sessionId) return true;
+      return turn.sessionId === sessionId;
+    });
+  }
+
   private async workerEnv(workspace: string, cwd: string, source: 'interactive' | 'goal'): Promise<Record<string, string>> {
     const env: Record<string, string> = {
       ...(await this.options.resolveEnv?.(workspace) ?? {}),
@@ -694,13 +958,19 @@ export class PiRuntimeService {
   }
 
   private async flushFollowUp(workspace: string, session: SessionContext): Promise<unknown> {
-    const handle = await this.resolveHandle(workspace);
+    return this.flushFollowUpOn(workspace, await this.resolveHandle(workspace), session);
+  }
+
+  private async flushFollowUpOn(workspace: string, handle: WorkspaceHandlePort, session: SessionContext): Promise<unknown> {
     if (handle.session.isStreaming) return undefined;
     const queued = [...handle.session.getFollowUpMessages()];
     if (queued.length === 0) return undefined;
     const restored = handle.session.clearQueue();
     for (const item of restored.steering) await handle.session.steer(item);
     for (const item of restored.followUp.slice(1)) await handle.session.followUp(item);
+    if (handle !== this.options.agentHost.get(workspace)) {
+      return this.sendRouted(workspace, handle, 'agent_prompt', { message: queued[0] });
+    }
     return this.send(workspace, 'agent_prompt', { message: queued[0], ...session });
   }
 
@@ -712,7 +982,13 @@ export class PiRuntimeService {
     if (!next) return;
     if (queue?.length === 0) this.queuedTurns.delete(stateKey);
     try {
-      await this.send(workspace, 'agent_follow_up', { message: next.input, permissionProfile: next.permissionProfile, ...session });
+      // 排队的会话停在后台时直接打到它的 handle；走前景路径会把排队内容发进当前画面那份会话。
+      const parked = this.parkedHandleFor(workspace, session);
+      if (parked) {
+        await this.sendRouted(workspace, parked, 'agent_follow_up', { message: next.input, permissionProfile: next.permissionProfile });
+      } else {
+        await this.send(workspace, 'agent_follow_up', { message: next.input, permissionProfile: next.permissionProfile, ...session });
+      }
     } catch {
       // send() records the failed turn; later enqueued turns remain available for the next terminal event.
     }
@@ -803,9 +1079,10 @@ export class PiRuntimeService {
     return identity;
   }
 
-  /** Used by AgentData project authorization for the currently open session. */
+  /** Used by AgentData project authorization for an open session, including one parked in the background. */
   async ownsSession(workspace: string, sessionId: string): Promise<boolean> {
-    return this.currentSessionByWorkspace.get(workspace)?.sessionId === sessionId;
+    if (this.currentSessionByWorkspace.get(workspace)?.sessionId === sessionId) return true;
+    return this.handlesOf(workspace).some((handle) => handle.session.sessionId === sessionId);
   }
 
   private async replaceCurrentSession(workspace: string, identity: SessionContext): Promise<void> {
@@ -874,6 +1151,39 @@ function shouldTrackTurn(command: string, args: Record<string, unknown>): boolea
 
 const SESSION_REPLACING_COMMANDS = ['agent_switch_session', 'agent_new_session', 'agent_fork', 'agent_clone', 'agent_rewind_to'];
 
+/** 带 targetSessionPath 时可以打到停在后台那份会话的命令。 */
+const ROUTED_COMMANDS = new Set([
+  'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering',
+  'agent_get_messages', 'agent_get_session_stats', 'agent_get_state',
+]);
+const PROMPT_COMMANDS = new Set(['agent_prompt', 'agent_steer', 'agent_follow_up']);
+
+async function refreshHandleModel(handle: WorkspaceHandlePort): Promise<void> {
+  const snapshot = handle.session.modelRuntime.getAvailableSnapshot() ?? [];
+  const current = handle.session.model as { provider?: string; id?: string } | undefined;
+  const live = current?.provider && current.id
+    ? snapshot.find((model) => model.provider === current.provider && model.id === current.id)
+    : undefined;
+  if (live) {
+    // 同一模型换的是档位映射等配置。setModel 会往会话里再记一条模型切换，这里只换引用。
+    const state = handle.session.state;
+    if (state.model !== live) state.model = live;
+  } else if (current) {
+    const next = snapshot[0];
+    if (next) await handle.session.setModel(next);
+  }
+}
+
+function sessionFileOf(handle: WorkspaceHandlePort): string | undefined {
+  const file = handle.session.sessionFile;
+  return typeof file === 'string' && file ? file : undefined;
+}
+
+function sameSessionPath(left: string, right: string): boolean {
+  const norm = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return norm(left) === norm(right);
+}
+
 function summarizeTurn(raw: Record<string, unknown>, event: PiProjection): string {
   const messages = Array.isArray(raw.messages) ? raw.messages : [];
   const text = messages
@@ -916,7 +1226,7 @@ function readInput(args: Record<string, unknown>): string {
 }
 
 function stripSessionArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const { sessionId: _sessionId, sessionPath: _sessionPath, source: _source, goalId: _goalId, goalCondition: _goalCondition, revision: _revision, nextRound: _nextRound, idempotencyKey: _idempotencyKey, turnId: _turnId, ...rpcArgs } = args;
+  const { sessionId: _sessionId, sessionPath: _sessionPath, source: _source, goalId: _goalId, goalCondition: _goalCondition, revision: _revision, nextRound: _nextRound, idempotencyKey: _idempotencyKey, turnId: _turnId, targetSessionPath: _targetSessionPath, ...rpcArgs } = args;
   return rpcArgs;
 }
 

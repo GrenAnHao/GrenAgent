@@ -1,8 +1,0 @@
-{
-  "main": "dist/app.bundle.js",
-  "mainFormat": "commonjs",
-  "executable": "D:\\nvm4w\\nodejs\\node.exe",
-  "output": "vector-service.exe",
-  "disableExperimentalSeaWarning": true,
-  "useCodeCache": true
-}

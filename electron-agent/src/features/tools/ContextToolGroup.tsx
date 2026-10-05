@@ -1,15 +1,12 @@
 import { Accordion, AccordionItem, Flexbox, Text } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import { Suspense, lazy, memo, useState } from 'react';
+import { memo, useState } from 'react';
 import { StatusIndicator } from './StatusIndicator';
 import { cardStyles } from './cardStyles';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { contextToolCategory } from './toolUtils';
+import { ToolExecution } from './ToolExecution';
 import type { ToolSegment } from '../chat/groupMessages';
-
-const ToolExecution = lazy(() =>
-  import('./ToolExecution').then((m) => ({ default: m.ToolExecution })),
-);
 
 const styles = createStaticStyles(({ css }) => ({
   list: css`
@@ -111,19 +108,17 @@ function ContextToolGroupInner({ tools }: { tools: ToolSegment[] }) {
     >
       <AccordionItem itemKey="context" paddingBlock={4} paddingInline={0} title={title}>
         <div ref={listRef} className={styles.list} onScroll={handleScroll}>
-          <Suspense fallback={null}>
-            {tools.map((t) => (
-              <ToolExecution
-                key={t.id}
-                toolName={t.toolName}
-                toolCallId={t.toolCallId}
-                args={t.args}
-                result={t.result}
-                status={t.status}
-                argsComplete={t.argsComplete}
-              />
-            ))}
-          </Suspense>
+          {tools.map((t) => (
+            <ToolExecution
+              key={t.id}
+              toolName={t.toolName}
+              toolCallId={t.toolCallId}
+              args={t.args}
+              result={t.result}
+              status={t.status}
+              argsComplete={t.argsComplete}
+            />
+          ))}
         </div>
       </AccordionItem>
     </Accordion>

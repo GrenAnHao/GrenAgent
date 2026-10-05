@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 
@@ -39,14 +39,14 @@ afterEach(() => {
 function renderOverlay() {
   const anchorRef = createRef<HTMLDivElement>();
   const view = render(
-    <>
+    <div data-chat-column="">
       <div
         ref={anchorRef}
         data-testid="composer-surface"
         style={{ width: 400, height: 80 }}
       />
       <ComposerPromptOverlay anchorRef={anchorRef} />
-    </>,
+    </div>,
   );
   return view;
 }
@@ -56,9 +56,12 @@ describe('ComposerPromptOverlay', () => {
   // 不要用 vi.restoreAllMocks()，它会把上面 vi.mock 里的 vi.fn() 一并处理掉。
   let rectSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
-    rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      top: 400, left: 20, width: 480, height: 80, bottom: 480, right: 500, x: 20, y: 400, toJSON() {},
-    } as DOMRect);
+    rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-chat-column')) {
+        return { top: 0, left: 0, width: 1000, height: 800, bottom: 800, right: 1000, x: 0, y: 0, toJSON() {} } as DOMRect;
+      }
+      return { top: 400, left: 20, width: 480, height: 80, bottom: 480, right: 500, x: 20, y: 400, toJSON() {} } as DOMRect;
+    });
   });
   afterEach(() => {
     rectSpy?.mockRestore();
@@ -79,6 +82,61 @@ describe('ComposerPromptOverlay', () => {
     expect(screen.getByTestId('composer-prompt-overlay')).toHaveStyle({ width: '480px' });
     expect(screen.getByTestId('inline-question')).toBeTruthy();
     expect(screen.getByTestId('inline-question').getAttribute('data-full-width')).toBe('true');
+  });
+
+  it('repositions when an ancestor resizes even if the anchor width stays the same', async () => {
+    const observed: Element[] = [];
+    let callback: ResizeObserverCallback | undefined;
+    const previous = globalThis.ResizeObserver;
+    class TrackingResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        callback = cb;
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', TrackingResizeObserver);
+    try {
+      useInlineQuestionStore.getState().setRequest({
+        workspace: '/ws',
+        id: 'u1',
+        data: {
+          kind: 'questions',
+          id: 'q1',
+          questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
+        },
+        mode: 'live',
+      });
+      const anchorRef = createRef<HTMLDivElement>();
+      const { container } = render(
+        <div data-testid="column" data-chat-column="">
+          <div ref={anchorRef} data-testid="composer-surface" style={{ width: 400, height: 80 }} />
+          <ComposerPromptOverlay anchorRef={anchorRef} />
+        </div>,
+      );
+      const overlay = screen.getByTestId('composer-prompt-overlay');
+      expect(overlay).toHaveStyle({ left: '20px' });
+      const column = container.querySelector('[data-testid="column"]');
+      expect(column && observed.includes(column)).toBe(true);
+      rectSpy.mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute('data-chat-column')) {
+          return { top: 0, left: 0, width: 1000, height: 800, bottom: 800, right: 1000, x: 0, y: 0, toJSON() {} } as DOMRect;
+        }
+        return { top: 400, left: 140, width: 480, height: 80, bottom: 480, right: 620, x: 140, y: 400, toJSON() {} } as DOMRect;
+      });
+      await act(async () => {
+        callback?.([], {} as ResizeObserver);
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+      expect(overlay).toHaveStyle({ left: '140px' });
+    } finally {
+      vi.stubGlobal('ResizeObserver', previous);
+    }
   });
 
   it('keeps overlay extra content in the card scroll, not the overlay itself', () => {
@@ -107,7 +165,7 @@ describe('ComposerPromptOverlay', () => {
     expect(getComputedStyle(overlay).overflowY).not.toBe('auto');
   });
 
-  it('portals the question card outside the composer so seat height stays put', () => {
+  it('keeps the question card inside the session column', () => {
     useInlineQuestionStore.getState().setRequest({
       workspace: '/ws',
       id: 'u1',
@@ -122,8 +180,26 @@ describe('ComposerPromptOverlay', () => {
     const overlay = screen.getByTestId('composer-prompt-overlay');
     const surface = screen.getByTestId('composer-surface');
     expect(surface.contains(overlay)).toBe(false);
-    expect(surface.parentElement?.contains(overlay)).toBe(false);
-    expect(overlay.parentElement).toBe(document.body);
+    expect(overlay.parentElement?.hasAttribute('data-chat-column')).toBe(true);
+    expect(overlay.parentElement).not.toBe(document.body);
+  });
+
+  it('drops the card when the session column is not on screen', () => {
+    useInlineQuestionStore.getState().setRequest({
+      workspace: '/ws',
+      id: 'u1',
+      data: {
+        kind: 'questions',
+        id: 'q1',
+        questions: [{ id: 'q1', title: 'T', options: [{ id: 'a', label: '甲' }] }],
+      },
+      mode: 'live',
+    });
+    rectSpy.mockReturnValue({
+      top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON() {},
+    } as DOMRect);
+    renderOverlay();
+    expect(screen.queryByTestId('composer-prompt-overlay')).toBeNull();
   });
 
   it('renders overlay select and skips approval', () => {

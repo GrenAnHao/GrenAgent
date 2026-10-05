@@ -3,8 +3,12 @@ import { useSubAgentLiveStore, selectSubAgentById } from '../stores/subagentLive
 
 export interface SubAgentLive {
   model: string | null;
+  /** 注册表里的启动时间。还没轮询到时为 null。 */
+  createdAt: number | null;
   step: number | null;
   action: string | null;
+  /** 注册表里的子会话 JSONL。后台 one-shot 的工具结果里没有它，详情靠这里绑定子会话事件流。 */
+  sessionPath: string | null;
 }
 
 /**
@@ -31,9 +35,12 @@ export function useSubAgentLive(
 
   const item = useSubAgentLiveStore(selectSubAgentById(workspace, agentId));
 
+  const createdAt = item?.createdAt;
   return {
     model: item?.model ?? null,
+    createdAt: typeof createdAt === 'number' && createdAt > 0 ? createdAt : null,
     step: null,
     action: running && item ? '运行中…' : null,
+    sessionPath: item?.sessionPath?.trim() || null,
   };
 }

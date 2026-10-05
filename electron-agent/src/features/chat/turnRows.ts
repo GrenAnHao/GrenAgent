@@ -1,5 +1,5 @@
 import type { TimelineSegment, ToolSegment, ThinkingSegment } from './groupMessages';
-import { isContextTool, skillNameFromRead } from '../tools/toolUtils';
+import { isContextTool, isImageFileRead, skillNameFromRead } from '../tools/toolUtils';
 
 export type TurnRow =
   | { kind: 'segment'; id: string; segment: TimelineSegment }
@@ -23,7 +23,44 @@ function mergeThinking(parts: ThinkingSegment[]): ThinkingSegment {
     streaming: parts.some((p) => p.streaming),
     // 累加各段耗时；全为 0/缺省时回退 undefined，让 ReasoningInline 只显示「已深度思考」不带秒数。
     durationMs: parts.reduce((sum, p) => sum + (p.durationMs ?? 0), 0) || undefined,
+    startedAt: parts.find((p) => p.startedAt != null)?.startedAt,
   };
+}
+
+/** 父段在本轮里时，把子工具从顶层摘到父段 children；父段缺失则留在顶层。 */
+function nestUnderParents(segments: TimelineSegment[]): TimelineSegment[] {
+  const toolIds = new Set<string>();
+  for (const segment of segments) {
+    if (segment.kind === 'tool') toolIds.add(segment.toolCallId);
+  }
+  const childrenByParent = new Map<string, ToolSegment[]>();
+  const nested = new Set<string>();
+  for (const segment of segments) {
+    if (segment.kind !== 'tool' || !segment.parentToolCallId) continue;
+    if (segment.parentToolCallId === segment.toolCallId) continue;
+    if (!toolIds.has(segment.parentToolCallId)) continue;
+    nested.add(segment.id);
+    const list = childrenByParent.get(segment.parentToolCallId) ?? [];
+    list.push(segment);
+    childrenByParent.set(segment.parentToolCallId, list);
+  }
+  if (nested.size === 0) return segments;
+
+  const attach = (segment: ToolSegment, seen: Set<string>): ToolSegment => {
+    if (seen.has(segment.toolCallId)) return segment;
+    const children = childrenByParent.get(segment.toolCallId);
+    if (!children) return segment;
+    const nextSeen = new Set(seen);
+    nextSeen.add(segment.toolCallId);
+    return { ...segment, children: children.map((child) => attach(child, nextSeen)) };
+  };
+
+  const out: TimelineSegment[] = [];
+  for (const segment of segments) {
+    if (segment.kind === 'tool' && nested.has(segment.id)) continue;
+    out.push(segment.kind === 'tool' ? attach(segment, new Set()) : segment);
+  }
+  return out;
 }
 
 /**
@@ -35,11 +72,14 @@ function mergeThinking(parts: ThinkingSegment[]): ThinkingSegment {
  *
  * 例外：模型用 read 读取 SKILL.md 是「调用技能」，语义上不是普通上下文收集——把它从折叠里
  * 排除，单独渲染成技能调用卡（见 ToolExecution 的 skill 分支）。
+ * 读到的是图片时同样单独成行，方便直接看到画面。
+ * 带 parentToolCallId 且父段在本轮里的工具，先从顶层摘掉，按出现顺序挂到父段 children。
  */
 export function buildTurnRows(segments: TimelineSegment[]): TurnRow[] {
   const rows: TurnRow[] = [];
   let ctxBuffer: ToolSegment[] = [];
   let thinkBuffer: ThinkingSegment[] = [];
+  const timeline = nestUnderParents(segments);
 
   const flushCtx = () => {
     if (ctxBuffer.length === 0) return;
@@ -58,10 +98,16 @@ export function buildTurnRows(segments: TimelineSegment[]): TurnRow[] {
     thinkBuffer = [];
   };
 
-  for (const segment of segments) {
+  for (const segment of timeline) {
     if (segment.kind === 'thinking') {
       flushCtx();
       thinkBuffer.push(segment);
+      continue;
+    }
+    if (segment.kind === 'tool' && isImageFileRead(segment.toolName, segment.result)) {
+      flushThink();
+      flushCtx();
+      rows.push({ kind: 'segment', id: segment.id, segment });
       continue;
     }
     if (

@@ -1,5 +1,8 @@
 import { createStaticStyles, cssVar } from 'antd-style';
 
+/** 项目会话工作区条一行的高度。对话和草稿没有这条时，输入区仍留出同样高度，输入框离底才对齐。 */
+export const WORKSPACE_BAR_ROW_HEIGHT = 28;
+
 /** WorkspaceBar 及其弹层（分支 / diff / 图谱 / 任务）共享样式。无 emoji，配色走 antd token。 */
 export const wsStyles = createStaticStyles(({ css }) => ({
   bar: css`
@@ -8,7 +11,10 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     gap: 8px;
     align-items: center;
 
-    margin-bottom: 8px;
+    margin-top: 0;
+  `,
+  barCompact: css`
+    flex-wrap: nowrap;
   `,
   projectContextPanel: css`
     display: flex;
@@ -136,38 +142,33 @@ export const wsStyles = createStaticStyles(({ css }) => ({
     gap: 6px;
     align-items: center;
 
-    height: 28px;
-    padding: 0 9px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
+    height: ${WORKSPACE_BAR_ROW_HEIGHT}px;
+    padding: 0 6px;
+    border: none;
     border-radius: 8px;
 
     font-size: 12.5px;
     color: ${cssVar.colorText};
     white-space: nowrap;
 
-    background: ${cssVar.colorBgElevated};
+    background: transparent;
 
     user-select: none;
     cursor: pointer;
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease;
 
     &:hover {
-      border-color: ${cssVar.colorBorder};
       background: ${cssVar.colorFillQuaternary};
     }
   `,
   chipReadonly: css`
     cursor: default;
     &:hover {
-      border-color: ${cssVar.colorBorderSecondary};
-      background: ${cssVar.colorBgElevated};
+      background: transparent;
     }
   `,
   chipName: css`
     overflow: hidden;
-    max-width: 160px;
+    max-width: 220px;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,

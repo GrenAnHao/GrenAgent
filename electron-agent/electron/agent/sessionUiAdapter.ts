@@ -7,6 +7,8 @@ export interface UiEnvelope {
   workspace: string;
   source: UiSource;
   sessionId?: string;
+  /** 发起请求的那份会话文件。同项目多份会话同时跑时，渲染层据此把卡片放到对的会话上。 */
+  sessionPath?: string;
   request: Record<string, unknown>;
 }
 
@@ -19,6 +21,8 @@ export interface UiResponse {
 interface Pending {
   resolve: (value: unknown) => void;
   cancelValue: unknown;
+  method: string;
+  title?: string;
   timer?: ReturnType<typeof setTimeout>;
   signal?: AbortSignal;
   onAbort?: () => void;
@@ -29,6 +33,7 @@ interface DialogOpts { signal?: AbortSignal; timeout?: number }
 export interface SessionUiAdapterOptions {
   workspace: string;
   sessionId: () => string | undefined;
+  sessionPath?: () => string | undefined;
   /** 当前回合是否为 Goal：为真则对话立即默认值、通知丢弃，都不广播（对齐今日 rejectUiRequest）。 */
   isGoalTurn: () => boolean;
   emit: (envelope: UiEnvelope) => void;
@@ -93,6 +98,29 @@ export class SessionUiAdapter {
     this.settle(id, entry, response.cancelled ? entry.cancelValue : (response.confirmed ?? response.value));
   }
 
+  hasPending(id: string): boolean {
+    return this.pending.has(id);
+  }
+
+  /** 还有等用户回答的对话框。停在后台的 handle 有它就不能拆。 */
+  hasAnyPending(): boolean {
+    return this.pending.size > 0;
+  }
+
+  /** 回合仍阻塞在 ask_user 的 input 上时，返回那次请求的 id。界面重载后用来把答案交回去。 */
+  pendingAskUserRequestId(): string | undefined {
+    for (const [id, entry] of this.pending) {
+      if (entry.method !== 'input' || typeof entry.title !== 'string') continue;
+      try {
+        const parsed = JSON.parse(entry.title) as { __askUser?: unknown };
+        if (parsed?.__askUser === 1) return id;
+      } catch {
+        /* 普通文本输入 */
+      }
+    }
+    return undefined;
+  }
+
   cancelAll(): void {
     for (const [id, entry] of [...this.pending]) this.settle(id, entry, entry.cancelValue);
   }
@@ -103,7 +131,12 @@ export class SessionUiAdapter {
     if (opts?.signal?.aborted) return Promise.resolve(cancelValue);
     const id = randomUUID();
     return new Promise((resolve) => {
-      const entry: Pending = { resolve, cancelValue };
+      const entry: Pending = {
+        resolve,
+        cancelValue,
+        method,
+        ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
+      };
       if (opts?.signal) {
         entry.signal = opts.signal;
         entry.onAbort = () => this.settle(id, entry, cancelValue);
@@ -114,9 +147,7 @@ export class SessionUiAdapter {
       }
       this.pending.set(id, entry);
       this.options.emit({
-        workspace: this.options.workspace,
-        source: 'interactive',
-        ...(this.options.sessionId() ? { sessionId: this.options.sessionId()! } : {}),
+        ...this.identity(),
         request: { type: 'extension_ui_request', id, method, ...fields },
       });
     });
@@ -125,11 +156,25 @@ export class SessionUiAdapter {
   private fireAndForget(fields: Record<string, unknown>): void {
     if (this.options.isGoalTurn()) return;
     this.options.emit({
-      workspace: this.options.workspace,
-      source: 'interactive',
-      ...(this.options.sessionId() ? { sessionId: this.options.sessionId()! } : {}),
+      ...this.identity(),
       request: { type: 'extension_ui_request', id: randomUUID(), ...fields },
     });
+  }
+
+  private identity(): Omit<UiEnvelope, 'request'> {
+    const sessionId = this.options.sessionId();
+    let sessionPath: string | undefined;
+    try {
+      sessionPath = this.options.sessionPath?.();
+    } catch {
+      sessionPath = undefined;
+    }
+    return {
+      workspace: this.options.workspace,
+      source: 'interactive',
+      ...(sessionId ? { sessionId } : {}),
+      ...(sessionPath ? { sessionPath } : {}),
+    };
   }
 
   private settle(id: string, entry: Pending, value: unknown): void {

@@ -15,7 +15,12 @@ import { composeMessage } from './input/editor/composeMessage';
 import type { PastedText } from './input/editor/types';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
 import { cancelPendingOverlay } from './input/overlayPrompt';
-import { composerCanSend, composerSendBehavior } from './input/sendBehavior';
+import {
+  composerCanSend,
+  composerSendBehavior,
+  shouldDispatchSingleQueued,
+  waitForTurnIdle,
+} from './input/sendBehavior';
 import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
 import { makePastedText } from './input/editor/pastedText';
 import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
@@ -28,7 +33,7 @@ interface ChatInputProps {
     message: string,
     images?: PromptImage[],
     behavior?: 'steer' | 'followUp',
-  ) => Promise<void> | void;
+  ) => Promise<void | 'failed'> | void | 'failed';
   onAbort: () => Promise<void> | void;
   leftActions?: ActionKey[];
   rightActions?: ActionKey[];
@@ -57,7 +62,9 @@ export function ChatInput({
   const hasRunningTool = useStore((s) => s.messages.some((m) => m.kind === 'tool' && m.status === 'running'));
   const retrying = useStore((s) => s.retrying);
   const awaitingResponse = useStore((s) => s.awaitingResponse);
+  const runActive = useStore((s) => Boolean(s.runActive));
   const inFlight = isStreaming || Boolean(retrying) || Boolean(awaitingResponse);
+  const busy = inFlight || hasRunningTool || runActive;
   const steering = useStore((s) => s.steering);
   const followUp = useStore((s) => s.followUp);
   const composerQueue = useStore((s) => s.composerQueue) ?? [];
@@ -89,7 +96,44 @@ export function ChatInput({
     }, 300);
   }, [draftKey, readDraft]);
 
-  const send = useCallback(async () => {
+  const queuedImages = (item: { images?: Array<{ mimeType: string; data: string }> }) =>
+    item.images?.map(({ mimeType, data }) => ({ type: 'image' as const, mimeType, data }));
+
+  const takeQueued = useCallback((id: string) => {
+    const item = useStore.getState().composerQueue?.find((entry) => entry.id === id);
+    if (!item) return undefined;
+    useStore.setState((s) => ({
+      composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== id),
+    }));
+    return item;
+  }, [useStore]);
+
+  const steerQueued = useCallback((id: string) => {
+    const item = takeQueued(id);
+    if (!item) return;
+    void onSend(item.text, queuedImages(item), 'steer');
+  }, [onSend, takeQueued]);
+
+  const interruptQueued = useCallback(async (id: string) => {
+    const item = takeQueued(id);
+    if (!item) return;
+    const images = queuedImages(item);
+    try {
+      await onAbort();
+      await waitForTurnIdle(() => {
+        const state = useStore.getState();
+        return { busy: Boolean(state.isStreaming || state.awaitingResponse) };
+      });
+      await onSend(item.text, images);
+    } catch {
+      useStore.setState((s) => ({
+        composerQueue: [...(s.composerQueue ?? []), item],
+      }));
+    }
+  }, [onAbort, onSend, takeQueued, useStore]);
+
+  const send = useCallback(async (options?: { interrupt?: boolean }) => {
+    const interrupt = Boolean(options?.interrupt);
     const markdown = readDraft();
     const text = composeMessage(markdown, pastedTexts);
     const images: PromptImage[] = attachments.map(({ type, mimeType, data }) => ({
@@ -97,7 +141,16 @@ export function ChatInput({
       mimeType,
       data,
     }));
+    const hasDraft = Boolean(text || images.length);
+    const dispatchSingle = shouldDispatchSingleQueued({
+      empty: !hasDraft,
+      hasAttachments: false,
+      composerQueueCount: composerQueue.length,
+      busy,
+    });
     if (
+      !hasDraft &&
+      !dispatchSingle &&
       !composerCanSend({
         empty: !text,
         hasAttachments: images.length > 0,
@@ -109,7 +162,20 @@ export function ChatInput({
       return;
     if (sendingRef.current) return;
     sendingRef.current = true;
+    const snapshot = {
+      markdown,
+      pastedTexts: pastedTexts.slice(),
+      attachments: attachments.slice(),
+    };
     try {
+      if (!hasDraft && dispatchSingle) {
+        const id = useStore.getState().composerQueue?.[0]?.id;
+        if (!id) return;
+        if (interrupt) await interruptQueued(id);
+        else steerQueued(id);
+        return;
+      }
+
       void pi.abortEnhancePrompt(workspace);
       useEnhancePromptStore.getState().clear(workspace);
       const cancel = await cancelPendingOverlay(workspace);
@@ -125,45 +191,52 @@ export function ChatInput({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (draftKey) useChatDraftStore.getState().clearDraft(draftKey);
       requestAnimationFrame(() => editor.focus());
-      // 路由：正在生成或工具执行中发送 = 引导当前回合（steer，工具结束后注入）；
-      // run 进行中但已停笔且无工具（收尾窗口）发送 = 跟进（followUp，回合结束后作为新一轮跑）；
-      // 已有跟进排队时即使已停流也继续跟进，避免插队。
-      void onSend(
-        text,
-        images.length ? images : undefined,
-        composerSendBehavior({
-          isGenerating,
-          isStreaming,
-          hasFollowUp: followUp.length > 0,
-          hasRunningTool,
-          hasComposerQueue: composerQueue.length > 0,
-        }),
-      );
+
+      if (interrupt && hasDraft) {
+        await onAbort();
+        await waitForTurnIdle(() => {
+          const state = useStore.getState();
+          return { busy: Boolean(state.isStreaming || state.awaitingResponse || state.runActive) };
+        });
+      }
+      // 运行中第一次发送先挂成跟进。Ctrl+Enter 才先停掉当前回复，再作为新消息发出。
+      const behavior = interrupt
+        ? undefined
+        : composerSendBehavior({
+            isGenerating,
+            isStreaming,
+            hasFollowUp: followUp.length > 0,
+            hasRunningTool,
+            hasComposerQueue: composerQueue.length > 0,
+          });
+      // 首条发送会等到整轮结束。锁如果一直占着，运行中的跟进回车和按钮都会被丢掉。
+      // 草稿已经清掉，这里放开，让下一条能挂成跟进。
+      sendingRef.current = false;
+      const outcome = await onSend(text, images.length ? images : undefined, behavior);
+      if (outcome === 'failed') {
+        setAttachments(snapshot.attachments);
+        setPastedTexts(snapshot.pastedTexts);
+        if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
+        else editor.cleanDocument();
+        setEmpty(!snapshot.markdown);
+        if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.markdown);
+        requestAnimationFrame(() => editor.focus());
+      }
+    } catch {
+      setAttachments(snapshot.attachments);
+      setPastedTexts(snapshot.pastedTexts);
+      if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
+      else editor.cleanDocument();
+      setEmpty(!snapshot.markdown);
+      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.markdown);
     } finally {
       sendingRef.current = false;
     }
-  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, hasRunningTool, followUp.length, composerQueue.length, onSend, draftKey, workspace, message]);
+  }, [editor, readDraft, pastedTexts, attachments, isGenerating, isStreaming, hasRunningTool, busy, followUp.length, composerQueue.length, onSend, onAbort, draftKey, workspace, message, steerQueued, interruptQueued, useStore]);
 
   const stop = useCallback(() => {
     void onAbort();
   }, [onAbort]);
-
-  const steerQueued = useCallback(
-    (id: string) => {
-      const item = useStore.getState().composerQueue?.find((entry) => entry.id === id);
-      if (!item) return;
-      useStore.setState((s) => ({
-        composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== id),
-      }));
-      const images = item.images?.map(({ mimeType, data }) => ({
-        type: 'image' as const,
-        mimeType,
-        data,
-      }));
-      void onSend(item.text, images, 'steer');
-    },
-    [onSend, useStore],
-  );
 
   const setValue = useCallback(
     (text: string) => {
@@ -238,7 +311,9 @@ export function ChatInput({
       steering,
       followUp,
       steerQueued,
+      interruptQueued,
       hasComposerQueue: composerQueue.length > 0,
+      retrying: Boolean(retrying),
       send,
       stop,
       scrollTranscript,
@@ -256,9 +331,11 @@ export function ChatInput({
       isGenerating,
       hasRunningTool,
       inFlight,
+      retrying,
       steering,
       followUp,
       steerQueued,
+      interruptQueued,
       composerQueue.length,
       send,
       stop,

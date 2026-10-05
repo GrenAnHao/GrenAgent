@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
+import { validateSettingValues } from './settingsSchema';
 
 export interface SettingsForm {
   values: Record<string, string>;
@@ -81,10 +82,18 @@ export function useSettingsForm(): SettingsForm {
     setDirty(true);
   }, []);
 
+  const rejectInvalid = (): boolean => {
+    const message = validateSettingValues(valuesRef.current);
+    if (!message) return false;
+    setError(message);
+    return true;
+  };
+
   const persist = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
+      if (rejectInvalid()) return;
       await pi.setSettings(valuesRef.current);
       setDirty(false);
     } catch (e) {
@@ -98,6 +107,7 @@ export function useSettingsForm(): SettingsForm {
     setSaving(true);
     setError(null);
     try {
+      if (rejectInvalid()) return;
       await pi.setSettings(valuesRef.current);
       setDirty(false);
       // restart 类设置：close + open 重启 sidecar 使其生效。

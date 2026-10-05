@@ -1,6 +1,7 @@
 import { Flexbox } from '@lobehub/ui';
-import { Input, InputNumber, Select, Switch } from 'antd';
+import { Input, InputNumber, Select, Slider, Switch } from 'antd';
 import { createStyles } from 'antd-style';
+import { useState } from 'react';
 import type { SettingField } from './settingsSchema';
 import { ModelListField } from './ModelListField';
 import { ModelSelectField } from './ModelSelectField';
@@ -49,6 +50,7 @@ interface Props {
 
 export function SettingFieldInput({ field, value, onChange, testIdPrefix = 'set-field' }: Props) {
   const { styles, cx } = useStyles();
+  const [tipOpen, setTipOpen] = useState(false);
   const testId = `${testIdPrefix}-${field.key}`;
   const storeBoolean = field.storeBoolean ?? 'one-zero';
   const on =
@@ -72,6 +74,8 @@ export function SettingFieldInput({ field, value, onChange, testIdPrefix = 'set-
             data-testid={testId}
             value={value === '' ? null : Number(value)}
             placeholder={field.placeholder}
+            min={field.min}
+            max={field.max}
             onChange={(n) => onChange(n == null ? '' : String(n))}
           />
         );
@@ -79,7 +83,7 @@ export function SettingFieldInput({ field, value, onChange, testIdPrefix = 'set-
         return (
           <Select
             data-testid={testId}
-            value={value || undefined}
+            value={value || field.default || undefined}
             placeholder={field.placeholder}
             options={field.options}
             style={{ minWidth: 180 }}
@@ -97,6 +101,32 @@ export function SettingFieldInput({ field, value, onChange, testIdPrefix = 'set-
         );
       case 'model-list':
         return <ModelListField value={value} testId={testId} onChange={onChange} />;
+      case 'slider': {
+        const min = field.min ?? 0;
+        const max = field.max ?? 100;
+        const fallback = field.default != null && field.default !== '' ? Number(field.default) : min;
+        const parsed = value.trim() === '' ? fallback : Number(value);
+        const shown = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : fallback;
+        return (
+          <div data-testid={testId} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Slider
+              aria-label={field.label}
+              min={min}
+              max={max}
+              step={1}
+              value={shown}
+              tooltip={{ open: tipOpen, formatter: (n) => `${n}%` }}
+              style={{ flex: 1, margin: 0 }}
+              onChange={(n) => {
+                setTipOpen(true);
+                onChange(String(n));
+              }}
+              onChangeComplete={() => setTipOpen(false)}
+            />
+            <span style={{ width: 40, textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{shown}%</span>
+          </div>
+        );
+      }
       case 'password':
         return (
           <Input.Password

@@ -174,6 +174,11 @@ describe("createSandboxProvider", () => {
       platform: "win32",
       helperPath,
       tempDir: "C:/tmp/pi-sandbox-s1",
+      prepareWindowsIdentity: async () => ({
+        username: "PiSandbox",
+        blobPath: "C:/blob.bin",
+        home: "C:/Users/PiSandbox",
+      }),
     });
     const out = await provider.confine(caller, {
       mode: "workspace-write",
@@ -181,8 +186,12 @@ describe("createSandboxProvider", () => {
       workspaceRoot: "C:/work/repo",
     });
     expect(out.argv[0]).toBe(helperPath);
-    expect(out.argv).toContain("--workspace-sid");
-    expect(out.argv).toContain("--temp-sid");
+    expect(out.argv).toContain("--logon-user");
+    expect(out.argv).toContain("PiSandbox");
+    expect(out.argv).toContain("C:/blob.bin");
+    expect(out.argv).toContain("--sandbox-home");
+    expect(out.argv).toContain("C:/Users/PiSandbox");
+    expect(out.argv).not.toContain("--workspace-sid");
     expect(out.enforcement).toBe("partial");
     expect(out.denialExitCodes).toEqual([SANDBOX_DENIAL_EXIT]);
     expect(out.runnerFailureRules).toEqual([
@@ -190,6 +199,15 @@ describe("createSandboxProvider", () => {
         kind: "runner-launch-failed",
         exitCodes: [163],
         signatures: ["pi-sandbox-win:"],
+      },
+      {
+        kind: "runner-launch-failed",
+        exitCodes: [1, 3221225794, -1073741502],
+        signatures: [
+          "bash/service/createinstance",
+          "couldn't create signal pipe",
+          "createfilemapping",
+        ],
       },
     ]);
   });
@@ -200,6 +218,7 @@ describe("createSandboxProvider", () => {
     const provider = createSandboxProvider({
       platform: "win32",
       helperPath,
+      prepareWindowsIdentity: async () => ({ username: "PiSandbox", blobPath: "C:/blob.bin" }),
     });
     const out = await provider.confine(caller, {
       mode: "workspace-write",

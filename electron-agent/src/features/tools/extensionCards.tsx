@@ -1098,7 +1098,7 @@ const MultiSearchCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
       results={results}
       status={status}
       error={error}
-      testId="card-search"
+      testId="card-web_search_multi"
     />
   );
 };
@@ -1142,18 +1142,88 @@ const FetchArticleCard: FC<ExtensionCardProps & { testId: string }> = ({ args, r
   );
 };
 
+const mcpAddStyles = createStaticStyles(({ css }) => ({
+  card: css`
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  `,
+  block: css`
+    min-width: 0;
+  `,
+  label: css`
+    margin-block-end: 4px;
+    font-size: 11px;
+    color: ${cssVar.colorTextTertiary};
+  `,
+  pre: css`
+    overflow: auto;
+    max-height: 240px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: ${cssVar.colorFillTertiary};
+    font-family: ${cssVar.fontFamilyCode};
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  `,
+}));
+
+function jsonBlock(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+/** add_mcp_server：展开后同时给出实际写入的参数和工具响应。 */
+const AddMcpServerCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
+  const details = getDetails(result);
+  const parsed = details?.parsed ?? args;
+  const text = extractText(result);
+  const response = details
+    ? {
+        status: details.status ?? status,
+        ...(typeof details.error === 'string' ? { error: details.error } : {}),
+        ...(typeof details.path === 'string' ? { path: details.path } : {}),
+        ...(typeof details.connection === 'string' ? { connection: details.connection } : {}),
+        ...(Array.isArray(details.tools) ? { tools: details.tools } : {}),
+        message: typeof details.response === 'string' ? details.response : text,
+      }
+    : text || (status === 'running' ? '处理中' : '');
+
+  return (
+    <div className={mcpAddStyles.card} data-testid="card-add_mcp_server">
+      <div className={mcpAddStyles.block}>
+        <div className={mcpAddStyles.label}>参数</div>
+        <pre className={mcpAddStyles.pre}>{jsonBlock(parsed)}</pre>
+      </div>
+      <div className={mcpAddStyles.block}>
+        <div className={mcpAddStyles.label}>响应</div>
+        <pre className={mcpAddStyles.pre}>{jsonBlock(response)}</pre>
+      </div>
+    </div>
+  );
+};
+
 const EXTENSION_CARD_RENDERERS: Record<string, FC<ExtensionCardProps>> = {
   generate_image: GenerateImageCard,
   spawn_agent: SpawnAgentCard,
   fetch_url: FetchUrlCard,
   web_search: WebSearchCard,
-  search: MultiSearchCard,
+  web_search_multi: MultiSearchCard,
   fetch_csdn_article: (p) => <FetchArticleCard {...p} testId="card-fetch_csdn_article" />,
   fetch_juejin_article: (p) => <FetchArticleCard {...p} testId="card-fetch_juejin_article" />,
   fetch_linuxdo_article: (p) => <FetchArticleCard {...p} testId="card-fetch_linuxdo_article" />,
   fetch_github_readme: (p) => <FetchArticleCard {...p} testId="card-fetch_github_readme" />,
   fetch_web_content: (p) => <FetchArticleCard {...p} testId="card-fetch_web_content" />,
   speak: SpeakCard,
+  add_mcp_server: AddMcpServerCard,
 };
 
 export function renderExtensionCard(props: ExtensionCardProps): ReactNode | null {

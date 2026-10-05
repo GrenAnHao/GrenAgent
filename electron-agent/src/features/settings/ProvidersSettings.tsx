@@ -5,7 +5,7 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { pi } from '../../lib/pi';
 import { invalidateAvailableModels } from './availableModelsCache';
-import { loadState, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
+import { loadState, modelsWithApiThinkingLevels, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
 import { invalidateProviderList } from './providerListCache';
 import { PROVIDER_PRESETS, type ApiType } from './providerPresets';
 import { scrubLinkedModelSettings } from './scrubLinkedModelSettings';
@@ -582,7 +582,7 @@ export function ProvidersSettings() {
                         options={API_OPTIONS}
                         style={{ width: '100%' }}
                         variant="filled"
-                        onChange={(v) => patchActive({ api: v })}
+                        onChange={(v) => patchActive({ api: v, models: modelsWithApiThinkingLevels(active.models, v) })}
                       />
                     </div>
                   </div>

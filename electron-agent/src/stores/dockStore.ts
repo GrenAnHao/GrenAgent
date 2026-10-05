@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useLayoutStore } from './layoutStore';
+import { useSessionStore } from '../store/session';
+import { pathsEquivalent } from '../lib/pathUtils';
 
 export type DockRegion = 'right' | 'bottom';
 export type DockTabKind =
@@ -11,7 +13,8 @@ export type DockTabKind =
   | 'subagentLog'
   | 'projectContext'
   | 'file'
-  | 'review';
+  | 'review'
+  | 'visual';
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 
@@ -32,6 +35,7 @@ export interface PagePayload {
 export interface BrowserPayload {
   url: string;
   title?: string;
+  faviconUrl?: string;
 }
 
 /** 兼容现有调用方（extensionCards / PageContentViewer）的别名。 */
@@ -68,7 +72,11 @@ export interface ReviewPayload {
   fileIndex?: number;
 }
 
-export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload;
+export interface VisualPayload {
+  sessionId: number;
+}
+
+export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload | VisualPayload;
 
 export interface DockTab {
   id: string;
@@ -81,6 +89,89 @@ export interface DockTab {
   payload: DockTabPayload;
   /** 最近一次打开或激活，标签列表用相对时间。 */
   touchedAt?: number;
+  /**
+   * 会话归属（仅 subagent / subagentLog / visual）：打开时所在的聊天会话。
+   * undefined = 全局 tab；null = 当前工作区的草稿会话。只在归属会话里显示。
+   */
+  ownerSessionPath?: string | null;
+  /** 归属会话所在工作区（草稿会话靠它区分）。 */
+  ownerWorkspace?: string;
+}
+
+/** 当前正在查看的聊天会话。sessionPath 为 null 表示草稿。 */
+export interface DockSessionView {
+  sessionPath: string | null;
+  workspace: string;
+}
+
+export type DockTabOwner = Pick<DockTab, 'ownerSessionPath' | 'ownerWorkspace'>;
+
+/** 从会话 store 读取正在查看的会话（'' / null 都算草稿）。 */
+export function currentDockView(): DockSessionView {
+  const st = useSessionStore.getState();
+  return { sessionPath: st.activeSessionPath || null, workspace: st.activeWorkspace ?? '' };
+}
+
+/** 打开会话归属 tab 时记录的 owner 字段。 */
+export function currentDockOwner(): Required<DockTabOwner> {
+  const view = currentDockView();
+  return { ownerSessionPath: view.sessionPath, ownerWorkspace: view.workspace };
+}
+
+/**
+ * 由渲染消息的 agent store 推出 owner：它实际加载的会话比 activeSessionPath 更可靠（切换中两者可能短暂不一致）。
+ * 拿不到 store 时返回空对象，交给 dockStore 用会话 store 兜底。
+ */
+export function dockOwnerFromStore(
+  store: { getLoadedSessionPath?: () => string | null | undefined } | null | undefined,
+  workspace: string,
+): DockTabOwner {
+  if (!store?.getLoadedSessionPath) return {};
+  return { ownerSessionPath: store.getLoadedSessionPath() ?? null, ownerWorkspace: workspace };
+}
+
+export function isSessionOwnedKind(kind: DockTabKind): boolean {
+  return kind === 'subagent' || kind === 'subagentLog' || kind === 'visual';
+}
+
+function normKey(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** 会话视图的 map key（草稿按工作区区分）。 */
+export function dockSessionKey(view: DockSessionView): string {
+  return view.sessionPath ? `s:${normKey(view.sessionPath)}` : `d:${normKey(view.workspace)}`;
+}
+
+function ownerMatches(tab: DockTab, view: DockSessionView): boolean {
+  if (tab.ownerSessionPath == null) return !view.sessionPath && pathsEquivalent(tab.ownerWorkspace ?? '', view.workspace);
+  return Boolean(view.sessionPath) && pathsEquivalent(tab.ownerSessionPath, view.sessionPath as string);
+}
+
+/** 全局 tab 总可见；会话归属 tab 只在归属会话里可见。 */
+export function isDockTabVisible(tab: DockTab, view: DockSessionView): boolean {
+  if (tab.ownerSessionPath === undefined) return true;
+  return ownerMatches(tab, view);
+}
+
+/** 某 region 在给定会话下可见的 tab（按 order 排序）。 */
+export function visibleRegionTabs(tabs: DockTab[], region: DockRegion, view: DockSessionView): DockTab[] {
+  return tabs.filter((t) => t.region === region && isDockTabVisible(t, view)).sort((a, b) => a.order - b.order);
+}
+
+/** 可见的激活 tab：activeByRegion 被隐藏时退回该会话上次激活的，再退回最后一个可见 tab。 */
+export function resolveVisibleActive(
+  state: Pick<DockState, 'activeByRegion' | 'activeBySession'>,
+  region: DockRegion,
+  view: DockSessionView,
+  visible: DockTab[],
+): string | null {
+  const has = (id: string | null | undefined): id is string => Boolean(id) && visible.some((t) => t.id === id);
+  const current = state.activeByRegion[region];
+  if (has(current)) return current;
+  const remembered = state.activeBySession?.[dockSessionKey(view)]?.[region];
+  if (has(remembered)) return remembered;
+  return visible.at(-1)?.id ?? null;
 }
 
 /** 关掉后可从标签列表恢复的快照。子代理 tab 不入列。 */
@@ -100,9 +191,16 @@ interface DockState {
   tabs: DockTab[];
   closedTabs: ClosedDockTab[];
   activeByRegion: Record<DockRegion, string | null>;
+  /** 每个会话上次激活的 tab（不持久化）。 */
+  activeBySession: Record<string, Partial<Record<DockRegion, string>>>;
+  /** 每个会话离开时右面板是否展开（不持久化）。 */
+  rightOpenBySession: Record<string, boolean>;
 
   addTab: (input: Omit<DockTab, 'order'> & { order?: number }) => void;
-  updateTab: (id: string, patch: Partial<Pick<DockTab, 'title' | 'payload'>>) => void;
+  updateTab: (
+    id: string,
+    patch: Partial<Pick<DockTab, 'title' | 'payload' | 'touchedAt' | 'ownerSessionPath' | 'ownerWorkspace'>>,
+  ) => void;
   closeTab: (id: string) => void;
   restoreClosedTab: (id: string, closedAt: number) => void;
   setActive: (region: DockRegion, id: string) => void;
@@ -112,8 +210,12 @@ interface DockState {
   openPage: (page: PageView) => void;
   openProjectContext: (workspace: string) => void;
   openSubAgent: (input: SubAgentOpenInput) => void;
-  openSubAgentLog: (input: SubAgentLogPayload) => void;
+  openSubAgentLog: (input: SubAgentLogPayload & DockTabOwner) => void;
   resetWorkspaceTabs: () => void;
+  /** 聊天会话切换：保存/恢复每会话的激活 tab 与右面板展开态。 */
+  switchSessionView: (prev: DockSessionView, next: DockSessionView) => void;
+  /** 删除会话时丢弃它名下的 tab。 */
+  dropSessionTabs: (sessionPath: string, wasViewed?: boolean) => void;
 }
 
 /** 按需打开（或激活）某个子代理的右坞 tab。单任务 subIndex 传 null。 */
@@ -122,6 +224,16 @@ export interface SubAgentOpenInput {
   toolCallId: string;
   subIndex: number | null;
   title: string;
+  /** 归属会话；缺省取当前查看的会话。 */
+  ownerSessionPath?: string | null;
+  ownerWorkspace?: string;
+}
+
+function ownerOf(input: DockTabOwner): Required<DockTabOwner> {
+  if (input.ownerSessionPath !== undefined) {
+    return { ownerSessionPath: input.ownerSessionPath, ownerWorkspace: input.ownerWorkspace ?? currentDockView().workspace };
+  }
+  return currentDockOwner();
 }
 
 /** 子代理 tab 的稳定 id：单任务用 messageId，多任务用 `${messageId}#${subIndex}`。 */
@@ -153,7 +265,8 @@ function patchTabs(tabs: DockTab[], updated: DockTab[]): DockTab[] {
 }
 
 function collapseEmptyRegion(region: DockRegion, tabs: DockTab[]): void {
-  if (tabs.some((t) => t.region === region)) return;
+  const view = currentDockView();
+  if (tabs.some((t) => t.region === region && isDockTabVisible(t, view))) return;
   if (region === 'right') useLayoutStore.getState().setRightPanelOpen(false);
   else useLayoutStore.getState().setTerminalOpen(false);
 }
@@ -195,12 +308,46 @@ function pushClosed(list: ClosedDockTab[] | undefined, snap: ClosedDockTab): Clo
   return [snap, ...(list ?? []).filter((c) => c.id !== snap.id)].slice(0, MAX_CLOSED_TABS);
 }
 
+function isSessionOnlyDockKind(kind: DockTabKind): boolean {
+  return kind === 'subagent' || kind === 'subagentLog' || kind === 'browser' || kind === 'visual';
+}
+
+function sanitizePersistedActive(
+  active: Record<DockRegion, string | null>,
+  tabs: DockTab[],
+): Record<DockRegion, string | null> {
+  const pick = (region: DockRegion): string | null => {
+    if (active[region] && tabs.some((tab) => tab.id === active[region])) return active[region];
+    return tabs.filter((tab) => tab.region === region).sort((a, b) => a.order - b.order)[0]?.id ?? null;
+  };
+  return { right: pick('right'), bottom: pick('bottom') };
+}
+
+function persistDockSnapshot(s: Pick<DockState, 'tabs' | 'closedTabs' | 'activeByRegion'>): Pick<
+  DockState,
+  'tabs' | 'closedTabs' | 'activeByRegion'
+> {
+  const tabs = s.tabs
+    .filter((t) => !isSessionOnlyDockKind(t.kind))
+    .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
+  const closedTabs = (s.closedTabs ?? [])
+    .filter((t) => !isSessionOnlyDockKind(t.kind))
+    .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
+  return {
+    tabs,
+    closedTabs,
+    activeByRegion: sanitizePersistedActive(s.activeByRegion, tabs),
+  };
+}
+
 export const useDockStore = create<DockState>()(
   persist(
     (set, get) => ({
       tabs: [],
       closedTabs: [],
       activeByRegion: { right: null, bottom: null },
+      activeBySession: {},
+      rightOpenBySession: {},
 
       addTab: (input) => {
         set((s) => {
@@ -222,8 +369,10 @@ export const useDockStore = create<DockState>()(
         if (!target) return;
         const region = target.region;
         const snap = snapshotClosedTab(target);
+        const view = currentDockView();
         set((s) => {
-          const regionTabs = s.tabs.filter((t) => t.region === region).sort((a, b) => a.order - b.order);
+          // 只在当前会话可见的 tab 里挑兜底，别把激活指向别的会话的 tab。
+          const regionTabs = visibleRegionTabs(s.tabs, region, view);
           const index = regionTabs.findIndex((t) => t.id === id);
           const tabs = s.tabs.filter((t) => t.id !== id);
           const activeByRegion = { ...s.activeByRegion };
@@ -302,7 +451,7 @@ export const useDockStore = create<DockState>()(
           const nextTarget = [...targetTabs.slice(0, at), movedTab, ...targetTabs.slice(at)].map((t, i) => ({ ...t, order: i }));
           const activeByRegion = { ...s.activeByRegion, [targetRegion]: id };
           if (activeByRegion[fromRegion] === id) {
-            const sourceTabs = s.tabs.filter((t) => t.region === fromRegion).sort((a, b) => a.order - b.order);
+            const sourceTabs = visibleRegionTabs(s.tabs, fromRegion, currentDockView());
             const index = sourceTabs.findIndex((t) => t.id === id);
             const remaining = sourceTabs.filter((t) => t.id !== id);
             const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0] ?? null;
@@ -372,12 +521,13 @@ export const useDockStore = create<DockState>()(
         useLayoutStore.getState().setRightPanelOpen(true);
       },
 
-      openSubAgentLog: (input) => {
+      openSubAgentLog: ({ ownerSessionPath, ownerWorkspace, ...input }) => {
         const id = `salog:${input.agentId}`;
+        const owner = ownerOf({ ownerSessionPath, ownerWorkspace });
         set((s) => {
           const exists = s.tabs.some((t) => t.id === id);
           const tabs = exists
-            ? s.tabs.map((t) => (t.id === id ? { ...t, title: input.task, payload: { ...input } } : t))
+            ? s.tabs.map((t) => (t.id === id ? { ...t, ...owner, title: input.task, payload: { ...input } } : t))
             : [
                 ...s.tabs,
                 {
@@ -388,6 +538,7 @@ export const useDockStore = create<DockState>()(
                   closable: true,
                   order: nextOrder(s.tabs, 'right'),
                   payload: { ...input },
+                  ...owner,
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
@@ -395,12 +546,14 @@ export const useDockStore = create<DockState>()(
         useLayoutStore.getState().setRightPanelOpen(true);
       },
 
-      openSubAgent: ({ messageId, toolCallId, subIndex, title }) => {
+      openSubAgent: ({ messageId, toolCallId, subIndex, title, ownerSessionPath, ownerWorkspace }) => {
         const id = subAgentTabId(messageId, subIndex);
+        const owner = ownerOf({ ownerSessionPath, ownerWorkspace });
         set((s) => {
           const exists = s.tabs.some((t) => t.id === id);
+          // 同 id 已存在：归属改到当前会话（消息 id 理论上不跨会话重复，防御性接管）。
           const tabs = exists
-            ? s.tabs.map((t) => (t.id === id ? { ...t, title } : t))
+            ? s.tabs.map((t) => (t.id === id ? { ...t, ...owner, title, payload: { messageId, toolCallId, subIndex } } : t))
             : [
                 ...s.tabs,
                 {
@@ -411,6 +564,7 @@ export const useDockStore = create<DockState>()(
                   closable: true,
                   order: nextOrder(s.tabs, 'right'),
                   payload: { messageId, toolCallId, subIndex },
+                  ...owner,
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
@@ -439,20 +593,79 @@ export const useDockStore = create<DockState>()(
             activeByRegion: { ...s.activeByRegion, bottom: fresh ? fresh.id : null },
           };
         }),
+
+      switchSessionView: (prev, next) => {
+        const prevKey = dockSessionKey(prev);
+        const nextKey = dockSessionKey(next);
+        if (prevKey === nextKey) return;
+        const s = get();
+        const layout = useLayoutStore.getState();
+        const prevRight = visibleRegionTabs(s.tabs, 'right', prev);
+        const prevActive: Partial<Record<DockRegion, string>> = {};
+        for (const region of ['right', 'bottom'] as const) {
+          const id = resolveVisibleActive(s, region, prev, visibleRegionTabs(s.tabs, region, prev));
+          if (id) prevActive[region] = id;
+        }
+        const nextRight = visibleRegionTabs(s.tabs, 'right', next);
+        // 激活优先级：本会话上次激活 → 当前激活（全局 tab 跨会话保持）→ 最后一个可见。
+        const has = (id: string | null | undefined): id is string => Boolean(id) && nextRight.some((t) => t.id === id);
+        const remembered = s.activeBySession[nextKey]?.right;
+        const right = has(remembered) ? remembered : has(s.activeByRegion.right) ? s.activeByRegion.right : nextRight.at(-1)?.id ?? null;
+        set({
+          activeBySession: { ...s.activeBySession, [prevKey]: prevActive },
+          rightOpenBySession: { ...s.rightOpenBySession, [prevKey]: layout.rightPanelOpen },
+          activeByRegion: { ...s.activeByRegion, right },
+        });
+        if (nextRight.length === 0) {
+          // 右面板只装着上一会话的会话归属 tab：本会话没内容就收起（全局 tab 在两边都可见，不会走到这里）。
+          if (layout.rightPanelOpen && prevRight.length > 0) layout.setRightPanelOpen(false);
+          return;
+        }
+        // 回到有自己 tab 的会话：离开时是展开的就重新展开；其余情况保持现状。
+        const nextHasOwned = nextRight.some((t) => t.ownerSessionPath !== undefined);
+        if (nextHasOwned && s.rightOpenBySession[nextKey] && !layout.rightPanelOpen) layout.setRightPanelOpen(true);
+      },
+
+      dropSessionTabs: (sessionPath, wasViewed = false) => {
+        if (!sessionPath) return;
+        const s = get();
+        const doomed = new Set(
+          s.tabs
+            .filter((t) => t.ownerSessionPath && pathsEquivalent(t.ownerSessionPath, sessionPath))
+            .map((t) => t.id),
+        );
+        const key = dockSessionKey({ sessionPath, workspace: '' });
+        const { [key]: _a, ...activeBySession } = s.activeBySession;
+        const { [key]: _o, ...rightOpenBySession } = s.rightOpenBySession;
+        void _a;
+        void _o;
+        const activeByRegion = { ...s.activeByRegion };
+        for (const region of ['right', 'bottom'] as const) {
+          if (activeByRegion[region] && doomed.has(activeByRegion[region] as string)) activeByRegion[region] = null;
+        }
+        set({ tabs: s.tabs.filter((t) => !doomed.has(t.id)), activeBySession, rightOpenBySession, activeByRegion });
+        // 删的是正在看的会话且右坞里有它的 tab：当前视图若已无可见 tab 就收起右面板。
+        if (wasViewed && s.tabs.some((t) => doomed.has(t.id) && t.region === 'right')) {
+          collapseEmptyRegion('right', get().tabs);
+        }
+      },
     }),
     {
       name: 'hermes-dock',
-      // 终端 runtime shellId 不持久化，重置为 idle；subagent / subagentLog tab
-      // 由 messages 同步或浮动列表点击重建，不持久化（output 可能很大）。
-      partialize: (s) => ({
-        tabs: s.tabs
-          .filter((t) => t.kind !== 'subagent' && t.kind !== 'subagentLog')
-          .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t)),
-        closedTabs: (s.closedTabs ?? [])
-          .filter((t) => t.kind !== 'subagent' && t.kind !== 'subagentLog')
-          .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t)),
-        activeByRegion: s.activeByRegion,
-      }),
+      // 终端 runtime shellId 不持久化，重置为 idle；subagent / subagentLog / browser
+      // 只活在当前会话：重启后不要自动打开上次的网页。
+      partialize: (s) => persistDockSnapshot(s),
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<Pick<DockState, 'tabs' | 'closedTabs' | 'activeByRegion'>>;
+        return {
+          ...current,
+          ...persistDockSnapshot({
+            tabs: stored.tabs ?? current.tabs,
+            closedTabs: stored.closedTabs ?? current.closedTabs,
+            activeByRegion: stored.activeByRegion ?? current.activeByRegion,
+          }),
+        };
+      },
     },
   ),
 );

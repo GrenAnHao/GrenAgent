@@ -58,6 +58,37 @@ describe("extractAssistantOutput", () => {
     expect(r.stopReason).toBe("error");
   });
 
+  it("does not treat an earlier progress sentence as the result when a later message has content", () => {
+    const r = extractAssistantOutput(
+      [
+        { role: "assistant", content: [{ type: "text", text: "我先读要求文档和规格，再读实现文件。" }], stopReason: "toolUse" },
+        { role: "assistant", content: [{ type: "thinking", thinking: "still reviewing" }], stopReason: "aborted" },
+      ],
+      { streamingDelta: "我先读要求文档和规格，再读实现文件。" },
+    );
+    expect(r.output).toBe("");
+    expect(r.stopReason).toBe("aborted");
+  });
+
+  it("keeps the previous non-empty message when the terminal message is empty", () => {
+    const r = extractAssistantOutput([
+      { role: "assistant", content: [{ type: "text", text: "opening" }], stopReason: "toolUse" },
+      { role: "assistant", content: [{ type: "text", text: "later progress" }], stopReason: "toolUse" },
+      { role: "assistant", content: [], stopReason: "aborted" },
+    ]);
+    expect(r.output).toBe("later progress");
+    expect(r.stopReason).toBe("aborted");
+  });
+
+  it("keeps the interrupted message's own text instead of an earlier sentence", () => {
+    const r = extractAssistantOutput([
+      { role: "assistant", content: [{ type: "text", text: "我先读要求文档和规格，再读实现文件。" }], stopReason: "toolUse" },
+      { role: "assistant", content: [{ type: "text", text: "审查结论：入口在强制改密时不可达。" }], stopReason: "aborted" },
+    ]);
+    expect(r.output).toBe("审查结论：入口在强制改密时不可达。");
+    expect(r.stopReason).toBe("aborted");
+  });
+
   it("skipPrefix still finds child assistant", () => {
     const r = extractAssistantOutput(
       [

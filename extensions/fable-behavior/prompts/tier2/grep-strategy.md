@@ -1,21 +1,20 @@
 ## Grep and glob strategy
 
-`grep` searches file contents; `find`/`glob` match paths. Prefer these tools over `grep`/`rg` in bash — they respect `.gitignore` and return structured output.
+`grep` and `search` search file contents with ripgrep. `find` matches paths by glob. `ls` lists one directory. Prefer these over bash, including Windows `Get-ChildItem`, `Select-String`, and `Get-Content`. They respect `.gitignore` and return structured output.
 
-### Output modes
+### Parameters
 
-- `files_with_matches` (default): locate where a pattern lives — cheapest.
-- `content`: read matching lines; use `-n`, `-A`/`-B`/`-C` for context.
-- `count`: gauge spread before diving deep.
+- `grep`: `pattern`, optional `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit` (default 100).
+- `search`: `patterns` (OR), optional `globs`, `path`, `literal`, `contextLines`, `maxResults`.
+- `find`: glob `pattern` (for example `*.sql` or `**/*.spec.ts`), optional `path`, `limit`.
+- `ls`: optional `path`, `limit`. Results are alphabetical; `limit` keeps the first entries.
 
 ### Regex
 
-- Patterns are regex, not literals. Escape metacharacters (`interface\{\}` in Go).
-- Default is per-line; use `multiline: true` only when the pattern must span lines.
-- In JSON/tool args, backslashes need doubling (`\\.` for a literal dot).
+- `pattern` is a regex unless `literal` is true. Escape metacharacters (`interface\{\}` in Go).
+- In JSON tool args, backslashes need doubling (`\\.` for a literal dot).
 
 ### Filter early
 
-- Combine `pattern` with `glob` (e.g. `*.{ts,tsx}`) or `type` (e.g. `py`, `rust`) to cut noise.
-- Use `head_limit` when results may be huge.
-- Exploration flow: `glob`/`find` for candidate files, then `grep` for contents — or delegate many independent searches to a scout sub-agent.
+- Combine `pattern` with `glob` (for example `*.sql` or `*.{ts,tsx}`) and set `limit` when results may be huge.
+- Exploration flow: `find` or `ls` for candidate files, then `grep` or `search` for contents.

@@ -10,6 +10,13 @@ describe('languageLabel', () => {
     expect(languageLabel('brainfuck')).toBe('brainfuck');
   });
 
+  it('maps module script extensions onto javascript and typescript', () => {
+    expect(languageFromPath('probe.mjs')).toBe('javascript');
+    expect(languageFromPath('probe.cjs')).toBe('javascript');
+    expect(languageFromPath('probe.mts')).toBe('typescript');
+    expect(languageFromPath('probe.cts')).toBe('typescript');
+  });
+
   it('names every language id that languageFromPath can return', () => {
     const samples = ['a.ts', 'a.tsx', 'a.js', 'a.jsx', 'a.py', 'a.go', 'a.rs', 'a.java', 'a.css', 'a.scss', 'a.html', 'a.json', 'a.md', 'a.sh', 'a.ps1', 'a.sql', 'a.yml', 'a.toml', 'a.xml', 'a.vue', 'a.svelte', 'a.c', 'a.cpp', 'a.cs', 'a.txt'];
     for (const sample of samples) {

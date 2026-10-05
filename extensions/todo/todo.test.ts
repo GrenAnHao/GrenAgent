@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyTodo, emptyTodoState, reconstructFromEntries } from "./todo.js";
+import { applyTodo, closeTodosInContext, emptyTodoState, reconstructFromEntries } from "./todo.js";
 
-const write = (todos: Array<{ id?: number; text: string; status: "pending" | "in_progress" | "completed" }>) =>
+const write = (todos: Array<{ id?: number; text: string; status: string }>) =>
   applyTodo(emptyTodoState(), { todos });
 
 describe("applyTodo", () => {
@@ -45,6 +45,15 @@ describe("applyTodo", () => {
     ] });
     expect(r.state.todos.map((t) => t.id)).toEqual([5, 6]);
     expect(r.state.nextId).toBe(7);
+  });
+
+  it("accepts done as completed", () => {
+    const r = write([
+      { text: "注册", status: "done" },
+      { text: "验证", status: "in_progress" },
+    ]);
+    expect(r.error).toBeUndefined();
+    expect(r.state.todos.map((todo) => todo.status)).toEqual(["completed", "in_progress"]);
   });
 
   it("clears to emptyTodoState", () => {
@@ -91,5 +100,63 @@ describe("reconstructFromEntries", () => {
       { type: "message", message: { role: "toolResult", toolName: "todo", details: { todos: [{ id: 1, text: "failed", status: "completed" }], nextId: 2, error: "nope" } } },
     ]);
     expect(s).toEqual({ todos: [kept], nextId: 2 });
+  });
+});
+
+describe("closeTodosInContext", () => {
+  const todo = {
+    role: "toolResult" as const,
+    toolName: "todo",
+    content: [{ type: "text", text: "0 pending, 1 in progress, 5 completed" }],
+    details: {
+      todos: [
+        { id: 1, text: "已完成", status: "completed" },
+        { id: 2, text: "注册", status: "in_progress" },
+      ],
+      nextId: 3,
+    },
+  };
+
+  it("closes the last successful todo result after a normal stop", () => {
+    const next = closeTodosInContext([
+      todo,
+      { role: "assistant" as const, stopReason: "stop", content: "做完了" },
+    ]);
+    const updated = next?.[0];
+    if (!updated || updated.role !== "toolResult") throw new Error("expected todo result");
+    expect(updated.details).toMatchObject({
+      todos: [
+        { id: 1, text: "已完成", status: "completed" },
+        { id: 2, text: "注册", status: "completed" },
+      ],
+    });
+    expect(updated.content).toEqual([{ type: "text", text: "0 pending, 0 in progress, 2 completed" }]);
+  });
+
+  it("clears a finished list once the next user message is present", () => {
+    const next = closeTodosInContext([
+      todo,
+      { role: "assistant" as const, stopReason: "stop", content: "做完了" },
+      { role: "user" as const, content: "下一轮" },
+    ]);
+    const updated = next?.[0];
+    if (!updated || updated.role !== "toolResult") throw new Error("expected todo result");
+    expect(updated.details).toMatchObject({ todos: [] });
+    expect(updated.content).toEqual([{ type: "text", text: "0 pending, 0 in progress, 0 completed" }]);
+  });
+
+  it("does not close after abort or while a pending item remains", () => {
+    expect(closeTodosInContext([todo, { role: "assistant", stopReason: "aborted" }])).toBeUndefined();
+    const pending = {
+      ...todo,
+      details: {
+        todos: [
+          { id: 1, text: "进行中", status: "in_progress" },
+          { id: 2, text: "还没做", status: "pending" },
+        ],
+        nextId: 3,
+      },
+    };
+    expect(closeTodosInContext([pending, { role: "assistant", stopReason: "stop" }])).toBeUndefined();
   });
 });

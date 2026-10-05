@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
-import { defaultThinkingLevelMap, loadState, serializeState, type UiProvider } from './providerConfigAdapter';
+import { defaultThinkingLevelMap, loadState, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
 
@@ -80,14 +80,12 @@ describe('providerConfigAdapter', () => {
     expect(defaultThinkingLevelMap('unknown')).toBeUndefined();
   });
 
-  it('caps anthropic top effort per model: opus-4-6 keeps max, others fall back to xhigh', () => {
-    // 仅 opus-4-6 系支持原生 "max"。
-    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-6')).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' });
-    // 其余（4-7/4-8/fable-5/sonnet-4-6）最高到 xhigh：pi-xhigh 隐藏(null)，顶档落在 pi-high→原生 xhigh。
-    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-8')).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: null });
-    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-fable-5')).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: null });
-    // 缺省 modelId 时按「不支持 max」封顶到 xhigh。
-    expect(defaultThinkingLevelMap('anthropic-messages')).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: null });
+  it('uses the full Anthropic effort ladder for every model', () => {
+    const anthropic = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-6')).toEqual(anthropic);
+    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-8')).toEqual(anthropic);
+    expect(defaultThinkingLevelMap('anthropic-messages', 'claude-fable-5')).toEqual(anthropic);
+    expect(defaultThinkingLevelMap('anthropic-messages')).toEqual(anthropic);
   });
 
   it('round-trips a custom anthropic reasoning model: per-model map + adaptive thinking on by default', () => {
@@ -103,8 +101,8 @@ describe('providerConfigAdapter', () => {
     // anthropic 推理模型默认写入 compat.forceAdaptiveThinking=true（pi 才会发送 effort/推理强度）。
     const raw = JSON.parse(modelsJson).providers.p.models;
     expect(raw[0]).toMatchObject({ id: 'claude-opus-4-6', compat: { forceAdaptiveThinking: true } });
-    expect(raw[0].thinkingLevelMap.xhigh).toBe('max');
-    expect(raw[1].thinkingLevelMap.xhigh).toBeNull();
+    expect(raw[0].thinkingLevelMap).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' });
+    expect(raw[1].thinkingLevelMap).toEqual(raw[0].thinkingLevelMap);
 
     const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
     expect(back?.models[0]).toMatchObject({ id: 'claude-opus-4-6', reasoning: true, forceAdaptiveThinking: true });
@@ -135,6 +133,22 @@ describe('providerConfigAdapter', () => {
     expect(back?.models[0].forceAdaptiveThinking).toBeUndefined();
   });
 
+  it('rewrites reasoning models to the new API ladder when the provider API type changes', () => {
+    const openai = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
+    const models = modelsWithApiThinkingLevels(
+      [
+        { id: 'glm-5.2', reasoning: true, thinkingLevelMap: openai },
+        { id: 'claude-opus-4-6', reasoning: true, thinkingLevelMap: openai },
+        { id: 'plain', thinkingLevelMap: openai },
+      ],
+      'anthropic-messages',
+    );
+    const anthropic = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+    expect(models[0].thinkingLevelMap).toEqual(anthropic);
+    expect(models[1].thinkingLevelMap).toEqual(anthropic);
+    expect(models[2].thinkingLevelMap).toEqual(openai);
+  });
+
   it('preserves a per-model thinkingLevelMap instead of overwriting it with the API default', () => {
     const customMap = { minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: 'max' };
     const { modelsJson } = serializeState([
@@ -144,6 +158,18 @@ describe('providerConfigAdapter', () => {
       },
     ]);
     expect(JSON.parse(modelsJson).providers.p.models[0].thinkingLevelMap).toEqual(customMap);
+  });
+
+  it('fills cache rates so a partial price does not invalidate models.json', () => {
+    const { modelsJson } = serializeState([
+      {
+        id: 'p', name: 'P', builtIn: false, api: 'anthropic-messages',
+        models: [{ id: 'claude', cost: { input: 4, output: 20 } }],
+      },
+    ]);
+    expect(JSON.parse(modelsJson).providers.p.models[0].cost).toEqual({
+      input: 4, output: 20, cacheRead: 0, cacheWrite: 0,
+    });
   });
 
   it('round-trips image input, thinkingFormat and openai compat flags', () => {

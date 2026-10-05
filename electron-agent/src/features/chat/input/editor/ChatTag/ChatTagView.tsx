@@ -97,7 +97,7 @@ export function ChatTagView({
   return (
     <span
       className={cx(styles.tag, colorClass, onOpen && styles.openable)}
-      title={category === 'link' ? value : undefined}
+      title={category === 'link' || (isFileLike && value !== label) ? value : undefined}
       {...openProps}
     >
       {isFileLike ? (

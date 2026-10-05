@@ -4,6 +4,7 @@ import { ArrowLeft, Square } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
+import { PendingResponseStatus } from '../chat/PendingResponseStatus';
 import { computeAnsweredQuestions, computeSubAgentUnits } from '../chat/messagePrecompute';
 import { useChildSessionBinding } from '../panels/useChildSessionBinding';
 import { pi } from '../../lib/pi';
@@ -130,6 +131,7 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
   const error = useChildOverlayStore((s) => s.error);
   const workspace = useOptionalAgentStoreContext()?.workspace ?? '';
   const [draft, setDraft] = useState('');
+  const [startedAt, setStartedAt] = useState<number | undefined>();
 
   const parentTitle = useSessionStore((s) => {
     const path = overlay?.parentSessionPath;
@@ -141,11 +143,12 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
 
   const messages = useChildSessionBinding(overlay?.sessionPath, overlay?.activity === 'running');
   const display = useMemo(() => groupMessages(messages), [messages]);
-  const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
+  const subAgents = useMemo(() => computeSubAgentUnits(display), [display]);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
 
   useEffect(() => {
     setDraft('');
+    setStartedAt(undefined);
   }, [overlay?.sessionPath]);
 
   useEffect(() => {
@@ -159,6 +162,7 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
           if (store.overlay?.sessionPath !== sessionPath) return;
           store.setActivity(row.activity);
           store.setTornDown(deriveTornDown(store.overlay.mode, row.activity));
+          if (typeof row.createdAt === 'number' && row.createdAt > 0) setStartedAt(row.createdAt);
         } catch {
           /* keep last */
         }
@@ -239,8 +243,11 @@ export function ChildSessionOverlay({ onClose }: { onClose?: () => void } = {}) 
       <div className={styles.body}>
         <ChatMessageItems
           messages={display}
-          unitsByMessage={unitsByMessage}
+          unitsByMessage={subAgents.unitsByMessage}
+          hiddenSpawnIds={subAgents.hidden}
+          spawnOverlay={subAgents.overlay}
           answeredQuestions={answeredQuestions}
+          footer={overlay.activity === 'running' ? <PendingResponseStatus label="正在处理…" startedAt={startedAt} /> : undefined}
           paddingInline={16}
           resetKey={overlay.sessionPath}
         />

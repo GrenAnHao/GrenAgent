@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyTodoState, normalizeTodos, todoSummary } from "./todo-model.js";
+import { closeFinishedTodos, emptyTodoState, normalizeTodos, todoListFinishedInTranscript, todoSummary } from "./todo-model.js";
 
 describe("todoSummary", () => {
   it("counts done/total and names the single active item with no extra", () => {
@@ -47,6 +47,20 @@ describe("normalizeTodos", () => {
       todos: [{ id: 2, text: "写组件", status: "in_progress" }],
       nextId: 3,
     });
+  });
+
+  it("maps status done onto completed", () => {
+    const n = normalizeTodos({
+      todos: [
+        { id: 1, text: "注册", status: "done" },
+        { id: 2, text: "还在写", status: "in progress" },
+      ],
+      nextId: 3,
+    });
+    expect(n?.todos).toEqual([
+      { id: 1, text: "注册", status: "completed" },
+      { id: 2, text: "还在写", status: "in_progress" },
+    ]);
   });
 
   it("maps legacy done true/false and ignores action", () => {
@@ -104,5 +118,56 @@ describe("normalizeTodos", () => {
 
   it("emptyTodoState starts at nextId 1", () => {
     expect(emptyTodoState()).toEqual({ todos: [], nextId: 1 });
+  });
+});
+
+describe("closeFinishedTodos", () => {
+  const list = [
+    { id: 1, text: "已完成", status: "completed" as const },
+    { id: 2, text: "收尾", status: "in_progress" as const },
+  ];
+
+  it("closes leftover in_progress when nothing is pending", () => {
+    expect(closeFinishedTodos(list)).toEqual([
+      { id: 1, text: "已完成", status: "completed" },
+      { id: 2, text: "收尾", status: "completed" },
+    ]);
+  });
+
+  it("leaves the list alone while a pending item remains", () => {
+    expect(closeFinishedTodos([...list, { id: 3, text: "还没做", status: "pending" }])).toBeNull();
+  });
+
+  it("leaves an already closed list alone", () => {
+    expect(closeFinishedTodos([{ id: 1, text: "已完成", status: "completed" }])).toBeNull();
+  });
+});
+
+describe("todoListFinishedInTranscript", () => {
+  const done = {
+    role: "toolResult",
+    toolName: "todo",
+    details: { todos: [{ id: 1, text: "注册", status: "completed" }], nextId: 2 },
+  };
+  const tail = {
+    role: "toolResult",
+    toolName: "todo",
+    details: { todos: [{ id: 1, text: "注册", status: "in_progress" }], nextId: 2 },
+  };
+
+  it("is finished when every item is completed", () => {
+    expect(todoListFinishedInTranscript([done])).toBe(true);
+  });
+
+  it("is finished when a normal stop follows an in_progress tail with nothing pending", () => {
+    expect(todoListFinishedInTranscript([tail, { role: "assistant", stopReason: "stop" }])).toBe(true);
+  });
+
+  it("stays unfinished while pending remains or the turn was aborted", () => {
+    expect(todoListFinishedInTranscript([
+      { role: "toolResult", toolName: "todo", details: { todos: [{ id: 1, text: "还没做", status: "pending" }], nextId: 2 } },
+      { role: "assistant", stopReason: "stop" },
+    ])).toBe(false);
+    expect(todoListFinishedInTranscript([tail, { role: "assistant", stopReason: "aborted" }])).toBe(false);
   });
 });

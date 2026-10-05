@@ -127,6 +127,9 @@ export function VirtualizedMessageList({
   const ref = useRef<VListHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  // 打开会话后的测高窗口：virtua 先按估算高度滚，onScroll 会误判「不在底部」并取消贴底。
+  // 这段时间内忽略该误判，持续滚到真实底部，直到高度稳住或用户主动上滚。
+  const pinningRef = useRef(false);
   const countRef = useRef(0);
   const resizingRef = useRef(false);
   // 不贴底时 resize 的稳定锚点：顶部可见条目索引 + 该条目已滚过视口顶的像素。
@@ -194,29 +197,58 @@ export function VirtualizedMessageList({
   //（旧手写列表用的就是 useLayoutEffect，迁移到 virtua 时曾降级为 useEffect，这里改回）。
   useLayoutEffect(stickToBottom);
 
-  // 会话切换（resetKey 变）或首次挂载：重置滚动锚点为「贴底」，并在 virtua 完成首轮高度测量后精确滚到底。
-  // 为什么要双 rAF：virtua 初次以 itemSize 估算高度，此刻 scrollToIndex 落点不准（表现为首次打开不贴底）；
-  // 且切换会话若沿用旧的 atBottom/锚点，virtua 逐帧测高重排会把视图往旧位置拽（表现为抖动）。
-  // 先立即滚一次（估算位），再在随后两帧测高稳定后各滚一次，落到真实底部、不抖。
+  const scrollToEnd = () => {
+    const h = ref.current;
+    if (h && countRef.current > 0) h.scrollToIndex(countRef.current - 1, { align: 'end' });
+  };
+
+  // 会话切换（resetKey 变）或首次挂载：钉在底部，直到 virtua 把末尾条目测高并稳住。
+  // 两帧 rAF 不够：估算高度下的 scrollToIndex 落在半截，随后 onScroll 把 atBottom 清掉，
+  // 真实高度长出来后就不再贴底。测高期间忽略这次误判，高度连续稳定后再放开。
   useLayoutEffect(() => {
     atBottomRef.current = true;
+    pinningRef.current = true;
     anchorIndexRef.current = 0;
     anchorWithinRef.current = 0;
     notifyViewport();
     setShowJump(false);
-    const toBottom = () => {
+
+    // 用帧数而不是墙上时间：测试环境里 rAF 可能同步空转，performance.now 不前进会死循环。
+    const maxFrames = 24;
+    let frames = 0;
+    let lastSize = -1;
+    let stableFrames = 0;
+    let raf = 0;
+    const tick = () => {
+      if (!pinningRef.current || frames >= maxFrames) {
+        pinningRef.current = false;
+        return;
+      }
+      frames += 1;
       const h = ref.current;
-      if (h && countRef.current > 0) h.scrollToIndex(countRef.current - 1, { align: 'end' });
+      if (!h || countRef.current === 0) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const atBottom = h.scrollOffset + h.viewportSize >= h.scrollSize - BOTTOM_THRESHOLD;
+      if (!atBottom) scrollToEnd();
+      const size = h.scrollSize;
+      if (atBottom && size === lastSize) {
+        stableFrames += 1;
+        if (stableFrames >= 3) {
+          pinningRef.current = false;
+          return;
+        }
+      } else {
+        stableFrames = 0;
+        lastSize = size;
+      }
+      raf = requestAnimationFrame(tick);
     };
-    toBottom();
-    let r2 = 0;
-    const r1 = requestAnimationFrame(() => {
-      toBottom();
-      r2 = requestAnimationFrame(toBottom);
-    });
+    tick();
     return () => {
-      cancelAnimationFrame(r1);
-      cancelAnimationFrame(r2);
+      pinningRef.current = false;
+      cancelAnimationFrame(raf);
     };
     // 仅在会话标识变化时重置贴底；同会话内的增量贴底由上面的 useLayoutEffect(stickToBottom) 负责。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,7 +256,10 @@ export function VirtualizedMessageList({
 
   useImperativeHandle(scrollRef, () => ({
     scrollBy(deltaY) {
-      if (deltaY < 0) atBottomRef.current = false;
+      if (deltaY < 0) {
+        atBottomRef.current = false;
+        pinningRef.current = false;
+      }
       ref.current?.scrollBy(deltaY);
     },
   }));
@@ -290,7 +325,10 @@ export function VirtualizedMessageList({
         onWheel={(e) => {
           // 用户主动上滚：立刻脱离自动贴底，避免流式输出（每 100ms 重渲染都触发 stickToBottom）
           // 把视图反复拽回底部、打断阅读。滚回贴近底部后 onScroll 会重新判定 atBottom 恢复自动贴底。
-          if (e.deltaY < 0) atBottomRef.current = false;
+          if (e.deltaY < 0) {
+            atBottomRef.current = false;
+            pinningRef.current = false;
+          }
         }}
       >
         <VList
@@ -299,7 +337,7 @@ export function VirtualizedMessageList({
           style={{ height: '100%', flex: 1, minHeight: 0 }}
           bufferSize={BUFFER_SIZE}
           onScroll={() => {
-            if (resizingRef.current) return;
+            if (resizingRef.current || pinningRef.current) return;
             const h = ref.current;
             if (!h) return;
             const atBottom = h.scrollOffset + h.viewportSize >= h.scrollSize - BOTTOM_THRESHOLD;

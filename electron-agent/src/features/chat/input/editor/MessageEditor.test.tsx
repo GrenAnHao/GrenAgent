@@ -81,6 +81,9 @@ vi.mock('../SessionGoalDrawer', () => ({
 }));
 vi.mock('../ComposerPromptOverlay', () => ({ ComposerPromptOverlay: () => null }));
 vi.mock('../EnhancePromptOverlay', () => ({ EnhancePromptOverlay: () => null }));
+vi.mock('../actions/EnhancePromptAction', () => ({
+  default: () => <button type="button">增强提示词</button>,
+}));
 vi.mock('../ContextUsageTag', () => ({ ContextUsageTag: () => null }));
 vi.mock('./InputChips', () => ({ InputChips: () => null }));
 vi.mock('./ChatTag/ReactChatTagPlugin', () => ({ default: {} }));
@@ -93,6 +96,7 @@ vi.mock('./useSlashOptions', () => ({ useSlashOptions: () => ({ slashItems: [], 
 vi.mock('./useTauriFileDrop', () => ({ useTauriFileDrop: () => ({ dragOver: false, dragKind: null }) }));
 
 import { MessageEditor } from './MessageEditor';
+import { WORKSPACE_BAR_ROW_HEIGHT } from '../workspace/styles';
 import { useUiPromptStore } from '../../../../stores/uiPromptStore';
 
 if (!('ResizeObserver' in globalThis)) {
@@ -218,6 +222,21 @@ describe('MessageEditor project context citations', () => {
     expect(dock.contains(tasks)).toBe(true);
     expect(dock.contains(goal)).toBe(true);
     expect(dock.compareDocumentPosition(screen.getByTestId('composer-surface')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps the project-session workspace row under the input in every mode', () => {
+    render(<MessageEditor leftActions={[]} rightActions={[]} />);
+    expect(screen.getByTestId('composer-below')).toHaveStyle({ minHeight: `${WORKSPACE_BAR_ROW_HEIGHT}px` });
+  });
+
+  it('puts project labels under the composer and the enhance control inside the top corner', () => {
+    render(<MessageEditor leftActions={[]} rightActions={['enhancePrompt']} />);
+    const surface = screen.getByTestId('composer-surface');
+    const labels = screen.getByRole('button', { name: '引用当前内容' });
+    const enhance = screen.getByRole('button', { name: '增强提示词' });
+    expect(surface.contains(labels)).toBe(false);
+    expect(surface.compareDocumentPosition(labels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(surface.contains(enhance)).toBe(true);
   });
 
   it('keeps the approval card in the editor flow, not the overlay', () => {

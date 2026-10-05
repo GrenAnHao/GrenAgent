@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { CodeCard } from './CodeCard';
+import { CodeCard, codeCardContentClass } from './CodeCard';
 
 afterEach(cleanup);
 
@@ -46,7 +46,7 @@ describe('CodeCard', () => {
     expect(stats.textContent).toContain('-1');
   });
 
-  it('does not reserve a horizontal scrollbar until hover', () => {
+  it('does not hide the scrollbar until hover', () => {
     render(
       <CodeCard fileName="a.ts">
         <pre>short</pre>
@@ -54,8 +54,22 @@ describe('CodeCard', () => {
     );
     const body = screen.getByTestId('code-card-body');
     const css = [...document.querySelectorAll('style')].map((node) => node.textContent ?? '').join('\n');
-    expect(body.className.length).toBeGreaterThan(0);
-    expect(css).toContain('scrollbar-width:none');
-    expect(css).toContain('scrollbar-width:thin');
+    const token = body.className.split(/\s+/).find((name) => name.startsWith('acss-'));
+    const rule = css.split('}').find((part) => token && part.includes(`.${token}`)) ?? '';
+    expect(rule).toContain('overflow:auto');
+    expect(rule).toContain('max-height:min(50vh, 360px)');
+    expect(rule).not.toContain('scrollbar-width');
+    expect(rule).not.toContain(':hover');
+  });
+
+  it('uses 16px padding for read and search bodies', () => {
+    render(
+      <CodeCard fileName="a.ts">
+        <pre className={codeCardContentClass}>short</pre>
+      </CodeCard>,
+    );
+    const css = [...document.querySelectorAll('style')].map((node) => node.textContent ?? '').join('\n');
+    const start = css.indexOf(`.${codeCardContentClass}`);
+    expect(css.slice(start, start + 240)).toContain('padding:16px');
   });
 });

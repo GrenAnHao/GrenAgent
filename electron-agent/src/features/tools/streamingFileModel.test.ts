@@ -1,5 +1,51 @@
 import { describe, expect, it } from 'vitest';
-import { PREVIEW_MAX_CHARS, streamingEditPairs, streamingWritePreview } from './streamingFileModel';
+import {
+  HL_MAX_CHARS,
+  HL_MAX_LINES,
+  PREVIEW_MAX_CHARS,
+  exceedsHighlightBudget,
+  inferLanguage,
+  lineCount,
+  streamingEditPairs,
+  streamingEditStats,
+  streamingWritePreview,
+  writeContent,
+} from './streamingFileModel';
+
+describe('lineCount', () => {
+  it('空串为 0，无换行为 1，末尾换行再加一行', () => {
+    expect(lineCount('')).toBe(0);
+    expect(lineCount('abc')).toBe(1);
+    expect(lineCount('a\n')).toBe(2);
+    expect(lineCount('a\nb')).toBe(2);
+  });
+});
+
+describe('exceedsHighlightBudget', () => {
+  it('在字符和行数边界上取值', () => {
+    expect(exceedsHighlightBudget('a'.repeat(HL_MAX_CHARS))).toBe(false);
+    expect(exceedsHighlightBudget('a'.repeat(HL_MAX_CHARS + 1))).toBe(true);
+    expect(exceedsHighlightBudget(`${'a\n'.repeat(HL_MAX_LINES - 1)}a`)).toBe(false);
+    expect(exceedsHighlightBudget('a\n'.repeat(HL_MAX_LINES))).toBe(true);
+  });
+});
+
+describe('inferLanguage', () => {
+  it('路径未到时从正文识别 Python', () => {
+    expect(inferLanguage('def _format(value: float) -> str:\n    return 1\n')).toBe('python');
+  });
+
+  it('无法判断时返回空', () => {
+    expect(inferLanguage('x')).toBeUndefined();
+  });
+});
+describe('writeContent', () => {
+  it('非字符串时返回空串', () => {
+    expect(writeContent({})).toBe('');
+    expect(writeContent({ content: 1 })).toBe('');
+    expect(writeContent({ content: 'hi' })).toBe('hi');
+  });
+});
 
 describe('streamingWritePreview', () => {
   it('小内容原样返回', () => {
@@ -19,6 +65,14 @@ describe('streamingWritePreview', () => {
     expect(preview.omittedLines).toBe(100);
     expect(preview.totalLines).toBe(101);
     expect(preview.revision).toBe(head.length + tail.length);
+  });
+});
+
+describe('streamingEditStats', () => {
+  it('随半截 newText 变长，缺的一侧不计', () => {
+    expect(streamingEditStats({ edits: [{ oldText: 'a\nb' }] })).toEqual({ added: 0, deleted: 2 });
+    expect(streamingEditStats({ edits: [{ oldText: 'a\nb', newText: 'c' }] })).toEqual({ added: 1, deleted: 2 });
+    expect(streamingEditStats({ edits: [{ oldText: 'a\nb', newText: 'c\nd' }] })).toEqual({ added: 2, deleted: 2 });
   });
 });
 

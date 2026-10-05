@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
-import { Dropdown } from 'antd';
+import { Dropdown, Input, Modal } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { FolderPlus, MessageSquarePlus } from 'lucide-react';
 import { revealItemInDir } from '../../platform/runtime';
 import { VList } from 'virtua';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
-import { prewarmRecent, prewarmWorkspace } from '../../lib/prewarm';
+import { PREWARM_AFTER_BOOT_MS, prewarmRecent, prewarmWorkspace } from '../../lib/prewarm';
+import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pathsEquivalent } from '../../lib/pathUtils';
 import { useConversations } from './useConversations';
 import { SidebarActions } from './SidebarActions';
@@ -100,20 +101,25 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const setAlias = useSidebarPrefsStore((s) => s.setAlias);
 
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [aliasEdit, setAliasEdit] = useState<{ cwd: string; name: string } | null>(null);
+  const [aliasValue, setAliasValue] = useState('');
   const [showAllCwds, setShowAllCwds] = useState<Set<string>>(new Set());
 
   const items = useSidebarItems(showAllCwds);
+  const { appBooted } = useAgentStoreContext();
 
-  // 启动后后台预热最近几个对话的 pi 进程，让首次切换也无需等冷启动。
+  // 等主界面出来再预热其它项目。冷启动时和当前工作区一起建运行时，会把扩展工厂挤在加载页上。
   const didPrewarmRef = useRef(false);
   useEffect(() => {
-    if (didPrewarmRef.current || conversations.length === 0) return;
+    if (!appBooted || didPrewarmRef.current || conversations.length === 0) return;
     didPrewarmRef.current = true;
     prewarmRecent(
       conversations.map((c) => c.cwd),
       4,
+      PREWARM_AFTER_BOOT_MS,
+      useSessionStore.getState().activeWorkspace,
     );
-  }, [conversations]);
+  }, [appBooted, conversations]);
 
   const handleSubmitRename = useCallback(
     (cwd: string, path: string, name: string) => {
@@ -128,11 +134,16 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const handleRevealProject = useCallback((cwd: string) => void revealItemInDir(cwd), []);
   const handleRenameProject = useCallback(
     (group: { cwd: string; name: string }) => {
-      const next = window.prompt('项目别名（留空恢复默认）', group.name);
-      if (next !== null) setAlias(group.cwd, next);
+      setAliasValue(group.name);
+      setAliasEdit({ cwd: group.cwd, name: group.name });
     },
-    [setAlias],
+    [],
   );
+  const submitAlias = useCallback(() => {
+    if (!aliasEdit) return;
+    setAlias(aliasEdit.cwd, aliasValue);
+    setAliasEdit(null);
+  }, [aliasEdit, aliasValue, setAlias]);
   const handleShowAll = useCallback((cwd: string) => {
     setShowAllCwds((prev) => {
       const next = new Set(prev);
@@ -288,6 +299,22 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           </VList>
         )}
       </div>
+      <Modal
+        open={aliasEdit != null}
+        title="项目别名"
+        okText="确定"
+        cancelText="取消"
+        centered
+        onCancel={() => setAliasEdit(null)}
+        onOk={submitAlias}
+      >
+        <Input
+          value={aliasValue}
+          placeholder="留空恢复默认"
+          onChange={(event) => setAliasValue(event.target.value)}
+          onPressEnter={submitAlias}
+        />
+      </Modal>
     </Flexbox>
   );
 });

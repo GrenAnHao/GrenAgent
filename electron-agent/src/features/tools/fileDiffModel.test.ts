@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead } from './fileDiffModel';
+import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, readLineRange, rowsFromGitPatch, totals } from './fileDiffModel';
+
+describe('rowsFromGitPatch', () => {
+  it('keeps hunk lines only, including a deleted line that looks like a file header', () => {
+    const patch = [
+      'diff --git a/a.ts b/a.ts',
+      'index 111..222 100644',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -1,3 +1,3 @@',
+      ' keep',
+      '--- old dashes',
+      '+new',
+      '\\ No newline at end of file',
+      '@@ -20,2 +20,2 @@ fn',
+      ' tail',
+      '',
+    ].join('\n');
+    const rows = rowsFromGitPatch(patch);
+    expect(rows).toEqual([
+      { marker: ' ', text: 'keep' },
+      { marker: '-', text: '-- old dashes' },
+      { marker: '+', text: 'new' },
+      { marker: ' ', text: 'tail' },
+    ]);
+    expect(totals(rows)).toEqual({ added: 1, deleted: 1 });
+  });
+
+  it('returns nothing for a binary diff', () => {
+    expect(rowsFromGitPatch('diff --git a/x.png b/x.png\nBinary files a/x.png and b/x.png differ\n')).toEqual([]);
+  });
+});
 
 describe('fileDiffModel', () => {
   it('recognizes read/write/edit aliases', () => {
@@ -9,6 +40,14 @@ describe('fileDiffModel', () => {
     expect(isFileMutation('read')).toBe(false);
     expect(fileCardVerb('write_file')).toBe('写入');
     expect(fileCardVerb('bash')).toBeNull();
+  });
+
+  it('formats a read window as a line range', () => {
+    expect(readLineRange({ path: 'a.ts' })).toBeUndefined();
+    expect(readLineRange({ offset: 12, limit: 20 })).toBe('12-31');
+    expect(readLineRange({ offset: 4, limit: 1 })).toBe('4');
+    expect(readLineRange({ limit: 3 })).toBe('1-3');
+    expect(readLineRange({ offset: 8 })).toBe('8-');
   });
 
   it('write intended is all additions and drops a trailing empty line', () => {

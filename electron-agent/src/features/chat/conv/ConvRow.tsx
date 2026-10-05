@@ -53,6 +53,7 @@ const styles = createStaticStyles(({ css }) => ({
     margin-inline-start: auto;
   `,
   meta: css`
+    flex: none;
     font-size: 11px;
     color: ${cssVar.colorTextQuaternary};
     font-variant-numeric: tabular-nums;
@@ -71,6 +72,8 @@ interface ConvRowProps {
   name: ReactNode;
   args?: ReactNode;
   meta?: ReactNode;
+  /** 计数紧跟文件名，不推进右侧簇。折叠箭头仍靠右。 */
+  metaInline?: boolean;
   /** 提供 body 即可展开；不提供则为纯展示行（无 chevron）。 */
   body?: ReactNode;
   open?: boolean;
@@ -78,13 +81,14 @@ interface ConvRowProps {
   'data-testid'?: string;
 }
 
-/** L2 纯行：状态图标 + 工具图标 + 等宽名·参数 + 右侧 meta + 折叠箭头；展开 body 轻缩进、无左竖线。 */
+/** L2 纯行：状态图标 + 工具图标 + 等宽名·参数 + meta + 折叠箭头；展开 body 轻缩进、无左竖线。 */
 export const ConvRow = memo(function ConvRow({
   status,
   icon,
   name,
   args,
   meta,
+  metaInline = false,
   body,
   open = false,
   onToggle,
@@ -106,8 +110,9 @@ export const ConvRow = memo(function ConvRow({
             <span className={styles.arg}>{args}</span>
           </>
         ) : null}
+        {metaInline && meta != null ? <span className={styles.meta}>{meta}</span> : null}
         <div className={styles.right}>
-          {meta != null ? <span className={styles.meta}>{meta}</span> : null}
+          {!metaInline && meta != null ? <span className={styles.meta}>{meta}</span> : null}
           {expandable ? <Disclosure open={open} /> : null}
         </div>
       </div>

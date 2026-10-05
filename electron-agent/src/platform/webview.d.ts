@@ -7,8 +7,7 @@ declare global {
         HTMLAttributes<HTMLElement> & {
           src?: string;
           partition?: string;
-          allowpopups?: boolean | 'true' | 'false';
-          webpreferences?: string;
+          allowpopups?: 'true' | 'false';
         },
         HTMLElement
       >;

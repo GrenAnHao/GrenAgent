@@ -21,13 +21,22 @@ vi.mock('@lobehub/ui/base-ui', () => ({
     onChange,
     disabled,
     options,
+    optionRender,
+    classNames,
   }: {
     value?: string;
     onChange?: (v: string) => void;
     disabled?: boolean;
     options?: Array<{ label: string; value: string }>;
+    optionRender?: (opt: { label: string; value: string }) => ReactNode;
+    classNames?: { trigger?: string; prefix?: string; value?: string };
   }) => (
-    <div data-testid="approval-select" data-value={value}>
+    <div
+      data-testid="approval-select"
+      data-value={value}
+      data-trigger-class={classNames?.trigger ?? ''}
+      data-prefix-class={classNames?.prefix ?? ''}
+    >
       {options?.map((opt) => (
         <button
           key={opt.value}
@@ -37,6 +46,11 @@ vi.mock('@lobehub/ui/base-ui', () => ({
         >
           {opt.label}
         </button>
+      ))}
+      {options?.map((opt) => (
+        <div key={`render-${opt.value}`} data-testid={`option-render-${opt.value}`}>
+          {optionRender?.(opt)}
+        </div>
       ))}
     </div>
   ),
@@ -131,6 +145,7 @@ vi.mock('antd', async (importOriginal) => {
 import { APPROVAL_LABELS } from '../../../../stores/approvalStore';
 import { useApprovalStore } from '../../../../stores/approvalStore';
 import { useModeStore } from '../../../../stores/modeStore';
+import { useSessionStore } from '../../../../store/session';
 import {
   __resetFullAccessConfirmForTest,
   dismissFullAccessConfirm,
@@ -150,8 +165,9 @@ function renderApproval() {
 
 beforeEach(() => {
   __resetFullAccessConfirmForTest();
-  useApprovalStore.setState({ byWorkspace: {} });
-  useModeStore.setState({ byWorkspace: {} });
+  useApprovalStore.setState({ byWorkspace: {}, bySession: {} });
+  useModeStore.setState({ byWorkspace: {}, bySession: {} });
+  useSessionStore.setState({ activeSessionPath: null, draftConversationCwd: null });
   setApproval.mockReset();
   setApproval.mockResolvedValue(undefined);
   messageError.mockReset();
@@ -169,7 +185,7 @@ describe('ApprovalAction', () => {
     fireEvent.click(screen.getByRole('button', { name: APPROVAL_LABELS.auto }));
 
     await waitFor(() => {
-      expect(setApproval).toHaveBeenCalledWith('/ws', 'auto');
+      expect(setApproval).toHaveBeenCalledWith('/ws', 'auto', null);
     });
     expect(screen.queryByTestId('full-access-confirm-modal')).not.toBeInTheDocument();
     expect(useApprovalStore.getState().byWorkspace['/ws']).toBe('auto');
@@ -200,7 +216,7 @@ describe('ApprovalAction', () => {
     fireEvent.click(screen.getByTestId('full-access-ok'));
 
     await waitFor(() => {
-      expect(setApproval).toHaveBeenCalledWith('/ws', 'full');
+      expect(setApproval).toHaveBeenCalledWith('/ws', 'full', null);
     });
     expect(useApprovalStore.getState().byWorkspace['/ws']).toBe('full');
     expect(useFullAccessConfirmStore.getState().open).toBe(false);
@@ -237,5 +253,53 @@ describe('ApprovalAction', () => {
     expect(screen.queryByTestId('full-access-confirm-modal')).not.toBeInTheDocument();
     expect(setApproval).not.toHaveBeenCalled();
     expect(useApprovalStore.getState().byWorkspace['/ws']).toBe('auto');
+  });
+
+  it('下拉里只有「完全权限」一项带错误色', () => {
+    renderApproval();
+    const fullClass = screen.getByTestId('option-render-full').firstElementChild?.className ?? '';
+    expect(fullClass).not.toBe('');
+    for (const level of ['readonly', 'ask', 'auto', 'workspace']) {
+      expect(screen.getByTestId(`option-render-${level}`).firstElementChild?.className ?? '').toBe('');
+    }
+  });
+
+  it('当前是完全权限：触发器文字和图标用同一个错误色类；其它档不加', () => {
+    useApprovalStore.setState({ byWorkspace: { '/ws': 'full' } });
+    const { unmount } = renderApproval();
+    const select = screen.getByTestId('approval-select');
+    const fullClass = screen.getByTestId('option-render-full').firstElementChild?.className;
+    expect(select).toHaveAttribute('data-trigger-class', fullClass);
+    expect(select).toHaveAttribute('data-prefix-class', fullClass);
+    unmount();
+
+    useApprovalStore.setState({ byWorkspace: { '/ws': 'workspace' } });
+    renderApproval();
+    expect(screen.getByTestId('approval-select')).toHaveAttribute('data-trigger-class', '');
+  });
+
+  it('Ask 模式下完全权限没有生效，触发器不标红', () => {
+    useModeStore.setState({ byWorkspace: { '/ws': 'ask' } });
+    useApprovalStore.setState({ byWorkspace: { '/ws': 'full' } });
+    renderApproval();
+    expect(screen.getByTestId('approval-select')).toHaveAttribute('data-trigger-class', '');
+  });
+
+  it('按会话：显示并只改当前会话的档，另一个会话保持自己的档', async () => {
+    useApprovalStore.setState({
+      byWorkspace: { '/ws': 'auto' },
+      bySession: { '/ws/a.jsonl': 'ask', '/ws/b.jsonl': 'readonly' },
+    });
+    useSessionStore.setState({ activeSessionPath: '/ws/a.jsonl', draftConversationCwd: null });
+    renderApproval();
+    expect(screen.getByTestId('approval-select')).toHaveAttribute('data-value', 'ask');
+
+    fireEvent.click(screen.getByRole('button', { name: APPROVAL_LABELS.workspace }));
+
+    await waitFor(() => {
+      expect(setApproval).toHaveBeenCalledWith('/ws', 'workspace', '/ws/a.jsonl');
+    });
+    expect(useApprovalStore.getState().bySession['/ws/a.jsonl']).toBe('workspace');
+    expect(useApprovalStore.getState().bySession['/ws/b.jsonl']).toBe('readonly');
   });
 });

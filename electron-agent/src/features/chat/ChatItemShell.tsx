@@ -9,15 +9,17 @@ interface ChatItemShellProps {
   bubble?: boolean;
   /** hover/focus 才浮现的操作栏（焦点气泡）。预留固定高度，避免显隐跳动。 */
   actions?: ReactNode;
+  /** 用户消息占满会话列宽。任务提示词限高时用，避免气泡缩成内容宽度。 */
+  fullWidth?: boolean;
   children: ReactNode;
 }
 
 /** 自研无头像消息外壳：对齐 lobehub 间距（gap 8 / paddingBlock 8 / 用户 paddingInlineStart 36）。 */
-function ChatItemShellInner({ placement, bubble, actions, children }: ChatItemShellProps) {
+function ChatItemShellInner({ placement, bubble, actions, children, fullWidth }: ChatItemShellProps) {
   const isUser = placement === 'right';
   return (
     <div className={cx(chatStyles.item, isUser && chatStyles.itemUser)}>
-      <div className={cx(chatStyles.body, !isUser && chatStyles.bodyAssistant)}>
+      <div className={cx(chatStyles.body, (!isUser || fullWidth) && chatStyles.bodyAssistant)}>
         {bubble ? <div className={chatStyles.bubble}>{children}</div> : children}
         {actions ? (
           <div

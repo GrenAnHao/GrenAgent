@@ -162,17 +162,37 @@ describe('Electron input drag and drop through preload', () => {
     ]));
   });
 
-  it('turns a workspace text file into a text chip', async () => {
+  it('turns a workspace text file into a path reference, not its content', async () => {
     const input = mountInput();
     electron.webUtils.getPathForFile.mockReturnValue('C:\\repo\\readme.md');
-    mockBinary('text/plain', '# readme');
+    mockBinary('text/plain', '# readme\nline 2');
     drag(input.target, 'drop', { files: [new File(['# readme'], 'readme.md')] });
     await waitFor(() => expect(input.onPastedText).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ source: 'readme.md', text: '# readme' }),
+      expect.objectContaining({ source: 'readme.md', referenceOnly: true, text: '', lines: 2 }),
     ));
+    expect(electron.ipcRenderer.invoke).not.toHaveBeenCalledWith('gren:invoke', expect.objectContaining({
+      command: 'import_dropped_file',
+    }));
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('gren:invoke', {
       command: 'read_file_binary', args: { workspace: 'C:/repo', path: 'readme.md' },
     });
+  });
+
+  it('imports every external text file in a multi-file drop as a reference, small ones included', async () => {
+    const input = mountInput();
+    electron.webUtils.getPathForFile.mockImplementation((file: File) => `C:/outside/${file.name}`);
+    electron.ipcRenderer.invoke.mockImplementation(async (_channel, request) => {
+      if (request.command === 'register_dropped_files') return;
+      if (request.command === 'import_dropped_file') return `.pi/dropped/h/${request.args.path.split('/').pop()}`;
+      return { mime_type: 'text/markdown', data: btoa('a\nb\nc'), size: 5 };
+    });
+    drag(input.target, 'drop', { files: [new File(['a'], 'one.md'), new File(['b'], 'two.md'), new File(['c'], 'three.md')] });
+    await waitFor(() => expect(input.onPastedText).toHaveBeenCalledTimes(3));
+    expect(input.onPastedText.mock.calls.map(([chip]) => chip)).toEqual([
+      expect.objectContaining({ source: '.pi/dropped/h/one.md', referenceOnly: true, text: '', lines: 3 }),
+      expect.objectContaining({ source: '.pi/dropped/h/two.md', referenceOnly: true, text: '' }),
+      expect.objectContaining({ source: '.pi/dropped/h/three.md', referenceOnly: true, text: '' }),
+    ]);
   });
 
   it('imports a large external text file as a reference', async () => {

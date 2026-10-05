@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useDockStore, defaultTerminalTitle, subAgentTabId, MAX_CLOSED_TABS } from './dockStore';
+import {
+  useDockStore,
+  defaultTerminalTitle,
+  subAgentTabId,
+  MAX_CLOSED_TABS,
+  resolveVisibleActive,
+  visibleRegionTabs,
+  type DockSessionView,
+} from './dockStore';
+import { useSessionStore } from '../store/session';
 import { useLayoutStore } from './layoutStore';
 
 function reset() {
@@ -295,5 +304,169 @@ describe('dockStore', () => {
     expect(closed).toHaveLength(MAX_CLOSED_TABS);
     expect(closed[0].id).toBe(`page:https://u${MAX_CLOSED_TABS}`);
     expect(closed.at(-1)?.id).toBe('page:https://u1');
+  });
+});
+
+describe('dock persist (重启不还原浏览器标签)', () => {
+  beforeEach(reset);
+
+  it('does not persist open or recently closed browser tabs', () => {
+    const s = useDockStore.getState();
+    s.addTab({
+      id: 'browser:1',
+      kind: 'browser',
+      region: 'right',
+      title: '必应',
+      closable: true,
+      payload: { url: 'https://www.bing.com/', title: '必应' },
+    });
+    s.addTab({
+      id: 'file:right:/repo',
+      kind: 'file',
+      region: 'right',
+      title: '文件',
+      closable: true,
+      payload: { workspace: '/repo' },
+    });
+    s.closeTab('browser:1');
+    const persisted = useDockStore.persist.getOptions().partialize!(useDockStore.getState());
+    expect(persisted.tabs?.some((t) => t.kind === 'browser')).toBe(false);
+    expect(persisted.closedTabs?.some((t) => t.kind === 'browser')).toBe(false);
+    expect(persisted.tabs?.map((t) => t.id)).toEqual(['file:right:/repo']);
+    expect(persisted.activeByRegion?.right).toBe('file:right:/repo');
+    expect(useDockStore.getState().closedTabs.some((t) => t.kind === 'browser')).toBe(true);
+  });
+
+  it('drops previously persisted browser tabs on rehydrate', () => {
+    const merge = useDockStore.persist.getOptions().merge!;
+    const merged = merge(
+      {
+        tabs: [
+          {
+            id: 'browser:old',
+            kind: 'browser',
+            region: 'right',
+            title: '旧页',
+            closable: true,
+            order: 0,
+            payload: { url: 'https://old.test/', title: '旧页' },
+          },
+          {
+            id: 'file:right:/repo',
+            kind: 'file',
+            region: 'right',
+            title: '文件',
+            closable: true,
+            order: 1,
+            payload: { workspace: '/repo' },
+          },
+        ],
+        closedTabs: [
+          {
+            id: 'browser:closed',
+            kind: 'browser',
+            region: 'right',
+            title: '关掉的页',
+            closable: true,
+            payload: { url: 'https://closed.test/' },
+            closedAt: 1,
+          },
+        ],
+        activeByRegion: { right: 'browser:old', bottom: null },
+      },
+      useDockStore.getState(),
+    ) as ReturnType<typeof useDockStore.getState>;
+    expect(merged.tabs.map((t) => t.id)).toEqual(['file:right:/repo']);
+    expect(merged.closedTabs).toEqual([]);
+    expect(merged.activeByRegion.right).toBe('file:right:/repo');
+  });
+});
+
+describe('dockStore session-owned tabs', () => {
+  const A = { sessionPath: '/ws/a.jsonl', workspace: '/ws' };
+  const B = { sessionPath: '/ws/b.jsonl', workspace: '/ws' };
+
+  beforeEach(() => {
+    reset();
+    useDockStore.setState({ activeBySession: {}, rightOpenBySession: {} });
+    useSessionStore.setState({ activeSessionPath: A.sessionPath, activeWorkspace: '/ws' });
+  });
+
+  /** 模拟一次会话切换（与 useDockSessionSwitch 的行为一致）。 */
+  function switchTo(next: DockSessionView) {
+    const st = useSessionStore.getState();
+    const prev = { sessionPath: st.activeSessionPath || null, workspace: st.activeWorkspace };
+    useSessionStore.setState({ activeSessionPath: next.sessionPath ?? '', activeWorkspace: next.workspace });
+    useDockStore.getState().switchSessionView(prev, next);
+  }
+
+  function visibleRight(view: DockSessionView) {
+    const s = useDockStore.getState();
+    const tabs = visibleRegionTabs(s.tabs, 'right', view);
+    return { ids: tabs.map((t) => t.id), active: resolveVisibleActive(s, 'right', view, tabs) };
+  }
+
+  it('records the current session as owner when opening a subagent tab', () => {
+    useDockStore.getState().openSubAgent({ messageId: 'm1', toolCallId: 'c1', subIndex: 2, title: '#2 子账号' });
+    const tab = useDockStore.getState().tabs[0];
+    expect(tab.ownerSessionPath).toBe(A.sessionPath);
+    expect(tab.ownerWorkspace).toBe('/ws');
+  });
+
+  it('hides A-owned tabs in B, closes the right panel, and restores both when switching back', () => {
+    useDockStore.getState().openSubAgent({ messageId: 'm1', toolCallId: 'c1', subIndex: 2, title: '#2 子账号' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+
+    switchTo(B);
+    expect(visibleRight(B)).toEqual({ ids: [], active: null });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+    // 隐藏而不是删除
+    expect(useDockStore.getState().tabs.map((t) => t.id)).toEqual(['m1#2']);
+
+    switchTo(A);
+    expect(visibleRight(A)).toEqual({ ids: ['m1#2'], active: 'm1#2' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('keeps global tabs visible across sessions and leaves the panel open', () => {
+    useDockStore.getState().openPage({ url: 'https://a', content: 'x' });
+    useDockStore.getState().openSubAgentLog({ agentId: 'sa', task: 't', output: '', status: 'done' });
+    expect(visibleRight(A).active).toBe('salog:sa');
+
+    switchTo(B);
+    expect(visibleRight(B)).toEqual({ ids: ['page:https://a'], active: 'page:https://a' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+
+    switchTo(A);
+    expect(visibleRight(A)).toEqual({ ids: ['page:https://a', 'salog:sa'], active: 'salog:sa' });
+  });
+
+  it('closing a session-owned tab only falls back to tabs visible in that session', () => {
+    useDockStore.getState().openSubAgent({ messageId: 'mA', toolCallId: 'c', subIndex: null, title: 'A' });
+    switchTo(B);
+    useDockStore.getState().openPage({ url: 'https://b', content: 'x' });
+    useDockStore.getState().openSubAgent({ messageId: 'mB', toolCallId: 'c', subIndex: null, title: 'B' });
+    useDockStore.getState().closeTab('mB');
+    expect(useDockStore.getState().activeByRegion.right).toBe('page:https://b');
+    expect(useDockStore.getState().tabs.some((t) => t.id === 'mA')).toBe(true);
+  });
+
+  it('draft owner (null) is only visible in the draft of the same workspace', () => {
+    useSessionStore.setState({ activeSessionPath: '', activeWorkspace: '/ws' });
+    useDockStore.getState().openSubAgent({ messageId: 'd', toolCallId: 'c', subIndex: null, title: 'D' });
+    expect(useDockStore.getState().tabs[0].ownerSessionPath).toBeNull();
+    expect(visibleRight({ sessionPath: null, workspace: '/ws' }).ids).toEqual(['d']);
+    expect(visibleRight({ sessionPath: null, workspace: '/other' }).ids).toEqual([]);
+    expect(visibleRight(A).ids).toEqual([]);
+  });
+
+  it('dropSessionTabs removes only the deleted session tabs', () => {
+    useDockStore.getState().openSubAgent({ messageId: 'mA', toolCallId: 'c', subIndex: null, title: 'A' });
+    useDockStore.getState().openPage({ url: 'https://g', content: 'x' });
+    useDockStore.getState().openSubAgent({
+      messageId: 'mB', toolCallId: 'c', subIndex: null, title: 'B', ownerSessionPath: B.sessionPath, ownerWorkspace: '/ws',
+    });
+    useDockStore.getState().dropSessionTabs('\\WS\\a.jsonl');
+    expect(useDockStore.getState().tabs.map((t) => t.id).sort()).toEqual(['mB', 'page:https://g']);
   });
 });

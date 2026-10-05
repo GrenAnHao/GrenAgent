@@ -7,7 +7,7 @@
 | 目录 | 工具 / 命令 | 需要 key? | 说明 |
 |---|---|---|---|
 | [`memory`](./memory) | `memory_search` `conversation_search` | Agent Data Runtime | 本地 L0-L3 长期记忆、会话捕获与自动召回 |
-| [`web-fetch`](./web-fetch) | `fetch_url` `fetch_html` `fetch_markdown` `fetch_txt` `fetch_json` | 否 | 网页抓取(SSRF 防护) |
+| [`web-fetch`](./web-fetch) | `fetch_url` | 否 | 网页抓取(SSRF 防护，`format` 选 markdown / text / html / json / llms) |
 | [`image-gen`](./image-gen) | `generate_image` | 是 | 文生图(OpenAI 兼容) |
 | [`multi-agent`](./multi-agent) | `spawn_agent` | 子 agent 需 | 委派隔离 pi 子进程(单个/并行) |
 | [`fable-behavior`](./fable-behavior) | — | 否 | Fable 5 + coding-agent 行为层(Tier 注入 + 子 agent 种子) |

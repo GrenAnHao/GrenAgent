@@ -30,11 +30,11 @@ afterEach(() => {
 });
 
 describe('ModuleContainer', () => {
-  it('forwards an existing source session without substituting the current chat project', () => {
+  it('forwards an existing source session without substituting the current chat project', async () => {
     useModuleStore.setState({ activeModule: 'agentData' });
     const onOpenSession = vi.fn();
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} onOpenSession={onOpenSession} />);
-    fireEvent.click(screen.getByRole('button', { name: '打开来源会话' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开来源会话' }));
     expect(onOpenSession).toHaveBeenCalledExactlyOnceWith('/source-project', '/actual/sessions/source.jsonl');
   });
 
@@ -51,31 +51,32 @@ describe('ModuleContainer', () => {
     ['devWorkbench', 'DEV_WORKBENCH'],
   ];
   for (const [mod, text] of cases) {
-    it(`renders ${text} for ${mod} module`, () => {
+    it(`renders ${text} for ${mod} module`, async () => {
       useModuleStore.setState({ activeModule: mod as never });
       render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-      expect(screen.getByText(text)).toBeTruthy();
+      expect(await screen.findByText(text)).toBeTruthy();
     });
   }
 
-  it('passes the active workspace as the panel initial project', () => {
+  it('passes the active workspace as the panel initial project', async () => {
     useModuleStore.setState({ activeModule: 'agentData' });
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
-    expect(screen.getByText('AGENT_DATA:local:/workspace')).toBeTruthy();
+    expect(await screen.findByText('AGENT_DATA:local:/workspace')).toBeTruthy();
   });
 
-  it('does not mount Agent Data before its first visit', () => {
+  it('does not mount Agent Data before its first visit', async () => {
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     expect(screen.queryByTestId('agent-data-content')).toBeNull();
     act(() => useModuleStore.setState({ activeModule: 'settings' }));
+    await screen.findByText('SET_PANEL');
     expect(screen.queryByTestId('agent-data-content')).toBeNull();
   });
 
-  it('retains Agent Data input, scroll and nodes across module switches', () => {
+  it('retains Agent Data input, scroll and nodes across module switches', async () => {
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     const chat = screen.getByText('CHAT_CONTENT');
     act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    const content = screen.getByTestId('agent-data-content');
+    const content = await screen.findByTestId('agent-data-content');
     const input = screen.getByLabelText('Agent 数据搜索') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'retained query' } });
     content.scrollTop = 128;
@@ -96,15 +97,16 @@ describe('ModuleContainer', () => {
     expect(screen.getByText('CHAT_CONTENT')).toBe(chat);
   });
 
-  it('snapshots the workspace on the first Agent Data visit', () => {
+  it('snapshots the workspace on the first Agent Data visit', async () => {
     render(<ModuleContainer chat={<div>CHAT_CONTENT</div>} />);
     act(() => useSessionStore.setState({ activeWorkspace: '/before-open' }));
     act(() => useModuleStore.setState({ activeModule: 'agentData' }));
-    expect(screen.getByText('AGENT_DATA:local:/before-open')).toBeTruthy();
+    expect(await screen.findByText('AGENT_DATA:local:/before-open')).toBeTruthy();
 
     act(() => useModuleStore.setState({ activeModule: 'chat' }));
     act(() => useSessionStore.setState({ activeWorkspace: '/later-project' }));
     act(() => useModuleStore.setState({ activeModule: 'agentData' }));
     expect(screen.getByText('AGENT_DATA:local:/before-open')).toBeTruthy();
   });
+
 });

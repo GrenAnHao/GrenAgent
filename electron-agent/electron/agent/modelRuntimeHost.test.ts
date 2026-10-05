@@ -150,6 +150,34 @@ describe('ModelRuntimeHost 短调用', () => {
     expect(completeSimple).not.toHaveBeenCalled();
   });
 
+  it('streamSimple 条件透传 temperature / reasoning / samplingParams', async () => {
+    async function* streamSimple() {
+      yield { type: 'done', message: { usage: {} } };
+    }
+    const inner = vi.fn((_model?: unknown, _context?: unknown, _options?: unknown) => streamSimple());
+    const create = vi.fn().mockResolvedValue({
+      completeSimple: vi.fn(),
+      streamSimple: inner,
+      getAvailableSnapshot: () => [model],
+      getModel: () => model,
+      hasConfiguredAuth: () => true,
+      refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    for await (const _ of host.streamSimple({
+      user: 'q',
+      temperature: 0.3,
+      reasoning: 'minimal',
+      samplingParams: { top_p: 0.85 },
+    })) { /* drain */ }
+    expect(inner.mock.calls[0][2]).toEqual({
+      signal: undefined,
+      temperature: 0.3,
+      reasoning: 'minimal',
+      samplingParams: { top_p: 0.85 },
+    });
+  });
+
   it('streamSimple 把 signal 透传到第三参并映射 text_delta', async () => {
     const signal = new AbortController().signal;
     async function* streamSimple() {

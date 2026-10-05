@@ -44,6 +44,21 @@ describe('parseMessageTags', () => {
     expect(parseMessageTags('/skill:caveman')).toEqual([{ type: 'skill', name: 'caveman' }]);
   });
 
+  it('keeps a quoted skill name that contains spaces as one chip', () => {
+    expect(parseMessageTags('/skill:"IDA Pro逆向分析" 我')).toEqual([
+      { type: 'skill', name: 'IDA Pro逆向分析' },
+      { type: 'text', text: ' 我' },
+    ]);
+  });
+
+  it('keeps spaces inside an expanded skill block name', () => {
+    const text = '<skill name="IDA Pro逆向分析" location="x">body</skill> 我';
+    expect(parseMessageTags(text)).toEqual([
+      { type: 'skill', name: 'IDA Pro逆向分析' },
+      { type: 'text', text: ' 我' },
+    ]);
+  });
+
   it('strips a skill: prefix from the expanded block name', () => {
     const text = '<skill name="skill:caveman" location="x">body</skill>';
     expect(parseMessageTags(text)).toEqual([{ type: 'skill', name: 'caveman' }]);

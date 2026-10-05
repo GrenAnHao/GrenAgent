@@ -59,6 +59,17 @@ describe("profileToModel", () => {
   it("no model → undefined", () => {
     expect(profileToModel({}, env({}))).toBeUndefined();
   });
+  it("inherit mode ignores leftover cheap/strong routes", () => {
+    const get = env({
+      SUBAGENT_MODE: "inherit",
+      SUBAGENT_MODEL_CHEAP: "opencode-go/deepseek-v4-flash",
+      SUBAGENT_MODEL_STRONG: "opencode-go/glm-5.3",
+      SUBAGENT_MODEL: "opencode-go/deepseek-v4-pro",
+    });
+    expect(profileToModel({ model: "cheap" }, get)).toBeUndefined();
+    expect(profileToModel({ model: "strong" }, get)).toBeUndefined();
+    expect(profileToModel({ model: "deepseek/deepseek-flash" }, get)).toBe("deepseek/deepseek-flash");
+  });
 });
 
 describe("profileToEnv", () => {

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Folder, FolderTree, GitPullRequest, Globe, SquareTerminal } from 'lucide-react';
+import { Bot, Folder, FolderTree, GitPullRequest, Globe, AppWindow, SquareTerminal } from 'lucide-react';
 import type { DockTabKind } from '../../stores/dockStore';
 import type { LauncherKind } from './launcherItems';
 
@@ -30,5 +30,7 @@ export function dockTabKindIcon(kind: DockTabKind): LucideIcon {
     case 'subagent':
     case 'subagentLog':
       return Bot;
+    case 'visual':
+      return AppWindow;
   }
 }

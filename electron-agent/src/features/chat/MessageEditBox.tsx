@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@lobehub/ui';
+import { Button } from 'antd';
 import { Editor, useEditor } from '@lobehub/editor/react';
 import type { ISlashOption } from '@lobehub/editor';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
@@ -28,27 +28,25 @@ const PLACEHOLDER = '编辑消息，@ 引用文件/目录，/ 调用技能…';
 const styles = createStaticStyles(({ css }) => ({
   zone: css`
     position: relative;
-    width: 100%;
   `,
   surface: css`
     container-type: inline-size;
 
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
+    border: 1px solid ${cssVar.colorBorder};
     border-radius: ${cssVar.borderRadiusLG};
 
     background: ${cssVar.colorBgElevated};
-    box-shadow: ${cssVar.boxShadowSecondary};
 
     transition: border-color 0.15s ease;
 
     &:focus-within {
-      border-color: ${cssVar.colorBorder};
+      border-color: ${cssVar.colorPrimary};
     }
   `,
   body: css`
@@ -65,6 +63,11 @@ const styles = createStaticStyles(({ css }) => ({
     font: var(--pi-md-base);
 
     p {
+      margin-block: 0;
+    }
+
+    /* 与底部输入框相同：段落边距清零后，占位层的 4px 上边距也要去掉。 */
+    [contenteditable] + div {
       margin-block: 0;
     }
 
@@ -98,7 +101,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   actions: css`
     display: flex;
-    gap: 8px;
+    gap: 4px;
     align-items: center;
     justify-content: flex-end;
   `,
@@ -245,8 +248,10 @@ export function MessageEditBox({
       steering: [],
       followUp: [],
       steerQueued: () => undefined,
+      interruptQueued: () => undefined,
       hasComposerQueue: false,
       inFlight: false,
+      retrying: false,
       send,
       stop: () => undefined,
     }),
@@ -258,7 +263,16 @@ export function MessageEditBox({
 
   return (
     <ChatInputProvider value={ctx}>
-      <div ref={zoneRef} className={styles.zone} data-testid="message-edit-box">
+      <div
+        ref={zoneRef}
+        className={styles.zone}
+        data-testid="message-edit-box"
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          onCancel();
+        }}
+      >
         <div ref={surfaceRef} className={styles.surface}>
           {hasChips ? <InputChips /> : null}
           <div
@@ -302,11 +316,12 @@ export function MessageEditBox({
             />
           </div>
           <div className={styles.actions}>
-            <Button aria-label="取消" onClick={onCancel}>
+            <Button type="link" size="small" danger aria-label="取消" onClick={onCancel}>
               取消
             </Button>
             <Button
-              type="primary"
+              type="link"
+              size="small"
               aria-label="发送"
               disabled={!canSend}
               onClick={() => void send()}

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
+import { codeCardContentClass } from './CodeCard';
 import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 
 afterEach(cleanup);
@@ -25,6 +26,7 @@ describe('GrepCard', { timeout: 30_000 }, () => {
       expect(container.textContent).toContain('foo()');
     });
     expect(screen.getAllByTestId('code-card-header').every((header) => header.querySelector('button') == null)).toBe(true);
+    expect(container.querySelectorAll(`.${codeCardContentClass}`)).toHaveLength(2);
   });
 
   it('无命中显示占位', () => {
@@ -54,6 +56,7 @@ describe('CodeSearchCard', { timeout: 30_000 }, () => {
       expect(container.textContent).toContain('export function PddWorkbench');
     });
     expect(screen.getByTestId('code-card-header').querySelector('button')).toBeNull();
+    expect(container.querySelector(`.${codeCardContentClass}`)).toBeTruthy();
   });
 
   it('无命中显示未找到匹配', () => {

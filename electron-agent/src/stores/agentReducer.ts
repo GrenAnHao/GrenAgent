@@ -1,4 +1,5 @@
 import { todoListFinishedInTranscript, type TodoTranscriptMessage } from '@extensions/_shared/todo-model';
+import { closedChainSteps, closedParallelTasks, closedStringField, closedTopLevelString, type NormalizedTask } from '@extensions/multi-agent/tasks';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import type { AgentEvent, AgentMessage, AssistantMessageEvent } from '../lib/pi';
 import type { WaitingUiPrompt } from './waitingUiPrompt';
@@ -9,6 +10,12 @@ export interface UserImage {
   data: string;
 }
 
+/**
+ * 引导消息在当前回合里的下落，对齐 Kiro 的 steerState：
+ * written 已收下、尚未注入；consumed 已注入正在跑的这一轮；requeued 这一轮结束前没注入。
+ */
+export type SteerState = 'written' | 'consumed' | 'requeued';
+
 export type ChatMessage =
   | {
       kind: 'user';
@@ -16,10 +23,13 @@ export type ChatMessage =
       text: string;
       images?: UserImage[];
       steering?: boolean;
+      steerState?: SteerState;
       /** pi 消息自带的 Unix ms 时间戳；作为「移出上下文 / 回退到此」的稳定 key。本地新发的消息在落盘前为 undefined。 */
       timestamp?: number;
       /** 会话文件条目 id；截断 / 回退 / 重新生成 / 删除的定位键。后端投影带回前可能缺省。 */
       entryId?: string;
+      /** 子代理任务提示词：气泡内限高，不把全文铺在面板上。 */
+      promptFrame?: boolean;
     }
   | {
       kind: 'assistant';
@@ -44,6 +54,12 @@ export type ChatMessage =
       status: 'running' | 'done' | 'error';
       /** false = 参数仍在生成；缺省视为完整。不进历史文件。 */
       argsComplete?: boolean;
+      /** 真正开始执行的时刻（tool_execution_start），用于运行中实时计时；参数生成阶段不计。 */
+      startedAt?: number;
+      /** 执行耗时（ms），tool_execution_end 时定格，用于卡片右侧显示固定时长。 */
+      durationMs?: number;
+      /** 嵌套调用的父工具。codemode 里的 MCP 调用带这个 id，时间线挂到父卡片下面。 */
+      parentToolCallId?: string;
     }
   | { kind: 'notice'; id: string; customType: string; content: string }
   /** 一次成功的上下文压缩留在会话里的分隔。进行中只显示「正在压缩」，结束后写成这一条。 */
@@ -78,6 +94,18 @@ export interface AgentState {
    */
   runActive?: boolean;
   /**
+   * 「正在处理」的起点：用户这次请求开始的时刻。agent_settled 不清，之后由子代理回报、自动压缩续跑、
+   * 排队跟进等接着跑的回合沿用它；用户从空闲发起新请求时才重新起算。
+   */
+  runStartedAt?: number;
+  /**
+   * 界面发送时已经定好了下一回合的 runStartedAt（新请求起算、或跟进 / 引导沿用）。
+   * 下一个从空闲开始的回合照办，或被任一条用户消息用掉。
+   */
+  runOriginPinned?: boolean;
+  /** 刚从空闲开始的回合，还没看到它的第一条用户 / 自定义 / 助手消息，计时起点未定。 */
+  runOpening?: boolean;
+  /**
    * 最近一条 assistant 的停止原因。只有 stop 才表示这轮正常说完；
    * aborted / error 不能把还在进行中的任务收成完成。
    */
@@ -101,6 +129,41 @@ export interface ToolDraft {
   dirty: boolean;
   /** 上次解析的时间（ms）。 */
   parsedAt: number;
+}
+
+/** 新一轮从现在计时。同一轮里的重试、agent_end 再启动沿用已有起点。 */
+export function nextRunStartedAt(state: { runActive?: boolean; isStreaming?: boolean; runStartedAt?: number }): number {
+  if ((state.runActive || state.isStreaming) && state.runStartedAt) return state.runStartedAt;
+  return Date.now();
+}
+
+/**
+ * 界面要发一条会开启或接续回合的消息时调用：空闲时从现在起算，仍在跑就沿用。fresh 强制从现在起算。
+ * 钉住之后，即使 Pi 把这条消息推迟到上一轮收尾之后才开新回合，起点也按这里定的算。
+ */
+export function pinRunClock(
+  state: { runActive?: boolean; isStreaming?: boolean; runStartedAt?: number },
+  fresh = false,
+): { runStartedAt: number; runOriginPinned: true } {
+  return { runStartedAt: fresh ? Date.now() : nextRunStartedAt(state), runOriginPinned: true };
+}
+
+/**
+ * 回合的第一条消息决定计时起点：界面钉过就照办；否则用户消息说明有人从别处发了新请求，
+ * 从现在起算；自定义消息（子代理回报、压缩后续跑、后台任务通知）和直接续写的助手消息是同一件事的延续，沿用。
+ * 回合中途的用户消息（引导、跟进）只用掉界面的钉定，不动起点。
+ */
+function settleRunClock(state: AgentState, role: unknown): AgentState {
+  const user = role === 'user';
+  if (!state.runOpening) return user && state.runOriginPinned ? { ...state, runOriginPinned: false } : state;
+  if (!user && role !== 'custom' && role !== 'assistant') return state;
+  const restart = user && !state.runOriginPinned;
+  return {
+    ...state,
+    runOpening: false,
+    runOriginPinned: false,
+    ...(restart ? { runStartedAt: Date.now() } : {}),
+  };
 }
 
 export function initialAgentState(): AgentState {
@@ -154,6 +217,11 @@ function thinkingTiming(
 function messageTimestamp(msg: AgentMessage): number | undefined {
   const ts = (msg as { timestamp?: unknown }).timestamp;
   return typeof ts === 'number' && Number.isFinite(ts) ? ts : undefined;
+}
+
+/** 压缩主动打断回合时的报错，不是模型失败。 */
+function isAbortError(message: string | undefined): boolean {
+  return typeof message === "string" && /abort/i.test(message);
 }
 
 /** 读取 pi assistant 消息上的 errorMessage（模型/供应商失败时 Pi 会带上，此前被 UI 丢弃）。 */
@@ -510,13 +578,52 @@ export function materializeToolDrafts(
     const card = idx >= 0 ? messages[idx] : undefined;
     if (card?.kind === 'tool' && card.argsComplete === false) {
       if (messages === state.messages) messages = [...messages];
-      messages[idx] = { ...card, args: parse(draft.json) };
+      const parsed = parse(draft.json);
+      messages[idx] = {
+        ...card,
+        args: card.toolName === 'spawn_agent' ? closedSpawnArgs(draft.json, parsed) : parsed,
+      };
     }
     nextDrafts ??= { ...drafts };
     nextDrafts[draft.contentIndex] = { ...draft, dirty: false, parsedAt: now };
   }
   if (!nextDrafts) return { state, deferred };
   return { state: { ...state, messages, toolDrafts: nextDrafts }, deferred };
+}
+
+/** 流式 spawn_agent 只保留引号或对象已经闭合的任务，避免半句被解析器补全后逐字长出来。 */
+function closedTaskArg(item: NormalizedTask): string | { task: string; title?: string; model?: string; agent?: string } {
+  if (!item.model && !item.agent && !item.title) return item.task;
+  return {
+    task: item.task,
+    ...(item.title ? { title: item.title } : {}),
+    ...(item.model ? { model: item.model } : {}),
+    ...(item.agent ? { agent: item.agent } : {}),
+  };
+}
+
+function closedSpawnArgs(json: string, parsed: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...parsed };
+  const closed = closedParallelTasks(json);
+  if ('tasks' in parsed || closed.length > 0) {
+    next.tasks = closed.map(closedTaskArg);
+  }
+  const chain = closedChainSteps(json);
+  if ('chain' in parsed || chain.length > 0) {
+    next.chain = chain.map((item) => ({
+      task: item.task,
+      ...(item.title ? { title: item.title } : {}),
+      ...(item.model ? { model: item.model } : {}),
+      ...(item.agent ? { agent: item.agent } : {}),
+    }));
+  }
+  const taskField = closedStringField(json, 'task');
+  if (typeof taskField === 'string') next.task = taskField;
+  else delete next.task;
+  const titleField = closedTopLevelString(json, 'title');
+  if (typeof titleField === 'string') next.title = titleField;
+  else delete next.title;
+  return next;
 }
 
 /** 把 pi toolResult 消息还原成与 tool_execution_end 一致的 result 形状。 */
@@ -543,16 +650,60 @@ function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
   };
 }
 
+/** 引导被注入当前回合：优先按正文对上，对不上且只剩一条未确认引导时收下那一条。 */
+export function consumeSteer(messages: ChatMessage[], text: string): ChatMessage[] {
+  const written = messages.flatMap((message, index) =>
+    message.kind === 'user' && message.steering && message.steerState === 'written' ? [{ message, index }] : [],
+  );
+  if (written.length === 0) return messages;
+  const exact = text ? written.find((item) => item.message.text === text) : undefined;
+  const target = exact ?? (written.length === 1 ? written[0] : undefined);
+  if (!target) return messages;
+  const next = messages.slice();
+  next[target.index] = { ...target.message, steerState: 'consumed' };
+  return next;
+}
+
+/** 这一轮已经结束，还停在 written 的引导没有注入当前回合。 */
+export function requeuePendingSteers(messages: ChatMessage[]): ChatMessage[] {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.kind !== 'user' || !message.steering || message.steerState !== 'written') return message;
+    changed = true;
+    return { ...message, steerState: 'requeued' as const };
+  });
+  return changed ? next : messages;
+}
+
+function parentToolLink(parentToolCallId: string | undefined): { parentToolCallId?: string } {
+  return typeof parentToolCallId === 'string' && parentToolCallId ? { parentToolCallId } : {};
+}
+
 export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case 'agent_start':
       // 一轮真正开始流式：清掉「正在重试」指示（成功重连/重发）、上一条错误与中断标记，
       // 并清掉「准备响应中」占位（由 isStreaming 接管等待指示，无缝过渡）。
-      return { ...state, isStreaming: true, runActive: true, awaitingResponse: false, lastError: undefined, retrying: undefined, aborting: false, assistantStop: undefined };
+      return {
+        ...state,
+        isStreaming: true,
+        runActive: true,
+        // 从空闲开始的回合等第一条消息再定起点；同一轮里重试、续写的 agent_start 不动。
+        ...(state.runActive ? {} : { runOpening: true }),
+        awaitingResponse: false,
+        runStartedAt: state.runStartedAt ?? Date.now(),
+        lastError: undefined,
+        retrying: undefined,
+        aborting: false,
+        assistantStop: undefined,
+      };
 
     case 'agent_end': {
       // 收起仍在流的 assistant，并把参数没写完的工具卡标成中断（丢了 message_end 时的兜底）。
-      const messages = settleIncompleteToolCards(state.messages);
+      // willRetry 时这一轮还会继续，未注入的引导先留着，等真正收尾再改成 requeued。
+      const willRetry = (event as { willRetry?: boolean }).willRetry === true;
+      const settled = settleIncompleteToolCards(state.messages);
+      const messages = willRetry ? settled : requeuePendingSteers(settled);
       return dropDrafts(state, {
         isStreaming: false,
         awaitingResponse: false,
@@ -574,10 +725,12 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       // agent_settled 是 RPC 流程的最终收尾事件，晚于 agent_end（扩展的 agent_end hooks 可能仍在执行）。
       // 即使中间的历史快照刷新覆盖过状态，也必须在此清掉停止按钮对应的 streaming 标记，
       // 避免 UI 永久停在「待停止」。参数没写完的工具卡同样收成中断。
-      const messages = settleIncompleteToolCards(state.messages);
+      // runStartedAt 留着：紧接着由子代理回报、压缩续跑、推迟的跟进开启的回合要接着计时。
+      const messages = requeuePendingSteers(settleIncompleteToolCards(state.messages));
       return dropDrafts(state, {
         isStreaming: false,
         runActive: false,
+        runOpening: false,
         awaitingResponse: false,
         aborting: false,
         compacting: false,
@@ -588,8 +741,11 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'message_start': {
       const ev = event as Extract<AgentEvent, { type: 'message_start' }>;
-      const cleared = dropDrafts(state);
+      const cleared = dropDrafts(settleRunClock(state, ev.message?.role));
       if (ev.message.role === 'custom') return applyCustomMessage(cleared, ev.message);
+      if (ev.message.role === 'user') {
+        return { ...cleared, messages: consumeSteer(cleared.messages, extractText(ev.message).text) };
+      }
       if (ev.message.role !== 'assistant') return cleared;
       const { text, thinking } = extractText(ev.message);
       const messages = [...state.messages];
@@ -634,7 +790,19 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       if (idx < 0) {
         // 无在流的 assistant 泡：有可见文本/思考才补一条终态 assistant；纯 toolCall（无文本/思考）
         // 不建空泡，由下方 syncStreamingToolCalls 兜底把卡片立住，避免多条灰线。
-        if (text || thinking) {
+        // 会话文件已经还原过同一条助手时，迟到的 message_end 不能再追加，否则工具后面会多一块思考和正文。
+        const duplicate = matchingFinishedAssistant(messages, text, thinking);
+        if (duplicate >= 0) {
+          const cur = messages[duplicate] as Extract<ChatMessage, { kind: 'assistant' }>;
+          messages[duplicate] = {
+            ...cur,
+            text,
+            thinking,
+            streaming: false,
+            timestamp: messageTimestamp(ev.message) ?? cur.timestamp,
+            ...thinkingTiming(cur, thinking, text, true),
+          };
+        } else if (text || thinking) {
           messages.push({
             kind: 'assistant',
             id: nextId(),
@@ -720,15 +888,29 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       } else {
         const nextThinking = thinking || thinkingDelta;
         const nextText = text || textDelta;
-        messages.push({
-          kind: 'assistant',
-          id: nextId(),
-          text: nextText,
-          thinking: nextThinking,
-          streaming: true,
-          timestamp: messageTimestamp(snapshot),
-          ...thinkingTiming({}, nextThinking, nextText),
-        });
+        const duplicate = matchingFinishedAssistant(messages, nextText, nextThinking);
+        if (duplicate >= 0 && !thinkingDelta && !textDelta) {
+          return state;
+        }
+        if (duplicate >= 0) {
+          const cur = messages[duplicate] as Extract<ChatMessage, { kind: 'assistant' }>;
+          messages[duplicate] = {
+            ...cur,
+            text: nextText || cur.text,
+            thinking: nextThinking || cur.thinking,
+            timestamp: messageTimestamp(snapshot) ?? cur.timestamp,
+          };
+        } else {
+          messages.push({
+            kind: 'assistant',
+            id: nextId(),
+            text: nextText,
+            thinking: nextThinking,
+            streaming: true,
+            timestamp: messageTimestamp(snapshot),
+            ...thinkingTiming({}, nextThinking, nextText),
+          });
+        }
       }
       // 生产事件没有 message 快照。只有测试或上游重新带上快照时，才按 toolCall 块建卡。
       const synced = ev.message ? syncStreamingToolCalls(messages, snapshot) : messages;
@@ -746,7 +928,15 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         const cur = state.messages[existing];
         if (cur.kind === 'tool') {
           const messages = [...state.messages];
-          messages[existing] = { ...cur, toolName: ev.toolName, args: ev.args, status: 'running', argsComplete: true };
+          messages[existing] = {
+            ...cur,
+            toolName: ev.toolName,
+            args: ev.args,
+            status: 'running',
+            argsComplete: true,
+            startedAt: Date.now(),
+            ...parentToolLink(ev.parentToolCallId),
+          };
           return { ...state, messages };
         }
       }
@@ -763,6 +953,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             result: undefined,
             status: 'running',
             argsComplete: true,
+            startedAt: Date.now(),
+            ...parentToolLink(ev.parentToolCallId),
           },
         ],
       };
@@ -770,7 +962,11 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
 
     case 'tool_execution_update': {
       const ev = event as Extract<AgentEvent, { type: 'tool_execution_update' }>;
-      return updateTool(state, ev.toolCallId, (t) => ({ ...t, result: ev.partialResult }));
+      return updateTool(state, ev.toolCallId, (t) => ({
+        ...t,
+        result: ev.partialResult,
+        ...parentToolLink(ev.parentToolCallId),
+      }));
     }
 
     case 'tool_execution_end': {
@@ -779,8 +975,10 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ...t,
         result: ev.result,
         status: ev.isError ? 'error' : 'done',
+        ...(t.startedAt != null ? { durationMs: Math.max(0, Date.now() - t.startedAt) } : {}),
+        ...parentToolLink(ev.parentToolCallId),
       }));
-      if (ev.isError || ev.toolName.toLowerCase() !== 'todo') return next;
+      if (ev.isError || ev.toolName?.toLowerCase() !== 'todo') return next;
       return { ...next, todoListFinished: false };
     }
 
@@ -800,7 +998,13 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     }
 
     case 'compaction_start':
-      return { ...state, compacting: true };
+      // 自动压缩会先 abort 正在跑的回合，模型侧带着 "Request was aborted"。
+      // 这不是给用户看的失败；压缩一开始就清掉，避免红条盖住「正在压缩」。
+      return {
+        ...state,
+        compacting: true,
+        ...(isAbortError(state.lastError) ? { lastError: undefined } : {}),
+      };
 
     case 'compaction_end': {
       const ev = event as Extract<AgentEvent, { type: 'compaction_end' }>;
@@ -887,7 +1091,7 @@ export function addUserMessage(
         id: nextId(),
         text,
         images: images?.length ? images : undefined,
-        ...(steering ? { steering: true } : {}),
+        ...(steering ? { steering: true, steerState: 'written' as const } : {}),
       },
     ],
   };
@@ -1020,6 +1224,18 @@ export function messagesFromTranscript(transcript: string): ChatMessage[] {
     state = applyEvent(state, event);
   }
   return state.messages.map((m, i) => ({ ...m, id: `sa-${i}` }));
+}
+
+/** 最后一条助手已经是这份思考和正文，且后面没有新的用户消息。 */
+function matchingFinishedAssistant(messages: ChatMessage[], text: string, thinking: string): number {
+  if (!text && !thinking) return -1;
+  const idx = lastIndex(messages, (m) => m.kind === 'assistant');
+  if (idx < 0) return -1;
+  if (messages.slice(idx + 1).some((m) => m.kind === 'user')) return -1;
+  const cur = messages[idx];
+  if (cur?.kind !== 'assistant' || cur.streaming) return -1;
+  if (cur.text !== text || cur.thinking !== thinking) return -1;
+  return idx;
 }
 
 function lastIndex(arr: ChatMessage[], pred: (m: ChatMessage) => boolean): number {

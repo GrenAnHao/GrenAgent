@@ -20,6 +20,14 @@ describe('useSubAgentLive', () => {
     await waitFor(() => expect(result.current.model).toBe('gpt-5.3-codex'));
   });
 
+  it('exposes the child session path from the registry row so the detail can bind the event stream', async () => {
+    vi.spyOn(pi, 'subagentList').mockResolvedValue([
+      { id: 'ag2', task: 't', status: 'running', sessionPath: ' C:/s/2026-10-04T00-00-00-000Z_ag2.jsonl ', createdAt: 0, updatedAt: 0 },
+    ]);
+    const { result } = renderHook(() => useSubAgentLive('ws', 'ag2', true));
+    await waitFor(() => expect(result.current.sessionPath).toBe('C:/s/2026-10-04T00-00-00-000Z_ag2.jsonl'));
+  });
+
   it('not running → never polls', () => {
     const spy = vi.spyOn(pi, 'subagentList').mockResolvedValue([]);
     renderHook(() => useSubAgentLive('ws', 'ag1', false));

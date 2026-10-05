@@ -28,7 +28,7 @@ export class ToolDecisionService {
    */
   evaluate(call: ToolCallFacts): ToolDecision {
     // 对话中切档写进 live 表。这里现读，覆盖 sidecar 可能过期的 facts.preset。
-    const live = getApprovalPolicy(call.workspace);
+    const live = getApprovalPolicy(call.workspace, call.sessionId);
     const facts = live !== call.preset ? { ...call, preset: live } : call;
     const builtin = matchBuiltinRules(facts);
     let user: ToolRule | undefined;

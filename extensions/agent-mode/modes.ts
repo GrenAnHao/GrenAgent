@@ -1,6 +1,6 @@
 // 模式定义与纯逻辑：工具白名单、工具调用 gate、命令参数解析、徽章/标签。
 // 无磁盘 I/O；live 表只碰内存。状态机与副作用（setActiveTools/setStatus/persist）在 index.ts。
-import { currentCwd } from "../_shared/workspace-context.js";
+import { currentCwd, currentSessionId } from "../_shared/workspace-context.js";
 import { isSafeCommand } from "./utils.js";
 
 export type AgentMode = "agent" | "ask" | "debug" | "plan" | "brainstorm";
@@ -22,33 +22,45 @@ export function agentModeConfigKey(workspace: string): string {
   return `AGENT_MODE:${normalizeCwd(workspace)}`;
 }
 
+// byCwd 是项目默认模式（新会话继承）；bySession 是每个会话自己的模式，优先。
 const byCwd = new Map<string, AgentMode>();
+const bySession = new Map<string, AgentMode>();
 
 function resolveCwd(cwd?: string): string {
   return normalizeCwd(cwd ?? currentCwd());
 }
 
-export function getAgentMode(cwd?: string): AgentMode {
+/** sessionId 省略时取 ALS 里的交互会话；会话没写过模式时回退项目默认。 */
+export function getAgentMode(cwd?: string, sessionId: string | undefined = currentSessionId()): AgentMode {
+  const own = sessionId ? bySession.get(sessionId) : undefined;
+  return own ?? byCwd.get(resolveCwd(cwd)) ?? DEFAULT_MODE;
+}
+
+/** 带 sessionId 只写该会话；不带写项目默认。 */
+export function setAgentMode(mode: AgentMode, cwd?: string, sessionId?: string): void {
+  if (sessionId) bySession.set(sessionId, mode);
+  else byCwd.set(resolveCwd(cwd), mode);
+}
+
+/** 项目默认模式（不看会话）。 */
+export function getDefaultAgentMode(cwd?: string): AgentMode {
   return byCwd.get(resolveCwd(cwd)) ?? DEFAULT_MODE;
 }
 
-export function setAgentMode(mode: AgentMode, cwd?: string): void {
-  byCwd.set(resolveCwd(cwd), mode);
-}
-
-export function hasAgentMode(cwd?: string): boolean {
-  return byCwd.has(resolveCwd(cwd));
+export function hasAgentMode(cwd?: string, sessionId?: string): boolean {
+  return sessionId ? bySession.has(sessionId) : byCwd.has(resolveCwd(cwd));
 }
 
 /** 仅测试。 */
 export function __resetAgentModeForTest(): void {
   byCwd.clear();
+  bySession.clear();
 }
 
 // ask：只读问答。白名单为经核实存在的只读工具 + bash / bash_escalate（写由只读 OS 沙箱拦）：
 //   - pi 内置：read / grep / find / ls / bash / bash_escalate
-//   - 联网只读：fetch_url / fetch_llms / fetch_html / fetch_markdown / fetch_txt / fetch_json（web-fetch）、
-//     web_search / web_search_multi / fetch_web_content / fetch_github_readme（web-search）
+//   - 联网只读：fetch_url（web-fetch，format 选 markdown / text / html / json / llms）、
+//     web_search / web_search_multi（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
 //     memory_search / conversation_search、git_diff（code-review）、
 //     code_*（code-retrieval，只读 CodeGraph 查询）
@@ -65,15 +77,8 @@ export const ASK_TOOLS: readonly string[] = [
   "bash",
   "bash_escalate",
   "fetch_url",
-  "fetch_llms",
-  "fetch_html",
-  "fetch_markdown",
-  "fetch_txt",
-  "fetch_json",
   "web_search",
   "web_search_multi",
-  "fetch_web_content",
-  "fetch_github_readme",
   "search",
   "memory_search",
   "conversation_search",

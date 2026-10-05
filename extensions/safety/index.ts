@@ -127,6 +127,11 @@ export default function (pi: ExtensionAPI) {
     const verdict = await evaluateToolCall(control, facts);
 
     if (verdict.decision === "allow") return undefined;
+    if (verdict.unavailable) {
+      // 通道超时不是规则拒绝：照样不执行，但不 terminate。terminate 会让这轮停在 toolUse 上、没有正文，
+      // 子代理因此以 "(no output)" 出错退出。模型拿到这条结果可以重试或换路。
+      return { block: true, reason: `授权服务暂时没有响应，${event.toolName} 未执行，稍后可以重试这一步。` };
+    }
     if (verdict.decision === "deny") {
       if (verdict.ruleId === SUBAGENT_ASK_PINNED_RULE_ID) return { block: true, reason: DELEGATION_DENY_REASON };
       return refuse(`已被授权规则拒绝：${event.toolName}`);

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { currentWorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
 import { drainByParent } from '../../../extensions/multi-agent/activation.js';
@@ -194,9 +197,35 @@ describe('WorkspaceHandle', () => {
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('prompt：含空格的技能名在交给 pi 之前展开', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skill-'));
+    const file = join(dir, 'SKILL.md');
+    writeFileSync(file, '---\nname: IDA Pro逆向分析\n---\n\n# body\n');
+    try {
+      const { runtime, first } = makeRuntime();
+      (first as { resourceLoader?: unknown }).resourceLoader = {
+        getSkills: () => ({
+          skills: [{ name: 'IDA Pro逆向分析', filePath: file, baseDir: dir }],
+        }),
+      };
+      first.prompt = vi.fn(async (_text: string, opts: { preflightResult?: (disposition: unknown) => void }) => {
+        opts.preflightResult?.("started");
+      });
+      const { handle } = makeHandle(runtime);
+      await handle.start();
+      await handle.prompt('/skill:"IDA Pro逆向分析" 我', {}, 'main');
+      const sent = first.prompt.mock.calls[0][0] as string;
+      expect(sent).toContain('name="IDA Pro逆向分析"');
+      expect(sent).toContain('# body');
+      expect(sent.endsWith('\n\n我')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('prompt：preflight(true) 即 resolve，设 origin=main', async () => {
     const { runtime, first } = makeRuntime();
-    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void }) => { opts.preflightResult?.(true); return new Promise<void>(() => {}); });
+    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void }) => { opts.preflightResult?.("started"); return new Promise<void>(() => {}); });
     const { handle } = makeHandle(runtime);
     await handle.start();
     await handle.prompt('你好', {}, 'main');
@@ -205,12 +234,21 @@ describe('WorkspaceHandle', () => {
     expect(handle.currentTurnOrigin).toBe('main');
   });
 
-  it('prompt：preflight(false)+throw → reject', async () => {
+  it('prompt：preflight 未接受且 throw → reject', async () => {
     const { runtime, first } = makeRuntime();
-    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void }) => { opts.preflightResult?.(false); throw new Error('preflight denied'); });
+    first.prompt = vi.fn(async () => { throw new Error('preflight denied'); });
     const { handle } = makeHandle(runtime);
     await handle.start();
     await expect(handle.prompt('x', {}, 'goal')).rejects.toThrow('preflight denied');
+    expect(handle.currentTurnOrigin).toBe('main');
+  });
+
+  it('prompt：无 preflightResult 且 resolve → reject prompt not accepted', async () => {
+    const { runtime, first } = makeRuntime();
+    first.prompt = vi.fn(async () => {});
+    const { handle } = makeHandle(runtime);
+    await handle.start();
+    await expect(handle.prompt('x', {}, 'goal')).rejects.toThrow('prompt not accepted');
     expect(handle.currentTurnOrigin).toBe('main');
   });
 
@@ -218,7 +256,7 @@ describe('WorkspaceHandle', () => {
     const { runtime, first, onFatal } = { ...makeRuntime(), onFatal: undefined } as never;
     const rt = makeRuntime();
     const first2 = rt.first;
-    first2.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void }) => { opts.preflightResult?.(true); throw new Error('turn crashed'); });
+    first2.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void }) => { opts.preflightResult?.("started"); throw new Error('turn crashed'); });
     const h = makeHandle(rt.runtime);
     await h.handle.start();
     await expect(h.handle.prompt('x', {}, 'main')).resolves.toBeUndefined();
@@ -227,7 +265,7 @@ describe('WorkspaceHandle', () => {
 
   it('agent_end(!willRetry) 后 origin 归位到 main', async () => {
     const { runtime, first } = makeRuntime();
-    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void }) => { opts.preflightResult?.(true); return new Promise<void>(() => {}); });
+    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void }) => { opts.preflightResult?.("started"); return new Promise<void>(() => {}); });
     const { handle, onEvent } = makeHandle(runtime);
     await handle.start();
     await handle.prompt('x', {}, 'goal');
@@ -264,7 +302,7 @@ describe('WorkspaceHandle', () => {
     const { handle, onFatal } = makeHandle(runtime);
     await handle.start();
     await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed after invalidate');
-    expect(onFatal).toHaveBeenCalledWith(expect.any(Error));
+    expect(onFatal).toHaveBeenCalledWith(expect.any(Error), handle);
   });
 
   it('switchSession 失败且 session 已换 → onFatal 并 rethrow', async () => {
@@ -276,7 +314,7 @@ describe('WorkspaceHandle', () => {
     const { handle, onFatal } = makeHandle(runtime);
     await handle.start();
     await expect(handle.switchSession('/x/o.jsonl')).rejects.toThrow('create failed after teardown');
-    expect(onFatal).toHaveBeenCalledWith(expect.any(Error));
+    expect(onFatal).toHaveBeenCalledWith(expect.any(Error), handle);
   });
 
   it('commandContextActions.newSession 走宿主 replace：单次 rebind、main ALS、取消挂起 confirm', async () => {
@@ -364,9 +402,9 @@ describe('WorkspaceHandle', () => {
   it('prompt 的 ALS cwd 是 options.cwd', async () => {
     const seen: string[] = [];
     const { runtime, first } = makeRuntime();
-    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (ok: boolean) => void }) => {
+    first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void }) => {
       seen.push(currentWorkspaceContext()?.cwd ?? '');
-      opts.preflightResult?.(true);
+      opts.preflightResult?.("started");
     });
     const { handle } = makeHandle(runtime, { cwd: 'D:/resolved' });
     await handle.start();
@@ -477,9 +515,9 @@ describe('WorkspaceHandle', () => {
       const seen: Array<string | undefined> = [];
       let resolvePrompt!: () => void;
       const prompted = new Promise<void>((resolve) => { resolvePrompt = resolve; });
-      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void; streamingBehavior?: string }) => {
+      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void; streamingBehavior?: string }) => {
         seen.push(currentWorkspaceContext()?.origin);
-        opts.preflightResult?.(true);
+        opts.preflightResult?.("started");
         resolvePrompt();
       });
       const { handle } = makeHandle(runtime);
@@ -499,8 +537,8 @@ describe('WorkspaceHandle', () => {
       first.isStreaming = true;
       let resolvePrompt!: () => void;
       const prompted = new Promise<void>((resolve) => { resolvePrompt = resolve; });
-      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (b: boolean) => void; streamingBehavior?: string }) => {
-        opts.preflightResult?.(true);
+      first.prompt = vi.fn(async (_t: string, opts: { preflightResult?: (disposition: unknown) => void; streamingBehavior?: string }) => {
+        opts.preflightResult?.("started");
         resolvePrompt();
       });
       const { handle } = makeHandle(runtime);

@@ -51,11 +51,35 @@ describe('ConvStrip', () => {
         onToggle={onToggle}
       />,
     );
-    expect(screen.getByText('gpt-5.3-codex')).toBeTruthy();
+    expect(screen.getByTestId('conv-strip-model')).toHaveTextContent('gpt-5.3-codex');
+    expect(screen.getByTestId('conv-strip-model').className).toMatch(/ant-tag/);
     expect(screen.getByText('第 3 步 · 正在读取 x.rs')).toBeTruthy();
-    fireEvent.click(screen.getByTitle('停止子代理'));
+    const stop = screen.getByTitle('停止子代理');
+    expect(stop.getAttribute('data-role')).toBe('run-stop');
+    const css = Array.from(document.querySelectorAll('style'))
+      .map((node) => node.textContent ?? '')
+      .join('\n');
+    expect(css).toContain("[data-role='run-stop']");
+    expect(css).toContain("[data-role='run-spinner']");
+    expect(css).not.toMatch(/\.conv-strip:hover\s+\.[^{]*run/);
+    fireEvent.click(stop);
     expect(onStop).toHaveBeenCalled();
     expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('does not render a model tag when the name is blank', () => {
+    render(
+      <ConvStrip
+        status="error"
+        icon={Bot}
+        title="子代理 #35"
+        role="整体实现终审"
+        model="  "
+        line2="出错"
+      />,
+    );
+    expect(screen.queryByTestId('conv-strip-model')).toBeNull();
+    expect(screen.getByText('出错')).toBeTruthy();
   });
 
   it('ellipsis-truncates a long role instead of expanding the strip', () => {

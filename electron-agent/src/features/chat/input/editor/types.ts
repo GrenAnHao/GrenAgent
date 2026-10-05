@@ -23,4 +23,6 @@ export interface PastedText {
   source?: string;
   /** 仅引用路径、不嵌入内容（大文件拖入）；发送时序列化为 `@path`。 */
   referenceOnly?: boolean;
+  /** 覆盖 chip 展示名；浏览器元素等非文件来源用这个，不走文件名。 */
+  label?: string;
 }

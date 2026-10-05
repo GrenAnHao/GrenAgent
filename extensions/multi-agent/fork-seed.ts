@@ -1,4 +1,7 @@
 import { rmSync } from "node:fs";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
+
+type SeedMessage = Parameters<SessionManager["appendMessage"]>[0];
 
 function roleOf(message: unknown): string | undefined {
   return (message as { role?: string }).role;
@@ -34,9 +37,9 @@ export function wipeSessionFile(path: string | undefined): void {
 
 /** Copy seed messages onto the child session. Returns written count. Does not rewrite tool ids. */
 export function writeSeed(
-  sessionManager: { appendMessage: (m: unknown) => void },
-  messages: unknown[],
+  sessionManager: { appendMessage: (message: SeedMessage) => void },
+  messages: readonly unknown[],
 ): number {
-  for (const m of messages) sessionManager.appendMessage(m);
+  for (const message of messages) sessionManager.appendMessage(message as SeedMessage);
   return messages.length;
 }

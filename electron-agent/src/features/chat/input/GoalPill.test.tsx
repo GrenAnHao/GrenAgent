@@ -14,8 +14,12 @@ vi.mock('../../../store/session', () => ({
   useSessionStore: (selector: (state: { activeSessionPath: string | null }) => unknown) =>
     selector({ activeSessionPath }),
 }));
+// 二次确认改成了 antd 弹窗；测试里交给 window.confirm，便于按确认 / 取消断言。
+vi.mock('../../../components/askConfirm', () => ({
+  useAskConfirm: () => async ({ title }: { title: string }) => window.confirm(title),
+}));
 vi.mock('../../../stores/AgentStoreContext', () => ({
-  useAgentStoreContext: () => ({ workspace: '/repo' }),
+  useAgentStoreContext: () => ({ workspace: '/repo', store: { getLoadedSessionPath: () => '/repo/s.jsonl' } }),
 }));
 
 import { GoalPill } from './GoalPill';
@@ -168,7 +172,7 @@ describe('GoalPill', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '目标条件' }), { target: { value: '新条件' } });
     fireEvent.keyDown(screen.getByRole('textbox', { name: '目标条件' }), { key: 'Enter' });
 
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件', undefined, undefined, '/repo/s.jsonl'));
   });
 
   it('clears only after confirm and ignores a second click while busy', async () => {
@@ -180,12 +184,14 @@ describe('GoalPill', () => {
     await renderGoal();
 
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    // 确认弹窗开着时遮罩挡住点击；这里测的是清除进行中再点一次。
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith('清除当前目标？');
-    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
-    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear');
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear', undefined, undefined, '/repo/s.jsonl');
     resolvePrompt();
     confirm.mockRestore();
   });
@@ -204,13 +210,13 @@ describe('GoalPill', () => {
   it('pauses an armed goal and resumes a paused goal', async () => {
     await renderGoal();
     fireEvent.click(screen.getByRole('button', { name: '暂停目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal pause'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal pause', undefined, undefined, '/repo/s.jsonl'));
 
     cleanup();
     prompt.mockClear();
     await renderGoal({ status: 'paused', activation: 'disarmed', revision: 3 });
     fireEvent.click(screen.getByRole('button', { name: '恢复目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal resume'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal resume', undefined, undefined, '/repo/s.jsonl'));
   });
 
   it('never shows the round budget on the bar', async () => {

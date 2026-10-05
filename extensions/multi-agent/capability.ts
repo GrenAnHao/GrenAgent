@@ -77,6 +77,8 @@ export function profileToModel(
 ): string | undefined {
   const m = p.model?.trim();
   if (!m) return undefined;
+  // 策略＝继承父模型时，cheap/strong 对应的配置项在设置里被藏起来，不能再拿残留值覆盖父模型。
+  if (getEnv("SUBAGENT_MODE")?.trim() === "inherit" && (m === "cheap" || m === "strong")) return undefined;
   if (m === "cheap") return getEnv("SUBAGENT_MODEL_CHEAP")?.trim() || getEnv("SUBAGENT_MODEL")?.trim() || undefined;
   if (m === "strong") return getEnv("SUBAGENT_MODEL_STRONG")?.trim() || getEnv("SUBAGENT_MODEL")?.trim() || undefined;
   return m;

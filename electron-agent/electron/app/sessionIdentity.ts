@@ -1,4 +1,35 @@
-import { readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+
+const HEAD_CHUNK = 16 * 1024;
+const HEAD_LIMIT = 1024 * 1024;
+
+/**
+ * 只读会话文件的第一行。会话 JSONL 动辄几十 MB，而身份、cwd 都在头一行，
+ * 每条命令都整份读进来再取第一行会平白占住主进程。头一行超过 1MB 时返回已读到的部分。
+ */
+export async function readFirstLine(path: string): Promise<string> {
+  const handle = await open(path, 'r');
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total < HEAD_LIMIT) {
+      const buffer = Buffer.alloc(HEAD_CHUNK);
+      const { bytesRead } = await handle.read(buffer, 0, HEAD_CHUNK, total);
+      if (bytesRead === 0) break;
+      const slice = buffer.subarray(0, bytesRead);
+      const newline = slice.indexOf(10);
+      if (newline >= 0) {
+        chunks.push(slice.subarray(0, newline));
+        break;
+      }
+      chunks.push(slice);
+      total += bytesRead;
+    }
+    return Buffer.concat(chunks).toString('utf8').replace(/\r$/, '');
+  } finally {
+    await handle.close();
+  }
+}
 
 export interface SessionIdentity {
   sessionId: string;
@@ -11,7 +42,7 @@ export async function readSessionIdentity(sessionPath: string, expectedWorkspace
   if (!sessionPath || !sessionPath.endsWith('.jsonl')) throw new Error('INVALID_SESSION_PATH');
   let header: Record<string, unknown> | undefined;
   try {
-    const first = (await readFile(sessionPath, 'utf8')).split(/\r?\n/, 1)[0];
+    const first = await readFirstLine(sessionPath);
     const parsed = JSON.parse(first) as Record<string, unknown>;
     if (parsed?.type === 'session') header = parsed;
   } catch {

@@ -196,12 +196,15 @@ describe('registerIpcHandlers', () => {
     await invoke({}, { command: 'git_checkout', args: { workspacePath: 'C:/project', branch: 'main' } });
     await invoke({}, { command: 'git_create_branch', args: { workspacePath: 'C:/project', name: 'feature/x', checkout: true } });
     await invoke({}, { command: 'get_git_log_graph', args: { workspacePath: 'C:/project', limit: null } });
+    await invoke({}, { command: 'get_git_log_graph', args: { workspacePath: 'C:/project', limit: 300, skip: 600 } });
+    await expect(invoke({}, { command: 'get_git_log_graph', args: { workspacePath: 'C:/project', limit: 300, skip: -1 } })).rejects.toThrow('skip');
     expect(git.status).toHaveBeenCalledWith('C:/project');
     expect(git.diff).toHaveBeenCalledWith('C:/project', 'file.ts');
     expect(git.branches).toHaveBeenCalledWith('C:/project');
     expect(git.checkout).toHaveBeenCalledWith('C:/project', 'main');
     expect(git.createBranch).toHaveBeenCalledWith('C:/project', 'feature/x', true);
-    expect(git.logGraph).toHaveBeenCalledWith('C:/project', null);
+    expect(git.logGraph).toHaveBeenCalledWith('C:/project', null, 0);
+    expect(git.logGraph).toHaveBeenCalledWith('C:/project', 300, 600);
   });
 
   it('routes execute_command with string arguments and optional workspace', async () => {

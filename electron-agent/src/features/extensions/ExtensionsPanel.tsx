@@ -20,6 +20,7 @@ import {
 import { parsePolicyDoc, serializePolicyDoc, setToolPerm, setToolRules, type Perm } from './mcpPolicy';
 import { getCacheEntry, getCachedTools, parseToolsCache, toProbeConfigJson, type CacheEntry } from './mcpToolsCache';
 import { ToolPermissionModal } from './ToolPermissionModal';
+import { useAskConfirm } from '../../components/askConfirm';
 
 const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -150,6 +151,7 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export function ExtensionsPanel() {
+  const ask = useAskConfirm();
   const workspace = useOptionalAgentStoreContext()?.workspace ?? '';
   const { values, setValue, persist, loading, error } = useSettingsForm();
   const [managedEntries, setManagedEntries] = useState<Array<McpEntry & { scope: McpConfigScope }>>([]);
@@ -307,7 +309,10 @@ export function ExtensionsPanel() {
     void runMcpMutation(() => pi.upsertMcpConfig(workspace, entry.scope, entry.name, entry.config, enabled));
   };
   const handleDeleteMcp = (entry: McpEntry & { scope: McpConfigScope }) => {
-    if (window.confirm(`确认删除 MCP "${entry.name}"？`)) void runMcpMutation(() => pi.removeMcpConfig(workspace, entry.scope, entry.name));
+    void (async () => {
+      const ok = await ask({ title: `确认删除 MCP「${entry.name}」？`, danger: true });
+      if (ok) await runMcpMutation(() => pi.removeMcpConfig(workspace, entry.scope, entry.name));
+    })();
   };
 
   return (
@@ -381,30 +386,39 @@ export function ExtensionsPanel() {
               <span>未配置 MCP server，点右上「添加 MCP」</span>
             </div>
           ) : (
-            entries.map((entry) => (
-              <McpServerCard
-                key={entry.name}
-                name={entry.name}
-                config={entry.config}
-                enabled={entry.enabled}
-                scope={entry.scope}
-                cachedTools={getCachedTools(toolsCache, entry.name)}
-                runtimeStatus={runtimeServers.find((server) => server.name === entry.name)?.status}
-                runtimeToolNames={runtimeServers.find((server) => server.name === entry.name)?.toolNames}
-                probing={probing.has(entry.name)}
-                probeError={getCacheEntry(toolsCache, entry.name)?.ok === false ? getCacheEntry(toolsCache, entry.name)?.error : undefined}
-                policyRaw={policyRaw}
-                onToggle={(enabled) => handleToggleMcp(entry, enabled)}
-                onEdit={() => {
-                  setEditing(entry);
-                  setModalOpen(true);
-                }}
-                onDelete={() => handleDeleteMcp(entry)}
-                onReload={() => void reloadOne(entry.name)}
-                onPermChange={onPermChange}
-                onOpenRules={(fullName) => setRulesTarget(fullName)}
-              />
-            ))
+            entries.map((entry) => {
+              const runtime = runtimeServers.find((server) => server.name === entry.name);
+              const runtimeStatus = runtime?.status === 'needs-login' || (runtime?.loginUrl && runtime.status !== 'connected')
+                ? 'needs-login'
+                : runtime?.status;
+              return (
+                <McpServerCard
+                  key={entry.name}
+                  name={entry.name}
+                  config={entry.config}
+                  enabled={entry.enabled}
+                  scope={entry.scope}
+                  cachedTools={getCachedTools(toolsCache, entry.name)}
+                  runtimeStatus={runtimeStatus}
+                  runtimeToolNames={runtime?.toolNames}
+                  loginUrl={runtime?.loginUrl}
+                  exposure={runtime?.exposure}
+                  auth={runtime?.auth}
+                  probing={probing.has(entry.name)}
+                  probeError={getCacheEntry(toolsCache, entry.name)?.ok === false ? getCacheEntry(toolsCache, entry.name)?.error : undefined}
+                  policyRaw={policyRaw}
+                  onToggle={(enabled) => handleToggleMcp(entry, enabled)}
+                  onEdit={() => {
+                    setEditing(entry);
+                    setModalOpen(true);
+                  }}
+                  onDelete={() => handleDeleteMcp(entry)}
+                  onReload={() => void reloadOne(entry.name)}
+                  onPermChange={onPermChange}
+                  onOpenRules={(fullName) => setRulesTarget(fullName)}
+                />
+              );
+            })
           )}
 
           <AddMcpModal

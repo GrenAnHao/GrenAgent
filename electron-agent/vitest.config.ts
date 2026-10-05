@@ -20,6 +20,10 @@ export default defineConfig({
       {
         resolve: {
           alias: { '@extensions': fileURLToPath(new URL('../extensions', import.meta.url)) },
+          // 与 electron.vite.config.ts 的 renderer 保持一致：@pierre/diffs 被 @lobehub/ui 和
+          // 我们的流式高亮视图分别引用，两份副本就是两个主题注册表和两个高亮器单例，
+          // lobe 注册的 lobe-theme 会解析不到（报 No valid theme loader registered）。
+          dedupe: ['@pierre/diffs'],
         },
         test: {
           name: 'renderer',

@@ -7,15 +7,19 @@ import { FullAccessConfirmModal } from './features/chat/input/FullAccessConfirmM
 import { useThemeStore } from './stores/themeStore';
 import { schemePrimary, schemeTokens } from './theme/colorSchemes';
 import { MarkdownWarmup } from './features/chat/MarkdownWarmup';
+import { CodeViewWarmup } from './features/tools/LazyHighlighter';
 import { Sidebar } from './features/sessions/Sidebar';
 import { DockPanel } from './features/dock/DockPanel';
 import { DockDndProvider } from './features/dock/DockDndProvider';
-import { VisualPanel } from './features/visual/VisualPanel';
+import { closeVisualDockTab, openVisualDockTab } from './features/visual/openVisualDockTab';
 import { useVisualStore } from './stores/visualStore';
 import { useDockStore } from './stores/dockStore';
 import { Titlebar } from './components/Titlebar';
+import { useAskConfirm } from './components/askConfirm';
 import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreContext';
 import { agentStoreRegistry, useAgentRegistryStore } from './stores/agentStoreRegistry';
+import { restoreRunningTurns } from './stores/restoreRunningTurns';
+import { resolveRunningSessionPaths, startRunningSessionTracking } from './stores/runningSessions';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
 import { MainChatColumn } from './features/layout/MainChatColumn';
@@ -72,8 +76,28 @@ async function refreshSessions(
   }
 }
 
+let projectSyncEpoch = 0;
+
+/** 把主进程登记的空项目灌回侧栏。过期响应直接丢掉，避免「移除项目」和列表刷新交错时又加回来。 */
+async function syncRememberedProjects(): Promise<void> {
+  const epoch = ++projectSyncEpoch;
+  try {
+    const projects = await pi.listProjects();
+    if (epoch !== projectSyncEpoch) return;
+    const session = useSessionStore.getState();
+    const prefs = useSidebarPrefsStore.getState();
+    for (const cwd of projects) {
+      session.registerProject(cwd);
+      prefs.keepProject(cwd);
+    }
+  } catch {
+    /* 登记读失败不挡会话列表；下次刷新再试 */
+  }
+}
+
 /** 拉取所有项目的全量会话（供侧边栏按项目分组），带短期缓存。 */
 async function refreshAllSessions(force = false): Promise<void> {
+  void syncRememberedProjects();
   const { syncAllSessions, setAllSessionsLoading, setError } = useSessionStore.getState();
   // 记录发起时的代次：响应回来若代次已变（期间发生删除/新建/重命名），丢弃该响应——
   // 否则"删前/删中"扫到的旧列表会被灌回，表现为删后回弹/需重删。
@@ -194,23 +218,41 @@ const SidebarPanel = memo(function SidebarPanel({
 
 const RightPanelColumn = memo(function RightPanelColumn() {
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel);
-  const setRightPanelOpen = useLayoutStore((s) => s.setRightPanelOpen);
   const visualMode = useVisualStore((s) => s.mode);
   const visualHtml = useVisualStore((s) => s.html);
+  const sessionId = useVisualStore((s) => s.sessionId);
+  const visualTabOpen = useDockStore((s) => s.tabs.some((tab) => tab.id === 'visual:panel'));
+  const openedRef = useRef(false);
+  const sawTabRef = useRef(false);
 
   useEffect(() => {
     if (visualMode === 'panel' && visualHtml) {
-      setRightPanelOpen(true);
+      openVisualDockTab(sessionId);
+      openedRef.current = true;
+      return;
     }
-  }, [visualMode, visualHtml, setRightPanelOpen]);
+    if (openedRef.current) {
+      closeVisualDockTab();
+      openedRef.current = false;
+      sawTabRef.current = false;
+    }
+  }, [visualMode, visualHtml, sessionId]);
+
+  useEffect(() => {
+    if (visualTabOpen) {
+      sawTabRef.current = true;
+      return;
+    }
+    // 打开的同一帧标签还不在列表里，不能当成用户关掉。
+    if (!sawTabRef.current || visualMode !== 'panel') return;
+    sawTabRef.current = false;
+    openedRef.current = false;
+    useVisualStore.getState().clearVisual();
+  }, [visualTabOpen, visualMode]);
 
   return (
     <RightPanelShell>
-      {visualMode === 'panel' && visualHtml ? (
-        <VisualPanel onClose={() => { toggleRightPanel(); }} />
-      ) : (
-        <DockPanel region="right" onCollapse={toggleRightPanel} />
-      )}
+      <DockPanel region="right" onCollapse={toggleRightPanel} />
     </RightPanelShell>
   );
 });
@@ -230,6 +272,10 @@ const MainAndRightRow = memo(function MainAndRightRow() {
 const ChatColumns = memo(function ChatColumns({ sidebar }: { sidebar: ReactNode }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const setAvailableWidth = useLayoutStore((s) => s.setAvailableWidth);
+  const setRowNode = useCallback((el: HTMLDivElement | null) => {
+    rowRef.current = el;
+    if (el) el.setAttribute('data-sidebar-row', '');
+  }, []);
 
   useLayoutEffect(() => {
     const el = rowRef.current;
@@ -242,7 +288,7 @@ const ChatColumns = memo(function ChatColumns({ sidebar }: { sidebar: ReactNode 
   }, [setAvailableWidth]);
 
   return (
-    <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%', minWidth: 0 }} ref={rowRef}>
+    <Flexbox horizontal flex={1} style={{ minHeight: 0, height: '100%', minWidth: 0 }} ref={setRowNode}>
       {sidebar}
       <Flexbox flex={1} style={{ minWidth: 0, height: '100%' }}>
         <DockDndProvider>
@@ -264,6 +310,7 @@ const TerminalColumn = memo(function TerminalColumn() {
 
 const Workspace = memo(function Workspace() {
   const { store, workspace, setWorkspaceReady, appBooted } = useAgentStoreContext();
+  const ask = useAskConfirm();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const prevWorkspaceRef = useRef(workspace);
 
@@ -313,6 +360,7 @@ const Workspace = memo(function Workspace() {
         setWorkspaceReady(true);
         useSessionStore.getState().setLoading(false);
         if (target) useSessionStore.getState().setWorkspaceSessionPath(workspace, target);
+        void restoreRunningTurns();
         // 全量会话仍后台刷新（带 30s 缓存，不阻塞、不重载消息区）。
         void refreshAllSessions();
         return () => {
@@ -322,9 +370,9 @@ const Workspace = memo(function Workspace() {
       // 目标会话命中模块级缓存（该 workspace 的 store 可能新建/曾被 LRU 驱逐）→ 先秒显缓存内容并
       // 结束骨架屏；下方完整后端流程仍会跑以对齐活跃会话并刷新，刷新内容与缓存一致时 loadMessages
       // 会跳过重渲染（不闪动）。让「看过的会话」切回即时可见，不必干等 openWorkspace/getMessages。
-      if (target && store.showCachedSession(target)) {
-        setWorkspaceReady(true);
-      }
+      // 没命中时画面已被清成这份会话的空壳：常驻 store 的 workspaceReady 初值是 true，
+      // 不压回 false 会把空壳当成「空对话」展示，看起来像草稿，直到后端流程跑完。
+      if (target) setWorkspaceReady(store.showCachedSession(target));
     }
 
     const perf = createStartupPerf(workspace);
@@ -336,6 +384,7 @@ const Workspace = memo(function Workspace() {
     void (async () => {
       if (!workspace) {
         useSessionStore.getState().setLoading(false);
+        await restoreRunningTurns();
         return;
       }
       useSessionStore.getState().setLoading(true);
@@ -346,8 +395,12 @@ const Workspace = memo(function Workspace() {
         perf.end('openWorkspace');
         if (!alive) return;
 
+        // 已经知道要打开哪份会话时，会话列表只是侧栏数据，不该挡在 switchSession / getMessages 前面。
+        // 它会扫这个项目的全部会话文件，主进程正忙着跑任务时要好几秒。
+        const knownTarget = Boolean(useSessionStore.getState().activeSessionPath);
         perf.start('refreshSessions');
-        await refreshSessions(workspace, openResult);
+        const sessionsTask = refreshSessions(workspace, openResult, { autoSelect: !knownTarget });
+        if (!knownTarget) await sessionsTask;
         perf.end('refreshSessions');
         if (!alive) return;
 
@@ -357,7 +410,10 @@ const Workspace = memo(function Workspace() {
         );
         if (!stAfter.activeSessionPath && !alreadyDraft) {
           applyOpenedProject(workspace, null, () => store.reset());
-          if (alive) setWorkspaceReady(true);
+          if (alive) {
+            await restoreRunningTurns();
+            setWorkspaceReady(true);
+          }
           return;
         }
 
@@ -376,12 +432,15 @@ const Workspace = memo(function Workspace() {
         perf.start('getMessages');
         try {
           const [{ messages }, uiHistory] = await Promise.all([
-            pi.getMessages(workspace),
+            pi.getMessages(workspace, path),
             readUiHistoryForSession(workspace, path),
           ]);
-          if (alive) store.loadMessages(messages, { force: true, sessionPath: path, uiHistory });
+          if (alive) {
+            store.loadMessages(messages, { force: true, sessionPath: path, uiHistory });
+            await restoreRunningTurns();
+          }
         } catch {
-          /* 无消息或加载失败，保持空 */
+          if (alive) await restoreRunningTurns();
         }
         perf.end('getMessages');
         // 消息加载完成后再就绪：内容区骨架屏直接切到最终内容（消息列表或空对话占位），
@@ -390,7 +449,10 @@ const Workspace = memo(function Workspace() {
         if (alive) setWorkspaceReady(true);
       } catch (err) {
         useSessionStore.getState().setError(err instanceof Error ? err.message : String(err));
-        if (alive) setWorkspaceReady(true); // 失败也结束加载，显示界面与错误，避免永久 loading
+        if (alive) {
+          await restoreRunningTurns();
+          setWorkspaceReady(true);
+        }
       } finally {
         clearTimeout(readyGuard);
         useSessionStore.getState().setLoading(false);
@@ -424,6 +486,8 @@ const Workspace = memo(function Workspace() {
   const handleOpenSession = useCallback(
     async (cwd: string, path: string) => {
       const st = useSessionStore.getState();
+      const previousPath = st.activeSessionPath;
+      const previousWorkspacePath = st.workspaceSessionPaths[cwd];
       st.clearDraftConversation();
       st.setActiveSession(path);
       st.setWorkspaceSessionPath(cwd, path);
@@ -437,7 +501,7 @@ const Workspace = memo(function Workspace() {
         // 同项目切会话：命中前端缓存先秒显（看过的会话立即出现）；未命中则置骨架屏给即时反馈，
         // 避免在 switchSession/getMessages 的后端往返期间界面冻在旧内容上「等好几秒才切过去」。
         const token = ++selectTokenRef.current;
-        const shown = store.showCachedSession(path);
+        const shown = store.showCachedSession(path, previousWorkspacePath ?? previousPath);
         // 命中→就绪(秒显缓存内容)，未命中→骨架屏。之后仅最新 token 的链能再改就绪态与内容。
         setWorkspaceReady(shown);
         try {
@@ -445,14 +509,21 @@ const Workspace = memo(function Workspace() {
           // 已被更新的切换超越 → 丢弃本次后端结果，避免旧链用旧会话消息覆盖当前显示 / 污染缓存。
           if (selectTokenRef.current !== token) return;
           const [{ messages }, uiHistory] = await Promise.all([
-            pi.getMessages(cwd),
+            pi.getMessages(cwd, path),
             readUiHistoryForSession(cwd, path),
           ]);
           if (selectTokenRef.current !== token) return;
           // 命中缓存且内容未变时 loadMessages 内部会跳过重渲染（见 agent store），不会闪动。
           store.loadMessages(messages, { force: true, sessionPath: path, uiHistory });
+          await restoreRunningTurns();
         } catch (error) {
           if (selectTokenRef.current === token) {
+            const cur = useSessionStore.getState();
+            const restorePath = previousWorkspacePath ?? previousPath;
+            if (!previousPath) cur.setActiveSession('');
+            else cur.setActiveSession(previousPath);
+            if (restorePath) cur.setWorkspaceSessionPath(cwd, restorePath);
+            if (previousPath) store.showCachedSession(previousPath);
             store.useStore.setState({ lastError: `切换会话失败：${error instanceof Error ? error.message : String(error)}` });
           }
         } finally {
@@ -475,6 +546,7 @@ const Workspace = memo(function Workspace() {
     // 乐观：隐藏集为唯一真相（渲染层 filterDeletedSessions 即时移除）；同时失效两级缓存 + bump epoch
     // 作废在途重拉。不再裸 setAllSessions(remaining)——那会与重拉互相覆盖造成删后回弹。
     st.hideDeletedSession(path);
+    useDockStore.getState().dropSessionTabs(path, wasActive);
     st.removeOptimisticSession(path);
     invalidateCachedSession(path);
     bumpSessionMutationEpoch();
@@ -508,10 +580,11 @@ const Workspace = memo(function Workspace() {
           try {
             await pi.switchSession(cwd, nextInProject.path);
             const [{ messages }, uiHistory] = await Promise.all([
-              pi.getMessages(cwd),
+              pi.getMessages(cwd, nextInProject.path),
               readUiHistoryForSession(cwd, nextInProject.path),
             ]);
             store.loadMessages(messages, { force: true, sessionPath: nextInProject.path, uiHistory });
+            await restoreRunningTurns();
             st.setActiveSession(nextInProject.path);
             st.setWorkspaceSessionPath(cwd, nextInProject.path);
             useThinkingMemoryStore.getState().bumpSwitch(cwd);
@@ -660,7 +733,7 @@ const Workspace = memo(function Workspace() {
 
   const handleClearProjectSessions = useCallback(
     async (cwd: string) => {
-      if (!window.confirm('清空该项目下的全部会话？项目会保留。')) return;
+      if (!(await ask({ title: '清空该项目下的全部会话？', content: '项目会保留。', danger: true }))) return;
       const st = useSessionStore.getState();
       const pathsUnderCwd = mergeAllSessions(st.allSessions, st.optimisticSessions)
         .filter((session) => session.cwd && pathsEquivalent(session.cwd, cwd))
@@ -668,6 +741,7 @@ const Workspace = memo(function Workspace() {
       const wasActive = pathsEquivalent(st.activeWorkspace, cwd);
       for (const path of pathsUnderCwd) {
         st.hideDeletedSession(path);
+        useDockStore.getState().dropSessionTabs(path, wasActive);
         st.removeOptimisticSession(path);
         invalidateCachedSession(path);
         useCommandInputStore.getState().dropSession(path);
@@ -697,7 +771,7 @@ const Workspace = memo(function Workspace() {
         st.setError(error instanceof Error ? error.message : String(error));
       }
     },
-    [handleNewSession, store],
+    [ask, handleNewSession, store],
   );
 
   const handleRemoveProject = useCallback(
@@ -755,19 +829,13 @@ const Workspace = memo(function Workspace() {
     return () => un?.();
   }, []);
 
-  const runningWorkspaces = useAgentRegistryStore((s) => s.runningWorkspaces);
-  const workspaceSessionPaths = useSessionStore((s) => s.workspaceSessionPaths);
-  const runningSessionPaths = useMemo(() => {
-    const set = new Set<string>();
-    for (const ws of runningWorkspaces) {
-      // 当前 workspace 的运行会话以 activeSessionPath 为准：workspaceSessionPaths[ws]
-      // 在「项目内新建会话」后可能仍指向上一个会话，若再叠加 activeSessionPath，会把同
-      // 项目里的旧会话也点亮成「执行中」。后台 workspace 仍用其映射路径。
-      const p = pathsEquivalent(ws, workspace) ? activeSessionPath : workspaceSessionPaths[ws];
-      if (p) set.add(p);
-    }
-    return set;
-  }, [runningWorkspaces, workspaceSessionPaths, workspace, activeSessionPath]);
+  const listedRunningPaths = useAgentRegistryStore((s) => s.runningSessionPaths);
+  const allSessions = useSessionStore((s) => s.allSessions);
+  const optimisticSessions = useSessionStore((s) => s.optimisticSessions);
+  const runningSessionPaths = useMemo(
+    () => resolveRunningSessionPaths(listedRunningPaths, allSessions, optimisticSessions),
+    [listedRunningPaths, allSessions, optimisticSessions],
+  );
 
   return (
     <Flexbox style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
@@ -803,6 +871,7 @@ const Workspace = memo(function Workspace() {
 });
 
 export default function App() {
+  useEffect(() => startRunningSessionTracking(), []);
   const appearance = useThemeStore((s) => s.appearance);
   const primaryColor = useThemeStore((s) => s.primaryColor);
   const neutralColor = useThemeStore((s) => s.neutralColor);
@@ -876,19 +945,18 @@ export default function App() {
         /* ignore */
       }
 
-      // 清理历史 / 崩溃残留的空对话目录：删掉 works 下所有无会话的孤儿，仅保留当前草稿。
-      // 配合「统一复用未使用 draft」把磁盘空目录收敛到最多 1 个。
-      try {
-        await pi.pruneOrphanConversations(ws ? [ws] : []);
-      } catch {
-        /* ignore — 清理失败无害，下次启动再试 */
-      }
-
       if (ws) {
         useSessionStore.getState().setDraftConversation(ws);
         useSessionStore.getState().setActiveSession('');
         useSessionStore.getState().setActiveWorkspace(ws);
       }
+
+      // 清理历史 / 崩溃残留的空对话目录：删掉 works 下所有无会话的孤儿，仅保留当前草稿。
+      // 配合「统一复用未使用 draft」把磁盘空目录收敛到最多 1 个。
+      // 要再扫一遍全部会话，放在进入草稿之后、不等它：它不碰当前草稿，也不该挡加载页。
+      void pi.pruneOrphanConversations(ws ? [ws] : []).catch(() => {
+        /* ignore — 清理失败无害，下次启动再试 */
+      });
     })();
     return () => {
       // store 由 registry 常驻；卸载时统一取消所有订阅（后端进程由窗口关闭事件 close_all 兜底）。
@@ -923,6 +991,7 @@ export default function App() {
         <ExtensionUiHost />
         <FullAccessConfirmModal />
         <MarkdownWarmup />
+        <CodeViewWarmup />
         <AgentStoreProvider workspace={activeWorkspace}>
           <Workspace />
         </AgentStoreProvider>

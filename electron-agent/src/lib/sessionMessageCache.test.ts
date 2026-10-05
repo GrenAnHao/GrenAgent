@@ -17,3 +17,14 @@ describe('invalidateCachedSession', () => {
     expect(() => invalidateCachedSession('/p/missing.jsonl')).not.toThrow();
   });
 });
+
+describe('equivalent session paths', () => {
+  it('finds, replaces and evicts an entry written under another spelling of the path', () => {
+    setCachedSession('C:\\Sessions\\A.jsonl', [], '0');
+    expect(getCachedSession('c:/sessions/a.jsonl')).toEqual({ messages: [], sig: '0' });
+    setCachedSession('c:/sessions/a.jsonl', [], '1');
+    expect(getCachedSession('C:\\Sessions\\A.jsonl')?.sig).toBe('1');
+    invalidateCachedSession('C:/Sessions/A.jsonl');
+    expect(getCachedSession('c:/sessions/a.jsonl')).toBeUndefined();
+  });
+});

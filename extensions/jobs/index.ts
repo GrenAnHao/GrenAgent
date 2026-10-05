@@ -1,10 +1,13 @@
-// 通用后台 job：job_output / job_list / job_kill + 结算 notice。生产者（subagent 等）调 jobs.start。
+// 通用后台 job：job_output / job_list / job_kill + 结算 notice。生产者（bash run_in_background、subagent）调 jobs.start。
+// 语义移植自 DSH packages/jobs/tool-jobs：模型已经收走的结算不再通知——等待释放的（awaited）、
+// 模型自己 job_kill 的、所有者销毁导致的（teardown）都跳过。
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig } from "../_shared/runtime-config.js";
 import { formatJobNotice } from "./notice.js";
+import { fitWithSuffix, jobDetail, statusLine } from "./render.js";
 import { jobs } from "./service.js";
-import { JobsError, type JobSnapshot } from "./types.js";
+import { JobsError, type JobDoneInfo, type JobSnapshot } from "./types.js";
 
 const DEFAULT_WAIT_MS = 60_000;
 const DEFAULT_WAIT_MAX_MS = 600_000;
@@ -17,6 +20,8 @@ interface OwnerHost {
 
 const owners = new Map<string, OwnerHost>();
 const wakes = new Map<string, number>();
+/** 模型经 job_kill 请求停掉的存活 job：那条工具结果就是送达，结算通知只会重复它。 */
+const killedByModel = new Set<string>();
 let unsubscribe: (() => void) | undefined;
 
 function num(key: string, fallback: number): number {
@@ -37,12 +42,9 @@ function fail(e: unknown) {
   return { content: [{ type: "text" as const, text }], isError: true, details: {} };
 }
 
-function statusLine(s: JobSnapshot): string {
-  return `[status: ${s.status}]`;
-}
-
-function deliver(snapshot: JobSnapshot): void {
-  if (snapshot.reported) return;
+function deliver(snapshot: JobSnapshot, info: JobDoneInfo): void {
+  const killed = killedByModel.delete(snapshot.id);
+  if (snapshot.reported || killed || info.awaited || info.cause === "teardown") return;
   const host = owners.get(snapshot.owner);
   if (!host) return;
   const msg = {
@@ -94,25 +96,28 @@ export default function (pi: ExtensionAPI) {
     name: "job_output",
     label: "Job Output",
     description:
-      "Read a background job by id. Final-output jobs return their output once finished; stream jobs return output since the previous read. " +
+      "Read a background job: output since the previous read for stream jobs (bash run_in_background), or the result of a finished final-output job (one-shot sub-agent). " +
+      "The response ends with `[status: ...]` (plus the exit code once a command finished). " +
       "Set `wait: true` to block until the job settles or `timeout_ms` expires (a timed-out wait returns [status: running] and leaves the job alive).",
     promptSnippet: "Read a background job by id.",
     promptGuidelines: [
-      "Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one.",
+      "Track every background job id you start (bash run_in_background, one-shot spawn_agent). You are notified in-session when one finishes — do not busy-poll job_output or sleep on it; keep working on independent steps and do not duplicate a running job's work.",
       "Before giving a final answer, collect every still-relevant job with job_output (wait: true only when genuinely blocked), and job_kill jobs that stopped mattering.",
     ],
     parameters: Type.Object({
       job_id: Type.String({ description: "Job id returned by the tool that started the background work." }),
-      wait: Type.Optional(Type.Boolean({ description: "Block until the job reaches a terminal status or the timeout expires." })),
+      wait: Type.Optional(Type.Boolean({ description: "Block until the job finishes or the timeout expires; a timed-out wait leaves the job running. Defaults to false." })),
       timeout_ms: Type.Optional(Type.Number({ description: "Max wait in milliseconds (with wait: true). Capped by JOBS_WAIT_MAX_MS." })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       try {
         const max = num("JOBS_WAIT_MAX_MS", DEFAULT_WAIT_MAX_MS);
-        const timeoutMs = Math.min(typeof params.timeout_ms === "number" ? params.timeout_ms : num("JOBS_WAIT_TIMEOUT_MS", DEFAULT_WAIT_MS), max);
-        const r = await jobs.read(params.job_id, callerId(ctx), { wait: params.wait === true, timeoutMs });
-        const text = r.text ? `[status: ${r.status}]\n${r.text}` : `[status: ${r.status}]`;
-        return { content: [{ type: "text", text }], details: {} };
+        const timeoutMs = Math.min(typeof params.timeout_ms === "number" && params.timeout_ms > 0 ? params.timeout_ms : num("JOBS_WAIT_TIMEOUT_MS", DEFAULT_WAIT_MS), max);
+        const r = await jobs.read(params.job_id, callerId(ctx), { wait: params.wait === true, timeoutMs, ...(signal ? { signal } : {}) });
+        const body = r.text.length > 0 ? r.text : "(no new output)";
+        const content = body.endsWith("\n") ? body.slice(0, -1) : body;
+        const text = fitWithSuffix(content, `\n${statusLine(r.job)}`, r.job.outputLimitBytes, "\n[output truncated]");
+        return { content: [{ type: "text", text }], details: { jobId: r.job.id, kind: r.job.kind, status: r.job.status } };
       } catch (e) {
         return fail(e);
       }
@@ -127,9 +132,12 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       const rows = jobs.list(callerId(ctx));
-      if (rows.length === 0) return { content: [{ type: "text", text: "(no jobs)" }], details: {} };
-      const lines = rows.map((s) => `${s.id} | ${s.kind} | ${s.label} | ${s.status} | ${new Date(s.startedAt).toISOString()} | ${s.finishedAt ? new Date(s.finishedAt).toISOString() : "-"}`);
-      return { content: [{ type: "text", text: ["id | kind | label | status | startedAt | finishedAt", ...lines].join("\n") }], details: {} };
+      if (rows.length === 0) return { content: [{ type: "text", text: "(no background jobs)" }], details: {} };
+      const lines = rows.map((s) => {
+        const detail = jobDetail(s);
+        return `${s.id} [${s.kind}] ${s.status}${detail ? ` (${detail})` : ""} — ${s.label}`;
+      });
+      return { content: [{ type: "text", text: lines.join("\n") }], details: {} };
     },
   });
 
@@ -140,16 +148,18 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: "Cancel a running background job by id.",
     parameters: Type.Object({
       job_id: Type.String({ description: "Job id returned by the tool that started the background work." }),
-      reason: Type.Optional(Type.String({ description: "Optional short reason, forwarded to the job." })),
+      reason: Type.Optional(Type.String({ description: "Optional short reason, recorded in the job's terminal status and forwarded to the job." })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       try {
-        const outcome = jobs.kill(params.job_id, callerId(ctx), params.reason);
-        const snap = jobs.snapshot(params.job_id);
+        const caller = callerId(ctx);
+        const outcome = jobs.kill(params.job_id, caller, params.reason);
+        if (outcome === "requested") killedByModel.add(params.job_id);
+        const snap = jobs.get(params.job_id, caller);
         const text =
           outcome === "already-finished"
-            ? `job ${params.job_id} had already finished ${snap ? statusLine(snap) : ""}`.trim()
-            : `cancellation requested for job ${params.job_id}`;
+            ? `job ${params.job_id} had already finished ${statusLine(snap)}`
+            : `requested cancellation of job ${params.job_id}`;
         return { content: [{ type: "text", text }], details: {} };
       } catch (e) {
         return fail(e);
@@ -161,4 +171,5 @@ export default function (pi: ExtensionAPI) {
 export function __resetJobsOwnersForTest(): void {
   owners.clear();
   wakes.clear();
+  killedByModel.clear();
 }

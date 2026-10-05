@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ActionIcon, Icon } from '@lobehub/ui';
-import { CornerDownRight, GripVertical, PencilLine, Trash2 } from 'lucide-react';
+import { ActionIcon, Hotkey, Icon, KeyMapEnum, combineKeys } from '@lobehub/ui';
+import { ArrowUp, GripVertical, PencilLine, SquareArrowUp, Trash2 } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useChatInput } from './ChatInputContext';
 import { moveComposerItem, updateComposerItem } from './composerQueue';
@@ -34,17 +34,12 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
-  card: css`
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 6px 12px;
-  `,
-  head: css`
+  row: css`
     display: flex;
     gap: 8px;
     align-items: center;
     min-width: 0;
+    padding: 4px 12px;
   `,
   grip: css`
     display: inline-flex;
@@ -68,25 +63,31 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
+  hint: css`
+    display: flex;
+    flex: none;
+    gap: 8px;
+    align-items: center;
+    color: ${cssVar.colorTextTertiary};
+    font-size: 12px;
+    white-space: nowrap;
+  `,
+  hintItem: css`
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  `,
   actions: css`
     display: flex;
     flex: none;
     gap: 2px;
     margin-left: auto;
   `,
-  body: css`
-    min-height: 44px;
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.5;
-    color: ${cssVar.colorTextSecondary};
-    white-space: pre-wrap;
-    word-break: break-word;
-  `,
   editor: css`
-    width: 100%;
-    min-height: 44px;
-    padding: 6px 8px;
+    flex: 1;
+    min-width: 0;
+    min-height: 32px;
+    padding: 4px 8px;
     border: 1px solid ${cssVar.colorBorder};
     border-radius: ${cssVar.borderRadius};
     color: ${cssVar.colorText};
@@ -102,14 +103,15 @@ function actionProps(label: string) {
 }
 
 /**
- * 执行中发送后停在输入栏的跟进条。
- * 点引导 → 注入当前回合；不点 → 本轮结束后自动跟进；可编辑 / 删除。
- * 默认收起为一行摘要，点标题才展开每条。
+ * 执行中发送后停在输入栏的跟进。
+ * 只有一条时直接露出这一行，不收进排队摘要。
+ * 多条才收成「排队 · N」，点开后每条仍是一行。
+ * 引导把这条注入当前回合；截断发送先停掉当前回复再作为新消息发出。
  */
 export function SteerQueue() {
   const { useStore } = useAgentStore();
   const queue = useStore((s) => s.composerQueue) ?? [];
-  const { steerQueued } = useChatInput();
+  const { steerQueued, interruptQueued } = useChatInput();
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [draft, setDraft] = useState('');
@@ -125,6 +127,7 @@ export function SteerQueue() {
 
   if (queue.length === 0) return null;
 
+  const single = queue.length === 1;
   const summary = queueSummaryLabel(queue);
   const firstTitle = queue[0]?.text.trim() || undefined;
 
@@ -168,27 +171,29 @@ export function SteerQueue() {
 
   return (
     <div className={styles.wrap} data-cap-layer="" data-testid="steer-queue">
-      <button
-        aria-expanded={expanded}
-        className={styles.header}
-        onClick={() => setExpanded((v) => !v)}
-        title={firstTitle}
-        type="button"
-      >
-        <span className={styles.headerLabel}>{summary}</span>
-      </button>
-      {expanded
+      {single ? null : (
+        <button
+          aria-expanded={expanded}
+          className={styles.header}
+          onClick={() => setExpanded((v) => !v)}
+          title={firstTitle}
+          type="button"
+        >
+          <span className={styles.headerLabel}>{summary}</span>
+        </button>
+      )}
+      {single || expanded
         ? queue.map((item) => {
             const editing = editingId === item.id;
             return (
               <div
-                className={styles.card}
+                className={styles.row}
                 data-dock-card=""
                 data-queue-id={item.id}
                 data-testid={`composer-queue-item-${item.id}`}
                 key={item.id}
               >
-                <div className={styles.head}>
+                {single ? null : (
                   <button
                     aria-label="拖拽排序"
                     className={styles.grip}
@@ -198,36 +203,7 @@ export function SteerQueue() {
                   >
                     <Icon icon={GripVertical} size={14} />
                   </button>
-                  <span className={styles.title}>跟进</span>
-                  <div className={styles.actions}>
-                    <ActionIcon
-                      {...actionProps('发送引导')}
-                      icon={CornerDownRight}
-                      onClick={() => steerQueued(item.id)}
-                      size="small"
-                    />
-                    <ActionIcon
-                      {...actionProps('编辑消息')}
-                      icon={PencilLine}
-                      onClick={() => {
-                        setEditingId(item.id);
-                        setDraft(item.text);
-                      }}
-                      size="small"
-                    />
-                    <ActionIcon
-                      {...actionProps('删除这条')}
-                      icon={Trash2}
-                      onClick={() => {
-                        useStore.setState((s) => ({
-                          composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== item.id),
-                        }));
-                        if (editingId === item.id) setEditingId(undefined);
-                      }}
-                      size="small"
-                    />
-                  </div>
-                </div>
+                )}
                 {editing ? (
                   <textarea
                     aria-label="编辑跟进"
@@ -252,8 +228,54 @@ export function SteerQueue() {
                     value={draft}
                   />
                 ) : (
-                  <p className={styles.body}>{item.text}</p>
+                  <span className={styles.title} title={item.text}>{item.text}</span>
                 )}
+                {single && !editing ? (
+                  <span className={styles.hint} data-testid="follow-up-hotkeys">
+                    <span className={styles.hintItem}>
+                      引导
+                      <Hotkey compact keys={KeyMapEnum.Enter} variant="borderless" />
+                    </span>
+                    <span className={styles.hintItem}>
+                      截断
+                      <Hotkey compact keys={combineKeys([KeyMapEnum.Ctrl, KeyMapEnum.Enter])} variant="borderless" />
+                    </span>
+                  </span>
+                ) : null}
+                <div className={styles.actions}>
+                  <ActionIcon
+                    {...actionProps('引导')}
+                    icon={ArrowUp}
+                    onClick={() => steerQueued(item.id)}
+                    size="small"
+                  />
+                  <ActionIcon
+                    {...actionProps('截断发送')}
+                    icon={SquareArrowUp}
+                    onClick={() => void interruptQueued(item.id)}
+                    size="small"
+                  />
+                  <ActionIcon
+                    {...actionProps('编辑消息')}
+                    icon={PencilLine}
+                    onClick={() => {
+                      setEditingId(item.id);
+                      setDraft(item.text);
+                    }}
+                    size="small"
+                  />
+                  <ActionIcon
+                    {...actionProps('删除这条')}
+                    icon={Trash2}
+                    onClick={() => {
+                      useStore.setState((s) => ({
+                        composerQueue: (s.composerQueue ?? []).filter((entry) => entry.id !== item.id),
+                      }));
+                      if (editingId === item.id) setEditingId(undefined);
+                    }}
+                    size="small"
+                  />
+                </div>
               </div>
             );
           })

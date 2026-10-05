@@ -1,4 +1,4 @@
-import { type ReactNode, type Ref } from 'react';
+import { useMemo, type ReactNode, type Ref } from 'react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import type { DisplayMessage } from './groupMessages';
 import { UserMessage } from './UserMessage';
@@ -15,7 +15,8 @@ import { VirtualizedMessageList, type MessageListViewport, type TranscriptScroll
 import { ToolExecution } from '../tools/ToolExecution';
 import { SubAgentInline } from './SubAgentInline';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
-import { subAgentMode, taskLabel } from '../panels/subagentUtils';
+import { argsLookParallel, subAgentMode, taskLabel } from '../panels/subagentUtils';
+import type { SpawnFollowOverlay } from './messagePrecompute';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
 import { CompactionDivider } from './CompactionStatusRow';
 
@@ -33,10 +34,17 @@ const commandInputStyles = createStaticStyles(({ css }) => ({
   `,
 }));
 
+const EMPTY_HIDDEN = new Set<string>();
+const EMPTY_OVERLAY = new Map<string, SpawnFollowOverlay>();
+
 interface ChatMessageItemsProps {
   messages: DisplayMessage[];
   /** 全局预计算（由调用方 useMemo 缓存后传入）。 */
   unitsByMessage: Map<string, NumberedUnit[]>;
+  /** 并回启动卡片的跟进调用，不单独占一行。 */
+  hiddenSpawnIds?: Set<string>;
+  /** 启动卡片改显示跟进结果（等待完成之后）。 */
+  spawnOverlay?: Map<string, SpawnFollowOverlay>;
   answeredQuestions: Set<string>;
   /** 列表末尾附加元素（如「准备响应中」占位）。 */
   footer?: ReactNode;
@@ -76,10 +84,21 @@ export function renderMessageBody(
   answeredQuestions: Set<string>,
   showDeliverables = false,
   liveTurn = false,
+  spawnOverlay: Map<string, SpawnFollowOverlay> = EMPTY_OVERLAY,
 ): ReactNode {
   switch (msg.kind) {
     case 'user':
-      return <UserMessage text={msg.text} images={msg.images} timestamp={msg.timestamp} entryId={msg.entryId} />;
+      return (
+        <UserMessage
+          text={msg.text}
+          images={msg.images}
+          timestamp={msg.timestamp}
+          entryId={msg.entryId}
+          steering={msg.steering}
+          steerState={msg.steerState}
+          promptFrame={msg.promptFrame}
+        />
+      );
     case 'turn':
       return (
         <TurnTimeline
@@ -93,16 +112,18 @@ export function renderMessageBody(
     case 'tool':
       if (msg.toolName === 'spawn_agent') {
         const numbered = unitsByMessage.get(msg.id) ?? [];
-        if (numbered.length <= 1) {
+        if (numbered.length <= 1 && !argsLookParallel(msg.args)) {
           const only = numbered[0];
+          const followed = spawnOverlay.get(msg.id);
           return (
             <SubAgentInline
               messageId={msg.id}
               toolCallId={msg.toolCallId}
               index={only?.no ?? 1}
               task={only?.unit.task ?? taskLabel(msg.args)}
-              result={msg.result}
-              status={msg.status}
+              title={only?.unit.title}
+              result={followed?.result ?? msg.result}
+              status={followed?.status ?? msg.status}
             />
           );
         }
@@ -124,6 +145,8 @@ export function renderMessageBody(
           result={msg.result}
           status={msg.status}
           argsComplete={msg.argsComplete}
+          startedAt={msg.startedAt}
+          durationMs={msg.durationMs}
         />
       );
     case 'compaction':
@@ -159,6 +182,8 @@ export function renderMessageBody(
 export function ChatMessageItems({
   messages,
   unitsByMessage,
+  hiddenSpawnIds = EMPTY_HIDDEN,
+  spawnOverlay = EMPTY_OVERLAY,
   answeredQuestions,
   footer,
   overlay,
@@ -173,9 +198,13 @@ export function ChatMessageItems({
   sessionLive,
 }: ChatMessageItemsProps) {
   const liveId = liveTurnId(messages, Boolean(sessionLive));
+  const visible = useMemo(
+    () => (hiddenSpawnIds.size === 0 ? messages : messages.filter((msg) => !hiddenSpawnIds.has(msg.id))),
+    [messages, hiddenSpawnIds],
+  );
   return (
     <VirtualizedMessageList
-      display={messages}
+      display={visible}
       footer={footer}
       overlay={overlay}
       fill={fill}
@@ -192,6 +221,7 @@ export function ChatMessageItems({
           answeredQuestions,
           showDeliverables,
           Boolean(liveId && msg.kind === 'turn' && msg.id === liveId),
+          spawnOverlay,
         )
       }
     />

@@ -1,13 +1,14 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { DisplayMessage } from './groupMessages';
 import type { MessageListViewport } from './VirtualizedMessageList';
 
-const { scrollToIndex, scrollBy, fireScroll } = vi.hoisted(() => ({
+const { scrollToIndex, scrollBy, fireScroll, onScrollRef } = vi.hoisted(() => ({
   scrollToIndex: vi.fn(),
   scrollBy: vi.fn(),
   fireScroll: { current: false },
+  onScrollRef: { current: null as null | (() => void) },
 }));
 
 vi.mock('virtua', async () => {
@@ -23,6 +24,7 @@ vi.mock('virtua', async () => {
         findItemIndex: () => 0,
         getItemOffset: () => 0,
       }));
+      onScrollRef.current = props.onScroll ?? null;
       React.useEffect(() => {
         if (fireScroll.current) props.onScroll?.();
       }, []);
@@ -107,15 +109,20 @@ describe('VirtualizedMessageList', () => {
   });
 
   it('lifts the jump button above the seat', () => {
-    fireScroll.current = true;
+    const scrollRef = { current: null as { scrollBy: (deltaY: number) => void } | null };
     render(
       <VirtualizedMessageList
         display={longConversation()}
         renderItem={(m) => <div>{m.id}</div>}
         paddingBottom={120}
+        scrollRef={scrollRef}
         data-testid="vlist"
       />,
     );
+    act(() => {
+      scrollRef.current?.scrollBy(-40);
+      onScrollRef.current?.();
+    });
     expect(screen.getByTestId('jump-to-bottom')).toHaveStyle({ insetBlockEnd: '136px' });
   });
 });

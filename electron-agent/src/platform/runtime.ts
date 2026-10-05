@@ -21,6 +21,11 @@ export interface GrenWebviewApi {
   onDragDropEvent(handler: (event: RuntimeEvent<DragDropPayload>) => boolean | void): Promise<UnlistenFn>;
 }
 
+export interface GrenBrowserApi {
+  attachGuest(input: { tabId: string; webContentsId: number }): Promise<{ ok: boolean }>;
+  detachGuest(input: { tabId: string }): Promise<{ ok: boolean }>;
+}
+
 export interface DragDropPayload {
   type: 'over' | 'leave' | 'drop';
   position?: { x: number; y: number };
@@ -38,6 +43,7 @@ export interface GrenRuntimeBridge {
   revealItemInDir(path: string): Promise<void>;
   window: GrenWindowApi;
   webview: GrenWebviewApi;
+  browser?: GrenBrowserApi;
 }
 
 declare global {
@@ -50,6 +56,11 @@ function bridge(): GrenRuntimeBridge {
   if (typeof window !== 'undefined' && window.gren) return window.gren;
   return browserPreviewBridge;
 }
+
+const previewBrowser: GrenBrowserApi = {
+  attachGuest: async () => ({ ok: false }),
+  detachGuest: async () => ({ ok: false }),
+};
 
 const browserPreviewBridge: GrenRuntimeBridge = {
   invoke: async () => {
@@ -71,6 +82,7 @@ const browserPreviewBridge: GrenRuntimeBridge = {
   webview: {
     onDragDropEvent: async () => () => {},
   },
+  browser: previewBrowser,
 };
 
 export function invoke<T>(command: string, args?: RuntimeArgs): Promise<T> {
@@ -140,4 +152,8 @@ export function getCurrentWindow(): GrenWindowApi {
 
 export function getCurrentWebview(): GrenWebviewApi {
   return bridge().webview;
+}
+
+export function getBrowser(): GrenBrowserApi {
+  return bridge().browser ?? previewBrowser;
 }

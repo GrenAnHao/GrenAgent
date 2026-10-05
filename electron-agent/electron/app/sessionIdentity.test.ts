@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readSessionIdentity } from './sessionIdentity';
+import { readFirstLine, readSessionIdentity } from './sessionIdentity';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -48,6 +48,15 @@ describe('readSessionIdentity', () => {
       sessionPath: file,
       workspace,
     });
+  });
+
+  it('reads the header from a long session without needing the rest of the file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'session-identity-')); roots.push(root);
+    const file = join(root, 'session.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 'long', cwd: 'C:/repo', pad: 'x'.repeat(40_000) });
+    await writeFile(file, `${header}\r\n${'{"type":"message"}\n'.repeat(1000)}`);
+    await expect(readFirstLine(file)).resolves.toBe(header);
+    await expect(readSessionIdentity(file)).resolves.toMatchObject({ sessionId: 'long', workspace: 'C:/repo' });
   });
 
   it('rejects paths that do not contain the timestamp and id filename shape', async () => {

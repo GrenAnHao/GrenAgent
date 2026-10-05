@@ -2,7 +2,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+vi.mock('./LazyHighlighter', () => ({
+  LazySyntaxHighlighter: (p: { animated?: boolean; language: string; children: string }) => (
+    <pre data-animated={String(Boolean(p.animated))} data-language={p.language} data-testid="lazy-syntax">{p.children}</pre>
+  ),
+  LazyCodeDiff: () => <div data-testid="lazy-code-diff" />,
+  LazyHighlighter: (p: { children: string }) => <pre>{p.children}</pre>,
+  CodeViewWarmup: () => null,
+}));
+// 真实实现会动态加载 @pierre/diffs 和 shiki 去逐行追加；这里只关心路由到了哪个视图。
+vi.mock('./StreamingCodeView', () => ({
+  StreamingCodeView: (p: { path: string; content: string }) => (
+    <div data-path={p.path} data-testid="streaming-code-view">{p.content}</div>
+  ),
+}));
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { ToolExecution } from './ToolExecution';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
@@ -151,10 +165,34 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
     expect(screen.getByText('List files in current directory')).toBeTruthy();
     expect(screen.getByTestId('terminal-command').textContent).toBe('Get-ChildItem');
     expect(screen.getByTestId('terminal-output').textContent).toBe('Name    Length\n----    ------');
-    expect(screen.queryByRole('button', { name: '复制' })).toBeNull();
+    expect(screen.getByRole('button', { name: '复制' })).toBeTruthy();
   });
 
-  it('运行中尚无输出时只显示命令，不占位', () => {
+  it('运行中输出变长时贴住底部', () => {
+    const { rerender } = wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'ping', description: 'Ping' }}
+        result={{ content: [{ type: 'text', text: 'line-1' }] }}
+        status="running"
+      />,
+    );
+    const output = screen.getByTestId('terminal-output');
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, value: 480 });
+    rerender(
+      <ThemeProvider themeMode="dark">
+        <ToolExecution
+          toolName="bash"
+          args={{ command: 'ping', description: 'Ping' }}
+          result={{ content: [{ type: 'text', text: 'line-1\nline-2' }] }}
+          status="running"
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('terminal-output').scrollTop).toBe(480);
+  });
+
+  it('运行中尚无输出时整张卡已经出现：输出区先占一行，显示等待响应中', () => {
     wrap(
       <ToolExecution
         toolName="bash"
@@ -164,11 +202,100 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
       />,
     );
     expect(screen.getByTestId('terminal-command').textContent).toBe('sleep 5');
+    expect(screen.getByTestId('terminal-waiting').textContent).toBe('等待响应中');
     expect(screen.queryByTestId('terminal-output')).toBeNull();
     expect(screen.queryByTestId('terminal-empty')).toBeNull();
   });
 
-  it('完成后无输出显示占位，并可复制已有输出', async () => {
+  it('pi 先发来的空结果也算等待响应', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'npm run build', description: 'Build' }}
+        result={{ content: [] }}
+        status="running"
+      />,
+    );
+    expect(screen.getByTestId('terminal-waiting')).toBeTruthy();
+  });
+
+  it('第一行输出到来时替换等待占位', () => {
+    const props = { toolName: 'bash', args: { command: 'Get-Date', description: 'Show date' }, status: 'running' as const };
+    const { rerender } = wrap(<ToolExecution {...props} result={undefined} />);
+    expect(screen.getByTestId('terminal-waiting')).toBeTruthy();
+    rerender(
+      <ThemeProvider themeMode="dark">
+        <ToolExecution {...props} result={{ content: [{ type: 'text', text: '2026-09-16' }] }} />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByTestId('terminal-waiting')).toBeNull();
+    expect(screen.getByTestId('terminal-output').textContent).toBe('2026-09-16');
+  });
+
+  it('多行命令在卡片头只占一行，悬停可看全文', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'cd extensions\nnpx vitest run', description: 'Run tests' }}
+        result={undefined}
+        status="running"
+      />,
+    );
+    const command = screen.getByTestId('terminal-command');
+    expect(command.textContent).toBe('cd extensions …');
+    expect(command.getAttribute('title')).toBe('cd extensions\nnpx vitest run');
+    expect(screen.getAllByTestId('terminal-prompt')).toHaveLength(1);
+  });
+
+  it('行尾显示运行时长：运行中随时间自增，完成后定格在记录的耗时', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-29T00:00:00.000Z'));
+    try {
+      wrap(
+        <ToolExecution
+          toolName="bash"
+          args={{ command: 'sleep 90', description: 'Wait' }}
+          result={undefined}
+          status="running"
+          startedAt={Date.now()}
+        />,
+      );
+      expect(screen.getByTestId('tool-run-duration').textContent).toBe('· 0s');
+      act(() => {
+        vi.advanceTimersByTime(80_000);
+      });
+      expect(screen.getByTestId('tool-run-duration').textContent).toBe('· 1m20s');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    cleanup();
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'sleep 10', description: 'Wait' }}
+        result={{ content: [{ type: 'text', text: 'ok' }] }}
+        status="done"
+        startedAt={1}
+        durationMs={9_600}
+      />,
+    );
+    expect(screen.getByTestId('tool-run-duration').textContent).toBe('· 10s');
+  });
+
+  it('没有计时数据的 bash 行不显示时长', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'ls', description: 'List' }}
+        result={{ content: [{ type: 'text', text: 'a' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.queryByTestId('tool-run-duration')).toBeNull();
+  });
+
+  it('复制按钮弹出菜单：复制命令 / 复制结果 / 复制全部', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     wrap(
@@ -180,8 +307,35 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
       />,
     );
     fireEvent.click(screen.getByText('bash'));
+
     fireEvent.click(screen.getByRole('button', { name: '复制' }));
-    expect(writeText).toHaveBeenCalledWith('2026-09-16 02:07:31 +08:00');
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual(['复制命令', '复制结果', '复制全部']);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '复制命令' }));
+    expect(writeText).toHaveBeenLastCalledWith('Get-Date');
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '复制结果' }));
+    expect(writeText).toHaveBeenLastCalledWith('2026-09-16 02:07:31 +08:00');
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '复制全部' }));
+    expect(writeText).toHaveBeenLastCalledWith('$ Get-Date\n2026-09-16 02:07:31 +08:00');
+  });
+
+  it('还没有输出时复制结果不可用，复制命令仍可用', async () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'sleep 5', description: 'Wait' }}
+        result={undefined}
+        status="running"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    expect((await screen.findByRole('menuitem', { name: '复制结果' })).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('menuitem', { name: '复制命令' }).getAttribute('aria-disabled')).not.toBe('true');
   });
 
   it('保留 ls -a 的 --- / . / ..，不当成 Markdown 吃掉', () => {
@@ -229,6 +383,40 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
   });
 });
 
+describe('ToolExecution default expansion', () => {
+  it('写入和编辑运行中默认收起', () => {
+    wrap(
+      <ToolExecution toolName="write" args={{ path: 'a.txt', content: 'hello' }} result={{}} status="running" />,
+    );
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    cleanup();
+    wrap(
+      <ToolExecution
+        toolName="edit"
+        args={{ path: 'a.ts', edits: [{ oldText: 'a', newText: 'b' }] }}
+        result={{}}
+        status="running"
+      />,
+    );
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    expect(screen.queryByTestId('streaming-file-body')).toBeNull();
+  });
+
+  it('检索类工具运行中默认收起，点开后才看到结果', () => {
+    wrap(
+      <ToolExecution
+        toolName="grep"
+        args={{ pattern: 'foo' }}
+        result={{ content: [{ type: 'text', text: 'Found 1 match\nsrc/a.ts:\n  Line 1: foo' }] }}
+        status="running"
+      />,
+    );
+    expect(screen.queryByTestId('card-grep')).toBeNull();
+    fireEvent.click(screen.getByText(/检索/));
+    expect(screen.getByTestId('card-grep')).toBeTruthy();
+  });
+});
+
 describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
   it('shows the Chinese verb and filename only on the title row', () => {
     wrap(
@@ -254,6 +442,8 @@ describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
       <ToolExecution toolName="write" args={{ path: 'a.txt', content: 'a' }} result={{}} status="running" />,
     );
     expect(screen.getByText('写入')).toBeTruthy();
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    fireEvent.click(screen.getByText('写入'));
     expect(screen.getByTestId('file-diff-block').getAttribute('data-new-content')).toBe('a\n');
     rerender(
       <ThemeProvider themeMode="dark">
@@ -284,6 +474,29 @@ describe('ToolExecution edit inspector', { timeout: 30_000 }, () => {
     fireEvent.click(screen.getByText('读取'));
     expect(screen.getByTestId('file-read-block').textContent).toContain('hello from file');
     expect((await screen.findAllByText('a.txt')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders the image when a read result contains image bytes', () => {
+    wrap(
+      <ToolExecution
+        toolName="read"
+        args={{ path: 'shots/kiro-1-expanded.png' }}
+        result={{
+          content: [
+            { type: 'text', text: 'Read image file [image/png]\n[Image: original 2x2, displayed at 2x2.]' },
+            { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+          ],
+        }}
+        status="done"
+      />,
+    );
+    expect(screen.queryByTestId('file-read-image')).toBeNull();
+    fireEvent.click(screen.getByText('读取'));
+    const img = screen.getByTestId('file-read-image') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('data:image/png;base64,AAAA');
+    expect(img.getAttribute('alt')).toBe('kiro-1-expanded.png');
+    expect(screen.queryByText(/Read image file/)).toBeNull();
+    expect(screen.queryByTestId('file-read-block')).toBeNull();
   });
 
   it('shows the read line range on the row', () => {
@@ -484,53 +697,79 @@ describe('ToolExecution todo row', () => {
 });
 
 describe('ToolExecution 参数生成', () => {
-  it('write 参数生成中显示流式正文和生成中，完成后切到 diff', () => {
-    const { rerender } = wrap(
+  const growWrite = (content: string, argsComplete = false) => (
+    <ThemeProvider themeMode="dark">
       <ToolExecution
         toolName="write"
-        args={{ path: 'notes/a.html', content: 'hello' }}
+        args={{ path: 'notes/a.html', content }}
         result={undefined}
         status="running"
-        argsComplete={false}
-      />,
-    );
-    expect(screen.getByTestId('streaming-file-body').textContent).toContain('hello');
-    expect(screen.queryByTestId('file-diff-block')).toBeNull();
-    expect(document.body.textContent).toContain('a.html');
-    expect(document.body.textContent).toContain('生成中');
-    rerender(
-      <ThemeProvider themeMode="dark">
-        <ToolExecution
-          toolName="write"
-          args={{ path: 'notes/a.html', content: 'hello' }}
-          result={undefined}
-          status="running"
-          argsComplete
-        />
-      </ThemeProvider>,
-    );
+        argsComplete={argsComplete}
+      />
+    </ThemeProvider>
+  );
+
+  it('write 生成中只做代码高亮，完成后才换成 diff', () => {
+    const { rerender } = render(growWrite('hello'));
+    fireEvent.click(screen.getByText('写入'));
+    // 写入全是新增行，生成阶段不上 diff。
     expect(screen.queryByTestId('streaming-file-body')).toBeNull();
-    expect(screen.getByTestId('file-diff-block')).toBeTruthy();
+    expect(screen.queryByTestId('file-diff-block')).toBeNull();
+    expect(screen.getByTestId('streaming-code-view').textContent).toContain('hello');
+    expect(document.body.textContent).toContain('a.html');
+    expect(document.body.textContent).toContain('生成中 · 1 行');
+    rerender(growWrite('hello\nworld'));
+    expect(document.body.textContent).toContain('生成中 · 2 行');
+    expect(screen.getByTestId('streaming-code-view').textContent).toContain('world');
+    rerender(growWrite('hello\nworld', true));
+    expect(screen.queryByTestId('streaming-code-view')).toBeNull();
+    expect(screen.getByTestId('file-diff-block').getAttribute('data-new-content')).toContain('world');
   });
 
-  it('edit 只有 oldText 时显示删除行', () => {
-    wrap(
-      <ToolExecution
-        toolName="edit"
-        args={{ path: 'a.ts', edits: [{ oldText: 'before' }] }}
-        result={undefined}
-        status="running"
-        argsComplete={false}
-      />,
+  it('write 生成中全程复用同一个高亮视图，不按字符数重挂', () => {
+    const chunk = (c: string) => `${c.repeat(700)}\n`;
+    const { rerender } = render(growWrite(chunk('a')));
+    fireEvent.click(screen.getByText('写入'));
+    const view = screen.getByTestId('streaming-code-view');
+    rerender(growWrite(chunk('a') + chunk('b')));
+    rerender(growWrite(chunk('a') + chunk('b') + chunk('c')));
+    expect(screen.getByTestId('streaming-code-view')).toBe(view);
+  });
+
+  it('write 超出高亮预算时退回纯文本预览', () => {
+    render(growWrite(`${'x'.repeat(200 * 1024)}\n`));
+    fireEvent.click(screen.getByText('写入'));
+    expect(screen.queryByTestId('streaming-code-view')).toBeNull();
+    expect(screen.getByTestId('streaming-file-body').textContent).toContain('已接收');
+  });
+
+  it('edit 参数生成中显示删除块，行数随新文本变长', () => {
+    const edit = (newText?: string) => (
+      <ThemeProvider themeMode="dark">
+        <ToolExecution
+          toolName="edit"
+          args={{ path: 'a.ts', edits: [{ oldText: 'before', ...(newText === undefined ? {} : { newText }) }] }}
+          result={undefined}
+          status="running"
+          argsComplete={false}
+        />
+      </ThemeProvider>
     );
-    expect(screen.getByTestId('streaming-file-body').textContent).toContain('-before');
-    expect(document.body.textContent).toContain('生成中');
+    const { rerender } = render(edit());
+    fireEvent.click(screen.getByText('编辑'));
+    expect(screen.getByTestId('streaming-file-body').querySelector('[data-kind="old"]')?.textContent).toContain('before');
+    expect(document.body.textContent).toContain('生成中 · -1');
+    rerender(edit('after\nmore'));
+    expect(document.body.textContent).toContain('生成中 · +2 -1');
+    expect(screen.getByTestId('streaming-file-body').querySelector('[data-kind="new"]')?.textContent).toContain('more');
   });
 
   it('空参数不抛错', () => {
     expect(() => wrap(
       <ToolExecution toolName="write" args={{}} result={undefined} status="running" argsComplete={false} />,
     )).not.toThrow();
+    expect(screen.queryByTestId('streaming-file-body')).toBeNull();
+    fireEvent.click(screen.getByText('写入'));
     expect(screen.getByTestId('streaming-file-body').textContent).toContain('等待参数');
   });
 });

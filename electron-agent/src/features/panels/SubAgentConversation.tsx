@@ -11,13 +11,11 @@ import { useThrottledValue } from '../../hooks/useThrottledValue';
 import { groupMessages } from '../chat/groupMessages';
 import { ChatMessageItems } from '../chat/ChatMessageItems';
 import { computeSubAgentUnits, computeAnsweredQuestions } from '../chat/messagePrecompute';
-import {
-  buildSubAgentConversationMessages,
-  shouldBindChildSession,
-  subAgentSessionPath,
-} from './subagentUtils';
+import { buildSubAgentConversationMessages, subAgentSessionPath } from './subagentUtils';
 import { pi } from '../../lib/pi';
 import { useChildSessionBinding } from './useChildSessionBinding';
+import { useSubAgentLive } from '../../hooks/useSubAgentLive';
+import { PendingResponseStatus } from '../chat/PendingResponseStatus';
 
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript / transcriptTail）。 */
 function transcriptOf(result: unknown): string {
@@ -152,23 +150,28 @@ export function SubAgentConversation({
   'data-testid': testId,
 }: SubAgentConversationProps) {
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
+  const live = useSubAgentLive(workspace ?? '', agentId ?? null, status === 'running');
 
-  const sessionPath = subAgentSessionPath(liveResult);
-  const bindChild = shouldBindChildSession(liveResult);
-  const sessionMessages = useChildSessionBinding(bindChild ? sessionPath : null, status === 'running');
+  // 后台 one-shot 的工具结果在子会话建立前就返回了，里面没有 sessionPath；注册表行里有。
+  // 有了它就和主代理一样吃流式事件，不再靠 2.5s 拉 registry transcript 回放。
+  const sessionPath = subAgentSessionPath(liveResult) ?? live.sessionPath;
+  const sessionMessages = useChildSessionBinding(sessionPath, status === 'running');
+  // 真会话还没回放出助手/工具时，先走 registry transcript（和气泡卡片同一条路），
+  // 避免右坞只剩一条任务原文。
+  const sessionHasWork = sessionMessages.some((m) => m.kind === 'assistant' || m.kind === 'tool');
 
   const inlineTranscript = usableTranscript(transcriptOf(liveResult));
 
   const registryTranscript = useRegistryTranscript(
     workspace ?? '',
-    bindChild || inlineTranscript ? null : agentId,
+    sessionHasWork || inlineTranscript ? null : agentId,
     status === 'running',
   );
 
   const transcript = inlineTranscript || registryTranscript;
-  const transcriptMessages = useIncrementalMessages(bindChild ? '' : transcript);
+  const transcriptMessages = useIncrementalMessages(sessionHasWork ? '' : transcript);
 
-  const replayMessages = bindChild ? sessionMessages : transcriptMessages;
+  const replayMessages = sessionHasWork ? sessionMessages : transcriptMessages;
 
   const messages = useMemo(
     () => buildSubAgentConversationMessages(task, liveResult, status, replayMessages),
@@ -176,14 +179,20 @@ export function SubAgentConversation({
   );
 
   const display = useMemo(() => groupMessages(messages), [messages]);
-  const unitsByMessage = useMemo(() => computeSubAgentUnits(display), [display]);
+  const subAgents = useMemo(() => computeSubAgentUnits(display), [display]);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
+  const footer = status === 'running' ? (
+    <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
+  ) : undefined;
 
   return (
     <ChatMessageItems
       messages={display}
-      unitsByMessage={unitsByMessage}
+      unitsByMessage={subAgents.unitsByMessage}
+      hiddenSpawnIds={subAgents.hidden}
+      spawnOverlay={subAgents.overlay}
       answeredQuestions={answeredQuestions}
+      footer={footer}
       paddingInline={16}
       resetKey={sessionPath ?? task}
       data-testid={testId}

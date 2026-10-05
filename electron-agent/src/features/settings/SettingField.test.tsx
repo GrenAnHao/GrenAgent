@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingFieldInput } from './SettingField';
+import { SETTINGS_SCHEMA } from './settingsSchema';
 
 afterEach(cleanup);
 
@@ -107,4 +108,21 @@ describe('SettingFieldInput', () => {
     },
     30000,
   );
+});
+
+describe('循环保护设置项', () => {
+  it('未落盘时开关显示为开，次数和预览用占位提示默认值', () => {
+    const fields = SETTINGS_SCHEMA.find((category) => category.id === 'safety')?.sections?.find((section) => section.title === '循环保护')?.fields ?? [];
+    render(
+      <>
+        {fields.map((field) => (
+          <SettingFieldInput key={field.key} field={field} value="" onChange={() => {}} />
+        ))}
+      </>,
+    );
+    expect(screen.getByTestId('set-field-LOOP_GUARD').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByPlaceholderText('3,5,8')).toBeTruthy();
+    expect(screen.getByPlaceholderText('500')).toBeTruthy();
+    expect(screen.getByText('不跟踪这些工具')).toBeTruthy();
+  });
 });

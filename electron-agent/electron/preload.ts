@@ -75,4 +75,10 @@ contextBridge.exposeInMainWorld('gren', {
   webview: {
     onDragDropEvent,
   },
+  browser: {
+    attachGuest: (input: { tabId: string; webContentsId: number }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.invoke, { command: 'browser_attach_guest', args: input }),
+    detachGuest: (input: { tabId: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.invoke, { command: 'browser_detach_guest', args: input }),
+  },
 });

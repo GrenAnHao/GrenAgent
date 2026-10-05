@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { sessionControlKey, useComposerSessionPath } from './modeStore';
 
 export type ApprovalPolicy = 'readonly' | 'ask' | 'auto' | 'workspace' | 'full';
 
@@ -27,17 +28,43 @@ export function isApprovalPolicy(v: unknown): v is ApprovalPolicy {
 }
 
 interface ApprovalState {
-  /** 各 workspace 的当前审批策略（由 sidecar approval 扩展经 setStatus 推送回读）。 */
+  /** 各 workspace 的项目默认档：草稿显示它，新会话继承它（approval-policy-default 推送）。 */
   byWorkspace: Record<string, ApprovalPolicy>;
+  /** 各会话自己的档（approval-policy 推送，带 sessionPath）。切会话互不影响。 */
+  bySession: Record<string, ApprovalPolicy>;
   setLevel: (workspace: string, level: ApprovalPolicy) => void;
+  setSessionLevel: (sessionPath: string, level: ApprovalPolicy) => void;
 }
 
 export const useApprovalStore = create<ApprovalState>((set) => ({
   byWorkspace: {},
+  bySession: {},
   setLevel: (workspace, level) =>
     set((s) =>
       s.byWorkspace[workspace] === level
         ? s
         : { byWorkspace: { ...s.byWorkspace, [workspace]: level } },
     ),
+  setSessionLevel: (sessionPath, level) => {
+    const key = sessionControlKey(sessionPath);
+    set((s) => (s.bySession[key] === level ? s : { bySession: { ...s.bySession, [key]: level } }));
+  },
 }));
+
+/** 某会话（null = 草稿）当前生效的档：会话自己的 → 项目默认 → auto。 */
+export function readApprovalLevel(workspace: string, sessionPath: string | null): ApprovalPolicy {
+  const s = useApprovalStore.getState();
+  return (sessionPath ? s.bySession[sessionControlKey(sessionPath)] : undefined) ?? s.byWorkspace[workspace] ?? 'auto';
+}
+
+/** 写本地乐观值：会话写会话；项目默认同步更新（与宿主一致，最近一次选择给新会话继承）。 */
+export function setComposerApprovalLevel(workspace: string, sessionPath: string | null, level: ApprovalPolicy): void {
+  const s = useApprovalStore.getState();
+  if (sessionPath) s.setSessionLevel(sessionPath, level);
+  s.setLevel(workspace, level);
+}
+
+export function useComposerApproval(workspace: string): ApprovalPolicy {
+  const path = useComposerSessionPath(workspace);
+  return useApprovalStore((s) => (path ? s.bySession[sessionControlKey(path)] : undefined) ?? s.byWorkspace[workspace] ?? 'auto');
+}

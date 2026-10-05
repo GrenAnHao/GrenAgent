@@ -16,7 +16,7 @@ import { parsePartialArgs } from '../lib/streamingJson';
 import { pi, onPiEvent, onPiExit, type AgentEvent, type AgentMessage } from '../lib/pi';
 import { getThinkingDuration, saveThinkingDuration } from '../lib/thinkingDurations';
 import { getCachedSession, setCachedSession, sessionSignature } from '../lib/sessionMessageCache';
-import { sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
+import { readUiHistoryForSession, sessionKeyFromPath, serializeHistory } from '../lib/uiHistory';
 import { expandSystemWorkerChat } from '../lib/systemWorkerChat';
 import { todoListFinishedInTranscript } from '@extensions/_shared/todo-model';
 import {
@@ -24,11 +24,17 @@ import {
   setComposerValue,
   type PromptImage,
 } from '../features/chat/input/composerBridge';
-import { backfillEntryIds, cutMessagesAfterEntry } from './sessionMessageSync';
+import { backfillEntryIds, cutMessagesAfterEntry, mergeLiveTail } from './sessionMessageSync';
 import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
 import { findPendingAskUser } from '../features/chat/pendingAskUser';
 import { restoreInlineQuestionOnLoad } from './restoreInlineQuestionOnLoad';
 import { useInlineQuestionStore } from './inlineQuestionStore';
+import { pathsEquivalent } from '../lib/pathUtils';
+import {
+  dropStashedUiRequests,
+  parkVisibleUiRequests,
+  restoreStashedUiRequests,
+} from './backgroundUiRequests';
 
 /**
  * 缓存是 ChatMessage 列表；restore 需要 agent 形态才能 findPendingAskUser。
@@ -128,12 +134,22 @@ export interface AgentStoreApi {
    * 尝试用模块级缓存秒显某会话（命中且非实时流式时）。
    * 命中返回 true（已把缓存内容写入展示态，可跳过骨架屏）；未命中返回 false（调用方需走完整后端加载）。
    */
-  showCachedSession: (sessionPath: string) => boolean;
+  showCachedSession: (sessionPath: string, fromPath?: string | null) => boolean;
+  /**
+   * 草稿首发刚落盘：把画面绑到这个会话。之后另一个会话的事件不会再灌进来，
+   * 切走时这份内容也能按路径停靠。
+   */
+  bindSessionPath: (sessionPath: string) => void;
   destroy: () => void;
 }
 
 /** 非 active store 的 flush 间隔（rAF 在后台被节流，用 setTimeout 兜底）。 */
 const BACKGROUND_FLUSH_MS = 60;
+
+function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a == null || b == null) return a === b;
+  return pathsEquivalent(a, b);
+}
 
 /** 为某工作区创建 agent 状态，并订阅 pi://event。 */
 export function createAgentStore(workspace: string): AgentStoreApi {
@@ -142,6 +158,14 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   let loadedSessionPath: string | null | undefined = undefined;
   // 当前展示内容的轻量签名：后台刷新比对，未变则跳过 setState，避免整列重渲染闪一下。
   let currentSig = '';
+  /**
+   * 画面上的消息是否带着这份会话的完整历史。切到没有缓存的会话时为 false：画面只有实时尾巴，
+   * 不能当完整内容写缓存 / UI 历史，后端快照到了要垫到尾巴前面，而不是被流式挡掉。
+   */
+  let viewHasHistory = true;
+  /** 正在补后端快照的 partial shadow 路径。 */
+  const backfilling = new Set<string>();
+  let destroyed = false;
   const unsubs: Array<() => void> = [];
 
   const useStore = create<AgentState>(() => initialAgentState());
@@ -165,6 +189,58 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let active = true;
+  /** 切走后仍在跑的会话。事件继续写进这里，不再灌进当前画面。 */
+  const shadows = new Map<string, AgentState>();
+  /** 没有任何历史打底、只靠后台事件攒出来的 shadow（缺前文），切回时消息以后端快照为准。 */
+  const partialShadows = new Set<string>();
+  /** 已经从画面解开、但 loadedSessionPath 还没换成目标时，这个路径的事件只进 shadow。 */
+  let detachedPath: string | undefined;
+  /** 停到后台的会话还没发出的跟进条。跟着会话走，不能在另一个会话结束时被冲进去。 */
+  const parkedComposerQueues = new Map<string, AgentState['composerQueue']>();
+  /** 刚停靠的那份画面已经带走了跟进条，下一份画面从空队列开始。 */
+  let composerQueueParked = false;
+  /** 切到 target 时它该显示的跟进条。 */
+  const composerQueueFor = (target: string | null | undefined): AgentState['composerQueue'] => {
+    let found: AgentState['composerQueue'] | undefined;
+    if (target) {
+      for (const [key, queued] of parkedComposerQueues) {
+        if (!pathsEquivalent(key, target)) continue;
+        found = queued;
+        parkedComposerQueues.delete(key);
+        break;
+      }
+    }
+    const parked = composerQueueParked;
+    composerQueueParked = false;
+    return found ?? (parked ? [] : useStore.getState().composerQueue);
+  };
+  /** shadow 按路径等价查找（Windows 下大小写 / 分隔符可能不同）。 */
+  const shadowKey = (path: string): string | undefined => {
+    if (shadows.has(path)) return path;
+    for (const key of shadows.keys()) if (pathsEquivalent(key, path)) return key;
+    return undefined;
+  };
+  const getShadow = (path: string): AgentState | undefined => {
+    const key = shadowKey(path);
+    return key ? shadows.get(key) : undefined;
+  };
+  const dropShadow = (path: string) => {
+    const key = shadowKey(path);
+    if (key) {
+      shadows.delete(key);
+      partialShadows.delete(key);
+    }
+  };
+  /** 这条事件 / 退出属于不在画面上的会话。 */
+  const belongsElsewhere = (eventPath: string | undefined): eventPath is string => {
+    if (!eventPath) return false;
+    if (detachedPath && pathsEquivalent(eventPath, detachedPath)) return true;
+    if (loadedSessionPath) return !pathsEquivalent(eventPath, loadedSessionPath);
+    // 画面未绑定（草稿）：草稿首发先 bindSessionPath 再 prompt，绑定前没有属于它的带路径事件。
+    // 带路径的一律是同项目别的会话——包括停靠时空闲、没留 shadow、之后才被唤醒的会话
+    //（如后台子代理回报把父会话叫起来）。只认 shadow 会让这类会话的流灌进草稿。
+    return true;
+  };
 
   const hasDirtyDraft = (state: AgentState) =>
     Boolean(state.toolDrafts && Object.values(state.toolDrafts).some((draft) => draft.dirty));
@@ -233,7 +309,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       try {
         persistThinkingDurations(state);
         // 一轮结束后把当前会话最新内容写回缓存，使切走再切回时缓存即最新（不会先显旧快照再刷新闪动）。
-        if (loadedSessionPath != null) {
+        // 画面只有实时尾巴时不写：否则半截内容会盖掉磁盘上的完整 UI 历史。
+        if (loadedSessionPath != null && viewHasHistory) {
           currentSig = sessionSignature(state.messages);
           setCachedSession(loadedSessionPath, state.messages, currentSig);
           // 持久化 UI 完整历史：state.messages 是前端累积的完整对话（reducer 不删），每轮结束覆盖写盘。
@@ -251,13 +328,16 @@ export function createAgentStore(workspace: string): AgentStoreApi {
 
   /** 按序把 getMessages 带回的 entryId/timestamp 补到本地用户消息；不重排、不整表重置。 */
   const syncEntryIdsAfterAccept = async () => {
+    // 回包到达前画面可能已切到别的会话：只补发起时那个会话，且要按它的路径取消息。
+    const pathAtStart = loadedSessionPath;
     try {
-      const res = await pi.getMessages(workspace);
+      const res = await pi.getMessages(workspace, pathAtStart);
+      if (!samePath(loadedSessionPath, pathAtStart)) return;
       const current = useStore.getState().messages;
       const patched = backfillEntryIds(current, res.messages);
       if (patched === current) return;
       useStore.setState({ messages: patched });
-      if (loadedSessionPath != null) {
+      if (loadedSessionPath != null && viewHasHistory) {
         currentSig = sessionSignature(patched);
         setCachedSession(loadedSessionPath, patched, currentSig);
         const key = sessionKeyFromPath(loadedSessionPath);
@@ -298,17 +378,156 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     }
   };
 
+  const noteBackground = (eventPath: string, event: AgentEvent) => {
+    const sessionPath = shadowKey(eventPath) ?? eventPath;
+    let state = shadows.get(sessionPath);
+    let needsBackfill = false;
+    if (!state) {
+      const cached = getCachedSession(sessionPath);
+      if (!cached) {
+        partialShadows.add(sessionPath);
+        needsBackfill = true;
+      }
+      state = { ...initialAgentState(), messages: cached?.messages ?? [] };
+    }
+    try {
+      state = applyEvent(state, event);
+    } catch {
+      return;
+    }
+    shadows.set(sessionPath, state);
+    // 缺前文的 shadow 不能写缓存，否则切回时会把只有半轮的内容当完整历史秒显。
+    // 它在后台补一份后端快照垫底，切回时就能直接显示完整内容。
+    const partial = partialShadows.has(sessionPath);
+    if (!partial) {
+      setCachedSession(sessionPath, state.messages, sessionSignature(state.messages));
+    }
+    if (needsBackfill) scheduleBackfill(sessionPath);
+    const type = (event as { type?: string }).type;
+    if (type === 'agent_settled' || (type === 'agent_end' && (event as { willRetry?: boolean }).willRetry !== true)) {
+      // 后台会话这一轮已结束，它挂起的交互请求后端已经不再等。
+      dropStashedUiRequests(sessionPath);
+      if (!state.isStreaming && !partial) {
+        const key = sessionKeyFromPath(sessionPath);
+        if (key) void pi.writeUiHistory(workspace, key, serializeHistory(state.messages)).catch(() => {});
+      }
+    }
+  };
+
+  /** 把画面上的会话停到后台：内容进 shadow，交互请求暂存，之后它的事件只写 shadow。 */
+  const parkCurrent = (path: string) => {
+    // 还没 flush 的事件属于画面上这份会话，先落进去再停靠，否则 clearQueue 会把它们丢掉。
+    if (queue.length) flush();
+    const state = useStore.getState();
+    dropShadow(path);
+    if (viewHasHistory) {
+      if (state.isStreaming || state.awaitingResponse || state.runActive) shadows.set(path, state);
+      setCachedSession(path, state.messages, sessionSignature(state.messages));
+    } else {
+      // 画面还没等到这份会话的历史，手里只有实时尾巴：停成 partial，不进缓存，后台补快照。
+      shadows.set(path, state);
+      partialShadows.add(path);
+      scheduleBackfill(path);
+    }
+    detachedPath = path;
+    if (state.composerQueue?.length) parkedComposerQueues.set(path, state.composerQueue);
+    else parkedComposerQueues.delete(path);
+    composerQueueParked = true;
+    parkVisibleUiRequests(workspace, path);
+  };
+
+  /**
+   * 画面要换成另一个会话前调用。已绑定路径时按它停靠；还没绑定（草稿首发刚落盘、
+   * bindSessionPath 尚未赶上）时用调用方给的上一会话路径兜底。都没有就只能丢弃画面态。
+   */
+  const leaveView = (fromPath?: string | null) => {
+    const path = loadedSessionPath ?? (liveActivity ? fromPath ?? undefined : undefined);
+    if (path) parkCurrent(path);
+    liveActivity = false;
+  };
+
+  /** 切到目标会话后，它在后台时的流式标记和暂存请求要跟着回来。 */
+  const takeShadowRunState = (path: string): Partial<AgentState> => {
+    const shadow = getShadow(path);
+    dropShadow(path);
+    if (!shadow || !(shadow.isStreaming || shadow.awaitingResponse)) return {};
+    liveActivity = true;
+    return {
+      isStreaming: Boolean(shadow.isStreaming),
+      runActive: Boolean(shadow.runActive ?? shadow.isStreaming),
+      awaitingResponse: Boolean(shadow.awaitingResponse),
+      // 计时起点跟着会话走：切回来「正在处理」接着数，不从切回的那一刻重算。
+      ...(shadow.runStartedAt ? { runStartedAt: shadow.runStartedAt } : {}),
+      ...(shadow.runOpening ? { runOpening: true } : {}),
+      ...(shadow.runOriginPinned ? { runOriginPinned: true } : {}),
+    };
+  };
+
+  /** 后端快照 → 界面消息。UI 完整历史更长时用它（压缩后后端历史会变短），并补回未完成的 ask_user 行。 */
+  function snapshotMessages(msgs: AgentMessage[], uiHistory?: ChatMessage[]) {
+    const backend = messagesFromAgent(msgs, getThinkingDuration);
+    const processed = expandSystemWorkerChat(uiHistory && uiHistory.length > backend.length ? uiHistory : backend);
+    return { backend, processed, sanitized: applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs)) };
+  }
+
+  /**
+   * partial shadow 只有实时尾巴。趁它还在后台，去后端取这份会话的快照垫在尾巴前面，
+   * 之后它就是完整内容，切回时不必再等后端。快照回来时这份会话已经被接回画面、且画面仍缺历史，
+   * 就直接垫进画面。
+   */
+  function scheduleBackfill(path: string): void {
+    for (const pending of backfilling) if (pathsEquivalent(pending, path)) return;
+    backfilling.add(path);
+    void Promise.all([pi.getMessages(workspace, path), readUiHistoryForSession(workspace, path)])
+      .then(([res, uiHistory]) => {
+        if (destroyed) return;
+        const key = shadowKey(path);
+        const shadow = key ? shadows.get(key) : undefined;
+        if (key && shadow && partialShadows.has(key)) {
+          const merged = mergeLiveTail(snapshotMessages(res.messages, uiHistory).sanitized, shadow.messages);
+          shadows.set(key, { ...shadow, messages: merged, excluded: excludedFromAgent(res.messages) });
+          partialShadows.delete(key);
+          setCachedSession(key, merged, sessionSignature(merged));
+          return;
+        }
+        if (!viewHasHistory && loadedSessionPath != null && samePath(loadedSessionPath, path)) {
+          loadMessages(res.messages, { force: true, sessionPath: loadedSessionPath, uiHistory });
+        }
+      })
+      .catch(() => {
+        // 取不到就留着 partial：切回时走骨架，等切换链自己取快照。
+      })
+      .finally(() => {
+        backfilling.delete(path);
+      });
+  }
+
   onPiEvent((env) => {
     // Goal workers share the pi://event channel but are headless; their stream
     // must never be applied to the interactive session's message reducer.
     if (env.workspace !== workspace || env.source === 'goal' || env.source === 'subagent') return;
     if (env.event?.type === 'subagent_catalog_changed') return;
+    const eventPath = typeof env.sessionPath === 'string' && env.sessionPath ? env.sessionPath : undefined;
+    if (belongsElsewhere(eventPath)) {
+      noteBackground(eventPath, env.event);
+      return;
+    }
     queue.push(env.event);
     scheduleFlush();
   }).then((un) => unsubs.push(un));
 
   onPiExit((env) => {
     if (env.workspace !== workspace || env.source === 'goal' || env.source === 'subagent') return;
+    const eventPath = typeof env.sessionPath === 'string' && env.sessionPath ? env.sessionPath : undefined;
+    if (belongsElsewhere(eventPath)) {
+      const key = shadowKey(eventPath);
+      const shadow = key ? shadows.get(key) : undefined;
+      if (key && shadow) {
+        shadows.set(key, { ...shadow, isStreaming: false, runActive: false, awaitingResponse: false });
+      }
+      dropStashedUiRequests(eventPath);
+      return;
+    }
     useStore.setState({ isStreaming: false });
   }).then((un) => unsubs.push(un));
 
@@ -321,6 +540,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     if (liveActivity && !options?.force) return;
     const sessionPath =
       options && 'sessionPath' in options ? options.sessionPath ?? null : undefined;
+    const previousLoaded = loadedSessionPath;
     // 后台 getMessages 可能与 prompt 并发返回。实时轮次尚未 flush 时，强制重载会 clearQueue()
     // 并把 store 重置为 initialAgentState()，后果是：已排队的 message_update（含 thinking delta）
     // 与 tool_execution_start 永久丢失、isStreaming/awaitingResponse 被清零、流式累积的推理内容
@@ -328,47 +548,84 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // 且运行中的工具卡会被下方 sanitized 误标成 error。
     // 同一会话在等待首响应或已进入流式后，实时事件是唯一权威来源，快照延后到本轮结束再取；
     // 切换到另一会话仍允许强制加载。
+    // 切到另一个已知路径的会话：先把画面上那份停到后台。目标会话自己还在后台跑时，
+    // 它的 shadow 比后端快照新（含未落盘的流式内容），直接显示 shadow。
+    if (sessionPath != null && !samePath(sessionPath, loadedSessionPath)) {
+      const targetKey = shadowKey(sessionPath);
+      const target = targetKey ? shadows.get(targetKey) : undefined;
+      if (target && !partialShadows.has(targetKey!) && (target.isStreaming || target.awaitingResponse)) {
+        showCached(sessionPath);
+        return;
+      }
+      // 只有实时尾巴的 shadow：先接回画面，下面按同一会话把快照垫到尾巴前面。
+      if (target && partialShadows.has(targetKey!)) showCached(sessionPath);
+      else leaveView();
+    }
     const liveState = useStore.getState();
-    const sameSession =
-      sessionPath === undefined ||
-      (loadedSessionPath != null && sessionPath === loadedSessionPath) ||
-      (loadedSessionPath === undefined && liveActivity);
-    if (options?.force && sameSession && (liveState.isStreaming || liveState.awaitingResponse)) return;
-    const backend = messagesFromAgent(msgs, getThinkingDuration);
+    // 只有确实是同一会话时，才让实时流挡住强制重载；显式给了另一个路径一律按切换处理。
+    const sameSession = sessionPath === undefined || samePath(sessionPath, loadedSessionPath);
+    // 画面只有实时尾巴、缺历史：这份快照必须垫进去，不能被流式挡掉，也不能把尾巴冲掉。
+    const fillHistory = sessionPath != null && sameSession && !viewHasHistory;
+    if (options?.force && sameSession && !fillHistory && (liveState.isStreaming || liveState.awaitingResponse)) return;
     // UI 完整历史优先：pi auto-compaction 会让后端历史变短，前端持久化的完整历史（uiHistory）更长时用它，
     // 避免压缩后的短历史盖掉完整对话（rewind 等需要后端权威时调用方不传 uiHistory，自然走后端）。
-    const uiHistory = options?.uiHistory;
-    const processed = expandSystemWorkerChat(
-      uiHistory && uiHistory.length > backend.length ? uiHistory : backend,
-    );
     // 先补回当前未完成 ask_user 的 waiting 行，再算签名 / 写缓存，避免 uiHistory 盖掉 backend
     // 后缓存缺行；切回时 showCachedSession + sig 命中会永久跳过补行。
-    const sanitized = applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs));
+    const { backend, processed, sanitized } = snapshotMessages(msgs, options?.uiHistory);
+    if (fillHistory) {
+      const merged = mergeLiveTail(sanitized, liveState.messages);
+      viewHasHistory = true;
+      currentSig = sessionSignature(merged);
+      setCachedSession(sessionPath, merged, currentSig);
+      if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+      useStore.setState({
+        messages: merged,
+        excluded: excludedFromAgent(msgs),
+        todoListFinished: liveState.todoListFinished ?? todoListFinishedInTranscript(msgs),
+      });
+      restoreInlineQuestionOnLoad(workspace, msgs, sessionPath);
+      return;
+    }
     const sig = sessionSignature(sanitized);
     // 浮层恢复：正常写入与「签名未变提前 return」两条路径都要跑，否则缓存命中会跳过浮层。
     // 读草稿异步，不 await，以免打乱上面「先补行再算签名」的顺序。
     const restoreOverlay = () => restoreInlineQuestionOnLoad(workspace, msgs, sessionPath);
     // 后台刷新命中「同一会话 + 内容未变」→ 跳过 setState：缓存已秒显，无谓重渲染会让整列闪一下。
-    if (sessionPath != null && sessionPath === loadedSessionPath && sig === currentSig) {
-      liveActivity = false;
+    if (sessionPath != null && samePath(sessionPath, loadedSessionPath) && sig === currentSig) {
+      const runState = takeShadowRunState(sessionPath);
+      if (Object.keys(runState).length) useStore.setState(runState);
+      liveActivity = Boolean(liveState.isStreaming || liveState.awaitingResponse || runState.isStreaming || runState.awaitingResponse);
+      if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+      viewHasHistory = true;
       restoreOverlay();
       return;
     }
     liveActivity = false;
-    if (sessionPath !== undefined) loadedSessionPath = sessionPath;
+    viewHasHistory = true;
+    const switching = sessionPath != null && !samePath(sessionPath, previousLoaded);
+    if (sessionPath !== undefined) {
+      loadedSessionPath = sessionPath;
+      if (sessionPath && detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+    }
     currentSig = sig;
     if (sessionPath != null) setCachedSession(sessionPath, sanitized, sig);
     clearQueue();
     // 从会话树重建上下文排除集（best-effort），切换 / 重载会话后恢复灰显。
-    const composerQueue = useStore.getState().composerQueue;
+    const composerQueue = switching ? composerQueueFor(sessionPath) : useStore.getState().composerQueue;
+    const runState = sessionPath != null ? takeShadowRunState(sessionPath) : {};
+    // 同一会话重载（回退、截断、重新打开）不换计时起点：还在跑的回合接着数。
+    const keepClock = !switching && liveState.runStartedAt ? { runStartedAt: liveState.runStartedAt } : {};
     setFullState({
       ...initialAgentState(),
+      ...keepClock,
       messages: sanitized,
       excluded: excludedFromAgent(msgs),
       composerQueue,
       assistantStop: assistantStopFromMessages(msgs),
       todoListFinished: todoListFinishedInTranscript(msgs),
+      ...runState,
     });
+    if (switching && sessionPath) restoreStashedUiRequests(workspace, sessionPath);
     // 首次（无 uiHistory / uiHistory 更短）用后端起底：写一份 UI 历史，之后运行中每轮结束再覆盖为完整。
     if (sessionPath != null && processed === backend) {
       const key = sessionKeyFromPath(sessionPath);
@@ -455,6 +712,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     const cut = cutMessagesAfterEntry(useStore.getState().messages, entryId, mode);
     if (!cut) {
       liveActivity = false;
+      // 截断以后端为准：整份替换，不把画面上的旧内容当尾巴合并回去。
+      viewHasHistory = true;
       try {
         const res = await pi.getMessages(workspace);
         // 必须带 sessionPath：否则短列表只进内存，磁盘上更长的 ui-history 仍会在下次加载盖回已删消息。
@@ -528,13 +787,96 @@ export function createAgentStore(workspace: string): AgentStoreApi {
   };
 
   const reset = () => {
+    if (loadedSessionPath) parkCurrent(loadedSessionPath);
+    else detachedPath = undefined;
+    // reset 自己就清空了画面，草稿里新排的跟进条不该再被当成「已停靠」丢掉。
+    composerQueueParked = false;
     liveActivity = false;
     // 新会话尚无落盘路径：标记为未载入，切回时按完整加载处理（届时会话已有路径）。
     loadedSessionPath = undefined;
     currentSig = '';
+    // 草稿从空白开始，画面上的就是它的全部内容。
+    viewHasHistory = true;
     clearQueue();
     setFullState(initialAgentState());
   };
+
+  function showCached(sessionPath: string, fromPath?: string | null): boolean {
+    const previousPath = loadedSessionPath;
+    const sameAsCurrent = samePath(previousPath, sessionPath);
+    // 实时流式中不可被同一会话的缓存覆盖（会冲掉正在跑的内容）。画面已经是它：带着历史就算已显示，
+    // 调用方不必退回骨架；还在等历史时照旧返回 false。
+    if (sameAsCurrent && liveActivity) return viewHasHistory;
+    const key = shadowKey(sessionPath);
+    const partial = key != null && partialShadows.has(key);
+    // 缺前文的 shadow 不当完整内容秒显，只作为实时尾巴接回画面。
+    const targetShadow = key && !partial ? shadows.get(key) : undefined;
+    const tail = key && partial ? shadows.get(key) : undefined;
+    const entry = getCachedSession(sessionPath);
+    if (!targetShadow && !entry) {
+      // 没有缓存也要先把画面上的会话停到后台，否则它的流还会继续写进即将显示的目标会话。
+      if (!sameAsCurrent) {
+        leaveView(fromPath);
+        loadedSessionPath = sessionPath;
+        if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+        currentSig = '';
+        clearQueue();
+        const composerQueue = composerQueueFor(sessionPath);
+        // 只有实时尾巴的 shadow 接回来继续收事件（含流式标记），历史等快照到了再垫到前面。
+        const runState = takeShadowRunState(sessionPath);
+        const base = tail && (runState.isStreaming || runState.awaitingResponse)
+          ? { ...tail, retrying: undefined }
+          : { ...initialAgentState(), messages: tail?.messages ?? [] };
+        setFullState({ ...base, composerQueue, ...runState });
+        viewHasHistory = false;
+        // 之后的 loadMessages 已不算「切换」，暂存的交互请求在这里放回。
+        restoreStashedUiRequests(workspace, sessionPath);
+        return false;
+      }
+      return viewHasHistory;
+    }
+    if (!sameAsCurrent) leaveView(fromPath);
+    const cachedMessages = targetShadow?.messages ?? entry!.messages;
+    // 缓存是完整历史，partial shadow 是之后的实时尾巴：两者拼起来才是现在的样子。
+    const messages = tail ? mergeLiveTail(cachedMessages, tail.messages) : cachedMessages;
+    loadedSessionPath = sessionPath;
+    if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+    currentSig = sessionSignature(messages);
+    clearQueue();
+    const composerQueue = sameAsCurrent ? useStore.getState().composerQueue : composerQueueFor(sessionPath);
+    const runState = takeShadowRunState(sessionPath);
+    // 还在跑的 shadow 整份接回（含工具参数草稿、引导队列），后续事件接着它往下应用。
+    const live = Boolean(runState.isStreaming || runState.awaitingResponse);
+    const base = targetShadow && live
+      ? { ...targetShadow, retrying: undefined }
+      : tail && live
+        ? { ...tail, retrying: undefined, messages }
+        : { ...initialAgentState(), messages };
+    setFullState({ ...base, composerQueue, ...runState });
+    viewHasHistory = true;
+    // 同项目切会话：消息已是目标会话，浮层必须立刻对齐，否则用户会点到上一会话的卡。
+    // live 且仍属同一会话时保留；切到另一 sessionPath 则清掉后按缓存恢复。
+    const cur = useInlineQuestionStore.getState().byWorkspace[workspace];
+    if (!(cur?.mode === 'live' && sameAsCurrent)) {
+      if (cur?.mode === 'live') useInlineQuestionStore.getState().clear(workspace);
+      restoreInlineQuestionOnLoad(workspace, agentMsgsForAskUserRestore(messages), sessionPath);
+    }
+    if (!sameAsCurrent) restoreStashedUiRequests(workspace, sessionPath);
+    return true;
+  }
+
+  function bindSessionPath(sessionPath: string): void {
+    if (samePath(loadedSessionPath, sessionPath)) return;
+    // 草稿画面在等首发：已经绑到别的路径说明用户切走了，不能把那份内容改名。
+    if (loadedSessionPath != null) return;
+    loadedSessionPath = sessionPath;
+    if (detachedPath && pathsEquivalent(detachedPath, sessionPath)) detachedPath = undefined;
+    // 绑定前这个路径若有零星事件被当成后台收进了 shadow，现在画面就是它，旧 shadow 作废。
+    dropShadow(sessionPath);
+    const state = useStore.getState();
+    currentSig = sessionSignature(state.messages);
+    setCachedSession(sessionPath, state.messages, currentSig);
+  }
 
   return {
     useStore,
@@ -556,29 +898,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     hasLiveActivity: () => liveActivity,
     getStreamEpoch: () => streamEpoch,
     getLoadedSessionPath: () => loadedSessionPath,
-    showCachedSession: (sessionPath) => {
-      // 实时流式中不可被缓存覆盖（会冲掉正在跑的会话）。
-      if (liveActivity) return false;
-      const entry = getCachedSession(sessionPath);
-      if (!entry) return false;
-      const previousPath = loadedSessionPath;
-      loadedSessionPath = sessionPath;
-      currentSig = entry.sig;
-      clearQueue();
-      const composerQueue = useStore.getState().composerQueue;
-      setFullState({ ...initialAgentState(), messages: entry.messages, composerQueue });
-      // 同项目切会话：消息已是目标会话，浮层必须立刻对齐，否则用户会点到上一会话的卡。
-      // live 且仍属同一会话时保留；切到另一 sessionPath 则清掉后按缓存恢复。
-      const cur = useInlineQuestionStore.getState().byWorkspace[workspace];
-      if (!(cur?.mode === 'live' && previousPath === sessionPath)) {
-        if (cur?.mode === 'live') {
-          useInlineQuestionStore.getState().clear(workspace);
-        }
-        restoreInlineQuestionOnLoad(workspace, agentMsgsForAskUserRestore(entry.messages), sessionPath);
-      }
-      return true;
-    },
+    showCachedSession: showCached,
+    bindSessionPath,
     destroy: () => {
+      destroyed = true;
       clearQueue();
       for (const un of unsubs) un();
       unsubs.length = 0;

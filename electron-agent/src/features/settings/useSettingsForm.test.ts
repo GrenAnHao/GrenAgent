@@ -83,4 +83,18 @@ describe('useSettingsForm', () => {
     expect(closeWorkspace).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
   });
+
+  it('非法的循环保护次数不落盘，并留下错误', async () => {
+    const { result } = renderHook(() => useSettingsForm());
+    await waitFor(() => expect(result.current.values.OPENAI_API_KEY).toBe('sk-old'));
+    act(() => result.current.setValue('LOOP_GUARD_THRESHOLDS', '3,3'));
+
+    await act(async () => {
+      await result.current.persist();
+    });
+
+    expect(setSettings).not.toHaveBeenCalled();
+    expect(result.current.error).toMatch(/重复/);
+    expect(result.current.dirty).toBe(true);
+  });
 });

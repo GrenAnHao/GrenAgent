@@ -9,6 +9,7 @@ import { useGitInfo, useGitStore } from '../../../../stores/gitStore';
 import { ChangesModal } from './DiffPanel';
 import { GitGraphModal } from './GitGraphPanel';
 import { wsStyles as s } from './styles';
+import { useComposerCompact } from '../composerCompact';
 
 /**
  * 分支选择器：当前分支 + 未提交改动数徽标；点开下拉可搜索 / 切换 / 创建并检出新分支。
@@ -18,6 +19,7 @@ export function BranchPicker() {
   const { workspace } = useAgentStoreContext();
   const { message } = App.useApp();
   const git = useGitInfo(workspace);
+  const compact = useComposerCompact();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
@@ -27,6 +29,7 @@ export function BranchPicker() {
   const [graphOpen, setGraphOpen] = useState(false);
 
   const changes = git.changes.length;
+  const notRepo = git.loaded && !git.current && git.branches.length === 0;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? git.branches.filter((b) => b.name.toLowerCase().includes(q)) : git.branches;
@@ -76,7 +79,11 @@ export function BranchPicker() {
     }
   };
 
-  const content = (
+  const content = notRepo ? (
+    <div className={s.panel}>
+      <div className={s.empty}>该仓库不是 Git 仓库，无分支数据</div>
+    </div>
+  ) : (
     <div className={s.panel}>
       <div className={s.search}>
         <Icon icon={Search} size={13} />
@@ -136,7 +143,7 @@ export function BranchPicker() {
           }}
         >
           <Icon className={s.iconMuted} icon={Network} size={13} />
-          <span className={s.rowName}>Git 图谱</span>
+          <span className={s.rowName}>Git 历史</span>
         </div>
         {creating ? (
           <div className={s.search} style={{ border: 'none', padding: '4px 6px' }}>
@@ -172,10 +179,12 @@ export function BranchPicker() {
         trigger="click"
         onOpenChange={onOpenChange}
       >
-        <span className={s.chip}>
+        <span className={s.chip} title={notRepo ? '没有可用的本地分支' : git.current || '分支'}>
           <Icon icon={GitBranch} size={14} />
-          <span className={s.chipName}>{git.current || '—'}</span>
-          {changes > 0 ? <span className={s.badge}>{changes}</span> : null}
+          {compact ? null : (
+            <span className={s.chipName}>{notRepo ? '没有可用的本地分支' : git.current || '—'}</span>
+          )}
+          {!compact && changes > 0 ? <span className={s.badge}>{changes}</span> : null}
         </span>
       </Popover>
       <ChangesModal workspace={workspace} open={diffOpen} onClose={() => setDiffOpen(false)} />

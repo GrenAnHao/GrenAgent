@@ -20,8 +20,28 @@ vi.mock('@lobehub/editor/react', () => ({
     getLexicalEditor: () => null,
     dispatchCommand: vi.fn(),
   }),
-  Editor: ({ content }: { content?: string }) => (
-    <div data-testid="message-edit-editor">{content}</div>
+  Editor: ({
+    content,
+    onPressEnter,
+  }: {
+    content?: string;
+    onPressEnter?: (arg: { event: { shiftKey: boolean; isComposing: boolean; preventDefault: () => void } }) => void;
+  }) => (
+    <div
+      data-testid="message-edit-editor"
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return;
+        onPressEnter?.({
+          event: {
+            shiftKey: event.shiftKey,
+            isComposing: event.nativeEvent.isComposing,
+            preventDefault: () => event.preventDefault(),
+          },
+        });
+      }}
+    >
+      {content}
+    </div>
   ),
 }));
 
@@ -77,6 +97,14 @@ describe('MessageEditBox', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByTestId('message-edit-box'), { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(screen.getByTestId('message-edit-editor'), { key: 'Enter', shiftKey: true });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId('message-edit-editor'), { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it('给定初始图片时显示图片块', () => {

@@ -92,9 +92,11 @@ vi.mock('../../../settings/providerListCache', () => ({
 }));
 
 import { useThinkingMemoryStore } from '../../../../stores/thinkingMemoryStore';
+import { modelKey } from '../modelUtils';
 import ModelThinkingAction, {
   clearComposerUserPick,
   commitComposerModelToSession,
+  peekComposerLevel,
   peekComposerModel,
   resetModelThinkingCacheForTests,
 } from './ModelThinkingAction';
@@ -102,6 +104,7 @@ import ModelThinkingAction, {
 beforeEach(() => {
   vi.clearAllMocks();
   resetModelThinkingCacheForTests();
+  useThinkingMemoryStore.setState({ byModel: {}, switchSeq: {} });
   sessionState.draftConversationCwd = null;
   sessionState.activeSessionPath = null;
   modelsState.list = DEFAULT_MODELS.map((item) => ({ ...item }));
@@ -166,6 +169,31 @@ describe('ModelThinkingAction', () => {
     expect(piMock.setModel).not.toHaveBeenCalled();
   });
 
+  it('会话模型还是保存前的档位表时，分段仍显示列表里新勾上的关闭', async () => {
+    modelsState.list = [{
+      id: 'claude-opus-5.5',
+      name: 'claude-opus-5.5',
+      provider: 'custom',
+      api: 'anthropic-messages',
+      reasoning: true,
+      thinkingLevelMap: { off: '', minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max', max: null },
+    }];
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'minimal',
+      model: {
+        id: 'claude-opus-5.5',
+        provider: 'custom',
+        api: 'anthropic-messages',
+        reasoning: true,
+        thinkingLevelMap: { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' },
+      },
+      sessionFile: '/ws/s.jsonl',
+    });
+    render(<ModelThinkingAction />);
+    expect(await screen.findByText('关闭')).toBeTruthy();
+    expect(screen.queryByText('最高')).toBeNull();
+  });
+
   it('选模型后立刻用该模型 settings 里的 thinkingLevelMap 渲染档位', async () => {
     let selected = { id: 'm', provider: 'anthropic', api: 'anthropic-messages' };
     piMock.getState.mockImplementation(async () => ({
@@ -221,6 +249,117 @@ describe('ModelThinkingAction', () => {
     await waitFor(() => {
       expect(screen.getByTestId('model-trigger').textContent).toContain('GPT');
     });
+  });
+
+  it('草稿套用默认模型时自动选上该模型的推理档位', async () => {
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 中');
+    });
+    expect(peekComposerLevel('/ws')).toBe('medium');
+    expect(piMock.setThinkingLevel).not.toHaveBeenCalled();
+  });
+
+  it('只露出一个思考档时，输入栏固定显示这一档', async () => {
+    modelsState.list = [{
+      id: 'gemini-3.8-flash-high',
+      name: 'gemini-3.8-flash-high',
+      provider: 'google',
+      api: 'google-generative-ai',
+      reasoning: true,
+      thinkingLevelMap: { high: 'high', minimal: null, low: null, medium: null },
+    }];
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'high',
+      model: {
+        id: 'gemini-3.8-flash-high',
+        provider: 'google',
+        api: 'google-generative-ai',
+        reasoning: true,
+      },
+      sessionFile: '/ws/s.jsonl',
+    });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 高');
+    });
+    expect(screen.getByText('高')).toBeTruthy();
+    expect(screen.queryByText('中')).toBeNull();
+    expect(piMock.setThinkingLevel).not.toHaveBeenCalled();
+  });
+
+  it('当前档不在唯一可见档里时，改锁到这一档', async () => {
+    modelsState.list = [{
+      id: 'gemini-3.8-flash-high',
+      name: 'gemini-3.8-flash-high',
+      provider: 'google',
+      api: 'google-generative-ai',
+      reasoning: true,
+      thinkingLevelMap: { high: 'high' },
+    }];
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'medium',
+      model: {
+        id: 'gemini-3.8-flash-high',
+        provider: 'google',
+        api: 'google-generative-ai',
+        reasoning: true,
+        thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high' },
+      },
+      sessionFile: '/ws/s.jsonl',
+    });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 高');
+    });
+    expect(piMock.setThinkingLevel).toHaveBeenCalledWith('/ws', 'high');
+    expect(peekComposerLevel('/ws')).toBe('high');
+  });
+
+  it('列表把思考档收成一档后，当前档跟着落到这一档', async () => {
+    modelsState.list = [{
+      id: 'g',
+      name: 'GPT',
+      provider: 'openai',
+      api: 'openai-completions',
+      reasoning: true,
+      thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high' },
+    }];
+    piMock.getState.mockResolvedValue({
+      thinkingLevel: 'medium',
+      model: { id: 'g', provider: 'openai', api: 'openai-completions', reasoning: true },
+      sessionFile: '/ws/s.jsonl',
+    });
+    const view = render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 中');
+    });
+    modelsState.list = [{
+      id: 'g',
+      name: 'GPT',
+      provider: 'openai',
+      api: 'openai-completions',
+      reasoning: true,
+      thinkingLevelMap: { high: 'high', low: null, medium: null },
+    }];
+    view.rerender(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 高');
+      expect(piMock.setThinkingLevel).toHaveBeenCalledWith('/ws', 'high');
+    });
+  });
+
+  it('草稿沿用该模型记住的推理档位，不沿用上一个会话的 off', async () => {
+    useThinkingMemoryStore.setState({ byModel: { [modelKey('openai', 'g')]: 'high' }, switchSeq: {} });
+    sessionState.draftConversationCwd = '/ws';
+    piMock.getSettings.mockResolvedValue({ defaultSessionModel: 'openai/g' });
+    render(<ModelThinkingAction />);
+    await waitFor(() => {
+      expect(screen.getByTestId('model-trigger').textContent).toContain('· 高');
+    });
+    expect(peekComposerLevel('/ws')).toBe('high');
   });
 
   it('草稿会话使用设置里的默认模型，忽略 getState.model，且不 setModel', async () => {

@@ -58,4 +58,23 @@ describe('awaitStreamingEnd', () => {
     await p;
     expect(done).toBe(true);
   });
+
+  it('画面切到另一个会话时放行，不把新会话的 isStreaming 当成本轮结束信号', async () => {
+    const src = fakeSource(true);
+    let detached = false;
+    let done = false;
+    const p = awaitStreamingEnd(src, { isDetached: () => detached }).then(() => {
+      done = true;
+    });
+    detached = true;
+    // 切到的会话也在跑：isStreaming 仍为 true，但必须放行。
+    src.set(true);
+    await p;
+    expect(done).toBe(true);
+  });
+
+  it('开始等待前就已切走：立即放行', async () => {
+    const src = fakeSource(false);
+    await expect(awaitStreamingEnd(src, { isDetached: () => true })).resolves.toBeUndefined();
+  });
 });

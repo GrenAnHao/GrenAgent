@@ -16,6 +16,36 @@ import {
 
 const MAX_ARG_VALUE_LEN = 50;
 
+export interface ContentImage {
+  mimeType: string;
+  data: string;
+}
+
+/** 工具结果 content 里的图像块。read 读图片时 Pi 会附带 type:image 的字节。 */
+export function extractContentImages(result: unknown): ContentImage[] {
+  if (!result || typeof result !== 'object') return [];
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  const images: ContentImage[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const img = block as { type?: unknown; mimeType?: unknown; data?: unknown };
+    if (img.type !== 'image' || typeof img.data !== 'string' || !img.data) continue;
+    images.push({
+      mimeType: typeof img.mimeType === 'string' && img.mimeType ? img.mimeType : 'image/png',
+      data: img.data,
+    });
+  }
+  return images;
+}
+
+/** read / read_file 的结果里带了图像，应该直接把图画出来，而不是收进上下文折叠。 */
+export function isImageFileRead(toolName: string, result: unknown): boolean {
+  const name = toolName.toLowerCase();
+  if (name !== 'read' && name !== 'read_file') return false;
+  return extractContentImages(result).length > 0;
+}
+
 export function extractText(result: unknown): string {
   if (result == null) return '';
   if (typeof result === 'string') return result;
@@ -97,8 +127,7 @@ export function toolMeta(toolName: string): { icon: LucideIcon } {
   if (name === 'generate_image') return { icon: Image };
   if (name === 'spawn_agent') return { icon: Network };
   if (name === 'fetch_url') return { icon: Globe };
-  if (name === 'fetch_llms') return { icon: FileText };
-  if (name === 'web_search' || name === 'search') return { icon: Search };
+  if (name === 'web_search' || name === 'web_search_multi' || name === 'search') return { icon: Search };
   if (name.startsWith('fetch_')) return { icon: Globe };
   if (name === 'speak') return { icon: Volume2 };
   if (name === 'todo') return { icon: ListChecks };

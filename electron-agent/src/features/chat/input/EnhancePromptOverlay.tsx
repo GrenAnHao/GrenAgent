@@ -1,18 +1,19 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { ActionIcon, Button, Icon, LOBE_THEME_APP_ID } from '@lobehub/ui';
+import { ActionIcon, Button, Icon } from '@lobehub/ui';
 import { Wand2, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useEnhancePromptStore, type EnhancePromptSlot } from '../../../stores/enhancePromptStore';
 import { useChatInput } from './ChatInputContext';
+import { useSessionOverlayBox } from './sessionOverlay';
 
 const MENU_GAP = 8;
 
 const styles = createStaticStyles(({ css }) => ({
   root: css`
-    position: fixed;
+    position: absolute;
     z-index: 1040;
     box-sizing: border-box;
 
@@ -113,13 +114,8 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
   const slot = useEnhancePromptStore((s) => s.byWorkspace[workspace]);
   const visible = Boolean(slot && slot.status !== 'idle');
   const elapsed = useElapsedSeconds(slot?.startedAt ?? 0, slot?.status === 'streaming');
-  const [pos, setPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const prevWorkspaceRef = useRef(workspace);
-
-  const portalContainer = useMemo(
-    () => document.getElementById(LOBE_THEME_APP_ID) ?? document.body,
-    [],
-  );
+  const { host, box } = useSessionOverlayBox(anchorRef, visible, MENU_GAP);
 
   const dismiss = useCallback(() => {
     void pi.abortEnhancePrompt(workspace);
@@ -136,7 +132,7 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
 
   useEffect(() => {
     const prev = prevWorkspaceRef.current;
-    if (prev !== workspace) {
+    if (prev && prev !== workspace) {
       void pi.abortEnhancePrompt(prev);
       useEnhancePromptStore.getState().clear(prev);
     }
@@ -146,36 +142,11 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
   useEffect(() => {
     return () => {
       const prev = prevWorkspaceRef.current;
+      if (!prev) return;
       void pi.abortEnhancePrompt(prev);
       useEnhancePromptStore.getState().clear(prev);
     };
   }, []);
-
-  useEffect(() => {
-    if (!visible) return;
-    const anchor = anchorRef.current;
-    if (!anchor) return;
-    const measure = () => {
-      const rect = anchor.getBoundingClientRect();
-      if (rect.width === 0) return;
-      setPos({
-        left: Math.round(rect.left),
-        bottom: Math.round(window.innerHeight - rect.top + MENU_GAP),
-        width: Math.round(rect.width),
-      });
-    };
-    measure();
-    const onChange = () => requestAnimationFrame(measure);
-    const ro = new ResizeObserver(onChange);
-    ro.observe(anchor);
-    window.addEventListener('resize', onChange);
-    window.addEventListener('scroll', onChange, true);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', onChange);
-      window.removeEventListener('scroll', onChange, true);
-    };
-  }, [anchorRef, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -188,7 +159,7 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
   }, [visible, dismiss]);
 
   if (!visible || !slot) return null;
-  if (!pos) return null;
+  if (!host || !box) return null;
 
   const applyDisabled = slot.status === 'error' || !slot.preview.trim();
   const previewText = slot.preview || slot.source;
@@ -197,7 +168,7 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
     <div
       className={styles.root}
       data-testid="enhance-prompt-overlay"
-      style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}
+      style={{ left: box.left, bottom: box.bottom, width: box.width }}
     >
       <div className={styles.card}>
         <div className={styles.head}>
@@ -239,6 +210,6 @@ export const EnhancePromptOverlay = memo(function EnhancePromptOverlay({
         </div>
       </div>
     </div>,
-    portalContainer,
+    host,
   );
 });

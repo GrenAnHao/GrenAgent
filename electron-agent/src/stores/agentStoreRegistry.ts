@@ -13,8 +13,12 @@ interface Entry {
 /** 运行态：哪些 workspace 当前在 streaming（供 Sidebar 角标读）。 */
 interface RegistryStatus {
   runningWorkspaces: string[];
+  /** 主进程回报的仍在跑的会话路径，按 workspace 记一条。热更新后侧边栏用它，不靠内存里的当前会话猜测。 */
+  runningPaths: Record<string, string>;
+  /** 同一项目里同时在跑的全部会话路径。 */
+  runningSessionPaths: string[];
 }
-export const useAgentRegistryStore = create<RegistryStatus>(() => ({ runningWorkspaces: [] }));
+export const useAgentRegistryStore = create<RegistryStatus>(() => ({ runningWorkspaces: [], runningPaths: {}, runningSessionPaths: [] }));
 
 export interface AgentStoreRegistry {
   getOrCreate: (workspace: string) => AgentStoreApi;
@@ -106,7 +110,7 @@ export function createAgentStoreRegistry(max = DEFAULT_MAX): AgentStoreRegistry 
       }
       map.clear();
       activeKey = null;
-      useAgentRegistryStore.setState({ runningWorkspaces: [] });
+      useAgentRegistryStore.setState({ runningWorkspaces: [], runningPaths: {}, runningSessionPaths: [] });
     },
   };
 }

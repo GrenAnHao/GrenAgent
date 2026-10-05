@@ -14,15 +14,19 @@ const state = vi.hoisted(() => ({
     composerQueue: [] as Array<{ id: string; text: string }>,
     lastError: undefined as string | undefined,
     retrying: undefined as { attempt: number; max: number } | undefined,
+    compacting: false,
   },
   pushUserMessage: vi.fn(),
   piPrompt: vi.fn(),
   piAbort: vi.fn(),
+  piTakeSteering: vi.fn(async () => ({ steering: [] as string[] })),
   piOpenWorkspace: vi.fn(),
   piNewSession: vi.fn(),
   piGetState: vi.fn(),
   piSetModel: vi.fn(),
+  piSetThinkingLevel: vi.fn(),
   composerModel: { provider: 'openai', id: 'g' } as { provider: string; id: string } | null,
+  composerLevel: null as string | null,
   peekCalls: [] as Array<{ provider: string; id: string } | null>,
   commitComposerModelToSession: vi.fn(),
   commandRun: vi.fn(),
@@ -37,22 +41,30 @@ const state = vi.hoisted(() => ({
   clearDraftConversation: vi.fn(),
   pendingSend: 'hello',
   pendingBehavior: undefined as 'steer' | 'followUp' | undefined,
+  setComposerValue: vi.fn(),
+  /** 测试显式给出画面绑定的会话；undefined 时跟 activeSessionPath 走。 */
+  loadedPath: undefined as string | null | undefined,
 }));
 
 vi.mock('../../lib/pi', () => ({
   pi: {
     prompt: state.piPrompt,
     abort: state.piAbort,
+    takeSteering: state.piTakeSteering,
     openWorkspace: state.piOpenWorkspace,
     newSession: state.piNewSession,
     getState: state.piGetState,
     setModel: state.piSetModel,
+    setThinkingLevel: state.piSetThinkingLevel,
     setSessionDisplayName: vi.fn(),
   },
 }));
 vi.mock('../../lib/commandLanes', () => ({ commandLanes: { run: state.commandRun } }));
 vi.mock('../../lib/streamingGate', () => ({ awaitStreamingEnd: vi.fn() }));
 vi.mock('../../lib/sidebarSessionSync', () => ({ syncSidebarOnSend: vi.fn() }));
+vi.mock('./input/composerBridge', () => ({
+  setComposerValue: (text: string) => state.setComposerValue(text),
+}));
 vi.mock('./ChatListView', () => ({ ChatListView: () => <div data-testid="chat-list" /> }));
 vi.mock('./ChatListSkeleton', () => ({ ChatListSkeleton: () => <div data-testid="chat-skeleton" /> }));
 vi.mock('./ChatInput', () => ({
@@ -75,6 +87,7 @@ vi.mock('./input/actions/ModelThinkingAction', () => ({
     const queued = state.peekCalls.shift();
     return queued !== undefined ? queued : state.composerModel;
   },
+  peekComposerLevel: () => state.composerLevel,
   commitComposerModelToSession: (...args: unknown[]) => state.commitComposerModelToSession(...args),
 }));
 vi.mock('./EmptyChatPrompt', () => ({
@@ -127,6 +140,11 @@ vi.mock('../../stores/AgentStoreContext', () => {
           };
         },
         syncEntryIdsAfterAccept: () => Promise.resolve(),
+        getLoadedSessionPath: () =>
+          state.loadedPath !== undefined ? state.loadedPath : state.sessionState.activeSessionPath ?? undefined,
+        bindSessionPath: (path: string) => {
+          state.loadedPath = path;
+        },
       },
       setWorkspaceReady: () => {},
       appBooted: true,
@@ -138,7 +156,7 @@ vi.mock('../../stores/AgentStoreContext', () => {
 state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => fn());
 
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
-import { ChatView } from './ChatView';
+import { ChatView, laneKey } from './ChatView';
 
 afterEach(() => {
   cleanup();
@@ -155,6 +173,7 @@ afterEach(() => {
     composerQueue: [],
     lastError: undefined,
     retrying: undefined,
+    compacting: false,
   };
   state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => fn());
   state.sessionState = {
@@ -164,10 +183,14 @@ afterEach(() => {
   };
   state.pendingSend = 'hello';
   state.pendingBehavior = undefined;
+  state.loadedPath = undefined;
+  state.piTakeSteering.mockReset();
+  state.piTakeSteering.mockResolvedValue({ steering: [] });
   state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
   state.piNewSession.mockResolvedValue(undefined);
   state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/s.jsonl' });
   state.composerModel = { provider: 'openai', id: 'g' };
+  state.composerLevel = null;
   state.peekCalls = [];
   state.piSetModel.mockResolvedValue(undefined);
 });
@@ -192,6 +215,15 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(screen.getByTestId('composer-seat')).toBeTruthy();
   });
 
+  it('压缩进行中不在输入框上方再画一条正在压缩', () => {
+    state.workspaceReady = true;
+    state.storeState.messages = [{}];
+    state.storeState.compacting = true;
+    render(<ChatView />);
+    expect(screen.queryByTestId('compaction-indicator')).toBeNull();
+    expect(screen.getByTestId('composer-seat').textContent).not.toContain('正在压缩');
+  });
+
   it('composer seat matches the chat column background without a fade overlay', () => {
     state.workspaceReady = true;
     state.storeState.messages = [{}];
@@ -210,7 +242,17 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     expect(screen.getByTestId('empty-chat-prompt')).toBeTruthy();
     expect(screen.getByTestId('chat-input')).toBeTruthy();
     expect(screen.queryByTestId('chat-list')).toBeNull();
-    expect(screen.queryByTestId('composer-seat')).toBeNull();
+    const seat = screen.getByTestId('composer-seat');
+    expect(seat).toBeTruthy();
+    expect(seat).toHaveStyle({ paddingBottom: '0px' });
+  });
+
+  it('草稿、会话与项目会话的输入座椅离底一致', () => {
+    state.workspaceReady = true;
+    state.messageCount = 1;
+    state.storeState.messages = [{}];
+    render(<ChatView />);
+    expect(screen.getByTestId('composer-seat')).toHaveStyle({ paddingBottom: '0px' });
   });
 
   it('keeps the compose column width when leaving the empty layout', () => {
@@ -218,7 +260,8 @@ describe('ChatView 内容区 gating（骨架屏替代全屏）', () => {
     state.messageCount = 0;
     state.storeState.messages = [];
     const empty = render(<ChatView />);
-    expect(empty.getByTestId('chat-input-region')).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
+    expect(empty.getByTestId('chat-input-region')).toHaveStyle({ width: '100%' });
+    expect(empty.getByTestId('chat-input-region').parentElement).toHaveStyle({ width: CHAT_CONTENT_WIDTH });
     empty.unmount();
 
     state.messageCount = 1;
@@ -247,6 +290,7 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piPrompt).toHaveBeenCalledTimes(6);
     expect(state.storeState.lastError).toContain('已重试 5 次仍失败：provider down');
     expect(state.storeState.retrying).toBeUndefined();
+    expect(state.storeState.messages).toEqual([]);
   });
 
   it('用户中断（错误经事件流写入 lastError）不报错、不重试、不残留错误条', async () => {
@@ -290,6 +334,8 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piAbort).toHaveBeenCalled();
     expect(state.storeState.lastError).toBeUndefined();
     expect(state.storeState.retrying).toBeUndefined();
+    expect(state.storeState.messages).toEqual([]);
+    expect(state.setComposerValue).toHaveBeenCalledWith('hello');
   });
 
   it('turn 已开始后失败（未真正重试）：直接显示错误，不加「已重试 N 次」前缀', async () => {
@@ -308,6 +354,10 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.piPrompt).toHaveBeenCalledTimes(1);
     expect(state.storeState.lastError).toBe('boom');
     expect(state.storeState.retrying).toBeUndefined();
+    expect(state.storeState.messages.map((message) => (message as { kind?: string }).kind)).toEqual([
+      'user',
+      'assistant',
+    ]);
   });
 
   it('首响应较慢（agent_start 未到、仍 awaitingResponse）时不误判空轮、不闪「发送失败」、不重发', async () => {
@@ -363,6 +413,28 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.storeState.lastError).toBeUndefined();
   });
 
+  it('暂停后只把第一条未注入的引导当成新消息发出，其余回到排队', async () => {
+    state.workspaceReady = true;
+    state.storeState.messages = [
+      { kind: 'assistant', id: 'a1', text: '正在改' },
+      { kind: 'user', id: 's1', text: '改用 chrome', steering: true, steerState: 'written' },
+      { kind: 'user', id: 's2', text: '再补登录态', steering: true, steerState: 'written' },
+    ];
+    state.piAbort.mockResolvedValue(undefined);
+    state.piTakeSteering.mockResolvedValue({ steering: ['改用 chrome', '再补登录态'] });
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '改用 chrome', undefined, undefined, '/home/.pi/agent/works/u1/s.jsonl');
+    expect(state.storeState.messages.map((message) => (message as { text?: string }).text)).toEqual(['正在改', '改用 chrome']);
+    expect(state.storeState.messages[1]).not.toHaveProperty('steering');
+    expect(state.storeState.composerQueue.map((item) => item.text)).toEqual(['再补登录态']);
+  });
+
   it('草稿对话首发时先懒初始化 workspace 和 session', async () => {
     state.composerModel = { provider: 'openai', id: 'g' };
     state.piSetModel.mockClear();
@@ -385,13 +457,45 @@ describe('ChatView 发送失败自动重试', () => {
       '/home/.pi/agent/works/u1',
       '/home/.pi/agent/works/u1/created.jsonl',
       { provider: 'openai', id: 'g' },
+      null,
     );
     expect(state.piSetModel).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'openai', 'g');
+    expect(state.piSetThinkingLevel).not.toHaveBeenCalled();
     expect(state.commitComposerModelToSession.mock.invocationCallOrder[0]).toBeLessThan(
       state.piSetModel.mock.invocationCallOrder[0],
     );
     expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(state.piPrompt.mock.invocationCallOrder[0]);
     expect(state.piNewSession.mock.invocationCallOrder[0]).toBeLessThan(state.piSetModel.mock.invocationCallOrder[0]);
+  });
+
+  it('草稿首发把输入栏推理档位写进新会话，且晚于 setModel', async () => {
+    state.composerModel = { provider: 'openai', id: 'g' };
+    state.composerLevel = 'medium';
+    state.piSetModel.mockClear();
+    state.piSetThinkingLevel.mockClear();
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
+    state.piGetState.mockResolvedValue({ sessionFile: '/home/.pi/agent/works/u1/created.jsonl' });
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    expect(state.commitComposerModelToSession).toHaveBeenCalledWith(
+      '/home/.pi/agent/works/u1',
+      '/home/.pi/agent/works/u1/created.jsonl',
+      { provider: 'openai', id: 'g' },
+      'medium',
+    );
+    expect(state.piSetThinkingLevel).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'medium');
+    expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(
+      state.piSetThinkingLevel.mock.invocationCallOrder[0],
+    );
+    expect(state.piSetThinkingLevel.mock.invocationCallOrder[0]).toBeLessThan(
+      state.piPrompt.mock.invocationCallOrder[0],
+    );
   });
 
   it('草稿首发没有输入栏模型时不调用 setModel', async () => {
@@ -435,6 +539,7 @@ describe('ChatView 发送失败自动重试', () => {
       'D:/repo/app',
       'D:/repo/app/created.jsonl',
       { provider: 'openai', id: 'g' },
+      null,
     );
     expect(state.piSetModel).toHaveBeenCalledWith('D:/repo/app', 'openai', 'g');
     expect(state.piSetModel.mock.invocationCallOrder[0]).toBeLessThan(state.piPrompt.mock.invocationCallOrder[0]);
@@ -460,6 +565,7 @@ describe('ChatView 发送失败自动重试', () => {
       '/home/.pi/agent/works/u1',
       '/home/.pi/agent/works/u1/created.jsonl',
       { provider: 'custom-mu78dr9u', id: 'grok-4.6-fast' },
+      null,
     );
     expect(state.piSetModel).toHaveBeenCalledWith(
       '/home/.pi/agent/works/u1',
@@ -504,7 +610,7 @@ describe('ChatView 发送失败自动重试', () => {
     await act(async () => {});
 
     expect(state.pushUserMessage).not.toHaveBeenCalled();
-    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '', 'followUp');
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '', 'followUp', undefined, '/home/.pi/agent/works/u1/s.jsonl');
   });
 
   it('执行中发送先落成跟进条，不立刻 prompt、不进对话', async () => {
@@ -532,6 +638,77 @@ describe('ChatView 发送失败自动重试', () => {
 
     expect(state.pushUserMessage).toHaveBeenCalledWith('改用 chrome', undefined, undefined);
     expect(state.storeState.composerQueue).toEqual([]);
-    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '改用 chrome', undefined, undefined);
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '改用 chrome', undefined, undefined, '/home/.pi/agent/works/u1/s.jsonl');
   });
+
+describe('ChatView 同项目多会话', () => {
+  const S = '/home/.pi/agent/works/u1/s.jsonl';
+  const OTHER = '/home/.pi/agent/works/u1/other.jsonl';
+
+  it('发送串行按会话分道', () => {
+    expect(laneKey('/ws', '/ws/a.jsonl')).not.toBe(laneKey('/ws', '/ws/b.jsonl'));
+    expect(laneKey('/ws', null)).toBe(laneKey('/ws', undefined));
+  });
+
+  it('prompt 带上画面绑定的会话路径，命令队列按会话取 key', async () => {
+    state.piPrompt.mockResolvedValue(undefined);
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'hello', undefined, undefined, S);
+    expect(state.commandRun.mock.calls[0][0]).toBe(laneKey('/home/.pi/agent/works/u1', S));
+  });
+
+  it('发送失败时画面已切到另一个会话：不报错、不重试、不回滚', async () => {
+    vi.useFakeTimers();
+    let reject: (e: Error) => void = () => {};
+    state.piPrompt.mockImplementation(() => new Promise<void>((_, rej) => { reject = rej; }));
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-input'));
+    });
+    const messagesAtSwitch = state.storeState.messages;
+    // 用户切到同项目另一个会话
+    state.loadedPath = OTHER;
+    await act(async () => {
+      reject(new Error('provider down'));
+      await vi.runAllTimersAsync();
+    });
+    expect(state.piPrompt).toHaveBeenCalledTimes(1);
+    expect(state.storeState.lastError).toBeUndefined();
+    expect(state.storeState.retrying).toBeUndefined();
+    expect(state.storeState.messages).toBe(messagesAtSwitch);
+    expect(state.setComposerValue).not.toHaveBeenCalled();
+  });
+
+  it('停止只打到画面上的会话，切走后不再处理取回的引导', async () => {
+    state.piAbort.mockResolvedValue(undefined);
+    state.piTakeSteering.mockImplementation(async () => {
+      state.loadedPath = OTHER;
+      return { steering: ['改用 chrome'] };
+    });
+    state.storeState.messages = [{ kind: 'user', id: 's1', text: '改用 chrome', steering: true, steerState: 'written' }];
+    render(<ChatView />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('chat-abort'));
+    });
+    expect(state.piAbort).toHaveBeenCalledWith('/home/.pi/agent/works/u1', S);
+    expect(state.piTakeSteering).toHaveBeenCalledWith('/home/.pi/agent/works/u1', S);
+    expect(state.piPrompt).not.toHaveBeenCalled();
+  });
+
+  it('草稿首发落盘后画面绑定到新会话，prompt 打到新会话', async () => {
+    const created = '/home/.pi/agent/works/u1/created.jsonl';
+    state.sessionState.activeSessionPath = null;
+    state.sessionState.draftConversationCwd = '/home/.pi/agent/works/u1';
+    state.piOpenWorkspace.mockResolvedValue({ restoredSession: null, sessionFile: null });
+    state.piGetState.mockResolvedValue({ sessionFile: created });
+    state.piPrompt.mockResolvedValue(undefined);
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+    expect(state.loadedPath).toBe(created);
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', 'hello', undefined, undefined, created);
+  });
+});
 });

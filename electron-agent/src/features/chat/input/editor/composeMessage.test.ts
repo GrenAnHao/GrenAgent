@@ -51,4 +51,16 @@ describe('composeMessage', () => {
     };
     expect(composeMessage('总结', [ref])).toBe('总结\n\n@docs/big.md');
   });
+
+  it('多个文件引用放在正文后同一行，粘贴文本仍作附件块跟在后面', () => {
+    const ref = (source: string): PastedText => ({ id: source, text: '', lines: 10, chars: 100, source, referenceOnly: true });
+    expect(composeMessage('开始规划设计', [
+      ref('.pi/dropped/a/one.md'),
+      pasted('note'),
+      ref('.pi/dropped/b/two.md'),
+    ])).toBe(
+      '开始规划设计\n\n@.pi/dropped/a/one.md @.pi/dropped/b/two.md' +
+        '\n\n<pi:attachment type="text" lines="1" chars="4">\nnote\n</pi:attachment>',
+    );
+  });
 });

@@ -11,10 +11,6 @@ vi.mock('../workspace/WorkspaceTabs', () => ({
   WorkspaceTabs: () => null,
 }));
 
-vi.mock('../subagents/SubagentHeaderCatalog', () => ({
-  SubagentHeaderCatalog: () => null,
-}));
-
 vi.mock('../subagents/SubAgentMenuButton', () => ({
   SubAgentMenuButton: () => null,
 }));

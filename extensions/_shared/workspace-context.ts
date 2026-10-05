@@ -8,6 +8,8 @@ export interface WorkspaceContext {
   workspace: string;
   cwd: string;
   config: Readonly<Record<string, string>>;
+  /** 当前交互会话 id（现取：同一 handle 换会话后跟着变）。子代理 / goal 不带。 */
+  sessionId?: () => string | undefined;
 }
 
 const storage = new AsyncLocalStorage<WorkspaceContext>();
@@ -23,6 +25,15 @@ export function currentWorkspaceContext(): WorkspaceContext | undefined {
 /** 无 ALS 时回退 process.cwd()：fork 子进程与未包裹的 CLI 路径按进程 cwd 即正确。 */
 export function currentCwd(): string {
   return storage.getStore()?.cwd ?? process.cwd();
+}
+
+/** ALS 里的交互会话 id；无 ALS 或未带 sessionId 时 undefined。 */
+export function currentSessionId(): string | undefined {
+  try {
+    return storage.getStore()?.sessionId?.() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function resolveToolOrigin(): ToolOrigin {

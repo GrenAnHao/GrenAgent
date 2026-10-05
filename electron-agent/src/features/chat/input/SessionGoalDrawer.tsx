@@ -6,6 +6,7 @@ import { Save, Trash2 } from 'lucide-react';
 import { pi } from '../../../lib/pi';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../../stores/goalStore';
+import { useAskConfirm } from '../../../components/askConfirm';
 
 const styles = createStaticStyles(({ css }) => ({
   root: css`
@@ -117,7 +118,8 @@ function historyKey(item: GoalHistoryItem, index: number): string {
 }
 
 export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: SessionGoalDrawerProps) {
-  const { workspace } = useAgentStoreContext();
+  const ask = useAskConfirm();
+  const { workspace, store } = useAgentStoreContext();
   const liveSnapshot = useGoalStore((state) => (sessionId ? state.bySession[sessionId] : undefined));
   const currentSnapshot = liveSnapshot ?? snapshot;
   const [mutating, setMutating] = useState(false);
@@ -138,7 +140,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
     if (!workspace || inflight.current) return;
     inflight.current = true;
     try {
-      await pi.prompt(workspace, message);
+      await pi.prompt(workspace, message, undefined, undefined, store.getLoadedSessionPath());
     } finally {
       inflight.current = false;
     }
@@ -146,7 +148,7 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
 
   const clearGoal = async () => {
     if (!currentSnapshot || !clearable || mutating || savingCondition || inflight.current) return;
-    if (!window.confirm('清除当前目标？')) return;
+    if (!(await ask({ title: '清除当前目标？' }))) return;
     setMutating(true);
     try {
       await runCommand('/goal clear');

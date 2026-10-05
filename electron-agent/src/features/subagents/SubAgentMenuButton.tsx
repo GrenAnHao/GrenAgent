@@ -5,16 +5,41 @@ import { Bot, Eraser } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { pi, type SubAgentItem } from '../../lib/pi';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
-import { useDockStore } from '../../stores/dockStore';
-import { useLayoutStore } from '../../stores/layoutStore';
+import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useSubAgentLiveStore, selectSubAgentList } from '../../stores/subagentLiveStore';
-import { mapSubAgentStatus, subAgentId } from '../panels/subagentUtils';
+import { mapSubAgentStatus, spawnUnitTitle, subAgentCardTitle, subAgentId, taskLabel } from '../panels/subagentUtils';
 import { SubAgentCard } from './SubAgentCard';
 
 // 终态（完成/失败/取消）结束这么久后自动从列表淡出（总览面板比输入框托盘给更久的回看窗口）。
 const FADE_MS = 300_000;
 // 折叠：默认最多显示这么多个最近终态，更旧的收进「显示全部」。
 const RECENT_TERMINAL = 4;
+
+/** 并行/链式 spawn_agent 里，agentId 对应的子项下标；没有则 undefined。 */
+function unitIndexOfAgent(result: unknown, agentId: string): number | undefined {
+  const details = (result as { details?: { results?: unknown } } | null)?.details;
+  const results = Array.isArray(details?.results) ? (details.results as Array<{ agentId?: unknown }>) : [];
+  const index = results.findIndex((r) => r?.agentId === agentId);
+  return index >= 0 ? index : undefined;
+}
+
+function menuCardTitle(args: unknown, subIndex: number | null, task: string): string | undefined {
+  const title = spawnUnitTitle(args, subIndex);
+  return title ? subAgentCardTitle(title, task) : undefined;
+}
+
+function labelForItem(
+  messages: readonly { kind: string; toolName?: string; args?: unknown; result?: unknown }[],
+  item: SubAgentItem,
+): string | undefined {
+  for (const m of messages) {
+    if (m.kind !== 'tool' || m.toolName !== 'spawn_agent') continue;
+    const subIndex = subAgentId(m.result) === item.id ? null : unitIndexOfAgent(m.result, item.id);
+    if (subIndex === undefined) continue;
+    return menuCardTitle(m.args, subIndex, item.task);
+  }
+  return undefined;
+}
 
 function isTerminalStatus(status: string): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled';
@@ -121,14 +146,23 @@ export function SubAgentMenuButton() {
   const openAgent = useCallback(
     (item: SubAgentItem) => {
       setOpen(false);
-      // 优先：主对话里能按 agentId 匹配到 spawn_agent 消息 → 用现有右坞 tab（含完整 transcript）。
+      // 优先：主对话里能按 agentId 匹配到 spawn_agent 消息 → 打开（或激活）该子代理的右坞 tab。
+      // 子代理 tab 按需创建，这里不能只 setActive，否则 tab 不存在，右面板展开了却是空的。
       const messages = store?.useStore.getState().messages ?? [];
-      const matched = messages.find(
-        (m) => m.kind === 'tool' && m.toolName === 'spawn_agent' && subAgentId(m.result) === item.id,
-      );
-      if (matched) {
-        useDockStore.getState().setActive('right', matched.id);
-        useLayoutStore.getState().setRightPanelOpen(true);
+      // 子代理 tab 归属当前会话（有 store 时以它实际加载的会话为准，否则由 dockStore 取会话 store）。
+      const owner = dockOwnerFromStore(store, workspace);
+      for (const m of messages) {
+        if (m.kind !== 'tool' || m.toolName !== 'spawn_agent') continue;
+        const subIndex = subAgentId(m.result) === item.id ? null : unitIndexOfAgent(m.result, item.id);
+        if (subIndex === undefined) continue;
+        const cardTitle = menuCardTitle(m.args, subIndex, item.task);
+        useDockStore.getState().openSubAgent({
+          messageId: m.id,
+          toolCallId: m.toolCallId,
+          subIndex,
+          title: cardTitle || item.task || taskLabel(m.args),
+          ...owner,
+        });
         return;
       }
       // 兜底：跨会话 / 后台 spawn。transcript 不再从列表携带，
@@ -138,9 +172,10 @@ export function SubAgentMenuButton() {
         task: item.task,
         output: item.output ?? '',
         status: mapSubAgentStatus(item.status),
+        ...owner,
       });
     },
-    [store],
+    [store, workspace],
   );
 
   const stopAgent = useCallback(
@@ -174,7 +209,13 @@ export function SubAgentMenuButton() {
   };
 
   const renderCard = (item: SubAgentItem) => (
-    <SubAgentCard key={item.id} item={item} onOpen={() => openAgent(item)} onStop={() => stopAgent(item)} />
+    <SubAgentCard
+      key={item.id}
+      item={item}
+      label={labelForItem(store?.useStore.getState().messages ?? [], item)}
+      onOpen={() => openAgent(item)}
+      onStop={() => stopAgent(item)}
+    />
   );
 
   const content = (

@@ -11,7 +11,7 @@ export function levelDisplayLabel(value: string): string {
 
 const BUILTIN_PROVIDER_IDS = new Set(PROVIDER_PRESETS.map((p) => p.id));
 
-// pi 内部推理档位（off 单独处理）。pi 内部档位只作 RPC 传输，标签显示各家原生取值。
+// pi 内部推理档位。off 用同一套「出现」规则，在 optionsFromMap 里排到最前。
 const PI_REASONING_LEVELS: ThinkingLevel[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 // 内置模型未在 get_state 暴露 thinkingLevelMap 时的安全回退：用各家原生名，且只取各家通用支持的档位，
@@ -38,13 +38,16 @@ export interface RpcModel {
   thinkingLevelMap?: ThinkingLevelMap;
 }
 
+/** 与设置页「出现」一致：只有显式写成字符串的档才出现；null / 缺省键都隐藏。 */
+function pushMappedLevel(map: ThinkingLevelMap, level: ThinkingLevel, fallbackLabel: string, opts: ThinkingOption[]): void {
+  const v = map[level];
+  if (typeof v !== 'string') return;
+  opts.push({ label: v || fallbackLabel, value: level });
+}
+
 function optionsFromMap(map: ThinkingLevelMap, opts: ThinkingOption[]): void {
-  for (const pi of PI_REASONING_LEVELS) {
-    const v = map[pi];
-    // 与设置页一致：只有显式写成字符串的档才出现；null / 缺省键都隐藏（xhigh/max 为 opt-in）。
-    if (typeof v !== 'string') continue;
-    opts.push({ label: v || pi, value: pi });
-  }
+  pushMappedLevel(map, 'off', 'off', opts);
+  for (const pi of PI_REASONING_LEVELS) pushMappedLevel(map, pi, pi, opts);
 }
 
 function hasConfiguredLevels(map: ThinkingLevelMap | undefined): boolean {
@@ -52,7 +55,10 @@ function hasConfiguredLevels(map: ThinkingLevelMap | undefined): boolean {
   return Object.values(map).some((v) => typeof v === 'string');
 }
 
-/** getState 常丢 thinkingLevelMap：用可用列表里同模型的映射补上，空对象也视为未配置。 */
+/**
+ * getState 的模型是选中那一刻的快照：保存「出现」后，会话对象上的 thinkingLevelMap 不会跟着变。
+ * 可用列表来自刷新后的 models.json，有映射时以它为准；列表没有映射时才留会话上的。
+ */
 export function mergeModelCatalog(
   session: RpcModel | null | undefined,
   catalog: readonly RpcModel[],
@@ -65,22 +71,22 @@ export function mergeModelCatalog(
     ...session,
     api: session.api ?? info.api,
     reasoning: session.reasoning ?? info.reasoning,
-    thinkingLevelMap: hasConfiguredLevels(session.thinkingLevelMap)
-      ? session.thinkingLevelMap
-      : info.thinkingLevelMap,
+    thinkingLevelMap: hasConfiguredLevels(info.thinkingLevelMap)
+      ? info.thinkingLevelMap
+      : session.thinkingLevelMap,
   };
 }
 
 // 选择器档位 = 照搬当前模型的真实档位，标签用供应商原生取值，value 是 pi 内部档位（仅作 RPC 传输）：
 //  - 非推理模型：只有 off；
-//  - 有 thinkingLevelMap（内置元数据 / 自定义勾「推理」写入）：只展示映射里的字符串档（null / 缺省隐藏）；
+//  - 有 thinkingLevelMap（内置元数据 / 自定义勾「推理」写入）：只展示映射里的字符串档（null / 缺省隐藏，含 off）；
 //  - 自定义供应商但 get_state 未回传映射：按其 API 协议取完整原生阶梯（与保存进 models.json 的一致）；
-//  - 内置供应商且无映射：按协议回退到安全原生档位（避免给出 pi/模型不支持的档位被钳回 off）。
+//  - 内置供应商且无映射：按协议回退到安全原生档位，并保留 off（没有映射可隐藏它）。
 export function levelOptions(model: RpcModel | null | undefined): ThinkingOption[] {
-  const opts: ThinkingOption[] = [{ label: 'off', value: 'off' }];
-  if (!model || model.reasoning === false) return opts;
+  if (!model || model.reasoning === false) return [{ label: 'off', value: 'off' }];
 
   if (hasConfiguredLevels(model.thinkingLevelMap)) {
+    const opts: ThinkingOption[] = [];
     optionsFromMap(model.thinkingLevelMap!, opts);
     return opts;
   }
@@ -88,10 +94,12 @@ export function levelOptions(model: RpcModel | null | undefined): ThinkingOption
   const isCustom = !!model.provider && !BUILTIN_PROVIDER_IDS.has(model.provider);
   const customMap = isCustom ? defaultThinkingLevelMap(model.api, model.id) : undefined;
   if (customMap) {
+    const opts: ThinkingOption[] = [];
     optionsFromMap(customMap, opts);
     return opts;
   }
 
+  const opts: ThinkingOption[] = [{ label: 'off', value: 'off' }];
   const ladder = (model.api && SAFE_LADDER[model.api]) || SAFE_LADDER_FALLBACK;
   for (const [label, value] of ladder) opts.push({ label, value });
   return opts;
@@ -104,6 +112,19 @@ export function defaultLevel(model: RpcModel | null | undefined): string {
   if (opts.some((o) => o.value === 'medium')) return 'medium';
   const firstReasoning = opts.find((o) => o.value !== 'off');
   return (firstReasoning?.value as string | undefined) ?? 'off';
+}
+
+/**
+ * 当前档不在可见档里时落到模型默认。只露出一档时默认就是这一档。
+ * 没给档位则原样返回，避免会话档读回前把占位值写成默认。
+ */
+export function coerceVisibleLevel(
+  model: RpcModel | null | undefined,
+  level: string | undefined,
+): string | undefined {
+  if (!level) return level;
+  if (levelOptions(model).some((o) => o.value === level)) return level;
+  return defaultLevel(model);
 }
 
 /** 切到某模型时该用的档位：优先用记忆（且对该模型有效），否则用模型默认（不沿用上一个模型）。 */

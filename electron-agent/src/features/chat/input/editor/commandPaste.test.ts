@@ -25,6 +25,10 @@ describe('parseCommandToken', () => {
   it('支持连字符与 skill: 前缀命令名', () => {
     expect(parseCommandToken('/deep-research')).toEqual({ name: 'deep-research', rest: '' });
     expect(parseCommandToken('/skill:foo')).toEqual({ name: 'skill:foo', rest: '' });
+    expect(parseCommandToken('/skill:"IDA Pro逆向分析" 我')).toEqual({
+      name: 'skill:IDA Pro逆向分析',
+      rest: '我',
+    });
   });
 
   it('换行后的参数也算 rest', () => {
@@ -80,6 +84,19 @@ describe('resolveCommandTag', () => {
       label: 'foo',
       value: 'skill:foo',
       commandGroup: 'skill',
+    });
+  });
+
+  it('带空格的技能名整段进标签，参数留在标签外', () => {
+    const spaced: PiCommand[] = [
+      { name: 'skill:IDA Pro逆向分析', source: 'api', apiSource: 'skill' },
+    ];
+    expect(resolveCommandTag(spaced, '/skill:"IDA Pro逆向分析" 我')).toEqual({
+      category: 'command',
+      label: 'IDA Pro逆向分析',
+      value: 'skill:IDA Pro逆向分析',
+      commandGroup: 'skill',
+      trailingText: '我',
     });
   });
 

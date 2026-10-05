@@ -3,13 +3,22 @@ import { ActionIcon, Flexbox } from '@lobehub/ui';
 import { cx } from 'antd-style';
 import { PanelRightClose } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
-import { useDockStore, type DockRegion, type DockTab, type SubAgentPayload } from '../../stores/dockStore';
+import { useSessionStore } from '../../store/session';
+import {
+  resolveVisibleActive,
+  useDockStore,
+  visibleRegionTabs,
+  type DockRegion,
+  type DockTab,
+  type SubAgentPayload,
+} from '../../stores/dockStore';
 import { dockTabStyles, resolveTone } from './dockTabStyles';
 import { TabStrip } from './TabStrip';
 import { TabBodyStack } from './TabBodyStack';
 import { DockLauncher } from './DockLauncher';
 import { DockStripAddMenu } from './DockStripAddMenu';
 import { DockTabSwitcher } from './DockTabSwitcher';
+import { RightPanelFillButton } from '../layout/RightPanelFillButton';
 
 interface DockPanelProps {
   region: DockRegion;
@@ -21,6 +30,9 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
   const messages = store.useStore((s) => s.messages);
   const allTabs = useDockStore((s) => s.tabs);
   const activeByRegion = useDockStore((s) => s.activeByRegion);
+  const activeBySession = useDockStore((s) => s.activeBySession);
+  const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
+  const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
   const setActive = useDockStore((s) => s.setActive);
   const closeTab = useDockStore((s) => s.closeTab);
 
@@ -32,11 +44,13 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     return map;
   }, [messages]);
 
-  const tabs = useMemo(
-    () => allTabs.filter((t) => t.region === region).sort((a, b) => a.order - b.order),
-    [allTabs, region],
+  // 会话归属 tab（子代理详情等）只在打开它的会话里显示；切走后保留在 store，切回来恢复。
+  const view = useMemo(
+    () => ({ sessionPath: activeSessionPath || null, workspace: activeWorkspace ?? '' }),
+    [activeSessionPath, activeWorkspace],
   );
-  const activeId = activeByRegion[region] ?? tabs.at(-1)?.id ?? null;
+  const tabs = useMemo(() => visibleRegionTabs(allTabs, region, view), [allTabs, region, view]);
+  const activeId = resolveVisibleActive({ activeByRegion, activeBySession }, region, view, tabs);
 
   const toneOf = useCallback(
     (tab: DockTab) =>
@@ -47,7 +61,7 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     [subAgentStatus],
   );
 
-  const actions = onCollapse ? (
+  const collapseButton = onCollapse ? (
     <span title="Collapse panel">
       <ActionIcon
         icon={PanelRightClose}
@@ -58,11 +72,17 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
       />
     </span>
   ) : null;
+  const actions = region === 'right' || collapseButton ? (
+    <>
+      {region === 'right' ? <RightPanelFillButton /> : null}
+      {collapseButton}
+    </>
+  ) : null;
 
   if (tabs.length === 0) {
     return (
       <Flexbox className={cx('dock-panel', dockTabStyles.container)}>
-        {onCollapse ? (
+        {actions ? (
           <div className={dockTabStyles.header}>
             <div className={dockTabStyles.tabs} />
             <div className={dockTabStyles.actions}>{actions}</div>

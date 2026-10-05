@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../stores/agentReducer';
+import { pathsEquivalent } from './pathUtils';
 
 /**
  * 模块级「按会话路径」消息缓存。
@@ -37,18 +38,29 @@ export function sessionSignature(messages: ChatMessage[]): string {
   }
 }
 
+/**
+ * 同一份会话的路径在事件、侧栏、getState 里可能大小写 / 分隔符不同。
+ * 精确键没命中时按等价路径再找一遍，最多 MAX_ENTRIES 条，开销可以忽略。
+ */
+function keyOf(sessionPath: string): string | undefined {
+  if (cache.has(sessionPath)) return sessionPath;
+  for (const key of cache.keys()) if (pathsEquivalent(key, sessionPath)) return key;
+  return undefined;
+}
+
 export function getCachedSession(sessionPath: string): CacheEntry | undefined {
-  const entry = cache.get(sessionPath);
-  if (entry) {
-    // LRU touch：命中后挪到末尾，最久未用的留在头部待淘汰。
-    cache.delete(sessionPath);
-    cache.set(sessionPath, entry);
-  }
+  const key = keyOf(sessionPath);
+  if (key === undefined) return undefined;
+  const entry = cache.get(key)!;
+  // LRU touch：命中后挪到末尾，最久未用的留在头部待淘汰。
+  cache.delete(key);
+  cache.set(key, entry);
   return entry;
 }
 
 export function setCachedSession(sessionPath: string, messages: ChatMessage[], sig: string): void {
-  cache.delete(sessionPath);
+  const existing = keyOf(sessionPath);
+  if (existing !== undefined) cache.delete(existing);
   cache.set(sessionPath, { messages, sig });
   while (cache.size > MAX_ENTRIES) {
     const oldest = cache.keys().next().value;
@@ -59,5 +71,6 @@ export function setCachedSession(sessionPath: string, messages: ChatMessage[], s
 
 /** 删除某会话后清掉其消息缓存，避免 showCachedSession 仍命中已删会话内容（缓存卡死）。 */
 export function invalidateCachedSession(sessionPath: string): void {
-  cache.delete(sessionPath);
+  const key = keyOf(sessionPath);
+  if (key !== undefined) cache.delete(key);
 }

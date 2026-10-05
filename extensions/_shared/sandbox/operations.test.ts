@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SandboxUnavailableError } from "./errors.js";
@@ -157,6 +160,20 @@ describe("createSandboxedBashOperations", () => {
     expect(result.exitCode).toBeNull();
     expect(text()).toMatch(/UNAVAILABLE/);
     expect(text()).toMatch(/Enable the OS runner or switch approval to 完全权限/);
+  });
+
+  it("does not tell the user to drop the sandbox when a grant fails", async () => {
+    const { ops, spawnImpl } = makeOps({
+      confine: vi.fn(async () => {
+        throw new SandboxUnavailableError("failed to grant PiSandbox access to C:/work: icacls exited 5");
+      }),
+    });
+    const { onData, text } = collectOnData();
+    const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(result.exitCode).toBeNull();
+    expect(text()).toMatch(/failed to grant PiSandbox/);
+    expect(text()).not.toMatch(/完全权限/);
   });
 
   it("records a pending denial with sessionId on exit 162", async () => {
@@ -411,6 +428,8 @@ describe("createSandboxedBashOperations", () => {
     expect(PS_UTF8_PREFIX).toContain("LanguageMode");
     expect(PS_UTF8_PREFIX).toContain("FullLanguage");
     expect(PS_UTF8_PREFIX).toContain("$env:NO_COLOR");
+    expect(PS_UTF8_PREFIX).toContain("AutoFlush = $true");
+    expect(PS_UTF8_PREFIX).toContain("[Console]::SetOut");
     expect(PS_UTF8_PREFIX).toMatch(
       /if\s*\(\s*\$ExecutionContext\.SessionState\.LanguageMode -eq 'FullLanguage'\s*\)/,
     );
@@ -425,6 +444,55 @@ describe("createSandboxedBashOperations", () => {
       ["-c", COMMAND],
       expect.objectContaining({ env: expect.objectContaining({ NO_COLOR: "1" }) }),
     );
+  });
+
+  it("sets PYTHONUNBUFFERED so piped Python output streams", async () => {
+    const { ops, spawnImpl } = makeOps({ mode: "danger-full-access" });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      SHELL,
+      ["-c", COMMAND],
+      expect.objectContaining({ env: expect.objectContaining({ PYTHONUNBUFFERED: "1" }) }),
+    );
+  });
+
+  it("keeps a caller-provided PYTHONUNBUFFERED", async () => {
+    const { ops, spawnImpl } = makeOps({ mode: "danger-full-access" });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: { PYTHONUNBUFFERED: "0" } });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      SHELL,
+      ["-c", COMMAND],
+      expect.objectContaining({ env: expect.objectContaining({ PYTHONUNBUFFERED: "0" }) }),
+    );
+  });
+
+  it("resolves the shell once and reuses it across commands", async () => {
+    const resolveShell = vi.fn(async () => SHELL);
+    const { ops } = makeOps({ mode: "danger-full-access", resolveShell });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(resolveShell).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves the shell again after the cached one fails to spawn", async () => {
+    const resolveShell = vi.fn(async () => SHELL);
+    let calls = 0;
+    const spawnImpl = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) {
+        const error = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }) as NodeJS.ErrnoException;
+        return fakeChild({ spawnError: error });
+      }
+      return fakeChild({ exitCode: 0 });
+    });
+    const { ops } = makeOps({ mode: "danger-full-access", resolveShell, spawnImpl });
+    const { onData } = collectOnData();
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(resolveShell).toHaveBeenCalledTimes(2);
   });
 
   it("strips ANSI from streamed bash output", async () => {
@@ -470,6 +538,63 @@ describe("createSandboxedBashOperations", () => {
     await ops.exec(COMMAND, CWD, { onData, env: {} });
     expect(text()).toContain("Bash/Service/CreateInstance/E_ACCESSDENIED");
     expect(text()).toContain("拒绝访问");
+  });
+
+  it("writes long-command script to workspace, not tmpdir (defect 8 regression)", async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "pi-ops-d8-"));
+    try {
+      const longCommand = "Write-Output '" + "A".repeat(500) + "'";
+      let confinedArgv: string[] = [];
+      const confine = vi.fn(async (argv: string[]) => {
+        confinedArgv = argv;
+        return confined(["runner", "--", ...argv]);
+      });
+      const spawnImpl = vi.fn(() => fakeChild({ exitCode: 0 }));
+      const opsInner = createSandboxedBashOperations({
+        getPolicy: () => ({ mode: "read-only" as const, network: "enabled" as const, workspaceRoot: workDir, sessionId: "d8" }),
+        confine,
+        spawnImpl,
+        resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        platform: "win32",
+      });
+      await opsInner.exec(longCommand, workDir, { onData: () => {}, env: {} });
+      expect(confine).toHaveBeenCalled();
+      const fileArg = confinedArgv.find((a) => a.endsWith(".ps1"));
+      expect(fileArg).toBeDefined();
+      // The script must live under the workspace root, NOT under os.tmpdir().
+      const normalWork = workDir.replace(/\//g, "\\");
+      expect(fileArg!.startsWith(normalWork)).toBe(true);
+      // It should not contain "pi-sandbox" (the old acquireTempDir prefix).
+      expect(fileArg).not.toContain("pi-sandbox");
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("cleans up the workspace script file after execution (defect 8)", async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "pi-ops-d8c-"));
+    try {
+      const longCommand = "Write-Output '" + "B".repeat(500) + "'";
+      let capturedFile: string | undefined;
+      const confine = vi.fn(async (argv: string[]) => {
+        capturedFile = argv.find((a) => a.endsWith(".ps1"));
+        return confined(["runner", "--", ...argv]);
+      });
+      const spawnImpl = vi.fn(() => fakeChild({ exitCode: 0 }));
+      const opsInner = createSandboxedBashOperations({
+        getPolicy: () => ({ mode: "read-only" as const, network: "enabled" as const, workspaceRoot: workDir, sessionId: "d8c" }),
+        confine,
+        spawnImpl,
+        resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        platform: "win32",
+      });
+      await opsInner.exec(longCommand, workDir, { onData: () => {}, env: {} });
+      // After exec returns, the temp file should have been cleaned up.
+      expect(capturedFile).toBeDefined();
+      expect(existsSync(capturedFile!)).toBe(false);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
   });
 });
 

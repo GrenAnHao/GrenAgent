@@ -348,6 +348,22 @@ describe('MemoryPanel', () => {
     rerender(<MemoryPanel userId="u" refreshToken={1} />);
     await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenCalledTimes(2));
   });
+  it('explains an empty level when the scope filter hides memories counted across all projects', async () => {
+    vi.mocked(agentDataApi.memory.overview).mockResolvedValue({ total: 625, byLevel: { L0: 0, L1: 608, L2: 17, L3: 0 } });
+    vi.mocked(agentDataApi.memory.list).mockImplementation(async (input) => (
+      input.filter.scope === 'all' ? { items: [memoryRecord] } : { items: [] }
+    ));
+    render(<MemoryPanel userId="u" />);
+    expect(await screen.findByText('625 条记忆')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /L1/ }));
+    await pickSelectOption('项目范围', '全局');
+    expect(await screen.findByText('全局范围内没有 L1 记忆。上方 L1 的 608 是全部项目的总数。')).toBeTruthy();
+    expect(screen.queryByText('暂无记忆')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看全部项目' }));
+    await waitFor(() => expect(agentDataApi.memory.list).toHaveBeenLastCalledWith({ userId: 'u', filter: { scope: 'all' }, level: 1, limit: 50 }));
+    expect(await screen.findByRole('button', { name: new RegExp(memoryRecord.content) })).toBeTruthy();
+    expect(screen.queryByText(/范围内没有 L1/)).toBeNull();
+  });
   it('merges the moved-level and out-of-filter notices when a cross-level save leaves the project filter', async () => {
     vi.mocked(agentDataApi.memory.create).mockResolvedValue({ ...memoryRecord, id: 'created', level: 1, scope: 'global', origin: 'manual' });
     render(<MemoryPanel userId="u" />); await screen.findByText('2 条记忆');

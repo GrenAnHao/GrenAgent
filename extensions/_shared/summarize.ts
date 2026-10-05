@@ -52,6 +52,8 @@ export interface SummarizeOptions {
   /** 指定模型 provider/id（覆盖 titleModel / ctx.model）。 */
   modelSpec?: string;
   signal?: AbortSignal;
+  /** 补全请求的 max_tokens。标题调用传小值，避免按模型默认输出上限计费。 */
+  maxTokens?: number;
 }
 
 /**
@@ -76,6 +78,8 @@ export async function summarize(
     model,
     {
       systemPrompt: opts.systemPrompt ?? DEFAULT_PROMPT,
+      // 摘要不是代理：不声明工具，模型只能根据这段提示词和用户文本回答。
+      tools: [],
       messages: [{ role: "user", content: text.slice(0, 4000), timestamp: Date.now() }],
     },
     {
@@ -83,6 +87,7 @@ export async function summarize(
       headers: auth.headers,
       // 类型只声明到 ThinkingLevel（不含 "off"），运行时（EXTENDED_THINKING_LEVELS）接受。
       reasoning: "off" as SimpleStreamOptions["reasoning"],
+      maxTokens: opts.maxTokens,
       signal: opts.signal,
     },
   );

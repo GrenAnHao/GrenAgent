@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   argSummary,
+  extractContentImages,
   extractText,
+  isImageFileRead,
   getDetails,
   getDiff,
   getEditTexts,
@@ -19,6 +21,22 @@ describe('toolUtils', () => {
     expect(
       extractText({ content: [{ type: 'text', text: 'line1' }, { type: 'text', text: 'line2' }] }),
     ).toBe('line1\nline2');
+  });
+
+  it('extractContentImages keeps image blocks and skips text', () => {
+    expect(
+      extractContentImages({
+        content: [
+          { type: 'text', text: 'Read image file [image/png]' },
+          { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+          { type: 'image', data: '' },
+        ],
+      }),
+    ).toEqual([{ mimeType: 'image/png', data: 'AAAA' }]);
+    expect(extractContentImages({ content: 'hello' })).toEqual([]);
+    expect(isImageFileRead('read', { content: [{ type: 'image', data: 'AAAA' }] })).toBe(true);
+    expect(isImageFileRead('read', { content: [{ type: 'text', text: 'hi' }] })).toBe(false);
+    expect(isImageFileRead('bash', { content: [{ type: 'image', data: 'AAAA' }] })).toBe(false);
   });
 
   it('extractText from string content', () => {

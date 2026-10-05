@@ -26,6 +26,7 @@ export default function (pi: ExtensionAPI) {
       if (!result.ok) {
         return {
           content: [{ type: "text", text: result.error }],
+          details: {},
           isError: true,
         };
       }

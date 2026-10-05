@@ -154,4 +154,17 @@ describe('SessionUiAdapter', () => {
     adapter.context.notify('x');
     expect(emit).not.toHaveBeenCalled();
   });
+
+  it('pendingAskUserRequestId 只指向仍在等待的 ask_user', async () => {
+    const { adapter } = makeAdapter();
+    void adapter.context.input('你的名字');
+    expect(adapter.pendingAskUserRequestId()).toBeUndefined();
+    const title = JSON.stringify({ __askUser: 1, data: { id: 'q1' } });
+    const pending = adapter.context.input(title);
+    const id = adapter.pendingAskUserRequestId();
+    expect(typeof id).toBe('string');
+    adapter.respond(id!, { value: '[我的选择]\n1. 问题：甲' });
+    await expect(pending).resolves.toBe('[我的选择]\n1. 问题：甲');
+    expect(adapter.pendingAskUserRequestId()).toBeUndefined();
+  });
 });

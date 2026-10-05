@@ -73,7 +73,9 @@ const styles = createStaticStyles(({ css }) => ({
 export function Titlebar() {
   const [maximized, setMaximized] = useState(false);
   const sidebarVisible = useLayoutStore(selectSidebarVisible);
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
+  const sidebarDrawer = useLayoutStore((s) => s.sidebarDrawer);
+  const requestSidebarToggle = useLayoutStore((s) => s.requestSidebarToggle);
+  const sidebarShown = sidebarVisible || sidebarDrawer != null;
   const activeModule = useModuleStore((s) => s.activeModule);
   const chatModule = activeModule === 'chat';
 
@@ -94,18 +96,25 @@ export function Titlebar() {
     <div data-tauri-drag-region className={styles.bar}>
       <div data-tauri-drag-region className={styles.brandRow}>
         <ActionIcon
-          icon={sidebarVisible ? PanelLeftClose : PanelLeftOpen}
+          icon={sidebarShown ? PanelLeftClose : PanelLeftOpen}
           size={{ blockSize: 28, size: 14 }}
-          title={sidebarVisible ? '收起会话列表' : '展开会话列表'}
+          title={sidebarShown ? '收起会话列表' : '展开会话列表'}
           className={styles.toggle}
           data-testid="sidebar-toggle"
           data-app-region="no-drag"
-          aria-label={sidebarVisible ? '收起会话列表' : '展开会话列表'}
-          aria-expanded={sidebarVisible}
+          aria-label={sidebarShown ? '收起会话列表' : '展开会话列表'}
+          aria-expanded={sidebarShown}
           disabled={!chatModule}
           onClick={() => {
             if (!chatModule) return;
-            toggleSidebar();
+            requestSidebarToggle();
+          }}
+          onPointerEnter={() => useLayoutStore.getState().cancelSidebarHoverClose()}
+          onPointerLeave={(event) => {
+            if (!useLayoutStore.getState().sidebarDrawer) return;
+            const next = event.relatedTarget;
+            if (next instanceof Element && next.closest('[data-sidebar-drawer]')) return;
+            useLayoutStore.getState().scheduleSidebarHoverClose();
           }}
         />
         <span data-tauri-drag-region className={styles.title}>

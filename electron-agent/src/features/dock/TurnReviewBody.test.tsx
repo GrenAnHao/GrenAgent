@@ -98,19 +98,20 @@ describe('TurnReviewBody', () => {
     const tab = reviewTab(payload);
     const view = render(<TurnReviewBody tab={tab} active />);
 
-    expect(screen.getByText('a.txt')).toBeTruthy();
-    expect(screen.getByText('b.txt')).toBeTruthy();
-    expect(screen.getByTestId('file-diff-block').textContent).toContain('hello-a');
+    // 文件名同时出现在左侧文件行和右侧 code card 标题上，按钮角色定位到文件行本身。
+    expect(screen.getByRole('button', { name: /a\.txt/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /b\.txt/ })).toBeTruthy();
+    expect(screen.getByTestId('file-diff-block').getAttribute('data-new-content')).toContain('hello-a');
 
     updateTab.mockImplementation((_id: string, patch: { payload?: ReviewPayload }) => {
       view.rerender(<TurnReviewBody tab={reviewTab({ ...payload, ...patch.payload })} active />);
     });
 
-    fireEvent.click(screen.getByText('b.txt'));
+    fireEvent.click(screen.getByRole('button', { name: /b\.txt/ }));
     expect(updateTab).toHaveBeenCalledWith('review:right', {
       payload: { ...payload, fileIndex: 1 },
     });
-    expect(screen.getByTestId('file-diff-block').textContent).toContain('hello-b');
+    expect(screen.getByTestId('file-diff-block').getAttribute('data-new-content')).toContain('hello-b');
   });
 
   it('shows missing copy when the turn is gone', () => {

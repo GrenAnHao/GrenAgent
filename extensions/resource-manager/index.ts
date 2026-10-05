@@ -7,16 +7,27 @@ import { reconcileMcpManager } from "../mcp/manager.js";
 import { probeServer } from "../mcp/probe.js";
 import { installSkill, prepareSkill, commitPreparedSkill, discardPreparedSkill } from "./skill-store.js";
 import { writeMcpServer } from "./mcp-store.js";
-import { redactSecrets, validateMcpInput, type AddMcpServerInput, type AddSkillInput } from "./validation.js";
+import { normalizeMcpInput, publicMcpView, redactSecrets, type AddMcpServerInput, type AddSkillInput } from "./validation.js";
 
 function result(text: string, details: unknown): { content: Array<{ type: "text"; text: string }>; details: unknown } { return { content: [{ type: "text", text }], details }; }
 function confirm(ctx: ExtensionContext, title: string, message: string): Promise<boolean> { return ctx.hasUI ? ctx.ui.confirm(title, message) : Promise.resolve(false); }
+// 根 schema 必须是 type:object。anyOf 联合会被 DeepSeek 等接口拒成 type:null。
 const mcpParams = Type.Object({
-  name: Type.String(), scope: Type.Union([Type.Literal("global"), Type.Literal("project")]),
-  transport: Type.Union([Type.Literal("stdio"), Type.Literal("sse")]),
-  command: Type.Optional(Type.String()), args: Type.Optional(Type.Array(Type.String())),
-  env: Type.Optional(Type.Record(Type.String(), Type.String())), cwd: Type.Optional(Type.String()),
-  url: Type.Optional(Type.String()), replace: Type.Optional(Type.Boolean()),
+  name: Type.String(),
+  scope: Type.Union([Type.Literal("global"), Type.Literal("project")]),
+  transport: Type.Union([
+    Type.Literal("stdio"),
+    Type.Literal("remote"),
+    Type.Literal("http"),
+    Type.Literal("sse"),
+  ]),
+  command: Type.Optional(Type.String({ description: "Required for stdio. Omit for remote." })),
+  args: Type.Optional(Type.Array(Type.String(), { description: "stdio only" })),
+  env: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "stdio only" })),
+  cwd: Type.Optional(Type.String({ description: "stdio only" })),
+  url: Type.Optional(Type.String({ description: "Required for remote, http, or sse." })),
+  headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Remote request headers, including Authorization." })),
+  replace: Type.Optional(Type.Boolean()),
 });
 const skillParams = Type.Object({
   name: Type.String(), source: Type.Union([
@@ -30,40 +41,56 @@ const resourceGuideline = [
   "当用户要求添加、安装或配置 MCP server 时，必须调用 add_mcp_server；不要使用 write、edit 或 bash 手动修改 mcp.json。",
   "当用户要求添加或安装 Skill 时，必须调用 add_skill；不要使用 write、edit 或 bash 手动创建 ~/.agents/skills 下的文件。",
 ];
+const mcpGuideline = [
+  ...resourceGuideline,
+  "Use add_mcp_server with transport \"remote\", url, and headers when the user gives a remote MCP. Do not pass command, args, env, or cwd for that call. Put Authorization in headers.",
+];
 
 export default function resourceManager(pi: ExtensionAPI) {
   pi.registerTool({
     name: "add_mcp_server", label: "Add MCP server",
-    description: "Add an MCP server configuration through the managed resource store. Use this whenever the user asks to add, install, or configure an MCP server; never edit mcp.json manually.",
-    promptSnippet: "添加 MCP server（自动探测、确认后写入分层配置）",
-    promptGuidelines: resourceGuideline,
+    description: "Add an MCP server. Local servers use transport stdio plus command. Remote servers use transport remote plus url and headers only; do not send command, args, env, or cwd. The URL path selects SSE or Streamable HTTP.",
+    promptSnippet: "添加 MCP server（remote 只写 url 与 headers；确认后写入分层配置）",
+    promptGuidelines: mcpGuideline,
     parameters: mcpParams,
     async execute(_id, raw, _signal, _update, ctx) {
-      const input = raw as AddMcpServerInput;
-      const error = validateMcpInput(input);
-      if (error) return result(error, { status: "error", resource: "mcp", error });
-      if (!ctx.hasUI) return result("添加 MCP 需要交互确认", { status: "error", resource: "mcp", error: "交互确认不可用" });
+      const rawInput = raw as AddMcpServerInput;
+      const normalized = normalizeMcpInput(rawInput);
+      if (!normalized.ok) {
+        const error = normalized.error;
+        return result(error, { status: "error", resource: "mcp", error, parsed: publicMcpView(rawInput), response: error });
+      }
+      const input = normalized.value.input;
+      const ignored = normalized.value.ignored;
+      const parsed = publicMcpView(input, ignored, rawInput);
+      if (!ctx.hasUI) return result("添加 MCP 需要交互确认", { status: "error", resource: "mcp", error: "交互确认不可用", parsed, response: "添加 MCP 需要交互确认" });
       const envKeys = Object.keys(input.env ?? {});
-      const summary = input.transport === "sse" ? "URL: " + input.url : "命令: " + [input.command, ...(input.args ?? [])].join(" ");
-      const ok = await confirm(ctx, "确认添加 MCP", "作用域: " + input.scope + "\n" + summary + "\n环境变量: " + (envKeys.join(", ") || "无"));
-      if (!ok) return result("用户取消添加 MCP", { status: "cancelled", resource: "mcp" });
-      const secrets = Object.values(input.env ?? {});
+      const headerKeys = Object.keys(input.headers ?? {});
+      const summary = input.transport === "stdio"
+        ? "命令: " + [input.command, ...(input.args ?? [])].join(" ") + "\n环境变量: " + (envKeys.join(", ") || "无")
+        : "传输: " + input.transport + "\nURL: " + input.url + "\n请求头: " + (headerKeys.join(", ") || "无");
+      const ignoredNote = ignored.length ? "\n已忽略（remote 不写入）: " + ignored.join(", ") : "";
+      const ok = await confirm(ctx, "确认添加 MCP", "作用域: " + input.scope + "\n" + summary + ignoredNote);
+      if (!ok) return result("用户取消添加 MCP", { status: "cancelled", resource: "mcp", parsed, response: "用户取消添加 MCP" });
+      const secrets = [...Object.values(input.env ?? {}), ...Object.values(input.headers ?? {})];
       try {
         ctx.ui.notify("正在探测 MCP server…");
-        const probe = await probeServer({ name: input.name, transport: input.transport, command: input.command, args: input.args, env: input.env, cwd: input.cwd, url: input.url });
+        const transport = input.transport === "sse" ? "sse" : input.transport === "stdio" ? "stdio" : "http";
+        const probe = await probeServer({ name: input.name, transport, command: input.command, args: input.args, env: input.env, cwd: input.cwd, url: input.url, headers: input.headers });
         if (!probe.ok) {
           const error = redactSecrets(probe.error ?? "unknown error", secrets);
           ctx.ui.notify("MCP 探测失败: " + error, "error");
-          return result("MCP 探测失败: " + error, { status: "error", resource: "mcp", error });
+          return result("MCP 探测失败: " + error, { status: "error", resource: "mcp", error, parsed, response: "MCP 探测失败: " + error });
         }
         const path = await writeMcpServer(input, ctx.cwd, undefined, getConfig("MCP_SERVERS") ?? "");
         reconcileMcpManager(currentWorkspaceContext()?.workspace ?? ctx.cwd);
         ctx.ui.notify("MCP " + input.name + " 已添加");
-        return result("已添加 MCP " + input.name, { status: "saved", resource: "mcp", name: input.name, scope: input.scope, path, connection: "connected", tools: probe.toolNames });
+        const response = "已添加 MCP " + input.name;
+        return result(response, { status: "saved", resource: "mcp", name: input.name, scope: input.scope, path, connection: "connected", tools: probe.toolNames, parsed, response });
       } catch (e) {
         const message = redactSecrets(e instanceof Error ? e.message : String(e), secrets);
         ctx.ui.notify("添加 MCP 失败: " + message, "error");
-        return result("添加 MCP 失败: " + message, { status: "error", resource: "mcp", error: message });
+        return result("添加 MCP 失败: " + message, { status: "error", resource: "mcp", error: message, parsed, response: "添加 MCP 失败: " + message });
       }
     },
   });

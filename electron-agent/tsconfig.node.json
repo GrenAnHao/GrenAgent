@@ -13,6 +13,7 @@
     "electron.vite.config.ts",
     "electron/**/*.ts",
     "src/lib/usageReport.ts",
+    "src/features/chat/skillCommandText.ts",
     "../extensions/**/*.ts",
     "../cli/src/**/*.ts"
   ],

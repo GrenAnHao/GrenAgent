@@ -24,19 +24,15 @@ const TEXT_EXT = new Set([
   'gradle', 'properties', 'dockerfile', 'makefile', 'gitignore', 'editorconfig',
 ]);
 
-// 读文本的体积上限（base64 长度，约对应 3MB 原文件）：超过则回退 `@` 引用，避免一次灌入巨量文本卡顿。
+// 读文本统计行数的体积上限（base64 长度，约对应 3MB 原文件）：超过就不解码，直接回退 `@` 引用。
 const MAX_TEXT_B64 = 4_000_000;
-
-// 「短文本」上限：超过即不直接拼进 prompt，而是落地工作区 @ 引用让 agent 按需读取，避免上下文爆炸。
-const LARGE_TEXT_CHARS = 32 * 1024;
-const LARGE_TEXT_LINES = 600;
 
 interface Options {
   editor: IEditor;
   workspace: string;
   zoneRef: RefObject<HTMLElement | null>;
   onImages: (items: ImageAttachment[]) => void;
-  /** 把拖入的文本文件内容作为「文件块」chip 暂存（发送时展开拼进消息）。 */
+  /** 拖入的文本文件暂存为引用 chip（发送时写成 `@path`）；长文本拖拽也走这里（发送时展开）。 */
   onPastedText: (text: PastedText) => void;
 }
 
@@ -104,8 +100,8 @@ function blobToBase64(blob: Blob): Promise<string> {
 
 /**
  * 监听 Electron preload 转发的拖放事件，文件以绝对路径传入。
- * 落在输入区内才处理：工作区内图片读成附件，文本文件读内容作为「文件块」chip（像粘贴长文本，
- * 发送时展开拼进消息），目录 / 工作区外 / 二进制 / 读失败回退为 `@` 引用 pill。
+ * 落在输入区内才处理：图片读成附件；文本文件不论大小都只发路径，chip 上显示文件名和行数，
+ * 发送时写成 `@path`（区内用相对路径，区外先复制到 `.pi/dropped/`）；目录 / 二进制 / 读失败回退为 `@` 引用 pill。
  * 应用内拖拽（从消息里拖选区文本 / 拖图片）也在此处理：dragstart 截存内容，drop 时插入。
  */
 export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPastedText }: Options) {
@@ -223,7 +219,7 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
         const name = baseName(normPath);
 
         // 文件（含工作区外）：读一次 binary（区内走相对路径、区外走拖放白名单），按类型分流：
-        // 图片→附件，文本→文件块 chip（区内标相对路径、区外标文件名），其余/失败→ @ 引用。
+        // 图片→附件，文本→引用 chip（只发路径，不把内容拼进消息），其余/失败→ @ 引用。
         if (!isDirectory) {
           try {
             const bin = rel
@@ -234,20 +230,13 @@ export function useTauriFileDrop({ editor, workspace, zoneRef, onImages, onPaste
               continue;
             }
             if (bin.data.length <= MAX_TEXT_B64 && isTextFile(normPath, bin.mime_type)) {
+              // 拖入文件是让 agent 去读这个文件，不是把全文塞进这条消息：一律只发路径。
+              // 内容只用来在 chip 上显示行数。
               const content = decodeText(bin.data);
-              if (content) {
-                const lines = countLines(content);
-                const chars = content.length;
-                // 短文本：嵌入内容的文件块 chip；超长文本：同位置的引用 chip（发送时 @path）。
-                if (chars <= LARGE_TEXT_CHARS && lines <= LARGE_TEXT_LINES) {
-                  onPastedText(makePastedText(content, rel ?? name));
-                  continue;
-                }
-                const refPath = rel ?? (await files.importDropped(workspace, normPath).catch(() => null));
-                if (refPath) {
-                  onPastedText(makeFileReference(refPath, { lines, chars }));
-                  continue;
-                }
+              const refPath = rel ?? (await files.importDropped(workspace, normPath).catch(() => null));
+              if (refPath) {
+                onPastedText(makeFileReference(refPath, { lines: countLines(content), chars: content.length }));
+                continue;
               }
             }
             // 二进制 / 解码失败 / 区外复制失败：回退为编辑器内 @ 引用 pill。

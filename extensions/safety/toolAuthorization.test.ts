@@ -130,6 +130,15 @@ describe('safety tool_call · host decision', () => {
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx());
     expect(result).toMatchObject({ block: true, terminate: true });
   });
+
+  it('blocks without terminating when the channel is unavailable, and does not blame a rule', async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: 'deny', auditId: undefined, unavailable: true } as never);
+    const result = await loadToolCall()({ toolName: 'read', input: { path: 'a.ts' } }, ctx());
+    expect(result).toMatchObject({ block: true });
+    expect(result).not.toHaveProperty('terminate', true);
+    expect(result?.reason).toContain('授权服务暂时没有响应');
+    expect(result?.reason).not.toContain('授权规则');
+  });
 });
 
 describe('safety tool_call · ask flow', () => {

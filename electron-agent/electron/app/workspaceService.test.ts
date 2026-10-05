@@ -1,4 +1,4 @@
-import { appendFile, mkdir, writeFile, rm, readFile, realpath } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile, rm, readFile, realpath, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
@@ -32,6 +32,33 @@ function childLines(id: string, cwd: string, parentSession: string | null): stri
 }
 
 describe('WorkspaceService', () => {
+  it('remembers a project directory that has no session file across restart', async () => {
+    const { service, agentDir } = await createService();
+    const project = await mkdtemp(join(tmpdir(), 'electron-agent-project-'));
+    directories.push(project);
+
+    const resolved = await service.ensureWorkspace(project);
+    const restarted = new WorkspaceService(agentDir);
+
+    await expect(restarted.listProjects()).resolves.toEqual([resolved]);
+    await expect(restarted.listAllSessions()).resolves.toEqual([]);
+
+    await restarted.ensureWorkspace(project);
+    await expect(restarted.listProjects()).resolves.toEqual([resolved]);
+
+    await restarted.removeProject(resolved);
+    await expect(restarted.listProjects()).resolves.toEqual([]);
+  });
+
+  it('does not remember scratch conversation directories as projects', async () => {
+    const { service } = await createService();
+    const conversation = await service.createConversation();
+
+    await service.ensureWorkspace(conversation.cwd);
+
+    await expect(service.listProjects()).resolves.toEqual([]);
+  });
+
   it('creates conversation directories below the canonical works directory', async () => {
     const { service } = await createService();
     const worksDir = await service.getWorksDir();
@@ -123,6 +150,64 @@ describe('WorkspaceService', () => {
     ].join('\n'));
 
     await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '请'.repeat(80) }]);
+  });
+
+  it('reuses the parsed record while size and mtime are unchanged, and rereads once either changes', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'cached.jsonl');
+    const header = JSON.stringify({ type: 'session', id: 'cached', cwd: 'C:/work', timestamp: '2026-10-04T00:00:00Z' });
+    // 整秒的修改时间，重写后能原样设回去。
+    const pinned = new Date('2026-10-04T00:00:00Z');
+    await writeFile(path, `${header}\n${JSON.stringify({ type: 'session_info', name: '标题甲' })}\n`);
+    await utimes(path, pinned, pinned);
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '标题甲' }]);
+
+    // 同样长度、同一个修改时间：视为同一份文件，不重读。
+    await writeFile(path, `${header}\n${JSON.stringify({ type: 'session_info', name: '标题乙' })}\n`);
+    await utimes(path, pinned, pinned);
+    expect((await stat(path)).mtimeMs).toBe(pinned.getTime());
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '标题甲' }]);
+
+    const later = new Date(pinned.getTime() + 5000);
+    await utimes(path, later, later);
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ name: '标题乙' }]);
+  });
+
+  it('does not mistake escaped markers inside tool output for session entries', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const path = join(sessionsDir, 'tooling.jsonl');
+    // 工具输出里引用了子代理标记、短调用提示和标题行，转义后不是真正的条目。
+    const quoted = [
+      JSON.stringify({ type: 'custom', customType: 'subagent_meta', data: { agentId: 'x' } }),
+      JSON.stringify({ type: 'session_info', name: '工具里的标题' }),
+      'role user\nTask kind: memory_extract\nInput: {}',
+    ].join('\n');
+    await writeFile(path, [
+      JSON.stringify({ type: 'session', id: 'tooling', cwd: 'C:/work', timestamp: '2026-10-04T00:00:00Z' }),
+      // 这两行都带未转义的 "user"，但都不是用户消息。
+      JSON.stringify({ type: 'custom', customType: 'note', data: { role: 'user' } }),
+      JSON.stringify({ type: 'message', message: { role: 'toolResult', details: { actor: 'user' }, content: [{ type: 'text', text: quoted }] } }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: '真正的第一条' } }),
+    ].join('\n'));
+
+    await expect(service.listAllSessions()).resolves.toMatchObject([{ path, name: '真正的第一条' }]);
+  });
+
+  it('hides a system-worker session whose task prompt is not the first user message', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'late.jsonl'), [
+      JSON.stringify({ type: 'session', id: 'late', cwd: 'C:/work', timestamp: '2026-10-04T00:00:00Z' }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: '先问一句' } }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content: 'Do it.\nTask kind: memory_extract\nInput: {}' } }),
+    ].join('\n'));
+
+    await expect(service.listAllSessions()).resolves.toEqual([]);
   });
 
   it('returns the latest renamed title on subsequent workspace listings', async () => {

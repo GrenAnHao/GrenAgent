@@ -1,21 +1,30 @@
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { Bot, PanelRightOpen } from 'lucide-react';
-import { memo, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { ConvStrip } from './conv/ConvStrip';
+import { ModelNameTag } from './ModelNameTag';
 import type { ConvStatus } from './conv/StatusGlyph';
 import { LazyMarkdown } from './LazyMarkdown';
+import { TaskPromptFrame } from './TaskPromptFrame';
 import {
   formatTokens,
+  backgroundRegistryStatus,
   isBackgroundSpawn,
   subAgentFinalText,
   subAgentId,
-  subAgentRoleLabel,
+  subAgentRecordStatus,
+  subAgentResultIndicatesTimeout,
+  subAgentTimeoutText,
+  displayModel,
+  modelFromResult,
+  subAgentCardTitle,
   subAgentStats,
   subAgentStepCount,
 } from '../panels/subagentUtils';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
-import { useDockStore } from '../../stores/dockStore';
+import { PendingResponseStatus } from './PendingResponseStatus';
+import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
 
@@ -42,26 +51,9 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
-  statKey: css`
-    flex: none;
-    padding: 1px 6px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 4px;
-    background: ${cssVar.colorFillTertiary};
-    font-family: ${cssVar.fontFamilyCode};
-    font-size: 11px;
-    color: ${cssVar.colorTextSecondary};
-  `,
   sectionLabel: css`
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
-  `,
-  promptBox: css`
-    overflow: auto;
-    max-height: 240px;
-    padding: 8px 12px;
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillTertiary};
   `,
   resultBox: css`
     overflow: auto;
@@ -114,46 +106,39 @@ interface SubAgentInlineProps {
   toolCallId: string;
   index: number;
   task: string;
+  /** 主代理提交的短任务名。缺省时从 task 截一句。 */
+  title?: string;
   result: unknown;
   status: 'running' | 'done' | 'error';
 }
 
 function mapRegistryStatus(status: string | undefined): ConvStatus {
   if (status === 'running') return 'running';
-  if (status === 'error' || status === 'cancelled') return 'error';
+  if (status === 'error' || status === 'cancelled' || status === 'interrupted') return 'error';
   return 'done';
-}
-
-/** 剥 markdown 的任务摘要：单行化、去标记、截断到 80 字。 */
-function taskPlain(task: string): string {
-  const oneLine = (task ?? '').replace(/\s+/g, ' ').trim();
-  const plain = oneLine.replace(/[#*_`>]/g, '').trim();
-  return plain.length > 80 ? `${plain.slice(0, 80)}…` : plain;
-}
-
-/** 终态错误首行（取首个非空行）。 */
-function errorFirstLine(text: string): string {
-  return text.split(/\r?\n/).map((l) => l.trim()).find((l) => l) ?? '';
 }
 
 /**
  * 流内内联子代理（L3 横条）：折叠头=ConvStrip 双行（角色前置 + 模型靠右 + 实时/摘要第二行，
- * 运行中左图标 hover 变停止）；展开=E1（统计头 + 打开完整对话 + 结果优先 + 指令默认折叠）。
+ * 运行中左图标 hover 变停止；点横条本体在右坞打开完整对话，折叠箭头才展开/收起）；展开=E1（统计头 + 打开完整对话 + 结果优先 + 指令默认折叠）。
  * 展开只渲染静态任务与最终结果文本，不内联回放流式 transcript（完整回放在右坞）。
  */
-function SubAgentInlineInner({ messageId, toolCallId, index, task, result, status }: SubAgentInlineProps) {
-  const { workspace } = useAgentStoreContext();
+function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result, status }: SubAgentInlineProps) {
+  const { workspace, store } = useAgentStoreContext();
   const agentId = useMemo(() => subAgentId(result), [result]);
   const background = useMemo(() => isBackgroundSpawn(result), [result]);
   const [bgStatus, setBgStatus] = useState<string | null>(background ? 'running' : null);
+  const [bgError, setBgError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
   const effectiveStatus = useMemo<ConvStatus>(() => {
     if (status === 'running') return 'running';
     if (background && bgStatus === 'running') return 'running';
     if (background && bgStatus) return mapRegistryStatus(bgStatus);
+    const child = subAgentRecordStatus(result);
+    if (child === 'error' || child === 'cancelled') return 'error';
     return status;
-  }, [status, background, bgStatus]);
+  }, [status, background, bgStatus, result]);
 
   useEffect(() => {
     if (!background || !agentId) return;
@@ -163,8 +148,10 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
       try {
         const rows = await pi.subagentList(workspace);
         if (cancelled) return;
-        const next = rows.find((r) => r.id === agentId)?.status ?? 'done';
+        const row = rows.find((r) => r.id === agentId);
+        const next = backgroundRegistryStatus(row);
         setBgStatus(next);
+        setBgError(typeof row?.error === 'string' ? row.error : null);
         if (next !== 'running' && timer) {
           clearInterval(timer);
           timer = undefined;
@@ -185,6 +172,8 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
 
   // 运行中轮询 registry 取模型与状态（通过单例 store，多卡片共享一次轮询）。
   const live = useSubAgentLive(workspace, agentId, running);
+  const seenModel = useRef<string | undefined>(undefined);
+  if (live.model) seenModel.current = live.model;
 
   const openInDock = (e?: MouseEvent) => {
     e?.stopPropagation();
@@ -192,14 +181,16 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
       messageId,
       toolCallId,
       subIndex: null,
-      title: `#${index} ${task}`,
+      title: `#${index} ${subAgentCardTitle(title, task)}`,
+      // tab 归属当前渲染这条消息的会话，切会话后不跟过去。
+      ...dockOwnerFromStore(store, workspace),
     });
   };
 
   const stop = (e: MouseEvent) => {
     e.stopPropagation();
     if (status === 'running') {
-      void pi.abort(workspace);
+      void pi.abort(workspace, store.getLoadedSessionPath());
       return;
     }
     if (agentId && (background || bgStatus === 'running')) {
@@ -220,27 +211,29 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
         .filter(Boolean)
         .join(' · ')
     : '';
+  const timedOut = subAgentResultIndicatesTimeout(result) || subAgentTimeoutText(bgError);
+  const childStatus = subAgentRecordStatus(result);
   const badge =
     effectiveStatus === 'done'
       ? `已完成${steps ? ` · ${steps} 步` : ''}`
       : effectiveStatus === 'error'
-        ? bgStatus === 'cancelled'
-          ? '已停止'
-          : `出错${steps ? ` · ${steps} 步` : ''}`
+        ? timedOut
+          ? '超时'
+          : bgStatus === 'cancelled' || childStatus === 'cancelled'
+            ? '已停止'
+            : bgStatus === 'interrupted'
+              ? '已中断'
+              : `出错${steps ? ` · ${steps} 步` : ''}`
         : '';
 
-  const role = subAgentRoleLabel(task);
-  // 模型：运行中取实时；终态取 transcript 统计；无则不显示。
-  const modelLabel = running ? live.model ?? undefined : stats?.model;
-  // 第二行任务摘要：仅在与角色不同时显示，避免与第一行角色重复。
-  const summary = role === task ? '' : taskPlain(task);
-  const line2: string = running
-    ? live.step != null
-      ? `第 ${live.step} 步 · ${live.action ?? '进行中…'}`
-      : '运行中…'
-    : [badge, effectiveStatus === 'error' && finalText ? errorFirstLine(finalText) : summary]
-        .filter(Boolean)
-        .join(' · ');
+  const role = subAgentCardTitle(title, task);
+  // 终态优先用写进工具结果的模型。内嵌子代理没有 transcript，不能等统计去扫。
+  const modelLabel = displayModel(modelFromResult(result) || (running ? live.model : undefined) || seenModel.current || stats?.model) ?? '';
+  const line2 = running ? (
+    <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
+  ) : (
+    badge || (effectiveStatus === 'error' ? '出错' : '')
+  );
 
   return (
     <div className={styles.root} data-testid="subagent-inline">
@@ -249,17 +242,18 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
         icon={Bot}
         title={`子代理 #${index}`}
         role={role}
-        model={modelLabel}
+        model={modelLabel || undefined}
         line2={line2}
         open={expanded}
         onToggle={() => setExpanded((v) => !v)}
+        onOpen={openInDock}
         onStop={running ? stop : undefined}
       />
 
       {expanded ? (
         <div className={styles.body}>
           <div className={styles.statRow}>
-            {modelLabel ? <span className={styles.statKey}>{modelLabel}</span> : null}
+            {modelLabel ? <ModelNameTag name={modelLabel} testId="subagent-inline-model" /> : null}
             <span>{running ? '运行中' : badge || '已结束'}</span>
             {statsText ? <span>· {statsText}</span> : null}
             <button type="button" className={styles.openLink} onClick={openInDock}>
@@ -286,13 +280,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, result, statu
           <button type="button" className={styles.toggleLink} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? '收起指令' : '查看指令'}
           </button>
-          {showPrompt ? (
-            <div className={styles.promptBox}>
-              <LazyMarkdown variant="chat" tone="secondary">
-                {task}
-              </LazyMarkdown>
-            </div>
-          ) : null}
+          {showPrompt ? <TaskPromptFrame text={task} /> : null}
         </div>
       ) : null}
     </div>

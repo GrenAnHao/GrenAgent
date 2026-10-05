@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 捕获事件订阅 handler + pi 命令 mock。用 vi.hoisted 确保在 vi.mock 工厂（被提升到文件顶部）执行前已初始化。
 const { eventHandlers, piMock } = vi.hoisted(() => ({
-  eventHandlers: [] as Array<(e: { workspace: string; event: unknown; source?: 'interactive' | 'goal' }) => void>,
+  eventHandlers: [] as Array<(e: { workspace: string; event: unknown; source?: 'interactive' | 'goal'; sessionPath?: string }) => void>,
   piMock: {
     excludeEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     restoreEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
@@ -21,6 +21,7 @@ const { eventHandlers, piMock } = vi.hoisted(() => ({
     writeUiHistory: vi.fn((_ws: string, _key: string, _jsonl: string) => Promise.resolve()),
     deleteUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve()),
     readAskUserDraft: vi.fn((_ws: string, _toolCallId: string) => Promise.resolve(null)),
+    readUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve('')),
   },
 }));
 vi.mock('../lib/pi', () => ({
@@ -38,12 +39,12 @@ vi.mock('@extensions/_shared/todo-model', () => ({
 
 import { createAgentStore } from './agent';
 import { clearThinkingDurationsForTest } from '../lib/thinkingDurations';
-import { getCachedSession } from '../lib/sessionMessageCache';
+import { getCachedSession, invalidateCachedSession } from '../lib/sessionMessageCache';
 import { useInlineQuestionStore } from './inlineQuestionStore';
 import type { QSData } from '../components/QuestionSelector/answers';
 
-function emit(event: unknown, source?: 'interactive' | 'goal') {
-  for (const h of eventHandlers) h({ workspace: '.', event, source });
+function emit(event: unknown, source?: 'interactive' | 'goal', sessionPath?: string) {
+  for (const h of eventHandlers) h({ workspace: '.', event, source, ...(sessionPath ? { sessionPath } : {}) });
 }
 
 describe('createAgentStore', () => {
@@ -61,6 +62,7 @@ describe('createAgentStore', () => {
     piMock.writeUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.deleteUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.readAskUserDraft.mockReset().mockResolvedValue(null);
+    piMock.readUiHistory.mockReset().mockResolvedValue('');
     useInlineQuestionStore.setState({ byWorkspace: {} });
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -492,6 +494,29 @@ describe('createAgentStore', () => {
     expect(state.messages).toHaveLength(1);
   });
 
+  it('正在跑的会话切走后，它的事件不写进当前画面', () => {
+    store = createAgentStore('.');
+    store.loadMessages([{ role: 'user', content: 'session a' }] as never, {
+      force: true,
+      sessionPath: '/s/a.jsonl',
+    });
+    store.loadMessages([{ role: 'user', content: 'session b' }] as never, {
+      force: true,
+      sessionPath: '/s/b.jsonl',
+    });
+    store.pushUserMessage('still on b');
+    emit({ type: 'agent_start' }, 'interactive', '/s/a.jsonl');
+    flushRAF();
+    expect(store.useStore.getState().isStreaming).toBe(false);
+    expect(store.useStore.getState().messages.some((m) => m.kind === 'user' && m.text === 'still on b')).toBe(true);
+
+    expect(store.showCachedSession('/s/a.jsonl')).toBe(true);
+    const back = store.useStore.getState();
+    expect(back.isStreaming).toBe(true);
+    expect(back.messages.some((m) => m.kind === 'user' && m.text === 'session a')).toBe(true);
+    expect(back.messages.some((m) => m.kind === 'user' && m.text === 'still on b')).toBe(false);
+  });
+
   it('loadMessages 首次载入用后端起底并写 UI 历史', async () => {
     store = createAgentStore('.');
     store.loadMessages([{ role: 'user', content: 'hello', timestamp: 1 }] as never, {
@@ -808,5 +833,264 @@ describe('createAgentStore', () => {
     const parsed = store.useStore.getState().messages.find((m) => m.kind === 'tool');
     expect(store.useStore.getState().toolDrafts?.[0]?.dirty).toBe(false);
     expect(parsed?.kind === 'tool' ? JSON.stringify(parsed.args).length : 0).toBeGreaterThan(1000);
+  });
+  describe('同项目两个会话同时在跑', () => {
+    const A = '/ws/two-a.jsonl';
+    const B = '/ws/two-b.jsonl';
+    const text = (body: string, ts: number) => [
+      { type: 'message_start', message: { role: 'assistant', content: [], timestamp: ts } },
+      {
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'text', text: body }], timestamp: ts },
+        assistantMessageEvent: { type: 'text_delta', delta: body },
+      },
+      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: body }], timestamp: ts } },
+    ];
+    const assistantTexts = () =>
+      store.useStore.getState().messages.flatMap((m) => (m.kind === 'assistant' ? [m.text] : []));
+    const userTexts = () =>
+      store.useStore.getState().messages.flatMap((m) => (m.kind === 'user' ? [m.text] : []));
+
+    beforeEach(() => {
+      invalidateCachedSession(A);
+      invalidateCachedSession(B);
+    });
+
+    it('草稿首发绑定 A 后新建 B，交替事件各回各的画面，来回切换都只显示自己的内容', () => {
+      store = createAgentStore('.');
+      // 草稿首发：ensureSessionForSend 落盘后绑定路径。
+      store.pushUserMessage('task A');
+      store.bindSessionPath(A);
+      expect(store.getLoadedSessionPath()).toBe(A);
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of text('answer A1', 101)) emit(ev, 'interactive', A);
+      flushRAF();
+      expect(assistantTexts()).toEqual(['answer A1']);
+
+      // 新建对话：A 停到后台；B 再从草稿首发。
+      store.reset();
+      store.pushUserMessage('task B');
+      store.bindSessionPath(B);
+      emit({ type: 'agent_start' }, 'interactive', B);
+      // 交替到达：A 的事件只进 A 的 shadow，B 的进画面。
+      for (const ev of text('answer A2', 102)) emit(ev, 'interactive', A);
+      for (const ev of text('answer B1', 201)) emit(ev, 'interactive', B);
+      flushRAF();
+      expect(userTexts()).toEqual(['task B']);
+      expect(assistantTexts()).toEqual(['answer B1']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+
+      // 切回 A：显示 A 的实时内容和流式标记，B 的内容不在。
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(userTexts()).toEqual(['task A']);
+      expect(assistantTexts()).toEqual(['answer A1', 'answer A2']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+      expect(store.hasLiveActivity()).toBe(true);
+
+      // 后端快照稍后回来：同一会话流式中，不能被快照覆盖。
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      expect(assistantTexts()).toEqual(['answer A1', 'answer A2']);
+
+      // B 在后台继续跑并结束；A 继续往画面写。
+      for (const ev of text('answer B2', 202)) emit(ev, 'interactive', B);
+      emit({ type: 'agent_end', messages: [] }, 'interactive', B);
+      emit({ type: 'agent_settled' }, 'interactive', B);
+      for (const ev of text('answer A3', 103)) emit(ev, 'interactive', A);
+      flushRAF();
+      expect(assistantTexts()).toEqual(['answer A1', 'answer A2', 'answer A3']);
+
+      // 再切到 B：只有 B 的内容，B 已经结束所以没有流式标记。
+      expect(store.showCachedSession(B)).toBe(true);
+      expect(userTexts()).toEqual(['task B']);
+      expect(assistantTexts()).toEqual(['answer B1', 'answer B2']);
+      expect(store.useStore.getState().isStreaming).toBe(false);
+
+      // A 后台结束后切回：内容完整，流式标记清掉。
+      emit({ type: 'agent_end', messages: [] }, 'interactive', A);
+      emit({ type: 'agent_settled' }, 'interactive', A);
+      flushRAF();
+      expect(assistantTexts()).toEqual(['answer B1', 'answer B2']);
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(assistantTexts()).toEqual(['answer A1', 'answer A2', 'answer A3']);
+      expect(store.useStore.getState().isStreaming).toBe(false);
+    });
+
+    it('显式给了另一个路径的 loadMessages 一律按切换处理，并把正在跑的画面停到后台', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of text('live A', 111)) emit(ev, 'interactive', A);
+      flushRAF();
+      expect(store.useStore.getState().isStreaming).toBe(true);
+
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      expect(store.getLoadedSessionPath()).toBe(B);
+      expect(userTexts()).toEqual(['task B']);
+      expect(store.useStore.getState().isStreaming).toBe(false);
+
+      for (const ev of text('more A', 112)) emit(ev, 'interactive', A);
+      flushRAF();
+      expect(assistantTexts()).toEqual([]);
+
+      // 回到 A：shadow 比后端快照新，直接显示 shadow 并接着流式。
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      expect(assistantTexts()).toEqual(['live A', 'more A']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    it('未 flush 的事件在切走时落进原会话，不丢也不串到新画面', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of text('pending A', 121)) emit(ev, 'interactive', A);
+      // 不 flush 就切走
+      store.showCachedSession(B);
+      flushRAF();
+      expect(assistantTexts()).toEqual([]);
+      store.showCachedSession(A);
+      expect(assistantTexts()).toEqual(['pending A']);
+    });
+
+    it('切走再切回还在跑的会话：正在处理的计时起点不变', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      emit({ type: 'agent_start' }, 'interactive', A);
+      flushRAF();
+      const started = store.useStore.getState().runStartedAt;
+      expect(started).toEqual(expect.any(Number));
+
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      expect(store.useStore.getState().runStartedAt).toBeUndefined();
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      expect(store.useStore.getState().isStreaming).toBe(true);
+      expect(store.useStore.getState().runStartedAt).toBe(started);
+    });
+
+    it('同一会话强制重载不换计时起点', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      store.useStore.setState({ runStartedAt: 1234 });
+      store.loadMessages([{ role: 'user', content: 'task A' }, { role: 'assistant', content: 'x' }] as never, { force: true, sessionPath: A });
+      expect(store.useStore.getState().runStartedAt).toBe(1234);
+    });
+
+    it('停靠时空闲的会话之后被唤醒（如后台子代理回报后再起子代理），事件不灌进草稿', () => {
+      store = createAgentStore('.');
+      // A 空闲时切到 B：A 没有 shadow，只留 detachedPath。
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      // 新建草稿：停靠 B，detachedPath 换成 B。
+      store.reset();
+      expect(store.getLoadedSessionPath()).toBeUndefined();
+
+      // A 被唤醒，起一个子代理。
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of text('A woke up', 131)) emit(ev, 'interactive', A);
+      emit({
+        type: 'tool_execution_start',
+        toolCallId: 'spawn-1',
+        toolName: 'spawn_agent',
+        args: { task: 'child task' },
+      }, 'interactive', A);
+      flushRAF();
+      expect(store.useStore.getState().messages).toEqual([]);
+      expect(store.useStore.getState().isStreaming).toBe(false);
+
+      // 切回 A：A 的实时内容都在。
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(userTexts()).toEqual(['task A']);
+      expect(assistantTexts()).toEqual(['A woke up']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    // 只发到流式中途：这条助手消息还没落盘，后端快照里没有它。
+    const inFlight = (body: string, ts: number) => [
+      { type: 'message_start', message: { role: 'assistant', content: [], timestamp: ts } },
+      {
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'text', text: body }], timestamp: ts },
+        assistantMessageEvent: { type: 'text_delta', delta: body },
+      },
+    ];
+    const snapshotA = [
+      { role: 'user', content: 'task A', timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: 'old answer' }], timestamp: 2 },
+    ];
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('画面没见过的会话在后台跑：先补后端快照，切回直接显示完整历史和实时尾巴', async () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      piMock.getMessages.mockResolvedValue({ messages: snapshotA });
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of inFlight('live tail', 3)) emit(ev, 'interactive', A);
+      await settle();
+      expect(piMock.getMessages).toHaveBeenCalledWith('.', A);
+
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(userTexts()).toEqual(['task A']);
+      expect(assistantTexts()).toEqual(['old answer', 'live tail']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    it('快照还没回来就切回：显示骨架，尾巴继续收事件，快照到了垫在前面', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      piMock.getMessages.mockImplementation(() => new Promise(() => {}));
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of inFlight('live', 3)) emit(ev, 'interactive', A);
+
+      expect(store.showCachedSession(A)).toBe(false);
+      emit({
+        type: 'message_update',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'live more' }], timestamp: 3 },
+        assistantMessageEvent: { type: 'text_delta', delta: ' more' },
+      }, 'interactive', A);
+      flushRAF();
+      expect(assistantTexts()).toEqual(['live more']);
+
+      store.loadMessages(snapshotA as never, { force: true, sessionPath: A });
+      expect(userTexts()).toEqual(['task A']);
+      expect(assistantTexts()).toEqual(['old answer', 'live more']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    it('历史还没到就切走：只有尾巴的画面不进缓存，也不覆盖 UI 历史，切回仍走骨架', () => {
+      store = createAgentStore('.');
+      piMock.getMessages.mockImplementation(() => new Promise(() => {}));
+      expect(store.showCachedSession(A)).toBe(false);
+      emit({ type: 'agent_start' }, 'interactive', A);
+      for (const ev of text('tail', 3)) emit(ev, 'interactive', A);
+      flushRAF();
+      expect(piMock.writeUiHistory).not.toHaveBeenCalled();
+
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      expect(getCachedSession(A)).toBeUndefined();
+      expect(store.showCachedSession(A)).toBe(false);
+      expect(assistantTexts()).toEqual(['tail']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    it('再点一次正在显示的在跑会话：内容已经在屏上，不退回骨架', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      store.pushUserMessage('go');
+      emit({ type: 'agent_start' }, 'interactive', A);
+      flushRAF();
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(userTexts()).toEqual(['task A', 'go']);
+    });
+
+    it('跟进条跟着会话走，切到另一个会话后不会被冲进去', () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      emit({ type: 'agent_start' }, 'interactive', A);
+      flushRAF();
+      store.useStore.setState({ composerQueue: [{ id: 'q1', text: 'follow A' }] });
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      expect(store.useStore.getState().composerQueue).toEqual([]);
+      store.showCachedSession(A);
+      expect(store.useStore.getState().composerQueue).toEqual([{ id: 'q1', text: 'follow A' }]);
+    });
   });
 });

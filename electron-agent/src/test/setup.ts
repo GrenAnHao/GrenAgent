@@ -13,7 +13,15 @@ configure({ asyncUtilTimeout: 5000 });
 const noop = (): void => {};
 const messageApi = { success: noop, error: noop, info: noop, warning: noop, loading: noop, open: noop, destroy: noop };
 const notificationApi = { success: noop, error: noop, info: noop, warning: noop, open: noop, destroy: noop };
-const modalApi = { confirm: noop, info: noop, success: noop, error: noop, warning: noop };
+const modalApi = {
+  confirm: (config: { onOk?: () => void }) => {
+    config.onOk?.();
+  },
+  info: noop,
+  success: noop,
+  error: noop,
+  warning: noop,
+};
 vi.spyOn(App, 'useApp').mockReturnValue({
   message: messageApi,
   notification: notificationApi,

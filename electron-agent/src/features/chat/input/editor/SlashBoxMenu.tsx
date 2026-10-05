@@ -4,6 +4,7 @@ import { Icon, LOBE_THEME_APP_ID } from '@lobehub/ui';
 import type { LucideIcon } from 'lucide-react';
 import type { ISlashMenuOption, ISlashOption } from '@lobehub/editor';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { TITLE_BAR_HEIGHT } from '../../../../components/titlebarConstants';
 
 /** 与 @lobehub/editor 的 slash/mention renderComp 约定一致。 */
 interface MenuRenderProps {
@@ -16,6 +17,14 @@ interface MenuRenderProps {
 }
 
 const MENU_GAP = 8;
+const MENU_MAX_HEIGHT = 360;
+
+/** 菜单底边贴在输入框上方。高度不能超过标题栏以下的空隙，否则会顶到窗口上沿。 */
+export function menuHeightAboveAnchor(anchorTop: number, viewportHeight: number): number {
+  const available = anchorTop - TITLE_BAR_HEIGHT - MENU_GAP * 2;
+  const preferred = Math.min(MENU_MAX_HEIGHT, viewportHeight * 0.46);
+  return Math.max(0, Math.min(preferred, available));
+}
 
 const styles = createStaticStyles(({ css }) => ({
   root: css`
@@ -36,7 +45,6 @@ const styles = createStaticStyles(({ css }) => ({
 
     overflow-y: auto;
 
-    max-height: min(46vh, 360px);
     padding: 4px;
   `,
   item: css`
@@ -107,7 +115,12 @@ function renderMenuIcon(icon: ISlashMenuOption['icon']) {
 export function createBoxMenu(anchorRef: RefObject<HTMLElement | null>): FC<MenuRenderProps> {
   const BoxMenu: FC<MenuRenderProps> = memo(
     ({ open, loading, options, activeKey, onSelect, setActiveKey }) => {
-      const [pos, setPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
+      const [pos, setPos] = useState<{
+        left: number;
+        bottom: number;
+        width: number;
+        maxHeight: number;
+      } | null>(null);
       const listRef = useRef<HTMLDivElement>(null);
 
       const portalContainer = useMemo(
@@ -126,6 +139,7 @@ export function createBoxMenu(anchorRef: RefObject<HTMLElement | null>): FC<Menu
             left: Math.round(rect.left),
             bottom: Math.round(window.innerHeight - rect.top + MENU_GAP),
             width: Math.round(rect.width),
+            maxHeight: Math.round(menuHeightAboveAnchor(rect.top, window.innerHeight)),
           });
         };
         measure();
@@ -168,7 +182,7 @@ export function createBoxMenu(anchorRef: RefObject<HTMLElement | null>): FC<Menu
           style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className={styles.scroll} ref={listRef}>
+          <div className={styles.scroll} ref={listRef} style={{ maxHeight: pos.maxHeight }}>
             {!hasItems ? (
               <div className={styles.state}>{loading ? '加载中…' : '无匹配项'}</div>
             ) : (

@@ -6,7 +6,8 @@ import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
 import { TerminalBlock } from '../chat/conv/TerminalBlock';
-import { bashRowSummary } from './bashCardModel';
+import { bashJobRef, bashRowSummary } from './bashCardModel';
+import { BashJobMeta, BashJobTerminal } from './BashJobTerminal';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
 import { todoRowCopy } from '../chat/input/todoRow';
@@ -14,16 +15,20 @@ import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
 import { FileDiffBlock } from './FileDiffBlock';
+import { StreamingCodeView } from './StreamingCodeView';
 import { StreamingFileBody } from './StreamingFileBody';
-import { streamingEditPairs, streamingWritePreview } from './streamingFileModel';
+import { exceedsHighlightBudget, streamingEditPairs, streamingEditStats, streamingWritePreview, writeContent } from './streamingFileModel';
+import { FileImageRead } from './FileImageRead';
 import { FileReadBlock } from './FileReadBlock';
 import { fileCardVerb, fileDiffModel, isFileMutation, isFileRead, mutationPath, readLineRange } from './fileDiffModel';
 import { LazyHighlighter } from './LazyHighlighter';
+import { RunDuration } from './RunDuration';
 import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
 import { renderExtensionCard } from './extensionCards';
 import {
   argSummary,
+  extractContentImages,
   extractText,
   fileNameFromPath,
   getArgString,
@@ -44,6 +49,10 @@ interface ToolExecutionProps {
   status: ConvStatus;
   /** false = 参数仍在生成。缺省视为完整。 */
   argsComplete?: boolean;
+  /** 开始执行的时刻；命令行卡片据此在标题右侧实时计时。 */
+  startedAt?: number;
+  /** 执行耗时（ms），结束后定格显示。 */
+  durationMs?: number;
 }
 
 function codeSearchPatterns(args: unknown): string {
@@ -105,6 +114,7 @@ function toolTitle(
   result: unknown,
   status: ConvStatus,
   argsStreaming = false,
+  timing: { startedAt?: number; durationMs?: number } = {},
 ): { icon: LucideIcon; name: ReactNode; args?: ReactNode; meta?: ReactNode; metaInline?: boolean } {
   const c = cardStyles;
   const lname = toolName.toLowerCase();
@@ -182,9 +192,25 @@ function toolTitle(
       ),
     };
   }
-  // bash 类：外层显示「这条命令在做什么」，展开卡片才给真实命令。
+  // bash 类：外层显示「这条命令在做什么」，展开卡片才给真实命令；时长插在工具名与描述之间。
   if (lname === 'bash' || lname === 'shell' || lname === 'run_terminal_cmd') {
-    return { icon: toolMeta(toolName).icon, name: toolName, args: bashRowSummary(args) || undefined };
+    // 转到后台的命令（run_in_background / 前台超时）：工具调用已结束，状态跟着 job 走。
+    const jobRef = status === 'running' ? null : bashJobRef(result);
+    return {
+      icon: toolMeta(toolName).icon,
+      name: (
+        <>
+          <span>{toolName}</span>
+          <RunDuration
+            startedAt={timing.startedAt}
+            durationMs={timing.durationMs}
+            running={status === 'running'}
+          />
+        </>
+      ),
+      args: bashRowSummary(args) || undefined,
+      meta: jobRef ? <BashJobMeta jobRef={jobRef} /> : undefined,
+    };
   }
 
   const { icon } = toolMeta(toolName);
@@ -194,9 +220,17 @@ function toolTitle(
     const range = verb === '读取' ? readLineRange(args) : undefined;
     const file = path ? fileNameFromPath(path) : undefined;
     if (argsStreaming && verb !== '读取') {
-      const streamingMeta = verb === '写入'
-        ? `生成中 · ${streamingWritePreview(args).totalLines} 行`
-        : `生成中 · ${streamingEditPairs(args).length} 处`;
+      let streamingMeta = `生成中 · ${streamingEditPairs(args).length} 处`;
+      if (verb === '写入') {
+        streamingMeta = `生成中 · ${streamingWritePreview(args).totalLines} 行`;
+      } else {
+        const stats = streamingEditStats(args);
+        const counts = [
+          stats.added ? `+${stats.added}` : '',
+          stats.deleted ? `-${stats.deleted}` : '',
+        ].filter(Boolean);
+        if (counts.length) streamingMeta = `生成中 · ${counts.join(' ')}`;
+      }
       return {
         icon,
         name: verb,
@@ -211,6 +245,15 @@ function toolTitle(
       args: file ? (range ? `${file} · ${range}` : file) : range,
       meta: diff ? <DiffMeta added={diff.added} deleted={diff.deleted} /> : undefined,
       metaInline: Boolean(diff),
+    };
+  }
+  if (lname === 'add_mcp_server') {
+    const server = getArgString(args, 'name') || 'MCP';
+    const transport = getArgString(args, 'transport');
+    return {
+      icon,
+      name: '添加 MCP',
+      args: transport ? `${server} · ${transport}` : server,
     };
   }
   if (lname === 'present') {
@@ -269,6 +312,17 @@ function ToolDetail({
 
   // bash：展开卡 = 命令横幅 + 流式输出（外层摘要是 description，不在这里重复命令）。
   if (name === 'bash' || name === 'shell' || name === 'run_terminal_cmd') {
+    const jobRef = status === 'running' ? null : bashJobRef(result);
+    if (jobRef) {
+      return (
+        <BashJobTerminal
+          jobRef={jobRef}
+          command={getArgString(args, 'command')}
+          cwd={workspace}
+          resultText={text}
+        />
+      );
+    }
     return (
       <TerminalBlock
         command={getArgString(args, 'command')}
@@ -281,18 +335,28 @@ function ToolDetail({
   }
 
   if (isFileRead(name)) {
+    const images = extractContentImages(result);
+    if (images.length > 0) {
+      return <FileImageRead alt={fileNameFromPath(mutationPath(args)) || '图片'} images={images} />;
+    }
     if (!text) return status === 'running' ? null : <TerminalOutput text={stringifyJson(result)} isError={isError} />;
     return <FileReadBlock path={mutationPath(args)} text={text} />;
   }
-  if (argsStreaming && isFileMutation(name)) {
-    return <StreamingFileBody toolName={toolName} args={args} />;
-  }
   if (isFileMutation(name)) {
-    const diff = fileDiffModel(toolName, args, result, status);
-    if (!diff) {
-      return text || isError ? <TerminalOutput text={text || stringifyJson(result)} isError={isError} /> : null;
+    // 写入全是新增行，生成阶段的 diff 没有信息量：先做逐行追加的代码高亮，完成后才上 diff。
+    if (argsStreaming && fileCardVerb(toolName) === '写入') {
+      const livePath = mutationPath(args);
+      const liveContent = writeContent(args);
+      if (livePath && liveContent && !exceedsHighlightBudget(liveContent)) {
+        return <StreamingCodeView content={liveContent} path={livePath} />;
+      }
     }
-    return <FileDiffBlock path={diff.path} rows={diff.rows} added={diff.added} deleted={diff.deleted} />;
+    if (argsStreaming) return <StreamingFileBody toolName={toolName} args={args} />;
+    const diff = fileDiffModel(toolName, args, result, status);
+    if (diff && diff.rows.length > 0) {
+      return <FileDiffBlock path={diff.path} rows={diff.rows} added={diff.added} deleted={diff.deleted} />;
+    }
+    return text || isError ? <TerminalOutput text={text || stringifyJson(result)} isError={isError} /> : null;
   }
 
   if (name === 'search') {
@@ -326,10 +390,16 @@ function ToolDetail({
   );
 }
 
-function ToolExecutionInner({ toolName, args, result, status, argsComplete }: ToolExecutionProps) {
+/** 运行中默认展开的只有命令行，方便看流式输出。写入和编辑保持收起。 */
+function opensWhileRunning(toolName: string): boolean {
+  const name = toolName.toLowerCase();
+  return name === 'bash' || name === 'shell' || name === 'run_terminal_cmd';
+}
+
+function ToolExecutionInner({ toolName, args, result, status, argsComplete, startedAt, durationMs }: ToolExecutionProps) {
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
-  const [expanded, setExpanded] = useState(status === 'running');
+  const [expanded, setExpanded] = useState(status === 'running' && opensWhileRunning(toolName));
   const bareName = toolName.toLowerCase();
   const isShell = bareName === 'bash' || bareName === 'shell' || bareName === 'run_terminal_cmd';
   const argsStreaming = status === 'running' && argsComplete === false;
@@ -418,7 +488,7 @@ function ToolExecutionInner({ toolName, args, result, status, argsComplete }: To
     }
   }
 
-  const title = toolTitle(toolName, args, result, status, argsStreaming);
+  const title = toolTitle(toolName, args, result, status, argsStreaming, { startedAt, durationMs });
   const canExpand = hasDetail;
 
   return (

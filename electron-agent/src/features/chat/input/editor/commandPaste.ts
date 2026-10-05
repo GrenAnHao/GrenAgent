@@ -1,4 +1,5 @@
 import type { PiCommand } from '../commandTypes';
+import { parseQuotedSkillToken } from '../../skillCommandText';
 import type { ChatTagData } from './ChatTag/types';
 
 /**
@@ -11,6 +12,7 @@ import type { ChatTagData } from './ChatTag/types';
  * 匹配规则：
  * - 去掉前导空白后必须以 `/` 开头；
  * - 命令名为 `[A-Za-z0-9_:-]+`（冒号用于 `skill:` 前缀命令）；
+ * - 含空白的技能名写成 `/skill:"name"`，引号内整段都是名字；
  * - 命令名之后必须是字符串结尾或一个空白字符——`/foo/bar` 因第二段非空白开头被排除。
  *
  * 返回的 rest 已去除命令名与参数之间的前导空白；命令是否真实存在由调用方校验。
@@ -24,6 +26,9 @@ export interface ParsedCommandToken {
 const COMMAND_TOKEN = /^\/([A-Za-z0-9_:-]+)([\s\S]*)$/;
 
 export function parseCommandToken(text: string): ParsedCommandToken | null {
+  const quoted = parseQuotedSkillToken(text);
+  if (quoted) return quoted;
+
   const match = text.trimStart().match(COMMAND_TOKEN);
   if (!match) return null;
 

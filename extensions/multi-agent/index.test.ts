@@ -125,7 +125,9 @@ type Execute = (
   id: string,
   params: Record<string, unknown>,
   signal: AbortSignal | null,
-  onUpdate: null,
+  onUpdate:
+    | ((update: { content?: unknown; details?: Record<string, unknown> }) => void)
+    | null,
   ctx: { cwd: string; model?: { provider?: string; id?: string } },
 ) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown>; isError?: boolean }>;
 
@@ -258,6 +260,35 @@ describe("spawn_agent · named agent infers capability profile", () => {
 
 // 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
 // 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
+describe("spawn_agent · early parallel start", () => {
+  it("starts a closed task from the argument stream before execute", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const { handlers, execute } = loadSpawnHarness();
+    await handlers.message_update?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "toolcall_start", contentIndex: 3, id: "call_p", toolName: "spawn_agent" },
+      } as never,
+      ctx as never,
+    );
+    await handlers.message_update?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "toolcall_delta", contentIndex: 3, delta: '{"tasks":["review server"],' },
+      } as never,
+      ctx as never,
+    );
+    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls[0]?.[0]?.task).toBe("review server");
+    await execute("call_p", { tasks: ["review server", "review desktop"] }, null, null, ctx);
+    expect(runEmbeddedSubagent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runEmbeddedSubagent).mock.calls.map((c) => c[0]?.task).sort()).toEqual([
+      "review desktop",
+      "review server",
+    ]);
+  });
+});
+
 describe("spawn_agent · parallel resilience (one failing task does not abort siblings)", () => {
   it("records the bad-agent task as failed and still completes the others", async () => {
     const r = await loadSpawnAgent()(
@@ -318,6 +349,68 @@ describe("spawn_agent · embedded session child", () => {
     expect(runEmbeddedSubagent).not.toHaveBeenCalled();
   });
 
+  it("starts every requested parallel task at once instead of holding the rest behind a cap of 4", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started = 0;
+    vi.mocked(runEmbeddedSubagent).mockImplementation(async () => {
+      started += 1;
+      await gate;
+      return {
+        ok: true,
+        output: "x",
+        exitCode: 0,
+        transcript: "",
+        sessionPath: "/tmp/x.jsonl",
+        stopReason: "completed" as const,
+      };
+    });
+    const pending = loadSpawnAgent()("tp5", { tasks: ["a", "b", "c", "d", "e"] }, null, null, ctx);
+    await vi.waitFor(() => expect(started).toBe(5));
+    release();
+    const r = await pending;
+    expect(r.details?.count).toBe(5);
+  });
+
+  it("publishes each parallel unit sessionPath before the batch finishes", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const updates: Array<{ details?: { results?: Array<{ task?: string; agentId?: string; sessionPath?: string }> } }> = [];
+    vi.mocked(runEmbeddedSubagent).mockImplementation(async (opts) => {
+      opts.onUpdate?.({ text: "", transcript: "", sessionPath: `/tmp/${opts.task}.jsonl` });
+      await gate;
+      return {
+        ok: true,
+        output: `out-${opts.task}`,
+        exitCode: 0,
+        transcript: "",
+        sessionPath: `/tmp/${opts.task}.jsonl`,
+        stopReason: "completed" as const,
+      };
+    });
+    const pending = loadSpawnAgent()(
+      "tp-live",
+      { tasks: ["A", "B"] },
+      null,
+      (update) => {
+        updates.push(update as (typeof updates)[number]);
+      },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      const paths = updates.at(-1)?.details?.results?.map((row) => row.sessionPath);
+      expect(paths).toEqual(["/tmp/A.jsonl", "/tmp/B.jsonl"]);
+    });
+    release();
+    await pending;
+  });
+
   it("gives each parallel unit its own sessionPath", async () => {
     vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
     vi.mocked(runEmbeddedSubagent).mockImplementation(async (opts) => ({
@@ -365,6 +458,23 @@ describe("spawn_agent · embedded session child", () => {
 
 // 单会话最大子代理数：本次请求数 + 会话已累计超过上限时，整次 spawn 在实际启动前被拒。
 describe("spawn_agent · 单会话上限 (SUBAGENT_MAX_PER_SESSION)", () => {
+  it("一次性任务结束后释放名额，下一次可以再启动", async () => {
+    vi.mocked(getConfig).mockImplementation((k: string) => (k === "SUBAGENT_MAX_PER_SESSION" ? "1" : undefined));
+    const capCtx = { cwd: process.platform === "win32" ? "D:\\caprelease" : "/caprelease" };
+    await loadSpawnAgent()("t1", { task: "a" }, null, null, capCtx);
+    await expect(loadSpawnAgent()("t2", { task: "b" }, null, null, capCtx)).resolves.toMatchObject({
+      details: expect.objectContaining({ agentId: "sa_test" }),
+    });
+  });
+
+  it("可继续的子代理在收尾前仍占着名额", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(getConfig).mockImplementation((k: string) => (k === "SUBAGENT_MAX_PER_SESSION" ? "1" : undefined));
+    const capCtx = { cwd: process.platform === "win32" ? "D:\\capkeep" : "/capkeep" };
+    await loadSpawnAgent()("t1", { task: "a", action: "spawn" }, null, null, capCtx);
+    await expect(loadSpawnAgent()("t2", { task: "b" }, null, null, capCtx)).rejects.toThrow("已达单会话子代理上限");
+  });
+
   it("超过上限时拒绝新 spawn 并提示去设置调整", async () => {
     vi.mocked(getConfig).mockImplementation((k: string) => (k === "SUBAGENT_MAX_PER_SESSION" ? "2" : undefined));
     // 独立 cwd → 独立 sessionKey，避免与其它测试的模块级累计计数相互污染。
@@ -479,6 +589,43 @@ describe("spawn_agent · parent catalog write", () => {
     expect(appendEntry.mock.calls.map((c) => (c[1] as { sessionPath: string }).sessionPath)).toEqual([
       "/tmp/step-1.jsonl",
       "/tmp/step-2.jsonl",
+    ]);
+  });
+
+  it("publishes each chain step model up front and keeps it after the step finishes", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    vi.mocked(runEmbeddedSubagent).mockImplementation(async (opts) => {
+      opts.onUpdate?.({ text: "", transcript: "", sessionPath: `/tmp/${opts.task}.jsonl` });
+      return {
+        ok: true,
+        output: `out-${opts.task}`,
+        exitCode: 0,
+        transcript: "",
+        sessionPath: `/tmp/${opts.task}.jsonl`,
+        stopReason: "completed" as const,
+      };
+    });
+    const updates: Array<{ results?: Array<{ status?: string; model?: string }> }> = [];
+    const { execute } = loadSpawnHarness();
+    const r = await execute(
+      "tc-model",
+      { chain: [{ task: "first" }, { task: "second" }] },
+      null,
+      (u) => {
+        if (u.details) updates.push(u.details as { results?: Array<{ status?: string; model?: string }> });
+      },
+      { ...ctx, model: { provider: "deepseek", id: "deepseek-v4-flash" } },
+    );
+    expect(updates[0]?.results?.map((step) => step.status)).toEqual(["starting", "waiting"]);
+    expect(updates[0]?.results?.map((step) => step.model)).toEqual([
+      "deepseek/deepseek-v4-flash",
+      "deepseek/deepseek-v4-flash",
+    ]);
+    expect(updates.some((u) => u.results?.map((step) => step.status).join() === "done,waiting")).toBe(true);
+    const results = (r.details?.results ?? []) as Array<{ model?: string }>;
+    expect(results.map((step) => step.model)).toEqual([
+      "deepseek/deepseek-v4-flash",
+      "deepseek/deepseek-v4-flash",
     ]);
   });
 
@@ -945,6 +1092,46 @@ describe("spawn_agent · one-shot background via jobs", () => {
     expect(jobs.read).toHaveBeenCalledWith("subagent-1", expect.any(String), expect.objectContaining({ wait: true }));
     expect(r.content[0].text).toContain("job-out");
     expect(r.content[0].text.split("job-out").length - 1).toBe(1);
+    expect(r.content[0].text).not.toContain("Task:");
+    expect(r.details).toMatchObject({ agentId: "sa_test", task: "x" });
+  });
+
+  it("status returns the child output without echoing the task", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const task = "你在做任务 6 的代码质量审查。只读审查，不要修改任何文件。\n\n一步（规格审查）的结论：\nSPEC_PASS";
+    const h = loadSpawnHarness();
+    await h.execute("t", { task }, null, null, ctx);
+    const status = await h.execute("s", { action: "status", agentId: "sa_test" }, null, null, ctx);
+    expect(status.content[0].text).toBe("agent sa_test: done\n\nembedded-out");
+    expect(status.content[0].text).not.toContain(task);
+    expect(status.details).toMatchObject({ agentId: "sa_test", task });
+  });
+
+  it("list returns child output and leaves the task out of the text", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const task = "你在做任务 7 的代码质量审查。只读审查，不要修改任何文件。\n\n前一步（规格审查）的结论：\nSPEC_PASS";
+    const h = loadSpawnHarness();
+    await h.execute("t", { task }, null, null, ctx);
+    const listed = await h.execute("l", { action: "list" }, null, null, ctx);
+    expect(listed.content[0].text).toContain("sa_test  [done]");
+    expect(listed.content[0].text).toContain("embedded-out");
+    expect(listed.content[0].text).not.toContain("SPEC_PASS");
+    expect(listed.content[0].text).not.toContain("不要修改任何文件");
+    const agents = listed.details?.agents as Array<{ task: string; output: string | null }>;
+    expect(agents[0]?.task).toBe(task);
+    expect(agents[0]?.output).toBe("embedded-out");
+  });
+
+  it("parallel result text does not repeat each task", async () => {
+    vi.mocked(canUseEmbeddedSubagent).mockReturnValue(true);
+    const task = "你在做任务 6 的代码质量审查。只读审查，不要修改任何文件。";
+    const r = await loadSpawnAgent()("tp-echo", { tasks: [task, "第二项"] }, null, null, ctx);
+    expect(r.content[0].text).not.toContain(task);
+    expect(r.content[0].text).not.toContain("Task:");
+    expect(r.content[0].text).toContain("## Sub-agent 1");
+    expect(r.content[0].text).toContain("embedded-out");
+    const results = r.details?.results as Array<{ task: string }>;
+    expect(results[0]?.task).toBe(task);
   });
 
   it("mode one-shot with tasks/chain/worktree is rejected", async () => {

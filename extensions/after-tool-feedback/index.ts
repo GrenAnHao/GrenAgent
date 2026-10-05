@@ -35,10 +35,9 @@ export default function (pi: ExtensionAPI) {
       const fresh = diffNewDiagnostics(lastByFile.get(paths[0]) ?? [], forFile);
       lastByFile.set(paths[0], forFile);
       if (fresh.length === 0) return undefined;
-      const structured = (event as { structuredContent?: unknown }).structuredContent;
       return {
-        content: patchContent(event.content, renderDiagnostics(fresh, maxLines())),
-        ...(structured !== undefined ? { structuredContent: structured } : {}),
+        content: patchContent(event.content, renderDiagnostics(fresh, maxLines())) as typeof event.content,
+        ...(event.structuredContent !== undefined ? { structuredContent: event.structuredContent } : {}),
       };
     } catch (e) {
       // fail-soft：诊断失败绝不改/阻断 tool result。

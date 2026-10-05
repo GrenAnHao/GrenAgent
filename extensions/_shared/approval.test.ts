@@ -93,3 +93,32 @@ describe("getApprovalPolicy 分键", () => {
     expect(hasApprovalPolicy("D:/b")).toBe(false);
   });
 });
+
+describe("getApprovalPolicy 按会话", () => {
+  it("会话档优先于项目默认，未写过的会话回退项目默认", () => {
+    setApprovalPolicy("auto", "D:/a");
+    setApprovalPolicy("full", "D:/a", "s1");
+    setApprovalPolicy("readonly", "D:/a", "s2");
+    expect(getApprovalPolicy("D:/a", "s1")).toBe("full");
+    expect(getApprovalPolicy("D:/a", "s2")).toBe("readonly");
+    expect(getApprovalPolicy("D:/a", "s3")).toBe("auto");
+    expect(hasApprovalPolicy("D:/a", "s3")).toBe(false);
+  });
+
+  it("改项目默认不影响已钉住的会话", () => {
+    setApprovalPolicy("ask", "D:/a", "s1");
+    setApprovalPolicy("full", "D:/a");
+    expect(getApprovalPolicy("D:/a", "s1")).toBe("ask");
+  });
+
+  it("无参时读 ALS 里的 sessionId", async () => {
+    setApprovalPolicy("auto", "D:/a");
+    setApprovalPolicy("readonly", "D:/a", "s1");
+    await runInWorkspace(
+      { origin: "main", workspace: "D:/a", cwd: "D:/a", config: {}, sessionId: () => "s1" },
+      async () => {
+        expect(getApprovalPolicy()).toBe("readonly");
+      },
+    );
+  });
+});

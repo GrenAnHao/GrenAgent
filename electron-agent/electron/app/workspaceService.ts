@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { releaseChildForDelete, releaseSubagentControlPlane } from '../../../extensions/multi-agent/controlPlane.js';
 import { readSubagentSessionMeta, type SubagentSessionMeta } from './subagentSession.js';
 import { isSystemWorkerSessionLines } from './systemWorkerSession.js';
+import { readFirstLine } from './sessionIdentity.js';
+import { firstLineOf, forEachLineContaining, linesContaining } from './sessionLineScan.js';
 
 export interface SessionInfo {
   id: string;
@@ -22,6 +24,13 @@ interface SessionRecord {
   subagent?: SubagentSessionMeta;
 }
 
+/** 同一份文件（大小、修改时间都没变）只解析一次；并发的扫描共用同一个 promise。 */
+interface CachedRecord {
+  size: number;
+  mtimeMs: number;
+  record: Promise<SessionRecord | null>;
+}
+
 interface ChildSession {
   path: string;
   /** 用来被孙级 parentSession 命中的归一化拼法：原路径 + realpath。 */
@@ -35,6 +44,7 @@ export class WorkspaceService {
   private readonly worksDir: string;
   private readonly sessionsDir: string;
   private readonly drafts = new Set<string>();
+  private readonly records = new Map<string, CachedRecord>();
   private closeWorkspace?: (workspace: string) => Promise<void>;
 
   constructor(agentDir: string) {
@@ -63,7 +73,10 @@ export class WorkspaceService {
 
   async ensureWorkspace(workspace: string): Promise<string> {
     try {
-      return displayPath(await realpath(workspace));
+      const resolved = displayPath(await realpath(workspace));
+      // Pi 在第一条助手消息之前不写 session jsonl。没对话的项目只能靠这里记住，否则重启后侧栏扫不到目录。
+      await this.rememberProject(resolved);
+      return resolved;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       const worksDir = await this.getWorksDir();
@@ -73,15 +86,43 @@ export class WorkspaceService {
     }
   }
 
+  /** 已打开、但可能还没有任何会话文件的项目目录。重启后侧栏靠这份登记恢复。 */
+  async listProjects(): Promise<string[]> {
+    const saved = await this.readProjectRegistry();
+    const existing: string[] = [];
+    let dropped = false;
+    for (const project of saved) {
+      try {
+        const info = await stat(project);
+        if (!info.isDirectory()) {
+          dropped = true;
+          continue;
+        }
+        existing.push(displayPath(await realpath(project)));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') dropped = true;
+        else existing.push(project);
+      }
+    }
+    if (dropped) await this.writeProjectRegistry(existing);
+    return existing;
+  }
+
   async listAllSessions(): Promise<SessionInfo[]> {
     const files = await collectJsonlFiles(this.sessionsDir);
-    const sessions = (await Promise.all(files.map((path) => readSession(path)))).filter((session): session is SessionInfo => session !== null);
+    this.forgetRecordsExcept(files);
+    const sessions = (await Promise.all(files.map((path) => this.readSession(path)))).filter((session): session is SessionInfo => session !== null);
     return sessions.filter((session) => session.cwd !== null).sort((left, right) => (right.timestamp ?? '').localeCompare(left.timestamp ?? ''));
   }
 
   async listSessions(workspace: string): Promise<SessionInfo[]> {
-    const sessions = await this.listAllSessions();
-    return sessions.filter((session) => session.cwd !== null && pathsEquivalent(session.cwd, workspace));
+    // 先只看头一行筛掉别的项目，再逐行解析剩下的。全量解析所有项目的会话会在主进程里干耗几百毫秒。
+    const files = await collectJsonlFiles(this.sessionsDir);
+    const candidates = await Promise.all(files.map(async (path) => (await headerMayBelongTo(path, workspace) ? path : null)));
+    const sessions = await Promise.all(candidates.filter((path): path is string => path !== null).map((path) => this.readSession(path)));
+    return sessions
+      .filter((session): session is SessionInfo => session !== null && session.cwd !== null && pathsEquivalent(session.cwd, workspace))
+      .sort((left, right) => (right.timestamp ?? '').localeCompare(left.timestamp ?? ''));
   }
 
   async pruneOrphanConversations(keep: string[]): Promise<number> {
@@ -130,6 +171,7 @@ export class WorkspaceService {
 
   async removeProject(workspace: string): Promise<void> {
     await this.deleteSessionsForWorkspace(workspace);
+    await this.forgetProject(workspace);
   }
 
   async setSessionDisplayName(sessionPath: string, name: string): Promise<void> {
@@ -139,7 +181,7 @@ export class WorkspaceService {
     const root = await realpath(sessionsRoot).catch(() => { throw new Error('sessions directory unavailable'); });
     const target = await realpath(sessionPath).catch(() => { throw new Error('session file not found'); });
     if (!isWithin(root, target) || !target.endsWith('.jsonl')) throw new Error('session file not in sessions directory');
-    const info = await readSession(target);
+    const info = await this.readSession(target);
     if (!info) throw new Error('SESSION_NOT_FOUND');
     await appendFile(target, `${JSON.stringify({ type: 'session_info', name: trimmed })}\n`);
   }
@@ -149,7 +191,7 @@ export class WorkspaceService {
     const root = await realpath(sessionsRoot).catch(() => { throw new Error('sessions directory unavailable'); });
     const target = await realpath(sessionPath).catch(() => { throw new Error('session file not found'); });
     if (!isWithin(root, target) || !target.endsWith('.jsonl')) throw new Error('session file not in sessions directory');
-    const info = await readSession(target); if (!info || !info.cwd || !pathsEquivalent(info.cwd, workspace)) throw new Error('session does not belong to workspace');
+    const info = await this.readSession(target); if (!info || !info.cwd || !pathsEquivalent(info.cwd, workspace)) throw new Error('session does not belong to workspace');
     const children = await this.childSessionsIn(workspace);
     // 子会话 parentSession 是 SDK 落盘写法，与调用方传入 / realpath 后的拼法都可能不同，两者都作根。
     await this.removeChildSessions(workspace, descendantsLeafFirst(children, [sessionPath, target]));
@@ -200,9 +242,79 @@ export class WorkspaceService {
     return Promise.all(records.filter((record) => record.subagent).map((record) => toChildSession(record)));
   }
 
+  private projectsPath(): string {
+    return join(this.agentDir, 'opened-projects.json');
+  }
+
+  private async rememberProject(workspace: string): Promise<void> {
+    const worksDir = await this.getWorksDir();
+    if (isUnderPath(worksDir, workspace)) return;
+    const projects = await this.readProjectRegistry();
+    if (projects.some((project) => pathsEquivalent(project, workspace))) return;
+    await this.writeProjectRegistry([...projects, workspace]);
+  }
+
+  private async forgetProject(workspace: string): Promise<void> {
+    const projects = await this.readProjectRegistry();
+    const next = projects.filter((project) => !pathsEquivalent(project, workspace));
+    if (next.length === projects.length) return;
+    await this.writeProjectRegistry(next);
+  }
+
+  private async readProjectRegistry(): Promise<string[]> {
+    try {
+      const parsed = JSON.parse(await readFile(this.projectsPath(), 'utf8')) as { projects?: unknown };
+      if (!Array.isArray(parsed.projects)) return [];
+      return parsed.projects.filter((project): project is string => typeof project === 'string' && project.trim().length > 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      return [];
+    }
+  }
+
+  private async writeProjectRegistry(projects: string[]): Promise<void> {
+    await writeFile(this.projectsPath(), JSON.stringify({ projects }), 'utf8');
+  }
+
   private async sessionRecordsIn(workspace: string): Promise<SessionRecord[]> {
-    const records = await Promise.all((await collectJsonlFiles(this.sessionsDir)).map((path) => readSessionRecord(path)));
+    const files = await collectJsonlFiles(this.sessionsDir);
+    this.forgetRecordsExcept(files);
+    const records = await Promise.all(files.map((path) => this.readSessionRecord(path)));
     return records.filter((record): record is SessionRecord => Boolean(record?.info.cwd && pathsEquivalent(record.info.cwd, workspace)));
+  }
+
+  /** 列表 / 单会话操作用：隐藏会话视同不存在。 */
+  private async readSession(path: string): Promise<SessionInfo | null> {
+    const record = await this.readSessionRecord(path);
+    // 缓存里的对象会交给下一次扫描，调用方拿到的是副本。
+    return record && !record.hidden ? { ...record.info } : null;
+  }
+
+  /**
+   * 侧栏每次刷新都要扫全部会话，启动时一连好几次。文件没变就复用上次的结果，只花一次 stat。
+   * 先 stat 再读：读到的内容只会比 stat 时更新，下次 stat 发现变了会重读，不会把旧内容当新的。
+   */
+  private async readSessionRecord(path: string): Promise<SessionRecord | null> {
+    const info = await stat(path);
+    const cached = this.records.get(path);
+    if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) return cached.record;
+    const record = parseSessionRecord(path);
+    const entry: CachedRecord = { size: info.size, mtimeMs: info.mtimeMs, record };
+    this.records.set(path, entry);
+    // 读失败不留缓存：文件可能正被删除或替换，下次重新读。
+    record.catch(() => {
+      if (this.records.get(path) === entry) this.records.delete(path);
+    });
+    return record;
+  }
+
+  /** 全量扫描时顺手丢掉已删除文件的缓存。 */
+  private forgetRecordsExcept(files: string[]): void {
+    if (this.records.size === 0) return;
+    const present = new Set(files);
+    for (const path of this.records.keys()) {
+      if (!present.has(path)) this.records.delete(path);
+    }
   }
 }
 
@@ -277,41 +389,52 @@ async function collectJsonlFiles(directory: string): Promise<string[]> {
   return descendants.flat();
 }
 
-/** 列表 / 单会话操作用：隐藏会话视同不存在。 */
-async function readSession(path: string): Promise<SessionInfo | null> {
-  const record = await readSessionRecord(path);
-  return record && !record.hidden ? record.info : null;
+/**
+ * 头一行是带 cwd 的 session 头时按它判断归属；没有头、读不出或解析失败的交给完整解析，
+ * 规则和 parseSessionRecord 一致（它会按路径推断 cwd）。
+ */
+async function headerMayBelongTo(path: string, workspace: string): Promise<boolean> {
+  let header: Record<string, unknown> | null = null;
+  try {
+    header = JSON.parse(await readFirstLine(path)) as Record<string, unknown> | null;
+  } catch {
+    return true;
+  }
+  if (header?.type !== 'session') return true;
+  return typeof header.cwd === 'string' && pathsEquivalent(header.cwd, workspace);
 }
 
-async function readSessionRecord(path: string): Promise<SessionRecord | null> {
-  const lines = (await readFile(path, 'utf8')).split(/\r?\n/);
+/**
+ * 只解析可能有用的行：标题（`"session_info"`）、首条用户消息（`"user"`）、
+ * 子代理标记（`"subagent_meta"`）、旧短调用提示（JSON 里转义成 `\nTask kind: `）。
+ * 这些标记都是对应判据的必要条件，命中的行仍按原规则判定，结果与逐行全量解析相同。
+ */
+async function parseSessionRecord(path: string): Promise<SessionRecord | null> {
+  const buffer = await readFile(path);
   let header: Record<string, unknown> | undefined;
   try {
-    header = JSON.parse(lines[0]) as Record<string, unknown>;
+    header = JSON.parse(firstLineOf(buffer)) as Record<string, unknown>;
   } catch {
     /* not JSON — fall through to path-based inference */
   }
 
-  let name: string | null = null;
-  let firstUser: string | null = null;
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown> | null;
-      if (!entry) continue;
-      if (entry.type === 'session_info' && typeof entry.name === 'string' && entry.name.trim()) {
-        name = entry.name.trim();
-      } else if (!firstUser && entry.type === 'message') {
-        const text = firstUserTextFromEntry(entry);
-        if (text) firstUser = text;
-      }
-    } catch {
-      /* Ignore malformed entries, including a partially written last line. */
-    }
-  }
+  // 在回调里赋值：用 as 声明，免得 TS 把它们收窄成 null。
+  let name = null as string | null;
+  forEachLineContaining(buffer, '"session_info"', (line) => {
+    const entry = parseEntry(line);
+    if (entry?.type === 'session_info' && typeof entry.name === 'string' && entry.name.trim()) name = entry.name.trim();
+  });
+  let firstUser = null as string | null;
+  forEachLineContaining(buffer, '"user"', (line) => {
+    const entry = parseEntry(line);
+    if (entry?.type !== 'message') return false;
+    firstUser = firstUserTextFromEntry(entry);
+    return firstUser !== null;
+  });
   if (!name && firstUser) name = firstUser;
 
-  const meta = readSubagentSessionMeta(lines);
-  const hidden = meta !== undefined || isSystemWorkerSessionLines(lines);
+  const meta = readSubagentSessionMeta(linesContaining(buffer, '"subagent_meta"'));
+  const hidden = meta !== undefined || isSystemWorkerSessionLines(linesContaining(buffer, '\\nTask kind: '));
   const headerParent = typeof header?.parentSession === 'string' && header.parentSession.trim() ? header.parentSession : null;
   const subagent = meta ? { ...meta, parentSession: meta.parentSession ?? headerParent } : undefined;
 
@@ -397,9 +520,25 @@ function inferIdFromFilename(sessionFilePath: string): string {
   return match ? match[1] : '';
 }
 
+function isUnderPath(root: string, candidate: string): boolean {
+  const parent = normalizePath(root);
+  const child = normalizePath(candidate);
+  return child === parent || child.startsWith(`${parent}/`);
+}
+
 function isDirectChild(parent: string, candidate: string): boolean {
   const relative = normalizePath(candidate).slice(normalizePath(parent).length).replace(/^\/+/, '');
   return relative.length > 0 && !relative.includes('/');
+}
+
+/** 坏行（含写了一半的末行）当作不存在。 */
+function parseEntry(line: string): Record<string, unknown> | null {
+  try {
+    const entry = JSON.parse(line) as unknown;
+    return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 const SIDEBAR_TITLE_MAX = 80;

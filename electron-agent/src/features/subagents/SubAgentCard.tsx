@@ -115,11 +115,13 @@ function statusMeta(status: string) {
 
 interface SubAgentCardProps {
   item: SubAgentItem;
+  /** 主代理提交的短任务名。缺省时显示 registry 里的任务原文。 */
+  label?: string;
   onOpen: () => void;
   onStop: () => void;
 }
 
-export function SubAgentCard({ item, onOpen, onStop }: SubAgentCardProps) {
+export function SubAgentCard({ item, label, onOpen, onStop }: SubAgentCardProps) {
   const type = useMemo(() => parseSubAgentType(item.profile), [item.profile]);
   const sm = statusMeta(item.status);
   const running = item.status === 'running';
@@ -146,7 +148,7 @@ export function SubAgentCard({ item, onOpen, onStop }: SubAgentCardProps) {
       </Block>
       <div className={styles.main}>
         <span className={styles.title} title={item.task}>
-          {item.task || '子代理任务'}
+          {label || item.task || '子代理任务'}
         </span>
         <div className={styles.meta}>
           <span className={styles.pill} title={`预设：${type.preset}`}>

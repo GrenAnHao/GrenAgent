@@ -1,7 +1,7 @@
 import { ActionIcon, Icon, Mermaid as LobeMermaid } from '@lobehub/ui';
 import type { MenuProps } from 'antd';
 import { ConfigProvider, Dropdown } from 'antd';
-import { createStaticStyles, cssVar, cx, useTheme } from 'antd-style';
+import { createStaticStyles, cssVar, useTheme } from 'antd-style';
 import { renderMermaidSVG, THEMES } from 'beautiful-mermaid';
 import { Braces, Check, Copy, FileCode, FileImage, Loader2, Sparkles, TriangleAlert } from 'lucide-react';
 import { Component, memo, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
@@ -10,6 +10,7 @@ import { pi } from '../../lib/pi';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useMermaidFixStore } from '../../stores/mermaidFixStore';
 import { autoFixMermaid } from './mermaidAutofix';
+import { MermaidLoading, mermaidBoxStyles } from './MermaidLoading';
 import { sanitizeMermaidCode } from './sanitizeMermaid';
 
 type MermaidApi = typeof import('mermaid').default;
@@ -23,11 +24,6 @@ const loadMermaid = (): Promise<MermaidApi> => {
 let renderSequence = 0;
 
 const styles = createStaticStyles(({ css }) => ({
-  root: css`
-    width: 100%;
-    min-width: 0;
-    margin: 8px 0;
-  `,
   diagramFrame: css`
     width: 100%;
     overflow: hidden;
@@ -46,14 +42,6 @@ const styles = createStaticStyles(({ css }) => ({
     .ant-image-preview-img {
       background: ${cssVar.colorBgContainer};
     }
-  `,
-  loading: css`
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 180px;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 13px;
   `,
   fixedBadge: css`
     position: absolute;
@@ -473,19 +461,19 @@ export const Mermaid = memo(({ code }: { code: string; streaming?: boolean }) =>
 
   if (error) {
     return (
-      <div className={styles.root}>
+      <div className={mermaidBoxStyles.root}>
         <MermaidErrorCard code={source} error={error} onFix={() => void requestAiFix()} aiFixing={aiFixing} aiError={aiError} />
       </div>
     );
   }
-  if (!prepared) return <div className={cx(styles.root, styles.loading)}>Loading diagram…</div>;
+  if (!prepared) return <MermaidLoading />;
 
   const fixed = Boolean(persistedFix?.ai || autofixed || persistedFix);
   const fallback = (
     <MermaidErrorCard code={source} error="LobeHub Mermaid 无法渲染此图表类型" onFix={() => void requestAiFix()} aiFixing={aiFixing} aiError={aiError} />
   );
   return (
-    <div className={styles.root}>
+    <div className={mermaidBoxStyles.root}>
       <div className={styles.diagramFrame}>
         <div className={styles.actionHost}>
           <MermaidRenderBoundary fallback={fallback}>

@@ -47,7 +47,7 @@ describe('renderMessageBody', () => {
       </>,
     );
     expect(screen.getByTestId('job-done-pill')).toBeTruthy();
-    expect(screen.getByText('Background job subagent-1 (subagent: L) finished completed.')).toBeTruthy();
+    expect(screen.getByText('后台任务 subagent-1 已完成 · L')).toBeTruthy();
     expect(screen.queryByText('已注入上下文')).toBeNull();
   });
 

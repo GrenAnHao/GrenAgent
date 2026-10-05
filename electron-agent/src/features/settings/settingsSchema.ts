@@ -1,7 +1,8 @@
-import { AudioLines, Bot, Cpu, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bot, Cpu, Database, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { parseRepeatGuardConfig } from '@extensions/loop-guard/chain';
 
-export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability' | 'model-list';
+export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability' | 'model-list' | 'slider';
 export type SettingGroup = '核心' | '能力' | '联网' | '扩展与安全';
 
 export const SETTING_GROUPS: SettingGroup[] = ['核心', '能力', '联网', '扩展与安全'];
@@ -33,6 +34,12 @@ export interface SettingField {
   default?: string;
   /** boolean 落盘格式：one-zero＝'1'/'0'（默认）；true-empty＝'true'/''（扩展侧仅认小写 true）。 */
   storeBoolean?: 'one-zero' | 'true-empty';
+  /** number 类型的下限。 */
+  min?: number;
+  /** number 类型的上限。 */
+  max?: number;
+  /** 保存前校验。返回错误文案则拒绝落盘；空字符串表示这一项合法。 */
+  validate?: (value: string) => string | undefined;
 }
 
 export interface SettingSection {
@@ -52,6 +59,57 @@ export interface SettingCategory {
 /** 字段生效方式，省略时默认 hot（扩展运行时读，改完即生效）。 */
 export function fieldEffect(field: SettingField): SettingEffect {
   return field.effect ?? 'hot';
+}
+
+function guardConfigError(run: () => void): string | undefined {
+  try {
+    run();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function validateLoopGuardThresholds(value: string): string | undefined {
+  return guardConfigError(() => {
+    parseRepeatGuardConfig({ thresholds: value });
+  });
+}
+
+function validateLoopGuardPreview(value: string): string | undefined {
+  return guardConfigError(() => {
+    parseRepeatGuardConfig({ argumentsPreviewChars: value });
+  });
+}
+
+function validateBoundedInt(min: number, max: number): (value: string) => string | undefined {
+  return (value: string) => {
+    const raw = value.trim();
+    if (!raw) return undefined;
+    if (!/^\d+$/.test(raw)) return `须为 ${min} 到 ${max} 的整数`;
+    const n = Number(raw);
+    if (n < min || n > max) return `须为 ${min} 到 ${max} 的整数`;
+    return undefined;
+  };
+}
+
+function validateWikiIngestMode(value: string): string | undefined {
+  const raw = value.trim();
+  if (!raw || raw === 'two-stage' || raw === 'single-stage') return undefined;
+  return '抽取模式只能是两段式或单段式';
+}
+
+export function allSettingFields(categories: SettingCategory[] = SETTINGS_SCHEMA): SettingField[] {
+  return categories.flatMap((category) => [...(category.fields ?? []), ...(category.sections ?? []).flatMap((section) => section.fields)]);
+}
+
+/** 保存前跑每个字段的 validate。返回第一条错误文案。 */
+export function validateSettingValues(values: Record<string, string>): string | undefined {
+  for (const field of allSettingFields()) {
+    const message = field.validate?.(values[field.key] ?? '');
+    if (message) return message;
+  }
+  return undefined;
 }
 
 export const SETTINGS_SCHEMA: SettingCategory[] = [
@@ -93,19 +151,21 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
         description: '打开后允许查阅会话目标、wiki/记忆和代码图；更慢，且依赖索引。默认关',
       },
       {
+        key: 'AUTO_COMPACT_PERCENT',
+        label: '自动压缩触发值',
+        type: 'slider',
+        min: 5,
+        max: 90,
+        default: '80',
+        description: '上下文占用达到这个百分比时自动压缩。未填写按 80。单个会话可在上下文面板里单独设置，范围 5 到 90。',
+        validate: validateBoundedInt(5, 90),
+      },
+      {
         key: 'AUTO_TITLE',
         label: '自动生成对话标题',
         type: 'boolean',
         default: '1',
         description: '关闭后侧栏用首条消息作标题（默认开）',
-      },
-      {
-        key: 'COMPACTION_PREVIEW',
-        label: '压缩上下文前确认',
-        type: 'boolean',
-        default: '1',
-        description:
-          '上下文将满需压缩时先弹确认，可拒绝本次压缩（默认开）。压缩会把靠前的对话压成摘要，关闭则自动压缩、不打扰。',
       },
       {
         key: 'goal.autoContinueOnOpen',
@@ -306,17 +366,152 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     ],
   },
   {
+    id: 'agentData',
+    title: 'AgentData',
+    group: '能力',
+    icon: Database,
+    sections: [
+      {
+        title: '记忆',
+        fields: [
+          {
+            key: 'MEMORY_AUTO_INJECT',
+            label: '自动注入记忆',
+            type: 'boolean',
+            default: '1',
+            description: '对话开始时把相关记忆放进上下文。默认开。',
+          },
+          {
+            key: 'MEMORY_AUTO_CAPTURE',
+            label: '自动捕获对话',
+            type: 'boolean',
+            default: '1',
+            description: '对话结束后保存原文。默认开。',
+          },
+          {
+            key: 'MEMORY_EXTRACT',
+            label: '对话后提炼记忆',
+            type: 'boolean',
+            default: '1',
+            description: '在捕获之上调用模型生成记忆。关闭后仍保存原文，只是不提炼。默认开。',
+          },
+        ],
+      },
+      {
+        title: '模型',
+        fields: [
+          {
+            key: 'agentDataModel',
+            label: 'AgentData 模型',
+            type: 'model',
+            effect: 'instant',
+            placeholder: '留空＝应用默认模型',
+            description: '记忆提炼与 Wiki 抽取共用。留空＝应用默认模型。',
+          },
+        ],
+      },
+      {
+        title: 'Wiki 抽取',
+        fields: [
+          {
+            key: 'KNOWLEDGE_WIKI_INGEST_MODE',
+            label: '抽取模式',
+            type: 'select',
+            effect: 'instant',
+            default: 'two-stage',
+            description: '两段式先分析再生成。单段式少一次模型调用。默认两段式。',
+            options: [
+              { value: 'two-stage', label: '两段式' },
+              { value: 'single-stage', label: '单段式' },
+            ],
+            validate: validateWikiIngestMode,
+          },
+          {
+            key: 'KNOWLEDGE_WIKI_INGEST_CONCURRENCY',
+            label: '抽取并发',
+            type: 'number',
+            effect: 'instant',
+            min: 1,
+            max: 10,
+            placeholder: '3',
+            description: '单个知识库抽取阶段的并行数。留空＝3，范围 1 到 10。',
+            validate: validateBoundedInt(1, 10),
+          },
+          {
+            key: 'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY',
+            label: '模型并发',
+            type: 'number',
+            effect: 'instant',
+            min: 1,
+            max: 20,
+            placeholder: '5',
+            description: '抽取与合并共用的模型调用并行上限。留空＝5，范围 1 到 20。下一次抽取生效。',
+            validate: validateBoundedInt(1, 20),
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: 'safety',
     title: '安全',
     group: '扩展与安全',
     icon: ShieldCheck,
-    fields: [
-      { key: 'SAFETY_BASH_CONFIRM', label: '危险命令前确认', type: 'boolean', description: '执行危险 bash 命令前弹确认（默认开）' },
+    sections: [
       {
-        key: 'SAFETY_PROTECT_PATHS',
-        label: '保护敏感路径',
-        type: 'boolean',
-        description: '阻断写 .env/.git/node_modules/密钥（默认开）',
+        title: '工具安全',
+        fields: [
+          { key: 'SAFETY_BASH_CONFIRM', label: '危险命令前确认', type: 'boolean', description: '执行危险 bash 命令前弹确认（默认开）' },
+          {
+            key: 'SAFETY_PROTECT_PATHS',
+            label: '保护敏感路径',
+            type: 'boolean',
+            description: '阻断写 .env/.git/node_modules/密钥（默认开）',
+          },
+        ],
+      },
+      {
+        title: '循环保护',
+        fields: [
+          {
+            key: 'LOOP_GUARD',
+            label: '重复调用提醒',
+            type: 'boolean',
+            default: '1',
+            description: '同一工具、相同参数连续重复时，在该次结果后追加提醒，不拦截调用。默认开。保存后下一次工具调用即生效',
+          },
+          {
+            key: 'LOOP_GUARD_THRESHOLDS',
+            label: '提醒次数',
+            type: 'text',
+            placeholder: '3,5,8',
+            description: '逗号分隔，每一项是 >= 2 的整数且不能重复。第一次到档是轻提醒，其后是详细提醒。留空＝3,5,8',
+            validate: validateLoopGuardThresholds,
+          },
+          {
+            key: 'LOOP_GUARD_INCLUDE',
+            label: '只跟踪这些工具',
+            type: 'text',
+            placeholder: '留空＝全部',
+            description: '逗号分隔，支持 * 通配，如 grep,mcp_*。留空＝跟踪全部工具',
+          },
+          {
+            key: 'LOOP_GUARD_EXCLUDE',
+            label: '不跟踪这些工具',
+            type: 'text',
+            placeholder: '如 todo*',
+            description: '逗号分隔，支持 * 通配。这些调用不计数，也不打断前后相同调用的连续次数',
+          },
+          {
+            key: 'LOOP_GUARD_ARGUMENTS_PREVIEW',
+            label: '参数预览字数',
+            type: 'number',
+            min: 1,
+            placeholder: '500',
+            description: '详细提醒里引用的参数最多多少字。留空＝500。是否算同一次调用仍比较完整参数',
+            validate: validateLoopGuardPreview,
+          },
+        ],
       },
     ],
   },

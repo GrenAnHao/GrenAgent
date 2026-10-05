@@ -192,10 +192,10 @@ export function registerSearch(pi: ExtensionAPI): void {
     description:
       "Search the codebase with one or more regex patterns (OR) and optional glob filters, in one call. " +
       "Uses packaged ripgrep (respects .gitignore). Returns matches grouped by file (file:line). " +
-      "Use this instead of running grep/rg/find/ls via bash.",
+      "Use this instead of bash grep, rg, or Windows Select-String.",
     promptSnippet: "Search the codebase with regex and optional globs.",
     promptGuidelines: [
-      "To search code by keyword/regex or find files by glob, call search instead of running grep/rg/find/ls in bash.",
+      "To search file contents by keyword or regex, call search instead of bash, including Windows Select-String and Get-Content. search runs ripgrep.",
       "Pass multiple patterns (OR) and multiple globs at once; results come back merged.",
     ],
     parameters: Type.Object({

@@ -1,16 +1,19 @@
 import { create } from 'zustand';
 import { pi } from '../lib/pi';
-import { useApprovalStore } from './approvalStore';
+import { readApprovalLevel, setComposerApprovalLevel } from './approvalStore';
 
 interface FullAccessConfirmState {
   open: boolean;
   workspace: string | null;
+  /** 要切到完全权限的会话；null = 草稿（改项目默认）。 */
+  sessionPath: string | null;
   busy: boolean;
 }
 
 const initialState: FullAccessConfirmState = {
   open: false,
   workspace: null,
+  sessionPath: null,
   busy: false,
 };
 
@@ -21,7 +24,7 @@ export const useFullAccessConfirmStore = create<FullAccessConfirmState>(() => ({
 let pendingResolve: (() => void) | null = null;
 
 function closeDialog(): void {
-  useFullAccessConfirmStore.setState({ open: false, workspace: null, busy: false });
+  useFullAccessConfirmStore.setState({ open: false, workspace: null, sessionPath: null, busy: false });
   pendingResolve?.();
   pendingResolve = null;
 }
@@ -33,13 +36,13 @@ export function dismissFullAccessConfirm(): void {
 }
 
 export async function confirmFullAccess(): Promise<void> {
-  const { open, workspace, busy } = useFullAccessConfirmStore.getState();
+  const { open, workspace, sessionPath, busy } = useFullAccessConfirmStore.getState();
   if (!open || !workspace || busy) return;
 
   useFullAccessConfirmStore.setState({ busy: true });
   try {
-    await pi.setApproval(workspace, 'full');
-    useApprovalStore.getState().setLevel(workspace, 'full');
+    await pi.setApproval(workspace, 'full', sessionPath);
+    setComposerApprovalLevel(workspace, sessionPath, 'full');
     closeDialog();
   } catch (err) {
     useFullAccessConfirmStore.setState({ busy: false });
@@ -47,8 +50,8 @@ export async function confirmFullAccess(): Promise<void> {
   }
 }
 
-export async function enableFullAccess(workspace: string): Promise<void> {
-  if (useApprovalStore.getState().byWorkspace[workspace] === 'full') {
+export async function enableFullAccess(workspace: string, sessionPath: string | null = null): Promise<void> {
+  if (readApprovalLevel(workspace, sessionPath) === 'full') {
     return;
   }
 
@@ -61,6 +64,7 @@ export async function enableFullAccess(workspace: string): Promise<void> {
     useFullAccessConfirmStore.setState({
       open: true,
       workspace,
+      sessionPath,
       busy: false,
     });
   });

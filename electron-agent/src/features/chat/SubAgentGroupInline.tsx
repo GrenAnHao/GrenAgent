@@ -4,18 +4,23 @@ import {
   CheckCircle2,
   CircleDashed,
   CircleStop,
+  Clock,
   GitBranch,
   Loader2,
   PanelRightOpen,
   Rows3,
   XCircle,
 } from 'lucide-react';
-import { memo, type MouseEvent } from 'react';
+import { memo, useEffect, useState, type MouseEvent } from 'react';
 import { cardStyles } from '../tools/cardStyles';
-import type { SubAgentMode, SubAgentUnit, SubAgentUnitStatus } from '../panels/subagentUtils';
-import { useDockStore } from '../../stores/dockStore';
+import { ModelNameTag } from './ModelNameTag';
+import { displayModel, subAgentCardTitle, type SubAgentMode, type SubAgentUnit, type SubAgentUnitStatus } from '../panels/subagentUtils';
+import { PendingResponseStatus } from './PendingResponseStatus';
+import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
+import type { SubAgentItem } from '../../lib/pi';
+import { selectSubAgentList, useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 
 const styles = createStaticStyles(({ css }) => ({
   group: css`
@@ -93,14 +98,51 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
+function modelText(value: string | null | undefined): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function withLiveStart(
+  unit: SubAgentUnit,
+  items: SubAgentItem[],
+  used: Set<string>,
+): { unit: SubAgentUnit; createdAt?: number } {
+  const match = items.find((item) =>
+    !used.has(item.id) && item.task === unit.task && (item.status === 'running' || item.status === 'starting'),
+  );
+  if (match) used.add(match.id);
+  let model = unit.model || modelText(match?.model);
+  // 已经写进结果的模型优先。旧的链式结果没带模型，完成行再按任务原文对上 registry。
+  if (!model && unit.status !== 'waiting' && unit.status !== 'pending') {
+    const remembered = items.find((item) =>
+      !used.has(item.id)
+      && item.task === unit.task
+      && (item.status === 'done' || item.status === 'error' || item.status === 'cancelled')
+      && modelText(item.model),
+    );
+    if (remembered) {
+      used.add(remembered.id);
+      model = modelText(remembered.model);
+    }
+  }
+  const status = unit.status === 'starting' && match?.sessionPath ? 'running' : unit.status;
+  const createdAt = typeof match?.createdAt === 'number' && match.createdAt > 0 ? match.createdAt : undefined;
+  const next = model === unit.model && status === unit.status ? unit : { ...unit, status, ...(model ? { model } : {}) };
+  return { unit: next, createdAt };
+}
+
 function statusMeta(status: SubAgentUnitStatus) {
   switch (status) {
+    case 'starting':
+      return { icon: Loader2, color: cssVar.colorTextSecondary, spin: true, label: '启动中' };
     case 'running':
       return { icon: Loader2, color: cssVar.colorTextSecondary, spin: true, label: '运行中…' };
     case 'done':
       return { icon: CheckCircle2, color: cssVar.colorSuccess, spin: false, label: '已完成' };
     case 'error':
       return { icon: XCircle, color: cssVar.colorError, spin: false, label: '出错' };
+    case 'waiting':
+      return { icon: Clock, color: cssVar.colorTextQuaternary, spin: false, label: '等待上一步完成' };
     default:
       return { icon: CircleDashed, color: cssVar.colorTextQuaternary, spin: false, label: '未执行' };
   }
@@ -125,8 +167,27 @@ interface SubAgentGroupInlineProps {
  */
 function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }: SubAgentGroupInlineProps) {
   const card = cardStyles;
-  const { workspace } = useAgentStoreContext();
+  const { workspace, store } = useAgentStoreContext();
   const running = status === 'running';
+  const startPolling = useSubAgentLiveStore((s) => s.startPolling);
+  const liveItems = useSubAgentLiveStore(selectSubAgentList(workspace));
+  const modelGap = units.some((u) => !u.unit.model && u.unit.status !== 'waiting' && u.unit.status !== 'pending');
+  const [remembered, setRemembered] = useState<SubAgentItem[]>([]);
+  useEffect(() => {
+    if (!workspace || !running) return;
+    return startPolling(workspace);
+  }, [workspace, running, startPolling]);
+  useEffect(() => {
+    if (!workspace || !modelGap) return;
+    let cancelled = false;
+    void pi.subagentList(workspace).then((rows) => {
+      if (!cancelled) setRemembered(rows);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace, modelGap]);
+  const knownItems = liveItems.length > 0 ? liveItems : remembered;
   // 组头成败汇总：非运行态时统计失败子代理数（与工具聚合一致，部分失败用琥珀计数而非整组标红）。
   const errorCount = units.filter((u) => u.unit.status === 'error').length;
 
@@ -135,13 +196,15 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
       messageId,
       toolCallId,
       subIndex: u.unit.subIndex,
-      title: `#${u.no} ${u.unit.task}`,
+      title: `#${u.no} ${subAgentCardTitle(u.unit.title, u.unit.task)}`,
+      // tab 归属当前渲染这条消息的会话，切会话后不跟过去。
+      ...dockOwnerFromStore(store, workspace),
     });
   };
 
   const stop = (e: MouseEvent) => {
     e.stopPropagation();
-    void pi.abort(workspace);
+    void pi.abort(workspace, store.getLoadedSessionPath());
   };
 
   const groupIcon = mode === 'chain' ? GitBranch : Rows3;
@@ -169,9 +232,15 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
         {running ? <ActionIcon icon={CircleStop} size="small" title="停止整组子代理" onClick={stop} /> : null}
       </div>
       <div className={styles.rows}>
-        {units.map((u) => {
-          const sm = statusMeta(u.unit.status);
-          return (
+        {(() => {
+          const used = new Set<string>();
+          return units.map((u) => {
+            const liveRow = withLiveStart(u.unit, knownItems, used);
+            const shown = liveRow.unit;
+            const sm = statusMeta(shown.status);
+            const pending = shown.status === 'running' || shown.status === 'starting';
+            const modelLabel = displayModel(shown.model);
+            return (
             <div
               key={u.unit.key}
               className={styles.row}
@@ -181,12 +250,20 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
             >
               <Icon icon={sm.icon} size={14} spin={sm.spin} style={{ flex: 'none', color: sm.color }} />
               <span className={styles.no}>#{u.no}</span>
-              <span className={cx(styles.task, u.unit.status === 'running' && card.shinyText)}>{u.unit.task}</span>
-              <span className={styles.badge}>{sm.label}</span>
+              <span className={cx(styles.task, pending && card.shinyText)}>{subAgentCardTitle(shown.title, shown.task)}</span>
+              {modelLabel ? <ModelNameTag name={modelLabel} testId="subagent-step-model" /> : null}
+              <span className={styles.badge}>
+                {pending ? (
+                  <PendingResponseStatus label="正在处理…" startedAt={liveRow.createdAt} dot={false} size="inherit" />
+                ) : (
+                  sm.label
+                )}
+              </span>
               <ActionIcon icon={PanelRightOpen} size="small" title="在右侧面板打开" onClick={(e) => { e.stopPropagation(); open(u); }} />
             </div>
-          );
-        })}
+            );
+          });
+        })()}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Titlebar } from './Titlebar';
-import { useLayoutStore } from '../stores/layoutStore';
+import { useLayoutStore, SIDEBAR_AUTO_COLLAPSE_WIDTH } from '../stores/layoutStore';
 import { useModuleStore } from '../stores/moduleStore';
 
 beforeEach(() => {
@@ -11,8 +11,10 @@ beforeEach(() => {
   useLayoutStore.setState({
     sidebarOpen: true,
     rightPanelOpen: false,
-    availableWidth: 0,
+    sidebarWidth: 275,
+    availableWidth: 1200,
     liveSidebarWidth: null,
+    sidebarDrawer: null,
   });
 });
 
@@ -33,6 +35,26 @@ describe('Titlebar sidebar toggle', () => {
     expect(screen.getByTestId('sidebar-toggle').getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('sidebar-toggle').getAttribute('aria-label')).toBe('展开会话列表');
     fireEvent.click(screen.getByTestId('sidebar-toggle'));
+    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
+  });
+
+  it('窗体在最小宽度时，顶部展开打开抽屉且不改停靠意图', () => {
+    useLayoutStore.setState({
+      sidebarOpen: true,
+      availableWidth: SIDEBAR_AUTO_COLLAPSE_WIDTH,
+      sidebarDrawer: null,
+      rightPanelOpen: false,
+    });
+    render(<Titlebar />);
+    const toggle = screen.getByTestId('sidebar-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('展开会话列表');
+    fireEvent.click(toggle);
+    expect(useLayoutStore.getState().sidebarOpen).toBe(true);
+    expect(useLayoutStore.getState().sidebarDrawer).toBe('toggle');
+    expect(screen.getByTestId('sidebar-toggle').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByTestId('sidebar-toggle'));
+    expect(useLayoutStore.getState().sidebarDrawer).toBeNull();
     expect(useLayoutStore.getState().sidebarOpen).toBe(true);
   });
 

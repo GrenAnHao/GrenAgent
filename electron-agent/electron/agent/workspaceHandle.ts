@@ -1,9 +1,11 @@
+import { promptWasAccepted } from '../../../extensions/_shared/promptDisposition.js';
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
 import { drainByParent } from '../../../extensions/multi-agent/activation.js';
 import { registerCatalogChangeSink } from '../../../extensions/multi-agent/catalog-events.js';
 import { registerEmbeddedSubagentEventSink } from '../../../extensions/multi-agent/embedded-events.js';
 import { registerParentSessionHost } from '../../../extensions/multi-agent/parent-host.js';
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOptions } from '../../../cli/src/pi-sdk.js';
+import { expandSpacedSkillCommand, skillsFromSession } from './expandSkillCommand.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
 import { toRendererEvent } from './streamingEvent.js';
 import { createToolcallDeltaCoalescer } from './toolcallDeltaCoalescer.js';
@@ -19,10 +21,10 @@ export interface WorkspaceHandleOptions {
   runtime: AgentSessionRuntime;
   /** 解析该 origin 的 per-(workspace, source) 配置进 ALS（第 2 份消费）。 */
   resolveConfig: (origin: TurnOrigin) => Promise<Readonly<Record<string, string>>>;
-  emitUiRequest: (envelope: { workspace: string; source: 'interactive' | 'goal'; sessionId?: string; request: Record<string, unknown> }) => void;
+  emitUiRequest: (envelope: { workspace: string; source: 'interactive' | 'goal'; sessionId?: string; sessionPath?: string; request: Record<string, unknown> }) => void;
   onEvent: (event: Record<string, unknown>, meta: HandleEventMeta) => void;
-  /** 构造失败使 handle 损坏时调用（AgentHost 负责 evict + 广播 pi://exit）。 */
-  onFatal: (error: unknown) => void;
+  /** 构造失败使 handle 损坏时调用（AgentHost 只拆这个 handle，并广播 pi://exit）。 */
+  onFatal: (error: unknown, handle: WorkspaceHandle) => void;
   /** 关项目：MCP / IM（第 4 份再接 killSubagentsFor）。 */
   onDispose?: (workspace: string, cwd: string) => void | Promise<void>;
 }
@@ -68,6 +70,10 @@ export class WorkspaceHandle {
     this.ui = new SessionUiAdapter({
       workspace: options.workspace,
       sessionId: () => this.session.sessionId,
+      sessionPath: () => {
+        const file = this.session?.sessionFile;
+        return typeof file === 'string' && file ? file : undefined;
+      },
       isGoalTurn: () => this.turnOrigin === 'goal',
       emit: options.emitUiRequest,
     });
@@ -75,6 +81,14 @@ export class WorkspaceHandle {
 
   get session(): AgentSession {
     return this.options.runtime.session;
+  }
+
+  get workspace(): string {
+    return this.options.workspace;
+  }
+
+  get cwd(): string {
+    return this.options.cwd;
   }
 
   get currentTurnOrigin(): TurnOrigin {
@@ -120,20 +134,33 @@ export class WorkspaceHandle {
   async prompt(text: string, options: { images?: ImageContent[]; streamingBehavior?: 'steer' | 'followUp' }, origin: TurnOrigin): Promise<void> {
     const config = await this.options.resolveConfig(origin);
     this.turnOrigin = origin;
+    // Pi 按第一个空格切 `/skill:` 名字。含空格的技能在这里展开，否则对不上已加载的技能。
+    const prepared = expandSpacedSkillCommand(text, skillsFromSession(this.session));
     return runInWorkspace(this.ctx(origin, config), () => new Promise<void>((resolve, reject) => {
       let settled = false;
-      void this.session.prompt(text, {
+      void this.session.prompt(prepared, {
         images: options.images,
         streamingBehavior: options.streamingBehavior,
         source: 'rpc',
-        preflightResult: (ok: boolean) => { if (ok) { settled = true; resolve(); } },
-      } as PromptOptions).catch((error: unknown) => {
-        // preflight 前失败 → reject；preflight 成功后的回合内错误由事件流上报，吞掉。
-        if (!settled) {
-          this.turnOrigin = 'main';
-          reject(error);
-        }
-      });
+        preflightResult: (disposition: unknown) => {
+          if (!promptWasAccepted(disposition)) return;
+          settled = true;
+          resolve();
+        },
+      } as PromptOptions)
+        .then(() => {
+          if (!settled) {
+            this.turnOrigin = 'main';
+            reject(new Error('prompt not accepted'));
+          }
+        })
+        .catch((error: unknown) => {
+          // preflight 前失败 → reject；preflight 成功后的回合内错误由事件流上报，吞掉。
+          if (!settled) {
+            this.turnOrigin = 'main';
+            reject(error);
+          }
+        });
     }));
   }
 
@@ -222,7 +249,7 @@ export class WorkspaceHandle {
       // 旧 session 已 teardown（原地 invalidate、引用已变或已空）才致命；fork 无效 id / 非法 jsonl / resolveConfig 失败时 session 仍在。
       if (this.sessionInvalidated || current !== previous || current == null) {
         await this.detachParentHost(oldPath);
-        this.options.onFatal(error);
+        this.options.onFatal(error, this);
       }
       throw error;
     }
@@ -269,7 +296,17 @@ export class WorkspaceHandle {
   }
 
   private ctx(origin: TurnOrigin, config: Readonly<Record<string, string>>): WorkspaceContext {
-    return { origin, workspace: this.options.workspace, cwd: this.options.cwd, config };
+    return {
+      origin,
+      workspace: this.options.workspace,
+      cwd: this.options.cwd,
+      config,
+      // 现取：同一 handle 换会话后，审批档 / 模式按新会话的 id 查。
+      sessionId: () => {
+        const id = this.options.runtime.session?.sessionId;
+        return typeof id === 'string' && id ? id : undefined;
+      },
+    };
   }
 
   private async bindAndSubscribe(): Promise<void> {
@@ -305,8 +342,10 @@ export class WorkspaceHandle {
   }
 
   private forward(event: Record<string, unknown>): void {
+    const sessionPath = this.session.sessionFile;
     this.options.onEvent(event, {
       ...(this.session.sessionId ? { sessionId: this.session.sessionId } : {}),
+      ...(typeof sessionPath === 'string' && sessionPath ? { sessionPath } : {}),
       source: this.turnOrigin === 'goal' ? 'goal' : 'interactive',
     });
   }

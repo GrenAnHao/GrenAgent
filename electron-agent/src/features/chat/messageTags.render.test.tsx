@@ -37,4 +37,17 @@ describe('renderMessageTags link chip', () => {
 
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
+
+  it('拖入的区外文件只显示文件名，完整路径放在悬停提示里', () => {
+    render(<span>{renderMessageTags('开始规划\n\n@.pi/dropped/4321a/one.md @.pi/dropped/77bc/two.md')}</span>);
+
+    expect(screen.getByText('one.md').parentElement).toHaveAttribute('title', '.pi/dropped/4321a/one.md');
+    expect(screen.getByText('two.md')).toBeInTheDocument();
+    expect(screen.queryByText(/4321a/)).not.toBeInTheDocument();
+  });
+
+  it('工作区内的路径原样显示', () => {
+    render(<span>{renderMessageTags('@src/foo.ts')}</span>);
+    expect(screen.getByText('src/foo.ts')).toBeInTheDocument();
+  });
 });

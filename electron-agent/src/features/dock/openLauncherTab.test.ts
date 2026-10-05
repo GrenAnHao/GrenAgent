@@ -12,6 +12,29 @@ function reset() {
 describe('openLauncherTab', () => {
   beforeEach(reset);
 
+  it('does not reuse a closed browser tab id', () => {
+    useDockStore.setState({
+      closedTabs: [{
+        id: 'browser:1',
+        kind: 'browser',
+        region: 'right',
+        title: '旧页',
+        closable: true,
+        payload: { url: 'https://old.test/', title: '旧页' },
+        closedAt: 1,
+      }],
+    });
+    openLauncherTab({ region: 'right', kind: 'browser' });
+    const liveIds = useDockStore.getState().tabs.filter((t) => t.kind === 'browser').map((t) => t.id);
+    expect(liveIds).not.toContain('browser:1');
+    useDockStore.getState().restoreClosedTab('browser:1', 1);
+    expect(
+      useDockStore.getState().tabs.some(
+        (t) => t.kind === 'browser' && (t.payload as { url: string }).url === 'https://old.test/',
+      ),
+    ).toBe(true);
+  });
+
   it('opens browser and terminal as new tabs in the launcher region', () => {
     openLauncherTab({ region: 'bottom', kind: 'browser' });
     openLauncherTab({ region: 'bottom', kind: 'browser' });
@@ -22,6 +45,8 @@ describe('openLauncherTab', () => {
     expect(tabs.every((t) => t.region === 'bottom')).toBe(true);
     expect(useLayoutStore.getState().terminalOpen).toBe(true);
     expect(tabs.find((t) => t.kind === 'terminal')?.title).toBe(defaultTerminalTitle());
+    expect(tabs.filter((t) => t.kind === 'browser').every((t) => (t.payload as { url: string }).url === 'about:blank')).toBe(true);
+    expect(new Set(tabs.filter((t) => t.kind === 'browser').map((t) => t.id)).size).toBe(2);
   });
 
   it('reuses file and review tabs in the same region', () => {

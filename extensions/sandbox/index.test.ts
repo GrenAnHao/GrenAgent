@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("@earendil-works/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createBashToolDefinition: (_cwd: string, opts: object) => ({
     name: "bash",
     description: "Execute a bash command.",

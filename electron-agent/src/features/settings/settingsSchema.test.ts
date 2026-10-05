@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_SCHEMA } from './settingsSchema';
+import { SETTINGS_SCHEMA, validateSettingValues } from './settingsSchema';
 
 describe('SETTINGS_SCHEMA general', () => {
   it('在标题模型后提供默认开启的自动标题开关', () => {
@@ -17,10 +17,28 @@ describe('SETTINGS_SCHEMA general', () => {
       'titleModel',
       'enhancePromptModel',
       'enhancePromptUseProjectContext',
+      'AUTO_COMPACT_PERCENT',
       'AUTO_TITLE',
-      'COMPACTION_PREVIEW',
       'goal.autoContinueOnOpen',
     ]);
+  });
+
+  it('在增强提示词之后提供自动压缩触发值，范围 5 到 90，留空按 80', () => {
+    const fields = SETTINGS_SCHEMA.find((category) => category.id === 'general')?.fields ?? [];
+    expect(fields.find((field) => field.key === 'AUTO_COMPACT_PERCENT')).toMatchObject({
+      label: '自动压缩触发值',
+      type: 'slider',
+      min: 5,
+      max: 90,
+      default: '80',
+    });
+    expect(validateSettingValues({})).toBeUndefined();
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '' })).toBeUndefined();
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '5' })).toBeUndefined();
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '90' })).toBeUndefined();
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '4' })).toMatch(/5 到 90/);
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '91' })).toMatch(/5 到 90/);
+    expect(validateSettingValues({ AUTO_COMPACT_PERCENT: '80.5' })).toMatch(/5 到 90/);
   });
 
   it('在标题模型后提供增强提示词模型与实验开关', () => {
@@ -78,9 +96,105 @@ describe('subagent model selection keys', () => {
   });
 });
 
+describe('loop guard settings', () => {
+  const fields = () => SETTINGS_SCHEMA.find((category) => category.id === 'safety')?.sections?.find((section) => section.title === '循环保护')?.fields ?? [];
+
+  it('把循环保护放在安全页，开关默认开，次数与预览留空走扩展默认', () => {
+    expect(fields().map((field) => field.key)).toEqual([
+      'LOOP_GUARD',
+      'LOOP_GUARD_THRESHOLDS',
+      'LOOP_GUARD_INCLUDE',
+      'LOOP_GUARD_EXCLUDE',
+      'LOOP_GUARD_ARGUMENTS_PREVIEW',
+    ]);
+    expect(fields().find((field) => field.key === 'LOOP_GUARD')).toMatchObject({ type: 'boolean', default: '1' });
+    expect(fields().find((field) => field.key === 'LOOP_GUARD_THRESHOLDS')?.placeholder).toBe('3,5,8');
+    expect(fields().find((field) => field.key === 'LOOP_GUARD_ARGUMENTS_PREVIEW')).toMatchObject({ type: 'number', min: 1, placeholder: '500' });
+  });
+
+  it('留空可通过，非法次数在保存前被拒绝', () => {
+    expect(validateSettingValues({})).toBeUndefined();
+    expect(validateSettingValues({ LOOP_GUARD_THRESHOLDS: '8,3,5' })).toBeUndefined();
+    expect(validateSettingValues({ LOOP_GUARD_THRESHOLDS: '1,3' })).toMatch(/>= 2/);
+    expect(validateSettingValues({ LOOP_GUARD_THRESHOLDS: '3,3' })).toMatch(/重复/);
+    expect(validateSettingValues({ LOOP_GUARD_ARGUMENTS_PREVIEW: '0' })).toMatch(/>= 1/);
+    expect(validateSettingValues({ LOOP_GUARD_THRESHOLDS: ',' })).toMatch(/不能为空/);
+  });
+});
+
 describe('subagent max depth', () => {
   it('exposes SUBAGENT_MAX_DEPTH as a number with default 2', () => {
     const all = SETTINGS_SCHEMA.flatMap((c) => [...(c.fields ?? []), ...(c.sections ?? []).flatMap((s) => s.fields)]);
     expect(all.find((f) => f.key === 'SUBAGENT_MAX_DEPTH')).toMatchObject({ type: 'number', default: '2' });
+  });
+});
+
+describe('AgentData settings', () => {
+  const category = () => SETTINGS_SCHEMA.find((item) => item.id === 'agentData');
+  const fields = () => category()?.sections?.flatMap((section) => section.fields) ?? [];
+
+  it('在能力分组提供记忆开关、模型和 Wiki 抽取设置', () => {
+    expect(category()).toMatchObject({ title: 'AgentData', group: '能力' });
+    expect(category()?.sections?.map((section) => section.title)).toEqual(['记忆', '模型', 'Wiki 抽取']);
+    expect(fields().map((field) => field.key)).toEqual([
+      'MEMORY_AUTO_INJECT',
+      'MEMORY_AUTO_CAPTURE',
+      'MEMORY_EXTRACT',
+      'agentDataModel',
+      'KNOWLEDGE_WIKI_INGEST_MODE',
+      'KNOWLEDGE_WIKI_INGEST_CONCURRENCY',
+      'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY',
+    ]);
+  });
+
+  it('记忆开关默认开，模型留空走应用默认模型', () => {
+    expect(fields().find((field) => field.key === 'MEMORY_AUTO_INJECT')).toMatchObject({
+      type: 'boolean',
+      default: '1',
+      label: '自动注入记忆',
+    });
+    expect(fields().find((field) => field.key === 'MEMORY_AUTO_CAPTURE')).toMatchObject({ type: 'boolean', default: '1' });
+    expect(fields().find((field) => field.key === 'MEMORY_EXTRACT')).toMatchObject({
+      type: 'boolean',
+      default: '1',
+      description: expect.stringContaining('仍保存原文'),
+    });
+    expect(fields().find((field) => field.key === 'agentDataModel')).toMatchObject({
+      type: 'model',
+      effect: 'instant',
+      description: expect.stringContaining('留空'),
+    });
+  });
+
+  it('抽取模式默认两段式，并发留空合法、越界在保存前拒绝', () => {
+    expect(fields().find((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_MODE')).toMatchObject({
+      type: 'select',
+      default: 'two-stage',
+      effect: 'instant',
+      options: [
+        { value: 'two-stage', label: '两段式' },
+        { value: 'single-stage', label: '单段式' },
+      ],
+    });
+    expect(fields().find((field) => field.key === 'KNOWLEDGE_WIKI_INGEST_CONCURRENCY')).toMatchObject({
+      type: 'number',
+      min: 1,
+      max: 10,
+      placeholder: '3',
+      effect: 'instant',
+    });
+    expect(fields().find((field) => field.key === 'KNOWLEDGE_LLM_GLOBAL_CONCURRENCY')).toMatchObject({
+      type: 'number',
+      min: 1,
+      max: 20,
+      placeholder: '5',
+      effect: 'instant',
+    });
+    expect(validateSettingValues({})).toBeUndefined();
+    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '10', KNOWLEDGE_LLM_GLOBAL_CONCURRENCY: '1' })).toBeUndefined();
+    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '0' })).toMatch(/1 到 10/);
+    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_CONCURRENCY: '11' })).toMatch(/1 到 10/);
+    expect(validateSettingValues({ KNOWLEDGE_LLM_GLOBAL_CONCURRENCY: '21' })).toMatch(/1 到 20/);
+    expect(validateSettingValues({ KNOWLEDGE_WIKI_INGEST_MODE: 'batch' })).toMatch(/两段式|单段式/);
   });
 });

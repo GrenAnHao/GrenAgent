@@ -1,12 +1,39 @@
 import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { ArrowUp, Square } from 'lucide-react';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { actionMap, type ActionKey } from './config';
 import { useChatInput } from './ChatInputContext';
-import { composerCanSend, composerSendBehavior } from './sendBehavior';
+import { composerCanSend, composerPrimaryAction, composerSendBehavior } from './sendBehavior';
 
 interface SendAreaProps {
   actions: ActionKey[];
 }
+
+const styles = createStaticStyles(({ css }) => ({
+  send: css`
+    && {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-radius: 12px;
+    }
+  `,
+  stop: css`
+    &&,
+    &&:hover,
+    &&:focus,
+    &&:active {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-color: transparent;
+      border-radius: 12px;
+
+      color: #fff;
+      background: ${cssVar.colorError};
+    }
+  `,
+}));
 
 export function SendArea({ actions }: SendAreaProps) {
   const { empty, attachments, pastedTexts, isStreaming, isGenerating, hasRunningTool, followUp, hasComposerQueue, inFlight, send, stop } = useChatInput();
@@ -24,6 +51,8 @@ export function SendArea({ actions }: SendAreaProps) {
     hasRunningTool,
     hasComposerQueue,
   });
+  const primary = composerPrimaryAction({ inFlight, canSend });
+  const stopping = primary === 'stop';
 
   return (
     <Flexbox horizontal align="center" gap={2}>
@@ -31,27 +60,15 @@ export function SendArea({ actions }: SendAreaProps) {
         const Render = actionMap[key];
         return <Render key={key} />;
       })}
-      {/* 进行中（流式 / 失败重试 / 等待首响）始终显示停止，避免失败重试时只剩发送 */}
-      {inFlight && (
-        <Button
-          shape="circle"
-          title="停止"
-          data-testid="composer-stop"
-          icon={<Icon icon={Square} size={16} />}
-          onClick={stop}
-        />
-      )}
-      {/* 有内容可发（引导/跟进/发送），或未在进行中时（含禁用发送态） */}
-      {(!inFlight || canSend) && (
-        <Button
-          type="primary"
-          shape="circle"
-          disabled={!canSend}
-          title={sendBehavior === 'steer' ? '引导' : sendBehavior === 'followUp' ? '跟进' : '发送'}
-          icon={<Icon icon={ArrowUp} size={16} />}
-          onClick={send}
-        />
-      )}
+      <Button
+        className={stopping ? styles.stop : styles.send}
+        type="primary"
+        disabled={!stopping && !canSend}
+        data-testid={stopping ? 'composer-stop' : 'composer-send'}
+        title={stopping ? '停止' : sendBehavior === 'steer' ? '引导' : sendBehavior === 'followUp' ? '跟进' : '发送'}
+        icon={<Icon icon={stopping ? Square : ArrowUp} size={stopping ? 14 : 16} />}
+        onClick={stopping ? stop : send}
+      />
     </Flexbox>
   );
 }

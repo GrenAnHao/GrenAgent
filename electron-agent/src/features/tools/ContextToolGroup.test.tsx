@@ -3,11 +3,26 @@ import { cleanup, render } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { ContextToolGroup } from './ContextToolGroup';
 import type { ToolSegment } from '../chat/groupMessages';
+import { AgentStoreContext } from '../../stores/AgentStoreContext';
 
 afterEach(cleanup);
 
 const wrap = (ui: React.ReactElement) =>
-  render(<ThemeProvider themeMode="dark">{ui}</ThemeProvider>);
+  render(
+    <ThemeProvider themeMode="dark">
+      <AgentStoreContext.Provider
+        value={{
+          workspace: '/ws',
+          store: {} as never,
+          workspaceReady: true,
+          setWorkspaceReady: () => {},
+          appBooted: true,
+        }}
+      >
+        {ui}
+      </AgentStoreContext.Provider>
+    </ThemeProvider>,
+  );
 
 const tool = (
   id: string,

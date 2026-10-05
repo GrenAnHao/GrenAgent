@@ -15,11 +15,14 @@ export const MAX_GOAL_CHARS = 2000;
 export const SLOW_FIRST_CHUNK_MS = 20_000;
 export const SLOW_RUN_WARN_MS = 45_000;
 /**
- * 改写是低创作度任务：压 temperature 减少自由发挥，压 reasoning 减少自我解说。
+ * 改写是低创作度任务：压 temperature / top_p 减少自由发挥，压 reasoning 减少自我解说。
  * 此前不传参，请求跑在 provider 默认值上（DeepSeek 默认 temperature=1.0）——
  * 实测「改动点对照表」「轻量变体」这类加戏输出与默认高温+推理直接相关。
  */
 export const ENHANCE_TEMPERATURE = 0.3;
+/** 与 temperature 一起收紧尾部采样；经 samplingParams.top_p 透传（OpenAI 兼容）。 */
+export const ENHANCE_TOP_P = 0.85;
+export const ENHANCE_SAMPLING_PARAMS: Readonly<Record<string, unknown>> = { top_p: ENHANCE_TOP_P };
 
 function warnSlow(message: string): void {
   if (process.env.VITEST) return;
@@ -54,6 +57,8 @@ ${text}
 
 要求：
 - 澄清任务、范围、约束和预期输出；已够清楚时轻度抛光，不要原样退回。
+- 只写 WHAT，不要写 HOW；不要元评论（改动说明、对照表、变体、使用建议）。
+- 改写稿约 800 字以内，意思完整；不要半截列表。
 - 只输出增强后的提示词；不要前言、分析、语言标签或围栏。
 - 语言与草稿一致；中英混写保持混写。
 
@@ -132,7 +137,7 @@ const FENCE_RE = /^```[^\n]*\n([\s\S]*?)\n```$/;
  * 关键词必须收窄到明确的元评论标记：改写稿正文可能合法出现「改动路径」
  * 「调整建议」等词（实测出现过），匹配单独的「改动」会误伤正文。
  */
-const META_TRAILING_RE = /\n[ \t]*(?:\*\*|#{1,6}[ \t]+)?(?:主要改动|改动点|改动说明|修改说明|优化说明|变更说明)\s*[:：*]/;
+const META_TRAILING_RE = /\n[ \t]*(?:\*\*|#{1,6}[ \t]+)?(?:主要改动|改动点|改动说明|修改说明|优化说明|变更说明|轻量变体|使用建议|改动点对照)\s*[:：*(（]/;
 
 /**
  * 兜底提取：弱模型不守 〈改写稿〉 契约时的常见形态——开头一行「**改写后的提示词**」
@@ -456,7 +461,7 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
       const tools = executed >= MAX_TOOL_CALLS || round >= MAX_TOOL_ROUNDS ? [] : ENHANCE_TOOLS;
       let buffered = '';
       let liveEmitted = false;
-      const stream = runtime.stream(input.model, { systemPrompt: input.systemPrompt, messages, tools }, { signal: input.signal, temperature: ENHANCE_TEMPERATURE }) as StreamLike;
+      const stream = runtime.stream(input.model, { systemPrompt: input.systemPrompt, messages, tools }, { signal: input.signal, temperature: ENHANCE_TEMPERATURE, samplingParams: { ...ENHANCE_SAMPLING_PARAMS } }) as StreamLike;
       const drained = await drain(stream, input.signal, (chunk) => {
         buffered += chunk;
         if (tools.length === 0) {
@@ -540,6 +545,7 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
         signal: input.signal,
         temperature: ENHANCE_TEMPERATURE,
         reasoning: 'minimal',
+        samplingParams: { ...ENHANCE_SAMPLING_PARAMS },
       }),
       input.signal,
       (chunk) => {

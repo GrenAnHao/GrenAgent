@@ -13,23 +13,15 @@ const COLOR: Record<ConvStatus, string> = {
 };
 
 const styles = createStaticStyles(({ css }) => ({
-  // 运行可停止：默认显示 spinner，父 .conv-strip:hover 时切到红色停止方块。
-  // display 放在类里（非行内），否则行内 display 优先级更高、hover 覆盖不掉。
+  // 默认只显示 spinner。悬停切换写在父级 ConvStrip（.conv-strip:hover），
+  // 子级里的 `.conv-strip:hover &` 会把停止方块留在文档流里，运行中看起来像一颗方块。
   spinner: css`
     display: inline-flex;
-
-    .conv-strip:hover & {
-      display: none;
-    }
   `,
   stop: css`
     display: none;
     color: ${cssVar.colorError};
     cursor: pointer;
-
-    .conv-strip:hover & {
-      display: inline-flex;
-    }
   `,
 }));
 
@@ -44,11 +36,12 @@ export const StatusGlyph = memo(function StatusGlyph({
   if (status === 'running' && onStop) {
     return (
       <span className={convStyles.lead} data-status="running">
-        <span className={styles.spinner} style={{ color: COLOR.running }}>
+        <span className={styles.spinner} data-role="run-spinner" style={{ color: COLOR.running }}>
           <Icon icon={Loader2} size={13} spin />
         </span>
         <span
           className={styles.stop}
+          data-role="run-stop"
           title="停止子代理"
           onClick={(e) => {
             e.stopPropagation();

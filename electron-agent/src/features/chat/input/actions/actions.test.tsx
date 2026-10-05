@@ -59,7 +59,6 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
   }),
 }));
 
-import CompactAction from './CompactAction';
 import NewSessionAction from './NewSessionAction';
 import { ChatInputProvider, type ChatInputContextValue } from '../ChatInputContext';
 import { useSessionStore } from '../../../../store/session';
@@ -79,9 +78,11 @@ const ctx: ChatInputContextValue = {
   isGenerating: false,
   hasRunningTool: false,
   inFlight: false,
+  retrying: false,
   steering: [],
   followUp: [],
   steerQueued: vi.fn(),
+  interruptQueued: vi.fn(),
   hasComposerQueue: false,
   send: vi.fn(),
   stop: vi.fn(),
@@ -97,12 +98,6 @@ afterEach(() => {
 });
 
 describe('chat input actions', () => {
-  it('CompactAction triggers compact with workspace', () => {
-    render(<CompactAction />);
-    fireEvent.click(screen.getByRole('button'));
-    expect(piMock.compact).toHaveBeenCalledWith('/ws');
-  });
-
   it('NewSessionAction 不立刻 newSession，只进入待发送草稿并清空输入', async () => {
     useSessionStore.setState({
       activeWorkspace: '/ws',

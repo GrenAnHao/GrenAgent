@@ -28,7 +28,7 @@ export interface ConfinedArgv {
 }
 
 export interface SandboxProvider {
-  confine(argv: string[], policy: SandboxPolicy): Promise<ConfinedArgv>
+  confine(argv: string[], policy: SandboxPolicy, signal?: AbortSignal): Promise<ConfinedArgv>
   dispose?(sessionId: string): Promise<void>
 }
 

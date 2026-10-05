@@ -18,6 +18,7 @@ export interface PiEventEnvelope {
 export interface PiUiRequestEnvelope {
   workspace: string;
   sessionId?: string;
+  sessionPath?: string;
   source?: 'interactive' | 'goal';
   request: ExtensionUiRequest;
 }
@@ -25,6 +26,7 @@ export interface PiExitEnvelope {
   workspace: string;
   code: number | null;
   sessionId?: string;
+  sessionPath?: string;
   source?: 'interactive' | 'goal';
 }
 
@@ -37,9 +39,9 @@ export type AgentEvent =
   | { type: 'message_start'; message: AgentMessage }
   | { type: 'message_update'; message?: AgentMessage; assistantMessageEvent: AssistantMessageEvent; usage?: unknown }
   | { type: 'message_end'; message: AgentMessage }
-  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown }
-  | { type: 'tool_execution_update'; toolCallId: string; toolName: string; partialResult: unknown }
-  | { type: 'tool_execution_end'; toolCallId: string; toolName: string; result: unknown; isError: boolean }
+  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: unknown; parentToolCallId?: string }
+  | { type: 'tool_execution_update'; toolCallId: string; toolName: string; partialResult: unknown; parentToolCallId?: string }
+  | { type: 'tool_execution_end'; toolCallId: string; toolName: string; result: unknown; isError: boolean; parentToolCallId?: string }
   | { type: 'queue_update'; steering: string[]; followUp: string[] }
   | { type: 'compaction_start'; reason: string }
   | { type: 'compaction_end'; reason: string; aborted: boolean; willRetry: boolean; errorMessage?: string }
@@ -129,6 +131,8 @@ export interface SubAgentItem {
   task: string;
   status: 'running' | 'done' | 'error' | 'cancelled' | string;
   model?: string | null;
+  /** 子进程会话文件已写出时才算真正跑起来。没有它时界面显示启动中。 */
+  sessionPath?: string | null;
   /** 已解析能力档案 JSON（含 fs/name），前端据此推断「类型（只读/工作）」。 */
   profile?: string | null;
   output?: string | null;
@@ -190,8 +194,13 @@ export interface GitLogEntry {
   refs: string[];
 }
 
+/** 同项目多份会话同时在跑时，主进程按这个 jsonl 找到对应的 handle。缺省打到前景会话。 */
+function target(sessionPath?: string | null): { targetSessionPath?: string } {
+  return sessionPath ? { targetSessionPath: sessionPath } : {};
+}
+
 export const pi = {
-  openWorkspace: (workspace: string) =>
+  openWorkspace:(workspace: string) =>
     invoke<OpenWorkspaceResult>('open_workspace', { workspace }),
   closeWorkspace: (workspace: string) => invoke<void>('close_workspace', { workspace }),
   warmWorkspace: (workspace: string) => invoke<void>('warm_workspace', { workspace }),
@@ -200,23 +209,31 @@ export const pi = {
     message: string,
     streamingBehavior?: 'steer' | 'followUp',
     images?: Array<{ type: 'image'; mimeType: string; data: string }>,
+    targetSessionPath?: string | null,
   ) =>
     invoke<unknown>('agent_prompt', {
       workspace,
       message,
       images: images?.length ? images : undefined,
       streamingBehavior,
+      ...target(targetSessionPath),
     }),
-  abort: (workspace: string) => invoke<unknown>('agent_abort', { workspace }),
+  abort: (workspace: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_abort', { workspace, ...target(targetSessionPath) }),
+  /** 暂停后取走尚未注入的引导，跟进队列原样放回。 */
+  takeSteering: (workspace: string, targetSessionPath?: string | null) =>
+    invoke<{ steering: string[] }>('agent_take_steering', { workspace, ...target(targetSessionPath) }),
   setModel: (workspace: string, provider: string, modelId: string) =>
     invoke<unknown>('agent_set_model', { workspace, provider, modelId }),
   cycleModel: (workspace: string) => invoke<unknown>('agent_cycle_model', { workspace }),
   getAvailableModels: (workspace: string) => invoke<unknown>('agent_get_available_models', { workspace }),
   setThinkingLevel: (workspace: string, level: string) =>
     invoke<unknown>('agent_set_thinking_level', { workspace, level }),
-  setMode: (workspace: string, mode: string) => invoke<unknown>('agent_set_mode', { workspace, mode }),
-  setApproval: (workspace: string, level: string) =>
-    invoke<unknown>('agent_set_approval', { workspace, level }),
+  /** 带会话路径时只改那份会话；草稿不带，改项目默认（新会话继承）。 */
+  setMode: (workspace: string, mode: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_set_mode', { workspace, mode, ...target(targetSessionPath) }),
+  setApproval: (workspace: string, level: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_set_approval', { workspace, level, ...target(targetSessionPath) }),
   /** 删任意段：把某条消息（按毫秒 timestamp）移出 LLM 上下文（对模型不可见、不删盘、可恢复）。 */
   excludeEntry: (workspace: string, timestamp: number) =>
     invoke<unknown>('agent_exclude_entry', { workspace, timestamp }),
@@ -249,11 +266,13 @@ export const pi = {
   getForkMessages: (workspace: string) =>
     invoke<{ messages: AgentMessage[] }>('agent_get_fork_messages', { workspace }),
   compact: (workspace: string) => invoke<unknown>('agent_compact', { workspace }),
-  getState: (workspace: string) => invoke<unknown>('agent_get_state', { workspace }),
+  getState: (workspace: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_get_state', { workspace, ...target(targetSessionPath) }),
   /** 主进程仍在跑的交互回合。渲染进程热更新后用来恢复停止按钮和侧边栏运行态。 */
   listRunningTurns: () =>
     invoke<Array<{ workspace: string; sessionId?: string; sessionPath?: string }>>('agent_list_running_turns'),
-  getMessages: (workspace: string) => invoke<{ messages: AgentMessage[] }>('agent_get_messages', { workspace }),
+  getMessages: (workspace: string, targetSessionPath?: string | null) =>
+    invoke<{ messages: AgentMessage[] }>('agent_get_messages', { workspace, ...target(targetSessionPath) }),
   newSession: (workspace: string) => invoke<unknown>('agent_new_session', { workspace }),
   switchSession: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_switch_session', { workspace, sessionPath }),
@@ -280,8 +299,8 @@ export const pi = {
     invoke<void>('extension_ui_respond', { workspace, response }),
   resolvePermission: (id: string, resolution: 'allow' | 'deny') =>
     invoke<unknown>('permission_resolve', { requestId: id, resolution }),
-  getSessionStats: (workspace: string) =>
-    invoke<SessionStats>('agent_get_session_stats', { workspace }),
+  getSessionStats: (workspace: string, targetSessionPath?: string | null) =>
+    invoke<SessionStats>('agent_get_session_stats', { workspace, ...target(targetSessionPath) }),
   readAskUserDraft: (workspace: string, toolCallId: string) =>
     invoke<AskUserDraft | null>('ask_user_draft_read', { workspace, toolCallId }),
   writeAskUserDraft: (workspace: string, draft: AskUserDraft) =>
@@ -337,7 +356,9 @@ export const pi = {
   enhancePrompt: (workspace: string, text: string, onChunk: Channel<string>, goalText?: string) =>
     invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText }),
   abortEnhancePrompt: (workspace: string) => invoke<void>('enhance_prompt_abort', { workspace }),
-  subagentList: (workspace: string) => invoke<SubAgentItem[]>('subagent_list', { workspace }),
+  /** 给了 sessionPath 只列这份会话派出去的子代理（含孙级）；不给列整个项目。 */
+  subagentList: (workspace: string, sessionPath?: string | null) =>
+    invoke<SubAgentItem[]>('subagent_list', { workspace, ...(sessionPath ? { sessionPath } : {}) }),
   /** 按需拉取单个子代理的完整 JSONL transcript（打开详情面板时调用，不在轮询路径中）。 */
   subagentGetTranscript: (workspace: string, agentId: string) =>
     invoke<string | null>('subagent_get_transcript', { workspace, agentId }),
@@ -345,6 +366,12 @@ export const pi = {
     invoke<{ messages: AgentMessage[] }>('subagent_get_session_messages', { sessionPath }),
   subagentCancel: (workspace: string, agentId: string) =>
     invoke<void>('subagent_cancel', { workspace, agentId }),
+  /** 后台 job 当前保留的输出与状态；job 不在（重启、已清理）时是 null。 */
+  jobSnapshot: (jobId: string, startedAt: number) =>
+    invoke<JobLiveSnapshot | null>('job_snapshot', { jobId, startedAt }),
+  /** 用户停止后台 job（原因记为 cancelled by the user，模型会收到结算通知）。 */
+  jobKill: (jobId: string, startedAt: number) =>
+    invoke<'requested' | 'already-finished' | 'not-found'>('job_kill', { jobId, startedAt }),
   subagentCatalog: (parentSessionPath: string) =>
     invoke<SubagentCatalogView>('subagent_catalog', { parentSessionPath }),
   subagentCatalogRow: (sessionPath: string) =>
@@ -377,8 +404,8 @@ export const pi = {
     invoke<void>('git_checkout', { workspacePath: workspace, branch }),
   gitCreateBranch: (workspace: string, name: string, checkout = true) =>
     invoke<void>('git_create_branch', { workspacePath: workspace, name, checkout }),
-  getGitLogGraph: (workspace: string, limit?: number) =>
-    invoke<GitLogEntry[]>('get_git_log_graph', { workspacePath: workspace, limit: limit ?? null }),
+  getGitLogGraph: (workspace: string, limit?: number, skip = 0) =>
+    invoke<GitLogEntry[]>('get_git_log_graph', { workspacePath: workspace, limit: limit ?? null, skip }),
 };
 
 /**
@@ -406,6 +433,35 @@ export interface SessionInfo {
   cwd: string | null;
   timestamp: string | null;
   name: string | null;
+}
+
+/** 后台 job 的界面投影（与 extensions/jobs/observer.ts 的 JobLiveView 同形）。 */
+export interface JobLiveView {
+  id: string;
+  kind: string;
+  label: string;
+  owner: string;
+  workspace: string;
+  status: 'running' | 'stopping' | 'completed' | 'failed' | 'killed';
+  progress?: string;
+  detail?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+export interface JobFrame {
+  job: JobLiveView;
+  delta?: { from: number; text: string; next: number; lossy: boolean };
+  removed?: true;
+}
+export interface JobLiveSnapshot {
+  job: JobLiveView;
+  text: string;
+  next: number;
+  lossy: boolean;
+  spillPaths?: string[];
+}
+export function onJobFrames(handler: (e: { frames: JobFrame[] }) => void): Promise<UnlistenFn> {
+  return listen<{ frames: JobFrame[] }>('pi://jobs', (e) => handler(e.payload));
 }
 
 export function onPiEvent(handler: (e: PiEventEnvelope) => void): Promise<UnlistenFn> {

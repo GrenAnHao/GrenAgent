@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Flexbox } from '@lobehub/ui';
 import { Editor } from '@lobehub/editor/react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
@@ -11,10 +11,11 @@ import { GoalPill } from '../GoalPill';
 import { TodoDockFromStore } from '../TodoDock';
 import { SessionGoalDrawer } from '../SessionGoalDrawer';
 import { WorkspaceBar } from '../workspace/WorkspaceBar';
+import { WORKSPACE_BAR_ROW_HEIGHT } from '../workspace/styles';
 import { PromptRequestCard } from '../PromptRequestCard';
 import { ComposerPromptOverlay } from '../ComposerPromptOverlay';
 import { EnhancePromptOverlay } from '../EnhancePromptOverlay';
-import { ContextUsageTag } from '../ContextUsageTag';
+import EnhancePromptAction from '../actions/EnhancePromptAction';
 import type { ActionKey } from '../config';
 import { InputChips } from './InputChips';
 import { createBoxMenu } from './SlashBoxMenu';
@@ -27,6 +28,7 @@ import { useSlashOptions } from './useSlashOptions';
 import { useTauriFileDrop } from './useTauriFileDrop';
 import { useGoalStore, type GoalSnapshot } from '../../../../stores/goalStore';
 import { draftShouldForwardWheel } from '../../composerWheel';
+import { ComposerCompactProvider, composerIsCompact } from '../composerCompact';
 
 const PLACEHOLDER = '输入消息，@ 引用文件/目录，/ 调用命令…';
 const STREAMING_PLACEHOLDER = '继续跟进，引导当前回答…';
@@ -35,18 +37,19 @@ const styles = createStaticStyles(({ css }) => ({
   zone: css`
     position: relative;
     flex: none;
-    margin: 8px 16px 16px;
+    margin: 8px 16px 4px;
   `,
   // 单层无缝容器：chips / 编辑器 / 操作栏共用同一底色与边框。
   // 作为 body 空闲高度的度量容器：内容列宽随会话区伸缩，固定高度会让窄列下的输入框显得方而笨重。
   surface: css`
+    position: relative;
     container-type: inline-size;
 
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 13px;
 
-    padding: 10px 12px;
+    padding: 13px 13px 8px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: ${cssVar.borderRadiusLG};
 
@@ -62,7 +65,8 @@ const styles = createStaticStyles(({ css }) => ({
   dock: css`
     display: flex;
     flex-direction: column;
-    margin-bottom: -1px;
+    /* 比输入卡片窄一个圆角，避免直边探出卡片上沿的弧。 */
+    margin: 0 ${cssVar.borderRadiusLG} -1px;
 
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-bottom: none;
@@ -90,6 +94,27 @@ const styles = createStaticStyles(({ css }) => ({
       border-top: 1px solid ${cssVar.colorBorderSecondary};
     }
   `,
+  toolLead: css`
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  `,
+  below: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+  `,
+  enhance: css`
+    position: absolute;
+    z-index: 1;
+    top: 8px;
+    right: 8px;
+  `,
+  bodyWithEnhance: css`
+    padding-right: 28px;
+  `,
   body: css`
     scrollbar-width: thin;
 
@@ -109,6 +134,11 @@ const styles = createStaticStyles(({ css }) => ({
       margin-block: 0;
     }
 
+    /* lobe 占位层按段落 margin-block: 4px 对齐。段落边距清零后占位要一起上移，否则光标会悬在占位文字上方。 */
+    [contenteditable] + div {
+      margin-block: 0;
+    }
+
     /* 填充式 @ 提及 chip，贴合输入区视觉。 */
     .editor_mention {
       padding: 1px 6px;
@@ -122,7 +152,9 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   dropHint: css`
     position: absolute;
-    inset: 0;
+    z-index: 2;
+    /* 盖住卡片自身 1px 边框，虚线框与卡片轮廓重合。 */
+    inset: -1px;
 
     display: flex;
     align-items: center;
@@ -150,6 +182,7 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   const { editor, send, addAttachments, addPastedText, setEmpty, attachments, pastedTexts, isGenerating, hasRunningTool, scrollTranscript } =
     useChatInput();
   const zoneRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLDivElement>(null);
   const [goalDrawerSessionId, setGoalDrawerSessionId] = useState<string>();
@@ -157,6 +190,16 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     goalDrawerSessionId ? state.bySession[goalDrawerSessionId] : undefined,
   );
   const setGoalSnapshot = useGoalStore((state) => state.setSnapshot);
+
+  useLayoutEffect(() => {
+    const zone = zoneRef.current;
+    if (!zone) return;
+    const update = () => setCompact(composerIsCompact(zone.clientWidth));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(zone);
+    return () => observer.disconnect();
+  }, []);
 
   // 菜单锚定在输入框上方，宽度与输入框齐宽（@ 与 / 共用）。
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
@@ -178,7 +221,8 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   const { dragOver, dragKind } = useTauriFileDrop({
     editor,
     workspace,
-    zoneRef,
+    // 命中区与提示层一致：只认输入卡片，不含上方 dock 与下方工作区栏。
+    zoneRef: surfaceRef,
     onImages: addAttachments,
     onPastedText: addPastedText,
   });
@@ -205,9 +249,27 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
     return () => el.removeEventListener('wheel', onWheel);
   }, [scrollTranscript]);
 
+  // 编辑器命令在流式重绘时可能接不住回车。冒泡到这里再补一次；斜杠菜单已处理过的不再发。
+  useEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return;
+      event.preventDefault();
+      void send(event.ctrlKey || event.metaKey ? { interrupt: true } : undefined);
+    };
+    el.addEventListener('keydown', onKeyDown);
+    return () => el.removeEventListener('keydown', onKeyDown);
+  }, [send]);
+
   const hasChips = attachments.length > 0 || pastedTexts.length > 0;
+  const showEnhance = rightActions.includes('enhancePrompt');
+  const sendActions = rightActions.filter((key) => key !== 'enhancePrompt');
 
   return (
+    <ComposerCompactProvider compact={compact}>
     <div ref={zoneRef} className={styles.zone}>
       <div data-testid="composer-dock" className={styles.dock}><SteerQueue /><TodoDockFromStore /><GoalPill onOpenDetails={(snapshot: GoalSnapshot) => setGoalDrawerSessionId(snapshot.sessionId)} /></div>
       <SessionGoalDrawer
@@ -217,13 +279,17 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
         sessionId={goalDrawerSessionId ?? ''}
         snapshot={goalDrawerSnapshot}
       />
-      <WorkspaceBar onReferencePastedText={addPastedText} />
       <PromptRequestCard />
       <div ref={surfaceRef} className={styles.surface} data-testid="composer-surface">
+        {showEnhance ? (
+          <div className={styles.enhance}>
+            <EnhancePromptAction />
+          </div>
+        ) : null}
         {hasChips ? <InputChips /> : null}
         <div
           ref={draftRef}
-          className={styles.body}
+          className={cx(styles.body, showEnhance && styles.bodyWithEnhance)}
           data-composer-draft
           onClick={(e) => {
             // 点击编辑器下方空白区也聚焦输入（整块 body 区域可用）。
@@ -259,26 +325,32 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
             onPressEnter={({ event }) => {
               if (event.shiftKey || event.isComposing) return;
               event.preventDefault();
-              void send();
+              void send(event.ctrlKey || event.metaKey ? { interrupt: true } : undefined);
               return true;
             }}
           />
         </div>
         <Flexbox horizontal align="center" gap={8}>
-          <ActionBar actions={leftActions} />
+          <div className={styles.toolLead}>
+            <ActionBar actions={leftActions} />
+          </div>
           <Flexbox horizontal align="center" gap={8} style={{ flexShrink: 0 }}>
-            <ContextUsageTag />
-            <SendArea actions={rightActions} />
+            <SendArea actions={sendActions} />
           </Flexbox>
         </Flexbox>
+        {/* 提示层只罩住输入卡片，不覆盖下方工作区栏。 */}
+        {dragOver ? (
+          <div className={styles.dropHint}>
+            {dragKind === 'text' ? '拖放以插入文本' : dragKind === 'image' ? '拖放以插入图片' : '拖放文件以引用'}
+          </div>
+        ) : null}
+      </div>
+      <div className={styles.below} data-testid="composer-below" style={{ minHeight: WORKSPACE_BAR_ROW_HEIGHT }}>
+        <WorkspaceBar onReferencePastedText={addPastedText} />
       </div>
       <ComposerPromptOverlay anchorRef={surfaceRef} />
       <EnhancePromptOverlay anchorRef={surfaceRef} />
-      {dragOver ? (
-        <div className={styles.dropHint}>
-          {dragKind === 'text' ? '拖放以插入文本' : dragKind === 'image' ? '拖放以插入图片' : '拖放文件以引用'}
-        </div>
-      ) : null}
     </div>
+    </ComposerCompactProvider>
   );
 }

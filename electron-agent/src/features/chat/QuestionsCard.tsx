@@ -3,6 +3,7 @@ import { App } from 'antd';
 import { pi } from '../../lib/pi';
 import type { ImageAttachment } from '../chat/input/ChatInputContext';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { pinRunClock } from '../../stores/agentReducer';
 import { QuestionSelector } from '../../components/QuestionSelector';
 import { formatAnswers } from '../../components/QuestionSelector/answers';
 
@@ -74,7 +75,7 @@ export const QuestionsCard = memo(function QuestionsCard({
   content: string;
   answered?: boolean;
 }) {
-  const { workspace } = useAgentStoreContext();
+  const { workspace, store } = useAgentStoreContext();
   const { message } = App.useApp();
   const data = parseQuestions(content);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
@@ -108,27 +109,32 @@ export const QuestionsCard = memo(function QuestionsCard({
         mimeType,
         data: imgData,
       }));
+      store.useStore.setState(pinRunClock(store.useStore.getState()));
       await pi.prompt(
         workspace,
         formatAnswers(data, selected, customTexts, extraText, images.length),
         undefined,
         images.length ? images : undefined,
+        store.getLoadedSessionPath(),
       );
     } catch (e) {
+      store.useStore.setState({ runOriginPinned: false });
       setSubmitted(false);
       message.error(`提交失败：${e instanceof Error ? e.message : '请重试'}`);
     }
-  }, [customTexts, data, extraImages, extraText, message, selected, workspace]);
+  }, [customTexts, data, extraImages, extraText, message, selected, store, workspace]);
 
   const onSkip = useCallback(async () => {
     setSkipped(true);
     try {
-      await pi.prompt(workspace, '[跳过提问] 用户选择暂不回答上面的问题，请继续。');
+      store.useStore.setState(pinRunClock(store.useStore.getState()));
+      await pi.prompt(workspace, '[跳过提问] 用户选择暂不回答上面的问题，请继续。', undefined, undefined, store.getLoadedSessionPath());
     } catch (e) {
+      store.useStore.setState({ runOriginPinned: false });
       setSkipped(false);
       message.error(`提交失败：${e instanceof Error ? e.message : '请重试'}`);
     }
-  }, [message, workspace]);
+  }, [message, store, workspace]);
 
   if (!data) {
     return (

@@ -3,6 +3,8 @@ import {
   createEnhancePrompt,
   createResultTagEmitter,
   ENHANCE_TEMPERATURE,
+  ENHANCE_TOP_P,
+  ENHANCE_SAMPLING_PARAMS,
   MAX_ENHANCE_CHARS,
   DEFAULT_ENHANCE_SYSTEM,
   PROJECT_ENHANCE_SYSTEM,
@@ -90,6 +92,18 @@ describe('sanitizeEnhanceOutput', () => {
     const raw = '分析这个仓库。\n上手建议：新人先读入口文件；最常见的三类改动路径也要列出。';
     expect(sanitizeEnhanceOutput(raw)).toEqual({ ok: true, content: raw });
   });
+
+  it('裸正文后尾随「轻量变体」时从该行起截断', () => {
+    const raw = [
+      '请对这个仓库做一次结构化分析。',
+      '',
+      '轻量变体（只想快速摸底时）：用 400 字讲清项目。',
+    ].join('\n');
+    expect(sanitizeEnhanceOutput(raw)).toEqual({
+      ok: true,
+      content: '请对这个仓库做一次结构化分析。',
+    });
+  });
 });
 
 describe('createResultTagEmitter（流式预览剥标签）', () => {
@@ -144,6 +158,8 @@ describe('buildDraftUserMessage（实质增强，草稿不是任务）', () => {
     expect(msg).toContain('USER INPUT:\n深度分析一下该项目');
     expect(msg).toContain('不是给你的任务');
     expect(msg).toContain('请解释这段代码的主要功能、执行流程和关键逻辑');
+    expect(msg).toContain('800');
+    expect(msg).toContain('不要元评论');
   });
 
   it('系统提示词要求实质增强，禁止执行、提问与扩成写作课', () => {
@@ -267,12 +283,18 @@ describe('createEnhancePrompt 默认路径', () => {
     expect(chunks).toEqual(['a']);
   });
 
-  it('默认路径固定 temperature=0.3、reasoning=minimal（压低自由发挥与自我解说）', async () => {
+  it('默认路径固定 temperature / top_p / reasoning=minimal（压低自由发挥与自我解说）', async () => {
     const { service, streamSimple } = setup({ sessionModel: model });
     await service.run({ workspace: '/ws', text: 'x' }, () => {});
-    const input = streamSimple.mock.calls[0]![0] as { temperature?: number; reasoning?: string };
+    const input = streamSimple.mock.calls[0]![0] as {
+      temperature?: number;
+      reasoning?: string;
+      samplingParams?: Record<string, unknown>;
+    };
     expect(input.temperature).toBe(ENHANCE_TEMPERATURE);
     expect(input.reasoning).toBe('minimal');
+    expect(input.samplingParams).toEqual({ top_p: ENHANCE_TOP_P });
+    expect(ENHANCE_SAMPLING_PARAMS).toEqual({ top_p: ENHANCE_TOP_P });
   });
 
   it('标签包裹的输出：预览不含标签与改动说明，最终内容只取标签内', async () => {
@@ -329,8 +351,9 @@ describe('createEnhancePrompt 实验路径', () => {
     await service.run({ workspace: '/ws', text: '深度分析一下该项目' }, () => {});
     const context = stream.mock.calls[0]![1] as { messages: Array<{ content: unknown }> };
     expect(context.messages[0]!.content).toBe(buildDraftUserMessage('深度分析一下该项目'));
-    const options = stream.mock.calls[0]![2] as { temperature?: number };
+    const options = stream.mock.calls[0]![2] as { temperature?: number; samplingParams?: Record<string, unknown> };
     expect(options.temperature).toBe(ENHANCE_TEMPERATURE);
+    expect(options.samplingParams).toEqual({ top_p: ENHANCE_TOP_P });
   });
 
   it('只允许五个只读工具；wiki_replace / codegraph_impact 回错误字符串且不 request', async () => {

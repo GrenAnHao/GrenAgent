@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import { create } from 'zustand';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
 import { UserMessage } from './UserMessage';
@@ -103,6 +104,23 @@ describe('UserMessage', () => {
     expect(container.querySelector('.chat-actions')).toBeNull();
   });
 
+  it('已压缩之前的用户消息没有编辑和回退', () => {
+    storeState.messages = [
+      { kind: 'user', entryId: 'e-old', timestamp: 1000, text: 'old' },
+      { kind: 'assistant' },
+      { kind: 'compaction' },
+    ];
+    render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="old" entryId="e-old" timestamp={1000} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.queryByTestId('msg-action-bar-edit')).toBeNull();
+    expect(screen.queryByTestId('msg-action-bar-rewind')).toBeNull();
+  });
+
   it('非最后一条用户消息：没有编辑、没有重新生成', async () => {
     storeState.messages = [
       { kind: 'user', entryId: 'e-old', timestamp: 1000, text: 'old' },
@@ -166,5 +184,69 @@ describe('UserMessage', () => {
     expect(menu.textContent).not.toContain('回退到此');
     expect(menu.textContent).not.toContain('重新生成');
     expect(menu.textContent).not.toContain('删除');
+  });
+
+  it('引导消息按下落显示状态', () => {
+    const { rerender } = render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="记住账号密码" steering steerState="written" />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByTestId('steer-status').textContent).toContain('正在引导…');
+    expect(screen.getByLabelText('正在重定向正在运行的这一轮，尚未确认。')).toBeTruthy();
+
+    rerender(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="记住账号密码" steering steerState="consumed" />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByTestId('steer-status').textContent).toContain('已引导到正在运行的这一轮');
+    expect(screen.queryByLabelText('正在重定向正在运行的这一轮，尚未确认。')).toBeNull();
+
+    rerender(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="记住账号密码" steering steerState="requeued" />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByTestId('steer-status').textContent).toContain('这一轮在此生效前已结束，此消息作为独立消息运行。');
+  });
+
+  it('普通用户消息不显示引导状态', () => {
+    renderMsg('hello');
+    expect(screen.queryByTestId('steer-status')).toBeNull();
+  });
+
+  it('timestamp 从无到有时不因多调 useStore 崩溃', () => {
+    const real = create(() => ({
+      excluded: new Set<number>(),
+      isStreaming: false,
+      awaitingResponse: false,
+      messages: [{ kind: 'user', text: 'hi' }],
+    }));
+    useOptional.mockImplementation(() => ({
+      store: { ...fakeStore, useStore: real },
+      workspace: '.',
+    }));
+    const ui = render(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="hi" />
+        </ThemeProvider>
+      </App>,
+    );
+    ui.rerender(
+      <App>
+        <ThemeProvider>
+          <UserMessage text="hi" timestamp={1000} entryId="e1" />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getByText('hi')).toBeTruthy();
   });
 });

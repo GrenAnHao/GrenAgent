@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { openBrowserPopupTab } from '../dock/browser/openBrowserPopupTab';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
 import { formatUrlLabel } from './input/editor/urlPaste';
+import { unescapeSkillName } from './skillCommandText';
 
 export type MessageSegment =
   | { type: 'text'; text: string }
@@ -17,8 +18,10 @@ export type MessageSegment =
 const SKILL_BLOCK_RE = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
 // 两条分支：
 // 1. `<url>` markdown autolink —— 尖括号自成边界（可紧跟文本），m[1] 为链接，渲染时隐藏两侧尖括号。
-// 2. `(^|\s)` 边界后的裸 URL / `/skill:name` / `@path`：m[2]=边界、m[3]=token、m[4]=skill、m[5]=file。
-const INLINE_RE = /<(https?:\/\/[^>\s]+)>|(^|\s)(https?:\/\/\S+|\/skill:(\S+)|@(\S+))/g;
+// 2. `(^|\s)` 边界后的裸 URL / `/skill:"name"` / `/skill:name` / `@path`。
+//    m[2]=边界、m[3]=token、m[4]=引号内技能名、m[5]=无引号技能名、m[6]=file。
+//    带空格的技能名必须走引号分支，否则会在第一个空格处截断。
+const INLINE_RE = /<(https?:\/\/[^>\s]+)>|(^|\s)(https?:\/\/\S+|\/skill:"((?:\\.|[^"\\])*)"|\/skill:(\S+)|@(\S+))/g;
 
 function bareSkillName(name: string): string {
   const n = name.trim();
@@ -41,9 +44,11 @@ function parseInline(text: string, segments: MessageSegment[]): void {
     const tokenStart = m.index + m[2].length;
     if (tokenStart > last) segments.push({ type: 'text', text: text.slice(last, tokenStart) });
     if (m[4] !== undefined) {
-      segments.push({ type: 'skill', name: bareSkillName(m[4]) });
+      segments.push({ type: 'skill', name: bareSkillName(unescapeSkillName(m[4])) });
     } else if (m[5] !== undefined) {
-      segments.push({ type: 'file', path: m[5] });
+      segments.push({ type: 'skill', name: bareSkillName(m[5]) });
+    } else if (m[6] !== undefined) {
+      segments.push({ type: 'file', path: m[6] });
     } else {
       segments.push({ type: 'link', url: m[3] });
     }
@@ -72,13 +77,22 @@ export function parseMessageTags(text: string): MessageSegment[] {
 }
 
 /**
+ * 消息里文件 chip 的显示名。拖入的区外文件复制在 `.pi/dropped/<hash>/` 下，哈希目录对人没有意义，
+ * 只显示文件名；其它路径原样显示。完整路径在悬停提示里。
+ */
+export function fileTagLabel(path: string): string {
+  if (!path.startsWith('.pi/dropped/')) return path;
+  return path.split('/').pop() || path;
+}
+
+/**
  * 渲染用户消息：`@相对路径` → 文件标签 chip；`/skill:名称` 或展开后的 `<skill>` 块 →
  * 技能命令 chip（与输入框/slash 菜单一致），其余按纯文本（保留换行）输出。
  */
 export function renderMessageTags(text: string): ReactNode {
   return parseMessageTags(text).map((seg, i) => {
     if (seg.type === 'file') {
-      return <ChatTagView key={i} category="file" label={seg.path} value={seg.path} />;
+      return <ChatTagView key={i} category="file" label={fileTagLabel(seg.path)} value={seg.path} />;
     }
     if (seg.type === 'skill') {
       return (

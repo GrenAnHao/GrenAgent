@@ -8,7 +8,7 @@ import type { AgentSessionEvent, JsonAgentSessionEvent } from "@earendil-works/p
  * AgentMessage，单条消息 O(n^2) IPC 克隆；且渲染层 agentReducer 的「快照优先、delta 兜底」
  * 分支会翻到从未被真实数据验证过的那条路。
  *
- * 对应上游版本：pi-coding-agent@0.85.1。升级 pi-coding-agent 必查 dist/modes/json-event.js。
+ * 对应上游版本：pi-coding-agent@0.87.0。升级 pi-coding-agent 必查 dist/modes/json-event.js。
  */
 type UnknownRecord = Record<string, unknown>;
 

@@ -12,6 +12,7 @@ const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, se
   setWaitingUiPrompt: vi.fn(),
 }));
 let emit: (e: unknown) => void = () => {};
+let loadedPath: string | null | undefined;
 vi.mock('../../lib/pi', () => ({
   onPiUiRequest: (h: (e: unknown) => void) => {
     emit = h;
@@ -37,12 +38,19 @@ vi.mock('../../stores/uiPromptStore', () => ({
 vi.mock('../../stores/agentStoreRegistry', () => ({
   agentStoreRegistry: {
     get: (workspace: string) =>
-      workspace === '/ws' ? { useStore: { setState: setWaitingUiPrompt } } : undefined,
+      workspace === '/ws'
+        ? {
+            useStore: { setState: setWaitingUiPrompt },
+            getLoadedSessionPath: () => loadedPath,
+            hasLiveActivity: () => false,
+          }
+        : undefined,
   },
 }));
 
 import { ExtensionUiHost } from './ExtensionUiHost';
 import { useImMessagesStore } from '../../stores/imMessagesStore';
+import { clearStashedUiRequestsForTest, hasStashedUiRequests } from '../../stores/backgroundUiRequests';
 
 afterEach(() => {
   cleanup();
@@ -56,6 +64,8 @@ afterEach(() => {
   msg.info.mockClear();
   msg.warning.mockClear();
   useImMessagesStore.getState().setConversations([]);
+  loadedPath = undefined;
+  clearStashedUiRequestsForTest();
 });
 
 describe('ExtensionUiHost', () => {
@@ -356,5 +366,25 @@ describe('ExtensionUiHost', () => {
     emit({ workspace: '/ws', request: { id: 'n2', method: 'notify', message: '裁判不可用，已放行。', level: 'warning' } });
     expect(msg.warning).toHaveBeenCalledWith('裁判不可用，已放行。');
     expect(msg.info).not.toHaveBeenCalled();
+  });
+
+  it('同项目另一个会话的交互请求按会话暂存，不显示在当前会话上', () => {
+    loadedPath = '/ws/a.jsonl';
+    render(<ExtensionUiHost />);
+    const request = { id: 'bg1', method: 'confirm', title: '后台会话要确认' };
+    emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request });
+    expect(setRequest).not.toHaveBeenCalled();
+    expect(hasStashedUiRequests('/ws/b.jsonl')).toBe(true);
+    // 后台会话的 ui-prompt 状态也不写进当前画面。
+    emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: { id: 's9', method: 'setStatus', statusKey: 'ui-prompt', statusText: 'x' } });
+    expect(setWaitingUiPrompt).not.toHaveBeenCalled();
+  });
+
+  it('当前会话自己的交互请求照常显示', () => {
+    loadedPath = '/ws/a.jsonl';
+    render(<ExtensionUiHost />);
+    const request = { id: 'fg1', method: 'confirm', title: '当前会话要确认' };
+    emit({ workspace: '/ws', sessionPath: '/ws/a.jsonl', request });
+    expect(setRequest).toHaveBeenCalledWith({ workspace: '/ws', request, sessionPath: '/ws/a.jsonl' });
   });
 });

@@ -37,10 +37,10 @@ function load() {
   return { commands, commandHandlers, handlers, setActiveTools, appendEntry };
 }
 
-function ctx(cwd = "D:/proj-a", entries: unknown[] = []) {
+function ctx(cwd = "D:/proj-a", entries: unknown[] = [], sessionId?: string) {
   return {
     cwd,
-    sessionManager: { getEntries: () => entries },
+    sessionManager: { getEntries: () => entries, ...(sessionId ? { getSessionId: () => sessionId } : {}) },
     ui: { setStatus: vi.fn(), notify: vi.fn() },
   };
 }
@@ -187,5 +187,39 @@ describe("agent-mode factory", () => {
     await handlers.before_agent_start?.({});
     await commandHandlers["plan-build"]?.("", session);
     expect(session.ui.notify).toHaveBeenCalledWith("没有可执行的计划步骤。", "warning");
+  });
+});
+
+describe("agent-mode per session", () => {
+  it("切会话各回各的模式，项目默认变化不改已打开会话", async () => {
+    const subscribers: Array<(next: Record<string, string>) => void> = [];
+    vi.mocked(watchConfig).mockImplementation((cb) => {
+      subscribers.push(cb);
+      return () => {};
+    });
+    const { handlers } = load();
+    const a = ctx("D:/proj-a", [{ type: "custom", customType: "session-controls", data: { mode: "ask" } }], "sa");
+    await handlers.session_start?.({}, a);
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("ask");
+    expect(a.ui.setStatus).toHaveBeenCalledWith("agent-mode", "ask");
+
+    const b = ctx("D:/proj-a", [], "sb");
+    await handlers.session_start?.({}, b);
+    expect(getAgentMode("D:/proj-a", "sb")).toBe("agent");
+    expect(b.ui.setStatus).toHaveBeenCalledWith("agent-mode", "agent");
+
+    for (const cb of subscribers) cb({ [agentModeConfigKey("D:/proj-a")]: "debug" });
+    expect(getAgentMode("D:/proj-a", "sb")).toBe("agent");
+    expect(getAgentMode("D:/proj-a", "sa")).toBe("ask");
+  });
+
+  it("tool_call 按本会话模式拦截", async () => {
+    const { handlers } = load();
+    const session = ctx("D:/proj-a", [], "sa");
+    await handlers.session_start?.({}, session);
+    setAgentMode("ask", "D:/proj-a", "other");
+    expect(await handlers.tool_call?.({ toolName: "write", input: { path: "a.ts" } }, session)).toBeUndefined();
+    setAgentMode("ask", "D:/proj-a", "sa");
+    expect(await handlers.tool_call?.({ toolName: "write", input: { path: "a.ts" } }, session)).toMatchObject({ block: true });
   });
 });

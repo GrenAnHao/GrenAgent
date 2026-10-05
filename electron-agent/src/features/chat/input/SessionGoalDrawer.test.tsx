@@ -5,8 +5,12 @@ import type { GoalSnapshot } from '../../../stores/goalStore';
 
 const { prompt } = vi.hoisted(() => ({ prompt: vi.fn() }));
 vi.mock('../../../lib/pi', () => ({ pi: { prompt } }));
+// 二次确认改成了 antd 弹窗；测试里交给 window.confirm，便于按确认 / 取消断言。
+vi.mock('../../../components/askConfirm', () => ({
+  useAskConfirm: () => async ({ title }: { title: string }) => window.confirm(title),
+}));
 vi.mock('../../../stores/AgentStoreContext', () => ({
-  useAgentStoreContext: () => ({ workspace: '/repo' }),
+  useAgentStoreContext: () => ({ workspace: '/repo', store: { getLoadedSessionPath: () => '/repo/s.jsonl' } }),
 }));
 
 if (!('ResizeObserver' in globalThis)) {
@@ -90,7 +94,7 @@ describe('SessionGoalDrawer', () => {
     fireEvent.change(input, { target: { value: '新条件' } });
     fireEvent.click(screen.getByRole('button', { name: '保存目标' }));
 
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件', undefined, undefined, '/repo/s.jsonl'));
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 
@@ -100,7 +104,7 @@ describe('SessionGoalDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
     expect(confirm).toHaveBeenCalledWith('清除当前目标？');
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear', undefined, undefined, '/repo/s.jsonl'));
     confirm.mockRestore();
   });
 
@@ -116,7 +120,7 @@ describe('SessionGoalDrawer', () => {
     });
 
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
-    expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件');
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal edit 新条件', undefined, undefined, '/repo/s.jsonl');
   });
 
   it('sends only one clear prompt when clear is clicked twice', async () => {
@@ -131,7 +135,7 @@ describe('SessionGoalDrawer', () => {
     });
 
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
-    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear');
+    expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear', undefined, undefined, '/repo/s.jsonl');
     confirm.mockRestore();
   });
 
@@ -147,7 +151,7 @@ describe('SessionGoalDrawer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '清除目标' }));
-    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear'));
+    await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal clear', undefined, undefined, '/repo/s.jsonl'));
     expect(screen.queryByLabelText('目标条件')).toBeNull();
     confirm.mockRestore();
   });

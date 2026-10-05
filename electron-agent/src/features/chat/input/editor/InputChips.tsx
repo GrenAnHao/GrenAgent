@@ -1,5 +1,5 @@
 import { ActionIcon, Flexbox } from '@lobehub/ui';
-import { X } from 'lucide-react';
+import { MousePointerClick, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import FileIcon from '../../../../components/FileIcon';
 import { useChatInput } from '../ChatInputContext';
@@ -55,7 +55,11 @@ export function InputChips() {
         const fileName = p.source?.split('/').pop() || p.source || '粘贴文本';
         return (
           <div key={p.id} className={styles.chip}>
-            <FileIcon fileName={fileName} size={14} variant="raw" />
+            {p.label && !p.source ? (
+              <MousePointerClick size={14} aria-hidden="true" />
+            ) : (
+              <FileIcon fileName={fileName} size={14} variant="raw" />
+            )}
             <span className={styles.chipLabel} title={p.text.slice(0, 2000)}>
               {pastedLabel(p)}
             </span>

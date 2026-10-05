@@ -69,6 +69,16 @@ export interface ToolDecisionResult {
   decision: ToolEffect;
   auditId?: string;
   ruleId?: string;
+  /** 通道超时或断开导致的 deny：没有规则参与判定，调用方不该当成「规则拒绝」。 */
+  unavailable?: true;
+}
+
+/** 连接层的失败（超时、拒连、半路断开）。主进程回了错误帧不算，那是它的判定。 */
+const TRANSPORT_CODES = new Set(['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE']);
+
+function isTransportFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && TRANSPORT_CODES.has(code);
 }
 
 /** 判定本进程 / 本回合身份。ALS 优先；无 ALS 时回退子进程 env（fork 与尚未删除的 sidecar）。 */
@@ -84,13 +94,28 @@ export function resolveToolOrigin(): ToolOrigin {
  *
  * 通道不可用或回包不合法时返回 deny：此时既无法确认规则也无法写审计，
  * 放行等于无记录地执行。不要改成 allow。
+ *
+ * 主进程和嵌入式 sidecar 共用一个事件循环：它卡住几秒后，到期的客户端计时器会先于
+ * 已经能处理的响应触发。所以连接层失败先重试一次，仍失败才 deny，并标上 unavailable。
  */
 export async function evaluateToolCall(
   client: DesktopControlPort,
   call: ToolCallFacts,
 ): Promise<ToolDecisionResult> {
+  let result: unknown;
   try {
-    const result = await client.request<unknown>('permission.tool.evaluate', { call });
+    result = await client.request<unknown>('permission.tool.evaluate', { call });
+  } catch (error) {
+    if (!isTransportFailure(error)) return { decision: 'deny', auditId: undefined };
+    try {
+      result = await client.request<unknown>('permission.tool.evaluate', { call });
+    } catch (retryError) {
+      return isTransportFailure(retryError)
+        ? { decision: 'deny', auditId: undefined, unavailable: true }
+        : { decision: 'deny', auditId: undefined };
+    }
+  }
+  try {
     if (typeof result !== 'object' || result === null) return { decision: 'deny', auditId: undefined };
     const value = result as { decision?: unknown; auditId?: unknown; ruleId?: unknown };
     if (value.decision !== 'allow' && value.decision !== 'deny' && value.decision !== 'ask') {

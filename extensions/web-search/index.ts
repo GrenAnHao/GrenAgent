@@ -1,14 +1,10 @@
-// web-search: open-webSearch 能力内置版 — 多引擎联网搜索（web_search / web_search_multi）+ 站点/文章抓取工具。
+// web-search: open-webSearch 能力内置版 — 多引擎联网搜索（web_search / web_search_multi）。
+// 单页抓取走 web-fetch 的 fetch_url，这里不再注册站点专用抓取。
 
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isSafeUrl } from "../web-fetch/html.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
-import { fetchCsdnArticle } from "./fetch/csdn.js";
-import { fetchGithubReadme, extractGithubRepo } from "./fetch/github.js";
-import { fetchJuejinArticle } from "./fetch/juejin.js";
-import { fetchLinuxDoArticle } from "./fetch/linuxdo.js";
-import { fetchWebContent } from "./fetch/web.js";
 import {
   filterResultsByHost,
   normalizeEngineName,
@@ -396,150 +392,17 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       };
     },
   });
-
-  const articleTool = (
-    name: string,
-    label: string,
-    description: string,
-    validate: (url: string) => boolean,
-    fetcher: (url: string, signal: AbortSignal | undefined) => Promise<string>,
-  ) => {
-    pi.registerTool({
-      name,
-      label,
-      description,
-      promptSnippet: description,
-      parameters: Type.Object({ url: Type.String({ description: "Article URL" }) }),
-      async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-        const denied = await requireNetwork(control, name, toolCwd(ctx), params.url);
-        if (denied) return denied;
-        const url = params.url.trim();
-        if (!isSafeUrl(url).ok || !validate(url)) {
-          return {
-            content: [{ type: "text", text: `${name}：URL 无效或不支持` }],
-            details: { url, error: "invalid_url" },
-          };
-        }
-        try {
-          const content = await fetcher(url, signal ?? undefined);
-          return {
-            content: [{ type: "text", text: content }],
-            details: { url, chars: content.length },
-          };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return {
-            content: [{ type: "text", text: `${name} 失败：${msg}` }],
-            details: { url, error: msg },
-          };
-        }
-      },
-    });
-  };
-
-  articleTool(
-    "fetch_csdn_article",
-    "Fetch CSDN Article",
-    "Fetch full article content from a CSDN blog post URL",
-    (url) => /blog\.csdn\.net/.test(url) && /\/article\/details\//.test(url),
-    (url, signal) => fetchCsdnArticle(url, signal, TIMEOUT_MS),
-  );
-
-  articleTool(
-    "fetch_juejin_article",
-    "Fetch Juejin Article",
-    "Fetch full article content from a Juejin post URL",
-    (url) => /juejin\.cn\/post\//.test(url),
-    (url, signal) => fetchJuejinArticle(url, signal, TIMEOUT_MS),
-  );
-
-  articleTool(
-    "fetch_linuxdo_article",
-    "Fetch Linux.do Article",
-    "Fetch full article content from a linux.do topic URL",
-    (url) => /linux\.do\/t\//.test(url),
-    (url, signal) => fetchLinuxDoArticle(url, signal, TIMEOUT_MS),
-  );
-
-  pi.registerTool({
-    name: "fetch_github_readme",
-    label: "Fetch GitHub README",
-    description: "Fetch README content from a GitHub repository URL",
-    promptSnippet: "Fetch GitHub repo README.",
-    parameters: Type.Object({ url: Type.String({ description: "GitHub repository URL" }) }),
-    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'fetch_github_readme', toolCwd(ctx), params.url);
-      if (denied) return denied;
-      const url = params.url.trim();
-      if (!extractGithubRepo(url)) {
-        return {
-          content: [{ type: "text", text: "fetch_github_readme：无效的 GitHub 仓库 URL" }],
-          details: { url, error: "invalid_url" },
-        };
-      }
-      const content = await fetchGithubReadme(url, signal ?? undefined, TIMEOUT_MS);
-      if (!content) {
-        return {
-          content: [{ type: "text", text: "README not found or repository does not exist" }],
-          details: { url, error: "not_found" },
-        };
-      }
-      return {
-        content: [{ type: "text", text: content }],
-        details: { url, chars: content.length },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "fetch_web_content",
-    label: "Fetch Web Content",
-    description: "Fetch readable text content from a public HTTP(S) URL (open-webSearch compatible).",
-    promptSnippet: "Fetch readable web page text.",
-    parameters: Type.Object({
-      url: Type.String({ description: "Public HTTP(S) URL" }),
-      maxChars: Type.Optional(Type.Number({ description: "Max characters (default 30000, max 51200)" })),
-    }),
-    async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
-      const denied = await requireNetwork(control, 'fetch_web_content', toolCwd(ctx), params.url);
-      if (denied) return denied;
-      const url = params.url.trim();
-      const safe = isSafeUrl(url);
-      if (!safe.ok) {
-        return {
-          content: [{ type: "text", text: `fetch_web_content：${safe.reason}` }],
-          details: { url, error: safe.reason },
-        };
-      }
-      const maxChars = Math.max(1000, Math.min(params.maxChars ?? 30000, 50 * 1024));
-      try {
-        const out = await fetchWebContent(url, maxChars, signal ?? undefined, TIMEOUT_MS);
-        return {
-          content: [{ type: "text", text: out.content }],
-          details: { url, title: out.title, chars: out.content.length, truncated: out.truncated },
-        };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return {
-          content: [{ type: "text", text: `fetch_web_content 失败：${msg}` }],
-          details: { url, error: msg },
-        };
-      }
-    },
-  });
 }
 
 async function requireNetwork(
   control: DesktopControlPort,
   toolName: string,
   cwd: string,
-  url?: string,
 ): Promise<AgentToolResult<Record<string, unknown>> | undefined> {
   const authorization = await authorizeDesktopOperation(control, {
     kind: 'network.request',
     workspace: cwd,
     toolName,
-    ...(url ? { url } : {}),
   });
   if (authorization.status === 'allowed') return undefined;
   return {

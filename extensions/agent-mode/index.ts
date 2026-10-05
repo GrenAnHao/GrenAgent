@@ -18,6 +18,7 @@ import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
+import { currentSessionId } from "../_shared/workspace-context.js";
 import {
   type AgentMode,
   DEFAULT_MODE,
@@ -25,6 +26,7 @@ import {
   agentModeConfigKey,
   gateToolCall,
   getAgentMode,
+  getDefaultAgentMode,
   hasAgentMode,
   isAgentMode,
   modeLabel,
@@ -54,10 +56,24 @@ interface PersistedState {
   planId?: string;
 }
 
+/** 会话里最近一条模式：本扩展的 agent-mode 条目或宿主切换写的 session-controls 条目。 */
+export function persistedMode(entries: Array<{ type: string; customType?: string; data?: unknown }>): AgentMode | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.type !== "custom") continue;
+    const data = e.data as { mode?: unknown } | undefined;
+    if ((e.customType === "agent-mode" || e.customType === "session-controls") && isAgentMode(data?.mode)) return data.mode;
+  }
+  return undefined;
+}
+
 export default function (pi: ExtensionAPI) {
   console.error("[agent-mode] extension loaded");
 
   let sessionCtx: ExtensionContext | undefined;
+  // 本会话 id：模式按会话存，切会话不跟着别的会话走。
+  let sessionId: string | undefined;
+  const liveMode = (cwd?: string) => getAgentMode(cwd ?? sessionCtx?.cwd, sessionId);
   let currentMode: AgentMode = DEFAULT_MODE;
   // 进入受限模式（ask/plan）前的完整工具集，退出时还原（避免丢失动态扩展工具）。
   let savedTools: string[] | undefined;
@@ -79,6 +95,8 @@ export default function (pi: ExtensionAPI) {
   // 把当前模式推给前端（模式选择器据此回读/高亮），并维护 plan 执行进度徽章。
   const pushStatus = (ctx: ExtensionContext) => {
     ctx.ui.setStatus("agent-mode", currentMode);
+    // 项目默认模式：草稿输入栏显示用（新会话将继承它）。
+    ctx.ui.setStatus("agent-mode-default", getDefaultAgentMode(ctx.cwd));
     if (executionMode && todoItems.length > 0) {
       const done = todoItems.filter((t) => t.completed).length;
       ctx.ui.setStatus("plan-mode", `执行中 ${done}/${todoItems.length}`);
@@ -98,7 +116,7 @@ export default function (pi: ExtensionAPI) {
     if (willRestrict && !wasRestricted) savedTools = pi.getActiveTools();
 
     currentMode = next;
-    setAgentMode(next, ctx.cwd);
+    setAgentMode(next, ctx.cwd, sessionId);
 
     if (willRestrict) {
       pi.setActiveTools(activeToolsFor(next, savedTools ?? pi.getActiveTools()) ?? []);
@@ -120,11 +138,18 @@ export default function (pi: ExtensionAPI) {
     applyMode(next, ctx);
   };
 
+  // 盘上的项目默认模式变了：只更新默认（给新会话继承），不改已打开会话的模式。
+  // 当前会话的切换由宿主直接写会话内存，before_agent_start 按 live 对齐工具集。
   watchConfig((next) => {
     if (!sessionCtx) return;
     const parsed = parseModeArg(next[agentModeConfigKey(sessionCtx.cwd)] ?? "");
-    if (!parsed || parsed === getAgentMode(sessionCtx.cwd)) return;
-    switchMode(parsed, sessionCtx);
+    if (!sessionId) {
+      // 无会话身份时只有项目级模式可用：沿用旧行为，直接切。
+      if (parsed && parsed !== getAgentMode(sessionCtx.cwd)) switchMode(parsed, sessionCtx);
+      return;
+    }
+    if (!parsed || parsed === getDefaultAgentMode(sessionCtx.cwd)) return;
+    setAgentMode(parsed, sessionCtx.cwd);
   });
 
   // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
@@ -132,7 +157,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("brainstorm-deliver", {
     description: "从头脑风暴切换到 Agent 模式并开始实施（由 AI 在交付阶段调用）",
     handler: async (args, ctx) => {
-      if (getAgentMode(ctx.cwd) !== "brainstorm") {
+      if (liveMode(ctx.cwd) !== "brainstorm") {
         ctx.ui.notify("当前不在头脑风暴模式，无需切换。", "info");
         return;
       }
@@ -275,14 +300,15 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) =>
-    gateToolCall(getAgentMode(ctx?.cwd ?? sessionCtx?.cwd), event.toolName, event.input),
+    gateToolCall(liveMode(ctx?.cwd), event.toolName, event.input),
   );
 
   pi.on("before_agent_start", async () => {
     if (sessionCtx) {
-      const live = getAgentMode(sessionCtx.cwd);
+      const live = liveMode();
       if (live !== currentMode) {
-        if (currentMode === "plan" && live !== "plan") {
+        // 宿主切了本会话的模式：与 switchMode 一致，离开 plan 系即清掉规划 / 执行子状态。
+        if (live !== "plan") {
           todoItems = [];
           executionMode = false;
         }
@@ -365,6 +391,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionCtx = ctx;
+    sessionId = ctx.sessionManager.getSessionId?.() || undefined;
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
     const data = entry?.data as PersistedState | undefined;
@@ -381,11 +408,31 @@ export default function (pi: ExtensionAPI) {
       savedTools = undefined;
       planId = undefined;
     }
-    if (!hasAgentMode(ctx.cwd)) {
-      const fromFile = parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "");
-      const fromEntry = isAgentMode(data?.mode) ? data.mode : undefined;
-      const next = fromFile ?? fromEntry ?? DEFAULT_MODE;
-      if (fromFile && fromFile !== currentMode && fromFile !== "plan") {
+    if (!sessionId) {
+      // 无会话身份（旧 worker / 测试桩）：沿用项目级行为，已写入的 live 优先，其次盘上，再会话条目。
+      if (!hasAgentMode(ctx.cwd)) {
+        const fromFile = parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "");
+        const next = fromFile ?? persistedMode(entries) ?? DEFAULT_MODE;
+        if (fromFile && fromFile !== currentMode && fromFile !== "plan") {
+          todoItems = [];
+          executionMode = false;
+        }
+        applyMode(next, ctx, { silent: true, persist: false });
+        return;
+      }
+    } else if (!hasAgentMode(ctx.cwd)) {
+      setAgentMode(parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "") ?? DEFAULT_MODE, ctx.cwd);
+    }
+    if (sessionId && !hasAgentMode(ctx.cwd, sessionId)) {
+      // 会话自己记的模式优先（宿主切换写的 session-controls 与本扩展的 agent-mode 取最近一条）；
+      // 没有时继承 ALS 里的父会话（子代理），再退项目默认。
+      const own = persistedMode(entries);
+      const parent = currentSessionId();
+      const inherited = parent && parent !== sessionId && hasAgentMode(ctx.cwd, parent)
+        ? getAgentMode(ctx.cwd, parent)
+        : undefined;
+      const next = own ?? inherited ?? getDefaultAgentMode(ctx.cwd);
+      if (next !== currentMode && next !== "plan") {
         todoItems = [];
         executionMode = false;
       }
@@ -393,7 +440,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const live = getAgentMode(ctx.cwd);
+    const live = liveMode(ctx.cwd);
     if (live !== currentMode) {
       applyMode(live, ctx, { silent: true });
       return;

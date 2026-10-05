@@ -9,13 +9,6 @@ export const NET_TOOLS = [
   "web_search",
   "web_search_multi",
   "fetch_url",
-  "fetch_llms",
-  "fetch_html",
-  "fetch_markdown",
-  "fetch_txt",
-  "fetch_json",
-  "fetch_github_readme",
-  "fetch_web_content",
   "github",
 ] as const;
 

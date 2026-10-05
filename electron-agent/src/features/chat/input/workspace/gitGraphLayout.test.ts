@@ -5,7 +5,7 @@ function commit(hash: string, parents: string[]): GraphCommit {
   return { hash, parents };
 }
 
-/** Two sequential one-commit merges, matching the Git 图谱 screenshot topology. */
+/** Two sequential one-commit merges, matching the Git 历史 screenshot topology. */
 const sequentialMerges = [
   commit('M1', ['M2', 'A']),
   commit('A', ['M2']),

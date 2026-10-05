@@ -13,11 +13,16 @@ describe('copyPiAdjacentAssets', () => {
       from: 'extensions/_shared/sandbox/windows/bin/pi-sandbox-win.exe',
       to: 'pi-sandbox-win.exe',
     });
+    expect(PI_ADJACENT_ASSETS).toContainEqual({
+      from: 'extensions/_shared/sandbox/windows/bin/pi-sandbox-launch.exe',
+      to: 'pi-sandbox-launch.exe',
+    });
     const dir = mkdtempSync(join(tmpdir(), 'pi-assets-'));
     copyPiAdjacentAssets(repoRoot, dir);
     expect(existsSync(join(dir, 'runner.py'))).toBe(true);
     expect(existsSync(join(dir, 'runner.mjs'))).toBe(true);
     expect(existsSync(join(dir, 'pi-sandbox-win.exe'))).toBe(true);
+    expect(existsSync(join(dir, 'pi-sandbox-launch.exe'))).toBe(true);
     expect(existsSync(join(dir, 'prompts/tier1/identity.md'))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -28,6 +33,7 @@ describe('copyPiAdjacentAssets', () => {
     copyPiAdjacentAssets(repoRoot, dir);
     expect(existsSync(join(dir, 'chunks', 'runner.py'))).toBe(true);
     expect(existsSync(join(dir, 'chunks', 'pi-sandbox-win.exe'))).toBe(true);
+    expect(existsSync(join(dir, 'chunks', 'pi-sandbox-launch.exe'))).toBe(true);
     expect(existsSync(join(dir, 'chunks', 'prompts/tier1/identity.md'))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -35,6 +41,8 @@ describe('copyPiAdjacentAssets', () => {
   it('asarUnpack 列出 out/main 与 chunks 下的 helper', () => {
     const config = parse(readFileSync(resolve(__dirname, '../../electron-builder.yml'), 'utf8'));
     expect(config.asarUnpack).toContain('out/main/pi-sandbox-win.exe');
+    expect(config.asarUnpack).toContain('out/main/pi-sandbox-launch.exe');
     expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-win.exe');
+    expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-launch.exe');
   });
 });

@@ -38,8 +38,8 @@ function loadSessionStart(): SessionStart {
   return handler!;
 }
 
-const ctx = (entries: SessionEntry[] = [], cwd?: string) => ({
-  sessionManager: { getEntries: () => entries },
+const ctx = (entries: SessionEntry[] = [], cwd?: string, sessionId?: string) => ({
+  sessionManager: { getEntries: () => entries, ...(sessionId ? { getSessionId: () => sessionId } : {}) },
   ui: { setStatus: vi.fn(), notify: vi.fn() },
   ...(cwd ? { cwd } : {}),
 });
@@ -140,5 +140,42 @@ describe("approval cwd binding", () => {
       appendEntry: () => {},
     } as never);
     expect(setRuntimeConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("approval per session", () => {
+  it("每个会话钉住自己的档：会话条目优先，换会话不沿用上一个", async () => {
+    vi.mocked(getConfig).mockReturnValue(undefined);
+    const start = loadSessionStart();
+    const a = ctx([{ type: "custom", customType: "session-controls", data: { approval: "readonly" } }], "D:/p", "sa");
+    await start({}, a);
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("readonly");
+    expect(a.ui.setStatus).toHaveBeenCalledWith("approval-policy", "readonly");
+
+    const b = ctx([], "D:/p", "sb");
+    await start({}, b);
+    expect(getApprovalPolicy("D:/p", "sb")).toBe("auto");
+    expect(b.ui.setStatus).toHaveBeenCalledWith("approval-policy", "auto");
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("readonly");
+  });
+
+  it("项目默认档变化不改已打开会话", async () => {
+    const subscribers: Array<(next: Record<string, string>) => void> = [];
+    vi.mocked(watchConfig).mockImplementation((cb) => {
+      subscribers.push(cb);
+      return () => {};
+    });
+    const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+    approval({
+      registerCommand: () => {},
+      on: (ev: string, h: (event: unknown, ctx: unknown) => unknown) => {
+        handlers[ev] = h;
+      },
+      appendEntry: () => {},
+    } as never);
+    await handlers.session_start?.({}, ctx([], "D:/p", "sa"));
+    for (const cb of subscribers) cb({ [approvalPolicyConfigKey("D:/p")]: "full" });
+    expect(getApprovalPolicy("D:/p", "sa")).toBe("auto");
+    expect(getApprovalPolicy("D:/p", "new")).toBe("full");
   });
 });

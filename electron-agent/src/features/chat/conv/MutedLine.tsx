@@ -9,8 +9,10 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     gap: 7px;
+    max-width: 100%;
     height: 28px;
     padding: 0;
+    text-align: start;
     border: none;
     background: transparent;
     color: ${cssVar.colorTextTertiary};
@@ -25,6 +27,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   count: css`
     color: ${cssVar.colorTextQuaternary};
+  `,
+  // 行高固定 28px：长文本必须单行省略，否则在按钮里居中换行、和下一行叠在一起。
+  text: css`
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   `,
 }));
 
@@ -56,7 +65,7 @@ export const MutedLine = memo(function MutedLine({
       onClick={onToggle}
     >
       {icon ? <Icon icon={icon} size={12} /> : null}
-      <span>
+      <span className={styles.text}>
         {text}
         {count ? <span className={styles.count}> · {count} 条</span> : null}
       </span>

@@ -49,10 +49,16 @@ export class GitService {
     await runGit(workspacePath, checkout ? ['checkout', '-b', name] : ['branch', name]);
   }
 
-  async logGraph(workspacePath: string, limit: number | null | undefined): Promise<GitLogEntry[]> {
+  /**
+   * 分页拉提交历史：本地分支 + 远端分支 + tag + HEAD（不含 stash）。
+   * `--date-order` 保证子提交总在父提交之前，前端 lane 布局依赖这一点；顺序稳定，`--skip` 翻页不乱。
+   */
+  async logGraph(workspacePath: string, limit: number | null | undefined, skip = 0): Promise<GitLogEntry[]> {
     if (!await isRepository(workspacePath)) return [];
-    const count = String(limit ?? 40);
-    const output = await runGit(workspacePath, ['log', '-n', count, '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ct%x1f%s%x1f%D']);
+    const args = ['log', '--branches', '--remotes', '--tags', 'HEAD', '--date-order', '-n', String(limit ?? 40)];
+    if (skip > 0) args.push('--skip', String(skip));
+    args.push('--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ct%x1f%s%x1f%D', '--');
+    const output = await runGit(workspacePath, args);
     return output.split(/\r?\n/).flatMap(parseLogEntry);
   }
 

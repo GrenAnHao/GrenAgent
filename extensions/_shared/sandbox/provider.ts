@@ -9,7 +9,8 @@ import { bwrapArgv } from "./linux/bwrap.js";
 import type { ConfinedArgv, SandboxPolicy, SandboxProvider } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
 import { acquireTempDir, dispose as disposeTempDir } from "./tempDirs.js";
-import { windowsConfined } from "./windows/runner.js";
+import { defaultSandboxHome, ensureSandboxAccount, grantSandboxAccess } from "./windows/account.js";
+import { windowsAccountConfined, type SandboxLogon } from "./windows/runner.js";
 import { assertWritableRootsDisjoint } from "./windows/sids.js";
 
 const execFileAsync = promisify(execFile);
@@ -45,6 +46,8 @@ export interface SandboxProviderDeps {
   tempDir?: string;
   helperPath?: string;
   helperLookup?: WinHelperLookup;
+  /** Win32 only. Default creates the PiSandbox account and grants workspace ACLs. */
+  prepareWindowsIdentity?: (policy: SandboxPolicy, tempDir: string, signal?: AbortSignal) => Promise<SandboxLogon>;
 }
 
 /**
@@ -168,6 +171,13 @@ function probeWinHelper(helperPath: string | undefined): SandboxProbeResult {
   return { ok: false, reason: `windows helper not found at ${helperPath ?? "any probe path"}` };
 }
 
+async function prepareWindowsIdentity(policy: SandboxPolicy, tempDir: string, signal?: AbortSignal): Promise<SandboxLogon> {
+  if (signal?.aborted) throw new Error("aborted");
+  const identity = await ensureSandboxAccount();
+  await grantSandboxAccess(identity.username, policy, tempDir, undefined, signal);
+  return { ...identity, home: identity.home ?? defaultSandboxHome(identity.username) };
+}
+
 function unwiredReason(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "darwin runner not wired";
   return `${platform} runner not wired`;
@@ -189,7 +199,7 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
   }
 
   return {
-    async confine(argv, policy) {
+    async confine(argv, policy, signal) {
       const result = await (deps.probe ?? defaultProbe)();
       if (!result.ok) {
         throw new SandboxUnavailableError(result.reason ?? "sandbox unavailable");
@@ -216,7 +226,8 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
         if (!helperPath) {
           throw new SandboxUnavailableError("windows helper not found at any probe path");
         }
-        confined = windowsConfined(policy, argv, helperPath, tempDir);
+        const identity = await (deps.prepareWindowsIdentity ?? prepareWindowsIdentity)(policy, tempDir, signal);
+        confined = windowsAccountConfined(policy, argv, helperPath, tempDir, identity);
       } else {
         throw new SandboxUnavailableError(unwiredReason(platform));
       }

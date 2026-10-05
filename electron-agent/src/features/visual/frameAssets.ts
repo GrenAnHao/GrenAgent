@@ -93,11 +93,12 @@ code { font-size: 0.8rem; background: #22222c; border-radius: 4px; padding: 1px 
 .mockup-body { padding: 14px; }
 
 /* ===== SPLIT ===== */
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 600px) { .split { grid-template-columns: 1fr; } }
+/* 方案多了按最小宽度折行，不再固定两列把每张卡挤窄。 */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px; align-items: stretch; }
+.split > * { min-width: 0; }
 
 /* ===== PROS/CONS ===== */
-.pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+.pros-cons { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin: 10px 0; }
 .pros, .cons { background: var(--bg-card); border-radius: 8px; padding: 11px; border: 1px solid var(--border); }
 .pros h4 { color: var(--success); }
 .cons h4 { color: var(--error); }
@@ -122,37 +123,56 @@ export const HELPER_JS = `(function() {
   // ── 原版 helper.js（WebSocket 重连逻辑在 iframe 内无效，保留结构但 connect() 是 no-op）──
   let eventQueue = [];
 
-  function sendEvent(event) {
-    event.timestamp = Date.now();
-    // In GrenAgent iframe: send via postMessage to parent instead of WebSocket
-    notifyChoice(event);
+  let submitted = false;
+
+  function choiceOf(el) {
+    return el.dataset.choice || el.dataset.value || '';
   }
 
-  // Capture clicks on choice elements
-  document.addEventListener('click', (e) => {
-    const target = e.target.closest('[data-choice]');
-    if (!target) return;
+  function labelOf(el) {
+    return el.querySelector('h3, .content h3, .card-body h3')?.textContent?.trim() || choiceOf(el);
+  }
 
-    sendEvent({
-      type: 'click',
-      text: target.textContent.trim(),
-      choice: target.dataset.choice,
-      id: target.id || null
+  function hasChoices() {
+    return !!document.querySelector('[data-choice], [data-value]');
+  }
+
+  function selectedNodes() {
+    const seen = new Set();
+    const out = [];
+    document.querySelectorAll('[data-choice].selected, [data-value].selected').forEach((el) => {
+      if (seen.has(el) || !choiceOf(el)) return;
+      seen.add(el);
+      out.push(el);
     });
+    return out;
+  }
 
-    // Update indicator bar (defer so toggleSelect runs first)
+  function sendEvent(event) {
+    event.timestamp = Date.now();
+    if (event.type === 'submit') notifyChoice(event);
+    else stageChoice(event);
+  }
+
+  // 点选项只选中。页面设计里选项常用来切换方案，提交交给底部确认按钮。
+  document.addEventListener('click', (e) => {
+    if (submitted) return;
+    const target = e.target.closest('[data-choice], [data-value]');
+    if (!target || target.closest('#visual-confirm-bar')) return;
+    const onclick = target.getAttribute('onclick') || '';
+    if (!onclick.includes('toggleSelect')) window.toggleSelect(target);
+    refreshConfirm();
+
     setTimeout(() => {
       const indicator = document.getElementById('indicator-text');
       if (!indicator) return;
-      const container = target.closest('.options') || target.closest('.cards');
-      const selected = container ? container.querySelectorAll('.selected') : [];
-      if (selected.length === 0) {
-        indicator.textContent = 'Click an option above, then return to the terminal';
-      } else if (selected.length === 1) {
-        const label = selected[0].querySelector('h3, .content h3, .card-body h3')?.textContent?.trim() || selected[0].dataset.choice;
-        indicator.innerHTML = '<span class="selected-text">' + label + ' selected</span> — return to terminal to continue';
+      const nodes = selectedNodes();
+      if (nodes.length === 0) {
+        indicator.textContent = 'Select a scheme, then confirm the page';
+      } else if (nodes.length === 1) {
+        indicator.innerHTML = '<span class="selected-text">' + labelOf(nodes[0]) + ' selected</span> — confirm to continue';
       } else {
-        indicator.innerHTML = '<span class="selected-text">' + selected.length + ' selected</span> — return to terminal to continue';
+        indicator.innerHTML = '<span class="selected-text">' + nodes.length + ' selected</span> — confirm to continue';
       }
     }, 0);
   });
@@ -171,22 +191,101 @@ export const HELPER_JS = `(function() {
     } else {
       el.classList.add('selected');
     }
-    window.selectedChoice = el.dataset.choice;
+    window.selectedChoice = el.dataset.choice || el.dataset.value;
   };
 
-  // Expose API for explicit use
+  // Expose API for explicit use. choice 只选中，不提交。
   window.brainstorm = {
     send: sendEvent,
-    choice: (value, metadata = {}) => sendEvent({ type: 'choice', value, ...metadata })
+    choice: (value, metadata = {}) => stageChoice({ type: 'choice', choice: value, text: metadata.text, ...metadata })
   };
 
-  // ── GrenAgent iframe 扩展：postMessage 到父窗口 ──
+  function stageChoice(event) {
+    const choice = event.choice || event.value;
+    if (!choice || submitted) return;
+    const el = document.querySelector('[data-choice="' + CSS.escape(choice) + '"], [data-value="' + CSS.escape(choice) + '"]');
+    if (el) window.toggleSelect(el);
+    else window.selectedChoice = choice;
+    refreshConfirm();
+  }
+
+  // ── GrenAgent iframe 扩展：只有确认按钮 postMessage 到父窗口 ──
   function notifyChoice(event) {
-    if (!event.choice) return;
+    if (!event.choice || submitted) return;
+    submitted = true;
     const text = event.text || event.choice;
+    const btn = document.getElementById('visual-confirm-btn');
+    const hint = document.getElementById('visual-confirm-hint');
+    if (btn) { btn.disabled = true; btn.textContent = '已提交'; }
+    if (hint) hint.textContent = '已提交：' + text;
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'visual-choice', choice: event.choice, text }, '*');
     }
+  }
+
+  function submitSelection() {
+    if (submitted) return;
+    const nodes = selectedNodes();
+    if (hasChoices()) {
+      if (!nodes.length) return;
+      notifyChoice({
+        choice: nodes.map(choiceOf).join(','),
+        text: nodes.map(labelOf).join('、')
+      });
+      return;
+    }
+    notifyChoice({ choice: 'confirm', text: '确定页面' });
+  }
+
+  function refreshConfirm() {
+    ensureConfirmBar();
+    const btn = document.getElementById('visual-confirm-btn');
+    const hint = document.getElementById('visual-confirm-hint');
+    if (!btn || !hint || submitted) return;
+    const nodes = selectedNodes();
+    if (hasChoices()) {
+      btn.textContent = '确认提交';
+      if (!nodes.length) {
+        btn.disabled = true;
+        hint.textContent = '可先切换查看方案，选中后再确认提交';
+        return;
+      }
+      btn.disabled = false;
+      hint.textContent = nodes.length === 1 ? ('已选：' + labelOf(nodes[0])) : ('已选 ' + nodes.length + ' 项');
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = '确定页面';
+    hint.textContent = '确认当前页面';
+  }
+
+  function ensureConfirmBar() {
+    if (document.getElementById('visual-confirm-bar')) return;
+    const page = document.querySelector('.mockup, .split, .cards, .option, [data-choice], [data-value]');
+    if (!page) return;
+    const style = document.createElement('style');
+    style.id = 'visual-confirm-style';
+    style.textContent = [
+      'body.visual-has-confirm { padding-bottom: 64px !important; }',
+      '#visual-confirm-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483646;',
+      'display: flex; align-items: center; justify-content: space-between; gap: 12px;',
+      'padding: 10px 14px; background: rgba(15,15,18,0.94); border-top: 1px solid #2e2e38;',
+      "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }",
+      '#visual-confirm-hint { font-size: 13px; color: #8888a0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+      '#visual-confirm-btn { flex-shrink: 0; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; background: #7c7cf8; color: #fff; }',
+      '#visual-confirm-btn:disabled { cursor: default; background: #2a2a36; color: #6a6a80; }'
+    ].join('');
+    const bar = document.createElement('div');
+    bar.id = 'visual-confirm-bar';
+    bar.innerHTML = '<span id="visual-confirm-hint"></span><button type="button" id="visual-confirm-btn"></button>';
+    document.body.appendChild(style);
+    document.body.appendChild(bar);
+    document.body.classList.add('visual-has-confirm');
+    bar.querySelector('#visual-confirm-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      submitSelection();
+    });
   }
 
   // 高度通知：DOM 渲染完成后告知父窗口实际内容高度
@@ -197,22 +296,52 @@ export const HELPER_JS = `(function() {
     }
   }
 
-  window.addEventListener('DOMContentLoaded', notifyResize);
+  window.addEventListener('DOMContentLoaded', () => { refreshConfirm(); notifyResize(); });
   window.addEventListener('load', notifyResize);
+  refreshConfirm();
 })();`;
+
+/** 整页文档没有 frame CSS，补上折行；面板模式再把比较区撑满 iframe。 */
+const LAYOUT_PATCH = `
+.split { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)) !important; gap: 14px; align-items: stretch; }
+.cards { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)) !important; gap: 10px; align-items: stretch; }
+.pros-cons { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)) !important; }
+.split > *, .cards > * { min-width: 0 !important; }
+`;
+
+const FILL_PATCH = `
+html, body { height: 100% !important; min-height: 100% !important; }
+body { display: flex !important; flex-direction: column !important; }
+/* 确认条的 style 挂在 body 上。display 一旦不是 none，浏览器会把 CSS 原文画进页面。 */
+body > *:not(script):not(style), #claude-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+h1, h2, h3, h4, p, .subtitle, .label, .options, .option { flex: 0 0 auto !important; }
+.split, .cards { flex: 1 1 auto !important; min-height: 0 !important; }
+.mockup { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
+.mockup-body { flex: 1 1 auto; overflow: auto; }
+`;
+
+function injectStyle(html: string, css: string): string {
+  const tag = `<style data-visual-layout>${css}</style>`;
+  if (html.includes('</head>')) return html.replace('</head>', `${tag}</head>`);
+  if (html.includes('</body>')) return html.replace('</body>', `${tag}</body>`);
+  return `${tag}${html}`;
+}
 
 /**
  * 把 HTML 片段（或完整文档）包裹进 frame-template，注入 helper.js。
- * 完整文档（以 <!DOCTYPE 或 <html 开头）只注入 helper.js；其余作为片段包裹。
+ * 完整文档（以 <!DOCTYPE 或 <html 开头）只注入 helper.js 和折行补丁；其余作为片段包裹。
+ * fill 用于右侧面板：比较区撑满 iframe，聊天里的内联卡片保持内容高度。
  */
-export function buildSrcDoc(html: string): string {
+export function buildSrcDoc(html: string, options?: { fill?: boolean }): string {
   const isFullDoc = /^\s*<!doctype|^\s*<html/i.test(html);
   const helperTag = `<script>\n${HELPER_JS}\n</script>`;
+  const patch = `${isFullDoc ? LAYOUT_PATCH : ''}${options?.fill ? FILL_PATCH : ''}`;
 
   if (isFullDoc) {
-    return html.includes('</body>')
+    const withHelper = html.includes('</body>')
       ? html.replace('</body>', `${helperTag}\n</body>`)
       : html + helperTag;
+    return patch ? injectStyle(withHelper, patch) : withHelper;
   }
 
   return `<!DOCTYPE html>
@@ -221,6 +350,7 @@ export function buildSrcDoc(html: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>${FRAME_CSS}</style>
+${patch ? `<style data-visual-layout>${patch}</style>` : ''}
 </head>
 <body>
 <div id="claude-content">

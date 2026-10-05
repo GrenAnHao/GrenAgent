@@ -17,7 +17,8 @@ export class MemoryClient {
     const socket = createConnection({ host: ep.host, port: ep.port }); socket.setEncoding('utf8');
     return new Promise<T>((resolve, reject) => {
       let buffer = ''; let settled = false;
-      const timer = setTimeout(() => finish(new Error('agent data request timed out')), this.timeoutMs);
+      // 连接层的失败带上 errno 风格的 code，调用方靠它和主进程回的错误帧区分开（见 desktop-control）。
+      const timer = setTimeout(() => finish(Object.assign(new Error('agent data request timed out'), { code: 'ETIMEDOUT' })), this.timeoutMs);
       function finish(error?: unknown, result?: T): void {
         if (settled) return;
         settled = true;
@@ -26,7 +27,7 @@ export class MemoryClient {
         if (error !== undefined) reject(error); else resolve(result as T);
       }
       socket.on('error', (error) => finish(error));
-      socket.on('close', () => finish(new Error('agent data connection closed before completing the request')));
+      socket.on('close', () => finish(Object.assign(new Error('agent data connection closed before completing the request'), { code: 'ECONNRESET' })));
       socket.on('data', (chunk: string) => {
         buffer += chunk;
         const i = buffer.indexOf('\n'); if (i < 0) return;

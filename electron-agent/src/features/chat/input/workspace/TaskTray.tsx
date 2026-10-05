@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Icon, Popover } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx, keyframes } from 'antd-style';
-import { AlertTriangle, CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ListTodo, Loader2, X, XCircle } from 'lucide-react';
 import { onPiEvent, pi, type SubAgentItem } from '../../../../lib/pi';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
+import { useSessionStore } from '../../../../store/session';
+import { pathsEquivalent } from '../../../../lib/pathUtils';
 import { wsStyles as s } from './styles';
+import { useComposerCompact } from '../composerCompact';
 
 const spin = keyframes`
   to { transform: rotate(360deg); }
@@ -108,17 +111,33 @@ function isAutoTask(task: SubAgentItem): boolean {
   return /^Auto\s/.test(task.task);
 }
 
-/** 后台任务托盘：复用 subagent_list，列出运行/完成/失败任务，运行中可取消。无任务时不渲染。 */
+/**
+ * 后台任务托盘：复用 subagent_list，列出运行/完成/失败任务，运行中可取消。无任务时不渲染。
+ * 只列画面上这份会话派出去的：同项目的另一个会话在跑的子代理不该出现在这里。草稿还没有会话，什么都不列。
+ */
 export function TaskTray() {
   const { workspace } = useAgentStoreContext();
+  const sessionPath = useSessionStore((s) => s.activeSessionPath);
+  const compact = useComposerCompact();
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<SubAgentItem[]>([]);
+  // 切会话后上一份的响应可能晚到，只认最后一次请求。
+  const requestRef = useRef(0);
 
   const load = useCallback(() => {
-    pi.subagentList(workspace)
-      .then(setTasks)
-      .catch(() => setTasks([]));
-  }, [workspace]);
+    const request = ++requestRef.current;
+    if (!sessionPath) {
+      setTasks([]);
+      return;
+    }
+    pi.subagentList(workspace, sessionPath)
+      .then((rows) => {
+        if (request === requestRef.current) setTasks(rows);
+      })
+      .catch(() => {
+        if (request === requestRef.current) setTasks([]);
+      });
+  }, [workspace, sessionPath]);
 
   const running = tasks.filter((x) => x.status === 'running').length;
 
@@ -128,6 +147,10 @@ export function TaskTray() {
     let unlisten: (() => void) | undefined;
     void onPiEvent((e) => {
       if (e.workspace !== workspace) return;
+      // 子代理自己的工具起止不改变托盘里有哪些任务。每条都重拉一次登记表，并发几个子代理时
+      // 主进程一秒要同步读好几次 registry.db，事件循环被堵住。运行中的状态靠下面的轮询。
+      if (e.source === 'subagent') return;
+      if (e.sessionPath && sessionPath && !pathsEquivalent(e.sessionPath, sessionPath)) return;
       const ty = e.event.type;
       if (ty === 'tool_execution_start' || ty === 'tool_execution_end' || ty === 'agent_end') {
         load();
@@ -136,7 +159,7 @@ export function TaskTray() {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [load, workspace]);
+  }, [load, workspace, sessionPath]);
 
   // 仅在面板打开或有运行中任务时轮询，空闲不轮询，避免常驻定时器。
   useEffect(() => {
@@ -208,9 +231,10 @@ export function TaskTray() {
       trigger="click"
       onOpenChange={setOpen}
     >
-      <span className={s.chip}>
+      <span className={s.chip} title="后台任务">
+        <Icon icon={ListTodo} size={14} />
         {running > 0 ? <span className={s.dot} /> : null}
-        后台任务
+        {compact ? null : '后台任务'}
         {running > 0 ? <span className={cx(s.badge, s.badgeRun)}>{running}</span> : null}
       </span>
     </Popover>

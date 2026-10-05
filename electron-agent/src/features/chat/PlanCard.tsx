@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, FileText, ListChecks, Play } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { pi } from '../../lib/pi';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { pinRunClock } from '../../stores/agentReducer';
 import { ConvCard } from './conv/ConvCard';
 import { LazyMarkdown } from './LazyMarkdown';
 import ModelAction from './input/actions/ModelAction';
@@ -110,7 +111,7 @@ export function parsePlan(content: string): PlanData | null {
  * 底部 View Plan 看完整计划、选执行模型、开始执行。解析失败回退纯文本。
  */
 export const PlanCard = memo(function PlanCard({ content }: { content: string }) {
-  const { workspace } = useAgentStoreContext();
+  const { workspace, store } = useAgentStoreContext();
   const data = parsePlan(content);
   const [open, setOpen] = useState(false);
   const [doc, setDoc] = useState<string | null>(null);
@@ -130,11 +131,14 @@ export const PlanCard = memo(function PlanCard({ content }: { content: string })
   const onBuild = useCallback(async () => {
     setBuilt(true);
     try {
+      // 按下执行是一次新请求，但它由扩展发自定义消息开回合：先钉住起点，不接着规划那一轮计。
+      store.useStore.setState(pinRunClock(store.useStore.getState()));
       await pi.runCommand(workspace, '/plan-build');
     } catch {
+      store.useStore.setState({ runOriginPinned: false });
       setBuilt(false);
     }
-  }, [workspace]);
+  }, [store, workspace]);
 
   if (!data) {
     return (

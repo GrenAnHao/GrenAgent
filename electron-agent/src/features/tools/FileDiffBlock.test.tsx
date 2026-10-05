@@ -37,6 +37,14 @@ describe('FileDiffBlock', () => {
     expect(screen.getByTestId('file-diff-block').getAttribute('data-old-content')).toContain('old');
   });
 
+  it('renders a git patch through the same card', () => {
+    render(<FileDiffBlock path="src/a.ts" patch={'@@ -1 +1 @@\n-old\n+new\n'} added={1} deleted={1} maxHeight="600px" />);
+    const block = screen.getByTestId('file-diff-block');
+    expect(block.getAttribute('data-diff-source')).toBe('patch');
+    expect(screen.getByTestId('code-card-name').textContent).toBe('a.ts');
+    expect((screen.getByTestId('code-card-body') as HTMLElement).style.maxHeight).toBe('600px');
+  });
+
   it('shows a long write instead of folding it away', () => {
     render(<FileDiffBlock path="a.txt" rows={many} added={20} deleted={0} />);
     const text = screen.getByTestId('file-diff-block').getAttribute('data-new-content') ?? '';

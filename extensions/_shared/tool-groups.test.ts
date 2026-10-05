@@ -7,12 +7,11 @@ describe("tool-groups", () => {
     expect(NET_TOOLS).toContain("web_search");
     expect(NET_TOOLS).toContain("web_search_multi");
     expect(NET_TOOLS).toContain("fetch_url");
-    expect(NET_TOOLS).toContain("fetch_llms");
-    expect(NET_TOOLS).toContain("fetch_html");
-    expect(NET_TOOLS).toContain("fetch_markdown");
-    expect(NET_TOOLS).toContain("fetch_txt");
-    expect(NET_TOOLS).toContain("fetch_json");
     expect(NET_TOOLS).toContain("github");
+    expect(NET_TOOLS as readonly string[]).not.toContain("fetch_llms");
+    expect(NET_TOOLS as readonly string[]).not.toContain("fetch_html");
+    expect(NET_TOOLS as readonly string[]).not.toContain("fetch_web_content");
+    expect(NET_TOOLS as readonly string[]).not.toContain("fetch_github_readme");
     // 历史失配的幻影名不得再出现。
     expect(NET_TOOLS as readonly string[]).not.toContain("web_fetch");
     expect(NET_TOOLS as readonly string[]).not.toContain("web_crawler");

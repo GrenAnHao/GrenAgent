@@ -1,6 +1,6 @@
 import { DraggablePanel, type DraggablePanelProps } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 type ResizePlacement = 'left' | 'right' | 'top' | 'bottom';
 
@@ -70,6 +70,11 @@ export function ResizeHandle({
   // 受控 size：折叠(expand=false)时 DraggablePanel 内部把面板尺寸动画到 0（靠 styles.panel
   // 自带的 transition），展开时回到这里记录的尺寸，精确恢复用户拖拽过的宽/高（对齐 lobehub RightPanel）。
   const [size, setSize] = useState(defaultSize);
+  const dragging = useRef(false);
+  // 占满/还原会从外部改 defaultSize。拖拽过程中不要把本地尺寸拽回去。
+  useEffect(() => {
+    if (!dragging.current) setSize(defaultSize);
+  }, [defaultSize]);
   // 渲染前把尺寸钳进 [minSize, maxSize]：maxSize 可能随容器（窗口/侧栏）收缩而变小，
   // 此时面板跟着缩回、贴齐参考边并收在窗口内；容器变大后又回到用户偏好的 size，不覆盖持久化值。
   const clampedSize = Math.min(Math.max(size, minSize), maxSize);
@@ -88,6 +93,7 @@ export function ResizeHandle({
   const handleSizeDragging: DraggablePanelProps['onSizeDragging'] = (_delta, next) => {
     const value = readMainSize(next);
     if (value != null) {
+      dragging.current = true;
       setSize(value);
       onResizeLive?.(value);
     }
@@ -95,6 +101,7 @@ export function ResizeHandle({
 
   // 拖拽结束时持久化到 layoutStore，并清空实时尺寸。
   const handleSizeChange: DraggablePanelProps['onSizeChange'] = (_delta, next) => {
+    dragging.current = false;
     const value = readMainSize(next);
     if (value != null) {
       setSize(value);

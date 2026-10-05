@@ -4,7 +4,7 @@ import { memo } from 'react';
 import { extractText } from './toolUtils';
 import { parseCodeSearch, parseGlobOutput, parseGrepOutput } from '../../lib/searchResults';
 import { languageFromPath } from './codeLanguage';
-import { CodeCard } from './CodeCard';
+import { CodeCard, codeCardContentClass } from './CodeCard';
 import { LazyHighlighter } from './LazyHighlighter';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -72,16 +72,18 @@ export const GrepCard = memo(function GrepCard({ result }: { result: unknown }) 
         const { name } = splitPath(f.path);
         return (
           <CodeCard fileName={name} key={f.path}>
-            <LazyHighlighter
-              copyable={false}
-              language={languageFromPath(f.path)}
-              showLanguage={false}
-              variant="borderless"
-              style={{ width: '100%' }}
-              styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
-            >
-              {f.matches.map((m) => (m.line > 0 ? `${m.line}: ${m.text}` : m.text)).join('\n')}
-            </LazyHighlighter>
+            <div className={codeCardContentClass}>
+              <LazyHighlighter
+                copyable={false}
+                language={languageFromPath(f.path)}
+                showLanguage={false}
+                variant="borderless"
+                style={{ width: '100%' }}
+                styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
+              >
+                {f.matches.map((m) => (m.line > 0 ? `${m.line}: ${m.text}` : m.text)).join('\n')}
+              </LazyHighlighter>
+            </div>
           </CodeCard>
         );
       })}
@@ -108,16 +110,18 @@ export const CodeSearchCard = memo(function CodeSearchCard({ result }: { result:
         const { name } = splitPath(f.path);
         return (
           <CodeCard fileName={name} key={f.path}>
-            <LazyHighlighter
-              copyable={false}
-              language={languageFromPath(f.path)}
-              showLanguage={false}
-              variant="borderless"
-              style={{ width: '100%' }}
-              styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
-            >
-              {f.matches.map((m) => (m.line > 0 ? `${m.line}: ${m.text}` : m.text)).join('\n')}
-            </LazyHighlighter>
+            <div className={codeCardContentClass}>
+              <LazyHighlighter
+                copyable={false}
+                language={languageFromPath(f.path)}
+                showLanguage={false}
+                variant="borderless"
+                style={{ width: '100%' }}
+                styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
+              >
+                {f.matches.map((m) => (m.line > 0 ? `${m.line}: ${m.text}` : m.text)).join('\n')}
+              </LazyHighlighter>
+            </div>
           </CodeCard>
         );
       })}

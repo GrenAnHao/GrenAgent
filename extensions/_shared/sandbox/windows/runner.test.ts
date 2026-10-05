@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SANDBOX_DENIAL_EXIT } from "../types.js";
 import { capabilitySid } from "./sids.js";
-import { windowsConfined, windowsHelperArgv } from "./runner.js";
+import { windowsAccountArgv, windowsConfined, windowsHelperArgv } from "./runner.js";
 
 const helperPath = "C:/tools/pi-sandbox-win.exe";
 const workspaceRoot = "C:/work/repo";
@@ -75,5 +75,22 @@ describe("windowsHelperArgv", () => {
     );
     expect(confined.enforcement).toBe("partial");
     expect(confined.denialExitCodes).toContain(SANDBOX_DENIAL_EXIT);
+  });
+
+  it("account launch uses the sandbox user and does not pass capability SIDs", () => {
+    const policy = { mode: "workspace-write" as const, workspaceRoot };
+    const argv = windowsAccountArgv(policy, caller, helperPath, tempDir, {
+      username: "PiSandbox",
+      blobPath: "C:/secret/account.bin",
+      home: "C:/Users/PiSandbox",
+    });
+    expect(argv[0]).toBe(helperPath);
+    expect(hasSeq(argv, ["--logon-user", "PiSandbox"])).toBe(true);
+    expect(hasSeq(argv, ["--logon-blob", "C:/secret/account.bin"])).toBe(true);
+    expect(hasSeq(argv, ["--sandbox-home", "C:/Users/PiSandbox"])).toBe(true);
+    expect(hasSeq(argv, ["--temp", tempDir])).toBe(true);
+    expect(argv).not.toContain("--workspace-sid");
+    expect(argv).not.toContain("--temp-sid");
+    expect(argv.slice(argv.indexOf("--") + 1)).toEqual(caller);
   });
 });
