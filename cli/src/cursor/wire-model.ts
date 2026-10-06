@@ -13,13 +13,12 @@ export interface CursorWireModel {
 export function resolveCursorWireModelId(
   model: CursorWireModel,
   effort: Effort | "off",
-  requestedId = model.id,
+  _requestedId = model.id,
 ): string {
-  const suffix = requestedId.slice(model.id.length);
-  const fromSuffix = suffix.startsWith("-") ? suffix.slice(1) : undefined;
-  const explicit = effort === "off" ? "off" : effort;
-  const chosen = explicit !== "off" ? explicit : fromSuffix === "off" || fromSuffix === undefined ? "off" : fromSuffix;
-  const clamped = clampEffort(model, chosen);
+  if (effort === "off") {
+    return model.thinking?.effortRouting?.off ?? model.requestModelId ?? model.id;
+  }
+  const clamped = clampEffort(model, effort);
   return model.thinking?.effortRouting?.[clamped] ?? model.requestModelId ?? model.id;
 }
 
