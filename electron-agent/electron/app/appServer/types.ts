@@ -77,6 +77,8 @@ export interface ServiceTaskUsageReport {
 /** TaskQueue 交给执行器的回调：每次模型调用（含失败的那次）都回报一次用量。 */
 export interface ServiceTaskHooks {
   onUsage?: (report: ServiceTaskUsageReport) => void;
+  /** 模型原文（解析前）。只在这次 attempt 失败时落库，用于排查输出格式问题。 */
+  onRawOutput?: (text: string) => void;
 }
 
 export interface ServiceTask {

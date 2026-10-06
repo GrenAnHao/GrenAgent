@@ -53,6 +53,8 @@ export class AgentDataStorage {
     this.ensureColumn('service_tasks', 'cache_read_tokens', 'INTEGER');
     this.ensureColumn('service_tasks', 'cache_write_tokens', 'INTEGER');
     this.ensureColumn('service_tasks', 'model', 'TEXT');
+    // 最近一次失败 attempt 的模型原文（截断），成功时清空。解析失败后原文否则无处可查。
+    this.ensureColumn('service_tasks', 'raw_output', 'TEXT');
     this.ensureColumn('threads', 'session_id', 'TEXT');
     this.ensureColumn('turns', 'session_id', 'TEXT');
     this.db.exec(`DROP TABLE IF EXISTS goal_turn_leases; DROP TABLE IF EXISTS goal_events; DROP TABLE IF EXISTS goal_snapshots;`);

@@ -107,17 +107,23 @@ export class TaskQueue {
 
   private async run(task: ServiceTask, threadId: string | undefined, system: boolean): Promise<void> {
     const started = this.writeStatus(task, 'running', { attempts: task.attempts + 1 });
+    let rawOutput: string | undefined;
     try {
       const definition = this.options.registry.get(task.kind);
       const output = this.options.registry.validateOutput(task.kind, await withTimeout(
-        this.options.execute({ ...started, threadId, system }, { onUsage: (report) => this.recordUsage(task.id, report) }),
+        this.options.execute({ ...started, threadId, system }, {
+          onUsage: (report) => this.recordUsage(task.id, report),
+          onRawOutput: (text) => { rawOutput = text; },
+        }),
         definition?.timeoutMs ?? 30_000,
       ));
+      this.recordRawOutput(task.id, null);
       const completed = this.writeStatus(started, 'completed', { output });
       this.notifySettled(completed);
       this.waiters.get(task.id)?.resolve(completed); this.waiters.delete(task.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (rawOutput !== undefined) this.recordRawOutput(task.id, rawOutput.slice(0, RAW_OUTPUT_LIMIT));
       if (!this.stopped && isRetryableError(message) && started.attempts < (this.options.registry.get(task.kind)?.maxAttempts ?? 1)) {
         this.writeStatus(started, 'queued', { error: message });
       } else {
@@ -149,6 +155,10 @@ export class TaskQueue {
     } catch { /* 观测失败不改变任务结果 */ }
   }
 
+  private recordRawOutput(id: string, text: string | null): void {
+    try { this.options.storage.db.prepare('UPDATE service_tasks SET raw_output=? WHERE id=?').run(text, id); } catch { /* 观测失败不改变任务结果 */ }
+  }
+
   private notifySettled(task: ServiceTask): void {
     try { this.options.onSettled?.(task); } catch { /* A notification cannot change the persisted terminal result. */ }
   }
@@ -165,6 +175,9 @@ export class TaskQueue {
 export function isRetryableError(message: string): boolean {
   return !message.startsWith('empty content');
 }
+
+/** 失败原文只留前 8000 字：够看清结构，又不会把超长输出堆进库。 */
+const RAW_OUTPUT_LIMIT = 8000;
 
 function tokens(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;

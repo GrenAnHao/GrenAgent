@@ -235,9 +235,45 @@ describe('SystemWorkerManager', () => {
     expect(JSON.parse(inputLine)).toEqual({ delta: 'user: UNRENDERED_DELTA' });
   });
 
+  it('memory_scene 的 Input 段去掉已渲染的场景正文与记忆，保留 summary 和没渲染的字段', () => {
+    const input = {
+      memories: [{ content: 'MEMORY_MARKER', type: 'work_method' }],
+      scenes: [
+        { filename: 'a.md', content: 'SCENE_BODY_MARKER', summary: 'sum-a' },
+        { filename: 'broken.md', summary: 'no content, not rendered' },
+      ],
+      sceneSummaries: 'SUMMARIES_MARKER',
+      currentTimestamp: 'TS_MARKER',
+      maxScenes: 15,
+      mode: 'work', userId: 'u', projectId: 'p', workspace: 'w', sessionId: 's', source: 'session:s',
+    };
+    const { user } = serviceTaskRequestForTest({ id: 's', kind: 'memory_scene', input });
+    for (const marker of ['MEMORY_MARKER', 'SCENE_BODY_MARKER', 'SUMMARIES_MARKER', 'TS_MARKER']) {
+      expect(user.split(marker).length - 1).toBe(1);
+    }
+    const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
+    expect(JSON.parse(inputLine)).toEqual({
+      scenes: [{ filename: 'a.md', summary: 'sum-a' }, { filename: 'broken.md', summary: 'no content, not rendered' }],
+      maxScenes: 15, mode: 'work', userId: 'u', projectId: 'p', workspace: 'w', sessionId: 's', source: 'session:s',
+    });
+  });
+
+  it('memory_scene 的 sceneSummaries 为空时正文用的是生成的摘要，原值留在 Input 段', () => {
+    const { user } = serviceTaskRequestForTest({ id: 's', kind: 'memory_scene', input: { memories: [], scenes: [], sceneSummaries: '  ' } });
+    const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
+    expect(JSON.parse(inputLine)).toEqual({ scenes: [], sceneSummaries: '  ' });
+  });
+
+  it('run 在解析前把模型原文交给 hooks.onRawOutput，解析失败也一样', async () => {
+    const onRawOutput = vi.fn();
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: async () => 'not json at all' });
+    await expect(manager.run({ id: 'r', kind: 'goal_judge', input: {} }, { onRawOutput })).rejects.toThrow('invalid JSON');
+    expect(onRawOutput).toHaveBeenCalledExactlyOnceWith('not json at all');
+  });
+
   it('其余 kind 的 Input 段保持原样', () => {
     const input = { memories: [{ content: 'x' }], currentTimestamp: 't', maxScenes: 15, delta: 'keep', background: 'keep' };
-    for (const kind of ['memory_scene', 'memory_persona', 'memory_deduplicate', 'goal_judge']) {
+    for (const kind of ['memory_persona', 'memory_deduplicate', 'goal_judge']) {
       const { user } = serviceTaskRequestForTest({ id: 'k', kind, input });
       expect(user.endsWith(`\nInput: ${JSON.stringify(input)}`)).toBe(true);
     }

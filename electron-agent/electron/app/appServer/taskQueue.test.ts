@@ -138,6 +138,34 @@ describe('TaskQueue', () => {
     queue.stop(); storage.close();
   });
 
+  it('keeps the raw model text of the latest failed attempt and clears it once the task succeeds', async () => {
+    const { storage, registry } = setup();
+    const raw = (id: string) => (storage.db.prepare('SELECT raw_output FROM service_tasks WHERE id=?').get(id) as { raw_output: string | null }).raw_output;
+    const failing = new TaskQueue({ storage, registry, execute: async (task, hooks) => {
+      hooks.onRawOutput?.(`{"scene_name":"x"} attempt ${task.attempts}`);
+      throw new Error('memory extraction output is invalid');
+    } });
+    await expect(failing.enqueue({ id: 'bad', kind: 'test', input: {} })).resolves.toMatchObject({ status: 'failed', attempts: 2 });
+    expect(raw('bad')).toBe('{"scene_name":"x"} attempt 2');
+    failing.stop();
+
+    let call = 0;
+    const recovering = new TaskQueue({ storage, registry, execute: async (_task, hooks) => {
+      call += 1;
+      hooks.onRawOutput?.('x'.repeat(10_000));
+      if (call === 1) {
+        await Promise.resolve();
+        expect(raw('ok')).toBeNull();
+        throw new Error('system Pi returned invalid JSON');
+      }
+      expect(raw('ok')).toHaveLength(8000);
+      return { ok: true };
+    } });
+    await expect(recovering.enqueue({ id: 'ok', kind: 'test', input: {} })).resolves.toMatchObject({ status: 'completed' });
+    expect(raw('ok')).toBeNull();
+    recovering.stop(); storage.close();
+  });
+
   it('leaves usage columns NULL when no model call reported usage, and ignores malformed usage', async () => {
     const { storage, registry } = setup();
     const queue = new TaskQueue({ storage, registry, execute: async (task, hooks) => {

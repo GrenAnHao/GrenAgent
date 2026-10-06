@@ -19,7 +19,11 @@ import {
 import { ShortCallQueue, timeoutForKind } from '../agent/shortCall.js';
 
 export interface SystemWorkerTask { id: string; kind: string; input: unknown; maxAttempts?: number }
-export interface SystemWorkerHooks { onUsage?: (report: { model?: string; usage: unknown }) => void }
+export interface SystemWorkerHooks {
+  onUsage?: (report: { model?: string; usage: unknown }) => void;
+  /** 每次拿到模型文本、解析之前回报原文，供解析失败时留底。 */
+  onRawOutput?: (text: string) => void;
+}
 export interface SystemWorkerState { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; output?: unknown; error?: string }
 
 /** 输出为纯文本（而非 JSON）的任务 kind：结果原样回传，不做 JSON 解析。 */
@@ -86,6 +90,7 @@ export class SystemWorkerManager {
           this.options.complete({ ...serviceTaskRequest(task), signal: linked, onUsage: hooks.onUsage }),
           abortError(linked, () => this.closed ? new Error('system worker is closed') : new Error('aborted')),
         ]));
+        try { hooks.onRawOutput?.(text); } catch { /* 留底失败不影响任务 */ }
         const output = parseCompleteOutput(text, task.kind);
         state.status = 'completed';
         state.output = output;
@@ -135,14 +140,37 @@ function serviceTaskPrompt(task: SystemWorkerTask): string {
 /**
  * Input 段只放正文模板没渲染过的字段。memory_extract 的 delta/background 已经由 formatExtractionPrompt
  * 写成可读文本，再原样序列化一遍会让载荷翻倍（实测占 input 的 95%）。只剔除本次真正被渲染的那一份：
- * newMessages 是数组时渲染的是它而不是 delta，background 同理。其余 kind 原样保留。
+ * newMessages 是数组时渲染的是它而不是 delta，background 同理。
+ * memory_scene 同样去重，见 sceneInputNotRendered。其余 kind 原样保留。
  */
 function inputNotRendered(task: SystemWorkerTask): unknown {
-  if (task.kind !== 'memory_extract' || !isRecord(task.input)) return task.input;
+  if (!isRecord(task.input)) return task.input;
+  if (task.kind === 'memory_scene') return sceneInputNotRendered(task.input);
+  if (task.kind !== 'memory_extract') return task.input;
   const rest = { ...task.input };
   if (Array.isArray(rest.newMessages)) delete rest.newMessages; else if (typeof rest.delta === 'string') delete rest.delta;
   if (Array.isArray(rest.backgroundMessages)) delete rest.backgroundMessages; else if (typeof rest.background === 'string') delete rest.background;
   if (typeof rest.previousSceneName === 'string') delete rest.previousSceneName;
+  return rest;
+}
+
+/**
+ * sceneUserPrompt 把 memories 整个序列化、把每个场景的 filename/content 内联成正文，
+ * sceneSummaries（非空时）和 currentTimestamp 也原样写进正文。场景正文是大头（实测 60 KB / 63.5 KB），
+ * 这里只去掉被渲染过的 content，场景的 summary 等其余字段留在 Input 里；没被渲染的条目整条保留。
+ */
+function sceneInputNotRendered(input: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...input };
+  if ('memories' in rest) delete rest.memories;
+  if (typeof rest.sceneSummaries === 'string' && rest.sceneSummaries.trim()) delete rest.sceneSummaries;
+  if (typeof rest.currentTimestamp === 'string') delete rest.currentTimestamp;
+  if (Array.isArray(rest.scenes)) {
+    rest.scenes = rest.scenes.map((item) => {
+      if (!isRecord(item) || typeof item.filename !== 'string' || typeof item.content !== 'string') return item;
+      const { content: _rendered, ...kept } = item;
+      return kept;
+    });
+  }
   return rest;
 }
 
