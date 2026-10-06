@@ -1,5 +1,6 @@
 import { type InlineExtension, main } from "@earendil-works/pi-coding-agent";
 import { allExtensions, safety } from "../../extensions/index.js";
+import { registerCursorNativeProvider } from "./cursor/install.js";
 
 /**
  * 1.0.2 的 MainOptions 只有 extensionFactories，没有 --extensions。
@@ -8,7 +9,19 @@ import { allExtensions, safety } from "../../extensions/index.js";
  * 不在这里追加 codemode / tool_search：main() 的内置扩展已经各加载一次。
  */
 function extensionFactoriesForMain(): InlineExtension[] {
-  return [...allExtensions, { name: "mcp", builtin: true, factory() {} }];
+  return [
+    ...allExtensions,
+    { name: "mcp", builtin: true, factory() {} },
+    {
+      name: "cursor",
+      hidden: true,
+      factory(pi) {
+        registerCursorNativeProvider((provider) => {
+          pi.registerProvider(provider);
+        });
+      },
+    },
+  ];
 }
 
 function emitReadyBanner(): void {
