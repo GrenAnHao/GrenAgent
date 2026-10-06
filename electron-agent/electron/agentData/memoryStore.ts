@@ -149,6 +149,17 @@ export class MemoryStore {
     return this.db.prepare('SELECT transcript,fingerprint FROM memory_captures WHERE capture_key=? AND pending IS NOT NULL').get(captureKey) as { transcript: string; fingerprint: string } | undefined;
   }
 
+  /** 启动补抽用：只取来源键，不读 transcript。 */
+  listPendingCaptures(): Array<{ userId: string; workspace: string; projectId?: string; sessionId?: string; source: string }> {
+    const rows = this.db.prepare(`SELECT user_id,workspace,project_id,session_id,source FROM memory_captures
+      WHERE pending IS NOT NULL ORDER BY updated_at ASC`).all() as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      userId: String(row.user_id), workspace: String(row.workspace), source: String(row.source),
+      ...(row.project_id == null ? {} : { projectId: String(row.project_id) }),
+      ...(row.session_id == null ? {} : { sessionId: String(row.session_id) }),
+    }));
+  }
+
   searchConversations(scope: MemoryScope, query: string, limit = 20): ConversationSearchHit[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];

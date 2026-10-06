@@ -42,12 +42,27 @@ export interface LayerScheduleOptions {
   now?: () => number;
   setTimer?: (callback: () => void, ms: number) => { cancel: () => void };
 }
+/** 上游 pipeline-manager.ts 的 L1 节奏。默认值来自上游 config.ts:586-588。 */
+export interface ExtractCadenceOptions {
+  /** everyNConversations：累计多少轮抽一次。默认 5。 */
+  everyN?: number;
+  /** enableWarmup：新会话阈值 1→2→4→…→everyN。默认 true。 */
+  warmup?: boolean;
+  /** l1IdleTimeoutSeconds：没到阈值时，空闲多久补抽。默认 600_000 ms。 */
+  idleMs?: number;
+  /** 启动后多久补抽上次没抽完的来源（上游在关闭时冲掉，Pi 退出时等不了模型）。默认 60_000 ms。 */
+  recoverDelayMs?: number;
+  setTimer?: (callback: () => void, ms: number) => { cancel: () => void };
+}
+type CaptureSource = Omit<MemoryCaptureInput, 'transcript' | 'fingerprint' | 'extract'>;
+interface CadenceState { count: number; threshold: number; source: CaptureSource; timer?: { cancel: () => void } }
 export interface MemoryServiceOptions {
   store: MemoryStore;
   queue: MemoryTaskQueue;
   validateProject?: (projectId: string) => Promise<string>;
   extractMode?: 'work' | 'chat';
   layerSchedule?: LayerScheduleOptions;
+  extractCadence?: ExtractCadenceOptions;
 }
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
 interface PendingDedup {
@@ -67,6 +82,8 @@ export class MemoryService {
   private readonly pendingPersona = new Map<string, PendingLayer>();
   private readonly finishing = new Set<string>();
   private readonly timers = new Map<string, { cancel: () => void }>();
+  private readonly cadence = new Map<string, CadenceState>();
+  private recoverTimer?: { cancel: () => void };
   constructor(private readonly options: MemoryServiceOptions) {}
 
   private now(): number {
@@ -83,6 +100,74 @@ export class MemoryService {
 
   private immediateLayers(): boolean {
     return this.delayMs() === 0 && this.minIntervalMs() === 0;
+  }
+
+  private everyN(): number { return Math.max(1, this.options.extractCadence?.everyN ?? 5); }
+  private warmup(): boolean { return this.options.extractCadence?.warmup ?? true; }
+  private idleMs(): number { return this.options.extractCadence?.idleMs ?? 600_000; }
+
+  private setCadenceTimer(callback: () => void, ms: number): { cancel: () => void } {
+    const setTimer = this.options.extractCadence?.setTimer ?? ((cb, wait) => {
+      const handle = setTimeout(cb, wait);
+      // 10 分钟的空闲补抽不该拖住进程退出。
+      handle.unref?.();
+      return { cancel: () => clearTimeout(handle) };
+    });
+    return setTimer(callback, ms);
+  }
+
+  private cadenceState(input: CaptureSource): CadenceState {
+    const key = sourceKey(input);
+    let state = this.cadence.get(key);
+    if (!state) {
+      state = { count: 0, threshold: this.warmup() ? 1 : this.everyN(), source: captureSource(input) };
+      this.cadence.set(key, state);
+    }
+    state.source = captureSource(input);
+    return state;
+  }
+
+  /** 每次真正入队抽取后调用：计数清零、取消空闲计时、预热阈值翻倍直到 everyN（上游每次 L1 成功后翻倍，这里在入队时翻倍）。 */
+  private consumeCadence(state: CadenceState): void {
+    state.count = 0;
+    state.timer?.cancel();
+    state.timer = undefined;
+    state.threshold = Math.min(state.threshold * 2, this.everyN());
+  }
+
+  private armIdle(state: CadenceState): void {
+    state.timer?.cancel();
+    state.timer = this.setCadenceTimer(() => {
+      state.timer = undefined;
+      void this.flushSource(state.source);
+    }, this.idleMs());
+  }
+
+  /** 空闲计时和启动补抽共用：按存储里的 pending 强制入队一次。 */
+  private async flushSource(source: CaptureSource): Promise<void> {
+    try {
+      const next = this.options.store.pendingCapture(source, source.source);
+      if (!next) return;
+      await this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true });
+    } catch {
+      /* 补抽失败不重试：pending 保留到下一轮对话或下次启动 */
+    }
+  }
+
+  recoverPendingCaptures(): void {
+    this.recoverTimer?.cancel();
+    this.recoverTimer = this.setCadenceTimer(() => {
+      this.recoverTimer = undefined;
+      void (async () => {
+        try {
+          for (const row of this.options.store.listPendingCaptures()) {
+            await this.flushSource({ ...row, projectId: row.projectId ?? row.workspace });
+          }
+        } catch {
+          /* 库已关闭等：下次启动再补 */
+        }
+      })();
+    }, this.options.extractCadence?.recoverDelayMs ?? 60_000);
   }
 
   search(scope: MemorySearchScope): Promise<MemoryRecord[]> {
@@ -133,14 +218,18 @@ export class MemoryService {
     }
   }
 
-  async capture(input: MemoryCaptureInput): Promise<MemoryCaptureResult> {
+  /** internal.force 只给空闲计时、启动补抽、finishCapture 内部使用，RPC 不会传第二个参数。 */
+  async capture(input: MemoryCaptureInput, internal: { force?: boolean } = {}): Promise<MemoryCaptureResult> {
     const captured = this.options.store.capture(input, input.source, input.transcript, input.fingerprint);
     if (!captured.changed || !captured.delta) return captured;
-    const active = [...this.pending].find(([, value]) => sameSource(value.scope, value.source, input));
     if (input.extract === false) {
       this.options.store.commitCapture(input, input.source, input.fingerprint);
       return captured;
     }
+    const state = this.cadenceState(input);
+    // 一次 agent_end 算一轮（上游 conversation_count）。任务进行中到来的轮数也计入，finishCapture 时据此决定接着抽还是等空闲。
+    if (!internal.force) state.count += 1;
+    const active = [...this.pending].find(([, value]) => sameSource(value.scope, value.source, input));
     if (active) return { ...captured, taskId: active[0], extraction: 'queued' };
     const queued = this.options.queue.findPending?.('memory_extract', (task) => {
       const value = this.captureFromTask(task.id, task);
@@ -150,6 +239,11 @@ export class MemoryService {
       this.pending.set(queued.id, this.captureFromTask(queued.id, queued)!);
       return { ...captured, taskId: queued.id, extraction: 'queued' };
     }
+    if (!internal.force && state.count < state.threshold) {
+      this.armIdle(state);
+      return { ...captured, extraction: 'deferred' };
+    }
+    this.consumeCadence(state);
     const scope = { ...input, scope: 'project' as const };
     const extractionWindow = buildExtractionWindow(captured.delta, () => captureBackground(this.options.store, scope, input.source, captured.delta));
     if (extractionWindow.newMessages.length === 0) {
@@ -303,10 +397,18 @@ export class MemoryService {
     // Only newer input earns another task. Repeated failures with no new turn
     // remain pending for an explicit retry instead of creating an infinite loop.
     if (next && next.fingerprint !== capture.fingerprint) {
+      const source = { ...capture.scope, projectId: capture.scope.projectId ?? capture.scope.workspace, source: capture.source };
+      // 任务进行中累计的轮数够了就接着抽，不够就等空闲补抽。这个进程里没见过该来源（重启后恢复的任务）
+      // 时不知道积了多少轮，照旧立刻接着抽。
+      const known = this.cadence.get(sourceKey(source));
+      if (known && known.count < known.threshold) {
+        this.armIdle(known);
+        return;
+      }
       // completeExtraction runs before TaskQueue persists "completed". Exclude
       // that still-running task while finding/creating the successor.
       this.finishing.add(taskId);
-      void this.capture({ ...capture.scope, projectId: capture.scope.projectId ?? capture.scope.workspace, source: capture.source, ...next })
+      void this.capture({ ...source, ...next }, { force: true })
         .catch(() => {}).finally(() => { this.finishing.delete(taskId); });
     }
   }
@@ -328,6 +430,10 @@ export class MemoryService {
   dispose(): void {
     for (const timer of this.timers.values()) timer.cancel();
     this.timers.clear();
+    for (const state of this.cadence.values()) state.timer?.cancel();
+    this.cadence.clear();
+    this.recoverTimer?.cancel();
+    this.recoverTimer = undefined;
   }
 
   private scheduleScene(scope: MemoryScope, source: string, l1: L1Record[]): void {
@@ -476,6 +582,15 @@ export class MemoryService {
 function sameSource(scope: MemoryScope, source: string, input: MemoryCaptureInput): boolean {
   return scope.userId === input.userId && scope.workspace === input.workspace && scope.sessionId === input.sessionId &&
     (scope.projectId ?? scope.workspace) === input.projectId && source === input.source;
+}
+
+function sourceKey(input: { userId: string; workspace: string; sessionId?: string; source: string }): string {
+  return `${input.userId}\0${input.workspace}\0${input.sessionId ?? ''}\0${input.source}`;
+}
+
+/** 节奏状态长期驻留内存，只留来源标识，不带 transcript。 */
+function captureSource(input: CaptureSource): CaptureSource {
+  return { userId: input.userId, workspace: input.workspace, projectId: input.projectId, sessionId: input.sessionId, source: input.source };
 }
 
 function captureBackground(store: MemoryStore, scope: MemoryScope, source: string, delta: string): string {

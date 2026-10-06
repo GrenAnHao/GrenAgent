@@ -12,7 +12,10 @@ function taskResult(input: QueueInput, status: ServiceTask['status'] = 'queued')
   return { ...input, status, attempts: 0, createdAt: 0, updatedAt: 0 };
 }
 
-function setup(layerSchedule: MemoryServiceOptions['layerSchedule'] = { delayMs: 0, minIntervalMs: 0 }) {
+function setup(
+  layerSchedule: MemoryServiceOptions['layerSchedule'] = { delayMs: 0, minIntervalMs: 0 },
+  extractCadence: MemoryServiceOptions['extractCadence'] = { everyN: 1, warmup: false },
+) {
   const db = new DatabaseSync(':memory:');
   const store = new MemoryStore(db);
   const tasks: QueueInput[] = [];
@@ -22,7 +25,7 @@ function setup(layerSchedule: MemoryServiceOptions['layerSchedule'] = { delayMs:
       return Promise.resolve(taskResult(input));
     }),
   };
-  const service = new MemoryService({ store, queue, layerSchedule });
+  const service = new MemoryService({ store, queue, layerSchedule, extractCadence });
   return { db, store, tasks, queue, service, layerSchedule };
 }
 
@@ -49,7 +52,7 @@ describe('MemoryService', () => {
     const draft: MemoryDraft = { content: 'manual', level: 1, owner: { scope: 'project', projectId: 'requested' } };
     await expect(service.create({ userId: 'u', draft })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     const validateProject = vi.fn(async () => 'canonical');
-    const validated = new MemoryService({ store, queue, validateProject, layerSchedule });
+    const validated = new MemoryService({ store, queue, validateProject, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     const record = await validated.create({ userId: 'u', draft });
     expect(validateProject).toHaveBeenCalledWith('requested');
     expect(record).toMatchObject({ sourceProjectId: 'canonical', sourceWorkspace: 'canonical' });
@@ -59,7 +62,7 @@ describe('MemoryService', () => {
 
   it('rejects failed project validation with a safe error before writing anything', async () => {
     const { db, store, queue, layerSchedule } = setup();
-    const service = new MemoryService({ store, queue, validateProject: async () => { throw new Error('secret filesystem path'); }, layerSchedule });
+    const service = new MemoryService({ store, queue, validateProject: async () => { throw new Error('secret filesystem path'); }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     const draft: MemoryDraft = { content: 'manual', level: 1, owner: { scope: 'project', projectId: 'missing' } };
     await expect(service.create({ userId: 'u', draft })).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: 'invalid memory project' });
     expect(store.list({ userId: 'u', filter: { scope: 'all' } }).items).toEqual([]);
@@ -68,7 +71,7 @@ describe('MemoryService', () => {
 
   it.each(['TEMPORARY_PROJECT_NOT_ALLOWED', 'PROJECT_NOT_DIRECTORY', 'PROJECT_REQUIRED', 'project directory not available'])('preserves the safe project validation reason %s', async (reason) => {
     const { db, store, queue, layerSchedule } = setup();
-    const service = new MemoryService({ store, queue, validateProject: async () => { throw new Error(reason); }, layerSchedule });
+    const service = new MemoryService({ store, queue, validateProject: async () => { throw new Error(reason); }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     await expect(service.create({ userId: 'u', draft: { content: 'manual', level: 1, owner: { scope: 'project', projectId: 'requested' } } })).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: reason });
     db.close();
   });
@@ -79,7 +82,7 @@ describe('MemoryService', () => {
     const record = store.create({ userId: 'u', draft });
     expect((await service.update({ userId: 'u', id: record.id, expectedRevision: 1, draft: { ...draft, content: 'edited' } })).revision).toBe(2);
     const validateProject = vi.fn(async () => 'new-project');
-    const validated = new MemoryService({ store, queue, validateProject, layerSchedule });
+    const validated = new MemoryService({ store, queue, validateProject, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     await validated.update({ userId: 'u', id: record.id, expectedRevision: 2, draft });
     expect(validateProject).not.toHaveBeenCalled();
     const movedDraft: MemoryDraft = { ...draft, owner: { scope: 'project', projectId: 'new-project' } };
@@ -97,7 +100,7 @@ describe('MemoryService', () => {
     const draft: MemoryDraft = { content: 'old', level: 1, owner: { scope: 'global' } };
     const record = store.create({ userId: 'u', draft });
     let resolve!: (project: string) => void;
-    const service = new MemoryService({ store, queue, validateProject: () => new Promise<string>((done) => { resolve = done; }), layerSchedule });
+    const service = new MemoryService({ store, queue, validateProject: () => new Promise<string>((done) => { resolve = done; }), layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     const pending = service.update({ userId: 'u', id: record.id, expectedRevision: 1, draft: { ...draft, owner: { scope: 'project', projectId: 'new' } } });
     const concurrent = store.update({ userId: 'u', id: record.id, expectedRevision: 1, draft: { ...draft, content: 'concurrent' } });
     resolve('new');
@@ -111,7 +114,7 @@ describe('MemoryService', () => {
     const draft: MemoryDraft = { content: 'old', level: 1, owner: { scope: 'project', projectId: 'new' } };
     const record = store.create({ userId: 'u', draft });
     const validateProject = vi.fn(async () => 'new');
-    const service = new MemoryService({ store, queue, validateProject, layerSchedule });
+    const service = new MemoryService({ store, queue, validateProject, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     for (const id of [record.id, 'missing']) await expect(service.update({ userId: 'other', id, expectedRevision: 1, draft })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'memory not found' });
     expect(validateProject).not.toHaveBeenCalled();
     db.close();
@@ -292,7 +295,7 @@ describe('MemoryService', () => {
     const reopened = new MemoryService({ store, queue: { ...queue, findPending: (kind, matches) => {
       const task = taskResult(tasks[0]);
       return task.kind === kind && matches(task) ? task : undefined;
-    } }, layerSchedule });
+    } }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     const second = await reopened.capture(input);
     expect(second.taskId).toBe(first.taskId);
     expect(second).toMatchObject({ extraction: 'queued' });
@@ -390,7 +393,7 @@ describe('MemoryService', () => {
     const reopened = new MemoryService({ store, queue: { ...queue, get: (id) => {
       const task = tasks.find((value) => value.id === id);
       return task ? taskResult(task) : undefined;
-    } }, layerSchedule });
+    } }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     reopened.completeExtraction(first.taskId!, {});
     expect(tasks).toHaveLength(2);
     expect(tasks[1].input).toMatchObject({ delta: 'user: second', fingerprint: 'fp2' });
@@ -407,7 +410,7 @@ describe('MemoryService', () => {
       ...queue,
       get: (id) => { const task = tasks.find((value) => value.id === id); return task ? taskResult(task, 'running') : undefined; },
       findPending: (kind, matches) => tasks.map((task) => taskResult(task, 'running')).find((task) => task.kind === kind && matches(task)),
-    }, layerSchedule });
+    }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     const next = await reopened.capture({ ...input, transcript: 'user: first\nuser: second', fingerprint: 'fp2' });
     expect(next.taskId).toBe(first.taskId);
     expect(tasks).toHaveLength(1);
@@ -428,7 +431,7 @@ describe('MemoryService', () => {
     const reopened = new MemoryService({ store, queue: { ...queue, get: (id) => {
       const task = tasks.find((value) => value.id === id);
       return task ? taskResult(task, 'failed') : undefined;
-    } }, layerSchedule });
+    } }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
     reopened.taskSettled(taskResult(tasks[0], 'failed'));
     expect(tasks).toHaveLength(2);
     expect(tasks[1].input).toMatchObject({ delta: 'user: first\nuser: second', fingerprint: 'fp2' });
@@ -694,6 +697,7 @@ describe('MemoryService', () => {
     const reopened = new MemoryService({
       store,
       queue,
+      extractCadence: { everyN: 1, warmup: false },
       layerSchedule: {
         delayMs: 10_000,
         minIntervalMs: 900_000,
@@ -753,6 +757,101 @@ describe('MemoryService', () => {
     expect(tasks.filter((task) => task.kind === 'memory_scene')).toHaveLength(2);
     const secondScene = tasks.filter((task) => task.kind === 'memory_scene')[1];
     expect((secondScene.input as { memories: Array<{ content: string }> }).memories.map((row) => row.content)).toContain('第二条任务');
+    db.close();
+  });
+});
+
+describe('MemoryService 抽取节奏', () => {
+  function cadenceSetup(options: MemoryServiceOptions['extractCadence'] = {}) {
+    const timers: Array<{ ms: number; callback: () => void; cancelled: boolean }> = [];
+    const setTimer = (callback: () => void, ms: number) => {
+      const timer = { ms, callback, cancelled: false };
+      timers.push(timer);
+      return { cancel: () => { timer.cancelled = true; } };
+    };
+    const base = setup(undefined, { setTimer, ...options });
+    const live = () => timers.filter((timer) => !timer.cancelled);
+    return { ...base, timers, live };
+  }
+  const turn = (n: number) => ({
+    ...scope, sessionId: 's', source: 'session:s',
+    transcript: Array.from({ length: n }, (_, i) => `user: turn ${i}`).join('\n'), fingerprint: `fp${n}`,
+  });
+
+  it('预热阈值 1→2→4→5：第 1 轮立刻抽，之后第 3、7、12 轮才抽', async () => {
+    const { db, tasks, service } = cadenceSetup();
+    const fired: number[] = [];
+    for (let n = 1; n <= 12; n++) {
+      const result = await service.capture(turn(n));
+      if (result.taskId) {
+        fired.push(n);
+        service.completeExtraction(result.taskId, {});
+      } else {
+        expect(result.extraction).toBe('deferred');
+      }
+    }
+    expect(fired).toEqual([1, 3, 7, 12]);
+    expect(tasks).toHaveLength(4);
+    db.close();
+  });
+
+  it('不预热时每 everyN 轮抽一次', async () => {
+    const { db, service } = cadenceSetup({ everyN: 3, warmup: false });
+    const fired: number[] = [];
+    for (let n = 1; n <= 6; n++) {
+      const result = await service.capture(turn(n));
+      if (result.taskId) { fired.push(n); service.completeExtraction(result.taskId, {}); }
+    }
+    expect(fired).toEqual([3, 6]);
+    db.close();
+  });
+
+  it('没到阈值时空闲 idleMs 后补抽，新一轮会重置空闲计时', async () => {
+    const { db, tasks, service, live } = cadenceSetup({ everyN: 5, warmup: false, idleMs: 600_000 });
+    await service.capture(turn(1));
+    await service.capture(turn(2));
+    expect(live()).toHaveLength(1);
+    expect(live()[0].ms).toBe(600_000);
+    live()[0].callback();
+    await Promise.resolve();
+    expect(tasks).toHaveLength(1);
+    expect((tasks[0].input as { newMessages: unknown[] }).newMessages).toHaveLength(2);
+    db.close();
+  });
+
+  it('任务进行中到来的轮数照样计数，任务结束后够阈值就接着抽，不够就等空闲', async () => {
+    const { db, tasks, service, live } = cadenceSetup({ everyN: 2, warmup: false });
+    await service.capture(turn(1));
+    const first = await service.capture(turn(2));
+    expect(first.taskId).toBeDefined();
+    await service.capture(turn(3));
+    service.completeExtraction(first.taskId!, {});
+    expect(tasks).toHaveLength(1);
+    expect(live()).toHaveLength(1);
+    await service.capture(turn(4));
+    expect(tasks).toHaveLength(2);
+    db.close();
+  });
+
+  it('启动补抽：延迟 recoverDelayMs 后对有 pending 的来源各入队一次', async () => {
+    const { db, store, tasks, service, live } = cadenceSetup({ recoverDelayMs: 60_000 });
+    store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
+    store.capture({ ...scope, sessionId: 's2' }, 'session:s2', 'user: also left', 'fp2');
+    service.recoverPendingCaptures();
+    expect(tasks).toHaveLength(0);
+    expect(live().map((timer) => timer.ms)).toEqual([60_000]);
+    live()[0].callback();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(tasks.map((task) => (task.input as { source: string }).source).sort()).toEqual(['session:s1', 'session:s2']);
+    db.close();
+  });
+
+  it('dispose 取消所有节奏计时器', async () => {
+    const { db, service, live } = cadenceSetup({ everyN: 5, warmup: false });
+    await service.capture(turn(1));
+    expect(live()).toHaveLength(1);
+    service.dispose();
+    expect(live()).toHaveLength(0);
     db.close();
   });
 });

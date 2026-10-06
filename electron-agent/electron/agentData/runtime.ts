@@ -134,6 +134,7 @@ export class AgentDataRuntime {
       this.memoryService = new MemoryService({ store: this.memory, queue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
       queue.recoverRunning();
       this.memoryService.recoverLayerSchedules();
+      this.memoryService.recoverPendingCaptures();
     } else {
       this.memoryService = new MemoryService({ store: this.memory, queue: fallbackQueue, validateProject: this.options.validateProject, layerSchedule: this.options.layerSchedule });
       this.memoryService.recoverLayerSchedules();
