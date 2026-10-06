@@ -1993,7 +1993,7 @@ it('replay', () => {
 - [ ] **步骤 2：全量相关测试**
 
 运行：`cd electron-agent; npx vitest run --project main electron/app electron/agent electron/pi electron/agentData`
-预期：除已知的 14 个基线失败（auditViewStore 4、taskViewService 4、jobCleanup 2、runtime 4）外全部 PASS
+预期：除已知的 14 个基线失败（auditViewStore 4、taskViewService 4、jobCleanup 2、runtime 4）和 gitService 在负载下的 4 个超时外全部 PASS（worktree 基线共 18 个失败）
 
 运行：`cd extensions; npx vitest run memory _shared/oneshot.test.ts prompt-metadata.test.ts`
 预期：PASS
@@ -2012,4 +2012,3 @@ it('replay', () => {
 6. L1 有新增记录。
 
 不达标的项把 `service_tasks` 里对应行的 `error`、`raw_output` 和 token 列贴出来，回到对应任务排查。
-```
