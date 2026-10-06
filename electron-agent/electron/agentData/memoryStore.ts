@@ -238,16 +238,27 @@ export class MemoryStore {
     return rows.map((row) => this.mapRecord(row));
   }
 
-  /** 去重召回：L1 里命中任一关键词的记录，最近更新的在前。打分在调用方做。 */
-  searchL1ByTerms(scope: MemoryScope, terms: string[], limit = 50): MemoryRecord[] {
-    const used = terms.filter(Boolean).slice(0, 32);
+  /**
+   * 去重召回的粗筛：只在 L1 的 content 字段（不是整段 JSON，否则 type、priority 这些键名让每行都命中）里数关键词子串命中数，
+   * 保留命中数 >= minShared 的，命中多的在前、同分最近更新的在前。词去重后最多取 64 个。精确打分在调用方做。
+   */
+  searchL1ByTerms(scope: MemoryScope, terms: string[], limit = 50, minShared = 1): MemoryRecord[] {
+    const used = [...new Set(terms.filter(Boolean))].slice(0, 64);
     if (used.length === 0) return [];
-    const rows = this.db.prepare(`SELECT id,level,content,source,project_id as sourceProjectId,memory_scope as scope,created_at as createdAt,updated_at as updatedAt
-      FROM memories WHERE user_id=? AND level=1
-        AND (memory_scope='global' OR project_id=? OR (? = 1 AND project_id IS NOT NULL))
-        AND (${used.map(() => 'instr(lower(content), ?) > 0').join(' OR ')})
-      ORDER BY updated_at DESC LIMIT ?`).all(
-      scope.userId, projectId(scope), scope.includeOtherProjects ? 1 : 0, ...used, Math.max(1, Math.min(limit, 200)),
+    const floor = Number.isFinite(minShared) ? Math.max(1, Math.trunc(minShared)) : 1;
+    // l1 把 content 小写化只算一次；scored 算命中数，也实化，避免 WHERE / ORDER BY 里把 64 个 instr 重算。
+    const rows = this.db.prepare(`WITH l1 AS MATERIALIZED (
+        SELECT id, updated_at AS updatedAt,
+          lower(CASE WHEN json_valid(content) THEN COALESCE(json_extract(content, '$.content'), content) ELSE content END) AS lc
+        FROM memories WHERE user_id=? AND level=1
+          AND (memory_scope='global' OR project_id=? OR (? = 1 AND project_id IS NOT NULL))
+      ), scored AS MATERIALIZED (
+        SELECT id, updatedAt, ${used.map(() => '(instr(lc, ?) > 0)').join(' + ')} AS hits FROM l1
+      )
+      SELECT m.id,m.level,m.content,m.source,m.project_id as sourceProjectId,m.memory_scope as scope,m.created_at as createdAt,m.updated_at as updatedAt
+      FROM scored s JOIN memories m ON m.id = s.id
+      WHERE s.hits >= ? ORDER BY s.hits DESC, s.updatedAt DESC, s.id LIMIT ?`).all(
+      scope.userId, projectId(scope), scope.includeOtherProjects ? 1 : 0, ...used, floor, Math.max(1, Math.min(limit, 200)),
     ) as Array<Record<string, unknown>>;
     return rows.map((row) => this.mapRecord(row));
   }

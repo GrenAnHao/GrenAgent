@@ -1,6 +1,6 @@
 import type { L1Record } from '../agent/memoryExtraction';
 import type { MemoryRecord, MemoryScope } from '../agentData/memoryStore';
-import { memoryTerms, termOverlap } from './memoryTerms';
+import { memoryTerms, sharedCount } from './memoryTerms';
 
 export interface DedupDecision {
   record_id: string;
@@ -18,6 +18,10 @@ export interface DedupTarget {
 
 /** 上游用向量 top-K（l1-dedup.ts）。Pi 没有 embedding，用关键词重叠近似：重叠率低于此值的不算候选。 */
 export const MIN_RECALL_OVERLAP = 0.3;
+/** 比例之外的命中数下限：查询词多时共享一个短语（如 4 字词组切出 3 个二元组）不足以说明说的是同一件事。词数不足 3 个时按词数算。 */
+export const MIN_RECALL_SHARED = 3;
+/** 查询词上限，和 store.searchL1ByTerms 的取词上限保持一致。 */
+const MAX_QUERY_TERMS = 64;
 
 function l1Text(content: string): string {
   try {
@@ -28,16 +32,26 @@ function l1Text(content: string): string {
   }
 }
 
+/** 候选至少要共享的词数：比例下限、命中数下限取大者。SQL 子串命中 >= 词集合命中，所以用它做粗筛下限不会漏真候选。 */
+export function minSharedTerms(termCount: number): number {
+  return Math.max(1, Math.min(MIN_RECALL_SHARED, termCount), Math.ceil(MIN_RECALL_OVERLAP * termCount - 1e-9));
+}
+
 export function recallCandidates(
-  store: { searchL1ByTerms: (scope: MemoryScope, terms: string[], limit?: number) => MemoryRecord[] },
+  store: { searchL1ByTerms: (scope: MemoryScope, terms: string[], limit?: number, minShared?: number) => MemoryRecord[] },
   scope: MemoryScope,
   content: string,
   topK = 5,
 ): MemoryRecord[] {
-  const terms = memoryTerms(content);
-  return store.searchL1ByTerms(scope, terms, 50)
-    .map((hit) => ({ hit, score: termOverlap(terms, new Set(memoryTerms(l1Text(hit.content), 400))) }))
-    .filter((entry) => entry.score >= MIN_RECALL_OVERLAP)
+  const terms = memoryTerms(content, MAX_QUERY_TERMS);
+  if (terms.length === 0) return [];
+  const minShared = minSharedTerms(terms.length);
+  return store.searchL1ByTerms(scope, terms, 50, minShared)
+    .map((hit) => {
+      const shared = sharedCount(terms, new Set(memoryTerms(l1Text(hit.content), 400)));
+      return { hit, shared, score: shared / terms.length };
+    })
+    .filter((entry) => entry.shared >= minShared && entry.score >= MIN_RECALL_OVERLAP)
     .sort((a, b) => b.score - a.score || b.hit.updatedAt - a.hit.updatedAt)
     .slice(0, topK)
     .map((entry) => entry.hit);

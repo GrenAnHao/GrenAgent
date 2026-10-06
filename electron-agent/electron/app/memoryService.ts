@@ -334,16 +334,14 @@ export class MemoryService {
     if (!capture) throw new Error('memory capture task not found');
     const extraction = parseMemoryExtraction(output, this.options.extractMode ?? 'work');
     const l1 = extraction.l1 ?? [];
-    const withCandidates = l1.filter((record) => recallCandidates(this.options.store, capture.scope, record.content, 5)
-      .some((hit) => hit.level === 1));
-    if (withCandidates.length > 0) {
+    const records = new Map(l1.map((record, index) => [`r${index}`, record]));
+    // 每条记录只召回一次（主进程同步执行）：是否需要去重、组装 matches 都用这份结果。searchL1ByTerms 已限 level=1。
+    const recalled = new Map([...records].map(([recordId, record]) => [recordId, recallCandidates(this.options.store, capture.scope, record.content, 5)]));
+    if ([...recalled.values()].some((hits) => hits.length > 0)) {
       const dedupTaskId = randomUUID();
-      const records = new Map(l1.map((record, index) => [`r${index}`, record]));
       const matches = [...records].map(([record_id, record]) => ({
         newMemory: { record_id, ...record },
-        candidates: recallCandidates(this.options.store, capture.scope, record.content, 5)
-          .filter((hit) => hit.level === 1)
-          .map((hit) => storedL1Candidate(hit)),
+        candidates: (recalled.get(record_id) ?? []).map((hit) => storedL1Candidate(hit)),
       }));
       this.pendingDedup.set(dedupTaskId, {
         capture, records,

@@ -458,6 +458,22 @@ describe('MemoryService', () => {
     db.close();
   });
 
+  it('每条新记录只召回一次候选，判断和组装用同一份结果，没候选的记录走空列表', async () => {
+    const { db, store, tasks, service } = setup();
+    store.upsert(scope, { level: 1, content: JSON.stringify({ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 80 }) });
+    const search = vi.spyOn(store, 'searchL1ByTerms');
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    await service.completeExtraction(captured.taskId!, { l1: [
+      { content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 },
+      { content: '发布窗口定在周五下午', type: 'work_task', priority: 60 },
+    ] });
+
+    expect(search).toHaveBeenCalledTimes(2);
+    const input = tasks[1].input as { matches: Array<{ newMemory: { record_id: string }; candidates: unknown[] }> };
+    expect(input.matches.map((match) => [match.newMemory.record_id, match.candidates.length > 0])).toEqual([['r0', true], ['r1', false]]);
+    db.close();
+  });
+
   it('completeDedup 找不到任务时抛出 memory capture task not found', async () => {
     const { db, service } = setup();
     const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
