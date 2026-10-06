@@ -77,6 +77,14 @@ interface ProviderEntry {
 const OPENAI_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
 const GOOGLE_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: null };
 const ANTHROPIC_THINKING_MAP: ThinkingLevelMap = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+const CURSOR_THINKING_MAP: ThinkingLevelMap = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 /**
  * 按供应商 API 类型给出官方原生推理档位映射；勾「推理」时写入自定义模型，让 pi 按各家原生档位生效、不会钳回 off。
@@ -91,6 +99,8 @@ export function defaultThinkingLevelMap(api: string | undefined, _modelId?: stri
     case 'openai-completions':
     case 'openai-responses':
       return OPENAI_THINKING_MAP;
+    case 'cursor-agent':
+      return CURSOR_THINKING_MAP;
     default:
       return undefined;
   }
