@@ -27,6 +27,20 @@ export interface MemoryExtraction { l1?: L1Record[]; l2?: string; l3?: string }
 /** 上游 scene-extraction 的默认情境名；L1 抽取未给场景时使用。 */
 const DEFAULT_SCENE = '未分类';
 
+/** 上游 parseExtractionResult（l1-extractor.ts:643-655）的字段默认值。type 缺失仍然丢弃：按 mode 过滤类型的是 parseMemoryExtraction。 */
+function normalizeMemory(memory: unknown): unknown {
+  if (!memory || typeof memory !== 'object' || Array.isArray(memory)) return memory;
+  const rec = { ...(memory as Record<string, unknown>) };
+  if (rec.priority !== undefined && typeof rec.priority !== 'number') {
+    const numeric = typeof rec.priority === 'string' && rec.priority.trim() ? Number(rec.priority) : Number.NaN;
+    rec.priority = Number.isFinite(numeric) ? numeric : 50;
+  }
+  if (Array.isArray(rec.source_message_ids)) rec.source_message_ids = rec.source_message_ids.map(String);
+  else if (rec.source_message_ids !== undefined) delete rec.source_message_ids;
+  if (rec.metadata !== undefined && (!rec.metadata || typeof rec.metadata !== 'object' || Array.isArray(rec.metadata))) rec.metadata = {};
+  return rec;
+}
+
 /** 上游抽取输出是 scene 数组；摊成 Pi 的 {l1} 信封以便兼容旧路径。 */
 export function flattenSceneExtraction(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -37,7 +51,7 @@ export function flattenSceneExtraction(value: unknown): unknown {
     const sceneName = typeof scene.scene_name === 'string' ? scene.scene_name : undefined;
     if (!Array.isArray(scene.memories)) continue;
     for (const memory of scene.memories) {
-      const parsed = l1RecordSchema.safeParse(memory);
+      const parsed = l1RecordSchema.safeParse(normalizeMemory(memory));
       if (!parsed.success) continue;
       l1.push({
         ...parsed.data,

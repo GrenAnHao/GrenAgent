@@ -322,6 +322,14 @@ describe('SystemWorkerManager', () => {
     });
   });
 
+  it('memory_extract 能解析 think 包裹、对象套数组的输出', async () => {
+    const memory = { content: 'prefer dark', type: 'work_fact', priority: 80 };
+    const complete = vi.fn()
+      .mockResolvedValueOnce(`<think>[草稿]</think>${JSON.stringify({ scenes: [{ scene_name: 's', memories: [memory] }] })}`);
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    await expect(manager.run({ id: 'p', kind: 'memory_extract', input: {} })).resolves.toEqual({ l1: [{ ...memory, scene_name: 's' }] });
+  });
+
   it('memory_deduplicate 使用上游冲突检测用户模板', () => {
     const request = serviceTaskRequestForTest({
       id: 'd1',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { L1_TYPES_WORK, L1_TYPES_CHAT, parseMemoryExtraction } from './memoryExtraction';
+import { L1_TYPES_WORK, L1_TYPES_CHAT, flattenSceneExtraction, parseMemoryExtraction } from './memoryExtraction';
 
 const record = {
   content: '团队决定 L1 只保留少量高层类型',
@@ -74,5 +74,17 @@ describe('parseMemoryExtraction', () => {
 
   it('空 memories 的情境数组视为无 L1，不抛错', () => {
     expect(parseMemoryExtraction([{ scene_name: '闲聊', message_ids: ['m0'], memories: [] }], 'work').l1).toBeUndefined();
+  });
+});
+
+describe('flattenSceneExtraction 补默认值', () => {
+  it('priority 是数字字符串时转成数字，非法时给 50；source_message_ids 转成字符串；metadata 不是对象时给空对象', () => {
+    expect(flattenSceneExtraction([{ scene_name: 's', memories: [
+      { content: 'a', type: 'work_fact', priority: '70', source_message_ids: [0, 'm1'], metadata: 'x' },
+      { content: 'b', type: 'work_fact', priority: 'high' },
+    ] }])).toEqual({ l1: [
+      { content: 'a', type: 'work_fact', priority: 70, source_message_ids: ['0', 'm1'], metadata: {}, scene_name: 's' },
+      { content: 'b', type: 'work_fact', priority: 50, scene_name: 's' },
+    ] });
   });
 });

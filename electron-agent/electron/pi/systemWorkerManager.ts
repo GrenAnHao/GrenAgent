@@ -1,4 +1,5 @@
 import { flattenSceneExtraction } from '../agent/memoryExtraction.js';
+import { parseExtractionText, parseLooseJson, stripModelWrappers } from '../agent/memoryOutputParse.js';
 import {
   formatPersonaUserPrompt,
   formatSceneUserPrompt,
@@ -333,16 +334,15 @@ function parseCompleteOutput(text: string, kind?: string): unknown {
     if (!trimmed) throw new Error('system Pi returned empty text');
     return trimmed;
   }
-  const json = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  let parsed: unknown;
+  if (kind === 'memory_extract') return flattenSceneExtraction(parseExtractionText(text));
+  const json = stripModelWrappers(text);
   try {
-    parsed = JSON.parse(json);
+    return parseLooseJson(json);
   } catch {
-    const match = (kind === 'memory_extract' || kind === 'memory_deduplicate') ? json.match(/\[[\s\S]*\]/) : undefined;
+    const match = kind === 'memory_deduplicate' ? json.match(/\[[\s\S]*\]/) : undefined;
     if (!match) throw new Error('system Pi returned invalid JSON');
-    try { parsed = JSON.parse(match[0]); } catch { throw new Error('system Pi returned invalid JSON'); }
+    try { return parseLooseJson(match[0]); } catch { throw new Error('system Pi returned invalid JSON'); }
   }
-  return kind === 'memory_extract' ? flattenSceneExtraction(parsed) : parsed;
 }
 
 function abortError(signal: AbortSignal, error: () => Error): Promise<never> {
