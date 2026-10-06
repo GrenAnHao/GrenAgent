@@ -45,6 +45,13 @@ describe('formatSceneUserPrompt', () => {
     expect(user).toContain('## 核心 SOP');
     expect(user).toContain('2026-09-18T12:00:00.000Z');
     expect(user).not.toContain('仅以下文件可 read');
+    expect(user).toContain('### 📁 与新记忆相关的场景正文');
+    expect(user).toContain('其余场景只在上方摘要里');
+  });
+
+  it('没有相关场景时写明只能新建', () => {
+    const user = formatSceneUserPrompt({ memoriesJson: '[]', sceneSummaries: '当前场景总数: 2', currentTimestamp: 't', existingScenes: [] });
+    expect(user).toContain('（没有与新记忆相关的已有场景，只能新建）');
   });
 });
 

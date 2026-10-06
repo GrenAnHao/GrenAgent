@@ -20,6 +20,7 @@ import {
   parseMemoryScene,
   sceneFilenameFromSource,
   sceneSummary,
+  selectScenesToInline,
   type ParsedMemoryScene,
 } from './memoryLayers';
 import { computeFireAt, L2_DELAY_MS, L2_MIN_INTERVAL_MS, LAYER_SCENE_KIND } from './memoryLayerSchedule';
@@ -73,6 +74,8 @@ interface PendingDedup {
 interface PendingLayer {
   scope: MemoryScope;
   source: string;
+  /** memory_scene：正文已内联给模型的已有场景。undefined 表示旧任务，不做限制。 */
+  editable?: Set<string>;
 }
 
 export class MemoryService {
@@ -395,7 +398,7 @@ export class MemoryService {
     const pending = this.pendingScene.get(taskId) ?? this.layerFromTask(taskId, 'memory_scene');
     if (!pending) throw new Error('memory scene task not found');
     const parsed = parseMemoryScene(output);
-    const writes = applySceneDecisions(this.options.store, pending.scope, parsed.scenes);
+    const writes = applySceneDecisions(this.options.store, pending.scope, this.allowedSceneDecisions(pending, parsed.scenes));
     this.pendingScene.delete(taskId);
     const pendingSchedule = this.options.store.schedules.get(pending.scope.userId, LAYER_SCENE_KIND);
     this.options.store.schedules.markFired(pending.scope.userId, LAYER_SCENE_KIND, this.now());
@@ -533,13 +536,24 @@ export class MemoryService {
     }
   }
 
+  /** 模型没看到正文的已有场景不能写也不能删，否则会用残缺内容覆盖或误删。新建不受限。 */
+  private allowedSceneDecisions(pending: PendingLayer, scenes: ParsedMemoryScene['scenes']): ParsedMemoryScene['scenes'] {
+    const editable = pending.editable;
+    if (!editable) return scenes;
+    const existing = new Set(listGlobalLevel(this.options.store, pending.scope.userId, 2).flatMap((row) => sceneFilenameFromSource(row.source) ?? []));
+    return scenes.filter((scene) => !existing.has(scene.filename) || editable.has(scene.filename));
+  }
+
   private enqueueScene(scope: MemoryScope, source: string, l1: L1Record[]): void {
-    const scenes = listGlobalLevel(this.options.store, scope.userId, 2).flatMap((row) => {
+    const all = listGlobalLevel(this.options.store, scope.userId, 2).flatMap((row) => {
       const filename = sceneFilenameFromSource(row.source);
       return filename ? [{ filename, content: row.content, summary: sceneSummary(row.content) }] : [];
     });
+    const editable = selectScenesToInline(all, l1, DEFAULT_MAX_SCENES);
+    // 没内联的场景只留文件名和摘要；sceneUserPrompt 只渲染带 content 的条目。
+    const scenes = all.map((scene) => editable.has(scene.filename) ? scene : { filename: scene.filename, summary: scene.summary });
     const taskId = randomUUID();
-    this.pendingScene.set(taskId, { scope, source });
+    this.pendingScene.set(taskId, { scope, source, editable });
     try {
       void this.options.queue.enqueue({
         id: taskId,
@@ -547,7 +561,7 @@ export class MemoryService {
         input: {
           memories: l1,
           scenes,
-          sceneSummaries: `当前场景总数: ${scenes.length}\n${scenes.map((scene) => `- ${scene.filename}: ${scene.summary}`).join('\n')}`,
+          sceneSummaries: `当前场景总数: ${all.length}\n${all.map((scene) => `- ${scene.filename}: ${scene.summary}`).join('\n')}`,
           currentTimestamp: new Date().toISOString(),
           maxScenes: DEFAULT_MAX_SCENES,
           mode: this.options.extractMode ?? 'work',
@@ -611,6 +625,11 @@ export class MemoryService {
     const task = this.options.queue.get?.(taskId);
     const input = task?.input as Record<string, unknown> | undefined;
     if (!task || task.kind !== kind || !input || typeof input.source !== 'string' || typeof task.sourceProjectId !== 'string') return undefined;
+    // 存储里的输入是原始输入（sceneInputNotRendered 只在拼 prompt 时去掉 content），带 content 的条目就是内联过的那些。
+    const editable = kind === 'memory_scene' && Array.isArray(input.scenes)
+      ? new Set(input.scenes.flatMap((item) => (item && typeof item === 'object' && typeof (item as { content?: unknown }).content === 'string'
+        && typeof (item as { filename?: unknown }).filename === 'string') ? [(item as { filename: string }).filename] : []))
+      : undefined;
     return {
       scope: {
         userId: typeof input.userId === 'string' ? input.userId : 'local',
@@ -619,6 +638,7 @@ export class MemoryService {
         sessionId: typeof task.sourceSessionId === 'string' ? task.sourceSessionId : undefined,
       },
       source: input.source,
+      ...(editable ? { editable } : {}),
     };
   }
 }

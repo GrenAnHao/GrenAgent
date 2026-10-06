@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord } from '../agentData/memoryContracts';
+import { memoryTerms, sharedCount } from './memoryTerms';
 
 export const SCENE_SOURCE_PREFIX = 'scene:';
 export const PERSONA_SOURCE = 'persona.md';
 export const DEFAULT_MAX_SCENES = 15;
+/** 主进程预筛：系统 worker 没有 read 工具（上游让模型按需读正文），只内联最相关的几个场景。 */
+export const MAX_INLINE_SCENES = 3;
 
 export type SceneAction = 'write' | 'delete';
 export interface SceneDecision {
@@ -47,6 +50,22 @@ export function sceneSummary(content: string): string {
   const match = content.match(/^summary:\s*(.+)$/m);
   const summary = match?.[1]?.trim();
   return summary || content.trim().slice(0, 80);
+}
+
+export function selectScenesToInline(
+  scenes: Array<{ filename: string; summary: string }>,
+  memories: Array<{ content: string; scene_name?: string }>,
+  maxScenes: number,
+): Set<string> {
+  // 橙色 / 红色预警时必须 MERGE，模型得看到所有正文才能挑合并对象。
+  if (scenes.length >= maxScenes - 1) return new Set(scenes.map((scene) => scene.filename));
+  const query = memoryTerms(memories.map((memory) => `${memory.scene_name ?? ''} ${memory.content}`).join('\n'), 96);
+  return new Set(scenes
+    .map((scene) => ({ filename: scene.filename, score: sharedCount(query, new Set(memoryTerms(`${scene.filename} ${scene.summary}`, 400))) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename))
+    .slice(0, MAX_INLINE_SCENES)
+    .map((entry) => entry.filename));
 }
 
 export function parseMemoryScene(output: unknown): ParsedMemoryScene {

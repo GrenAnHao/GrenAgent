@@ -1,6 +1,6 @@
 ---
 title: memory_scene 也不再重复发送场景正文，解析失败留下模型原文，用量以埋点 token 为准不做字节换算
-status: active
+status: superseded
 date: 2026-10-06
 scope: electron-agent/agentdata
 files:
@@ -9,8 +9,10 @@ files:
   - electron-agent/electron/app/appServer/types.ts
   - electron-agent/electron/agentData/storage.ts
 supersedes:
-superseded_by:
+superseded_by: 2026-10-07-memory-scene-inline-related.md
 ---
+
+> 已过时 → 见 2026-10-07-memory-scene-inline-related.md
 
 ## 背景
 2026-10-06 打开记忆系统、在一个新会话里跑了几轮，埋点数据如下：

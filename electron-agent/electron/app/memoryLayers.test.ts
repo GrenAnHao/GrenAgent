@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { MemoryStore } from '../agentData/memoryStore';
-import { applySceneDecisions, applyPersonaDecision, parseMemoryScene, parseMemoryPersona, sceneSource } from './memoryLayers';
+import { applySceneDecisions, applyPersonaDecision, MAX_INLINE_SCENES, parseMemoryScene, parseMemoryPersona, sceneSource, selectScenesToInline } from './memoryLayers';
 
 const scope = { userId: 'u', projectId: 'project-A', workspace: '/repo-a', scope: 'global' as const };
 
@@ -63,5 +63,25 @@ describe('parseMemoryPersona / applyPersonaDecision', () => {
     expect(second.id).toBe(first.id);
     expect(store.list({ userId: 'u', filter: { scope: 'global' }, level: 3 }).items).toHaveLength(1);
     db.close();
+  });
+});
+
+describe('selectScenesToInline', () => {
+  const scenes = [
+    { filename: '团队记忆-提交规范.md', summary: '提交信息用中文、提交前跑测试' },
+    { filename: '团队记忆-数据库.md', summary: '迁移放启动阶段' },
+    { filename: '团队记忆-前端.md', summary: '组件用 antd' },
+    { filename: '团队记忆-发布.md', summary: '发布前打 tag' },
+    { filename: '团队记忆-评审.md', summary: '评审要写放弃的方案' },
+  ];
+
+  it('按和新记忆的关键词重叠挑最相关的场景，最多 MAX_INLINE_SCENES 个，零分的不选', () => {
+    const picked = selectScenesToInline(scenes, [{ content: '提交信息统一用中文', scene_name: '提交规范' }], 15);
+    expect([...picked]).toEqual(['团队记忆-提交规范.md']);
+    expect(MAX_INLINE_SCENES).toBe(3);
+  });
+
+  it('场景数到 maxScenes - 1 时全部内联，方便 MERGE', () => {
+    expect(selectScenesToInline(scenes, [{ content: '无关' }], 6).size).toBe(5);
   });
 });

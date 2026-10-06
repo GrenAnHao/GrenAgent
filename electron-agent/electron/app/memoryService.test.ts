@@ -1033,3 +1033,62 @@ describe('MemoryService 抽取节奏', () => {
   });
 
 });
+
+describe('MemoryService L2 预筛', () => {
+  const sceneBody = (summary: string) => `-----META-START-----\nsummary: ${summary}\n-----META-END-----\n正文 ${summary}`;
+
+  it('只把相关场景的正文放进 memory_scene，其余只给文件名和摘要', async () => {
+    const { db, store, tasks, service } = setup();
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80, scene_name: '提交规范' }] });
+    const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
+    const input = sceneTask.input as { scenes: Array<{ filename: string; summary: string; content?: string }> };
+    expect(input.scenes).toHaveLength(2);
+    expect(input.scenes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ filename: '团队记忆-提交规范.md', content: expect.stringContaining('正文') }),
+      { filename: '团队记忆-数据库.md', summary: '迁移放启动阶段' },
+    ]));
+    db.close();
+  });
+
+  it('落库时丢掉对没给正文的已有场景的写入和删除，新建和改相关场景照常', async () => {
+    const { db, store, tasks, service } = setup();
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80 }] });
+    const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
+    service.completeScene(sceneTask.id, { scenes: [
+      { filename: '团队记忆-提交规范.md', action: 'write', content: sceneBody('提交信息用中文，已更新') },
+      { filename: '团队记忆-数据库.md', action: 'delete' },
+      { filename: '团队记忆-新场景.md', action: 'write', content: sceneBody('新的') },
+    ] });
+    const sources = db.prepare("SELECT source, content FROM memories WHERE level=2 ORDER BY source").all() as Array<{ source: string; content: string }>;
+    expect(sources.map((row) => row.source)).toEqual(['scene:团队记忆-提交规范.md', 'scene:团队记忆-数据库.md', 'scene:团队记忆-新场景.md']);
+    expect(sources[0].content).toContain('已更新');
+    db.close();
+  });
+
+  it('服务重建后从存储的输入还原哪些场景给过正文（带 content 的条目），其余仍不许写和删', async () => {
+    const { db, store, tasks, queue, service, layerSchedule } = setup();
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
+    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
+    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+    service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80 }] });
+    const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
+    const reopened = new MemoryService({ store, queue: { ...queue, get: (id) => {
+      const task = tasks.find((value) => value.id === id);
+      return task ? taskResult(task) : undefined;
+    } }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
+    reopened.completeScene(sceneTask.id, { scenes: [
+      { filename: '团队记忆-提交规范.md', action: 'write', content: sceneBody('提交信息用中文，已更新') },
+      { filename: '团队记忆-数据库.md', action: 'delete' },
+    ] });
+    const rows = db.prepare('SELECT source, content FROM memories WHERE level=2 ORDER BY source').all() as Array<{ source: string; content: string }>;
+    expect(rows.map((row) => row.source)).toEqual(['scene:团队记忆-提交规范.md', 'scene:团队记忆-数据库.md']);
+    expect(rows[0].content).toContain('已更新');
+    db.close();
+  });
+});

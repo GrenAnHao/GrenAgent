@@ -221,15 +221,19 @@ function sceneUserPrompt(input: unknown): string {
     if (!isRecord(item) || typeof item.filename !== 'string' || typeof item.content !== 'string') return [];
     return [{ filename: item.filename, content: item.content }];
   }) : [];
+  // 预筛后只有相关场景带 content，场景总数、预警档位得按所有条目算。
+  const allFilenames = Array.isArray(rec.scenes)
+    ? rec.scenes.flatMap((item) => (isRecord(item) && typeof item.filename === 'string' ? [item.filename] : []))
+    : [];
   const maxScenes = typeof rec.maxScenes === 'number' && Number.isFinite(rec.maxScenes) ? rec.maxScenes : 15;
   const summaries = typeof rec.sceneSummaries === 'string' && rec.sceneSummaries.trim()
     ? rec.sceneSummaries
-    : `当前场景总数: ${existingScenes.length}\n${existingScenes.map((scene) => `- ${scene.filename}`).join('\n')}`;
+    : `当前场景总数: ${allFilenames.length}\n${allFilenames.map((filename) => `- ${filename}`).join('\n')}`;
   return formatSceneUserPrompt({
     memoriesJson: JSON.stringify(rec.memories ?? [], null, 2),
     sceneSummaries: summaries,
     currentTimestamp: typeof rec.currentTimestamp === 'string' ? rec.currentTimestamp : '',
-    sceneCountWarning: sceneCountWarning(existingScenes.length, maxScenes),
+    sceneCountWarning: sceneCountWarning(allFilenames.length, maxScenes),
     existingScenes,
   });
 }

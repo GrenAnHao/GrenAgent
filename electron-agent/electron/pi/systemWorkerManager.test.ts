@@ -277,6 +277,18 @@ describe('SystemWorkerManager', () => {
     expect(JSON.parse(inputLine)).toEqual({ scenes: [], sceneSummaries: '  ' });
   });
 
+  it('memory_scene 预筛只给部分场景正文时，预警档位和兜底摘要按所有场景算，正文只渲染带 content 的', () => {
+    const scenes = Array.from({ length: 13 }, (_, index) => (index < 3
+      ? { filename: `s${index}.md`, summary: `sum${index}`, content: `BODY_${index}` }
+      : { filename: `s${index}.md`, summary: `sum${index}` }));
+    const { user } = serviceTaskRequestForTest({ id: 's', kind: 'memory_scene', input: { memories: [], scenes, maxScenes: 15, sceneSummaries: '' } });
+    expect(user).toContain('黄色预警：当前 13，接近上限 15');
+    expect(user).toContain('当前场景总数: 13');
+    expect(user).toContain('- s12.md');
+    expect(user).toContain('BODY_2');
+    expect(user).not.toContain('#### s3.md');
+  });
+
   it('run 在解析前把模型原文交给 hooks.onRawOutput，解析失败也一样', async () => {
     const onRawOutput = vi.fn();
     const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: async () => 'not json at all' });

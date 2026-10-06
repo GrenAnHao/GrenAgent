@@ -26,7 +26,7 @@ export interface PersonaUserPromptInput {
 
 const SCENE_JSON_PROTOCOL = `## ⛔ 输出协议（必须严格遵守）
 
-你没有文件工具，不能调用 read / write / edit。已有场景的完整正文已内联在用户消息中，直接基于这些正文做 UPDATE / MERGE / CREATE。
+你没有文件工具，不能调用 read / write / edit。与新记忆相关的已有场景正文已内联在用户消息中；其余场景只给出文件名和摘要。只能 UPDATE / MERGE / DELETE 正文已提供的场景，其余已有场景不要出现在 scenes 中；需要时可以用新的 filename CREATE。
 
 必须且仅返回一个 JSON 对象：
 
@@ -74,7 +74,7 @@ export function formatSceneUserPrompt(input: SceneUserPromptInput): string {
     : '';
   const bodies = input.existingScenes.length > 0
     ? input.existingScenes.map((scene) => `#### ${scene.filename}\n\`\`\`markdown\n${scene.content}\n\`\`\``).join('\n\n')
-    : '（当前无已有场景文件）';
+    : '（没有与新记忆相关的已有场景，只能新建）';
   return `**输出语言**：场景文件内容使用下方 New Memories List 中记忆的主导语言。
 ${warningSection}
 ### 1️⃣ New Memories List
@@ -86,7 +86,7 @@ ${input.sceneSummaries}
 ### 3️⃣ Current Timestamp
 ${input.currentTimestamp}
 
-### 📁 已有场景正文（按 filename 内联）
+### 📁 与新记忆相关的场景正文（只能修改或删除这些文件；其余场景只在上方摘要里）
 ${bodies}`;
 }
 
@@ -211,7 +211,7 @@ ${SCENE_JSON_PROTOCOL}
 
 ### 阶段 2：检索与策略选择
 
-将新记忆与 Existing Scene Blocks Summary 以及用户消息中已内联的场景正文进行比对。
+将新记忆与 Existing Scene Blocks Summary 以及用户消息中已内联的相关场景正文进行比对。没有提供正文的场景视为与本批新记忆无关。
 
 **核心原则：默认策略是 UPDATE，不是 CREATE。** 当犹豫于 UPDATE 和 CREATE 之间时，选择 UPDATE。
 
