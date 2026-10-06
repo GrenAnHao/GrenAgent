@@ -21,6 +21,13 @@ export function acquireCursorHttp2Session(
 	};
 	client.once("close", drop);
 	client.once("goaway", drop);
+	// A pooled session outlives the request. cursor.ts removes its own error
+	// listener in finally; without one left on the session, a GOAWAY error code
+	// becomes an uncaught exception and exits the process.
+	client.on("error", () => {
+		drop();
+		if (!client.closed && !client.destroyed) client.close();
+	});
 	return client;
 }
 
