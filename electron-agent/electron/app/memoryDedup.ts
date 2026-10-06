@@ -1,5 +1,6 @@
 import type { L1Record } from '../agent/memoryExtraction';
 import type { MemoryRecord, MemoryScope } from '../agentData/memoryStore';
+import { memoryTerms, termOverlap } from './memoryTerms';
 
 export interface DedupDecision {
   record_id: string;
@@ -15,9 +16,31 @@ export interface DedupTarget {
   remove: (scope: MemoryScope, id: string) => void;
 }
 
-/** 候选召回：按 content 走 store.search，取 topK。上游用向量+RRF；此处为阶段一的可用足量实现。 */
-export function recallCandidates(store: { search: (scope: MemoryScope, query: string, limit?: number) => MemoryRecord[] }, scope: MemoryScope, content: string, topK = 5): MemoryRecord[] {
-  return store.search(scope, content, topK);
+/** 上游用向量 top-K（l1-dedup.ts）。Pi 没有 embedding，用关键词重叠近似：重叠率低于此值的不算候选。 */
+export const MIN_RECALL_OVERLAP = 0.3;
+
+function l1Text(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as { content?: unknown };
+    return typeof parsed.content === 'string' ? parsed.content : content;
+  } catch {
+    return content;
+  }
+}
+
+export function recallCandidates(
+  store: { searchL1ByTerms: (scope: MemoryScope, terms: string[], limit?: number) => MemoryRecord[] },
+  scope: MemoryScope,
+  content: string,
+  topK = 5,
+): MemoryRecord[] {
+  const terms = memoryTerms(content);
+  return store.searchL1ByTerms(scope, terms, 50)
+    .map((hit) => ({ hit, score: termOverlap(terms, new Set(memoryTerms(l1Text(hit.content), 400))) }))
+    .filter((entry) => entry.score >= MIN_RECALL_OVERLAP)
+    .sort((a, b) => b.score - a.score || b.hit.updatedAt - a.hit.updatedAt)
+    .slice(0, topK)
+    .map((entry) => entry.hit);
 }
 
 export function applyDedupDecisions(

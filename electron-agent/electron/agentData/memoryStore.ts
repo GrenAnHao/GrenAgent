@@ -237,6 +237,20 @@ export class MemoryStore {
     return rows.map((row) => this.mapRecord(row));
   }
 
+  /** 去重召回：L1 里命中任一关键词的记录，最近更新的在前。打分在调用方做。 */
+  searchL1ByTerms(scope: MemoryScope, terms: string[], limit = 50): MemoryRecord[] {
+    const used = terms.filter(Boolean).slice(0, 32);
+    if (used.length === 0) return [];
+    const rows = this.db.prepare(`SELECT id,level,content,source,project_id as sourceProjectId,memory_scope as scope,created_at as createdAt,updated_at as updatedAt
+      FROM memories WHERE user_id=? AND level=1
+        AND (memory_scope='global' OR project_id=? OR (? = 1 AND project_id IS NOT NULL))
+        AND (${used.map(() => 'instr(lower(content), ?) > 0').join(' OR ')})
+      ORDER BY updated_at DESC LIMIT ?`).all(
+      scope.userId, projectId(scope), scope.includeOtherProjects ? 1 : 0, ...used, Math.max(1, Math.min(limit, 200)),
+    ) as Array<Record<string, unknown>>;
+    return rows.map((row) => this.mapRecord(row));
+  }
+
   overview(scope: MemoryScope): MemoryOverview {
     const rows = this.db.prepare(`SELECT level, count(*) as count FROM memories
       WHERE user_id=? AND (memory_scope='global' OR project_id=? OR (? = 1 AND project_id IS NOT NULL)) GROUP BY level`).all(
