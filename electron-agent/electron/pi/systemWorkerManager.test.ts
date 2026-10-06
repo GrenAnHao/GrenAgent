@@ -85,7 +85,7 @@ describe('SystemWorkerManager', () => {
     }
   });
 
-  it('wiki_page_generate 与 memory_extract 都用 60s', async () => {
+  it('wiki_page_generate 60s，memory_extract 对齐上游 180s', async () => {
     vi.useFakeTimers();
     try {
       const wiki = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
@@ -93,23 +93,32 @@ describe('SystemWorkerManager', () => {
       let wikiSettled = false;
       void wikiRun.then(() => { wikiSettled = true; }, () => { wikiSettled = true; });
       await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(59_000);
       expect(wikiSettled).toBe(false);
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       await expect(wikiRun).rejects.toThrow('aborted');
 
       const mem = new SystemWorkerManager({ describeModel: async () => 'x/y', complete: hangUntilAbort() });
       const memRun = mem.run({ id: 'mem', kind: 'memory_extract', input: {} });
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(30_000);
       let memSettled = false;
       void memRun.then(() => { memSettled = true; }, () => { memSettled = true; });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(179_000);
       expect(memSettled).toBe(false);
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       await expect(memRun).rejects.toThrow('aborted');
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('memory_extract / memory_deduplicate 传 maxTokens 4096，scene / persona 不限', async () => {
+    const complete = vi.fn(async (_input: CompleteInput & { maxTokens?: number }) => '{}');
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    await manager.run({ id: 'a', kind: 'memory_extract', input: {} });
+    await manager.run({ id: 'b', kind: 'memory_deduplicate', input: {} }).catch(() => {});
+    await manager.run({ id: 'c', kind: 'memory_scene', input: {} }).catch(() => {});
+    expect(complete.mock.calls.map((call) => call[0].maxTokens)).toEqual([4096, 4096, undefined]);
   });
 
   it('任务串行：第二个 complete 在第一个结束后才调用', async () => {

@@ -31,8 +31,10 @@ describe('ServiceTaskRegistry', () => {
     expect(registry.validateOutput('memory_extract', { l1: [{ content: 'x', type: 'work_fact' }] })).toMatchObject({ l1: [expect.any(Object)] });
   });
 
-  it('memory_extract 超时放宽到 60s', () => {
-    expect(new ServiceTaskRegistry().get('memory_extract')!.timeoutMs).toBe(60_000);
+  it('memory_extract / memory_deduplicate 超时对齐上游 180s', () => {
+    const registry = new ServiceTaskRegistry();
+    expect(registry.get('memory_extract')!.timeoutMs).toBe(180_000);
+    expect(registry.get('memory_deduplicate')!.timeoutMs).toBe(180_000);
   });
 
   it('memory_deduplicate 允许 store 决策省略 target_ids', () => {
@@ -42,10 +44,10 @@ describe('ServiceTaskRegistry', () => {
     ]);
   });
 
-  it('memory_scene / memory_persona 走 JSON 协议且超时 60s', () => {
+  it('memory_scene / memory_persona 走 JSON 协议，超时对齐上游（L2 300s，L3 180s）', () => {
     const registry = new ServiceTaskRegistry();
-    expect(registry.get('memory_scene')).toMatchObject({ timeoutMs: 60_000 });
-    expect(registry.get('memory_persona')).toMatchObject({ timeoutMs: 60_000 });
+    expect(registry.get('memory_scene')).toMatchObject({ timeoutMs: 300_000 });
+    expect(registry.get('memory_persona')).toMatchObject({ timeoutMs: 180_000 });
     expect(registry.validateOutput('memory_scene', {
       scenes: [{ filename: '团队记忆-SOP与禁忌.md', action: 'write', content: '## 核心 SOP' }],
       persona_update_request: 'SOP 已跨场景稳定',

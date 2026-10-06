@@ -47,10 +47,10 @@ export const memoryPersonaOutput = z.object({
 }).strict();
 
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
-  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: 300_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'memory_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },

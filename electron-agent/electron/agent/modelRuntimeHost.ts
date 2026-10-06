@@ -20,6 +20,8 @@ export interface ShortCallInput {
    * 不传则不覆盖 provider/模型默认；非 OpenAI 兼容 API 会忽略。
    */
   samplingParams?: Record<string, unknown>;
+  /** 输出 token 上限。记忆抽取 / 去重传 4096（上游 config.ts:652）；不传则用模型默认。 */
+  maxTokens?: number;
   /**
    * completeSimple 拿到模型响应后立刻回报用量，先于文本校验：空内容、provider 报错的那次也花了钱。
    * 这些调用不写 session JSONL，用量面板看不到，只能靠调用方自己记。
@@ -82,10 +84,14 @@ export class ModelRuntimeHost {
   async completeSimple(input: ShortCallInput): Promise<string> {
     const runtime = await this.ensure();
     const model = await this.resolveCallModel(input, runtime);
+    // reasoning 有意不透传：pi-ai 不传即关闭思考（openai-completions.js 的 enable_thinking = !!reasoningEffort），
+    // 传 'minimal' 反而会打开。
+    const options: { signal?: AbortSignal; maxTokens?: number } = { signal: input.signal };
+    if (input.maxTokens !== undefined) options.maxTokens = input.maxTokens;
     const msg = await runtime.completeSimple(
       model,
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
-      { signal: input.signal },
+      options,
     );
     try { input.onUsage?.({ model: `${model.provider}/${model.id}`, usage: msg.usage }); } catch { /* 记账失败不影响调用结果 */ }
     const formatted = formatNonStream(msg);

@@ -39,7 +39,7 @@ const KIND_INSTRUCTIONS: Record<string, string> = {
 
 interface WorkerOptions {
   describeModel: () => Promise<string>;
-  complete: (input: { user: string; systemPrompt?: string; signal?: AbortSignal; onUsage?: SystemWorkerHooks['onUsage'] }) => Promise<string>;
+  complete: (input: { user: string; systemPrompt?: string; maxTokens?: number; signal?: AbortSignal; onUsage?: SystemWorkerHooks['onUsage'] }) => Promise<string>;
   maxAttempts?: number;
   taskTimeoutMs?: number;
 }
@@ -178,12 +178,16 @@ export function serviceTaskPromptForTest(task: SystemWorkerTask): string {
   return serviceTaskPrompt(task);
 }
 
-export function serviceTaskRequestForTest(task: SystemWorkerTask): { user: string; systemPrompt?: string } {
+export function serviceTaskRequestForTest(task: SystemWorkerTask): { user: string; systemPrompt?: string; maxTokens?: number } {
   return serviceTaskRequest(task);
 }
 
-function serviceTaskRequest(task: SystemWorkerTask): { user: string; systemPrompt?: string } {
-  return { user: serviceTaskPrompt(task), systemPrompt: systemPromptFor(task) };
+/** 上游 L1 抽取与去重的输出上限（config.ts:652）；L2 / L3 要写整篇 Markdown，上游不设上限。 */
+const KIND_MAX_TOKENS: Record<string, number> = { memory_extract: 4096, memory_deduplicate: 4096 };
+
+function serviceTaskRequest(task: SystemWorkerTask): { user: string; systemPrompt?: string; maxTokens?: number } {
+  const maxTokens = KIND_MAX_TOKENS[task.kind];
+  return { user: serviceTaskPrompt(task), systemPrompt: systemPromptFor(task), ...(maxTokens ? { maxTokens } : {}) };
 }
 
 function systemPromptFor(task: SystemWorkerTask): string | undefined {

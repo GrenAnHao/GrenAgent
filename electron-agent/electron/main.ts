@@ -112,7 +112,7 @@ if (!process.env.VITEST) {
       refreshConfig();
       return getConfig('agentDataModel');
     };
-    const completeAgentData = (input: { user: string; systemPrompt?: string; signal?: AbortSignal; onUsage?: (report: { model: string; usage: unknown }) => void }) =>
+    const completeAgentData = (input: { user: string; systemPrompt?: string; maxTokens?: number; signal?: AbortSignal; onUsage?: (report: { model: string; usage: unknown }) => void }) =>
       modelRuntimeHost.completeSimple(applyAgentDataModel(input, agentDataModelRaw()));
     const systemWorker = new SystemWorkerManager({
       describeModel: async () => {

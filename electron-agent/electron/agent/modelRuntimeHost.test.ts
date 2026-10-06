@@ -91,6 +91,18 @@ describe('ModelRuntimeHost 短调用', () => {
     expect(completeSimple.mock.calls[0][2]).toEqual({ signal });
   });
 
+  it('completeSimple 只在给了 maxTokens 时才透传，不传 reasoning（pi-ai 不传即关闭思考）', async () => {
+    const completeSimple = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel: () => model, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await host.completeSimple({ user: 'q', maxTokens: 4096 });
+    await host.completeSimple({ user: 'q' });
+    expect(completeSimple.mock.calls[0][2]).toEqual({ signal: undefined, maxTokens: 4096 });
+    expect(completeSimple.mock.calls[1][2]).toEqual({ signal: undefined });
+  });
+
   it('describeModel 返回 provider/id，不是 displayName', async () => {
     const create = vi.fn().mockResolvedValue({
       completeSimple: vi.fn(),

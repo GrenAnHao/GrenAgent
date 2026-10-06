@@ -18,13 +18,14 @@ export class ShortCallQueue {
   }
 }
 
+/** 记忆任务对齐上游：L1 / 去重 / L3 180s（l1-extractor.ts:518、l1-dedup.ts:167、persona-generator.ts:207），L2 300s（scene-extractor.ts:118）。 */
 export const KIND_TIMEOUT_MS: Record<string, number> = {
   goal_judge: 60_000,
   wiki_page_generate: 60_000,
-  memory_extract: 60_000,
-  memory_deduplicate: 60_000,
-  memory_scene: 60_000,
-  memory_persona: 60_000,
+  memory_extract: 180_000,
+  memory_deduplicate: 180_000,
+  memory_scene: 300_000,
+  memory_persona: 180_000,
 };
 
 export function timeoutForKind(kind: string, fallback = 30_000): number {
