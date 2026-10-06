@@ -139,3 +139,58 @@ test("登录 URL 由 Cursor PKCE 生成，轮询打到 auth/poll", { timeout: 10
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("重叠的两次解析各自只看到自己的 fetch，结束后恢复原来的 fetch", async () => {
+	const original = globalThis.fetch;
+	const dirA = await mkdtemp(join(tmpdir(), "cursor-auth-overlap-a-"));
+	const dirB = await mkdtemp(join(tmpdir(), "cursor-auth-overlap-b-"));
+	const soon = Math.floor(Date.now() / 1000) + 60;
+	const later = Math.floor(Date.now() / 1000) + 3600;
+	const refreshUrl = "https://api2.cursor.sh/auth/exchange_user_api_key";
+	const accessA = tokenExpiringAt(later, "a");
+	const accessB = tokenExpiringAt(later, "b");
+	await writeFile(
+		join(dirA, "cursor-credentials.json"),
+		JSON.stringify({ access: tokenExpiringAt(soon, "a"), refresh: "refresh-a", expires: soon * 1000 }),
+	);
+	await writeFile(
+		join(dirB, "cursor-credentials.json"),
+		JSON.stringify({ access: tokenExpiringAt(soon, "b"), refresh: "refresh-b", expires: soon * 1000 }),
+	);
+	const seenA: string[] = [];
+	const seenB: string[] = [];
+	const startedA = Promise.withResolvers<void>();
+	const startedB = Promise.withResolvers<void>();
+	const gateA = Promise.withResolvers<void>();
+	const gateB = Promise.withResolvers<void>();
+	try {
+		const pendingA = resolveCursorAccessToken(dirA, {
+			fetch: async (input) => {
+				seenA.push(String(input));
+				startedA.resolve();
+				await gateA.promise;
+				return new Response(JSON.stringify({ accessToken: accessA, refreshToken: "next-a" }), { status: 200 });
+			},
+		});
+		const pendingB = resolveCursorAccessToken(dirB, {
+			fetch: async (input) => {
+				seenB.push(String(input));
+				startedB.resolve();
+				await gateB.promise;
+				return new Response(JSON.stringify({ accessToken: accessB, refreshToken: "next-b" }), { status: 200 });
+			},
+		});
+		await Promise.all([startedA.promise, startedB.promise]);
+		gateA.resolve();
+		assert.equal(await pendingA, accessA);
+		gateB.resolve();
+		assert.equal(await pendingB, accessB);
+		assert.deepEqual(seenA, [refreshUrl]);
+		assert.deepEqual(seenB, [refreshUrl]);
+		assert.equal(globalThis.fetch, original);
+	} finally {
+		globalThis.fetch = original;
+		await rm(dirA, { recursive: true, force: true });
+		await rm(dirB, { recursive: true, force: true });
+	}
+});

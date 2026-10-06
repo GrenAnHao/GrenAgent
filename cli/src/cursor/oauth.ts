@@ -47,17 +47,34 @@ export async function resolveCursorAccessToken(
 	return loggedIn.access;
 }
 
+interface InstalledFetch {
+	impl: typeof globalThis.fetch;
+}
+
+const fetchStack: InstalledFetch[] = [];
+let fetchBaseline: typeof globalThis.fetch | undefined;
+
 async function usingFetch<T>(
 	fetchImpl: ResolveCursorAccessOptions["fetch"],
 	run: () => Promise<T>,
 ): Promise<T> {
 	if (!fetchImpl) return run();
-	const previous = globalThis.fetch;
-	globalThis.fetch = fetchImpl as typeof globalThis.fetch;
+	const frame: InstalledFetch = { impl: fetchImpl as typeof globalThis.fetch };
+	if (fetchStack.length === 0) fetchBaseline = globalThis.fetch;
+	fetchStack.push(frame);
+	globalThis.fetch = frame.impl;
 	try {
 		return await run();
 	} finally {
-		globalThis.fetch = previous;
+		const index = fetchStack.indexOf(frame);
+		if (index !== -1) fetchStack.splice(index, 1);
+		const top = fetchStack[fetchStack.length - 1];
+		if (top) {
+			globalThis.fetch = top.impl;
+		} else if (fetchBaseline !== undefined) {
+			globalThis.fetch = fetchBaseline;
+			fetchBaseline = undefined;
+		}
 	}
 }
 
