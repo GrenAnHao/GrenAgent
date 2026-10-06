@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { KIND_TIMEOUT_MS } from '../../agent/shortCall';
 import type { ServiceTaskCapability, ServiceTaskDefinition } from './types';
 
 type Schema = { safeParse: (value: unknown) => { success: boolean; data?: unknown; error?: unknown } };
@@ -47,16 +48,16 @@ export const memoryPersonaOutput = z.object({
 }).strict();
 
 export const BUILTIN_SERVICE_TASKS: ServiceTaskDefinition[] = [
-  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: 300_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: 180_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_extract', inputSchema: anyObject, outputSchema: memoryExtractionOutput, timeoutMs: KIND_TIMEOUT_MS.memory_extract, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_deduplicate', inputSchema: anyObject, outputSchema: memoryDedupOutput, timeoutMs: KIND_TIMEOUT_MS.memory_deduplicate, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_scene', inputSchema: anyObject, outputSchema: memorySceneOutput, timeoutMs: KIND_TIMEOUT_MS.memory_scene, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'memory_persona', inputSchema: anyObject, outputSchema: memoryPersonaOutput, timeoutMs: KIND_TIMEOUT_MS.memory_persona, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'memory_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'thread_title_generate', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'content_classify', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
   { kind: 'context_summarize', inputSchema: anyObject, outputSchema: anyObject, timeoutMs: 30_000, maxAttempts: 2, capabilities: ['llm_completion'] },
-  { kind: 'goal_judge', inputSchema: anyObject, outputSchema: goalJudgeOutput, timeoutMs: 60_000, maxAttempts: 1, capabilities: ['llm_completion'] },
-  { kind: 'wiki_page_generate', inputSchema: anyObject, outputSchema: z.custom<unknown>(() => true), timeoutMs: 60_000, maxAttempts: 2, capabilities: ['llm_completion'] },
+  { kind: 'goal_judge', inputSchema: anyObject, outputSchema: goalJudgeOutput, timeoutMs: KIND_TIMEOUT_MS.goal_judge, maxAttempts: 1, capabilities: ['llm_completion'] },
+  { kind: 'wiki_page_generate', inputSchema: anyObject, outputSchema: z.custom<unknown>(() => true), timeoutMs: KIND_TIMEOUT_MS.wiki_page_generate, maxAttempts: 2, capabilities: ['llm_completion'] },
 ];
 
 export class ServiceTaskRegistry {

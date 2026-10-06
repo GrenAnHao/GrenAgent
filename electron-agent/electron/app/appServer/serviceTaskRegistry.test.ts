@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ServiceTaskRegistry } from './serviceTaskRegistry';
+import { KIND_TIMEOUT_MS } from '../../agent/shortCall';
+import { BUILTIN_SERVICE_TASKS, ServiceTaskRegistry } from './serviceTaskRegistry';
 
 describe('ServiceTaskRegistry', () => {
+  it('BUILTIN_SERVICE_TASKS 的超时以 KIND_TIMEOUT_MS 为唯一来源', () => {
+    for (const definition of BUILTIN_SERVICE_TASKS) {
+      const expected = KIND_TIMEOUT_MS[definition.kind];
+      if (expected === undefined) continue;
+      expect(definition.timeoutMs, definition.kind).toBe(expected);
+    }
+  });
+
   it('registers built-in task definitions with policy metadata', () => {
     const registry = new ServiceTaskRegistry();
     for (const kind of ['memory_extract', 'memory_deduplicate', 'memory_scene', 'memory_persona', 'memory_summarize', 'thread_title_generate', 'content_classify', 'context_summarize']) {

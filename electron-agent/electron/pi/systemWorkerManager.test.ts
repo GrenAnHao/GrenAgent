@@ -118,7 +118,8 @@ describe('SystemWorkerManager', () => {
     await manager.run({ id: 'a', kind: 'memory_extract', input: {} });
     await manager.run({ id: 'b', kind: 'memory_deduplicate', input: {} }).catch(() => {});
     await manager.run({ id: 'c', kind: 'memory_scene', input: {} }).catch(() => {});
-    expect(complete.mock.calls.map((call) => call[0].maxTokens)).toEqual([4096, 4096, undefined]);
+    await manager.run({ id: 'd', kind: 'memory_persona', input: {} }).catch(() => {});
+    expect(complete.mock.calls.map((call) => call[0].maxTokens)).toEqual([4096, 4096, undefined, undefined]);
   });
 
   it('任务串行：第二个 complete 在第一个结束后才调用', async () => {
