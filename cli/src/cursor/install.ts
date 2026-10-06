@@ -7,6 +7,7 @@ import {
 	streamSimple,
 	type CursorStreamCursor,
 } from "./provider.ts";
+import { prepareCursorExec } from "./exec-handlers.ts";
 import { kCursorExecResolved } from "./vendor/utils/block-symbols.ts";
 
 export interface InstallCursorProviderOptions {
@@ -16,8 +17,7 @@ export interface InstallCursorProviderOptions {
 
 interface GrenCursorGlobals {
 	__grenCursorExecResolved?: symbol;
-	__grenCursorExecHandlers?: () => unknown;
-	__grenCursorPrepare?: <T extends { cursorExecHandlers?: unknown }>(options: T) => T;
+	__grenCursorPrepare?: typeof prepareCursorExec;
 }
 
 const cursorAuth: ProviderAuth = {
@@ -55,10 +55,7 @@ export function installCursorProvider(options: InstallCursorProviderOptions = {}
 	bindCursorStream(options.streamCursor);
 	const globals = globalThis as GrenCursorGlobals;
 	globals.__grenCursorExecResolved = kCursorExecResolved;
-	globals.__grenCursorPrepare = (requestOptions) => ({
-		...requestOptions,
-		cursorExecHandlers: requestOptions.cursorExecHandlers ?? globals.__grenCursorExecHandlers?.(),
-	});
+	globals.__grenCursorPrepare = prepareCursorExec;
 	registerApiProvider({
 		api: "cursor-agent",
 		stream,

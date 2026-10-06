@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { manifestExtensions } from "../../extensions/index.js";
 import { getConfig } from "../../extensions/_shared/runtime-config.js";
-import { createCursorExecHandlers } from "./cursor/exec-handlers.js";
+import { createCursorExecHandlers, registerCursorExecSession } from "./cursor/exec-handlers.js";
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
 
 function bareSkillName(name: string): string {
@@ -93,11 +93,19 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
     });
     const created = await deps.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent });
     const session = created.session;
-    (globalThis as { __grenCursorExecHandlers?: () => unknown }).__grenCursorExecHandlers = () =>
-      createCursorExecHandlers({
-        cwd: session.sessionManager.getCwd(),
-        getTools: () => session.agent.state.tools,
-      });
+    const sessionId = session.sessionId;
+    if (sessionId) {
+      registerCursorExecSession(sessionId, () =>
+        createCursorExecHandlers({
+          cwd: session.sessionManager.getCwd(),
+          getTools: () => session.agent.state.tools,
+          getContext: () => ({
+            cwd: session.sessionManager.getCwd(),
+            sessionManager: session.sessionManager,
+          }),
+        }),
+      );
+    }
     return {
       ...created,
       services,
