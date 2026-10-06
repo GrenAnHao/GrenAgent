@@ -1,5 +1,6 @@
 import {
 	AssistantMessageEventStream,
+	type AssistantMessage,
 	type Model,
 	type SimpleStreamOptions,
 	type StreamFunction,
@@ -89,6 +90,21 @@ function rejectUnknownModel(id: string): AssistantMessageEventStream {
 	return stream;
 }
 
+function abortedAssistantStream(model: Model<"cursor-agent">): AssistantMessageEventStream {
+	const stream = new AssistantMessageEventStream();
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		stopReason: "aborted",
+		api: "cursor-agent",
+		provider: model.provider,
+		model: model.id,
+		timestamp: Date.now(),
+	};
+	stream.push({ type: "done", reason: "aborted", message });
+	return stream;
+}
+
 function streamCursorAgent(
 	model: Model<"cursor-agent">,
 	context: TranscriptContext,
@@ -96,6 +112,7 @@ function streamCursorAgent(
 ): AssistantMessageEventStream {
 	const known = cursorCatalog().wires.get(model.id);
 	if (!known) return rejectUnknownModel(model.id);
+	if (options?.signal?.aborted) return abortedAssistantStream(model);
 	const wireModelId = resolveCursorWireModelId(known, options?.reasoning ?? "off", model.id);
 	return openCursor(model, context, {
 		...options,
