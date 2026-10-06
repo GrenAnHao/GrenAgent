@@ -69,7 +69,10 @@ export class MemoryStore {
 
   listConversations(input: MemoryListInput): MemoryPage<MemoryConversation> {
     const query = browseQuery(input, 'conversation');
-    const rows = this.db.prepare(`SELECT ${conversationColumns} FROM memory_captures WHERE ${query.where}
+    // 列表只展示 1200 字片段。没有搜索词时片段就是开头，在 SQL 里截取，不把整份 transcript（单条可达数百 KB）读进主进程。
+    // SQLite 按字符截、JS 按 UTF-16 截，前者只会多不会少，mapConversation 再 slice 一次结果不变。
+    const columns = query.query ? conversationColumns : conversationColumns.replace('transcript,', `substr(transcript,1,${SNIPPET_LENGTH}) AS transcript,`);
+    const rows = this.db.prepare(`SELECT ${columns} FROM memory_captures WHERE ${query.where}
       ORDER BY updated_at DESC,capture_key DESC LIMIT ?`).all(...query.params, query.limit + 1) as Array<Record<string, unknown>>;
     return page(rows.map((row) => mapConversation(row, query.query)), query.limit, query.filterHash);
   }
@@ -332,11 +335,13 @@ function page<T extends { id: string; updatedAt: number }>(rows: T[], limit: num
   return { items, nextCursor: Buffer.from(JSON.stringify(cursor)).toString('base64url') };
 }
 
+const SNIPPET_LENGTH = 1200;
+
 function mapConversation(row: Record<string, unknown>, query: string): MemoryConversation {
   const transcript = String(row.transcript);
   const start = query ? Math.max(0, transcript.toLowerCase().indexOf(query) - 200) : 0;
   return {
     id: String(row.id), source: String(row.source), sourceSessionId: row.sourceSessionId == null ? undefined : String(row.sourceSessionId),
-    workspace: String(row.workspace), sourceProjectId: String(row.sourceProjectId), snippet: transcript.slice(start, start + 1200), updatedAt: Number(row.updatedAt),
+    workspace: String(row.workspace), sourceProjectId: String(row.sourceProjectId), snippet: transcript.slice(start, start + SNIPPET_LENGTH), updatedAt: Number(row.updatedAt),
   };
 }

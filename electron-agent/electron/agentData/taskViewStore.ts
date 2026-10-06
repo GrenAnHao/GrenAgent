@@ -122,11 +122,19 @@ export class TaskViewStore {
       CASE WHEN json_type(${metadata},'$.resourceName')='text' THEN json_extract(${metadata},'$.resourceName') END AS resource_name,
       NULL AS kb_id,NULL AS attempts,${lease} AS active_lease,j.created_at,j.updated_at FROM agent_jobs j`;
     if (!this.hasTable('service_tasks')) return user;
+    // 记忆任务的 input 是整段对话（单条可达数 MB），且从不带 kbId。attempts / error / created_at / updated_at
+    // 在表里排在 input 之后，直接扫表读它们也要走完 input 的溢出页链。记忆任务单独一支，只引用
+    // service_tasks_task_view 覆盖索引里的列，整支不碰表行。否则每次列表和计数都要在主进程同步读完
+    // 全部历史载荷（实测 50 MB 时单次 300~600 ms，AgentData 页面进入和切换都会卡住）。
+    const memoryKind = "s.kind LIKE 'memory\\_%' ESCAPE '\\'";
     const input = "CASE WHEN json_valid(s.input) THEN s.input ELSE '{}' END";
     const target = this.hasTable('wiki_task_targets') ? "(SELECT t.kb_id FROM wiki_task_targets t WHERE t.task_source='service_task' AND t.task_id=s.id ORDER BY t.kb_id LIMIT 1)" : 'NULL';
-    return `${user} UNION ALL SELECT 'system' AS source,s.id,s.kind,${label('s')} AS label,s.source_project_id AS workspace,s.status,NULL AS progress,
-      s.error,NULL AS metadata,NULL AS resource_name,COALESCE(${target},CASE WHEN json_type(${input},'$.kbId')='text' THEN json_extract(${input},'$.kbId') END) AS kb_id,
-      s.attempts,0 AS active_lease,s.created_at,s.updated_at FROM service_tasks s`;
+    const system = (kbId: string, where: string) => `SELECT 'system' AS source,s.id,s.kind,${label('s')} AS label,s.source_project_id AS workspace,s.status,NULL AS progress,
+      s.error,NULL AS metadata,NULL AS resource_name,${kbId} AS kb_id,
+      s.attempts,0 AS active_lease,s.created_at,s.updated_at FROM service_tasks s WHERE ${where}`;
+    return `${user} UNION ALL ${system(target, memoryKind)} UNION ALL ${system(
+      `COALESCE(${target},CASE WHEN json_type(${input},'$.kbId')='text' THEN json_extract(${input},'$.kbId') END)`, `NOT (${memoryKind})`,
+    )}`;
   }
 
   private map(row: Row): TaskView {

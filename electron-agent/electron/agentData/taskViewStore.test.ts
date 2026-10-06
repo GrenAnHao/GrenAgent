@@ -7,6 +7,18 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 function fixture() { const f = taskFixture(); cleanups.push(f.cleanup); return { ...f, views: new TaskViewStore(f.db) }; }
 
 describe('TaskViewStore', () => {
+  it('lists memory tasks without parsing their payload, while Wiki tasks still resolve kbId', () => {
+    const f = fixture();
+    f.system('wiki', 'completed', 10, { kbId: 'kb-1' });
+    const insert = f.db.prepare('INSERT INTO service_tasks(id,kind,source_project_id,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)');
+    insert.run('mem-object', 'memory_extract', '/repo', 'completed', JSON.stringify({ kbId: 'never-a-wiki', delta: 'x'.repeat(10_000) }), 1, 1, 9);
+    insert.run('mem-broken', 'memory_scene', '/repo', 'failed', '{not json', 2, 1, 8);
+    const items = f.views.list().items;
+    expect(items.find((item) => item.ref.id === 'wiki')?.resource).toEqual({ type: 'wiki', id: 'kb-1' });
+    expect(items.find((item) => item.ref.id === 'mem-object')?.resource).toEqual({ type: 'project', id: '/repo' });
+    expect(items.find((item) => item.ref.id === 'mem-broken')).toMatchObject({ status: 'failed', resource: { type: 'project', id: '/repo' } });
+  });
+
   it('keeps identical IDs separate and preserves system queued/blocked without progress or capabilities', () => {
     const f = fixture(); const job = f.jobs.create({ kind: 'codegraph.sync', workspace: '/repo' });
     f.jobs.start(job.id); f.system(job.id); f.system('blocked', 'blocked');
