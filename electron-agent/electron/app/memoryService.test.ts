@@ -833,16 +833,98 @@ describe('MemoryService 抽取节奏', () => {
     db.close();
   });
 
-  it('启动补抽：延迟 recoverDelayMs 后对有 pending 的来源各入队一次', async () => {
-    const { db, store, tasks, service, live } = cadenceSetup({ recoverDelayMs: 60_000 });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const from = (name: string, n: number, extra: { extract?: boolean } = {}) => ({ ...turn(n), sessionId: name, source: `session:${name}`, ...extra });
+  const sourceOf = (task: { input: unknown }) => (task.input as { source: string }).source;
+
+  it('启动补抽：见过开着开关的 capture 后，延迟 recoverDelayMs 对有 pending 的来源各入队一次', async () => {
+    const { db, store, tasks, service, live } = cadenceSetup({ everyN: 5, warmup: false, recoverDelayMs: 60_000 });
     store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
     store.capture({ ...scope, sessionId: 's2' }, 'session:s2', 'user: also left', 'fp2');
+    // 开关状态只能从 capture 带来的 extract 标志得知：先来一次开着的 capture（另一个来源，没到阈值，只会延后）。
+    await service.capture(from('other', 1));
     service.recoverPendingCaptures();
     expect(tasks).toHaveLength(0);
+    const recover = live().filter((timer) => timer.ms === 60_000);
+    expect(recover).toHaveLength(1);
+    recover[0].callback();
+    await tick();
+    expect(tasks.map(sourceOf).sort()).toEqual(['session:other', 'session:s1', 'session:s2']);
+    db.close();
+  });
+
+  it('收到 extract:false 后，之前挂的空闲回调触发也不入队，所有来源的空闲计时都被取消', async () => {
+    const { db, tasks, service, live } = cadenceSetup({ everyN: 5, warmup: false });
+    await service.capture(turn(1));
+    expect(live()).toHaveLength(1);
+    const idle = live()[0].callback;
+    await service.capture(from('off', 1, { extract: false }));
+    expect(live()).toHaveLength(0);
+    idle();
+    await tick();
+    expect(tasks).toHaveLength(0);
+    // 开关重新打开后空闲补抽恢复。
+    await service.capture(turn(2));
+    expect(live()).toHaveLength(1);
+    live()[0].callback();
+    await tick();
+    expect(tasks).toHaveLength(1);
+    expect((tasks[0].input as { newMessages: unknown[] }).newMessages).toHaveLength(2);
+    db.close();
+  });
+
+  it('请求补抽后第一次 capture 是 extract:false：补抽计时器不挂；之后来一次开着的再挂并执行', async () => {
+    const { db, store, tasks, service, live } = cadenceSetup({ everyN: 1, warmup: false, recoverDelayMs: 60_000 });
+    store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
+    service.recoverPendingCaptures();
+    expect(live()).toHaveLength(0);
+    await service.capture(from('off', 1, { extract: false }));
+    expect(live()).toHaveLength(0);
+    const on = await service.capture(from('on', 1));
+    service.completeExtraction(on.taskId!, {});
     expect(live().map((timer) => timer.ms)).toEqual([60_000]);
     live()[0].callback();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(tasks.map((task) => (task.input as { source: string }).source).sort()).toEqual(['session:s1', 'session:s2']);
+    await tick();
+    expect(tasks.map(sourceOf)).toEqual(['session:on', 'session:s1']);
+    db.close();
+  });
+
+  it('补抽计时器挂着时收到 extract:false 会取消并保留请求，开关重开后再挂，执行过一次就不再挂', async () => {
+    const { db, store, tasks, timers, service, live } = cadenceSetup({ everyN: 1, warmup: false, recoverDelayMs: 60_000 });
+    const recoverTimers = () => timers.filter((timer) => timer.ms === 60_000).length;
+    store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
+    service.completeExtraction((await service.capture(from('on', 1))).taskId!, {});
+    service.recoverPendingCaptures();
+    expect(live().map((timer) => timer.ms)).toEqual([60_000]);
+    await service.capture(from('off', 1, { extract: false }));
+    expect(live()).toHaveLength(0);
+    service.completeExtraction((await service.capture(from('on', 2))).taskId!, {});
+    expect(live().map((timer) => timer.ms)).toEqual([60_000]);
+    live()[0].callback();
+    await tick();
+    expect(tasks.map(sourceOf)).toContain('session:s1');
+    // 请求已执行过：再来开着的 capture 不会再创建补抽计时器（触发过的计时器仍留在 timers 里，所以比数量）。
+    const armed = recoverTimers();
+    service.completeExtraction((await service.capture(from('on', 3))).taskId!, {});
+    expect(recoverTimers()).toBe(armed);
+    db.close();
+  });
+
+  it('窗口为空被跳过时不推进预热阈值，也取消该来源的空闲计时', async () => {
+    const { db, tasks, service, live } = cadenceSetup();
+    const send = (transcript: string, n: number) => service.capture({ ...scope, sessionId: 's', source: 'session:s', transcript, fingerprint: `fp${n}` });
+    const first = await send('user: hi', 1);
+    expect(first.extraction).toBe('queued');
+    service.completeExtraction(first.taskId!, {});
+    expect((await send('user: hi\ntoolResult: x', 2)).extraction).toBe('deferred');
+    expect(live()).toHaveLength(1);
+    // 第 2 轮到阈值（2），但新增内容里只有工具输出：跳过，阈值不翻倍。
+    expect((await send('user: hi\ntoolResult: x\ntoolResult: y', 3)).extraction).toBe('skipped');
+    expect(live()).toHaveLength(0);
+    expect((await send('user: hi\ntoolResult: x\ntoolResult: y\nuser: a', 4)).extraction).toBe('deferred');
+    // 阈值还是 2：这一轮才入队。如果跳过时翻倍成 4，这里还会是 deferred。
+    expect((await send('user: hi\ntoolResult: x\ntoolResult: y\nuser: a\nuser: b', 5)).extraction).toBe('queued');
+    expect(tasks).toHaveLength(2);
     db.close();
   });
 
@@ -854,4 +936,84 @@ describe('MemoryService 抽取节奏', () => {
     expect(live()).toHaveLength(0);
     db.close();
   });
+
+  it('dispose 之后 completeExtraction 触发的后继不入队、不挂计时器', async () => {
+    const { db, tasks, service, timers } = cadenceSetup({ everyN: 2, warmup: false });
+    await service.capture(turn(1));
+    const first = await service.capture(turn(2));
+    expect(first.taskId).toBeDefined();
+    await service.capture(turn(3));
+    service.dispose();
+    const before = timers.length;
+    service.completeExtraction(first.taskId!, {});
+    await tick();
+    expect(tasks).toHaveLength(1);
+    expect(timers).toHaveLength(before);
+    db.close();
+  });
+
+  it('dispose 之后 armIdle、recoverPendingCaptures、flushSource 都不再动作', async () => {
+    const { db, tasks, service, timers } = cadenceSetup({ everyN: 5, warmup: false });
+    await service.capture(turn(1));
+    const idle = timers[0].callback;
+    service.dispose();
+    const before = timers.length;
+    idle();
+    await tick();
+    expect(tasks).toHaveLength(0);
+    service.recoverPendingCaptures();
+    await service.capture(turn(2));
+    expect(timers).toHaveLength(before);
+    expect(tasks).toHaveLength(0);
+    db.close();
+  });
+
+  it('任务进行中另一个来源带来 extract:false 后，任务结束不再接着抽', async () => {
+    const { db, tasks, service } = cadenceSetup({ everyN: 1, warmup: false });
+    const first = await service.capture(from('a', 1));
+    await service.capture(from('a', 2));
+    await service.capture(from('b', 1, { extract: false }));
+    service.completeExtraction(first.taskId!, {});
+    await tick();
+    expect(tasks).toHaveLength(1);
+    db.close();
+  });
+
+  it('listPendingCaptures 新的优先，默认最多 20 条，limit 可调', () => {
+    const { db, store } = setup();
+    for (let i = 0; i < 25; i++) store.capture({ ...scope, sessionId: `s${i}` }, `session:s${i}`, `user: ${i}`, `fp${i}`);
+    db.exec("UPDATE memory_captures SET updated_at = 1000 + CAST(substr(session_id, 2) AS INTEGER)");
+    const all = store.listPendingCaptures();
+    expect(all).toHaveLength(20);
+    expect(all[0]).toMatchObject({ sessionId: 's24', source: 'session:s24' });
+    expect(all[19].sessionId).toBe('s5');
+    expect(store.listPendingCaptures(3).map((row) => row.sessionId)).toEqual(['s24', 's23', 's22']);
+    expect(store.listPendingCaptures(100)).toHaveLength(25);
+    store.commitCapture({ ...scope, sessionId: 's24' }, 'session:s24', 'fp24');
+    expect(store.listPendingCaptures(1)[0].sessionId).toBe('s23');
+    db.close();
+  });
+
+  it('补抽失败不静默：flushSource 和补抽循环都 console.warn 错误消息', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { db, store, service, live } = cadenceSetup({ everyN: 5, warmup: false, recoverDelayMs: 60_000 });
+      await service.capture(turn(1));
+      const idle = live()[0].callback;
+      vi.spyOn(store, 'pendingCapture').mockImplementation(() => { throw new Error('db closed'); });
+      idle();
+      await tick();
+      expect(warn).toHaveBeenCalledWith('[memory] 补抽失败', 'db closed');
+      warn.mockClear();
+      vi.spyOn(store, 'listPendingCaptures').mockImplementation(() => { throw new Error('no table'); });
+      service.recoverPendingCaptures();
+      live().find((timer) => timer.ms === 60_000)!.callback();
+      await tick();
+      expect(warn).toHaveBeenCalledWith('[memory] 补抽失败', 'no table');
+      db.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
 });

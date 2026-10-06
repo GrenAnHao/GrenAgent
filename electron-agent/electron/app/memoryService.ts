@@ -84,6 +84,14 @@ export class MemoryService {
   private readonly timers = new Map<string, { cancel: () => void }>();
   private readonly cadence = new Map<string, CadenceState>();
   private recoverTimer?: { cancel: () => void };
+  /**
+   * 用户开关 MEMORY_EXTRACT 主进程读不到，只能从扩展每次 memory.capture 带的 extract 标志得知。
+   * 取最近一次非 internal.force 的 capture 的取值；undefined = 本进程还没见过，这时不做任何补抽。
+   */
+  private extractObserved: boolean | undefined;
+  /** recoverPendingCaptures 登记过、还没执行的补抽请求。开关关着时保留，重新打开后才挂计时器。 */
+  private recoverRequested = false;
+  private disposed = false;
   constructor(private readonly options: MemoryServiceOptions) {}
 
   private now(): number {
@@ -127,15 +135,21 @@ export class MemoryService {
     return state;
   }
 
-  /** 每次真正入队抽取后调用：计数清零、取消空闲计时、预热阈值翻倍直到 everyN（上游每次 L1 成功后翻倍，这里在入队时翻倍）。 */
+  /** 真正入队抽取时调用：计数清零、取消空闲计时、预热阈值翻倍直到 everyN（上游每次 L1 成功后翻倍，这里在入队时翻倍）。 */
   private consumeCadence(state: CadenceState): void {
-    state.count = 0;
-    state.timer?.cancel();
-    state.timer = undefined;
+    this.resetCount(state);
     state.threshold = Math.min(state.threshold * 2, this.everyN());
   }
 
+  /** 没入队就不推进预热：只清零计数、取消空闲计时。 */
+  private resetCount(state: CadenceState): void {
+    state.count = 0;
+    state.timer?.cancel();
+    state.timer = undefined;
+  }
+
   private armIdle(state: CadenceState): void {
+    if (this.disposed) return;
     state.timer?.cancel();
     state.timer = this.setCadenceTimer(() => {
       state.timer = undefined;
@@ -143,28 +157,55 @@ export class MemoryService {
     }, this.idleMs());
   }
 
-  /** 空闲计时和启动补抽共用：按存储里的 pending 强制入队一次。 */
+  /** 空闲计时和启动补抽共用：按存储里的 pending 强制入队一次。开关没被确认开着（或已关闭）时什么都不做。 */
   private async flushSource(source: CaptureSource): Promise<void> {
+    if (this.disposed || this.extractObserved !== true) return;
     try {
       const next = this.options.store.pendingCapture(source, source.source);
       if (!next) return;
       await this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true });
-    } catch {
-      /* 补抽失败不重试：pending 保留到下一轮对话或下次启动 */
+    } catch (error) {
+      // 不重试：pending 保留到下一轮对话或下次启动。
+      warnRecoverFailed(error);
     }
   }
 
-  recoverPendingCaptures(): void {
+  /** 记录最近一次 capture 带来的开关状态。开关是全局的：关了就取消所有来源的空闲计时和补抽计时。 */
+  private observeExtract(enabled: boolean): void {
+    this.extractObserved = enabled;
+    if (enabled) {
+      this.armRecover();
+      return;
+    }
+    for (const state of this.cadence.values()) {
+      state.timer?.cancel();
+      state.timer = undefined;
+    }
+    // 只取消计时器，recoverRequested 保留：开关重新打开后还要补抽。
     this.recoverTimer?.cancel();
+    this.recoverTimer = undefined;
+  }
+
+  /** 登记启动补抽。主进程不知道开关状态，等第一次开着开关的 capture 出现后才真正挂计时器。 */
+  recoverPendingCaptures(): void {
+    if (this.disposed) return;
+    this.recoverRequested = true;
+    this.armRecover();
+  }
+
+  private armRecover(): void {
+    if (this.disposed || !this.recoverRequested || this.recoverTimer || this.extractObserved !== true) return;
     this.recoverTimer = this.setCadenceTimer(() => {
       this.recoverTimer = undefined;
+      this.recoverRequested = false;
       void (async () => {
         try {
           for (const row of this.options.store.listPendingCaptures()) {
             await this.flushSource({ ...row, projectId: row.projectId ?? row.workspace });
           }
-        } catch {
-          /* 库已关闭等：下次启动再补 */
+        } catch (error) {
+          // 库已关闭等：下次启动再补。
+          warnRecoverFailed(error);
         }
       })();
     }, this.options.extractCadence?.recoverDelayMs ?? 60_000);
@@ -220,6 +261,7 @@ export class MemoryService {
 
   /** internal.force 只给空闲计时、启动补抽、finishCapture 内部使用，RPC 不会传第二个参数。 */
   async capture(input: MemoryCaptureInput, internal: { force?: boolean } = {}): Promise<MemoryCaptureResult> {
+    if (!internal.force) this.observeExtract(input.extract !== false);
     const captured = this.options.store.capture(input, input.source, input.transcript, input.fingerprint);
     if (!captured.changed || !captured.delta) return captured;
     if (input.extract === false) {
@@ -243,13 +285,15 @@ export class MemoryService {
       this.armIdle(state);
       return { ...captured, extraction: 'deferred' };
     }
-    this.consumeCadence(state);
     const scope = { ...input, scope: 'project' as const };
     const extractionWindow = buildExtractionWindow(captured.delta, () => captureBackground(this.options.store, scope, input.source, captured.delta));
     if (extractionWindow.newMessages.length === 0) {
       this.options.store.commitCapture(scope, input.source, input.fingerprint, captured.delta);
+      // 没入队就不翻倍预热阈值，只把这一批清掉。
+      this.resetCount(state);
       return { ...captured, extraction: 'skipped' };
     }
+    this.consumeCadence(state);
     const taskId = randomUUID();
     this.pending.set(taskId, { scope, source: input.source, fingerprint: input.fingerprint, delta: captured.delta });
     try {
@@ -392,7 +436,8 @@ export class MemoryService {
   private finishCapture(taskId: string, task?: ServiceTask): void {
     const capture = this.pending.get(taskId) ?? this.captureFromTask(taskId, task);
     this.pending.delete(taskId);
-    if (!capture) return;
+    // 关闭后不再入队；开关被确认关着时也不接着抽，pending 留到下一次开着开关的对话。
+    if (!capture || this.disposed || this.extractObserved === false) return;
     const next = this.options.store.pendingCapture(capture.scope, capture.source);
     // Only newer input earns another task. Repeated failures with no new turn
     // remain pending for an explicit retry instead of creating an infinite loop.
@@ -428,6 +473,7 @@ export class MemoryService {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const timer of this.timers.values()) timer.cancel();
     this.timers.clear();
     for (const state of this.cadence.values()) state.timer?.cancel();
@@ -577,6 +623,10 @@ export class MemoryService {
       source: input.source,
     };
   }
+}
+
+function warnRecoverFailed(error: unknown): void {
+  console.warn('[memory] 补抽失败', error instanceof Error ? error.message : String(error));
 }
 
 function sameSource(scope: MemoryScope, source: string, input: MemoryCaptureInput): boolean {
