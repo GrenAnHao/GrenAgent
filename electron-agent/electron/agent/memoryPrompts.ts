@@ -558,6 +558,16 @@ ${newText}`;
 }
 
 /**
+ * 从末尾往前退掉 `\n`。不用 `.replace(/\n+$/, '')`：正文中间有大量连续换行时，正则会从每个位置
+ * 回退重扫，整体退化成二次复杂度（实测 10 万个连续换行约 5 秒）。
+ */
+export function stripTrailingNewlines(text: string): string {
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 10) end -= 1;
+  return text.slice(0, end);
+}
+
+/**
  * 把 `user: …\\nassistant: …\\ntoolResult: …` 转成上游 ConversationMessage。
  * toolResult 没有独立 role，映射为 assistant，以便填进抽取用户模板。
  */
@@ -575,7 +585,7 @@ export function messagesFromTranscript(
     return {
       id: `${idPrefix}${index}`,
       role,
-      content: delta.slice(start, end).replace(/\n+$/, ''),
+      content: stripTrailingNewlines(delta.slice(start, end)),
       timestamp: now + index * 1000,
     };
   });

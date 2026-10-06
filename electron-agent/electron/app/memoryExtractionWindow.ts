@@ -1,4 +1,4 @@
-import type { ConversationMessage } from '../agent/memoryPrompts';
+import { stripTrailingNewlines, type ConversationMessage } from '../agent/memoryPrompts';
 
 /** 上游 core/record/l1-extractor.ts:149-150 的默认值。 */
 export const MAX_NEW_MESSAGES = 10;
@@ -15,7 +15,13 @@ export interface TranscriptSegment { role: string; content: string }
 export interface ConversationTurn { role: Role; content: string }
 export interface ExtractionWindow { newMessages: ConversationMessage[]; backgroundMessages: ConversationMessage[] }
 
-/** extensions/_shared/transcript.ts 的 messageToText 写成 `role: text`，role 来自 pi 的 AgentMessage。 */
+/**
+ * extensions/_shared/transcript.ts 的 messageToText 写成 `role: text`，role 来自 pi 的 AgentMessage。
+ *
+ * 限制：扁平文本无法区分「角色行」和「正文里恰好以 `user: ` / `assistant: ` 开头的行」
+ * （例如工具输出 cat 出来的示例对话），后者会被误切成新消息。这是 transcript 格式本身的
+ * 歧义，旧的 messagesFromTranscript 也一样。彻底解决需要 sidecar 传结构化消息。
+ */
 const ROLE_LINE = /^(user|assistant|toolResult|custom|bashExecution|branchSummary|compactionSummary): /gm;
 
 export function splitTranscript(text: string): TranscriptSegment[] {
@@ -23,7 +29,7 @@ export function splitTranscript(text: string): TranscriptSegment[] {
   return matches.map((match, index) => {
     const start = (match.index ?? 0) + match[0].length;
     const end = index + 1 < matches.length ? (matches[index + 1].index ?? text.length) : text.length;
-    return { role: match[1], content: text.slice(start, end).replace(/\n+$/, '') };
+    return { role: match[1], content: stripTrailingNewlines(text.slice(start, end)) };
   });
 }
 
@@ -37,8 +43,11 @@ function cleanContent(role: Role, content: string): string {
 /** 移植自上游 shouldExtractL1（utils/sanitize.ts:135-156）；OpenClaw 专有的框架噪声过滤不适用于 Pi，未移植。 */
 export function shouldExtract(text: string): boolean {
   if (!text.trim()) return false;
-  if (text.startsWith('/')) return false;
-  if (/^[^\w\s\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]{1,5}$/.test(text)) return false;
+  // 只把「斜杠命令形态」当命令：单行、不超过 64 字、`/` 后紧跟命令名再以空白或结尾断开。
+  // 否则 `/api/v1/foo 报错了` 这类以路径开头的正文会被误丢。
+  if (!text.includes('\n') && text.length <= 64 && /^\/[\w:-]+(\s|$)/.test(text)) return false;
+  // \w 只认 ASCII，用 Unicode 属性类避免把 Cyrillic / CJK 等纯文字误判成符号。
+  if (/^[^\p{L}\p{N}\s]{1,5}$/u.test(text)) return false;
   if (/^[?？]+$/.test(text)) return false;
   return true;
 }
@@ -53,16 +62,24 @@ function cap(text: string): string {
  */
 export function conversationTurns(text: string): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
+  // 记录上一个 user/assistant 段的原始角色（不论它是否被 shouldExtract 过滤掉）。
+  // 只有上一个对话段也是 assistant 时才合并，被过滤掉的 user 段（如 /compact）要断开合并；
+  // toolResult / custom 等非 user/assistant 段不参与判断，因此同一轮里被工具输出隔开的 assistant 仍合并。
+  let prevDialogRole: Role | null = null;
   for (const segment of splitTranscript(text)) {
     if (segment.role !== 'user' && segment.role !== 'assistant') continue;
-    const content = cleanContent(segment.role, segment.content);
-    if (!shouldExtract(content)) continue;
+    const role: Role = segment.role;
+    const content = cleanContent(role, segment.content);
+    const keep = shouldExtract(content);
+    const previousDialogRole = prevDialogRole;
+    prevDialogRole = role;
+    if (!keep) continue;
     const last = turns.at(-1);
-    if (last && last.role === 'assistant' && segment.role === 'assistant') {
+    if (role === 'assistant' && previousDialogRole === 'assistant' && last?.role === 'assistant') {
       last.content = `${last.content}\n\n${content}`;
       continue;
     }
-    turns.push({ role: segment.role, content });
+    turns.push({ role, content });
   }
   return turns.map((turn) => ({ ...turn, content: cap(turn.content) }));
 }

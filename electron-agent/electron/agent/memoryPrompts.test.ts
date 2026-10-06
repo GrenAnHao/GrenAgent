@@ -123,6 +123,18 @@ describe('memoryPrompts', () => {
     ]);
   });
 
+  it('messagesFromTranscript 正文中间有大量连续换行时不触发正则的二次复杂度', () => {
+    const body = `开头\n${'\n'.repeat(200_000)}尾部\n`;
+    const start = performance.now();
+    const messages = messagesFromTranscript(`user: ${body}assistant: 回复`, { now: 1_000_000 });
+    const elapsed = performance.now() - start;
+    expect(messages).toEqual([
+      { id: 'm0', role: 'user', content: `开头\n${'\n'.repeat(200_000)}尾部`, timestamp: 1_000_000 },
+      { id: 'm1', role: 'assistant', content: '回复', timestamp: 1_001_000 },
+    ]);
+    expect(elapsed).toBeLessThan(200);
+  });
+
   it('formatBatchConflictPrompt 输出统一候选池与按条关联 ID', () => {
     const prompt = formatBatchConflictPrompt([
       {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildExtractionWindow, conversationTurns, MAX_BACKGROUND_MESSAGES, MAX_MESSAGE_CHARS, MAX_NEW_MESSAGES, splitTranscript,
+  buildExtractionWindow, conversationTurns, MAX_BACKGROUND_MESSAGES, MAX_MESSAGE_CHARS, MAX_NEW_MESSAGES, shouldExtract, splitTranscript,
 } from './memoryExtractionWindow';
 
 describe('splitTranscript', () => {
@@ -12,6 +12,32 @@ describe('splitTranscript', () => {
       { role: 'custom', content: 'memo' },
     ]);
   });
+
+  it('正文中间有大量连续换行时不触发正则的二次复杂度', () => {
+    const body = `开头\n${'\n'.repeat(200_000)}尾部\n`;
+    const start = performance.now();
+    const result = splitTranscript(`user: ${body}assistant: 回复`);
+    const elapsed = performance.now() - start;
+    expect(result).toEqual([
+      { role: 'user', content: `开头\n${'\n'.repeat(200_000)}尾部` },
+      { role: 'assistant', content: '回复' },
+    ]);
+    expect(elapsed).toBeLessThan(200);
+  });
+});
+
+describe('shouldExtract', () => {
+  it('保留以路径开头但非命令的消息，只丢真正的斜杠命令', () => {
+    expect(shouldExtract('/api/v1/foo 报错了')).toBe(true);
+    expect(shouldExtract('/new')).toBe(false);
+    expect(shouldExtract('/compact')).toBe(false);
+  });
+
+  it('纯符号过滤只认非字母数字，保留 Cyrillic 等文字', () => {
+    expect(shouldExtract('Да')).toBe(true);
+    expect(shouldExtract('!!')).toBe(false);
+    expect(shouldExtract('？？')).toBe(false);
+  });
 });
 
 describe('conversationTurns', () => {
@@ -20,6 +46,20 @@ describe('conversationTurns', () => {
     expect(conversationTurns(text)).toEqual([
       { role: 'user', content: '帮我查日志' },
       { role: 'assistant', content: '我先看看\n\n结论是磁盘满了' },
+    ]);
+  });
+
+  it('被过滤掉的 user 段会断开 assistant 的合并', () => {
+    expect(conversationTurns('user: 开始\nassistant: A\nuser: /compact\nassistant: B')).toEqual([
+      { role: 'user', content: '开始' },
+      { role: 'assistant', content: 'A' },
+      { role: 'assistant', content: 'B' },
+    ]);
+  });
+
+  it('toolResult 等非对话段不打断同一轮 assistant 的合并', () => {
+    expect(conversationTurns('assistant: A\ntoolResult: x\nassistant: B')).toEqual([
+      { role: 'assistant', content: 'A\n\nB' },
     ]);
   });
 
