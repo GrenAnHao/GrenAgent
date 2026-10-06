@@ -68,6 +68,11 @@ export interface MemoryServiceOptions {
 interface PendingCapture { scope: MemoryScope; source: string; fingerprint: string; delta: string }
 interface PendingDedup {
   capture: PendingCapture;
+  /**
+   * 触发这次去重的 memory_extract 任务。游标要等去重写完才提交，所以这一批在 completeDedup / 去重失败之前都算「进行中」：
+   * pending 里的记录留着，同来源的新一轮并入它，后继任务（finishCapture）也等到那时才发。
+   */
+  extractTaskId: string;
   records: Map<string, L1Record>;
   candidateIds: Set<string>;
 }
@@ -84,6 +89,8 @@ export class MemoryService {
   private readonly pendingScene = new Map<string, PendingLayer>();
   private readonly pendingPersona = new Map<string, PendingLayer>();
   private readonly finishing = new Set<string>();
+  /** 启动补抽等着某个抽取任务落定（finishCapture 把它从 pending 里移除）的回调。 */
+  private readonly settleWaiters = new Map<string, Array<() => void>>();
   private readonly timers = new Map<string, { cancel: () => void }>();
   private readonly cadence = new Map<string, CadenceState>();
   private recoverTimer?: { cancel: () => void };
@@ -160,16 +167,40 @@ export class MemoryService {
     }, this.idleMs());
   }
 
-  /** 空闲计时和启动补抽共用：按存储里的 pending 强制入队一次。开关没被确认开着（或已关闭）时什么都不做。 */
-  private async flushSource(source: CaptureSource): Promise<void> {
-    if (this.disposed || this.extractObserved !== true) return;
+  /**
+   * 空闲计时和启动补抽共用：按存储里的 pending 强制入队一次。开关没被确认开着（或已关闭）时什么都不做。
+   * 返回入队（或并入进行中）的抽取任务 id，没有任务时为 undefined；启动补抽靠它等任务落定。
+   */
+  private async flushSource(source: CaptureSource): Promise<string | undefined> {
+    if (this.disposed || this.extractObserved !== true) return undefined;
     try {
       const next = this.options.store.pendingCapture(source, source.source);
-      if (!next) return;
-      await this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true });
+      if (!next) return undefined;
+      const result = await this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true });
+      return result.extraction === 'queued' ? result.taskId : undefined;
     } catch (error) {
       // 不重试：pending 保留到下一轮对话或下次启动。
       warnRecoverFailed(error);
+      return undefined;
+    }
+  }
+
+  /** 批次落定 = 该任务从 pending 里移除（抽取完成、去重结束、任务失败或取消）。dispose 也视为落定，避免补抽循环挂住。 */
+  private whenCaptureSettled(taskId: string): Promise<void> {
+    if (this.disposed || !this.pending.has(taskId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const waiters = this.settleWaiters.get(taskId) ?? [];
+      waiters.push(resolve);
+      this.settleWaiters.set(taskId, waiters);
+    });
+  }
+
+  private releaseSettleWaiters(taskId?: string): void {
+    const ids = taskId === undefined ? [...this.settleWaiters.keys()] : [taskId];
+    for (const id of ids) {
+      const waiters = this.settleWaiters.get(id);
+      this.settleWaiters.delete(id);
+      for (const resolve of waiters ?? []) resolve();
     }
   }
 
@@ -203,8 +234,10 @@ export class MemoryService {
       this.recoverRequested = false;
       void (async () => {
         try {
+          // 串行：上一个来源的任务落定再处理下一个，重启后不会一次性把所有残留来源都压进队列。
           for (const row of this.options.store.listPendingCaptures()) {
-            await this.flushSource({ ...row, projectId: row.projectId ?? row.workspace });
+            const taskId = await this.flushSource({ ...row, projectId: row.projectId ?? row.workspace });
+            if (taskId) await this.whenCaptureSettled(taskId);
           }
         } catch (error) {
           // 库已关闭等：下次启动再补。
@@ -346,8 +379,11 @@ export class MemoryService {
         newMemory: { record_id, ...record },
         candidates: (recalled.get(record_id) ?? []).map((hit) => storedL1Candidate(hit)),
       }));
+      // 游标要等去重结束才提交，这里不能 finishCapture：否则后继 force 任务的 delta 会带上还没提交的这一批，重抽。
+      // 从队列恢复的任务不在 pending 里，这里补登记，让同来源的新一轮能命中它。
+      this.pending.set(extractTaskId, capture);
       this.pendingDedup.set(dedupTaskId, {
-        capture, records,
+        capture, extractTaskId, records,
         candidateIds: new Set(matches.flatMap((match) => match.candidates.map((candidate) => candidate.id))),
       });
       void this.options.queue.enqueue({
@@ -357,8 +393,7 @@ export class MemoryService {
         sourceProjectId: capture.scope.projectId ?? capture.scope.workspace,
         sourceSessionId: capture.scope.sessionId,
         system: true,
-      }).catch(() => { this.pendingDedup.delete(dedupTaskId); });
-      this.finishCapture(extractTaskId);
+      }).catch(() => { this.abandonDedup(dedupTaskId); });
       return [];
     }
     const writes: MemoryRecord[] = [];
@@ -390,8 +425,18 @@ export class MemoryService {
     );
     this.options.store.commitCapture(pending.capture.scope, pending.capture.source, pending.capture.fingerprint, pending.capture.delta);
     this.pendingDedup.delete(taskId);
+    // 游标已提交，这一批才算结束：去重期间并进来的新一轮在这里接续，delta 只剩新的部分。
+    this.finishCapture(pending.extractTaskId);
     this.scheduleScene(pending.capture.scope, pending.capture.source, l1FromWrites(writes));
     return writes;
+  }
+
+  /** 去重失败 / 取消 / 入队被拒：游标保持未提交，释放这一批，有更新的输入才接续（将这一批连同新输入一起重抽）。 */
+  private abandonDedup(dedupTaskId: string): void {
+    const pending = this.pendingDedup.get(dedupTaskId);
+    if (!pending) return;
+    this.pendingDedup.delete(dedupTaskId);
+    this.finishCapture(pending.extractTaskId);
   }
 
   completeScene(taskId: string, output: unknown): MemoryRecord[] {
@@ -429,7 +474,7 @@ export class MemoryService {
 
   taskSettled(task: ServiceTask): void {
     if (task.kind === 'memory_extract' && (task.status === 'failed' || task.status === 'cancelled')) this.finishCapture(task.id, task);
-    if (task.kind === 'memory_deduplicate' && (task.status === 'failed' || task.status === 'cancelled')) this.pendingDedup.delete(task.id);
+    if (task.kind === 'memory_deduplicate' && (task.status === 'failed' || task.status === 'cancelled')) this.abandonDedup(task.id);
     if (task.kind === 'memory_scene' && (task.status === 'failed' || task.status === 'cancelled')) this.pendingScene.delete(task.id);
     if (task.kind === 'memory_persona' && (task.status === 'failed' || task.status === 'cancelled')) this.pendingPersona.delete(task.id);
   }
@@ -437,6 +482,7 @@ export class MemoryService {
   private finishCapture(taskId: string, task?: ServiceTask): void {
     const capture = this.pending.get(taskId) ?? this.captureFromTask(taskId, task);
     this.pending.delete(taskId);
+    this.releaseSettleWaiters(taskId);
     // 关闭后不再入队；开关被确认关着时也不接着抽，pending 留到下一次开着开关的对话。
     if (!capture || this.disposed || this.extractObserved === false) return;
     const next = this.options.store.pendingCapture(capture.scope, capture.source);
@@ -481,6 +527,7 @@ export class MemoryService {
     this.cadence.clear();
     this.recoverTimer?.cancel();
     this.recoverTimer = undefined;
+    this.releaseSettleWaiters();
   }
 
   private scheduleScene(scope: MemoryScope, source: string, l1: L1Record[]): void {

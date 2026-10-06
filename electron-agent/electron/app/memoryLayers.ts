@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_SCENE } from '../agent/memoryExtraction';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord } from '../agentData/memoryContracts';
 import { memoryTerms, sharedCount } from './memoryTerms';
@@ -66,7 +67,11 @@ export function selectScenesToInline(
   // 场景文件名常带共同前缀（「团队记忆-」），出现在超过一半场景里的词不区分场景，只会给每个场景垫一分。
   const common = commonTerms(sceneTerms);
   // 按条记忆分别算词：整批拼成一个查询再截断的话，批次累积得越多，靠后的记忆越参与不了选场景。
-  const queries = memories.map((memory) => memoryTerms(`${memory.scene_name ?? ''} ${memory.content}`).filter((term) => !common.has(term)));
+  // scene_name 是抽取默认值「未分类」时不进查询词：它不描述这条记忆，却会撞上名字里带「分类」的场景。
+  const queries = memories.map((memory) => {
+    const sceneName = memory.scene_name?.trim() === DEFAULT_SCENE ? '' : memory.scene_name ?? '';
+    return memoryTerms(`${sceneName} ${memory.content}`).filter((term) => !common.has(term));
+  });
   return new Set(scenes
     .map((scene, index) => {
       let hits = 0;

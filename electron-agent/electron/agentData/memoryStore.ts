@@ -149,9 +149,9 @@ export class MemoryStore {
     return this.db.prepare('SELECT transcript,fingerprint FROM memory_captures WHERE capture_key=? AND pending IS NOT NULL').get(captureKey) as { transcript: string; fingerprint: string } | undefined;
   }
 
-  /** 启动补抽用：只取来源键，不读 transcript。新的优先，最多 limit 条（默认 20），旧的留给下一轮对话。 */
-  listPendingCaptures(limit = 20): Array<{ userId: string; workspace: string; projectId?: string; sessionId?: string; source: string }> {
-    const count = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 20;
+  /** 启动补抽用：只取来源键，不读 transcript。新的优先，最多 limit 条（默认 5），旧的留给下一轮对话。 */
+  listPendingCaptures(limit = 5): Array<{ userId: string; workspace: string; projectId?: string; sessionId?: string; source: string }> {
+    const count = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 5;
     const rows = this.db.prepare(`SELECT user_id,workspace,project_id,session_id,source FROM memory_captures
       WHERE pending IS NOT NULL ORDER BY updated_at DESC,capture_key ASC LIMIT ?`).all(count) as Array<Record<string, unknown>>;
     return rows.map((row) => ({

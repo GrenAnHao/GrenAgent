@@ -25,7 +25,8 @@ export interface L1Record {
 export interface MemoryExtraction { l1?: L1Record[]; l2?: string; l3?: string }
 
 /** 上游 scene-extraction 的默认情境名；L1 抽取未给场景时使用。 */
-const DEFAULT_SCENE = '未分类';
+/** 模型没给 scene_name 时的默认值。它不描述记忆内容，下游按场景名做检索时要认出它。 */
+export const DEFAULT_SCENE = '未分类';
 
 /**
  * 上游 parseExtractionResult（l1-extractor.ts:643-655）的字段默认值。

@@ -142,11 +142,17 @@ function serviceTaskPrompt(task: SystemWorkerTask): string {
  * Input 段只放正文模板没渲染过的字段。memory_extract 的对话已经由 formatExtractionPrompt 写成可读文本，
  * delta 只是游标（见 MemoryService.capture，含工具输出），所以 newMessages / backgroundMessages / delta / background
  * 一律不进 Input 段；previousSceneName 是字符串时同样剔除（正文模板渲染的就是它）。memory_scene 同样去重，
- * 见 sceneInputNotRendered。其余 kind 原样保留。
+ * 见 sceneInputNotRendered。memory_deduplicate 的 matches 是数组时已由 formatBatchConflictPrompt 渲染进正文，
+ * 只剔除 matches，mode 等其余字段保留。其余 kind 原样保留。
  */
 function inputNotRendered(task: SystemWorkerTask): unknown {
   if (!isRecord(task.input)) return task.input;
   if (task.kind === 'memory_scene') return sceneInputNotRendered(task.input);
+  if (task.kind === 'memory_deduplicate') {
+    if (!Array.isArray(task.input.matches)) return task.input;
+    const { matches: _rendered, ...kept } = task.input;
+    return kept;
+  }
   if (task.kind !== 'memory_extract') return task.input;
   const rest = { ...task.input };
   for (const key of ['newMessages', 'backgroundMessages', 'delta', 'background']) delete rest[key];

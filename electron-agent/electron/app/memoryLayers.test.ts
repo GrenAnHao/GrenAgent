@@ -81,6 +81,17 @@ describe('selectScenesToInline', () => {
     expect(MAX_INLINE_SCENES).toBe(3);
   });
 
+  it('scene_name 是抽取默认值「未分类」时不进查询词：它不描述这条记忆，只会撞上名字里带「分类」的场景', () => {
+    const classified = [
+      { filename: '团队记忆-分类标准.md', summary: '按类型分类整理' },
+      { filename: '团队记忆-数据库.md', summary: '迁移放启动阶段' },
+    ];
+    expect([...selectScenesToInline(classified, [{ content: '发布窗口定在周五下午', scene_name: '未分类' }], 15)]).toEqual([]);
+    // 真正的场景名照常参与；内容命中也不受影响。
+    expect([...selectScenesToInline(classified, [{ content: '发布窗口定在周五下午', scene_name: '分类标准' }], 15)]).toEqual(['团队记忆-分类标准.md']);
+    expect([...selectScenesToInline(classified, [{ content: '迁移放启动阶段要先备份', scene_name: '未分类' }], 15)]).toEqual(['团队记忆-数据库.md']);
+  });
+
   it('场景数到 maxScenes - 1 时全部内联，方便 MERGE', () => {
     expect(selectScenesToInline(scenes, [{ content: '无关' }], 6).size).toBe(5);
   });

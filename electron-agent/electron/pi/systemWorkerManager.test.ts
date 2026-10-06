@@ -298,10 +298,38 @@ describe('SystemWorkerManager', () => {
 
   it('其余 kind 的 Input 段保持原样', () => {
     const input = { memories: [{ content: 'x' }], currentTimestamp: 't', maxScenes: 15, delta: 'keep', background: 'keep' };
-    for (const kind of ['memory_persona', 'memory_deduplicate', 'goal_judge']) {
+    for (const kind of ['memory_persona', 'goal_judge']) {
       const { user } = serviceTaskRequestForTest({ id: 'k', kind, input });
       expect(user.endsWith(`\nInput: ${JSON.stringify(input)}`)).toBe(true);
     }
+  });
+
+  it('memory_deduplicate 的 matches 已渲染进正文，Input 段不再重复带一份，其余字段保留', () => {
+    const input = {
+      matches: [{
+        newMemory: { record_id: 'r0', content: '新记忆独有文本ALPHA', type: 'work_method', priority: 90, scene_name: 's' },
+        candidates: [{ id: 'old1', content: '候选记忆独有文本BETA', type: 'work_method', priority: 80, scene_name: 's', timestamps: ['2026-10-01T00:00:00.000Z'] }],
+      }],
+      mode: 'work',
+    };
+    const { user } = serviceTaskRequestForTest({ id: 'd', kind: 'memory_deduplicate', input });
+    // 正文渲染一次：新记忆和候选各只出现一次。
+    expect(user.split('新记忆独有文本ALPHA')).toHaveLength(2);
+    expect(user.split('候选记忆独有文本BETA')).toHaveLength(2);
+    const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
+    const parsed = JSON.parse(inputLine) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('matches');
+    expect(parsed).toEqual({ mode: 'work' });
+  });
+
+  it('memory_deduplicate 的 matches 不是数组时（旧形状）Input 段保持原样', () => {
+    const input = {
+      newMemories: [{ record_id: 'r0', content: '新', type: 'work_method', priority: 90, scene_name: 's' }],
+      candidates: [{ record_id: 'old1', content: '旧', type: 'work_method', priority: 80, scene_name: 's' }],
+      matches: 'not-an-array',
+    };
+    const { user } = serviceTaskRequestForTest({ id: 'd', kind: 'memory_deduplicate', input });
+    expect(user.endsWith(`\nInput: ${JSON.stringify(input)}`)).toBe(true);
   });
 
   it('run 把 hooks.onUsage 交给 complete', async () => {

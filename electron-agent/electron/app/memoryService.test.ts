@@ -565,6 +565,104 @@ describe('MemoryService', () => {
     db.close();
   });
 
+  describe('去重期间游标未提交，后继抽取等去重结束再接续', () => {
+    const existingL1 = JSON.stringify({ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 80 });
+    const extracted = { l1: [{ content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 }] };
+    const input = { ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' };
+    const second = { ...input, transcript: 'user: a\nuser: b', fingerprint: 'fp2' };
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const extractTasks = (tasks: QueueInput[]) => tasks.filter((task) => task.kind === 'memory_extract');
+
+    it('去重进行中来了新的一轮：并入进行中的批次、不另起抽取，completeDedup 提交游标后后继任务的 delta 只含新的一轮', async () => {
+      const { db, store, tasks, service } = setup();
+      store.upsert(scope, { level: 1, content: existingL1 });
+      const first = await service.capture(input);
+      service.completeExtraction(first.taskId!, extracted);
+      const dedup = tasks.find((task) => task.kind === 'memory_deduplicate')!;
+
+      // 游标还没提交，这一批仍算进行中：新一轮并入它，不能带着未提交的那一批另起一个抽取。
+      expect(await service.capture(second)).toMatchObject({ extraction: 'queued', taskId: first.taskId });
+      expect(tasks.map((task) => task.kind)).toEqual(['memory_extract', 'memory_deduplicate']);
+
+      service.completeDedup(dedup.id, [{ record_id: 'r0', action: 'skip' }]);
+      expect(extractTasks(tasks)).toHaveLength(2);
+      expect(extractTasks(tasks)[1].input).toMatchObject({ delta: 'user: b', fingerprint: 'fp2' });
+      expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: b' });
+
+      service.completeExtraction(extractTasks(tasks)[1].id, {});
+      expect(extractTasks(tasks)).toHaveLength(2);
+      expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: null });
+      db.close();
+    });
+
+    it('即使抽取任务是重启后从队列恢复的（不在 pending 里），去重期间同来源的新一轮也不另起抽取', async () => {
+      const { db, store, tasks, queue, service, layerSchedule } = setup();
+      store.upsert(scope, { level: 1, content: existingL1 });
+      const first = await service.capture(input);
+      const reopened = new MemoryService({ store, queue: { ...queue, get: (id) => {
+        const task = tasks.find((value) => value.id === id);
+        return task ? taskResult(task, 'running') : undefined;
+      } }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
+      reopened.completeExtraction(first.taskId!, extracted);
+      const dedup = tasks.find((task) => task.kind === 'memory_deduplicate')!;
+      expect(await reopened.capture(second)).toMatchObject({ extraction: 'queued', taskId: first.taskId });
+      expect(extractTasks(tasks)).toHaveLength(1);
+      reopened.completeDedup(dedup.id, [{ record_id: 'r0', action: 'skip' }]);
+      expect(extractTasks(tasks)[1].input).toMatchObject({ delta: 'user: b' });
+      db.close();
+    });
+
+    it('去重失败时期间到来的新一轮照常接续：游标没提交，后继的 delta 带上这一整批', async () => {
+      const { db, store, tasks, service } = setup();
+      store.upsert(scope, { level: 1, content: existingL1 });
+      const first = await service.capture(input);
+      service.completeExtraction(first.taskId!, extracted);
+      const dedup = tasks.find((task) => task.kind === 'memory_deduplicate')!;
+      expect((await service.capture(second)).taskId).toBe(first.taskId);
+      expect(extractTasks(tasks)).toHaveLength(1);
+
+      service.taskSettled(taskResult(dedup, 'failed'));
+      expect(extractTasks(tasks)).toHaveLength(2);
+      expect(extractTasks(tasks)[1].input).toMatchObject({ delta: 'user: a\nuser: b', fingerprint: 'fp2' });
+      db.close();
+    });
+
+    it('去重失败且没有新输入时不自动重试；之后来的新输入另起任务，不被已结束的批次吞掉', async () => {
+      const { db, store, tasks, service } = setup();
+      store.upsert(scope, { level: 1, content: existingL1 });
+      const first = await service.capture(input);
+      service.completeExtraction(first.taskId!, extracted);
+      const dedup = tasks.find((task) => task.kind === 'memory_deduplicate')!;
+
+      service.taskSettled(taskResult(dedup, 'cancelled'));
+      await settle();
+      expect(extractTasks(tasks)).toHaveLength(1);
+      expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: 'user: a' });
+
+      const next = await service.capture(second);
+      expect(next.extraction).toBe('queued');
+      expect(next.taskId).not.toBe(first.taskId);
+      expect(extractTasks(tasks)[1].input).toMatchObject({ delta: 'user: a\nuser: b' });
+      db.close();
+    });
+
+    it('memory_deduplicate 入队被拒绝时同样释放这一批，后续输入不会一直被当成进行中', async () => {
+      const { db, store, tasks, queue, service } = setup();
+      store.upsert(scope, { level: 1, content: existingL1 });
+      const first = await service.capture(input);
+      queue.enqueue.mockImplementationOnce(() => Promise.reject(new Error('service task queue is stopped')));
+      service.completeExtraction(first.taskId!, extracted);
+      await settle();
+      expect(tasks.map((task) => task.kind)).toEqual(['memory_extract']);
+
+      const next = await service.capture(second);
+      expect(next.extraction).toBe('queued');
+      expect(next.taskId).not.toBe(first.taskId);
+      expect(extractTasks(tasks)[1].input).toMatchObject({ delta: 'user: a\nuser: b' });
+      db.close();
+    });
+  });
+
   it('completeScene 按 filename 落 global L2，无 L3 时再入队 memory_persona', async () => {
     const { db, store, tasks, service } = setup();
     const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
@@ -853,7 +951,7 @@ describe('MemoryService 抽取节奏', () => {
   const from = (name: string, n: number, extra: { extract?: boolean } = {}) => ({ ...turn(n), sessionId: name, source: `session:${name}`, ...extra });
   const sourceOf = (task: { input: unknown }) => (task.input as { source: string }).source;
 
-  it('启动补抽：见过开着开关的 capture 后，延迟 recoverDelayMs 对有 pending 的来源各入队一次', async () => {
+  it('启动补抽：见过开着开关的 capture 后，延迟 recoverDelayMs 对有 pending 的来源逐个补抽，上一个落定才入队下一个', async () => {
     const { db, store, tasks, service, live } = cadenceSetup({ everyN: 5, warmup: false, recoverDelayMs: 60_000 });
     store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
     store.capture({ ...scope, sessionId: 's2' }, 'session:s2', 'user: also left', 'fp2');
@@ -864,8 +962,63 @@ describe('MemoryService 抽取节奏', () => {
     const recover = live().filter((timer) => timer.ms === 60_000);
     expect(recover).toHaveLength(1);
     recover[0].callback();
+    for (let n = 1; n <= 3; n++) {
+      await tick();
+      await tick();
+      // 上一个任务还没落定时，下一个来源不会入队。
+      expect(tasks).toHaveLength(n);
+      service.completeExtraction(tasks[n - 1].id, {});
+    }
     await tick();
+    expect(tasks).toHaveLength(3);
     expect(tasks.map(sourceOf).sort()).toEqual(['session:other', 'session:s1', 'session:s2']);
+    db.close();
+  });
+
+  it('启动补抽逐个进行：任务失败也算落定，继续下一个来源；去重中的任务要等去重结束才算落定', async () => {
+    const { db, store, tasks, service, live } = cadenceSetup({ everyN: 1, warmup: false, recoverDelayMs: 60_000 });
+    const l1 = { content: '团队决定 L1 只保留高层类型', type: 'work_method', priority: 90 };
+    store.upsert(scope, { level: 1, content: JSON.stringify({ content: l1.content, type: l1.type, priority: 80 }) });
+    store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
+    store.capture({ ...scope, sessionId: 's2' }, 'session:s2', 'user: also left', 'fp2');
+    store.capture({ ...scope, sessionId: 's3' }, 'session:s3', 'user: third', 'fp3');
+    db.exec("UPDATE memory_captures SET updated_at = 1000 + CAST(substr(session_id, 2) AS INTEGER)");
+    await service.capture(from('on', 1));
+    service.completeExtraction(tasks[0].id, {});
+    service.recoverPendingCaptures();
+    live().find((timer) => timer.ms === 60_000)!.callback();
+    // 新的优先：s3 先补抽，它的抽取结果需要去重。
+    await tick();
+    expect(tasks.map(sourceOf)).toEqual(['session:on', 'session:s3']);
+    service.completeExtraction(tasks[1].id, { l1: [l1] });
+    await tick();
+    await tick();
+    // 去重还没结束，游标未提交，不能开始下一个来源。
+    expect(tasks.map((task) => task.kind)).toEqual(['memory_extract', 'memory_extract', 'memory_deduplicate']);
+    service.taskSettled(taskResult(tasks[2], 'failed'));
+    await tick();
+    expect(tasks.filter((task) => task.kind === 'memory_extract').map(sourceOf)).toEqual(['session:on', 'session:s3', 'session:s2']);
+    // 失败也算落定。
+    service.taskSettled(taskResult(tasks[3], 'failed'));
+    await tick();
+    expect(tasks.filter((task) => task.kind === 'memory_extract').map(sourceOf)).toEqual(['session:on', 'session:s3', 'session:s2', 'session:s1']);
+    db.close();
+  });
+
+  it('启动补抽等任务落定时 dispose：不再处理后面的来源', async () => {
+    const { db, store, tasks, service, live } = cadenceSetup({ everyN: 5, warmup: false, recoverDelayMs: 60_000 });
+    store.capture({ ...scope, sessionId: 's1' }, 'session:s1', 'user: left over', 'fp1');
+    store.capture({ ...scope, sessionId: 's2' }, 'session:s2', 'user: also left', 'fp2');
+    await service.capture(from('other', 1));
+    service.recoverPendingCaptures();
+    live().find((timer) => timer.ms === 60_000)!.callback();
+    await tick();
+    expect(tasks).toHaveLength(1);
+    service.dispose();
+    service.completeExtraction(tasks[0].id, {});
+    await tick();
+    await tick();
+    expect(tasks).toHaveLength(1);
     db.close();
   });
 
@@ -995,14 +1148,14 @@ describe('MemoryService 抽取节奏', () => {
     db.close();
   });
 
-  it('listPendingCaptures 新的优先，默认最多 20 条，limit 可调', () => {
+  it('listPendingCaptures 新的优先，默认最多 5 条，limit 可调', () => {
     const { db, store } = setup();
     for (let i = 0; i < 25; i++) store.capture({ ...scope, sessionId: `s${i}` }, `session:s${i}`, `user: ${i}`, `fp${i}`);
     db.exec("UPDATE memory_captures SET updated_at = 1000 + CAST(substr(session_id, 2) AS INTEGER)");
     const all = store.listPendingCaptures();
-    expect(all).toHaveLength(20);
+    expect(all).toHaveLength(5);
     expect(all[0]).toMatchObject({ sessionId: 's24', source: 'session:s24' });
-    expect(all[19].sessionId).toBe('s5');
+    expect(all[4].sessionId).toBe('s20');
     expect(store.listPendingCaptures(3).map((row) => row.sessionId)).toEqual(['s24', 's23', 's22']);
     expect(store.listPendingCaptures(100)).toHaveLength(25);
     store.commitCapture({ ...scope, sessionId: 's24' }, 'session:s24', 'fp24');

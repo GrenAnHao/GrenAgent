@@ -17,6 +17,7 @@ superseded_by: 2026-10-07-memory-extract-window.md
 ---
 
 > 已过时 → 见 2026-10-07-memory-extract-window.md
+> everyN 节流的否决另见 2026-10-07-memory-extract-cadence.md
 
 ## 背景
 2026-09-08 至 09-28 的记忆任务共发出 49.8 MB input，其中 memory_extract 占 46.5 MB（305 个任务）。这些调用走 `ModelRuntimeHost.completeSimple`，不写 session JSONL，用量面板看不到，`service_tasks` 也没有 token 列，改了什么都无法验证收益。
