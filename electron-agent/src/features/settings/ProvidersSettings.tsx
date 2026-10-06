@@ -2,7 +2,7 @@ import { Icon } from '@lobehub/ui';
 import { Input, Popconfirm, Select } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { pi } from '../../lib/pi';
 import { invalidateAvailableModels } from './availableModelsCache';
 import { loadState, modelsWithApiThinkingLevels, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
@@ -302,7 +302,7 @@ function validateProviderIds(ps: EditProvider[]): string | null {
   return null;
 }
 
-export function ProvidersSettings() {
+export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } = {}) {
   const [providers, setProviders] = useState<EditProvider[]>([]);
   const [activeId, setActiveId] = useState('openai');
   const [saving, setSaving] = useState(false);
@@ -590,6 +590,7 @@ export function ProvidersSettings() {
 
                 <div className={styles.group}>
                   <div className={styles.groupTitle}>凭据</div>
+                  {active.id === 'cursor' && cursorLogin ? <div className={styles.field}>{cursorLogin}</div> : null}
                   <div className={styles.field}>
                     <div className={styles.label}>API Key</div>
                     <Input.Password

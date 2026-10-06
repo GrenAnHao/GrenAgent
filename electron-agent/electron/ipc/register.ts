@@ -25,6 +25,7 @@ import type { PiPackageService } from '../app/piPackageService';
 import type { JobsBridgeService } from '../app/jobsBridge';
 import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
 import { recordIpc } from '../runtimeDiag';
+import { startCursorLogin } from '../agent/cursorLogin';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -390,6 +391,13 @@ function registerSkillCommands(service: SkillService): void {
 }
 
 function registerProviderCommands(service: ProviderService): void {
+  registerCommand('cursor_login', async () => {
+    const { agentDir } = await service.getConfig();
+    await startCursorLogin({
+      agentDir,
+      openLoginUrl: (url) => shell.openExternal(url),
+    });
+  });
   registerCommand('get_provider_config', () => service.getConfig());
   registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
   registerCommand('refresh_model_registry', () => service.refresh());
