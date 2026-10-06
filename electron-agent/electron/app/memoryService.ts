@@ -541,7 +541,12 @@ export class MemoryService {
     const editable = pending.editable;
     if (!editable) return scenes;
     const existing = new Set(listGlobalLevel(this.options.store, pending.scope.userId, 2).flatMap((row) => sceneFilenameFromSource(row.source) ?? []));
-    return scenes.filter((scene) => !existing.has(scene.filename) || editable.has(scene.filename));
+    const allowed = scenes.filter((scene) => !existing.has(scene.filename) || editable.has(scene.filename));
+    if (allowed.length < scenes.length) {
+      const dropped = new Set(scenes.filter((scene) => !allowed.includes(scene)).map((scene) => scene.filename));
+      console.warn('[memory] 丢弃对未提供正文场景的改动', [...dropped]);
+    }
+    return allowed;
   }
 
   private enqueueScene(scope: MemoryScope, source: string, l1: L1Record[]): void {

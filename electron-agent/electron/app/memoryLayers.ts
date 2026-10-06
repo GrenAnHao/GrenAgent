@@ -52,20 +52,46 @@ export function sceneSummary(content: string): string {
   return summary || content.trim().slice(0, 80);
 }
 
+/** 场景数达到这个值才做共有词过滤：场景太少时「超过一半」没有统计意义。 */
+const COMMON_TERM_MIN_SCENES = 4;
+
 export function selectScenesToInline(
   scenes: Array<{ filename: string; summary: string }>,
   memories: Array<{ content: string; scene_name?: string }>,
   maxScenes: number,
 ): Set<string> {
-  // 橙色 / 红色预警时必须 MERGE，模型得看到所有正文才能挑合并对象。
+  // 橙色预警只能 UPDATE、不能 CREATE，红色预警必须 MERGE：两种情况模型都需要看到全部正文。
   if (scenes.length >= maxScenes - 1) return new Set(scenes.map((scene) => scene.filename));
-  const query = memoryTerms(memories.map((memory) => `${memory.scene_name ?? ''} ${memory.content}`).join('\n'), 96);
+  const sceneTerms = scenes.map((scene) => new Set(memoryTerms(`${scene.filename} ${scene.summary}`, 400)));
+  // 场景文件名常带共同前缀（「团队记忆-」），出现在超过一半场景里的词不区分场景，只会给每个场景垫一分。
+  const common = commonTerms(sceneTerms);
+  // 按条记忆分别算词：整批拼成一个查询再截断的话，批次累积得越多，靠后的记忆越参与不了选场景。
+  const queries = memories.map((memory) => memoryTerms(`${memory.scene_name ?? ''} ${memory.content}`).filter((term) => !common.has(term)));
   return new Set(scenes
-    .map((scene) => ({ filename: scene.filename, score: sharedCount(query, new Set(memoryTerms(`${scene.filename} ${scene.summary}`, 400))) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.filename.localeCompare(b.filename))
+    .map((scene, index) => {
+      let hits = 0;
+      let score = 0;
+      for (const query of queries) {
+        const shared = sharedCount(query, sceneTerms[index]);
+        if (shared > 0) hits++;
+        score += shared;
+      }
+      return { filename: scene.filename, hits, score };
+    })
+    .filter((entry) => entry.hits > 0)
+    // 被多少条记忆命中为第一排序键，不让单条长记忆的重叠词数主导；其次总得分，最后文件名。
+    .sort((a, b) => b.hits - a.hits || b.score - a.score || a.filename.localeCompare(b.filename))
     .slice(0, MAX_INLINE_SCENES)
     .map((entry) => entry.filename));
+}
+
+function commonTerms(sceneTerms: Array<Set<string>>): Set<string> {
+  const common = new Set<string>();
+  if (sceneTerms.length < COMMON_TERM_MIN_SCENES) return common;
+  const frequency = new Map<string, number>();
+  for (const terms of sceneTerms) for (const term of terms) frequency.set(term, (frequency.get(term) ?? 0) + 1);
+  for (const [term, count] of frequency) if (count * 2 > sceneTerms.length) common.add(term);
+  return common;
 }
 
 export function parseMemoryScene(output: unknown): ParsedMemoryScene {

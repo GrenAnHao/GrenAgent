@@ -1053,22 +1053,61 @@ describe('MemoryService L2 预筛', () => {
     db.close();
   });
 
-  it('落库时丢掉对没给正文的已有场景的写入和删除，新建和改相关场景照常', async () => {
-    const { db, store, tasks, service } = setup();
-    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
-    store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
-    const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
-    service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80 }] });
-    const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
-    service.completeScene(sceneTask.id, { scenes: [
-      { filename: '团队记忆-提交规范.md', action: 'write', content: sceneBody('提交信息用中文，已更新') },
-      { filename: '团队记忆-数据库.md', action: 'delete' },
-      { filename: '团队记忆-新场景.md', action: 'write', content: sceneBody('新的') },
-    ] });
-    const sources = db.prepare("SELECT source, content FROM memories WHERE level=2 ORDER BY source").all() as Array<{ source: string; content: string }>;
-    expect(sources.map((row) => row.source)).toEqual(['scene:团队记忆-提交规范.md', 'scene:团队记忆-数据库.md', 'scene:团队记忆-新场景.md']);
-    expect(sources[0].content).toContain('已更新');
-    db.close();
+  it('落库时丢掉对没给正文的已有场景的写入和删除（并 console.warn 被丢的文件名），新建和改相关场景照常', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { db, store, tasks, service } = setup();
+      store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
+      store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
+      const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+      service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80 }] });
+      const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
+      service.completeScene(sceneTask.id, { scenes: [
+        { filename: '团队记忆-提交规范.md', action: 'write', content: sceneBody('提交信息用中文，已更新') },
+        { filename: '团队记忆-数据库.md', action: 'write', content: sceneBody('迁移被模型凭摘要重写') },
+        { filename: '团队记忆-数据库.md', action: 'delete' },
+        { filename: '团队记忆-新场景.md', action: 'write', content: sceneBody('新的') },
+      ] });
+      const sources = db.prepare("SELECT source, content FROM memories WHERE level=2 ORDER BY source").all() as Array<{ source: string; content: string }>;
+      expect(sources.map((row) => row.source)).toEqual(['scene:团队记忆-提交规范.md', 'scene:团队记忆-数据库.md', 'scene:团队记忆-新场景.md']);
+      expect(sources[0].content).toContain('已更新');
+      expect(sources[1].content).toBe(sceneBody('迁移放启动阶段'));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[memory] 丢弃对未提供正文场景的改动', ['团队记忆-数据库.md']);
+      db.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('旧格式 memory_scene 任务（input.scenes 每项都带 content）重建后落库：对任一已有场景的写入都不被拦，也不 warn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { db, store, tasks, queue, service, layerSchedule } = setup();
+      store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('提交信息用中文'), source: 'scene:团队记忆-提交规范.md' });
+      store.upsert({ ...scope, scope: 'global' }, { level: 2, content: sceneBody('迁移放启动阶段'), source: 'scene:团队记忆-数据库.md' });
+      const captured = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: a', fingerprint: 'fp1' });
+      service.completeExtraction(captured.taskId!, { l1: [{ content: '提交信息统一用中文', type: 'work_method', priority: 80 }] });
+      const sceneTask = tasks.find((task) => task.kind === 'memory_scene')!;
+      // 升级前入队的任务把所有场景的正文都内联进了 input.scenes。
+      const legacy: QueueInput = { ...sceneTask, input: { ...(sceneTask.input as Record<string, unknown>), scenes: [
+        { filename: '团队记忆-提交规范.md', summary: '提交信息用中文', content: sceneBody('提交信息用中文') },
+        { filename: '团队记忆-数据库.md', summary: '迁移放启动阶段', content: sceneBody('迁移放启动阶段') },
+      ] } };
+      const reopened = new MemoryService({ store, queue: { ...queue, get: (id) => (id === legacy.id ? taskResult(legacy) : undefined) }, layerSchedule, extractCadence: { everyN: 1, warmup: false } });
+      reopened.completeScene(legacy.id, { scenes: [
+        { filename: '团队记忆-提交规范.md', action: 'write', content: sceneBody('提交信息用中文，已更新') },
+        { filename: '团队记忆-数据库.md', action: 'write', content: sceneBody('迁移放启动阶段，已更新') },
+      ] });
+      const rows = db.prepare('SELECT source, content FROM memories WHERE level=2 ORDER BY source').all() as Array<{ source: string; content: string }>;
+      expect(rows.map((row) => row.source)).toEqual(['scene:团队记忆-提交规范.md', 'scene:团队记忆-数据库.md']);
+      expect(rows[0].content).toContain('已更新');
+      expect(rows[1].content).toContain('已更新');
+      expect(warn).not.toHaveBeenCalled();
+      db.close();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('服务重建后从存储的输入还原哪些场景给过正文（带 content 的条目），其余仍不许写和删', async () => {
