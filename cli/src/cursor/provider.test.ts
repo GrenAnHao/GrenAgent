@@ -90,3 +90,22 @@ test("用户中止会取消这一轮并且没有第二轮", async () => {
 	assert.equal(signals.length, 1);
 	assert.equal(signals[0]?.aborted, true);
 });
+
+test("signal 已 abort 时不开 Cursor 流", async () => {
+	resetApiProviders();
+	let opened = 0;
+	installCursorProvider({
+		streamCursor: () => {
+			opened += 1;
+			throw new Error("should not open");
+		},
+		registerNativeProvider: () => {},
+	});
+	const controller = new AbortController();
+	controller.abort();
+	const message = await streamSimple(cursorModel("composer-2.5"), { messages: [] } as never, {
+		signal: controller.signal,
+	}).result();
+	assert.equal(opened, 0);
+	assert.equal(message.stopReason, "aborted");
+});
