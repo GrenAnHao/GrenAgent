@@ -35,16 +35,27 @@ export function parseOneshotRequest(
 interface AssistantLike {
   content?: Array<{ type?: string; text?: string }>;
   usage?: unknown;
+  stopReason?: string;
+  errorMessage?: string;
 }
 
 export function formatNonStream(
   msg: AssistantLike,
 ): { ok: true; content: string; usage?: unknown } | { ok: false; error: string } {
+  // pi-ai 的 completeSimple 不抛异常：HTTP 错误、限流、上下文超长都以 stopReason=error 的消息返回，
+  // content 通常为空。不先看这里就会把真实原因报成 empty content。
+  if (msg.stopReason === "error" || msg.stopReason === "aborted") {
+    return { ok: false, error: msg.errorMessage?.trim() || `model ${msg.stopReason}` };
+  }
   const text = (msg.content ?? [])
     .filter((b) => b?.type === "text" && typeof b.text === "string")
     .map((b) => b.text)
     .join("");
-  if (!text.trim()) return { ok: false, error: "empty content" };
+  if (!text.trim()) {
+    // 保留 "empty content" 前缀（重试分级与历史统计都靠它），附上结束原因与块类型便于定位。
+    const blocks = (msg.content ?? []).map((b) => b?.type ?? "unknown").join(",") || "none";
+    return { ok: false, error: `empty content (stopReason=${msg.stopReason ?? "unknown"}, blocks=${blocks})` };
+  }
   return { ok: true, content: text, usage: msg.usage };
 }
 

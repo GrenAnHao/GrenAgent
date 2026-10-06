@@ -68,6 +68,17 @@ export interface ServiceTaskDefinition {
 
 export type ServiceTaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
+/** 一次模型调用的用量回报。usage 是 pi-ai 的 Usage 原样对象，缺失或形状不对时按 0 记。 */
+export interface ServiceTaskUsageReport {
+  model?: string;
+  usage: unknown;
+}
+
+/** TaskQueue 交给执行器的回调：每次模型调用（含失败的那次）都回报一次用量。 */
+export interface ServiceTaskHooks {
+  onUsage?: (report: ServiceTaskUsageReport) => void;
+}
+
 export interface ServiceTask {
   id: string;
   kind: string;

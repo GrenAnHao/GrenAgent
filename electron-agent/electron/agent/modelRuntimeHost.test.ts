@@ -140,6 +140,31 @@ describe('ModelRuntimeHost 短调用', () => {
     expect(completeSimple.mock.calls[0][0]).toBe(model);
   });
 
+  it('completeSimple 在文本校验前回报用量：空内容失败的那次也记账', async () => {
+    const usage = { input: 120, output: 0, cacheRead: 16_000, cacheWrite: 0 };
+    const completeSimple = vi.fn()
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', usage })
+      .mockResolvedValueOnce({ content: [{ type: 'thinking', thinking: '...' }], stopReason: 'stop', usage });
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel: () => model, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    const onUsage = vi.fn();
+    await expect(host.completeSimple({ user: 'q', onUsage })).resolves.toBe('ok');
+    await expect(host.completeSimple({ user: 'q', onUsage })).rejects.toThrow('empty content (stopReason=stop, blocks=thinking)');
+    expect(onUsage.mock.calls).toEqual([[{ model: 'openai/gpt-x', usage }], [{ model: 'openai/gpt-x', usage }]]);
+    expect(completeSimple.mock.calls[0][2]).toEqual({ signal: undefined });
+  });
+
+  it('completeSimple 把 provider 报错原样抛出，onUsage 抛错不影响结果', async () => {
+    const completeSimple = vi.fn().mockResolvedValue({ content: [], stopReason: 'error', errorMessage: '400 context length exceeded' });
+    const create = vi.fn().mockResolvedValue({
+      completeSimple, getAvailableSnapshot: () => [model], getModel: () => model, hasConfiguredAuth: () => true, refresh: vi.fn(),
+    });
+    const host = new ModelRuntimeHost({ create, resolveSettings: async () => ({ provider: 'openai', modelId: 'gpt-x' }) });
+    await expect(host.completeSimple({ user: 'q', onUsage: () => { throw new Error('ledger down'); } })).rejects.toThrow('400 context length exceeded');
+  });
+
   it('provider+modelId 未命中时抛 模型不可用，不回退默认', async () => {
     const completeSimple = vi.fn();
     const create = vi.fn().mockResolvedValue({

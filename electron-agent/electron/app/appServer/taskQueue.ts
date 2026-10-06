@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ServiceTask, ServiceTaskCapability, ServiceTaskStatus } from './types';
+import type { ServiceTask, ServiceTaskCapability, ServiceTaskHooks, ServiceTaskStatus, ServiceTaskUsageReport } from './types';
 import type { AgentDataStorage } from '../../agentData/storage';
 import { ServiceTaskRegistry } from './serviceTaskRegistry';
 
@@ -17,7 +17,7 @@ export interface QueueTaskInput {
 interface QueueOptions {
   storage: AgentDataStorage;
   registry: ServiceTaskRegistry;
-  execute: (task: ServiceTask & { threadId?: string; system: boolean }) => Promise<unknown>;
+  execute: (task: ServiceTask & { threadId?: string; system: boolean }, hooks: ServiceTaskHooks) => Promise<unknown>;
   onSettled?: (task: ServiceTask) => void;
   now?: () => number;
 }
@@ -110,7 +110,7 @@ export class TaskQueue {
     try {
       const definition = this.options.registry.get(task.kind);
       const output = this.options.registry.validateOutput(task.kind, await withTimeout(
-        this.options.execute({ ...started, threadId, system }),
+        this.options.execute({ ...started, threadId, system }, { onUsage: (report) => this.recordUsage(task.id, report) }),
         definition?.timeoutMs ?? 30_000,
       ));
       const completed = this.writeStatus(started, 'completed', { output });
@@ -118,7 +118,7 @@ export class TaskQueue {
       this.waiters.get(task.id)?.resolve(completed); this.waiters.delete(task.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!this.stopped && started.attempts < (this.options.registry.get(task.kind)?.maxAttempts ?? 1)) {
+      if (!this.stopped && isRetryableError(message) && started.attempts < (this.options.registry.get(task.kind)?.maxAttempts ?? 1)) {
         this.writeStatus(started, 'queued', { error: message });
       } else {
         const failed = this.writeStatus(started, 'failed', { error: message });
@@ -137,6 +137,18 @@ export class TaskQueue {
     return { ...task, status, attempts: patch.attempts ?? task.attempts, output: patch.output ?? task.output, error: patch.error ?? task.error, updatedAt };
   }
 
+  /** 累加到同一行：重试与失败的那次调用同样花了钱。记账失败不能影响任务本身。 */
+  private recordUsage(id: string, report: ServiceTaskUsageReport): void {
+    try {
+      const usage = (report.usage && typeof report.usage === 'object' ? report.usage : {}) as Record<string, unknown>;
+      this.options.storage.db.prepare(`UPDATE service_tasks SET
+        input_tokens=COALESCE(input_tokens,0)+?, output_tokens=COALESCE(output_tokens,0)+?,
+        cache_read_tokens=COALESCE(cache_read_tokens,0)+?, cache_write_tokens=COALESCE(cache_write_tokens,0)+?,
+        model=COALESCE(?,model) WHERE id=?`)
+        .run(tokens(usage.input), tokens(usage.output), tokens(usage.cacheRead), tokens(usage.cacheWrite), report.model ?? null, id);
+    } catch { /* 观测失败不改变任务结果 */ }
+  }
+
   private notifySettled(task: ServiceTask): void {
     try { this.options.onSettled?.(task); } catch { /* A notification cannot change the persisted terminal result. */ }
   }
@@ -144,6 +156,18 @@ export class TaskQueue {
   private map(row: Record<string, unknown>): ServiceTask { return { id: String(row.id), kind: String(row.kind), sourceProjectId: row.source_project_id == null ? undefined : String(row.source_project_id), sourceSessionId: row.source_session_id == null ? undefined : String(row.source_session_id), status: String(row.status) as ServiceTaskStatus, input: JSON.parse(String(row.input)), output: row.output == null ? undefined : JSON.parse(String(row.output)), attempts: Number(row.attempts), error: row.error == null ? undefined : String(row.error), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }; }
   private threadId(id: string): string | undefined { const row = this.options.storage.db.prepare('SELECT source_thread_id FROM service_tasks WHERE id=?').get(id) as { source_thread_id?: string } | undefined; return row?.source_thread_id ?? undefined; }
   private isSystem(id: string): boolean { const row = this.options.storage.db.prepare('SELECT is_system FROM service_tasks WHERE id=?').get(id) as { is_system?: number } | undefined; return row?.is_system === 1; }
+}
+
+/**
+ * 模型正常结束却没给任何文本（formatNonStream 的 `empty content`）是确定性失败：同一份 prompt 重发一遍
+ * 基本还是空，只会把整份载荷再付一次钱。provider 报错（限流、网络）不在此列，照旧重试。
+ */
+export function isRetryableError(message: string): boolean {
+  return !message.startsWith('empty content');
+}
+
+function tokens(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

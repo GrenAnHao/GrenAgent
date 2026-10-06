@@ -18,7 +18,7 @@ import { JobStore, type Job } from './jobStore';
 import { MemoryService, type LayerScheduleOptions, type MemoryTaskQueue } from '../app/memoryService';
 import { ServiceTaskRegistry } from '../app/appServer/serviceTaskRegistry';
 import { TaskQueue, type QueueTaskInput } from '../app/appServer/taskQueue';
-import type { ServiceTask } from '../app/appServer/types';
+import type { ServiceTask, ServiceTaskHooks } from '../app/appServer/types';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from './codeRetrievalProtocol';
 import { RequestFrameDecoder } from './requestFrames';
@@ -46,7 +46,8 @@ export interface AgentDataRuntimeOptions {
   wikiRootDir?: string;
   methods?: Record<string, AgentDataMethod>;
   stdin?: NodeJS.ReadableStream;
-  executeServiceTask?: (task: ServiceTask) => Promise<unknown>;
+  /** hooks.onUsage 由执行器在每次模型调用后回报用量，落到 service_tasks 的 token 列。 */
+  executeServiceTask?: (task: ServiceTask, hooks?: ServiceTaskHooks) => Promise<unknown>;
   /** 按 job kind 注册的执行器：创建即派发，取消时通知。未注册的 kind 只落库。 */
   jobRunners?: Record<string, AgentDataJobRunner>;
   codeRetrieval?: AgentDataCodeRetrievalProvider;
@@ -119,8 +120,8 @@ export class AgentDataRuntime {
       const queue = new TaskQueue({
         storage: this.storage,
         registry,
-        execute: async (task) => {
-          const output = await this.options.executeServiceTask!(task);
+        execute: async (task, hooks) => {
+          const output = await this.options.executeServiceTask!(task, hooks);
           if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
           if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
           if (task.kind === 'memory_scene') this.memoryService!.completeScene(task.id, output);

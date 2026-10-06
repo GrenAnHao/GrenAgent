@@ -107,6 +107,51 @@ describe('TaskQueue', () => {
     await vi.waitFor(() => expect(queue.get('queued-before-restart')).toMatchObject({ status: 'completed', output: { resumed: true } }));
   });
 
+  it('does not retry empty content but still retries provider errors', async () => {
+    const a = setup();
+    const empty = vi.fn(async () => { throw new Error('empty content (stopReason=stop, blocks=thinking)'); });
+    const emptyQueue = new TaskQueue({ storage: a.storage, registry: a.registry, execute: empty });
+    await expect(emptyQueue.enqueue({ id: 'empty', kind: 'test', input: {} })).resolves.toMatchObject({ status: 'failed', attempts: 1 });
+    expect(empty).toHaveBeenCalledOnce();
+    emptyQueue.stop(); a.storage.close();
+
+    const b = setup();
+    const flaky = vi.fn().mockRejectedValueOnce(new Error('429 rate limited')).mockResolvedValue({ ok: true });
+    const flakyQueue = new TaskQueue({ storage: b.storage, registry: b.registry, execute: flaky });
+    await expect(flakyQueue.enqueue({ id: 'flaky', kind: 'test', input: {} })).resolves.toMatchObject({ status: 'completed', attempts: 2 });
+    expect(flaky).toHaveBeenCalledTimes(2);
+    flakyQueue.stop(); b.storage.close();
+  });
+
+  it('accumulates reported model usage across attempts, including the failed one', async () => {
+    const { storage, registry } = setup();
+    let call = 0;
+    const queue = new TaskQueue({ storage, registry, execute: async (_task, hooks) => {
+      call += 1;
+      hooks.onUsage?.({ model: 'openai/gpt-x', usage: { input: 100, output: call === 1 ? 0 : 7, cacheRead: 16_000, cacheWrite: 5 } });
+      if (call === 1) throw new Error('system Pi returned invalid JSON');
+      return { ok: true };
+    } });
+    await expect(queue.enqueue({ id: 'u', kind: 'test', input: {} })).resolves.toMatchObject({ status: 'completed' });
+    expect(storage.db.prepare('SELECT input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,model,attempts FROM service_tasks WHERE id=?').get('u'))
+      .toEqual({ input_tokens: 200, output_tokens: 7, cache_read_tokens: 32_000, cache_write_tokens: 10, model: 'openai/gpt-x', attempts: 2 });
+    queue.stop(); storage.close();
+  });
+
+  it('leaves usage columns NULL when no model call reported usage, and ignores malformed usage', async () => {
+    const { storage, registry } = setup();
+    const queue = new TaskQueue({ storage, registry, execute: async (task, hooks) => {
+      if (task.id === 'bad') hooks.onUsage?.({ usage: { input: 'x', output: -3 } });
+      return { ok: true };
+    } });
+    await queue.enqueue({ id: 'none', kind: 'test', input: {} });
+    await queue.enqueue({ id: 'bad', kind: 'test', input: {} });
+    const row = (id: string) => storage.db.prepare('SELECT input_tokens,output_tokens,model FROM service_tasks WHERE id=?').get(id);
+    expect(row('none')).toEqual({ input_tokens: null, output_tokens: null, model: null });
+    expect(row('bad')).toEqual({ input_tokens: 0, output_tokens: 0, model: null });
+    queue.stop(); storage.close();
+  });
+
   it('finds matching durable queued or running tasks but not terminal tasks', () => {
     const { storage, registry } = setup();
     const insert = storage.db.prepare('INSERT INTO service_tasks(id,kind,status,input,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?)');

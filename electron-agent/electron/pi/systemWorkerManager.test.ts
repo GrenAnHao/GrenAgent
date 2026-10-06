@@ -197,6 +197,63 @@ describe('SystemWorkerManager', () => {
     expect(request.user).not.toContain('工作情境切分与团队共享记忆提取专家');
   });
 
+  it('memory_extract 的 Input 段只留正文没渲染的字段，delta/background/上一情境各只出现一次', () => {
+    const input = {
+      delta: 'user: DELTA_MARKER',
+      background: 'assistant: BACKGROUND_MARKER',
+      previousSceneName: 'SCENE_MARKER',
+      mode: 'work',
+      source: 'session:abc',
+      fingerprint: 'fp-1',
+      userId: 'u-1',
+      projectId: 'p-1',
+      workspace: 'D:/repo',
+      sessionId: 's-1',
+    };
+    const before = `Input: ${JSON.stringify(input)}`;
+    const { user } = serviceTaskRequestForTest({ id: 't1', kind: 'memory_extract', input });
+    const count = (needle: string) => user.split(needle).length - 1;
+    expect(count('DELTA_MARKER')).toBe(1);
+    expect(count('BACKGROUND_MARKER')).toBe(1);
+    expect(count('SCENE_MARKER')).toBe(1);
+    const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
+    expect(JSON.parse(inputLine)).toEqual({
+      mode: 'work', source: 'session:abc', fingerprint: 'fp-1', userId: 'u-1', projectId: 'p-1', workspace: 'D:/repo', sessionId: 's-1',
+    });
+    expect(user).not.toContain(before);
+  });
+
+  it('memory_extract 给了 newMessages 数组时渲染的是它，没渲染的 delta 留在 Input 段', () => {
+    const input = {
+      newMessages: [{ id: 'm0', role: 'user', content: 'ARRAY_MARKER', timestamp: 1 }],
+      delta: 'user: UNRENDERED_DELTA',
+    };
+    const { user } = serviceTaskRequestForTest({ id: 't1', kind: 'memory_extract', input });
+    expect(user.split('ARRAY_MARKER').length - 1).toBe(1);
+    expect(user.split('UNRENDERED_DELTA').length - 1).toBe(1);
+    const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
+    expect(JSON.parse(inputLine)).toEqual({ delta: 'user: UNRENDERED_DELTA' });
+  });
+
+  it('其余 kind 的 Input 段保持原样', () => {
+    const input = { memories: [{ content: 'x' }], currentTimestamp: 't', maxScenes: 15, delta: 'keep', background: 'keep' };
+    for (const kind of ['memory_scene', 'memory_persona', 'memory_deduplicate', 'goal_judge']) {
+      const { user } = serviceTaskRequestForTest({ id: 'k', kind, input });
+      expect(user.endsWith(`\nInput: ${JSON.stringify(input)}`)).toBe(true);
+    }
+  });
+
+  it('run 把 hooks.onUsage 交给 complete', async () => {
+    const onUsage = vi.fn();
+    const complete = vi.fn(async (input: CompleteInput & { onUsage?: (r: { usage: unknown }) => void }) => {
+      input.onUsage?.({ usage: { input: 3 } });
+      return '{"ok":true}';
+    });
+    const manager = new SystemWorkerManager({ describeModel: async () => 'x/y', complete });
+    await expect(manager.run({ id: 'u', kind: 'goal_judge', input: {} }, { onUsage })).resolves.toEqual({ ok: true });
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith({ usage: { input: 3 } });
+  });
+
   it('chat mode 使用 chat 抽取系统提示', () => {
     const request = serviceTaskRequestForTest({ id: 't1', kind: 'memory_extract', input: { delta: 'user: hi', mode: 'chat' } });
     expect(request.systemPrompt).toContain('情境切分与记忆提取专家');

@@ -47,6 +47,12 @@ export class AgentDataStorage {
     );`);
     this.ensureColumn('service_tasks', 'source_thread_id', 'TEXT');
     this.ensureColumn('service_tasks', 'is_system', 'INTEGER NOT NULL DEFAULT 0');
+    // 模型用量：同一任务各次 attempt 累加，NULL 表示从未拿到过用量（旧行或未走模型）。
+    this.ensureColumn('service_tasks', 'input_tokens', 'INTEGER');
+    this.ensureColumn('service_tasks', 'output_tokens', 'INTEGER');
+    this.ensureColumn('service_tasks', 'cache_read_tokens', 'INTEGER');
+    this.ensureColumn('service_tasks', 'cache_write_tokens', 'INTEGER');
+    this.ensureColumn('service_tasks', 'model', 'TEXT');
     this.ensureColumn('threads', 'session_id', 'TEXT');
     this.ensureColumn('turns', 'session_id', 'TEXT');
     this.db.exec(`DROP TABLE IF EXISTS goal_turn_leases; DROP TABLE IF EXISTS goal_events; DROP TABLE IF EXISTS goal_snapshots;`);

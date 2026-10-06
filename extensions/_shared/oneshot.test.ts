@@ -1,5 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import { runOneshotWithRuntime } from "./oneshot.js";
+import { formatNonStream, runOneshotWithRuntime } from "./oneshot.js";
+
+describe("formatNonStream", () => {
+  it("provider 报错时透出 errorMessage，不再报成 empty content", () => {
+    expect(formatNonStream({ content: [], stopReason: "error", errorMessage: "429 rate limited" }))
+      .toEqual({ ok: false, error: "429 rate limited" });
+    expect(formatNonStream({ content: [], stopReason: "aborted" })).toEqual({ ok: false, error: "model aborted" });
+  });
+
+  it("正常结束但没有文本时保留 empty content 前缀，并带上结束原因与块类型", () => {
+    expect(formatNonStream({ content: [{ type: "thinking" }, { type: "text", text: " " }], stopReason: "length" }))
+      .toEqual({ ok: false, error: "empty content (stopReason=length, blocks=thinking,text)" });
+    expect(formatNonStream({ content: [] })).toEqual({ ok: false, error: "empty content (stopReason=unknown, blocks=none)" });
+  });
+
+  it("有文本时原样返回内容与 usage", () => {
+    expect(formatNonStream({ content: [{ type: "text", text: "ok" }], stopReason: "stop", usage: { input: 1 } }))
+      .toEqual({ ok: true, content: "ok", usage: { input: 1 } });
+  });
+});
 
 describe("runOneshotWithRuntime", () => {
   it("非流式 emit formatNonStream 形状", async () => {

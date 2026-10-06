@@ -112,7 +112,7 @@ if (!process.env.VITEST) {
       refreshConfig();
       return getConfig('agentDataModel');
     };
-    const completeAgentData = (input: { user: string; systemPrompt?: string; signal?: AbortSignal }) =>
+    const completeAgentData = (input: { user: string; systemPrompt?: string; signal?: AbortSignal; onUsage?: (report: { model: string; usage: unknown }) => void }) =>
       modelRuntimeHost.completeSimple(applyAgentDataModel(input, agentDataModelRaw()));
     const systemWorker = new SystemWorkerManager({
       describeModel: async () => {
@@ -135,7 +135,7 @@ if (!process.env.VITEST) {
       validateProject: (project) => validateProject(project, worksDir),
       resolveSession: (project, sessionId) => piRuntime?.ownsSession(project, sessionId) ?? false,
       completeSimple: (input) => completeAgentData(input),
-      executeServiceTask: (task) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }),
+      executeServiceTask: (task, hooks) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }, hooks),
       jobRunners: {
         'codegraph.sync': codeGraphJobs,
       },

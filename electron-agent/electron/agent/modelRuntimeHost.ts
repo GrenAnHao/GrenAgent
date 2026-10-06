@@ -20,6 +20,11 @@ export interface ShortCallInput {
    * 不传则不覆盖 provider/模型默认；非 OpenAI 兼容 API 会忽略。
    */
   samplingParams?: Record<string, unknown>;
+  /**
+   * completeSimple 拿到模型响应后立刻回报用量，先于文本校验：空内容、provider 报错的那次也花了钱。
+   * 这些调用不写 session JSONL，用量面板看不到，只能靠调用方自己记。
+   */
+  onUsage?: (report: { model: string; usage: unknown }) => void;
 }
 
 export interface ModelRuntimeHostOptions {
@@ -82,6 +87,7 @@ export class ModelRuntimeHost {
       { systemPrompt: input.systemPrompt, messages: [{ role: 'user', content: input.user, timestamp: Date.now() }] },
       { signal: input.signal },
     );
+    try { input.onUsage?.({ model: `${model.provider}/${model.id}`, usage: msg.usage }); } catch { /* 记账失败不影响调用结果 */ }
     const formatted = formatNonStream(msg);
     if (!formatted.ok) throw new Error(formatted.error);
     return formatted.content;

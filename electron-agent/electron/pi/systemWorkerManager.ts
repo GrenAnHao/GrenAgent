@@ -19,6 +19,7 @@ import {
 import { ShortCallQueue, timeoutForKind } from '../agent/shortCall.js';
 
 export interface SystemWorkerTask { id: string; kind: string; input: unknown; maxAttempts?: number }
+export interface SystemWorkerHooks { onUsage?: (report: { model?: string; usage: unknown }) => void }
 export interface SystemWorkerState { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; output?: unknown; error?: string }
 
 /** 输出为纯文本（而非 JSON）的任务 kind：结果原样回传，不做 JSON 解析。 */
@@ -33,7 +34,7 @@ const KIND_INSTRUCTIONS: Record<string, string> = {
 
 interface WorkerOptions {
   describeModel: () => Promise<string>;
-  complete: (input: { user: string; systemPrompt?: string; signal?: AbortSignal }) => Promise<string>;
+  complete: (input: { user: string; systemPrompt?: string; signal?: AbortSignal; onUsage?: SystemWorkerHooks['onUsage'] }) => Promise<string>;
   maxAttempts?: number;
   taskTimeoutMs?: number;
 }
@@ -46,8 +47,8 @@ export class SystemWorkerManager {
 
   constructor(private readonly options: WorkerOptions) {}
 
-  run(task: SystemWorkerTask): Promise<unknown> {
-    return this.tail.run(async (signal) => this.runTask(task, signal), timeoutForKind(task.kind, this.options.taskTimeoutMs));
+  run(task: SystemWorkerTask, hooks: SystemWorkerHooks = {}): Promise<unknown> {
+    return this.tail.run(async (signal) => this.runTask(task, signal, hooks), timeoutForKind(task.kind, this.options.taskTimeoutMs));
   }
 
   describeModel(): Promise<string> {
@@ -64,7 +65,7 @@ export class SystemWorkerManager {
     }, this.options.taskTimeoutMs ?? 30_000);
   }
 
-  private async runTask(task: SystemWorkerTask, signal: AbortSignal): Promise<unknown> {
+  private async runTask(task: SystemWorkerTask, signal: AbortSignal, hooks: SystemWorkerHooks): Promise<unknown> {
     if (this.closed) throw new Error('system worker is closed');
     const state = this.states.get(task.id) ?? { id: task.id, status: 'queued' as const, attempts: 0 };
     this.states.set(task.id, state);
@@ -82,7 +83,7 @@ export class SystemWorkerManager {
           if (model !== task.input.expectedModel) throw new Error('MODEL_CHANGED');
         }
         const text = await this.withLinkedAbort(signal, (linked) => Promise.race([
-          this.options.complete({ ...serviceTaskRequest(task), signal: linked }),
+          this.options.complete({ ...serviceTaskRequest(task), signal: linked, onUsage: hooks.onUsage }),
           abortError(linked, () => this.closed ? new Error('system worker is closed') : new Error('aborted')),
         ]));
         const output = parseCompleteOutput(text, task.kind);
@@ -128,7 +129,21 @@ export class SystemWorkerManager {
 }
 
 function serviceTaskPrompt(task: SystemWorkerTask): string {
-  return `${userBodyFor(task)}\nTask kind: ${task.kind}\nInput: ${JSON.stringify(task.input)}`;
+  return `${userBodyFor(task)}\nTask kind: ${task.kind}\nInput: ${JSON.stringify(inputNotRendered(task))}`;
+}
+
+/**
+ * Input 段只放正文模板没渲染过的字段。memory_extract 的 delta/background 已经由 formatExtractionPrompt
+ * 写成可读文本，再原样序列化一遍会让载荷翻倍（实测占 input 的 95%）。只剔除本次真正被渲染的那一份：
+ * newMessages 是数组时渲染的是它而不是 delta，background 同理。其余 kind 原样保留。
+ */
+function inputNotRendered(task: SystemWorkerTask): unknown {
+  if (task.kind !== 'memory_extract' || !isRecord(task.input)) return task.input;
+  const rest = { ...task.input };
+  if (Array.isArray(rest.newMessages)) delete rest.newMessages; else if (typeof rest.delta === 'string') delete rest.delta;
+  if (Array.isArray(rest.backgroundMessages)) delete rest.backgroundMessages; else if (typeof rest.background === 'string') delete rest.background;
+  if (typeof rest.previousSceneName === 'string') delete rest.previousSceneName;
+  return rest;
 }
 
 export function serviceTaskPromptForTest(task: SystemWorkerTask): string {
