@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import * as AIError from "../../error/index.ts";
 import { generatePKCE } from "./pkce.ts";
 import type { OAuthController, OAuthCredentials } from "./types";
@@ -42,7 +43,7 @@ export async function pollCursorAuth(
 	let consecutiveErrors = 0;
 
 	for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-		await Bun.sleep(delay);
+		await sleep(delay);
 
 		try {
 			const response = await fetch(`${CURSOR_POLL_URL}?uuid=${uuid}&verifier=${verifier}`);

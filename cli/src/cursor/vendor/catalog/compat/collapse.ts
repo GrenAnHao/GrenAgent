@@ -382,6 +382,26 @@ function collapsedCursorLogicalMatches<TSpec extends VariantSpecLike>(
 	return true;
 }
 
+function deepEquals(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+		for (let index = 0; index < left.length; index++) {
+			if (!deepEquals(left[index], right[index])) return false;
+		}
+		return true;
+	}
+	const leftRecord = left as Record<string, unknown>;
+	const rightRecord = right as Record<string, unknown>;
+	const leftKeys = Object.keys(leftRecord);
+	if (leftKeys.length !== Object.keys(rightRecord).length) return false;
+	for (const key of leftKeys) {
+		if (!Object.hasOwn(rightRecord, key) || !deepEquals(leftRecord[key], rightRecord[key])) return false;
+	}
+	return true;
+}
+
 /**
  * Derive safe Cursor per-effort families from live wire ids. A family is
  * intentionally left expanded when its base is an independent live SKU, any
@@ -452,8 +472,8 @@ function deriveCursorEffortFamilies<TSpec extends VariantSpecLike>(specs: readon
 					member.spec.contextWindow !== first.spec.contextWindow ||
 					member.spec.maxTokens !== first.spec.maxTokens ||
 					member.spec.cursorMaxMode !== first.spec.cursorMaxMode ||
-					!Bun.deepEquals(member.spec.cost, first.spec.cost) ||
-					!Bun.deepEquals(member.spec.compat, first.spec.compat),
+					!deepEquals(member.spec.cost, first.spec.cost) ||
+					!deepEquals(member.spec.compat, first.spec.compat),
 			)
 		) {
 			continue;
@@ -708,7 +728,7 @@ function refreshCollapsedThinking<TSpec extends VariantSpecLike>(
 	const offTarget = family.routing.off;
 	const requestModelId =
 		offTarget !== undefined && !retired?.has(offTarget) && offTarget !== spec.id ? offTarget : spec.requestModelId;
-	if (Bun.deepEquals(thinking, spec.thinking) && requestModelId === spec.requestModelId) {
+	if (deepEquals(thinking, spec.thinking) && requestModelId === spec.requestModelId) {
 		return spec;
 	}
 	return { ...spec, thinking, ...(requestModelId !== undefined ? { requestModelId } : {}) };

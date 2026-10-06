@@ -8,7 +8,7 @@
  * import { isEnoent, isFsError } from "@oh-my-pi/pi-utils";
  *
  * try {
- *     return await Bun.file(path).text();
+ *     return await fs.readFile(path, "utf8");
  * } catch (err) {
  *     if (isEnoent(err)) return null;
  *     throw err;

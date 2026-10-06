@@ -20,7 +20,7 @@ let workerHostMain: string | null = null;
 
 /** Called by CLI entrypoints whose main module dispatches worker argv selectors. */
 export function declareWorkerHostEntry(): void {
-	workerHostMain = stripWindowsExtendedLengthPathPrefix(Bun.main);
+	workerHostMain = stripWindowsExtendedLengthPathPrefix(process.argv[1] ?? "");
 }
 
 /** Main-module path of the self-dispatching CLI host, or null outside it. */

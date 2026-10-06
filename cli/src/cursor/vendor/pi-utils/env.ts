@@ -384,7 +384,7 @@ const BUN_TEST_ENTRY_PATTERN = /[._](?:test|spec)\.[cm]?[jt]sx?$/;
 export function isBunTestRuntime(): boolean {
 	if (process.env.PI_TEST_RUNTIME === "1") return true;
 	const hasTestEnvironment = process.env.BUN_ENV === "test" || process.env.NODE_ENV === "test";
-	return hasTestEnvironment && BUN_TEST_ENTRY_PATTERN.test(Bun.main);
+	return hasTestEnvironment && BUN_TEST_ENTRY_PATTERN.test(process.argv[1] ?? "");
 }
 
 let terminalHeadless = isBunTestRuntime();

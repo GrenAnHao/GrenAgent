@@ -3,6 +3,7 @@
  * provider, OAuth login and account usage: client identity, upstream/region
  * vocabulary, API hosts and the account-scoped model-cache namespace.
  */
+import { stableHash } from "../../node-hash.ts";
 import { isRecord } from "../utils.ts";
 
 /**
@@ -126,5 +127,5 @@ export function factoryDroidModelCacheProviderId(options: { apiKey?: string } & 
 	const scope = `${credentialScope}\u0000${options.orgId ?? ""}\u0000${region}\u0000${options.inferenceRegion ?? region}`;
 	// v4: rows cached before credits became a scalar base rate carry the old
 	// `{ input, output, cacheRead }` object and must be refetched.
-	return `factory-droid:models-v4:${Bun.hash(scope).toString(36)}`;
+	return `factory-droid:models-v4:${stableHash(scope).toString(36)}`;
 }

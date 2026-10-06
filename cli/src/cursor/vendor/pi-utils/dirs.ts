@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { stableHash } from "../node-hash.ts";
 import { expandWindowsLongPath } from "../natives/path.ts";
 import { engines, version } from "./package.json" with { type: "json" };
 import { isEnoent, isEnotdir } from "./fs-error.ts";
@@ -789,12 +790,12 @@ export function getAutoQaDbPath(): string {
  *
  * Used to pack the project identity into a single short fs-safe segment
  * (e.g. PR-checkout and task-isolation worktree dirs under `~/.omp/wt/`).
- * Bun.hash is non-cryptographic — collision space is ~2^28, which is fine
- * for naming a handful of repos on a single machine. Same input on the
- * same Bun runtime yields the same output.
+ * The digest is a non-cryptographic 32-bit hash — collision space is ~2^28,
+ * which is fine for naming a handful of repos on a single machine. The same
+ * input always yields the same output.
  */
 export function hashPath(absPath: string): string {
-	return Bun.hash(path.resolve(absPath)).toString(16).padStart(16, "0").slice(-7);
+	return stableHash(path.resolve(absPath)).toString(16).padStart(16, "0").slice(-7);
 }
 
 /** Get the path to a single worktree directory (~/.omp/wt/<segment>). */
@@ -1078,7 +1079,7 @@ export function getDaemonRuntimeRoot(): string {
 
 /** Get the daemon runtime directory for a project (~/.omp/run/daemons/<hash>; XDG default: $XDG_STATE_HOME/omp/run/daemons/<hash>). */
 export function getDaemonRuntimeDir(projectDir: string): string {
-	const key = Bun.hash.wyhash(path.resolve(projectDir)).toString(16).padStart(16, "0");
+	const key = stableHash.wyhash(path.resolve(projectDir)).toString(16).padStart(16, "0");
 	return path.join(getDaemonRuntimeRoot(), key);
 }
 

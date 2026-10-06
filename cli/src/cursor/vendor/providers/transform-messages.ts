@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { stableHash } from "../node-hash.ts";
 import { renderDemotedThinking } from "../dialect/demotion.ts";
 import type {
 	Api,
@@ -401,7 +402,7 @@ function isValidAnthropicToolCallId(id: string): boolean {
 }
 
 function fallbackAnthropicToolCallId(originalId: string): string {
-	return `toolu_${Bun.hash(originalId).toString(36)}`;
+	return `toolu_${stableHash(originalId).toString(36)}`;
 }
 
 function normalizeAnthropicTargetToolCallId<TApi extends Api>(
