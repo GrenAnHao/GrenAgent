@@ -61,7 +61,7 @@
 | `electron-agent/electron/app/memoryLayers.ts` | 修改 | `selectScenesToInline` |
 | `electron-agent/electron/agent/memoryLayerPrompts.ts` | 修改 | L2 提示词说明只内联相关正文、只能改这些文件 |
 | `extensions/memory/capture.ts` | 修改 | 主进程已处理（延后或跳过）时不走本地兜底抽取 |
-| `docs/decisions/electron-agent/agentdata/*.md` | 创建 | 每个任务一篇决策记录 |
+| `docs/decisions/electron-agent/agentdata/*.md` | 创建 | 任务 2–7 各一篇决策记录（任务 1、8 不写） |
 
 ---
 
@@ -241,7 +241,7 @@ export function buildExtractionWindow(delta: string, background: string, now = D
 - [ ] **步骤 4：运行测试验证通过**
 
 运行：`cd electron-agent; npx vitest run --project main electron/app/memoryExtractionWindow.test.ts`
-预期：PASS（9 个测试）
+预期：PASS（8 个测试）
 
 - [ ] **步骤 5：Commit**
 
