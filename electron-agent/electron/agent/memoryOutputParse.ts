@@ -69,26 +69,49 @@ function isEnvelope(value: Record<string, unknown>): boolean {
 }
 
 /**
+ * 「是场景数组」的判定：空数组放行（模型明确说没有记忆），非空数组至少要有一个带 memories 数组的对象。
+ * 下游 flattenSceneExtraction 会跳过没有 memories 的元素、completeExtraction 在 l1 为空时照样提交游标，
+ * 所以把不是场景的数组（裸 L1 记录、[1]）当成结果返回，等于静默丢掉整批对话。
+ */
+function isSceneArray(value: unknown[]): boolean {
+  return value.length === 0 || value.some((el) => isRecord(el) && Array.isArray(el.memories));
+}
+
+/** 整段是带别的字段的对象（如 {scenes:[…],notes:[…]}）时，在属性值里找场景数组；真正的场景数组优先于空数组。 */
+function findSceneArrayInValues(value: Record<string, unknown>): unknown[] | undefined {
+  const arrays = Object.values(value).filter((v): v is unknown[] => Array.isArray(v));
+  return arrays.find((arr) => arr.length > 0 && isSceneArray(arr)) ?? arrays.find((arr) => arr.length === 0);
+}
+
+/**
  * 返回场景数组，或旧的 {l1,l2,l3} 信封（交给 flattenSceneExtraction / parseMemoryExtraction）。
- * 和上游的不同：完全找不到 JSON 时抛错（可重试），上游则当作「没有记忆」直接提交。
+ * 和上游的不同：完全找不到 JSON、或找到的数组不是场景数组时抛错（可重试），上游则当作「没有记忆」直接提交。
  */
 export function parseExtractionText(raw: string): unknown {
+  const invalid = () => new Error('system Pi returned invalid JSON');
   const cleaned = stripModelWrappers(raw);
   let whole: unknown;
   try { whole = parseLooseJson(cleaned); } catch { whole = undefined; }
-  if (Array.isArray(whole)) return whole;
+  if (Array.isArray(whole)) {
+    if (isSceneArray(whole)) return whole;
+    throw invalid();
+  }
   if (isRecord(whole)) {
     if (isEnvelope(whole)) return whole;
     if (Array.isArray(whole.memories)) return [whole];
+    // 整段已是合法对象：不再对原文做贪婪正则。找不到场景数组就原样交出（如 {"result":"…"}、{"l1":[…],"summary":"x"}），
+    // 由 parseMemoryExtraction 的严格校验拒绝。
+    return findSceneArrayInValues(whole) ?? whole;
   }
-  const match = cleaned.match(/\[[\s\S]*\]/);
-  if (match) {
-    try {
-      const parsed = parseLooseJson(match[0]);
-      if (Array.isArray(parsed)) return parsed;
-    } catch { /* 下面按整段的解析结果处理 */ }
+  // 回退路径：未闭合的 <think>（被 max_tokens 截断）里的方括号不是答案，直接走失败。
+  if (!cleaned.includes('<think>')) {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      try {
+        const parsed = parseLooseJson(match[0]);
+        if (Array.isArray(parsed) && isSceneArray(parsed)) return parsed;
+      } catch { /* 下面抛 invalid JSON */ }
+    }
   }
-  // 合法 JSON 对象但没有场景数组（如 {"result":"…"}）原样交出，由 parseMemoryExtraction 的严格校验拒绝。
-  if (isRecord(whole)) return whole;
-  throw new Error('system Pi returned invalid JSON');
+  throw invalid();
 }

@@ -87,4 +87,30 @@ describe('flattenSceneExtraction 补默认值', () => {
       { content: 'b', type: 'work_fact', priority: 50, scene_name: 's' },
     ] });
   });
+
+  it('source_message_ids 是单个字符串时包成数组', () => {
+    expect(flattenSceneExtraction([{ scene_name: 's', memories: [
+      { content: 'a', type: 'work_fact', source_message_ids: 'm1' },
+    ] }])).toEqual({ l1: [
+      { content: 'a', type: 'work_fact', source_message_ids: ['m1'], scene_name: 's' },
+    ] });
+  });
+
+  it('source_message_ids 数组里只保留 string 和 number，number 转字符串', () => {
+    expect(flattenSceneExtraction([{ scene_name: 's', memories: [
+      { content: 'a', type: 'work_fact', source_message_ids: ['m1', 2, { id: 'm3' }, null, true, ['m4'], 'm5'] },
+    ] }])).toEqual({ l1: [
+      { content: 'a', type: 'work_fact', source_message_ids: ['m1', '2', 'm5'], scene_name: 's' },
+    ] });
+  });
+
+  it('source_message_ids 既不是字符串也不是数组时去掉', () => {
+    expect(flattenSceneExtraction([{ scene_name: 's', memories: [
+      { content: 'a', type: 'work_fact', source_message_ids: { id: 'm1' } },
+      { content: 'b', type: 'work_fact', source_message_ids: 7 },
+    ] }])).toEqual({ l1: [
+      { content: 'a', type: 'work_fact', scene_name: 's' },
+      { content: 'b', type: 'work_fact', scene_name: 's' },
+    ] });
+  });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseMemoryExtraction } from './memoryExtraction';
 import { parseExtractionText, parseLooseJson, repairExtractionJson, sanitizeJsonForParse, stripModelWrappers } from './memoryOutputParse';
 
 const scene = { scene_name: 's', message_ids: ['m0'], memories: [{ content: 'c', type: 'work_fact', priority: 80 }] };
@@ -51,5 +52,55 @@ describe('parseExtractionText', () => {
 
   it('完全没有 JSON 时抛 invalid JSON，交给 TaskQueue 重试', () => {
     expect(() => parseExtractionText('我觉得没什么可记的。')).toThrow('system Pi returned invalid JSON');
+  });
+
+  it('空数组放行：模型明确说没有记忆', () => {
+    expect(parseExtractionText('[]')).toEqual([]);
+    expect(parseExtractionText('没有可记的内容：[]')).toEqual([]);
+  });
+
+  it.each([
+    ['think 被截断，括号里是数字', '<think>没写完 [1]'],
+    ['think 被截断，后面跟着合法场景数组', `<think>没写完 ${JSON.stringify([scene])}`],
+    ['think 被截断，前面有合法场景数组', `${JSON.stringify([scene])}\n<think>没写完`],
+  ])('未闭合的 think（%s）不去捞数组，抛 invalid JSON', (_name, raw) => {
+    expect(() => parseExtractionText(raw)).toThrow('system Pi returned invalid JSON');
+  });
+
+  it.each([
+    ['裸 L1 记录数组', '[{"content":"c","type":"work_fact"}]'],
+    ['数字数组', '[1]'],
+    ['字符串数组', '["a","b"]'],
+    ['memories 不是数组的对象数组', '[{"scene_name":"s","memories":"x"}]'],
+    ['说明文字里夹着数字数组', '见第 [1] 条'],
+    ['说明文字里夹着裸 L1 记录数组', '结果：[{"content":"c","type":"work_fact"}] 以上'],
+  ])('非空数组但没有场景（%s）抛 invalid JSON，不当成空结果提交', (_name, raw) => {
+    expect(() => parseExtractionText(raw)).toThrow('system Pi returned invalid JSON');
+  });
+
+  it('非空数组里只要有一个带 memories 数组的对象就放行', () => {
+    expect(parseExtractionText(JSON.stringify([1, scene]))).toEqual([1, scene]);
+    expect(parseExtractionText(JSON.stringify([{ scene_name: '闲聊', memories: [] }]))).toEqual([{ scene_name: '闲聊', memories: [] }]);
+  });
+
+  it('信封多带键：不是信封，原样返回，由 parseMemoryExtraction 的严格校验拒绝（可重试）', () => {
+    const raw = '{"l1":[{"content":"c","type":"work_fact"}],"summary":"x"}';
+    expect(parseExtractionText(raw)).toEqual({ l1: [{ content: 'c', type: 'work_fact' }], summary: 'x' });
+    expect(() => parseMemoryExtraction(parseExtractionText(raw), 'work')).toThrow('memory extraction output is invalid');
+  });
+
+  it('对象带别的字段时，在属性值里找场景数组', () => {
+    expect(parseExtractionText(JSON.stringify({ scenes: [scene], notes: ['x'] }))).toEqual([scene]);
+    expect(parseExtractionText(JSON.stringify({ summary: 'x', data: [scene] }))).toEqual([scene]);
+  });
+
+  it('属性值里的空数组不抢在真正的场景数组前面；只有空数组时按「没有记忆」处理', () => {
+    expect(parseExtractionText(JSON.stringify({ notes: [], scenes: [scene] }))).toEqual([scene]);
+    expect(parseExtractionText('{"scenes":[]}')).toEqual([]);
+  });
+
+  it('整段已是合法对象时不再对原文做贪婪正则', () => {
+    expect(parseExtractionText('{"ok":true,"note":"[]"}')).toEqual({ ok: true, note: '[]' });
+    expect(parseExtractionText('{"result":"见 [1]"}')).toEqual({ result: '见 [1]' });
   });
 });

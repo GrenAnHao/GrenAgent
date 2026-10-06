@@ -27,7 +27,12 @@ export interface MemoryExtraction { l1?: L1Record[]; l2?: string; l3?: string }
 /** 上游 scene-extraction 的默认情境名；L1 抽取未给场景时使用。 */
 const DEFAULT_SCENE = '未分类';
 
-/** 上游 parseExtractionResult（l1-extractor.ts:643-655）的字段默认值。type 缺失仍然丢弃：按 mode 过滤类型的是 parseMemoryExtraction。 */
+/**
+ * 上游 parseExtractionResult（l1-extractor.ts:643-655）的字段默认值。
+ * 缺 type 的记录不补默认值，会被 l1RecordSchema 的 type: z.string() 丢掉。上游默认 episodic，这里不跟，
+ * 是为了不引入默认类型（episodic 在 chat 模式下是有效类型，默认它会把没写 type 的记录原样存进去）。
+ * source_message_ids：单个字符串包成数组，数组里只留 string 和 number（number 转字符串），其余类型丢掉。
+ */
 function normalizeMemory(memory: unknown): unknown {
   if (!memory || typeof memory !== 'object' || Array.isArray(memory)) return memory;
   const rec = { ...(memory as Record<string, unknown>) };
@@ -35,8 +40,12 @@ function normalizeMemory(memory: unknown): unknown {
     const numeric = typeof rec.priority === 'string' && rec.priority.trim() ? Number(rec.priority) : Number.NaN;
     rec.priority = Number.isFinite(numeric) ? numeric : 50;
   }
-  if (Array.isArray(rec.source_message_ids)) rec.source_message_ids = rec.source_message_ids.map(String);
-  else if (rec.source_message_ids !== undefined) delete rec.source_message_ids;
+  if (typeof rec.source_message_ids === 'string') rec.source_message_ids = [rec.source_message_ids];
+  else if (Array.isArray(rec.source_message_ids)) {
+    rec.source_message_ids = rec.source_message_ids
+      .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
+      .map(String);
+  } else if (rec.source_message_ids !== undefined) delete rec.source_message_ids;
   if (rec.metadata !== undefined && (!rec.metadata || typeof rec.metadata !== 'object' || Array.isArray(rec.metadata))) rec.metadata = {};
   return rec;
 }
