@@ -1,6 +1,6 @@
 ---
 title: 系统任务记录模型用量，memory_extract 不再重复发送对话载荷，empty content 不重试
-status: active
+status: superseded
 date: 2026-10-06
 scope: electron-agent/agentdata
 files:
@@ -13,8 +13,10 @@ files:
   - electron-agent/electron/main.ts
   - extensions/_shared/oneshot.ts
 supersedes:
-superseded_by:
+superseded_by: 2026-10-07-memory-extract-window.md
 ---
+
+> 已过时 → 见 2026-10-07-memory-extract-window.md
 
 ## 背景
 2026-09-08 至 09-28 的记忆任务共发出 49.8 MB input，其中 memory_extract 占 46.5 MB（305 个任务）。这些调用走 `ModelRuntimeHost.completeSimple`，不写 session JSONL，用量面板看不到，`service_tasks` 也没有 token 列，改了什么都无法验证收益。

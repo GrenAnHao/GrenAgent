@@ -223,16 +223,19 @@ describe('SystemWorkerManager', () => {
     expect(user).not.toContain(before);
   });
 
-  it('memory_extract 给了 newMessages 数组时渲染的是它，没渲染的 delta 留在 Input 段', () => {
+  it('memory_extract 给了 newMessages 数组时，delta 只是游标，不进 Input 段', () => {
     const input = {
       newMessages: [{ id: 'm0', role: 'user', content: 'ARRAY_MARKER', timestamp: 1 }],
-      delta: 'user: UNRENDERED_DELTA',
+      backgroundMessages: [{ id: 'b0', role: 'user', content: 'BG_MARKER', timestamp: 0 }],
+      delta: 'user: ARRAY_MARKER\ntoolResult: TOOL_OUTPUT',
+      source: 'session:s',
     };
     const { user } = serviceTaskRequestForTest({ id: 't1', kind: 'memory_extract', input });
     expect(user.split('ARRAY_MARKER').length - 1).toBe(1);
-    expect(user.split('UNRENDERED_DELTA').length - 1).toBe(1);
+    expect(user.split('BG_MARKER').length - 1).toBe(1);
+    expect(user).not.toContain('TOOL_OUTPUT');
     const inputLine = user.slice(user.lastIndexOf('\nInput: ') + '\nInput: '.length);
-    expect(JSON.parse(inputLine)).toEqual({ delta: 'user: UNRENDERED_DELTA' });
+    expect(JSON.parse(inputLine)).toEqual({ source: 'session:s' });
   });
 
   it('memory_scene 的 Input 段去掉已渲染的场景正文与记忆，保留 summary 和没渲染的字段', () => {

@@ -138,18 +138,17 @@ function serviceTaskPrompt(task: SystemWorkerTask): string {
 }
 
 /**
- * Input 段只放正文模板没渲染过的字段。memory_extract 的 delta/background 已经由 formatExtractionPrompt
- * 写成可读文本，再原样序列化一遍会让载荷翻倍（实测占 input 的 95%）。只剔除本次真正被渲染的那一份：
- * newMessages 是数组时渲染的是它而不是 delta，background 同理。
- * memory_scene 同样去重，见 sceneInputNotRendered。其余 kind 原样保留。
+ * Input 段只放正文模板没渲染过的字段。memory_extract 的对话已经由 formatExtractionPrompt 写成可读文本，
+ * delta 只是游标（见 MemoryService.capture，含工具输出），所以 newMessages / backgroundMessages / delta / background
+ * 一律不进 Input 段；previousSceneName 是字符串时同样剔除（正文模板渲染的就是它）。memory_scene 同样去重，
+ * 见 sceneInputNotRendered。其余 kind 原样保留。
  */
 function inputNotRendered(task: SystemWorkerTask): unknown {
   if (!isRecord(task.input)) return task.input;
   if (task.kind === 'memory_scene') return sceneInputNotRendered(task.input);
   if (task.kind !== 'memory_extract') return task.input;
   const rest = { ...task.input };
-  if (Array.isArray(rest.newMessages)) delete rest.newMessages; else if (typeof rest.delta === 'string') delete rest.delta;
-  if (Array.isArray(rest.backgroundMessages)) delete rest.backgroundMessages; else if (typeof rest.background === 'string') delete rest.background;
+  for (const key of ['newMessages', 'backgroundMessages', 'delta', 'background']) delete rest[key];
   if (typeof rest.previousSceneName === 'string') delete rest.previousSceneName;
   return rest;
 }

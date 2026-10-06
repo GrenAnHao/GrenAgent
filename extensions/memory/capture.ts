@@ -31,12 +31,12 @@ export class LayeredMemoryCapture {
     if (!transcript) return;
     const fingerprint = hash(transcript);
     const source = `session:${ctx.sessionId ?? "unknown"}`;
-    const captured = await this.client.request<{ changed: boolean; delta: string; taskId?: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint, ...(ctx.extract === false ? { extract: false } : {}) });
+    const captured = await this.client.request<{ changed: boolean; delta: string; taskId?: string; extraction?: string }>("memory.capture", { ...scope(ctx), source, transcript, fingerprint, ...(ctx.extract === false ? { extract: false } : {}) });
     if (!captured.changed || !captured.delta) return;
     if (ctx.extract === false) return;
-    // Electron-owned MemoryService queues extraction in the system worker. The
-    // local fallback below remains for older sidecars that do not return taskId.
-    if (captured.taskId) return;
+    // Electron-owned MemoryService queues, defers or skips extraction itself. The
+    // local fallback below remains for older sidecars that return neither.
+    if (captured.taskId || captured.extraction) return;
     const delta = captured.delta;
 
     const ask = this.askFactory(ctx);

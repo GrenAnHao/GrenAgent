@@ -62,38 +62,78 @@ function cap(text: string): string {
  */
 export function conversationTurns(text: string): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
-  // 记录上一个 user/assistant 段的原始角色（不论它是否被 shouldExtract 过滤掉）。
-  // 只有上一个对话段也是 assistant 时才合并，被过滤掉的 user 段（如 /compact）要断开合并；
-  // toolResult / custom 等非 user/assistant 段不参与判断，因此同一轮里被工具输出隔开的 assistant 仍合并。
-  let prevDialogRole: Role | null = null;
+  // canMerge：下一条保留下来的 assistant 能不能并进上一条 assistant。
+  // 任何 user 段（哪怕被 shouldExtract 过滤掉，如 /compact）都会断开合并；保留下来的 assistant 段重新放开；
+  // 被过滤的 assistant 段（如纯代码块）和 toolResult / custom 等非对话段不改变它，
+  // 因此同一轮里被工具输出隔开的 assistant 仍合并，而被 user 命令隔开的不会借道被过滤的 assistant 合并。
+  let canMerge = false;
   for (const segment of splitTranscript(text)) {
     if (segment.role !== 'user' && segment.role !== 'assistant') continue;
     const role: Role = segment.role;
+    if (role === 'user') canMerge = false;
     const content = cleanContent(role, segment.content);
-    const keep = shouldExtract(content);
-    const previousDialogRole = prevDialogRole;
-    prevDialogRole = role;
-    if (!keep) continue;
+    if (!shouldExtract(content)) continue;
     const last = turns.at(-1);
-    if (role === 'assistant' && previousDialogRole === 'assistant' && last?.role === 'assistant') {
+    if (role === 'assistant' && canMerge && last?.role === 'assistant') {
       last.content = `${last.content}\n\n${content}`;
       continue;
     }
     turns.push({ role, content });
+    if (role === 'assistant') canMerge = true;
   }
   return turns.map((turn) => ({ ...turn, content: cap(turn.content) }));
+}
+
+/** 背景只要尾部几条，先解析末尾这么多字符；凑不够就每次放大 4 倍，直到整段。 */
+const TAIL_WINDOW_CHARS = 64 * 1024;
+const TAIL_WINDOW_GROWTH = 4;
+
+/** 从 from 起（含）第一个角色行的开头；`^` 看的是整段文本里的真实行首，不会把行中间当成行首。 */
+function roleLineIndexFrom(text: string, from: number): number {
+  const pattern = new RegExp(ROLE_LINE);
+  pattern.lastIndex = from;
+  return pattern.exec(text)?.index ?? -1;
+}
+
+/**
+ * 等价于 `conversationTurns(text).slice(-count)`，但只解析末尾一段。background 是整段更早的会话，可达 MB 级，
+ * 全量切分清洗只为留最后几条，在主进程里是白花的同步开销。
+ *
+ * 窗口从角色行开头切，窗口里的分段就是全量解析的后半段，逐段相同。唯一的差别在窗口的第一条：全量解析里它
+ * 可能已经和窗口之前的 assistant 段合并过，窗口里只看得到后半截。所以要拿到多于 count 条才能确定最后 count 条
+ * 和全量一致；窗口放大到整段时前面没有别的内容，直接返回。
+ */
+export function tailConversationTurns(text: string, count: number, windowChars = TAIL_WINDOW_CHARS): ConversationTurn[] {
+  if (count <= 0) return [];
+  let size = Math.max(1, windowChars);
+  for (;;) {
+    const from = text.length - size;
+    if (from <= 0) return conversationTurns(text).slice(-count);
+    const cut = roleLineIndexFrom(text, from);
+    if (cut >= 0) {
+      const turns = conversationTurns(text.slice(cut));
+      if (turns.length > count) return turns.slice(-count);
+    }
+    size *= TAIL_WINDOW_GROWTH;
+  }
 }
 
 /**
  * 上游把一批里最后 10 条当新消息、再往前 5 条当背景（l1-extractor.ts:177-182）。Pi 的 background 是同一
  * 会话里更早、已经抽过的文本，所以背景候选是「background 的消息 + delta 里没进窗口的消息」。
  * 窗口外更早的 delta 消息不再单独抽取，提交游标时一并视为已处理，和上游一致。
+ *
+ * background 可以是取值函数：delta 里没有可抽取的对话（调用方会直接跳过），或 delta 自己已经填满背景时，
+ * 不会去取，更不会解析历史。
  */
-export function buildExtractionWindow(delta: string, background: string, now = Date.now()): ExtractionWindow {
+export function buildExtractionWindow(delta: string, background: string | (() => string), now = Date.now()): ExtractionWindow {
   const fresh = conversationTurns(delta);
+  if (fresh.length === 0) return { newMessages: [], backgroundMessages: [] };
   const newTurns = fresh.slice(-MAX_NEW_MESSAGES);
-  const before = [...conversationTurns(background), ...fresh.slice(0, fresh.length - newTurns.length)];
-  const backgroundTurns = before.slice(-MAX_BACKGROUND_MESSAGES);
+  const overflow = fresh.slice(0, fresh.length - newTurns.length);
+  const missing = MAX_BACKGROUND_MESSAGES - overflow.length;
+  const earlier = missing > 0 ? tailConversationTurns(typeof background === 'function' ? background() : background, missing) : [];
+  const backgroundTurns = [...earlier, ...overflow].slice(-MAX_BACKGROUND_MESSAGES);
   const stamp = (prefix: string, list: ConversationTurn[], offset: number): ConversationMessage[] =>
     list.map((turn, index) => ({ id: `${prefix}${index}`, role: turn.role, content: turn.content, timestamp: now + (offset + index) * 1000 }));
   return {

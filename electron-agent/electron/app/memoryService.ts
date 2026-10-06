@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { L1Record } from '../agent/memoryExtraction';
 import { parseMemoryExtraction } from '../agent/memoryExtraction';
+import { stripTrailingNewlines } from '../agent/memoryPrompts';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord, MemoryConversation, MemoryConversationDetail, MemoryCreateInput, MemoryDraft, MemoryListInput, MemoryPage, MemoryReadInput, MemoryUpdateInput } from '../agentData/memoryContracts';
 import { RpcError } from '../agentData/protocol';
@@ -8,6 +9,7 @@ import { RpcError } from '../agentData/protocol';
 import { memoryDedupOutput } from './appServer/serviceTaskRegistry';
 import type { ServiceTask } from './appServer/types';
 import { applyDedupDecisions, recallCandidates } from './memoryDedup';
+import { buildExtractionWindow } from './memoryExtractionWindow';
 import {
   applyPersonaDecision,
   applySceneDecisions,
@@ -24,7 +26,11 @@ import { computeFireAt, L2_DELAY_MS, L2_MIN_INTERVAL_MS, LAYER_SCENE_KIND } from
 
 export interface MemorySearchScope extends MemoryScope { projectId: string; query: string; limit?: number }
 export interface MemoryCaptureInput extends MemoryScope { projectId: string; source: string; transcript: string; fingerprint: string; extract?: boolean }
-export interface MemoryCaptureResult { changed: boolean; delta: string; fingerprint: string; taskId?: string }
+/**
+ * extraction：主进程怎么处理了这次捕获。queued = 已入队（taskId 有值）；skipped = 新增内容里没有可抽取的
+ * 对话文本，游标已直接提交；deferred = 按抽取节奏延后。有值时扩展不再走本地兜底抽取。
+ */
+export interface MemoryCaptureResult { changed: boolean; delta: string; fingerprint: string; taskId?: string; extraction?: 'queued' | 'skipped' | 'deferred' }
 export interface MemoryTaskQueue {
   enqueue(input: { id: string; kind: string; input: unknown; sourceProjectId?: string; sourceSessionId?: string; system?: boolean }): Promise<ServiceTask>;
   get?(id: string): ServiceTask | undefined;
@@ -135,25 +141,32 @@ export class MemoryService {
       this.options.store.commitCapture(input, input.source, input.fingerprint);
       return captured;
     }
-    if (active) return { ...captured, taskId: active[0] };
+    if (active) return { ...captured, taskId: active[0], extraction: 'queued' };
     const queued = this.options.queue.findPending?.('memory_extract', (task) => {
       const value = this.captureFromTask(task.id, task);
       return !this.finishing.has(task.id) && value !== undefined && sameSource(value.scope, value.source, input);
     });
     if (queued) {
       this.pending.set(queued.id, this.captureFromTask(queued.id, queued)!);
-      return { ...captured, taskId: queued.id };
+      return { ...captured, taskId: queued.id, extraction: 'queued' };
+    }
+    const scope = { ...input, scope: 'project' as const };
+    const extractionWindow = buildExtractionWindow(captured.delta, () => captureBackground(this.options.store, scope, input.source, captured.delta));
+    if (extractionWindow.newMessages.length === 0) {
+      this.options.store.commitCapture(scope, input.source, input.fingerprint, captured.delta);
+      return { ...captured, extraction: 'skipped' };
     }
     const taskId = randomUUID();
-    const scope = { ...input, scope: 'project' as const };
     this.pending.set(taskId, { scope, source: input.source, fingerprint: input.fingerprint, delta: captured.delta });
     try {
       void this.options.queue.enqueue({
         id: taskId,
         kind: 'memory_extract',
         input: {
+          // delta 只是游标：captureFromTask / commitCapture 用它做前缀比对。它含工具输出，Input 行不会带上它。
           delta: captured.delta,
-          background: captureBackground(this.options.store, scope, input.source, captured.delta),
+          newMessages: extractionWindow.newMessages,
+          backgroundMessages: extractionWindow.backgroundMessages,
           previousSceneName: latestSceneName(this.options.store, scope),
           mode: this.options.extractMode ?? 'work',
           source: input.source,
@@ -174,7 +187,7 @@ export class MemoryService {
       this.pending.delete(taskId);
       throw error;
     }
-    return { ...captured, taskId };
+    return { ...captured, taskId, extraction: 'queued' };
   }
 
   completeExtraction(taskId: string, output: unknown): MemoryRecord[] {
@@ -469,7 +482,7 @@ function captureBackground(store: MemoryStore, scope: MemoryScope, source: strin
   const cursor = store.pendingCapture(scope, source);
   const transcript = cursor?.transcript ?? delta;
   if (!delta || !transcript.endsWith(delta)) return '';
-  return transcript.slice(0, transcript.length - delta.length).replace(/\n+$/, '');
+  return stripTrailingNewlines(transcript.slice(0, transcript.length - delta.length));
 }
 
 function latestSceneName(store: MemoryStore, scope: MemoryScope): string {

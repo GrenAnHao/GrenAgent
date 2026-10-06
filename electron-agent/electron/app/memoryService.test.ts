@@ -152,7 +152,7 @@ describe('MemoryService', () => {
     db.close();
   });
 
-  it('抽取任务带上背景对话、上一情境和 mode', async () => {
+  it('抽取任务带上背景消息、上一情境和 mode，delta 原样留作游标', async () => {
     const { db, store, tasks, service } = setup();
     store.upsert(scope, { level: 1, content: JSON.stringify({ content: '旧事实', type: 'work_fact', scene_name: '团队在围绕旧议题推进' }) });
     store.capture(scope, 'session:s1', 'user: first', 'fp0');
@@ -160,10 +160,53 @@ describe('MemoryService', () => {
     await service.capture({ ...scope, source: 'session:s1', transcript: 'user: first\nuser: second', fingerprint: 'fp1' });
     expect(tasks[0].input).toMatchObject({
       delta: 'user: second',
-      background: 'user: first',
+      newMessages: [expect.objectContaining({ id: 'm0', role: 'user', content: 'second' })],
+      backgroundMessages: [expect.objectContaining({ id: 'b0', role: 'user', content: 'first' })],
       previousSceneName: '团队在围绕旧议题推进',
       mode: 'work',
     });
+    expect(tasks[0].input).not.toHaveProperty('background');
+    db.close();
+  });
+
+  it('工具输出不进抽取消息', async () => {
+    const { db, tasks, service } = setup();
+    await service.capture({ ...scope, source: 'session:s1', transcript: 'user: 查日志\nassistant: 我看看\ntoolResult: HUGE_TOOL_OUTPUT\nassistant: 磁盘满了', fingerprint: 'fp1' });
+    const input = tasks[0].input as { newMessages: Array<{ role: string; content: string }> };
+    expect(input.newMessages.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: 'user', content: '查日志' },
+      { role: 'assistant', content: '我看看\n\n磁盘满了' },
+    ]);
+    expect(JSON.stringify(input.newMessages)).not.toContain('HUGE_TOOL_OUTPUT');
+    db.close();
+  });
+
+  it('新增内容只有工具输出时不入队，直接提交游标，也不去读历史', async () => {
+    const { db, store, tasks, service } = setup();
+    const first = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: hi', fingerprint: 'fp1' });
+    service.completeExtraction(first.taskId!, {});
+    const pendingCapture = vi.spyOn(store, 'pendingCapture');
+    const second = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: hi\ntoolResult: x', fingerprint: 'fp2' });
+    expect(second).toMatchObject({ changed: true, extraction: 'skipped' });
+    expect(second.taskId).toBeUndefined();
+    expect(tasks).toHaveLength(1);
+    expect(pendingCapture).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT pending FROM memory_captures').get()).toMatchObject({ pending: null });
+    // 游标确实推过了被跳过的那段：新任务的 delta 不再包含 toolResult。
+    const third = await service.capture({ ...scope, source: 'session:s1', transcript: 'user: hi\ntoolResult: x\nuser: more', fingerprint: 'fp3' });
+    expect(third).toMatchObject({ extraction: 'queued', delta: 'user: more' });
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1].input).toMatchObject({
+      delta: 'user: more',
+      newMessages: [expect.objectContaining({ role: 'user', content: 'more' })],
+      backgroundMessages: [expect.objectContaining({ role: 'user', content: 'hi' })],
+    });
+    db.close();
+  });
+
+  it('入队时回执带 extraction: queued', async () => {
+    const { db, service } = setup();
+    expect(await service.capture({ ...scope, source: 'session:s1', transcript: 'user: hi', fingerprint: 'fp1' })).toMatchObject({ extraction: 'queued' });
     db.close();
   });
 
@@ -237,6 +280,7 @@ describe('MemoryService', () => {
     const first = await service.capture(input);
     const second = await service.capture(input);
     expect(second.taskId).toBe(first.taskId);
+    expect(second).toMatchObject({ extraction: 'queued' });
     expect(tasks).toHaveLength(1);
     db.close();
   });
@@ -249,7 +293,9 @@ describe('MemoryService', () => {
       const task = taskResult(tasks[0]);
       return task.kind === kind && matches(task) ? task : undefined;
     } }, layerSchedule });
-    expect((await reopened.capture(input)).taskId).toBe(first.taskId);
+    const second = await reopened.capture(input);
+    expect(second.taskId).toBe(first.taskId);
+    expect(second).toMatchObject({ extraction: 'queued' });
     expect(tasks).toHaveLength(1);
     db.close();
   });

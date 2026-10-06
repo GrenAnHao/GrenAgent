@@ -161,4 +161,16 @@ describe("LayeredMemoryCapture", () => {
     expect(c.calls.some((call) => call.method === 'memory.commitCapture')).toBe(false);
     expect(c.calls.some((call) => call.method === 'memory.upsert')).toBe(false);
   });
+
+  it.each(['deferred', 'skipped', 'queued'])('主进程回执 extraction=%s 时不走本地兜底抽取', async (extraction) => {
+    const c = client();
+    const request = c.request.bind(c);
+    c.request = async <T,>(method: string, params: Record<string, unknown>) => {
+      const result = await request<T>(method, params);
+      return (method === 'memory.capture' ? { ...(result as object), extraction } : result) as T;
+    };
+    const ask = vi.fn(async () => sceneJson('unused'));
+    await new LayeredMemoryCapture(c, () => ask).enqueue(ctx, [{ role: 'user', content: 'remember me' }]);
+    expect(ask).not.toHaveBeenCalled();
+  });
 });
