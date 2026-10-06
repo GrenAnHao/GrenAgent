@@ -14,6 +14,12 @@ export interface InstallCursorProviderOptions {
 	registerNativeProvider?: (provider: Provider) => void;
 }
 
+interface GrenCursorGlobals {
+	__grenCursorExecResolved?: symbol;
+	__grenCursorExecHandlers?: () => unknown;
+	__grenCursorPrepare?: <T extends { cursorExecHandlers?: unknown }>(options: T) => T;
+}
+
 const cursorAuth: ProviderAuth = {
 	apiKey: {
 		name: "Cursor",
@@ -47,7 +53,12 @@ export function createCursorNativeProvider(): Provider {
  */
 export function installCursorProvider(options: InstallCursorProviderOptions = {}): void {
 	bindCursorStream(options.streamCursor);
-	(globalThis as { __grenCursorExecResolved?: symbol }).__grenCursorExecResolved = kCursorExecResolved;
+	const globals = globalThis as GrenCursorGlobals;
+	globals.__grenCursorExecResolved = kCursorExecResolved;
+	globals.__grenCursorPrepare = (requestOptions) => ({
+		...requestOptions,
+		cursorExecHandlers: requestOptions.cursorExecHandlers ?? globals.__grenCursorExecHandlers?.(),
+	});
 	registerApiProvider({
 		api: "cursor-agent",
 		stream,
