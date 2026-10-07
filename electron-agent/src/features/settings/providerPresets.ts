@@ -2,7 +2,8 @@ export type ApiType =
   | 'openai-completions'
   | 'openai-responses'
   | 'anthropic-messages'
-  | 'google-generative-ai';
+  | 'google-generative-ai'
+  | 'cursor-agent';
 
 export interface ProviderPreset {
   /** 与 Pi provider id 一致（如 'openai'） */
@@ -20,6 +21,7 @@ export interface ProviderPreset {
  * 内置 provider 的模型 / baseUrl 由 Pi registry 提供，UI 仅让填 API Key（+ 可追加自定义模型）。
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'cursor', name: 'Cursor', api: 'cursor-agent' },
   { id: 'openai', name: 'OpenAI', api: 'openai-responses', baseUrlHint: 'https://api.openai.com/v1' },
   { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages', baseUrlHint: 'https://api.anthropic.com' },
   { id: 'google', name: 'Google Gemini', api: 'google-generative-ai' },

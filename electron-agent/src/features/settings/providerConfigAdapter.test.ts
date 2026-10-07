@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
 import { defaultThinkingLevelMap, loadState, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
+import { PROVIDER_PRESETS } from './providerPresets';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
 
@@ -70,6 +71,15 @@ describe('providerConfigAdapter', () => {
     ]);
     const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
     expect(back?.headers).toMatchObject({ 'X-Foo': 'bar', 'User-Agent': 'pi-agent/1.0' });
+  });
+
+  it('cursor-agent 使用目录阶梯，不用 openai-responses 的四档', () => {
+    expect(PROVIDER_PRESETS.some((preset) => preset.id === 'cursor' && preset.api === 'cursor-agent')).toBe(true);
+    const cursor = defaultThinkingLevelMap('cursor-agent');
+    const openai = defaultThinkingLevelMap('openai-responses');
+    expect(cursor).not.toEqual(openai);
+    expect(cursor?.high).toBe('high');
+    expect(cursor && 'xhigh' in cursor).toBe(true);
   });
 
   it('maps each API type to its native reasoning ladder', () => {

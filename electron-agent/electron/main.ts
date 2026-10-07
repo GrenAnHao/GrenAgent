@@ -45,6 +45,7 @@ import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
 import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
+import { installCursorProvider, registerCursorNativeProvider } from "../../cli/src/cursor/install.js";
 import { collectModels } from "../../cli/src/probe-models.js";
 import { runHostOneshot } from "./agent/hostOneshotAdapter";
 import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
@@ -72,6 +73,7 @@ export function createWindow(backgroundColor?: string) {
 
 if (!process.env.VITEST) {
   app.whenReady().then(async () => {
+    installCursorProvider();
     startRuntimeDiag();
     // userData 随应用名变化（dev 用 package.json name，打包用 productName），
     // 早期版本的数据留在旧目录；读不到时回退到 com.rxstudio.grenagent。
@@ -102,7 +104,11 @@ if (!process.env.VITEST) {
     });
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
     const modelRuntimeHost = new ModelRuntimeHost({
-      create: async () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
+      create: async () => {
+        const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
+        registerCursorNativeProvider((provider) => runtime.registerNativeProvider(provider));
+        return runtime;
+      },
       resolveSettings: async () => {
         const defaults = SettingsManager.create(app.getPath('userData'), getAgentDir());
         return { provider: defaults.getDefaultProvider() ?? '', modelId: defaults.getDefaultModel() ?? '' };
