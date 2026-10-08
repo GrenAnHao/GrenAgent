@@ -35,6 +35,7 @@ import { prewarmWorkspace } from './lib/prewarm';
 import { createStartupPerf } from './lib/startupPerf';
 import { IS_DEV } from './lib/devMode';
 import { pathsEquivalent } from './lib/pathUtils';
+import { useStableCallback } from './lib/structuralShare';
 import { applyOpenedProject, enterPendingNewSession } from './lib/pendingSession';
 import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
 import {
@@ -837,6 +838,18 @@ const Workspace = memo(function Workspace() {
     [listedRunningPaths, allSessions, optimisticSessions],
   );
 
+  // 这些回调依赖当前工作区的 store，切到别的项目就全换了引用，侧栏每一行跟着重渲。
+  // 侧栏只在点击时调用它们，给它恒定引用、调用时转到最新实现。
+  const sidebarNewConversation = useStableCallback(handleNewConversation);
+  const sidebarOpenProject = useStableCallback(handleOpenProject);
+  const sidebarNewSession = useStableCallback(handleNewSession);
+  const sidebarOpenSession = useStableCallback(handleOpenSession);
+  const sidebarDeleteSession = useStableCallback(handleDeleteSession);
+  const sidebarDeleteConversation = useStableCallback(handleDeleteConversation);
+  const sidebarClearProjectSessions = useStableCallback(handleClearProjectSessions);
+  const sidebarRemoveProject = useStableCallback(handleRemoveProject);
+  const sidebarSubmitRename = useStableCallback(handleSubmitRename);
+
   return (
     <Flexbox style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
       <Titlebar />
@@ -850,15 +863,15 @@ const Workspace = memo(function Workspace() {
                 sidebar={
                   <SidebarPanel
                     runningSessionPaths={runningSessionPaths}
-                    onNewConversation={handleNewConversation}
-                    onOpenProject={handleOpenProject}
-                    onNewSession={handleNewSession}
-                    onOpenSession={handleOpenSession}
-                    onDeleteSession={handleDeleteSession}
-                    onDeleteConversation={handleDeleteConversation}
-                    onClearProjectSessions={handleClearProjectSessions}
-                    onRemoveProject={handleRemoveProject}
-                    onSubmitRename={handleSubmitRename}
+                    onNewConversation={sidebarNewConversation}
+                    onOpenProject={sidebarOpenProject}
+                    onNewSession={sidebarNewSession}
+                    onOpenSession={sidebarOpenSession}
+                    onDeleteSession={sidebarDeleteSession}
+                    onDeleteConversation={sidebarDeleteConversation}
+                    onClearProjectSessions={sidebarClearProjectSessions}
+                    onRemoveProject={sidebarRemoveProject}
+                    onSubmitRename={sidebarSubmitRename}
                   />
                 }
               />
@@ -869,6 +882,19 @@ const Workspace = memo(function Workspace() {
     </Flexbox>
   );
 });
+
+/**
+ * 只在这里订阅 activeWorkspace。放在 App 里时，切到别的项目的会话会让 App 连同外层的主题 Provider、
+ * 全局样式和弹窗一起重渲，切会话那一帧多出几十毫秒。
+ */
+function ActiveWorkspace() {
+  const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
+  return (
+    <AgentStoreProvider workspace={activeWorkspace}>
+      <Workspace />
+    </AgentStoreProvider>
+  );
+}
 
 export default function App() {
   useEffect(() => startRunningSessionTracking(), []);
@@ -899,7 +925,6 @@ export default function App() {
     // 全部取空值 → 深色下退回浅色兜底。给定固定 key 后由 ThemeBridge 挂到根元素上。
     return { cssVar: { key: ANTD_CSS_VAR_KEY }, hashed: false, ...(token ? { token } : {}) };
   }, [colorScheme, isDark]);
-  const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
   const worksDir = useSessionStore((s) => s.worksDir);
 
   // worksDir 决定侧栏「对话 / 项目」归类（works 目录下的会话算「对话」，其余算「项目」）。
@@ -992,9 +1017,7 @@ export default function App() {
         <FullAccessConfirmModal />
         <MarkdownWarmup />
         <CodeViewWarmup />
-        <AgentStoreProvider workspace={activeWorkspace}>
-          <Workspace />
-        </AgentStoreProvider>
+        <ActiveWorkspace />
       </ConfigProvider>
     </ThemeProvider>
   );

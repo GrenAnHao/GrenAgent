@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { SessionInfo } from '../../lib/pi';
 import { filterDeletedSessions, mergeAllSessions } from '../../lib/mergeSessions';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
+import { shareUnchanged } from '../../lib/structuralShare';
 
 export interface ProjectGroup {
   cwd: string;
@@ -100,6 +101,17 @@ export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams)
   return groups;
 }
 
+/** 先按路径共享每组的会话对象，再按 cwd 共享分组本身。 */
+export function sharePreviousGroups(prev: readonly ProjectGroup[] | undefined, next: ProjectGroup[]): ProjectGroup[] {
+  if (!prev) return next;
+  const prevByCwd = new Map(prev.map((group) => [group.cwd, group]));
+  const withSessions = next.map((group) => {
+    const old = prevByCwd.get(group.cwd);
+    return old ? { ...group, sessions: shareUnchanged(old.sessions, group.sessions, (session) => session.path) } : group;
+  });
+  return shareUnchanged(prev, withSessions, (group) => group.cwd);
+}
+
 export function useProjectGroups(): ProjectGroup[] {
   const allSessions = useSessionStore((s) => s.allSessions);
   const optimisticSessions = useSessionStore((s) => s.optimisticSessions);
@@ -113,9 +125,11 @@ export function useProjectGroups(): ProjectGroup[] {
   const hiddenProjects = useSidebarPrefsStore((s) => s.hiddenProjects);
   const aliases = useSidebarPrefsStore((s) => s.aliases);
 
+  // 沿用上一轮没变的分组和会话对象：切会话会整份重建，侧栏的 memo 行组件只该重渲变了的那几行。
+  const previous = useRef<ProjectGroup[] | undefined>(undefined);
   return useMemo(
-    () =>
-      buildProjectGroups(
+    () => {
+      const built = buildProjectGroups(
         filterDeletedSessions(mergeAllSessions(allSessions, optimisticSessions), deletedSessionPaths),
         {
           current,
@@ -126,7 +140,10 @@ export function useProjectGroups(): ProjectGroup[] {
           worksDir,
           registeredProjects: mergeProjectRegistrations(registeredProjects, keptProjects),
         },
-      ),
+      );
+      previous.current = sharePreviousGroups(previous.current, built);
+      return previous.current;
+    },
     [
       allSessions,
       optimisticSessions,

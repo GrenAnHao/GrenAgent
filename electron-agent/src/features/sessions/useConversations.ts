@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { SessionInfo } from '../../lib/pi';
 import { filterDeletedSessions, mergeAllSessions } from '../../lib/mergeSessions';
 import { useSessionStore } from '../../store/session';
 import { isUnder } from '../../lib/pathUtils';
 import { pathsEquivalent } from '../../lib/pathUtils';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
+import { shareUnchanged } from '../../lib/structuralShare';
 
 export interface ConversationItem {
   cwd: string;
@@ -70,8 +71,11 @@ export function useConversations(): ConversationItem[] {
   const keyword = useSessionStore((s) => s.searchKeyword);
   const deletedCwds = useSessionStore((s) => s.deletedConversationCwds);
   const pinnedCwds = useSidebarPrefsStore((s) => s.pinnedConversations);
-  return useMemo(
-    () =>
+  // 沿用上一轮没变的条目：切会话会整份重建，侧栏的 memo 行组件只该重渲变了的那几行。
+  const previous = useRef<ConversationItem[] | undefined>(undefined);
+  return useMemo(() => {
+    const next = shareUnchanged(
+      previous.current,
       buildConversations(
         filterDeletedSessions(mergeAllSessions(all, optimistic), deletedSessionPaths),
         worksDir,
@@ -80,6 +84,9 @@ export function useConversations(): ConversationItem[] {
         deletedCwds,
         pinnedCwds,
       ),
-    [all, optimistic, deletedSessionPaths, worksDir, current, keyword, deletedCwds, pinnedCwds],
-  );
+      (item) => item.sessionPath,
+    );
+    previous.current = next;
+    return next;
+  }, [all, optimistic, deletedSessionPaths, worksDir, current, keyword, deletedCwds, pinnedCwds]);
 }

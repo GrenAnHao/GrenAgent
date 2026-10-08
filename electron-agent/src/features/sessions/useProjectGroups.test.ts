@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectGroups, mergeProjectRegistrations } from './useProjectGroups';
+import { buildProjectGroups, mergeProjectRegistrations, sharePreviousGroups } from './useProjectGroups';
 import type { SessionInfo } from '../../lib/pi';
 
 const s = (cwd: string, ts: string): SessionInfo => ({
@@ -65,5 +65,21 @@ describe('buildProjectGroups worksDir filter', () => {
     // 仍按最近活跃排序：a 在前、b 在后；当前项目 b 不被置顶，避免打开即重排。
     expect(groups.map((g) => g.cwd)).toEqual(['/proj/a', '/proj/b']);
     expect(groups[1].isCurrent).toBe(true);
+  });
+});
+
+describe('sharePreviousGroups', () => {
+  const params = (current: string) => ({ current, pinnedProjects: [], hiddenProjects: [], aliases: {}, keyword: '', worksDir: '', registeredProjects: [] });
+
+  it('切到另一个项目只换掉 isCurrent 变了的两组，其余分组和所有会话对象沿用', () => {
+    const sessions = [s('D:/a', '2026-10-01'), s('D:/b', '2026-10-02'), s('D:/c', '2026-10-03')];
+    const before = buildProjectGroups(sessions, params('D:/a'));
+    const after = sharePreviousGroups(before, buildProjectGroups(sessions.map((x) => ({ ...x })), params('D:/b')));
+
+    const byCwd = (groups: typeof before, cwd: string) => groups.find((g) => g.cwd === cwd)!;
+    expect(byCwd(after, 'D:/c')).toBe(byCwd(before, 'D:/c'));
+    expect(byCwd(after, 'D:/a')).not.toBe(byCwd(before, 'D:/a'));
+    expect(byCwd(after, 'D:/a').sessions[0]).toBe(byCwd(before, 'D:/a').sessions[0]);
+    expect(byCwd(after, 'D:/b').isCurrent).toBe(true);
   });
 });

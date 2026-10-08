@@ -7,7 +7,7 @@ import { revealItemInDir } from '../../platform/runtime';
 import { VList } from 'virtua';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
-import { PREWARM_AFTER_BOOT_MS, prewarmRecent, prewarmWorkspace } from '../../lib/prewarm';
+import { cancelHoverPrewarm, PREWARM_AFTER_BOOT_MS, prewarmRecent, startHoverPrewarm } from '../../lib/prewarm';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pathsEquivalent } from '../../lib/pathUtils';
 import { useConversations } from './useConversations';
@@ -289,9 +289,14 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               <div
                 key={item.key}
                 onPointerEnter={() => {
-                  const cwd = cwdOfItem(item);
-                  if (cwd) prewarmWorkspace(cwd);
+                  // 只有会话行预热：项目行点了只是展开。划过不预热，停住才建，见 HOVER_PREWARM_DWELL_MS。
+                  const cwd = item.type === 'conversation' || item.type === 'session' ? cwdOfItem(item) : undefined;
+                  if (cwd) startHoverPrewarm(cwd);
+                  else cancelHoverPrewarm();
                 }}
+                onPointerLeave={cancelHoverPrewarm}
+                // 点下去就是要打开它，打开会话自己会建运行时，不要再让悬停计时在切换中途触发。
+                onPointerDown={cancelHoverPrewarm}
               >
                 {renderItem(item)}
               </div>

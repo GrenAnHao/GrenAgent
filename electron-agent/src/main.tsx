@@ -1,3 +1,5 @@
+// 尽量第一个求值：样式规则在其它模块求值时就开始插入，见 theme/installSpeedyStyles。
+import './theme/installSpeedyStyles';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';

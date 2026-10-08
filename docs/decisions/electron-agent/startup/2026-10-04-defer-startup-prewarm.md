@@ -1,14 +1,16 @@
 ---
 title: 冷启动的其它项目预热推迟到主界面出来之后，并串行执行
-status: active
+status: superseded
 date: 2026-10-04
 scope: electron-agent/startup
 files:
   - electron-agent/src/lib/prewarm.ts
   - electron-agent/src/features/sessions/Sidebar.tsx
 supersedes:
-superseded_by:
+superseded_by: electron-agent/startup/2026-10-08-prewarm-throttle.md
 ---
+
+> 已过时 → 见 [2026-10-08-prewarm-throttle.md](2026-10-08-prewarm-throttle.md)
 
 ## 背景
 侧边栏一拿到会话列表就 `prewarmRecent` 最多 4 个项目，每个都会 `createWorkspaceHandle` 并跑一遍扩展工厂。当前工作区的 `openWorkspace` 也在做同一件事，加载页要等它结束才收起。这几路运行时挤在同一个主进程上，首屏要等的那一路被其它项目的工厂拖住。日志里同一组 `extension loaded` 连续出现多次，就是这些句柄。
