@@ -104,6 +104,8 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextTertiary};
   `,
   badge: css`
+    flex: none;
+    white-space: nowrap;
     margin-inline-start: auto;
     padding: 0 6px;
     border-radius: 4px;

@@ -41,6 +41,8 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const requestSeq = useRef(0);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
 
   const report = useCallback((error: unknown) => {
     message.error(errorText(error));
@@ -65,25 +67,29 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   }, [reload]);
 
   const toggle = async (rule: RuleInfo, enabled: boolean) => {
+    const started = workspace;
     try {
       await setContextRuleEnabled(workspace, { scope: rule.scope, id: rule.id }, enabled);
+      if (workspaceRef.current !== started) return;
       setDraft((current) => (current && sameRule(current, rule) ? { ...current, enabled } : current));
       await reload();
     } catch (error) {
-      report(error);
+      if (workspaceRef.current === started) report(error);
     }
   };
 
   const save = async () => {
     if (!draft || saving) return;
+    const started = workspace;
     setSaving(true);
     try {
       const saved = await saveContextRule({ workspace, ...draft });
+      if (workspaceRef.current !== started) return;
       setDraft(draftOf(saved));
       await reload();
       message.success('已保存');
     } catch (error) {
-      report(error);
+      if (workspaceRef.current === started) report(error);
     } finally {
       setSaving(false);
     }

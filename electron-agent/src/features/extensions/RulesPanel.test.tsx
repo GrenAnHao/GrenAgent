@@ -146,6 +146,27 @@ describe('RulesPanel', () => {
     await waitFor(() => expect(screen.queryByTestId('rule-title-input')).not.toBeInTheDocument());
   });
 
+  it('保存挂起期间换工作区，完成后不回填草稿也不提示', async () => {
+    io.listContextRules.mockResolvedValue([]);
+    let release: (value: unknown) => void = () => {};
+    io.saveContextRule.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    const view = (workspace: string) => (
+      <ThemeProvider><App><RulesPanel workspace={workspace} /></App></ThemeProvider>
+    );
+    const { rerender } = render(view('/a'));
+    await waitFor(() => expect(screen.getByTestId('rule-new')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('rule-new'));
+    fireEvent.change(screen.getByTestId('rule-title-input'), { target: { value: 'a' } });
+    fireEvent.change(screen.getByTestId('rule-body-input'), { target: { value: 'b' } });
+    fireEvent.click(screen.getByTestId('rule-save'));
+    rerender(view('/b'));
+    await waitFor(() => expect(screen.queryByTestId('rule-title-input')).not.toBeInTheDocument());
+    release(rules[0]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId('rule-title-input')).not.toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it('旧请求晚返回时不覆盖新请求的结果', async () => {
     let releaseOld: (value: unknown) => void = () => {};
     io.listContextRules

@@ -36,7 +36,7 @@ function renderPanel(onResourcesChanged = vi.fn(), workspace = '/ws') {
   render(
     <ThemeProvider>
       <App>
-        <CommandsPanel workspace={workspace}onResourcesChanged={onResourcesChanged} />
+        <CommandsPanel workspace={workspace} onResourcesChanged={onResourcesChanged} />
       </App>
     </ThemeProvider>,
   );
