@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
+
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+vi.mock('antd', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('antd')>();
+  return { ...actual, App: Object.assign(actual.App, { useApp: () => ({ message: toast }) }) };
+});
 
 const io = vi.hoisted(() => ({
   listPromptCommands: vi.fn(),
@@ -26,11 +32,11 @@ vi.setConfig({ testTimeout: 45000 });
 
 const refactor = { name: 'refactor', description: '重构', body: '改 {file}', params: [{ name: 'file' }], path: '/p/refactor.md' };
 
-function renderPanel(onResourcesChanged = vi.fn()) {
+function renderPanel(onResourcesChanged = vi.fn(), workspace = '/ws') {
   render(
     <ThemeProvider>
       <App>
-        <CommandsPanel workspace="/ws" onResourcesChanged={onResourcesChanged} />
+        <CommandsPanel workspace={workspace}onResourcesChanged={onResourcesChanged} />
       </App>
     </ThemeProvider>,
   );
@@ -77,6 +83,40 @@ describe('CommandsPanel', () => {
     fireEvent.change(screen.getByTestId('command-name-input'), { target: { value: 'goal' } });
     fireEvent.change(screen.getByTestId('prompt-body-input'), { target: { value: 'x' } });
     await waitFor(() => expect(screen.getByTestId('command-error')).toHaveTextContent('/goal 和已有的内置、扩展或技能命令重名'));
+    expect(screen.getByTestId('command-save')).toBeDisabled();
+  });
+
+  it('删除失败时给出错误提示，编辑区保留', async () => {
+    io.listPromptCommands.mockResolvedValue([refactor]);
+    io.deletePromptCommand.mockRejectedValueOnce(new Error('磁盘只读'));
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('command-item-refactor')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-item-refactor'));
+    fireEvent.click(screen.getByTestId('command-delete'));
+    const popover = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('.ant-popover');
+      if (!el) throw new Error('popover not open');
+      return el;
+    });
+    fireEvent.click(within(popover).getByRole('button', { name: /删/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('磁盘只读'));
+    expect(screen.getByTestId('command-name-input')).toHaveValue('refactor');
+  });
+
+  it('损坏的命令在列表里显示警告图标', async () => {
+    io.listPromptCommands.mockResolvedValue([{ ...refactor, error: 'frontmatter 错误' }]);
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('command-warning-refactor')).toBeInTheDocument());
+  });
+
+  it('没有工作区时保留名至少包含前端命令', async () => {
+    io.listPromptCommands.mockResolvedValue([]);
+    renderPanel(vi.fn(), '');
+    await waitFor(() => expect(screen.getByTestId('command-new')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-new'));
+    fireEvent.change(screen.getByTestId('command-name-input'), { target: { value: 'compact' } });
+    fireEvent.change(screen.getByTestId('prompt-body-input'), { target: { value: 'x' } });
+    await waitFor(() => expect(screen.getByTestId('command-error')).toHaveTextContent('/compact'));
     expect(screen.getByTestId('command-save')).toBeDisabled();
   });
 });

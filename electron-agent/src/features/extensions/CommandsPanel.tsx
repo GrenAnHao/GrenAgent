@@ -1,13 +1,15 @@
 import { Button, Flexbox } from '@lobehub/ui';
-import { App, Input, Popconfirm } from 'antd';
-import { Plus } from 'lucide-react';
+import { App, Input, Popconfirm, Tooltip } from 'antd';
+import { Plus, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { parsePromptParams } from '@extensions/prompt-commands/syntax';
 import { deletePromptCommand, listPromptCommands, savePromptCommand, type PromptCommandInfo } from '../../lib/promptLibraryIo';
+import { getFrontendCommands } from '../chat/input/commandUtils';
 import { loadCommands } from '../chat/input/editor/commandLoader';
 import { invalidatePromptCommands } from '../chat/input/editor/promptCommandCache';
 import { CommandPillView } from '../chat/input/editor/CommandPill/CommandPillView';
 import { EMPTY_COMMAND_DRAFT, validateCommandDraft, type CommandDraft } from './commandDraft';
+import { errorText } from './errorText';
 import { libraryStyles as styles } from './libraryStyles';
 import { PromptBodyEditor } from './PromptBodyEditor';
 
@@ -32,7 +34,7 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
     try {
       setCommands(await listPromptCommands());
     } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
+      message.error(errorText(error));
     }
   }, [message]);
 
@@ -41,7 +43,10 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
   }, [reload]);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace) {
+      setReserved(new Set(getFrontendCommands().map((command) => command.name)));
+      return;
+    }
     let cancelled = false;
     void loadCommands(workspace).then((list) => {
       if (cancelled) return;
@@ -71,7 +76,7 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
       await afterChange();
       message.success(`已保存 /${saved.name}`);
     } catch (cause) {
-      message.error(cause instanceof Error ? cause.message : String(cause));
+      message.error(errorText(cause));
     } finally {
       setSaving(false);
     }
@@ -79,9 +84,15 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
 
   const remove = async () => {
     if (!draft?.originalName) return;
-    await deletePromptCommand(draft.originalName);
-    setDraft(null);
-    await afterChange();
+    const name = draft.originalName;
+    try {
+      await deletePromptCommand(name);
+      setDraft(null);
+      await afterChange();
+      message.success(`已删除 /${name}`);
+    } catch (cause) {
+      message.error(errorText(cause));
+    }
   };
 
   return (
@@ -103,10 +114,14 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
               className={styles.item}
               data-testid={`command-item-${command.name}`}
               data-active={draft?.originalName === command.name}
-              title={command.error}
               onClick={() => setDraft(draftOf(command))}
             >
               <CommandPillView name={command.name} args={[]} />
+              {command.error ? (
+                <Tooltip title={command.error}>
+                  <TriangleAlert size={14} className={styles.warn} data-testid={`command-warning-${command.name}`} />
+                </Tooltip>
+              ) : null}
               {command.params.length > 0 ? <span className={styles.badge}>{command.params.length} 参数</span> : null}
             </button>
           ))}
@@ -129,7 +144,7 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
               <div data-testid="command-detected-params">
                 <div className={styles.label}>识别到的参数</div>
                 {params.length === 0 ? '无' : params.map((param, index) => (
-                  <span key={param.name} style={{ marginInlineEnd: 8 }}>
+                  <span key={param.name} className={styles.param}>
                     {index + 1}. {param.name}
                     {param.defaultValue !== undefined ? `（默认 ${param.defaultValue}）` : ''}
                   </span>

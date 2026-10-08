@@ -22,6 +22,7 @@ const styles = createStaticStyles(({ css }) => ({
     line-height: 1.7;
     white-space: pre-wrap;
     word-break: break-word;
+    scrollbar-gutter: stable;
   `,
   backdrop: css`
     position: absolute;
@@ -45,6 +46,10 @@ const styles = createStaticStyles(({ css }) => ({
     color: transparent;
     caret-color: ${cssVar.colorText};
     background: transparent;
+
+    &::placeholder {
+      color: ${cssVar.colorTextQuaternary};
+    }
   `,
 }));
 
@@ -67,6 +72,7 @@ export function PromptBodyEditor({ value, onChange }: { value: string; onChange:
       <textarea
         className={`${styles.layer} ${styles.textarea}`}
         data-testid="prompt-body-input"
+        aria-label="提示词"
         value={value}
         spellCheck={false}
         placeholder="用 {参数名} 留空，{参数名=默认值} 带默认"

@@ -55,6 +55,54 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
       background: ${cssVar.colorFillTertiary};
     }
   `,
+  rowWrap: css`
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-inline-start: 8px;
+    border-radius: 6px;
+
+    &[data-active='true'] {
+      background: ${cssVar.colorFillSecondary};
+    }
+
+    &:hover {
+      background: ${cssVar.colorFillTertiary};
+    }
+  `,
+  rowOpen: css`
+    display: flex;
+    flex: 1;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    padding: 6px 8px 6px 0;
+    border: 0;
+    text-align: start;
+    color: ${cssVar.colorText};
+    background: transparent;
+    cursor: pointer;
+  `,
+  ellipsis: css`
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  warn: css`
+    flex: none;
+    color: ${cssVar.colorWarning};
+  `,
+  param: css`
+    margin-inline-end: 8px;
+  `,
+  listNote: css`
+    margin-block-start: auto;
+    padding: 8px 4px 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: ${cssVar.colorTextTertiary};
+  `,
   badge: css`
     margin-inline-start: auto;
     padding: 0 6px;

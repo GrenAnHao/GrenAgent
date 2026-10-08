@@ -1,7 +1,7 @@
 import { Button, Flexbox } from '@lobehub/ui';
 import { App, Input, Popconfirm, Segmented, Switch, Tooltip } from 'antd';
 import { Plus, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   deleteContextRule,
   listContextRules,
@@ -11,6 +11,7 @@ import {
   type RuleRef,
   type RuleScope,
 } from '../../lib/promptLibraryIo';
+import { errorText } from './errorText';
 import { libraryStyles as styles } from './libraryStyles';
 
 type Filter = 'all' | RuleScope;
@@ -38,18 +39,26 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   const [rules, setRules] = useState<RuleInfo[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [draft, setDraft] = useState<RuleDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const requestSeq = useRef(0);
 
   const report = useCallback((error: unknown) => {
-    message.error(error instanceof Error ? error.message : String(error));
+    message.error(errorText(error));
   }, [message]);
 
   const reload = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
-      setRules(await listContextRules(workspace));
+      const list = await listContextRules(workspace);
+      if (seq === requestSeq.current) setRules(list);
     } catch (error) {
-      report(error);
+      if (seq === requestSeq.current) report(error);
     }
   }, [workspace, report]);
+
+  useEffect(() => {
+    setDraft(null);
+  }, [workspace]);
 
   useEffect(() => {
     void reload();
@@ -58,6 +67,7 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   const toggle = async (rule: RuleInfo, enabled: boolean) => {
     try {
       await setContextRuleEnabled(workspace, { scope: rule.scope, id: rule.id }, enabled);
+      setDraft((current) => (current && sameRule(current, rule) ? { ...current, enabled } : current));
       await reload();
     } catch (error) {
       report(error);
@@ -65,13 +75,17 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || saving) return;
+    setSaving(true);
     try {
       const saved = await saveContextRule({ workspace, ...draft });
       setDraft(draftOf(saved));
       await reload();
+      message.success('已保存');
     } catch (error) {
       report(error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -98,7 +112,7 @@ export function RulesPanel({ workspace }: { workspace: string }) {
         </Button>
       </div>
       <div className={styles.desc}>
-        启用的规则在每次发送时放进上下文。全局规则在 ~/.pi/agent/rules，项目规则在工作区的 .pi/rules。Pi 自己还会读 AGENTS.md / CLAUDE.md，这里不管它们。
+        启用的规则在每次发送时放进上下文。全局规则在 ~/.pi/agent/rules，项目规则在工作区的 .pi/rules。
       </div>
       <div className={styles.split}>
         <div className={styles.list}>
@@ -116,20 +130,21 @@ export function RulesPanel({ workspace }: { workspace: string }) {
           {visible.map((rule) => {
             const key = `${rule.scope}-${rule.id}`;
             return (
-              <div key={key} className={styles.item} data-testid={`rule-item-${key}`} data-active={sameRule(draft, rule)} onClick={() => setDraft(draftOf(rule))}>
-                <span onClick={(event) => event.stopPropagation()}>
-                  <Switch size="small" checked={rule.enabled} disabled={Boolean(rule.error)} data-testid={`rule-toggle-${key}`} onChange={(checked) => void toggle(rule, checked)} />
-                </span>
-                <span>{rule.title}</span>
-                {rule.error ? (
-                  <Tooltip title={rule.error}>
-                    <TriangleAlert size={14} data-testid={`rule-warning-${key}`} />
-                  </Tooltip>
-                ) : null}
-                <span className={styles.badge}>{SCOPE_LABEL[rule.scope]}</span>
+              <div key={key} className={styles.rowWrap} data-testid={`rule-item-${key}`} data-active={sameRule(draft, rule)}>
+                <Switch size="small" checked={rule.enabled} disabled={Boolean(rule.error)} data-testid={`rule-toggle-${key}`} onChange={(checked) => void toggle(rule, checked)} />
+                <button type="button" className={styles.rowOpen} data-testid={`rule-open-${key}`} onClick={() => setDraft(draftOf(rule))}>
+                  <span className={styles.ellipsis}>{rule.title}</span>
+                  {rule.error ? (
+                    <Tooltip title={rule.error}>
+                      <TriangleAlert size={14} className={styles.warn} data-testid={`rule-warning-${key}`} />
+                    </Tooltip>
+                  ) : null}
+                  <span className={styles.badge}>{SCOPE_LABEL[rule.scope]}</span>
+                </button>
               </div>
             );
           })}
+          <div className={styles.listNote}>Pi 自己还会读 AGENTS.md / CLAUDE.md，这里不管它们。</div>
         </div>
         <div className={styles.edit}>
           {draft ? (
@@ -163,7 +178,7 @@ export function RulesPanel({ workspace }: { workspace: string }) {
                 <Input.TextArea data-testid="rule-body-input" autoSize={{ minRows: 6, maxRows: 18 }} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
               </div>
               <Flexbox horizontal gap={8}>
-                <Button type="primary" size="small" data-testid="rule-save" disabled={!canSave} onClick={() => void save()}>保存</Button>
+                <Button type="primary" size="small" data-testid="rule-save" disabled={!canSave} loading={saving} onClick={() => void save()}>保存</Button>
                 {draft.original ? (
                   <Popconfirm title="删除这条规则？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
                     <Button size="small" danger data-testid="rule-delete">删除</Button>
