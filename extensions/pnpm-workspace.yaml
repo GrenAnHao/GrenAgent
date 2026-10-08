@@ -2,3 +2,13 @@ allowBuilds:
   '@google/genai': set this to true or false
   esbuild: set this to true or false
   protobufjs: set this to true or false
+
+minimumReleaseAgeExclude:
+  - '@earendil-works/chord@1.1.0'
+  - '@earendil-works/pi-agent-core@1.1.0'
+  - '@earendil-works/pi-ai@1.1.0'
+  - '@earendil-works/pi-coding-agent@1.1.0'
+  - '@earendil-works/pi-codemode@1.1.0'
+  - '@earendil-works/pi-mcp@1.1.0'
+  - '@earendil-works/pi-tui@1.1.0'
+  - '@earendil-works/pi-telemetry@1.1.0'

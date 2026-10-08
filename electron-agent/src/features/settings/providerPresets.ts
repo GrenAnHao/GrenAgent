@@ -45,7 +45,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'vercel-ai-gateway', name: 'Vercel AI Gateway', api: 'openai-completions' },
   { id: 'amazon-bedrock', name: 'Amazon Bedrock', api: 'openai-completions' },
   { id: 'google-vertex', name: 'Google Vertex AI', api: 'google-generative-ai' },
-  { id: 'azure-openai-responses', name: 'Azure OpenAI Responses', api: 'openai-responses' },
+  { id: 'azure', name: 'Azure', api: 'openai-responses' },
   { id: 'cloudflare-workers-ai', name: 'Cloudflare Workers AI', api: 'openai-completions' },
   { id: 'cloudflare-ai-gateway', name: 'Cloudflare AI Gateway', api: 'openai-completions' },
   { id: 'moonshotai-cn', name: 'Moonshot AI (China)', api: 'openai-completions', baseUrlHint: 'https://api.moonshot.cn/v1' },
