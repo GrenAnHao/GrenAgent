@@ -164,6 +164,8 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
     };
     const onMouseDown = (event: MouseEvent) => {
       event.stopPropagation();
+      // 只处理左键：右键要出原生菜单，中键不该把焦点拉进参数框。
+      if (event.button !== 0) return;
       const target = event.target;
       if (target instanceof HTMLInputElement) return;
       // 不让光标落到胶囊外的正文里。点参数段的 label 时，原生会把随后的 click 转给里面的 input。
