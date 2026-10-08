@@ -12,10 +12,16 @@ import { pillKeyAction } from './pillKeys';
 
 const INVALID_FLASH_MS = 900;
 
-/** 在胶囊上就截住，不让 Lexical 根节点和 React 根节点处理（见计划任务 10 的约束）。 */
+/**
+ * 这些事件在胶囊根节点上就停止冒泡，不让外层处理：
+ * - Lexical 根节点的 keydown 会触发 KEY_ENTER_COMMAND 等（lobehub 的 onPressEnter 会直接发送）；
+ * - beforeinput / input 会被 Lexical 改写或阻止；paste / copy / cut / drop 会被编辑器接管；
+ * - React 合成事件挂在应用根容器上，事件到不了，所以输入框用原生监听，不用 React 的 onChange / onKeyDown。
+ * keydown / input / paste / mousedown 有专门的处理器（同样停止冒泡），不在这个列表里。
+ */
 const SWALLOWED_EVENTS = [
   'keyup', 'keypress', 'beforeinput', 'compositionstart', 'compositionupdate', 'compositionend',
-  'cut', 'copy', 'drop', 'dragstart', 'mousedown', 'click',
+  'cut', 'copy', 'drop', 'dragstart', 'click',
 ] as const;
 
 interface CommandPillEditorProps {
@@ -42,6 +48,7 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
   const [focused, setFocused] = useState<number | null>(null);
   const [invalid, setInvalid] = useState<number | null>(null);
   const invalidTimer = useRef<number | undefined>(undefined);
+  const invalidFrame = useRef<number | undefined>(undefined);
 
   // 输入框是非受控的（defaultValue 只在挂载时生效）。撤销/重做或程序改了节点值时要手动回写；
   // 正常输入时节点值和 input 值相同，这里是 no-op，不会打断光标。
@@ -52,7 +59,13 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
     });
   }, [values]);
 
-  useEffect(() => () => window.clearTimeout(invalidTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(invalidTimer.current);
+      if (invalidFrame.current !== undefined) window.cancelAnimationFrame(invalidFrame.current);
+    },
+    [],
+  );
 
   const withNode = useCallback(
     (fn: (node: CommandPillNode) => void) => {
@@ -64,6 +77,19 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
     [editor, nodeKey],
   );
 
+  /**
+   * 离开胶囊（跳出、删除）都走这里。先把焦点交还根节点：Lexical 提交时 updateDOMSelection
+   * 见 activeElement 是装饰器里的 input 就直接返回，不设 DOM 选区，光标会留在输入框里。
+   * 根节点有焦点后，move 里 selectNext / selectPrevious 产生的新选区会在提交时写进 DOM，不用再 editor.focus()。
+   */
+  const leavePill = useCallback(
+    (move: (node: CommandPillNode) => void) => {
+      editor.getRootElement()?.focus({ preventScroll: true });
+      withNode(move);
+    },
+    [editor, withNode],
+  );
+
   const focusArg = useCallback((index: number, caret: 'start' | 'end' = 'end') => {
     const input = inputs.current[index];
     if (!input) return;
@@ -72,16 +98,17 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
     input.setSelectionRange(at, at);
   }, []);
 
-  const exit = useCallback(
-    (where: 'before' | 'after') => {
-      withNode((node) => {
-        if (where === 'after') node.selectNext(0, 0);
-        else node.selectPrevious();
-      });
-      editor.focus();
-    },
-    [editor, withNode],
-  );
+  /** 参数段描边变红并抖一下。先清掉再在下一帧设上，连续被拦时动画能重播。 */
+  const flashInvalid = useCallback((index: number) => {
+    window.clearTimeout(invalidTimer.current);
+    if (invalidFrame.current !== undefined) window.cancelAnimationFrame(invalidFrame.current);
+    setInvalid(null);
+    invalidFrame.current = window.requestAnimationFrame(() => {
+      invalidFrame.current = undefined;
+      setInvalid(index);
+      invalidTimer.current = window.setTimeout(() => setInvalid(null), INVALID_FLASH_MS);
+    });
+  }, []);
 
   useLayoutEffect(() => {
     const index = takePillFocus(nodeKey);
@@ -95,16 +122,12 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
         (payload) => {
           if (payload.key !== nodeKey) return false;
           focusArg(payload.index);
-          if (payload.invalid) {
-            setInvalid(payload.index);
-            window.clearTimeout(invalidTimer.current);
-            invalidTimer.current = window.setTimeout(() => setInvalid(null), INVALID_FLASH_MS);
-          }
+          if (payload.invalid) flashInvalid(payload.index);
           return true;
         },
         COMMAND_PRIORITY_LOW,
       ),
-    [editor, nodeKey, focusArg],
+    [editor, nodeKey, focusArg, flashInvalid],
   );
 
   useEffect(() => {
@@ -115,6 +138,8 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
       event.stopPropagation();
       const index = argIndexOf(event.target);
       if (index === null) return;
+      // Tab 一律由胶囊处理：第一个参数上 Shift+Tab 是 none（不动），不拦的话浏览器会把焦点移出编辑器。
+      if (event.key === 'Tab' && !event.isComposing) event.preventDefault();
       const input = event.target as HTMLInputElement;
       const action = pillKeyAction({
         key: event.key,
@@ -129,14 +154,23 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
       if (action.type === 'none') return;
       event.preventDefault();
       if (action.type === 'focus') focusArg(action.index, action.caret);
-      else if (action.type === 'exit') exit(action.where);
+      else if (action.type === 'exit') leavePill((node) => node.selectNext(0, 0));
       else if (action.type === 'remove') {
-        withNode((node) => {
+        leavePill((node) => {
           node.selectPrevious();
           node.remove();
         });
-        editor.focus();
       } else hostRef.current?.submit();
+    };
+    const onMouseDown = (event: MouseEvent) => {
+      event.stopPropagation();
+      const target = event.target;
+      if (target instanceof HTMLInputElement) return;
+      // 不让光标落到胶囊外的正文里。点参数段的 label 时，原生会把随后的 click 转给里面的 input。
+      event.preventDefault();
+      if (target instanceof Element && target.closest('label[data-arg-label]')) return;
+      const firstEmpty = inputs.current.findIndex((input) => input?.value === '');
+      focusArg(firstEmpty === -1 ? 0 : firstEmpty);
     };
     const onInput = (event: Event) => {
       event.stopPropagation();
@@ -150,24 +184,26 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
       const input = event.target;
       if (!(input instanceof HTMLInputElement)) return;
       const text = event.clipboardData?.getData('text/plain');
-      if (text === undefined) return;
+      if (!text) return;
       event.preventDefault();
       const start = input.selectionStart ?? input.value.length;
       const end = input.selectionEnd ?? input.value.length;
-      input.setRangeText(text.replace(/\s*\r?\n\s*/g, ' '), start, end, 'end');
+      input.setRangeText(text.replace(/\s*[\r\n]+\s*/g, ' '), start, end, 'end');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     };
     root.addEventListener('keydown', onKeyDown);
+    root.addEventListener('mousedown', onMouseDown);
     root.addEventListener('input', onInput);
     root.addEventListener('paste', onPaste);
     SWALLOWED_EVENTS.forEach((type) => root.addEventListener(type, swallow));
     return () => {
       root.removeEventListener('keydown', onKeyDown);
+      root.removeEventListener('mousedown', onMouseDown);
       root.removeEventListener('input', onInput);
       root.removeEventListener('paste', onPaste);
       SWALLOWED_EVENTS.forEach((type) => root.removeEventListener(type, swallow));
     };
-  }, [editor, params.length, focusArg, exit, withNode]);
+  }, [editor, params.length, focusArg, leavePill, withNode]);
 
   return (
     <span
@@ -184,9 +220,10 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
         {name}
       </span>
       {params.map((param, index) => (
-        <span
+        <label
           key={param.name}
           className={cx(pillStyles.arg, focused === index && pillStyles.argFocus, invalid === index && pillStyles.argInvalid)}
+          data-arg-label
           data-testid="command-pill-arg"
           data-invalid={invalid === index}
         >
@@ -204,7 +241,7 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
             onFocus={() => setFocused(index)}
             onBlur={() => setFocused((current) => (current === index ? null : current))}
           />
-        </span>
+        </label>
       ))}
     </span>
   );

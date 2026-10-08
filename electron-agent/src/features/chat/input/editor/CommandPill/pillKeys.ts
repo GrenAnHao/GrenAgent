@@ -12,18 +12,21 @@ export interface PillKeyInput {
 export type PillKeyAction =
   | { type: 'none' }
   | { type: 'focus'; index: number; caret: 'start' | 'end' }
-  | { type: 'exit'; where: 'before' | 'after' }
+  /** 跳出到胶囊后面。胶囊必须在输入开头，所以没有「跳到胶囊前面」。 */
+  | { type: 'exit' }
   | { type: 'remove' }
   | { type: 'submit' };
 
 const NONE: PillKeyAction = { type: 'none' };
+const EXIT: PillKeyAction = { type: 'exit' };
 
+/** 上一个参数；第一个参数上不动（胶囊之前不允许有内容）。 */
 function previous(input: PillKeyInput): PillKeyAction {
-  return input.index > 0 ? { type: 'focus', index: input.index - 1, caret: 'end' } : { type: 'exit', where: 'before' };
+  return input.index > 0 ? { type: 'focus', index: input.index - 1, caret: 'end' } : NONE;
 }
 
 function next(input: PillKeyInput, caret: 'start' | 'end'): PillKeyAction {
-  return input.index < input.count - 1 ? { type: 'focus', index: input.index + 1, caret } : { type: 'exit', where: 'after' };
+  return input.index < input.count - 1 ? { type: 'focus', index: input.index + 1, caret } : EXIT;
 }
 
 /** 胶囊参数输入框里的按键 → 动作。纯函数，规格「输入框」一节的按键表。 */
@@ -43,7 +46,7 @@ export function pillKeyAction(input: PillKeyInput): PillKeyAction {
     case 'ArrowRight':
       return collapsed && input.selectionEnd === input.value.length ? next(input, 'start') : NONE;
     case 'Escape':
-      return { type: 'exit', where: 'after' };
+      return EXIT;
     default:
       return NONE;
   }

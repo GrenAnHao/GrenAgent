@@ -7,12 +7,12 @@ const at = (patch: Partial<PillKeyInput>) => pillKeyAction({ ...base, ...patch }
 describe('pillKeyAction', () => {
   it('Tab 前进，最后一个参数跳出到胶囊后', () => {
     expect(at({ key: 'Tab' })).toEqual({ type: 'focus', index: 1, caret: 'end' });
-    expect(at({ key: 'Tab', index: 1 })).toEqual({ type: 'exit', where: 'after' });
+    expect(at({ key: 'Tab', index: 1 })).toEqual({ type: 'exit' });
   });
 
-  it('Shift+Tab 后退，第一个参数跳出到胶囊前', () => {
+  it('Shift+Tab 后退，第一个参数上不动（胶囊之前不允许有内容）', () => {
     expect(at({ key: 'Tab', shift: true, index: 1 })).toEqual({ type: 'focus', index: 0, caret: 'end' });
-    expect(at({ key: 'Tab', shift: true })).toEqual({ type: 'exit', where: 'before' });
+    expect(at({ key: 'Tab', shift: true })).toEqual({ type: 'none' });
   });
 
   it('Enter 提交，Shift+Enter 和输入法组字中不处理', () => {
@@ -27,16 +27,16 @@ describe('pillKeyAction', () => {
     expect(at({ key: 'Backspace' })).toEqual({ type: 'none' });
   });
 
-  it('方向键只在边界处跨参数或跳出', () => {
+  it('方向键只在边界处跨参数，最后一个参数末尾跳出，第一个参数开头不动', () => {
     expect(at({ key: 'ArrowLeft', selectionStart: 0, selectionEnd: 0, index: 1 })).toEqual({ type: 'focus', index: 0, caret: 'end' });
-    expect(at({ key: 'ArrowLeft', selectionStart: 0, selectionEnd: 0 })).toEqual({ type: 'exit', where: 'before' });
+    expect(at({ key: 'ArrowLeft', selectionStart: 0, selectionEnd: 0 })).toEqual({ type: 'none' });
     expect(at({ key: 'ArrowLeft' })).toEqual({ type: 'none' });
     expect(at({ key: 'ArrowRight', selectionStart: 3, selectionEnd: 3 })).toEqual({ type: 'focus', index: 1, caret: 'start' });
-    expect(at({ key: 'ArrowRight', selectionStart: 3, selectionEnd: 3, index: 1 })).toEqual({ type: 'exit', where: 'after' });
+    expect(at({ key: 'ArrowRight', selectionStart: 3, selectionEnd: 3, index: 1 })).toEqual({ type: 'exit' });
   });
 
   it('Esc 跳出到胶囊后，其他键不处理', () => {
-    expect(at({ key: 'Escape' })).toEqual({ type: 'exit', where: 'after' });
+    expect(at({ key: 'Escape' })).toEqual({ type: 'exit' });
     expect(at({ key: 'x' })).toEqual({ type: 'none' });
   });
 });
