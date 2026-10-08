@@ -41,6 +41,18 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
   const [focused, setFocused] = useState<number | null>(null);
   const [invalid, setInvalid] = useState<number | null>(null);
+  const invalidTimer = useRef<number | undefined>(undefined);
+
+  // 输入框是非受控的（defaultValue 只在挂载时生效）。撤销/重做或程序改了节点值时要手动回写；
+  // 正常输入时节点值和 input 值相同，这里是 no-op，不会打断光标。
+  useLayoutEffect(() => {
+    inputs.current.forEach((input, index) => {
+      const value = values[index] ?? '';
+      if (input && input.value !== value) input.value = value;
+    });
+  }, [values]);
+
+  useEffect(() => () => window.clearTimeout(invalidTimer.current), []);
 
   const withNode = useCallback(
     (fn: (node: CommandPillNode) => void) => {
@@ -85,7 +97,8 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
           focusArg(payload.index);
           if (payload.invalid) {
             setInvalid(payload.index);
-            window.setTimeout(() => setInvalid(null), INVALID_FLASH_MS);
+            window.clearTimeout(invalidTimer.current);
+            invalidTimer.current = window.setTimeout(() => setInvalid(null), INVALID_FLASH_MS);
           }
           return true;
         },
