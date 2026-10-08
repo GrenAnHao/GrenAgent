@@ -24,6 +24,8 @@ export function usePasteCapture({ targetRef, onImages, onPastedText, onUrlText, 
     if (!el) return;
 
     const handler = (e: ClipboardEvent) => {
+      // 胶囊参数里的粘贴由胶囊自己处理（换行压成空格），这里不转附件、不转标签。
+      if (e.target instanceof Element && e.target.closest('[data-command-pill]')) return;
       const dt = e.clipboardData;
       if (!dt) return;
 

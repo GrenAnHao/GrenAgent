@@ -21,7 +21,9 @@ import { usePasteCapture } from './input/editor/usePasteCapture';
 import { useFileMention } from './input/editor/useFileMention';
 import { useSlashOptions } from './input/editor/useSlashOptions';
 import { useTauriFileDrop } from './input/editor/useTauriFileDrop';
-import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
+import ReactCommandPillPlugin from './input/editor/CommandPill/ReactCommandPillPlugin';
+import { CommandPillHostContext } from './input/editor/CommandPill/hostContext';
+import { focusMissingPillArg, readComposerText } from './input/editor/CommandPill/composerText';
 
 const PLACEHOLDER = '编辑消息，@ 引用文件/目录，/ 调用技能…';
 
@@ -174,12 +176,10 @@ export function MessageEditBox({
     requestAnimationFrame(() => editor.focus());
   }, [editor, initialText]);
 
-  const readDraft = useCallback(
-    () => unescapeComposerMarkdown(String(editor.getDocument('markdown') || '')),
-    [editor],
-  );
+  const readDraft = useCallback(() => readComposerText(editor), [editor]);
 
   const send = useCallback(() => {
+    if (focusMissingPillArg(editor.getLexicalEditor?.())) return;
     const text = composeMessage(readDraft(), pastedTexts);
     const images: PromptImage[] = attachments.map(({ type, mimeType, data }) => ({
       type,
@@ -188,7 +188,8 @@ export function MessageEditBox({
     }));
     if (!text && images.length === 0) return;
     onSend(text, images.length ? images : undefined);
-  }, [attachments, onSend, pastedTexts, readDraft]);
+  }, [attachments, editor, onSend, pastedTexts, readDraft]);
+  const pillHost = useMemo(() => ({ submit: () => void send() }), [send]);
 
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
   const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
@@ -281,39 +282,41 @@ export function MessageEditBox({
               if (e.target === e.currentTarget) editor.focus();
             }}
           >
-            <Editor
-              autoFocus
-              editor={editor}
-              content={initialText}
-              type="text"
-              variant="chat"
-              className={cx(styles.editor)}
-              pasteAsPlainText
-              enablePasteMarkdown={false}
-              markdownOption={false}
-              slashPlacement="top"
-              placeholder={PLACEHOLDER}
-              plugins={[ReactChatTagPlugin]}
-              mentionOption={{
-                items: mentionItems,
-                onSelect: mentionOnSelect,
-                maxLength: 80,
-                renderComp: boxMenu,
-              }}
-              slashOption={{
-                items: slashItems,
-                onSelect: slashOnSelect,
-                maxLength: 32,
-                renderComp: boxMenu,
-              }}
-              onChange={() => setEmpty(editor.isEmpty)}
-              onPressEnter={({ event }) => {
-                if (event.shiftKey || event.isComposing) return;
-                event.preventDefault();
-                void send();
-                return true;
-              }}
-            />
+            <CommandPillHostContext.Provider value={pillHost}>
+              <Editor
+                autoFocus
+                editor={editor}
+                content={initialText}
+                type="text"
+                variant="chat"
+                className={cx(styles.editor)}
+                pasteAsPlainText
+                enablePasteMarkdown={false}
+                markdownOption={false}
+                slashPlacement="top"
+                placeholder={PLACEHOLDER}
+                plugins={[ReactChatTagPlugin, ReactCommandPillPlugin]}
+                mentionOption={{
+                  items: mentionItems,
+                  onSelect: mentionOnSelect,
+                  maxLength: 80,
+                  renderComp: boxMenu,
+                }}
+                slashOption={{
+                  items: slashItems,
+                  onSelect: slashOnSelect,
+                  maxLength: 32,
+                  renderComp: boxMenu,
+                }}
+                onChange={() => setEmpty(editor.isEmpty)}
+                onPressEnter={({ event }) => {
+                  if (event.shiftKey || event.isComposing) return;
+                  event.preventDefault();
+                  void send();
+                  return true;
+                }}
+              />
+            </CommandPillHostContext.Provider>
           </div>
           <div className={styles.actions}>
             <Button type="link" size="small" danger aria-label="取消" onClick={onCancel}>

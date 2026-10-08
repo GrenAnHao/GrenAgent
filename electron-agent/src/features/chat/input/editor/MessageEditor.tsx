@@ -20,6 +20,8 @@ import type { ActionKey } from '../config';
 import { InputChips } from './InputChips';
 import { createBoxMenu } from './SlashBoxMenu';
 import ReactChatTagPlugin from './ChatTag/ReactChatTagPlugin';
+import ReactCommandPillPlugin from './CommandPill/ReactCommandPillPlugin';
+import { CommandPillHostContext } from './CommandPill/hostContext';
 import { useCommandPaste } from './useCommandPaste';
 import { useUrlPaste } from './useUrlPaste';
 import { usePasteCapture } from './usePasteCapture';
@@ -203,6 +205,8 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
 
   // 菜单锚定在输入框上方，宽度与输入框齐宽（@ 与 / 共用）。
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
+  // 胶囊参数里按 Enter 走同一个发送。
+  const pillHost = useMemo(() => ({ submit: () => void send() }), [send]);
 
   const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
   const { slashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>
@@ -296,39 +300,41 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
             if (e.target === e.currentTarget) editor.focus();
           }}
         >
-          <Editor
-            autoFocus
-            editor={editor}
-            content=""
-            type="text"
-            variant="chat"
-            className={cx(styles.editor)}
-            pasteAsPlainText
-            enablePasteMarkdown={false}
-            markdownOption={false}
-            slashPlacement="top"
-            placeholder={isGenerating || hasRunningTool ? STREAMING_PLACEHOLDER : PLACEHOLDER}
-            plugins={[ReactChatTagPlugin]}
-            mentionOption={{
-              items: mentionItems,
-              onSelect: mentionOnSelect,
-              maxLength: 80,
-              renderComp: boxMenu,
-            }}
-            slashOption={{
-              items: slashItems,
-              onSelect: slashOnSelect,
-              maxLength: 32,
-              renderComp: boxMenu,
-            }}
-            onChange={() => setEmpty(editor.isEmpty)}
-            onPressEnter={({ event }) => {
-              if (event.shiftKey || event.isComposing) return;
-              event.preventDefault();
-              void send(event.ctrlKey || event.metaKey ? { interrupt: true } : undefined);
-              return true;
-            }}
-          />
+          <CommandPillHostContext.Provider value={pillHost}>
+            <Editor
+              autoFocus
+              editor={editor}
+              content=""
+              type="text"
+              variant="chat"
+              className={cx(styles.editor)}
+              pasteAsPlainText
+              enablePasteMarkdown={false}
+              markdownOption={false}
+              slashPlacement="top"
+              placeholder={isGenerating || hasRunningTool ? STREAMING_PLACEHOLDER : PLACEHOLDER}
+              plugins={[ReactChatTagPlugin, ReactCommandPillPlugin]}
+              mentionOption={{
+                items: mentionItems,
+                onSelect: mentionOnSelect,
+                maxLength: 80,
+                renderComp: boxMenu,
+              }}
+              slashOption={{
+                items: slashItems,
+                onSelect: slashOnSelect,
+                maxLength: 32,
+                renderComp: boxMenu,
+              }}
+              onChange={() => setEmpty(editor.isEmpty)}
+              onPressEnter={({ event }) => {
+                if (event.shiftKey || event.isComposing) return;
+                event.preventDefault();
+                void send(event.ctrlKey || event.metaKey ? { interrupt: true } : undefined);
+                return true;
+              }}
+            />
+          </CommandPillHostContext.Provider>
         </div>
         <Flexbox horizontal align="center" gap={8}>
           <div className={styles.toolLead}>

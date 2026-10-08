@@ -21,7 +21,7 @@ import {
   shouldDispatchSingleQueued,
   waitForTurnIdle,
 } from './input/sendBehavior';
-import { unescapeComposerMarkdown } from './input/unescapeComposerMarkdown';
+import { focusMissingPillArg, readComposerText } from './input/editor/CommandPill/composerText';
 import { makePastedText } from './input/editor/pastedText';
 import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
 import { pi } from '../../lib/pi';
@@ -80,11 +80,8 @@ export function ChatInput({
     return () => bindBrowserElementChatSink(null);
   }, []);
 
-  // 读当前编辑器正文（markdown）。remark-gfm 会转义 _ / @、并把邮箱包成 <a@b.com>，发出前还原。
-  const readDraft = useCallback(
-    () => unescapeComposerMarkdown(String(editor.getDocument('markdown') || '')),
-    [editor],
-  );
+  // 读当前编辑器正文：markdown 去转义，命令胶囊换成调用文本（见 composerText.ts）。
+  const readDraft = useCallback(() => readComposerText(editor), [editor]);
 
   const sendingRef = useRef(false);
   // 草稿持久化：debounce 写，避免每键都落 localStorage。
@@ -133,6 +130,7 @@ export function ChatInput({
   }, [onAbort, onSend, takeQueued, useStore]);
 
   const send = useCallback(async (options?: { interrupt?: boolean }) => {
+    if (focusMissingPillArg(editor.getLexicalEditor?.())) return;
     const interrupt = Boolean(options?.interrupt);
     const markdown = readDraft();
     const text = composeMessage(markdown, pastedTexts);
