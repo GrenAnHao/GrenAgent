@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -62,6 +62,52 @@ describe("createRuleCache", () => {
     cache.load([{ dir, scope: "global" }]);
     cache.load([{ dir, scope: "global" }]);
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("读文件失败不写缓存，下一轮重新读", () => {
+    const dir = dirWith({ "r.md": "---\ntitle: R\n---\nbody" });
+    const onError = vi.fn();
+    let fail = true;
+    const cache = createRuleCache(onError, (path) => {
+      if (fail) throw new Error("EBUSY");
+      return readFileSync(path, "utf8");
+    });
+    const dirs = [{ dir, scope: "global" as const }];
+
+    const first = cache.load(dirs)[0];
+    expect(first.enabled).toBe(false);
+    expect(first.error).toContain("EBUSY");
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    fail = false;
+    const second = cache.load(dirs)[0];
+    expect(second.error).toBeUndefined();
+    expect(second.enabled).toBe(true);
+    expect(second.title).toBe("R");
+  });
+
+  it("同一个 path 连续读失败只报一次，恢复后再失败可以再报", () => {
+    const dir = dirWith({ "r.md": "---\ntitle: R\n---\nbody" });
+    const onError = vi.fn();
+    let fail = true;
+    const cache = createRuleCache(onError, (path) => {
+      if (fail) throw new Error("EBUSY");
+      return readFileSync(path, "utf8");
+    });
+    const dirs = [{ dir, scope: "global" as const }];
+
+    cache.load(dirs);
+    cache.load(dirs);
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    fail = false;
+    cache.load(dirs);
+    fail = true;
+    // 读成功的那一轮命中缓存，换 mtime 才会重新读
+    const later = new Date(Date.now() + 5000);
+    utimesSync(join(dir, "r.md"), later, later);
+    cache.load(dirs);
+    expect(onError).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -48,8 +48,13 @@ export function listRuleIds(dir: string): string[] {
   }
 }
 
-export function createRuleCache(onError: (rule: RuleFile) => void = () => {}) {
+export function createRuleCache(
+  onError: (rule: RuleFile) => void = () => {},
+  readFile: (path: string) => string = (path) => readFileSync(path, "utf8"),
+) {
   const cache = new Map<string, { mtimeMs: number; rule: RuleFile }>();
+  // 读文件失败（如编辑器保存时的瞬时 EBUSY）不缓存，下一轮重试；这里记已报过的 path，避免每轮刷日志。
+  const readFailureReported = new Set<string>();
   return {
     load(dirs: ReadonlyArray<{ dir: string; scope: RuleScope }>): RuleFile[] {
       const out: RuleFile[] = [];
@@ -67,12 +72,20 @@ export function createRuleCache(onError: (rule: RuleFile) => void = () => {}) {
             out.push(hit.rule);
             continue;
           }
-          let rule: RuleFile;
+          let content: string;
           try {
-            rule = parseRule(id, scope, path, readFileSync(path, "utf8"));
+            content = readFile(path);
           } catch (error) {
-            rule = { id, scope, path, title: id, enabled: false, body: "", error: errorText(error) };
+            const rule: RuleFile = { id, scope, path, title: id, enabled: false, body: "", error: errorText(error) };
+            if (!readFailureReported.has(path)) {
+              readFailureReported.add(path);
+              onError(rule);
+            }
+            out.push(rule);
+            continue;
           }
+          readFailureReported.delete(path);
+          const rule = parseRule(id, scope, path, content);
           if (rule.error) onError(rule);
           cache.set(path, { mtimeMs, rule });
           out.push(rule);
