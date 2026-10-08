@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCommandToken, resolveCommandTag } from './commandPaste';
+import { parseCommandToken, resolveCommandTag, resolvePromptPill } from './commandPaste';
 import type { PiCommand } from '../commandTypes';
 
 describe('parseCommandToken', () => {
@@ -111,5 +111,24 @@ describe('resolveCommandTag', () => {
   it('非命令文本返回 null', () => {
     expect(resolveCommandTag(commands, '/usr/local/bin')).toBeNull();
     expect(resolveCommandTag(commands, '帮我写代码')).toBeNull();
+  });
+});
+
+describe('resolvePromptPill', () => {
+  const templates = [{ name: 'refactor', description: '', body: '', params: [{ name: 'file' }, { name: 'style' }], path: '' }];
+
+  it('带参数模板解析出参数和补充正文', () => {
+    expect(resolvePromptPill(templates, '/refactor "a b" fp 顺便')).toEqual({
+      name: 'refactor',
+      params: templates[0].params,
+      values: ['a b', 'fp'],
+      trailingText: '顺便',
+    });
+  });
+
+  it('参数不够时补空串，不是带参数模板时返回 null', () => {
+    expect(resolvePromptPill(templates, '/refactor')?.values).toEqual(['', '']);
+    expect(resolvePromptPill(templates, '/review x')).toBeNull();
+    expect(resolvePromptPill(templates, 'hello')).toBeNull();
   });
 });

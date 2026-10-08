@@ -35,6 +35,10 @@ describe('substitutePillMarker', () => {
     expect(substitutePillMarker(M, '/a "x"')).toBe('/a "x"');
   });
 
+  it('标记后是多行正文时保留换行', () => {
+    expect(substitutePillMarker(`${M}\n第一行\n第二行`, '/a "x"')).toBe('/a "x" 第一行\n第二行');
+  });
+
   it('多余标记删掉', () => {
     expect(substitutePillMarker(`${M}${M}`, '/a')).toBe('/a');
   });

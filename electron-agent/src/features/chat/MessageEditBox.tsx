@@ -193,8 +193,10 @@ export function MessageEditBox({
 
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
   const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
-  const { slashItems: loadSlashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>
-    editor.cleanDocument(),
+  const { slashItems: loadSlashItems, onSelect: slashOnSelect } = useSlashOptions(
+    workspace,
+    () => editor.cleanDocument(),
+    editor,
   );
   const slashItems = useCallback(
     async (search: SlashSearch): Promise<ISlashOption[]> =>

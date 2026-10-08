@@ -212,8 +212,10 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
   );
 
   const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
-  const { slashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>
-    editor.cleanDocument(),
+  const { slashItems, onSelect: slashOnSelect } = useSlashOptions(
+    workspace,
+    () => editor.cleanDocument(),
+    editor,
   );
   const { tryCommandPaste } = useCommandPaste(workspace, editor);
   const { tryUrlPaste } = useUrlPaste(editor);

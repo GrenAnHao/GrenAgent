@@ -1,6 +1,9 @@
+import { parseInvocation, splitArgs } from '@extensions/prompt-commands/syntax';
+import type { PromptCommandInfo } from '../../../../lib/promptLibraryIo';
 import type { PiCommand } from '../commandTypes';
 import { parseQuotedSkillToken } from '../../skillCommandText';
 import type { ChatTagData } from './ChatTag/types';
+import type { InsertCommandPillPayload } from './CommandPill/commands';
 
 /**
  * 解析粘贴文本里开头的斜杠命令 token。
@@ -62,5 +65,20 @@ export function resolveCommandTag(commands: PiCommand[], text: string): ChatTagD
     value: command.name,
     commandGroup: command.apiSource ?? 'unknown',
     trailingText: parsed.rest || undefined,
+  };
+}
+
+/** 粘贴 `/模板 参数…`：命中带参数的模板时返回胶囊数据，参数不够的位置留空串。 */
+export function resolvePromptPill(templates: readonly PromptCommandInfo[], text: string): InsertCommandPillPayload | null {
+  const invocation = parseInvocation(text.trim());
+  if (!invocation) return null;
+  const template = templates.find((item) => item.name === invocation.name && item.params.length > 0);
+  if (!template) return null;
+  const { args, rest } = splitArgs(invocation.argsText, template.params.length);
+  return {
+    name: template.name,
+    params: template.params,
+    values: template.params.map((_, index) => args[index] ?? ''),
+    trailingText: rest || undefined,
   };
 }
