@@ -116,6 +116,8 @@ const CORE_ALWAYS_ON = new Set([
   "header-placeholders",
   "loop-guard",
   "rulebook",
+  "prompt-commands",
+  "context-rules",
   "compaction-policy",
   "auto-title",
   "todo",

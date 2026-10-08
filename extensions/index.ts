@@ -8,6 +8,8 @@ import autoTitle from "./auto-title/index.js";
 import compactionPolicy from "./compaction-policy/index.js";
 import loopGuard from "./loop-guard/index.js";
 import rulebook from "./rulebook/index.js";
+import promptCommands from "./prompt-commands/index.js";
+import contextRules from "./context-rules/index.js";
 import astTools from "./ast-tools/index.js";
 import github from "./github/index.js";
 import batchTools from "./batch-tools/index.js";
@@ -51,6 +53,8 @@ export {
   headerPlaceholders,
   loopGuard,
   rulebook,
+  promptCommands,
+  contextRules,
   compactionPolicy,
   autoTitle,  todo, present,
   agentMode,
@@ -90,6 +94,8 @@ export const allExtensions = [
   headerPlaceholders,
   loopGuard,
   rulebook,
+  promptCommands,
+  contextRules,
   compactionPolicy,
   autoTitle,  todo, present,
   agentMode,
@@ -130,6 +136,8 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "header-placeholders", factory: headerPlaceholders },
   { name: "loop-guard", factory: loopGuard },
   { name: "rulebook", factory: rulebook },
+  { name: "prompt-commands", factory: promptCommands },
+  { name: "context-rules", factory: contextRules },
   { name: "compaction-policy", factory: compactionPolicy },
   { name: "auto-title", factory: autoTitle },
   { name: "todo", factory: todo },

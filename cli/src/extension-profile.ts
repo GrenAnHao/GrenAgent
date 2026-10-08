@@ -23,6 +23,8 @@ export const CORE_ALWAYS_ON = new Set<string>([
   "header-placeholders",
   "loop-guard",
   "rulebook",
+  "prompt-commands",
+  "context-rules",
   "compaction-policy",
   "auto-title",
   "todo",
