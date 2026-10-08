@@ -19,8 +19,8 @@ vi.mock('../../lib/devRuntime', () => ({
 }));
 vi.mock('../../platform/runtime', () => ({
   invoke: (...args: unknown[]) => mocks.invoke(...args),
-  listen: async () => {
-    mocks.listen();
+  listen: async (channel: string) => {
+    mocks.listen(channel);
     return () => {};
   },
   openPath: async () => {},
@@ -104,11 +104,15 @@ describe('DevWorkbench', () => {
     expect(screen.getByRole('alert').textContent).toContain('参数不是合法 JSON 对象');
   });
 
-  it('subscribes to the two default event channels on the events tab', () => {
+  it('subscribes only to pi://event by default and adds channels when checked', () => {
     render(<DevWorkbench />);
     fireEvent.click(screen.getByTestId('dev-tab-events'));
     expect(screen.getByTestId('dev-events-tab')).toBeTruthy();
-    expect(mocks.listen).toHaveBeenCalledTimes(2);
+    expect(mocks.listen.mock.calls).toEqual([['pi://event']]);
+
+    mocks.listen.mockClear();
+    fireEvent.click(screen.getByText('pi://ui-request'));
+    expect(mocks.listen.mock.calls.map(([channel]) => channel).sort()).toEqual(['pi://event', 'pi://ui-request']);
   });
 
   it('renders a store snapshot on the state tab', () => {
