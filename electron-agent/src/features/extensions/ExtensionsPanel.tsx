@@ -1,6 +1,6 @@
 import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { Package, Plus, ScrollText, Server, Sparkles } from 'lucide-react';
+import { BookCheck, Package, Plus, ScrollText, Server, Sparkles, SquareSlash } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi, type McpConfigScope } from '../../lib/pi';
@@ -9,9 +9,11 @@ import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusS
 import { useSettingsForm } from '../settings/useSettingsForm';
 import { AddMcpModal } from './AddMcpModal';
 import { AuditModal } from './AuditModal';
+import { CommandsPanel } from './CommandsPanel';
 import { McpServerCard } from './McpServerCard';
 import { NativeSkillsPanel } from './NativeSkillsPanel';
 import { PiPackagesPanel } from './PiPackagesPanel';
+import { RulesPanel } from './RulesPanel';
 import {
   listEntries,
   type McpConfig,
@@ -161,7 +163,7 @@ export function ExtensionsPanel() {
   const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? EMPTY_SERVERS);
   const existingNames = entries.map((entry) => entry.name);
 
-  const [tab, setTab] = useState<'mcp' | 'packages' | 'skills'>('mcp');
+  const [tab, setTab] = useState<'mcp' | 'packages' | 'skills' | 'commands' | 'rules'>('mcp');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<(McpEntry & { scope: McpConfigScope }) | undefined>(undefined);
   const touchedRef = useRef(false);
@@ -193,6 +195,11 @@ export function ExtensionsPanel() {
 
   const markChanged = () => {
     touchedRef.current = true;
+  };
+
+  const bumpResources = () => {
+    setValue('PI_RELOAD_REV', String(Date.now()));
+    markChanged();
   };
 
   useEffect(() => {
@@ -331,6 +338,14 @@ export function ExtensionsPanel() {
             <Icon icon={Sparkles} size={15} />
             技能
           </button>
+          <button type="button" className={`${styles.tab} ${tab === 'commands' ? styles.tabActive : ''}`} data-testid="ext-tab-commands" onClick={() => setTab('commands')}>
+            <Icon icon={SquareSlash} size={15} />
+            命令
+          </button>
+          <button type="button" className={`${styles.tab} ${tab === 'rules' ? styles.tabActive : ''}`} data-testid="ext-tab-rules" onClick={() => setTab('rules')}>
+            <Icon icon={BookCheck} size={15} />
+            规则
+          </button>
         </div>
       </div>
 
@@ -338,7 +353,11 @@ export function ExtensionsPanel() {
 
       <div className={styles.body}>
         <div className={styles.inner}>
-          {tab === 'skills' ? (
+          {tab === 'commands' ? (
+            <CommandsPanel workspace={workspace} onResourcesChanged={bumpResources} />
+          ) : tab === 'rules' ? (
+            <RulesPanel workspace={workspace} />
+          ) : tab === 'skills' ? (
             <NativeSkillsPanel values={values} setValue={setValue} onChanged={markChanged} />
           ) : tab === 'packages' ? (
             <PiPackagesPanel workspace={workspace} />

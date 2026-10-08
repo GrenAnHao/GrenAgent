@@ -27,6 +27,9 @@ vi.mock('../../lib/mcpPolicyIo', () => ({
   writeMcpPolicy: () => Promise.resolve(),
 }));
 
+vi.mock('./CommandsPanel', () => ({ CommandsPanel: () => <div data-testid="commands-panel" /> }));
+vi.mock('./RulesPanel', () => ({ RulesPanel: () => <div data-testid="rules-panel" /> }));
+
 import { ThemeProvider } from '@lobehub/ui';
 import { ExtensionsPanel } from './ExtensionsPanel';
 
@@ -49,6 +52,15 @@ describe('ExtensionsPanel', () => {
     expect(screen.getByTestId('ext-tab-packages').textContent).toContain('扩展');
     expect(screen.getByTestId('ext-tab-skills')).toBeTruthy();
     expect(screen.queryByTestId('ext-tab-code-intel')).toBeNull();
+  });
+
+  it('有命令和规则两个页签', async () => {
+    getSettings.mockResolvedValueOnce({});
+    render(<ExtensionsPanel />);
+    fireEvent.click(await screen.findByTestId('ext-tab-commands'));
+    expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('ext-tab-rules'));
+    expect(screen.getByTestId('rules-panel')).toBeInTheDocument();
   });
 
   it('lists MCP servers from MCP_SERVERS (standard mcpServers format)', async () => {
