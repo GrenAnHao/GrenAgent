@@ -73,6 +73,12 @@ describe("argumentHint / resolveArgs", () => {
     expect(resolveArgs(params, ["", ""])).toEqual({ values: { style: "fp" }, missing: ["file"] });
     expect(resolveArgs(params, ["a.ts"])).toEqual({ values: { file: "a.ts", style: "fp" }, missing: [] });
   });
+
+  it("参数名叫 __proto__ 时值不会丢", () => {
+    const result = resolveArgs([{ name: "__proto__" }], ["v"]);
+    expect(result.values.__proto__).toBe("v");
+    expect(result.missing).toEqual([]);
+  });
 });
 
 describe("调用文本", () => {
@@ -134,6 +140,33 @@ describe("<command> 块", () => {
 
   it("空正文也能匹配", () => {
     expect(findCommandBlocks(buildCommandBlock("x", [], ""))).toHaveLength(1);
+  });
+
+  it("同一段文本里的两个块各自给出正确的 start/end", () => {
+    const first = buildCommandBlock("a", [{ name: "x", value: "1" }], "正文一");
+    const second = buildCommandBlock("b", [], "正文二");
+    const text = `前${first}中${second}后`;
+    const hits = findCommandBlocks(text);
+    expect(hits).toHaveLength(2);
+    expect(text.slice(hits[0].start, hits[0].end)).toBe(first);
+    expect(text.slice(hits[1].start, hits[1].end)).toBe(second);
+    expect(hits[0].block?.name).toBe("a");
+    expect(hits[1].block?.name).toBe("b");
+  });
+
+  it("args 坏掉时 hit 仍有正确的 start/end，block 为 null", () => {
+    const bad = '<command name="x" args="not json">\n正文\n</command>';
+    const text = `前${bad}后`;
+    const [hit] = findCommandBlocks(text);
+    expect(hit.block).toBeNull();
+    expect(text.slice(hit.start, hit.end)).toBe(bad);
+  });
+
+  it("大量未闭合的开头不会拖成二次方", () => {
+    const text = '<command name="x" args="{}">\n'.repeat(20000);
+    const startedAt = performance.now();
+    expect(findCommandBlocks(text)).toEqual([]);
+    expect(performance.now() - startedAt).toBeLessThan(200);
   });
 
   it("args 坏掉时 block 为 null", () => {

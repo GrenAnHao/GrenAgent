@@ -35,7 +35,8 @@ export const COMMAND_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]{0,63}$/u;
 
 const TOKEN_RE = /\{\{|\}\}|\{([\p{L}_][\p{L}\p{N}_-]*)(?:=([^}\n]*))?\}/gu;
 const INVOCATION_RE = /^\/([\p{L}\p{N}][\p{L}\p{N}_-]{0,63})(?=\s|$)/u;
-const COMMAND_BLOCK_RE = /<command name="([^"]*)" args="([^"]*)">\n[\s\S]*?\n<\/command>/g;
+const COMMAND_OPEN_RE = /<command name="([^"]*)" args="([^"]*)">\n/g;
+const COMMAND_CLOSE = "\n</command>";
 
 export function parsePromptParams(body: string): PromptParam[] {
   const params: PromptParam[] = [];
@@ -84,7 +85,8 @@ export function resolveArgs(
   params: readonly PromptParam[],
   raw: readonly string[],
 ): { values: Record<string, string>; missing: string[] } {
-  const values: Record<string, string> = {};
+  // 无原型，参数名叫 __proto__ 时也不会被当成设原型。
+  const values = Object.create(null) as Record<string, string>;
   const missing: string[] = [];
   params.forEach((param, index) => {
     const given = raw[index] ?? "";
@@ -165,10 +167,16 @@ export function decodeCommandBlock(nameAttr: string, argsAttr: string): CommandB
   }
 }
 
+/** 线性扫描：找开头，再向后找结尾；找不到结尾就停，后面的开头也不可能闭合。 */
 export function findCommandBlocks(text: string): CommandBlockHit[] {
-  return Array.from(text.matchAll(COMMAND_BLOCK_RE), (match) => ({
-    start: match.index ?? 0,
-    end: (match.index ?? 0) + match[0].length,
-    block: decodeCommandBlock(match[1], match[2]),
-  }));
+  const hits: CommandBlockHit[] = [];
+  const opener = new RegExp(COMMAND_OPEN_RE);
+  for (let open = opener.exec(text); open; open = opener.exec(text)) {
+    const closeAt = text.indexOf(COMMAND_CLOSE, opener.lastIndex);
+    if (closeAt === -1) break;
+    const end = closeAt + COMMAND_CLOSE.length;
+    hits.push({ start: open.index, end, block: decodeCommandBlock(open[1], open[2]) });
+    opener.lastIndex = end;
+  }
+  return hits;
 }
