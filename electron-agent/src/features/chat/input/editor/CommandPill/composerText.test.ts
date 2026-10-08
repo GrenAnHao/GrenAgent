@@ -3,7 +3,14 @@ import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from 'l
 import { describe, expect, it, vi } from 'vitest';
 import { $createCommandPillNode, CommandPillNode, PILL_MARKER } from './CommandPillNode';
 import { FOCUS_PILL_ARG_COMMAND } from './commands';
-import { $caretAtDocumentStart, focusMissingPillArg, readPillInvocation, substitutePillMarker } from './composerText';
+import type { IEditor } from '@lobehub/editor';
+import {
+  $caretAtDocumentStart,
+  focusMissingPillArg,
+  readComposerText,
+  readPillInvocation,
+  substitutePillMarker,
+} from './composerText';
 
 const params = [{ name: 'file' }, { name: 'style', defaultValue: 'fp' }];
 
@@ -18,11 +25,42 @@ function editorWith(values: string[]) {
   return { editor, key };
 }
 
+const M = PILL_MARKER;
+
 describe('substitutePillMarker', () => {
-  it('把第一个标记换成调用文本，多余标记删掉', () => {
-    expect(substitutePillMarker(`${PILL_MARKER} 顺便`, '/a "x"')).toBe('/a "x" 顺便');
-    expect(substitutePillMarker(`${PILL_MARKER}${PILL_MARKER}`, '/a')).toBe('/a');
+  it('调用文本总在开头，与剩余正文之间一个空格', () => {
+    expect(substitutePillMarker(`${M} 顺便`, '/a "x"')).toBe('/a "x" 顺便');
+    expect(substitutePillMarker(`${M}顺便`, '/a "x"')).toBe('/a "x" 顺便');
+    expect(substitutePillMarker(`前面${M} 后面`, '/a "x"')).toBe('/a "x" 前面 后面');
+    expect(substitutePillMarker(M, '/a "x"')).toBe('/a "x"');
+  });
+
+  it('多余标记删掉', () => {
+    expect(substitutePillMarker(`${M}${M}`, '/a')).toBe('/a');
+  });
+
+  it('没有调用文本时只删标记，其余原样', () => {
+    expect(substitutePillMarker(`a${M}b`, null)).toBe('ab');
+  });
+
+  it('无标记原样返回', () => {
     expect(substitutePillMarker('无标记', '/a')).toBe('无标记');
+  });
+});
+
+describe('readComposerText', () => {
+  it('markdown 去转义，调用文本放在开头', () => {
+    const lexical = editorWith(['a\\b', '']).editor;
+    const editor = {
+      getDocument: () => `x\\_y ${M}`,
+      getLexicalEditor: () => lexical,
+    } as unknown as IEditor;
+    expect(readComposerText(editor)).toBe('/refactor "a\\\\b" "" x_y');
+  });
+
+  it('拿不到 lexical 实例时只删标记', () => {
+    const editor = { getDocument: () => `x\\_y ${M}` } as unknown as IEditor;
+    expect(readComposerText(editor)).toBe('x_y ');
   });
 });
 

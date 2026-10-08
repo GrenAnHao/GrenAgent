@@ -160,7 +160,7 @@ export function CommandPillEditor({ editor, nodeKey, name, params, values }: Com
           node.selectPrevious();
           node.remove();
         });
-      } else hostRef.current?.submit();
+      } else hostRef.current?.submit(event.ctrlKey || event.metaKey ? { interrupt: true } : undefined);
     };
     const onMouseDown = (event: MouseEvent) => {
       event.stopPropagation();

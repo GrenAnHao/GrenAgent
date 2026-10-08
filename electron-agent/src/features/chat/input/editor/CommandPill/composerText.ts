@@ -15,10 +15,18 @@ export function readPillInvocation(editor: LexicalEditor | null | undefined): st
   return editor.getEditorState().read(() => $firstPill()?.invocation() ?? null);
 }
 
+/**
+ * 去掉胶囊标记，调用文本总是放在最前面，与剩余正文之间隔一个空格。
+ * 扩展只认以 `/名` 开头的文本：用户用方向键把光标移到胶囊前打了字，命令也要仍然生效；
+ * 标记后面直接跟文字（`/a "x"顺便`）时也要补上空格，不然最后一个参数会和正文粘在一起。
+ * 没有调用文本时（拿不到 lexical 实例）只删标记，其余原样。
+ */
 export function substitutePillMarker(markdown: string, invocation: string | null): string {
   if (!markdown.includes(PILL_MARKER)) return markdown;
   const [head, ...tail] = markdown.split(PILL_MARKER);
-  return `${head}${invocation ?? ''}${tail.join('')}`;
+  if (invocation === null) return `${head}${tail.join('')}`;
+  const rest = [head.trim(), tail.join('').trim()].filter(Boolean).join(' ');
+  return rest ? `${invocation} ${rest}` : invocation;
 }
 
 /** 输入框正文：markdown 去转义，再把胶囊标记换成调用文本。发送和存草稿都用它。 */

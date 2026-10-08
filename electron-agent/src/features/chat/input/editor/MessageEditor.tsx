@@ -205,8 +205,11 @@ export function MessageEditor({ leftActions, rightActions }: MessageEditorProps)
 
   // 菜单锚定在输入框上方，宽度与输入框齐宽（@ 与 / 共用）。
   const boxMenu = useMemo(() => createBoxMenu(surfaceRef), []);
-  // 胶囊参数里按 Enter 走同一个发送。
-  const pillHost = useMemo(() => ({ submit: () => void send() }), [send]);
+  // 胶囊参数里按 Enter 走同一个发送，Ctrl/Cmd+Enter 同样打断。
+  const pillHost = useMemo(
+    () => ({ submit: (options?: { interrupt?: boolean }) => void send(options) }),
+    [send],
+  );
 
   const { mentionItems, onSelect: mentionOnSelect } = useFileMention(workspace);
   const { slashItems, onSelect: slashOnSelect } = useSlashOptions(workspace, () =>

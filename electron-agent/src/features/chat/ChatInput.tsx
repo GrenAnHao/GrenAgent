@@ -130,6 +130,7 @@ export function ChatInput({
   }, [onAbort, onSend, takeQueued, useStore]);
 
   const send = useCallback(async (options?: { interrupt?: boolean }) => {
+    // 可选调用兼容测试里的 editor 桩；生产环境总有 lexical 实例
     if (focusMissingPillArg(editor.getLexicalEditor?.())) return;
     const interrupt = Boolean(options?.interrupt);
     const markdown = readDraft();
