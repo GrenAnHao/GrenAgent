@@ -178,11 +178,17 @@ export function VirtualizedMessageList({
   );
   countRef.current = rows.length;
 
+  // 贴底直接写滚动容器的 scrollTop，不走 virtua 的 scrollToIndex：后者会挂一个「条目测高后 150ms 内
+  // 重滚到目标」的任务，用户滚动不会取消它。流式中刚往上滚一下，新挂上的条目一测高就把视图拽回底部。
+  // 末尾条目测高后变高由下面的内容 ResizeObserver 跟上。
+  const scrollToEnd = () => {
+    const el = containerRef.current?.firstElementChild;
+    if (el instanceof HTMLElement && countRef.current > 0) el.scrollTop = el.scrollHeight;
+  };
+
   // 贴底：仅在用户停留在底部时滚到最后一条（用 ref 读最新 count，供 resize 回调复用）。
   const stickToBottom = () => {
-    if (atBottomRef.current && ref.current && countRef.current > 0) {
-      ref.current.scrollToIndex(countRef.current - 1, { align: 'end' });
-    }
+    if (atBottomRef.current) scrollToEnd();
   };
 
   // 一键回到底部：平滑滚到最后一条。
@@ -197,13 +203,8 @@ export function VirtualizedMessageList({
   //（旧手写列表用的就是 useLayoutEffect，迁移到 virtua 时曾降级为 useEffect，这里改回）。
   useLayoutEffect(stickToBottom);
 
-  const scrollToEnd = () => {
-    const h = ref.current;
-    if (h && countRef.current > 0) h.scrollToIndex(countRef.current - 1, { align: 'end' });
-  };
-
   // 会话切换（resetKey 变）或首次挂载：钉在底部，直到 virtua 把末尾条目测高并稳住。
-  // 两帧 rAF 不够：估算高度下的 scrollToIndex 落在半截，随后 onScroll 把 atBottom 清掉，
+  // 两帧 rAF 不够：估算高度下滚到的「底部」在测高后会变，随后 onScroll 把 atBottom 清掉，
   // 真实高度长出来后就不再贴底。测高期间忽略这次误判，高度连续稳定后再放开。
   useLayoutEffect(() => {
     atBottomRef.current = true;
@@ -276,10 +277,23 @@ export function VirtualizedMessageList({
     return () => ro.disconnect();
   }, [onGutterChange]);
 
+  // 内容总高变化（末尾条目测高、流式正文长高、懒加载内容撑开）时，贴底状态下跟到新的底部。
+  // 视口自身的尺寸变化交给下面的 resize 逻辑，那段时间不在这里插手。
+  useEffect(() => {
+    const content = containerRef.current?.firstElementChild?.firstElementChild;
+    if (!(content instanceof HTMLElement)) return;
+    const ro = new ResizeObserver(() => {
+      if (!resizingRef.current) stickToBottom();
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 视口尺寸变化（窗口压缩 / 面板折叠 / 文字重排）时保持位置。
   // 难点：virtua 在 resize 时按自身锚点逐帧重排，中部阅读位会抖；且重排触发的 onScroll 会污染贴底判断。
   // 方案：resize 期间用 resizingRef 冻结 atBottomRef/锚点（onScroll 跳过），按冻结前意图持续钉回——
-  //   贴底：交给收尾一次性 scrollToIndex(end)（virtua 自身贴底重排是平滑的，逐帧滚反而打架）；
+  //   贴底：交给收尾一次性 scrollToEnd（virtua 自身贴底重排是平滑的，逐帧滚反而打架）；
   //   不贴底：逐帧 scrollTo(锚点条目当前 offset + 偏移)，盖掉 virtua 的抖动，把阅读位钉死。
   //   收尾再钉一次确保最终位置准确，并延一帧解冻以避开程序化滚动自身触发的 onScroll。
   useEffect(() => {
@@ -290,7 +304,7 @@ export function VirtualizedMessageList({
       const h = ref.current;
       if (!h) return;
       if (atBottomRef.current) {
-        if (countRef.current > 0) h.scrollToIndex(countRef.current - 1, { align: 'end' });
+        scrollToEnd();
       } else {
         // 用 scrollToIndex 而非 scrollTo：它保证锚点条目落入渲染范围，rapid resize 下即使条目高度暂时
         // 还是旧值也不会因 offset 越界而瞬间空白；align:'start'+offset 落点与原 scrollTo 等价。

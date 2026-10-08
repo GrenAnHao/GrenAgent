@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:codegraph": "node scripts/test-codegraph.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "package": "electron-builder --config electron-builder.yml"
+    "package": "electron-builder --config electron-builder.yml",
+    "ui:check": "node ui-harness/check.mjs"
   },
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",

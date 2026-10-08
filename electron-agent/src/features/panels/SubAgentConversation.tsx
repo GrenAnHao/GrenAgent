@@ -17,6 +17,9 @@ import { useChildSessionBinding } from './useChildSessionBinding';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
 import { PendingResponseStatus } from '../chat/PendingResponseStatus';
 
+/** 列表末尾留白（px）：贴底跟随时最新内容停在这段空白之上。 */
+const TAIL_SPACE = 96;
+
 /** 从 spawn_agent 工具结果里取原始 JSONL transcript（details.transcript / transcriptTail）。 */
 function transcriptOf(result: unknown): string {
   if (!result || typeof result !== 'object') return '';
@@ -181,9 +184,16 @@ export function SubAgentConversation({
   const display = useMemo(() => groupMessages(messages), [messages]);
   const subAgents = useMemo(() => computeSubAgentUnits(display), [display]);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
-  const footer = status === 'running' ? (
-    <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
-  ) : undefined;
+  // 子代理面板下面没有输入框，列表末尾自己留一段空白，最新一行不压在面板底边上。
+  // 不走 paddingBottom：那会把「回到底部」按钮一起抬高，它是给主对话的输入框让位的。
+  const footer = (
+    <>
+      {status === 'running' ? (
+        <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
+      ) : null}
+      <div data-testid="subagent-tail-space" style={{ height: TAIL_SPACE }} />
+    </>
+  );
 
   return (
     <ChatMessageItems
