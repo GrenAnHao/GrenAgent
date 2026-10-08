@@ -109,7 +109,7 @@ export function parseInvocation(text: string): { name: string; argsText: string 
   return { name: match[1], argsText: text.slice(match[0].length) };
 }
 
-/** 按顺序取 count 个参数：双引号内支持 \ 转义，单引号原样，其余按空白切。剩下的原文是补充正文。 */
+/** 按顺序取 count 个参数：双引号内只转义 \" 和 \\，其它反斜杠原样，单引号原样，其余按空白切。剩下的原文是补充正文。 */
 export function splitArgs(text: string, count: number): { args: string[]; rest: string } {
   const args: string[] = [];
   let i = 0;
@@ -121,7 +121,7 @@ export function splitArgs(text: string, count: number): { args: string[]; rest: 
     if (quote === '"' || quote === "'") {
       i++;
       while (i < text.length && text[i] !== quote) {
-        if (quote === '"' && text[i] === "\\" && i + 1 < text.length) i++;
+        if (quote === '"' && text[i] === "\\" && (text[i + 1] === '"' || text[i + 1] === "\\")) i++;
         value += text[i];
         i++;
       }

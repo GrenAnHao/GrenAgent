@@ -89,6 +89,10 @@ describe("调用文本", () => {
     expect(splitArgs('"a" b 顺便看看\n第二行', 2)).toEqual({ args: ["a", "b"], rest: "顺便看看\n第二行" });
   });
 
+  it("双引号内只有 \\\" 和 \\\\ 是转义，其它反斜杠原样保留", () => {
+    expect(splitArgs('"C:\\path\\to" "a\\nb"', 2)).toEqual({ args: ["C:\\path\\to", "a\\nb"], rest: "" });
+  });
+
   it("单引号内不转义，缺收尾引号读到结尾", () => {
     expect(splitArgs("'a\\b' \"open", 2)).toEqual({ args: ["a\\b", "open"], rest: "" });
   });
