@@ -8,6 +8,7 @@ import { McpConfigService } from "./app/mcpConfigService";
 import { SubagentService } from "./app/subagentService";
 import { FileService } from "./app/fileService";
 import { SkillService } from "./app/skillService";
+import { PromptLibraryService } from "./app/promptLibraryService";
 import { UsageService } from "./app/usageService";
 import { PiRuntimeService } from "./app/piRuntimeService";
 import { PiPackageService } from "./app/piPackageService";
@@ -268,6 +269,7 @@ if (!process.env.VITEST) {
       subagent: new SubagentService(sandbox),
       files: new FileService(),
       skills: new SkillService(app.getPath('home')),
+      promptLibrary: new PromptLibraryService(agentDir),
       piPackages,
       usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
       pi: piRuntime = new PiRuntimeService({

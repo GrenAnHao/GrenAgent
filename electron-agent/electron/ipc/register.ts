@@ -6,6 +6,7 @@ import type { McpConfigService } from '../app/mcpConfigService';
 import type { SubagentService } from '../app/subagentService';
 import type { FileService } from '../app/fileService';
 import type { SkillService } from '../app/skillService';
+import type { PromptLibraryService } from '../app/promptLibraryService';
 import type { UsageService } from '../app/usageService';
 import type { PiRuntimeService } from '../app/piRuntimeService';
 import type { ProviderService } from '../app/providerService';
@@ -36,6 +37,7 @@ export interface IpcServices {
   subagent?: SubagentService;
   files?: FileService;
   skills?: SkillService;
+  promptLibrary?: PromptLibraryService;
   usage?: UsageService;
   pi?: PiRuntimeService;
   provider?: ProviderService;
@@ -121,6 +123,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.jobs) registerJobCommands(services.jobs);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
+  if (services.promptLibrary) registerPromptLibraryCommands(services.promptLibrary);
   if (services.usage) registerCommand('usage_report', () => services.usage!.report());
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
@@ -388,6 +391,45 @@ function registerSkillCommands(service: SkillService): void {
     if (error) throw new Error(error);
     return directory;
   });
+}
+
+function readRuleScope(args: Record<string, unknown>, key: string): 'global' | 'project' {
+  const value = args[key];
+  if (value !== 'global' && value !== 'project') throw new Error(`${key} must be "global" or "project"`);
+  return value;
+}
+
+function registerPromptLibraryCommands(service: PromptLibraryService): void {
+  registerCommand('list_prompt_commands', () => service.listCommands());
+  registerCommand('save_prompt_command', (_event, args) => service.saveCommand({
+    originalName: typeof args.originalName === 'string' && args.originalName ? args.originalName : undefined,
+    name: readString(args, 'name'),
+    description: readText(args, 'description'),
+    body: readText(args, 'body'),
+    reserved: Array.isArray(args.reserved) ? args.reserved.filter((item): item is string => typeof item === 'string') : [],
+  }));
+  registerCommand('delete_prompt_command', (_event, args) => service.deleteCommand(readString(args, 'name')));
+  registerCommand('list_context_rules', (_event, args) => service.listRules(readOptionalWorkspace(args)));
+  registerCommand('save_context_rule', (_event, args) => {
+    const original = args.original && typeof args.original === 'object' ? (args.original as Record<string, unknown>) : undefined;
+    return service.saveRule({
+      workspace: readOptionalWorkspace(args),
+      scope: readRuleScope(args, 'scope'),
+      original: original ? { scope: readRuleScope(original, 'scope'), id: readString(original, 'id') } : undefined,
+      title: readText(args, 'title'),
+      enabled: readBoolean(args, 'enabled'),
+      body: readText(args, 'body'),
+    });
+  });
+  registerCommand('set_context_rule_enabled', (_event, args) => service.setRuleEnabled(
+    { scope: readRuleScope(args, 'scope'), id: readString(args, 'id') },
+    readBoolean(args, 'enabled'),
+    readOptionalWorkspace(args),
+  ));
+  registerCommand('delete_context_rule', (_event, args) => service.deleteRule(
+    { scope: readRuleScope(args, 'scope'), id: readString(args, 'id') },
+    readOptionalWorkspace(args),
+  ));
 }
 
 function registerProviderCommands(service: ProviderService): void {
