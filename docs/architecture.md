@@ -196,3 +196,11 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 `embedding/` 是一个独立的本地向量服务，当前尚未集成进桌面应用。它在本地 CPU 上用 `@huggingface/transformers` 运行 `Xenova/all-MiniLM-L6-v2`，通过 `POST /embed` 返回 384 维向量，并可用 Node.js SEA 打成单文件可执行程序。
 
 它面向独立的本地向量实验，不属于桌面端记忆链路；桌面端的长期记忆和知识检索由自研 Agent Data Runtime 负责。实现细节见 `embedding/README.md`。
+
+## 命令与规则
+
+- **命令**是全局的 Pi prompt template，文件在 `<agentDir>/prompts/<名>.md`。正文里写了 `{参数}` / `{参数=默认值}` 的模板由 `extensions/prompt-commands` 在 `input` 钩子里接管：`/名 "值" …` 展开成 `<command name="…" args="{JSON}">正文</command>`，块后接补充正文；其余模板（包括 `$1` 写法）仍由 Pi 原生展开。语法在 `extensions/prompt-commands/syntax.ts`，扩展、主进程、渲染层共用。`splitArgs` 在双引号内只把 `\"` 和 `\` 当转义，其它反斜杠原样保留；`findCommandBlocks` 线性扫描。
+- 输入框里带参数的命令是 Lexical `CommandPillNode`（`src/features/chat/input/editor/CommandPill/`），只能放在输入开头，且输入框里最多一个：斜杠菜单与粘贴都要求光标 / 斜杠在整个输入开头且当前没有胶囊，不满足时带参数模板不出现在菜单里，粘贴按普通文本处理。胶囊内嵌原生 `<input>`：最后一个参数上 Tab、末尾 →、Esc 跳到胶囊后；第一个参数上 Shift+Tab、开头 ← 不动；离开胶囊时先 focus 编辑器根节点再移动选区；胶囊内 Ctrl/Cmd+Enter 透传 interrupt。
+- markdown 写出时胶囊写私用区字符 U+E000。发送和存草稿时由 `readComposerText` 把标记换成调用文本，调用文本总在最前，标记前后的正文各自 trim 后用一个空格接在后面。气泡由 `messageTags.tsx` 把 `<command>` 块还原成只读胶囊，不显示正文。
+- **规则**一条一个 Markdown 文件：全局 `<agentDir>/rules/*.md`，项目 `<工作区>/.pi/rules/*.md`，frontmatter 有 `title` 和 `enabled`。`extensions/context-rules` 在每次 `before_agent_start` 把启用的规则追加到 `systemPromptOptions.contextFiles`（全局在前、项目在后，同范围按文件名），按文件 mtime 缓存。读文件失败（如 Windows 上的 EBUSY）不缓存，下一轮重试；YAML 解析错误按 mtime 缓存，日志去重。子代理同样加载。
+- 主进程 `PromptLibraryService` 负责读写两类文件，原子写的临时文件名用 `randomUUID`，规则 id 冲突按大小写不敏感判断。IPC 命令：`list_prompt_commands` / `save_prompt_command` / `delete_prompt_command` / `list_context_rules` / `save_context_rule` / `set_context_rule_enabled` / `delete_context_rule`；开关不存在的规则返回「规则不存在」。管理界面是扩展面板的「命令」「规则」页签；命令改动通过 `PI_RELOAD_REV` 让会话重载，规则改动下一轮生效。

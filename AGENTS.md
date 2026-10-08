@@ -93,7 +93,7 @@ node scripts/check-notes.mjs
 
 ### 跑哪些场景
 
-原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row` 六个场景，全量就是它们。
+原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel` 八个场景，全量就是它们。
 
 - 改了某个工具卡 / 时间线组件的 UI：点名对应的场景（查下面「现有场景」），可以是几个，但都属于本次需求。
 - 新增组件 / 面板：先写新场景 + probe，只跑这个新场景。其他场景一个不跑。
@@ -132,6 +132,8 @@ node scripts/check-notes.mjs
 - 工具卡：`codemode-card`（走真实 reducer → groupMessages → TurnTimeline；实时完成 / 运行中 / 失败 / 历史回放 / 调用很多五种情况；标题摘要与调用次数、嵌套调用列表的状态和服务器标签、历史靠 details.calls 还原、展开后脚本与输出、去掉结果头、JSON 缩进、脚本错误标红且排在脚本前、MCP 结果 markdown / JSON 渲染与全文路径、超过 6 条折叠、浅色主题）
 - 视觉设计面板：`visual-panel`（真实 VisualPanel + HtmlPreview + `buildSrcDoc(fill)`，`extension_ui_respond` 用桩；iframe 里的几何靠主进程 `webFrameMain.executeJavaScript` 读；长页面滚到底选项 B 完整露在确认条上方且 hit test 命中、确认条保持 fixed 单行横排且样式节点不画成文字、点 B 只选中、点确认才回传 `change`；矮页面比较区仍撑满、选项贴在确认条预留区上方）
 - 侧栏会话行：`session-row`（真实 SessionItem，回调只记事件；运行中的行转圈和「更多」共用行尾同一格：静止只有转圈，悬停整行或鼠标正好停在转圈上，转圈在原位换成「更多」，标题宽度和占位格都不变、按钮中心就是转圈原来的位置、格子与按钮同尺寸、鼠标下面点得到按钮；点按钮只开菜单不触发整行点击，点行本身仍打开会话；移开变回转圈；空闲行照旧悬停才出现「更多」，位置和运行行同一列）
+- 命令胶囊：`command-pill`（真实 lobehub Editor + CommandPill 插件，插入走 `INSERT_COMMAND_PILL_COMMAND`，`list_prompt_commands` 用桩；插入后焦点在第一个参数；Tab / Shift+Tab 轮转，最后一个参数上 Tab 跳出到胶囊后，第一个参数上 Shift+Tab / ← 不动；必填参数空着时 Enter 被拦下、焦点回到缺的参数并标红；发送文本是调用文本 `/名 "值" ""` 加补充正文；空参数 Backspace 回退、第一个参数里删整个胶囊；气泡里 `<command>` 块整块成胶囊且正文不出现，刚发出的调用文本也成胶囊、空参数显示默认值；浅色主题）
+- 命令与规则面板：`prompt-library-panel`（真实 CommandsPanel / RulesPanel，主进程命令用内存桩；命令列表项是胶囊带参数个数；改提示词时参数实时识别、占位符背景高亮；与保留名重名就地报错、保存不可点；规则开关立即写盘；没有工作区时项目范围置灰）
 
 harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness 本身坏了（所有场景都「页面没就绪」、输入全部失效、升级 Electron / Vite 之后），用 electron-ui-harness skill 的 `scripts/smoke.mjs --app electron-agent` 跑一次，它跑完会自动删掉临时场景。在 `scenarios/` 里看到 `harness-smoke` 就是漏删的，直接删掉。
 
