@@ -75,8 +75,12 @@ export interface AgentState {
   /** 执行中发送后停在输入栏的跟进条；点引导才注入当前回合，否则本轮结束后自动跟进。 */
   composerQueue: Array<{ id: string; text: string; images?: UserImage[] }>;
   lastError?: string;
-  /** 发送失败自动重试中的进度（attempt 从 1 起，max 为总重试次数）；非重试时为 undefined。 */
-  retrying?: { attempt: number; max: number };
+  /**
+   * 自动重试中的进度（attempt 从 1 起，max 为总重试次数）；非重试时为 undefined。
+   * auto 表示是 pi 自己的接口错误重试（auto_retry_*），这期间的报错写进 error、不弹红条；
+   * 没有 auto 的是界面发送没被收下时的重试。attempt 为 0 表示 pi 已说要重试、还没报次数。
+   */
+  retrying?: { attempt: number; max: number; auto?: boolean; error?: string };
   /** 用户主动中断进行中：abort 触发的 "request aborted" 类报错不该弹红条，置位期间 reducer 丢弃这些
    * 错误（仅抑制用户主动中断，不影响真实失败）。由 ChatView 点停止时置位，agent_start/agent_end 清位。 */
   aborting?: boolean;
@@ -348,6 +352,16 @@ function dropDrafts(state: AgentState, patch: Partial<AgentState> = {}): AgentSt
   const merged: AgentState = { ...state, ...patch };
   delete merged.toolDrafts;
   return merged;
+}
+
+/**
+ * 回合真正收尾时收掉 pi 的接口重试条。重试用完、最后一次的报错还在重试条里，就落成红条；
+ * 用户主动中断的不落。界面自己的发送重试不归这里管。
+ */
+function settleAutoRetry(state: AgentState): Partial<AgentState> {
+  if (!state.retrying?.auto) return {};
+  const error = state.aborting ? undefined : state.retrying.error;
+  return { retrying: undefined, ...(error && !state.lastError ? { lastError: error } : {}) };
 }
 
 function commitDrafts(state: AgentState, messages: ChatMessage[], drafts: Record<number, ToolDraft>): AgentState {
@@ -693,7 +707,8 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         awaitingResponse: false,
         runStartedAt: state.runStartedAt ?? Date.now(),
         lastError: undefined,
-        retrying: undefined,
+        // pi 的接口重试要等 auto_retry_end 才算完；界面自己的发送重试到这里就成了。
+        retrying: state.retrying?.auto ? state.retrying : undefined,
         aborting: false,
         assistantStop: undefined,
       };
@@ -704,8 +719,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const willRetry = (event as { willRetry?: boolean }).willRetry === true;
       const settled = settleIncompleteToolCards(state.messages);
       const messages = willRetry ? settled : requeuePendingSteers(settled);
-      return dropDrafts(state, {
-        isStreaming: false,
+      const ended = {
         awaitingResponse: false,
         aborting: false,
         compacting: false,
@@ -718,6 +732,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           state.todoListFinished,
         ),
         messages,
+        ...settleAutoRetry(state),
       });
     }
 
@@ -736,6 +751,25 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         compacting: false,
         waitingUiPrompt: undefined,
         messages,
+      };
+      if (willRetry) {
+        // pi 退避后会自己重发：这一轮没结束，保持 streaming（停止按钮留着、发送等待不放行），
+        // 刚才的报错挪进重试条，不弹红条。次数等紧随其后的 auto_retry_start 再补。
+        return dropDrafts(state, {
+          ...ended,
+          lastError: undefined,
+          retrying: {
+            attempt: state.retrying?.auto ? state.retrying.attempt : 0,
+            max: state.retrying?.auto ? state.retrying.max : 0,
+            auto: true,
+            error: state.lastError ?? state.retrying?.error,
+          },
+        });
+      }
+      return dropDrafts(state, {
+        ...ended,
+        isStreaming: false,
+        ...settleAutoRetry(state),
       });
     }
 
@@ -786,7 +820,13 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const messages = [...state.messages];
       const idx = lastIndex(messages, (m) => m.kind === 'assistant' && m.streaming);
       // 用户主动中断期间，abort 触发的 errorMessage 不弹红条（aborting 由 ChatView 置位）。
-      const showErr = errMsg && !state.aborting ? errMsg : undefined;
+      const shownErr = errMsg && !state.aborting ? errMsg : undefined;
+      // pi 接口重试进行中：这次失败只更新重试条，是否落红条等 agent_end 说不再重试。
+      const errPatch: Partial<AgentState> = !shownErr
+        ? {}
+        : state.retrying?.auto
+          ? { retrying: { ...state.retrying, error: shownErr } }
+          : { lastError: shownErr };
       if (idx < 0) {
         // 无在流的 assistant 泡：有可见文本/思考才补一条终态 assistant；纯 toolCall（无文本/思考）
         // 不建空泡，由下方 syncStreamingToolCalls 兜底把卡片立住，避免多条灰线。
@@ -844,12 +884,12 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         }
         const toolCallIds = new Set(extractToolCalls(ev.message).map((call) => call.id));
         const failed = failRunningToolCards(rebound, cardIds, toolCallIds, failText);
-        return dropDrafts(state, { messages: failed, ...(showErr ? { lastError: showErr } : {}) });
+        return dropDrafts(state, { messages: failed, ...errPatch });
       }
       // 终态再 upsert 一次 toolCall：覆盖后端「只在 message_end 给完整 toolCall、不流式」的情况，
       // 让卡片即使没走流式也能在 tool_execution_start 之前带完整参数立住。
       const synced = syncStreamingToolCalls(rebound, ev.message);
-      return dropDrafts(state, { messages: synced, ...(showErr ? { lastError: showErr } : {}) });
+      return dropDrafts(state, { messages: synced, ...errPatch });
     }
 
     case 'message_update': {
@@ -987,9 +1027,23 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return { ...state, steering: ev.steering ?? [], followUp: ev.followUp ?? [] };
     }
 
+    case 'auto_retry_start': {
+      const ev = event as Extract<AgentEvent, { type: 'auto_retry_start' }>;
+      return {
+        ...state,
+        lastError: undefined,
+        retrying: { attempt: ev.attempt, max: ev.maxAttempts, auto: true, error: ev.errorMessage || state.retrying?.error },
+      };
+    }
+
     case 'auto_retry_end': {
       const ev = event as Extract<AgentEvent, { type: 'auto_retry_end' }>;
-      return ev.success ? { ...state, lastError: undefined } : { ...state, lastError: ev.finalError };
+      const retrying = state.retrying?.auto ? undefined : state.retrying;
+      if (ev.success) return { ...state, retrying, lastError: undefined };
+      // 用户取消（pi 报 Retry cancelled）不算失败。
+      const cancelled = state.aborting || ev.finalError === 'Retry cancelled';
+      const finalError = ev.finalError || state.retrying?.error;
+      return { ...state, retrying, lastError: cancelled ? state.lastError : finalError ?? state.lastError };
     }
 
     case 'extension_error': {

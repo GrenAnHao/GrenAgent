@@ -1177,6 +1177,91 @@ describe('引导状态', () => {
   });
 });
 
+describe('pi 自动重试', () => {
+  const failed = (errorMessage: string) =>
+    ({
+      type: 'message_end',
+      message: { role: 'assistant', content: [], stopReason: 'error', errorMessage },
+    }) as AgentEvent;
+  const ok = {
+    type: 'message_end',
+    message: { role: 'assistant', content: [{ type: 'text', text: '好了' }], stopReason: 'stop' },
+  } as AgentEvent;
+  const retryStart = (attempt: number) =>
+    ({ type: 'auto_retry_start', attempt, maxAttempts: 3, delayMs: 2000, errorMessage: '502 Bad Gateway' }) as AgentEvent;
+
+  function failingRun(): AgentState {
+    let s = addUserMessage(initialAgentState(), '你好');
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, failed('502 Bad Gateway'));
+    return applyEvent(s, { type: 'agent_end', willRetry: true, messages: [] } as AgentEvent);
+  }
+
+  it('agent_end 带 willRetry 时这一轮仍在进行，报错收进重试条', () => {
+    const s = failingRun();
+    expect(s.isStreaming).toBe(true);
+    expect(s.lastError).toBeUndefined();
+    expect(s.retrying).toMatchObject({ auto: true, error: '502 Bad Gateway' });
+  });
+
+  it('auto_retry_start 写入次数和原因，退避结束的 agent_start 不清重试条', () => {
+    let s = applyEvent(failingRun(), retryStart(1));
+    expect(s.retrying).toEqual({ attempt: 1, max: 3, auto: true, error: '502 Bad Gateway' });
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    expect(s.isStreaming).toBe(true);
+    expect(s.retrying).toMatchObject({ attempt: 1, auto: true });
+  });
+
+  it('重试中再次失败不弹红条，只更新重试条', () => {
+    let s = applyEvent(failingRun(), retryStart(1));
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, failed('503 Service Unavailable'));
+    expect(s.lastError).toBeUndefined();
+    expect(s.retrying).toMatchObject({ error: '503 Service Unavailable' });
+    s = applyEvent(s, { type: 'agent_end', willRetry: true, messages: [] } as AgentEvent);
+    expect(s.isStreaming).toBe(true);
+    expect(s.lastError).toBeUndefined();
+    expect(s.retrying).toMatchObject({ attempt: 1, max: 3, error: '503 Service Unavailable' });
+  });
+
+  it('重试成功后清掉重试条', () => {
+    let s = applyEvent(failingRun(), retryStart(1));
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, ok);
+    s = applyEvent(s, { type: 'auto_retry_end', success: true, attempt: 1 } as AgentEvent);
+    expect(s.retrying).toBeUndefined();
+    expect(s.lastError).toBeUndefined();
+  });
+
+  it('重试用完才落红条：agent_end 先把最后的报错落成 lastError，auto_retry_end 再给最终原因', () => {
+    let s = applyEvent(failingRun(), retryStart(3));
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    s = applyEvent(s, failed('503 Service Unavailable'));
+    s = applyEvent(s, { type: 'agent_end', willRetry: false, messages: [] } as AgentEvent);
+    expect(s.isStreaming).toBe(false);
+    expect(s.retrying).toBeUndefined();
+    expect(s.lastError).toBe('503 Service Unavailable');
+    s = applyEvent(s, { type: 'auto_retry_end', success: false, attempt: 3, finalError: '503 Service Unavailable' } as AgentEvent);
+    expect(s.lastError).toBe('503 Service Unavailable');
+  });
+
+  it('用户取消重试不弹红条', () => {
+    let s = applyEvent(failingRun(), retryStart(1));
+    s = { ...s, aborting: true, retrying: undefined };
+    s = applyEvent(s, { type: 'auto_retry_end', success: false, attempt: 1, finalError: 'Retry cancelled' } as AgentEvent);
+    s = applyEvent(s, { type: 'agent_settled' } as AgentEvent);
+    expect(s.lastError).toBeUndefined();
+    expect(s.retrying).toBeUndefined();
+    expect(s.isStreaming).toBe(false);
+  });
+
+  it('界面自己的发送重试仍由 agent_start 收掉', () => {
+    let s: AgentState = { ...initialAgentState(), retrying: { attempt: 1, max: 5 } };
+    s = applyEvent(s, { type: 'agent_start' } as AgentEvent);
+    expect(s.retrying).toBeUndefined();
+  });
+});
+
 describe('excludedFromAgent', () => {
   it('按序回放 add/remove 重建排除集', () => {
     const set = excludedFromAgent([

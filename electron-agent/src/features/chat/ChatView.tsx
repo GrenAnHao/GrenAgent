@@ -14,7 +14,13 @@ import type { TranscriptScrollHandle } from './VirtualizedMessageList';
 import type { PromptImage } from './input/ChatInputContext';
 import { createComposerItem, removeComposerItem } from './input/composerQueue';
 import { settleAbortedSteers } from './steerAbort';
-import { dropUnpersistedUserTail, pinRunClock, rollbackUnansweredSend, type UserImage } from '../../stores/agentReducer';
+import {
+  dropUnpersistedUserTail,
+  pinRunClock,
+  rollbackUnansweredSend,
+  type AgentState,
+  type UserImage,
+} from '../../stores/agentReducer';
 import { setComposerValue } from './input/composerBridge';
 import { isExecutiveCommandMessage } from './input/commandClassification';
 import { parseCommandToken } from './input/editor/commandPaste';
@@ -79,6 +85,14 @@ const retryBannerStyle: CSSProperties = {
   background: cssVar.colorWarningBg,
   border: `1px solid ${cssVar.colorWarningBorder}`,
 };
+
+const retryReasonStyle: CSSProperties = { display: 'block', opacity: 0.8 };
+
+function retryLabel(retrying: NonNullable<AgentState['retrying']>): string {
+  if (!retrying.auto) return `发送失败，正在重试（${retrying.attempt}/${retrying.max}）…`;
+  if (retrying.attempt <= 0) return '接口出错，准备重试…';
+  return `接口出错，正在重试（${retrying.attempt}/${retrying.max}）…`;
+}
 
 /** 发送失败时的自动重试次数（不含首次发送）。 */
 const MAX_SEND_RETRIES = 5;
@@ -306,7 +320,8 @@ export function ChatView() {
       }
       return;
     } else if (behavior === 'steer') {
-      store.useStore.setState({ lastError: undefined, retrying: undefined });
+      // pi 自己的接口重试条留着，引导不改变那一轮还在重试的事实。
+      store.useStore.setState((s) => ({ lastError: undefined, retrying: s.retrying?.auto ? s.retrying : undefined }));
       if (!hasContent) return;
       // 引导赶上本轮收尾时，Pi 会把它推迟成下一回合；钉住起点，那一回合也接着计时。
       store.useStore.setState(pinRunClock(store.useStore.getState()));
@@ -318,7 +333,7 @@ export function ChatView() {
           await pi.prompt(workspace, text, 'steer', images, steerPath);
           if (!steerHere()) return;
           void store.syncEntryIdsAfterAccept();
-          store.useStore.setState({ retrying: undefined });
+          store.useStore.setState((s) => ({ retrying: s.retrying?.auto ? s.retrying : undefined }));
           return;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -595,8 +610,9 @@ export function ChatView() {
   const retryIndicator = retrying ? (
     <div style={retryBannerStyle} data-testid="send-retry-indicator">
       <Icon icon={RefreshCw} spin size={14} />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        发送失败，正在重试（{retrying.attempt}/{retrying.max}）…
+      <span style={errorTextStyle}>
+        {retryLabel(retrying)}
+        {retrying.error ? <span style={retryReasonStyle}>{retrying.error}</span> : null}
       </span>
       <button type="button" aria-label="取消" data-testid="send-retry-cancel" onClick={() => void handleAbort()} style={errorCloseStyle}>
         取消

@@ -387,6 +387,24 @@ describe('ChatView 发送失败自动重试', () => {
     expect(screen.getByTestId('send-retry-cancel')).toBeTruthy();
   });
 
+  it('pi 接口重试显示原因和次数，取消走 abort', async () => {
+    state.workspaceReady = true;
+    state.storeState.messages = [{ kind: 'user', id: 'u1', text: 'hello' }];
+    state.storeState.retrying = { attempt: 1, max: 3, auto: true, error: '502 Bad Gateway' } as AgentState['retrying'] & object;
+    state.piAbort.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+
+    const indicator = screen.getByTestId('send-retry-indicator').textContent ?? '';
+    expect(indicator).toContain('接口出错，正在重试（1/3）');
+    expect(indicator).toContain('502 Bad Gateway');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('send-retry-cancel'));
+    });
+    expect(state.piAbort).toHaveBeenCalled();
+    expect(state.storeState.retrying).toBeUndefined();
+  });
+
   it('重试等待期间点停止：结束重试、不再发 prompt、不报错', async () => {
     vi.useFakeTimers();
     state.workspaceReady = true;
