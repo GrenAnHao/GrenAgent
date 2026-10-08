@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { expandInvocation } from "./expand.js";
-import { parseTemplate } from "./templates.js";
+import { isSafeFileStem, parseTemplate } from "./templates.js";
 
 const refactor = parseTemplate("refactor", "---\ndescription: 重构\n---\n请把 {file} 重构成 {style=functional} 风格。");
 const plain = parseTemplate("plain", "没有参数，$1 交给 Pi");
@@ -25,6 +25,22 @@ describe("expandInvocation", () => {
     expect(expandInvocation("你好", lookup)).toEqual({ kind: "pass" });
     expect(expandInvocation("/unknown a", lookup)).toEqual({ kind: "pass" });
     expect(expandInvocation("/plain a", lookup)).toEqual({ kind: "pass" });
+  });
+});
+
+describe("isSafeFileStem", () => {
+  it("拒绝正反斜杠、点目录和空串", () => {
+    expect(isSafeFileStem("a/b")).toBe(false);
+    expect(isSafeFileStem("a\\b")).toBe(false);
+    expect(isSafeFileStem("..\\x")).toBe(false);
+    expect(isSafeFileStem("..")).toBe(false);
+    expect(isSafeFileStem(".")).toBe(false);
+    expect(isSafeFileStem("")).toBe(false);
+  });
+
+  it("放行普通名字", () => {
+    expect(isSafeFileStem("重构-a_b")).toBe(true);
+    expect(isSafeFileStem("a.b")).toBe(true);
   });
 });
 

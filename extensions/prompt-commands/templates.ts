@@ -17,7 +17,7 @@ export function promptsDir(agentDir: string): string {
 
 /** 文件名主干不能带路径分隔符，也不能是 . 或 ..，防止越出目录。 */
 export function isSafeFileStem(stem: string): boolean {
-  return stem.length > 0 && stem !== "." && stem !== ".." && !/[\/]/.test(stem);
+  return stem.length > 0 && stem !== "." && stem !== ".." && !/[\\/]/.test(stem);
 }
 
 export function parseTemplate(name: string, content: string): PromptTemplate {
