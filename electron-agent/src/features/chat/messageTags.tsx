@@ -1,6 +1,9 @@
+import { findCommandBlocks, parseInvocation, resolveArgs, splitArgs } from '@extensions/prompt-commands/syntax';
 import type { ReactNode } from 'react';
 import { openBrowserPopupTab } from '../dock/browser/openBrowserPopupTab';
 import { ChatTagView } from './input/editor/ChatTag/ChatTagView';
+import { CommandPillView } from './input/editor/CommandPill/CommandPillView';
+import { getCachedPromptCommands } from './input/editor/promptCommandCache';
 import { formatUrlLabel } from './input/editor/urlPaste';
 import { unescapeSkillName } from './skillCommandText';
 
@@ -8,7 +11,8 @@ export type MessageSegment =
   | { type: 'text'; text: string }
   | { type: 'file'; path: string }
   | { type: 'skill'; name: string }
-  | { type: 'link'; url: string };
+  | { type: 'link'; url: string }
+  | { type: 'command'; name: string; args: Array<{ name: string; value: string }> };
 
 // Pi expands a `/skill:<name>` command into the full SKILL.md wrapped in
 // `<skill name="..." location="...">...</skill>`. The optimistic (just-sent)
@@ -58,11 +62,11 @@ function parseInline(text: string, segments: MessageSegment[]): void {
 }
 
 /**
- * 把用户消息文本切成普通文本段、技能段（`/skill:` 或展开后的 `<skill>` 块）与文件引用段。
+ * 把一段不含 command 块的文本切成普通文本段、技能段（`/skill:` 或展开后的 `<skill>` 块）与文件引用段。
  * 文件引用沿用 messenger 的 `@相对路径` 约定：只匹配「行首或空白后的 @ + 非空白串」，
  * 借此避开 email（a@b.com，@ 前是字母）这类误命中。
  */
-export function parseMessageTags(text: string): MessageSegment[] {
+function parseSkillAndInline(text: string): MessageSegment[] {
   const segments: MessageSegment[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
@@ -73,6 +77,44 @@ export function parseMessageTags(text: string): MessageSegment[] {
     last = SKILL_BLOCK_RE.lastIndex;
   }
   if (last < text.length) parseInline(text.slice(last), segments);
+  return segments;
+}
+
+/** 刚发出去、还没被 <command> 块替换的 `/模板 "参数"…`：用缓存的模板定义还原成胶囊。 */
+function parseOptimisticCommand(text: string, segments: MessageSegment[]): string {
+  const invocation = parseInvocation(text);
+  if (!invocation) return text;
+  const template = getCachedPromptCommands().find((item) => item.name === invocation.name && item.params.length > 0);
+  if (!template) return text;
+  const { args, rest } = splitArgs(invocation.argsText, template.params.length);
+  const { values } = resolveArgs(template.params, args);
+  segments.push({
+    type: 'command',
+    name: template.name,
+    args: template.params.map((param) => ({ name: param.name, value: values[param.name] ?? '' })),
+  });
+  return rest ? ` ${rest}` : '';
+}
+
+/**
+ * 把用户消息文本切成普通文本、命令胶囊（<command> 块或刚发出的调用文本）、
+ * 技能段（`/skill:` 或展开后的 `<skill>` 块）与文件引用段。
+ */
+export function parseMessageTags(text: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  let last = 0;
+  for (const hit of findCommandBlocks(text)) {
+    if (!hit.block) continue;
+    if (hit.start > last) segments.push(...parseSkillAndInline(text.slice(last, hit.start)));
+    segments.push({ type: 'command', name: hit.block.name, args: hit.block.args });
+    last = hit.end;
+    // 块后的空行在 pre-wrap 气泡里会空出一行，压成一个空格，和输入框里一致。
+    while (text.startsWith('\n', last)) last += 1;
+    if (last < text.length && last > hit.end) segments.push({ type: 'text', text: ' ' });
+  }
+  const tail = text.slice(last);
+  const remaining = last === 0 ? parseOptimisticCommand(tail, segments) : tail;
+  if (remaining) segments.push(...parseSkillAndInline(remaining));
   return segments;
 }
 
@@ -91,6 +133,9 @@ export function fileTagLabel(path: string): string {
  */
 export function renderMessageTags(text: string): ReactNode {
   return parseMessageTags(text).map((seg, i) => {
+    if (seg.type === 'command') {
+      return <CommandPillView key={i} name={seg.name} args={seg.args} />;
+    }
     if (seg.type === 'file') {
       return <ChatTagView key={i} category="file" label={fileTagLabel(seg.path)} value={seg.path} />;
     }
