@@ -9,7 +9,3 @@ const WIDEN: Record<FileSandboxMode, readonly FileSandboxMode[]> = {
 export function isStrictWidening(from: FileSandboxMode, to: FileSandboxMode): boolean {
   return WIDEN[from].includes(to);
 }
-
-export function justifyOk(text: string): boolean {
-  return text.trim().length >= 20;
-}

@@ -12,6 +12,7 @@ import {
   type ApprovalPreset, type ToolCallFacts, type ToolRuleDraft,
 } from "../_shared/desktop-control.js";
 import { DELEGATION_DENY_REASON, SUBAGENT_ASK_PINNED_RULE_ID } from "../_shared/delegation-scope.js";
+import { grantEscalation } from "../_shared/sandbox/escalationGrant.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
 // 工具分组取自单一真相源（_shared/tool-groups），避免与 capability 能力闸各维护一份而漂移失配。
@@ -68,6 +69,17 @@ function collectFacts(
 /** 硬拒绝：block 且 terminate，让本批工具结束后不再自动再调一轮模型。 */
 function refuse(reason: string) {
   return { block: true as const, reason, terminate: true as const };
+}
+
+/** bash 带升权参数时的目标模式和理由，写进询问文字；bash 工具执行前还会自己校验一遍。 */
+function escalationOf(event: { toolName: string; input?: unknown }): { mode: string; justification: string } | undefined {
+  if (event.toolName !== "bash") return undefined;
+  const input = (event.input ?? {}) as Record<string, unknown>;
+  const mode = input.sandbox_permissions;
+  const justification = input.justification;
+  // 和 bash 的 readEscalationArgs 一样要求理由非空：否则用户会批准一个理由为空、bash 一定会拒的请求。
+  if (typeof mode !== "string" || typeof justification !== "string" || !justification.trim()) return undefined;
+  return { mode, justification: justification.trim() };
 }
 
 /** 「总是允许」写成尽可能窄的规则：bash 按命令前缀，写类工具按目录，其余按工具名。 */
@@ -143,10 +155,17 @@ export default function (pi: ExtensionAPI) {
     }
 
     const detail = facts.command ?? facts.path ?? event.toolName;
+    // 带升权的 bash：同一次询问里写明目标模式和理由，允许后给这次调用留一张许可，bash 不再问第二次。
+    const escalation = escalationOf(event);
+    const question = escalation
+      ? `${detail}\n\n  沙箱升权 → ${escalation.mode}\n  理由：${escalation.justification}`
+      : detail;
     let choice: string | undefined;
     try {
       // 0.85+：用户取消 select 返回 undefined，不再保证抛错。
-      choice = await ctx.ui.select(`请求批准：\n\n  ${detail}`, ["允许本次", "总是允许", "拒绝"]);
+      // 带升权的询问不给「总是允许」：它只会记命令规则，用户却会以为是对升权的长期授权。
+      const options = escalation ? ["允许本次", "拒绝"] : ["允许本次", "总是允许", "拒绝"];
+      choice = await ctx.ui.select(`请求批准：\n\n  ${question}`, options);
     } catch {
       await settleToolCall(control, verdict.auditId, "aborted");
       return refuse("授权请求已取消");
@@ -162,6 +181,10 @@ export default function (pi: ExtensionAPI) {
     }
     if (choice === "总是允许") await rememberToolRule(control, draftRule(facts));
     await settleToolCall(control, verdict.auditId, "user_allow");
+    // 许可只给这一次调用，以后的升权仍由 bash 自己问。
+    if (escalation && event.toolCallId !== undefined) {
+      grantEscalation(ctx.sessionManager?.getSessionId?.() ?? "", event.toolCallId, escalation.mode);
+    }
     return undefined;
   });
 

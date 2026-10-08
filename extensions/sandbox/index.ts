@@ -1,16 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getAgentMode } from "../agent-mode/modes.js";
-import { isStrictWidening, justifyOk } from "../_shared/sandbox/escalate.js";
+import { clearEscalationGrants } from "../_shared/sandbox/escalationGrant.js";
 import { createSandboxedBashOperations } from "../_shared/sandbox/operations.js";
-import { clearPendingDenials, consumePendingDenial, peekPendingDenial } from "../_shared/sandbox/pendingDenial.js";
 import { createSandboxProvider } from "../_shared/sandbox/provider.js";
 import { resolvePreset } from "../_shared/sandbox/resolvePreset.js";
-import type { FileSandboxMode } from "../_shared/sandbox/types.js";
+import { withTextMarkers } from "../_shared/sandbox/userBash.js";
 import { jobs } from "../jobs/service.js";
 import { createGrenBashTool } from "./bashTool.js";
 import { withBashUiDescription } from "./bashUiDescription.js";
+import type { SandboxGate } from "./escalation.js";
 import { annotateWindowsBashTool } from "./windowsBashPrompt.js";
 
 export default function (pi: ExtensionAPI) {
@@ -31,6 +30,16 @@ export default function (pi: ExtensionAPI) {
     });
   };
 
+  /**
+   * 一次 bash 调用起步的模式，以及审批档是否拒绝从它升权（「工作区编辑」档下的 workspace-write）。
+   * 和 operations 的 getPolicy() 同源（会话 cwd）：exec 只在 PI_SANDBOX_MODE_ONCE 比它自己的模式严格更宽时才放宽，
+   * 两边看的不是同一个根，用户批准的放宽可能在执行时被静默忽略。
+   */
+  const sandboxGate = (): SandboxGate => {
+    const mode = getPolicy().mode;
+    return { mode, presetBlocksEscalation: mode === "workspace-write" && getApprovalPolicy(cwd) === "workspace" };
+  };
+
   const operations = createSandboxedBashOperations({
     getPolicy: () => getPolicy(),
     confine: (argv, policy) => provider.confine(argv, policy),
@@ -43,80 +52,22 @@ export default function (pi: ExtensionAPI) {
 
   // 自有 bash（不再用 pi 的 createBashToolDefinition）：契约照 pi 1.0.2，执行照 DSH——每次调用都是 jobs 里的 bash job，
   // 前台等到 timeout 仍在跑就转后台。进程走同一套沙箱 operations。
+  // 升权并进 bash 的 sandbox_permissions + justification（DSH），没有单独的升权工具。
   pi.registerTool(
-    withBashUiDescription(annotateWindowsBashTool(createGrenBashTool({ jobs, exec: operations.exec }))),
+    withBashUiDescription(annotateWindowsBashTool(createGrenBashTool({ jobs, exec: operations.exec, sandboxGate }))),
   );
 
-  pi.on("user_bash", () => ({ operations }));
-
-  pi.registerTool({
-    name: "bash_escalate",
-    label: "Escalate sandbox",
-    description:
-      "Retry the exact denied bash command under a wider file sandbox for this call only. Requires justification.",
-    promptSnippet: "Retry a denied bash command under a wider sandbox.",
-    parameters: Type.Object({
-      command: Type.String(),
-      justification: Type.String(),
-      targetMode: Type.Unsafe<FileSandboxMode>({ type: "string" }),
-    }),
-    async execute(_id, params, signal, onUpdate, ctx) {
-      const execCwd = ctx.cwd;
-      const policy = getPolicy(execCwd);
-      const sid = ctx.sessionManager.getSessionId() || sessionId;
-      const pending = peekPendingDenial(execCwd, params.command, sid);
-      const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
-      const consume = () => consumePendingDenial(execCwd, params.command, sid);
-      if (!pending) return fail("bash_escalate: no pending denial for that command.");
-      if (!justifyOk(params.justification)) return fail("bash_escalate: justification must be at least 20 characters.");
-      if (!isStrictWidening(pending.mode, params.targetMode)) {
-        return fail("bash_escalate: targetMode is not a strict widening.");
-      }
-      // 按解析后的 mode 裁决，不只看审批档：Ask 会把 mode 强制成 read-only，
-      // 此时即使审批档是 workspace，也应走「问人」而不是直接拒。
-      if (policy.mode === "workspace-write" && getApprovalPolicy(execCwd) === "workspace") {
-        consume();
-        return fail("bash_escalate: workspace-edit preset rejects escalation.");
-      }
-      if (!ctx.hasUI) {
-        consume();
-        return fail("bash_escalate: UI unavailable; denied.");
-      }
-      let choice: string | undefined;
-      try {
-        choice = await ctx.ui.select(
-          `Sandbox escalation\n\n${params.command}\n\n${params.justification}\n\n→ ${params.targetMode}`,
-          ["允许本次", "拒绝"],
-        );
-      } catch {
-        consume();
-        return fail("bash_escalate: cancelled.");
-      }
-      if (choice !== "允许本次") {
-        consume();
-        return fail("bash_escalate: rejected.");
-      }
-      consume();
-      const chunks: Buffer[] = [];
-      const result = await operations.exec(params.command, execCwd, {
-        signal,
-        onData: (data) => {
-          chunks.push(data);
-          const text = Buffer.concat(chunks).toString();
-          onUpdate?.({ content: [{ type: "text", text }], details: undefined });
-        },
-        env: { ...process.env, PI_SANDBOX_MODE_ONCE: params.targetMode },
-      });
-      const output = Buffer.concat(chunks).toString();
-      const text = output || `exit ${result.exitCode ?? "null"}`;
-      return { content: [{ type: "text" as const, text }], details: undefined };
-    },
-  });
+  // user_bash 由 pi 显示输出：沙箱事实经适配器写回文字。
+  const userBashOperations = withTextMarkers(operations);
+  pi.on("user_bash", () => ({ operations: userBashOperations }));
 
   pi.on("session_shutdown", async (_event, ctx) => {
     const id = sessionId ?? ctx.sessionManager.getSessionId();
     if (!id) return;
-    await provider.dispose?.(id);
-    clearPendingDenials(id);
+    try {
+      await provider.dispose?.(id);
+    } finally {
+      clearEscalationGrants(id);
+    }
   });
 }

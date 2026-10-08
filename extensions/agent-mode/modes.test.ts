@@ -110,11 +110,21 @@ describe("gateToolCall", () => {
   });
   it("ask allows bash and leaves writes blocked", () => {
     expect(gateToolCall("ask", "bash", { command: "ls" })).toBeUndefined();
-    expect(gateToolCall("ask", "bash_escalate", {})).toBeUndefined();
+    // 升权并进了 bash：ask 照旧放行，由 bash 自己的审批把关；bash_escalate 已删除，不在白名单里。
+    expect(
+      gateToolCall("ask", "bash", { command: "touch a.txt", sandbox_permissions: "workspace-write", justification: "需要写入" }),
+    ).toBeUndefined();
+    expect(gateToolCall("ask", "bash_escalate", {})?.block).toBe(true);
     expect(gateToolCall("ask", "write", { path: "a" })?.block).toBe(true);
     expect(gateToolCall("ask", "write", { path: "a" })?.reason).toContain(
       "不能修改文件或调用 MCP；命令行由只读 OS 沙箱执行",
     );
+  });
+
+  it("plan checks every bash command for safety, escalation or not", () => {
+    const pair = { sandbox_permissions: "workspace-write", justification: "需要写入" };
+    expect(gateToolCall("plan", "bash", { command: "git status", ...pair })).toBeUndefined();
+    expect(gateToolCall("plan", "bash", { command: "touch a.txt", ...pair })?.block).toBe(true);
   });
 
   it("ask allows read-only retrieval and web lookup", () => {

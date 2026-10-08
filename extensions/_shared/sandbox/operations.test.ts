@@ -3,19 +3,11 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SandboxUnavailableError } from "./errors.js";
 import { createSandboxedBashOperations, PS_UTF8_PREFIX } from "./operations.js";
-import {
-  consumePendingDenial,
-  __resetPendingDenialsForTest,
-} from "./pendingDenial.js";
 import type { ConfinedArgv, FileSandboxMode, SandboxExecutionPolicy } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
-
-afterEach(() => {
-  __resetPendingDenialsForTest();
-});
 
 const SHELL = "bash";
 const COMMAND = "echo hi";
@@ -130,6 +122,7 @@ describe("createSandboxedBashOperations", () => {
       expect.objectContaining({ cwd: CWD }),
     );
     expect(result.exitCode).toBe(0);
+    expect(result.sandbox).toEqual({ mode: "danger-full-access", denied: false });
   });
 
   it("spawns the argv returned by confine in other modes", async () => {
@@ -148,7 +141,7 @@ describe("createSandboxedBashOperations", () => {
     );
   });
 
-  it("does not spawn when confine throws SandboxUnavailableError", async () => {
+  it("does not spawn when confine throws SandboxUnavailableError; reports it as a fact", async () => {
     const { ops, spawnImpl } = makeOps({
       confine: vi.fn(async () => {
         throw new SandboxUnavailableError("runner missing");
@@ -157,9 +150,16 @@ describe("createSandboxedBashOperations", () => {
     const { onData, text } = collectOnData();
     const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
     expect(spawnImpl).not.toHaveBeenCalled();
-    expect(result.exitCode).toBeNull();
-    expect(text()).toMatch(/UNAVAILABLE/);
-    expect(text()).toMatch(/Enable the OS runner or switch approval to 完全权限/);
+    expect(result).toEqual({
+      exitCode: null,
+      sandbox: {
+        mode: "read-only",
+        denied: false,
+        runnerFailed: "unavailable",
+        detail: "runner missing The command was not executed. Enable the OS runner or switch approval to 完全权限.",
+      },
+    });
+    expect(text()).toBe("");
   });
 
   it("does not tell the user to drop the sandbox when a grant fails", async () => {
@@ -168,63 +168,56 @@ describe("createSandboxedBashOperations", () => {
         throw new SandboxUnavailableError("failed to grant PiSandbox access to C:/work: icacls exited 5");
       }),
     });
-    const { onData, text } = collectOnData();
-    const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
+    const result = await ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
     expect(spawnImpl).not.toHaveBeenCalled();
-    expect(result.exitCode).toBeNull();
-    expect(text()).toMatch(/failed to grant PiSandbox/);
-    expect(text()).not.toMatch(/完全权限/);
+    expect(result.sandbox.runnerFailed).toBe("unavailable");
+    expect(result.sandbox.detail).toMatch(/failed to grant PiSandbox/);
+    expect(result.sandbox.detail).toMatch(/The command was not executed\.$/);
+    expect(result.sandbox.detail).not.toMatch(/完全权限/);
   });
 
-  it("records a pending denial with sessionId on exit 162", async () => {
-    const sessionId = "deny-session";
+  it("reports a denial on exit 162 as a fact, not as output", async () => {
     const { ops } = makeOps({
       mode: "read-only",
-      sessionId,
       spawnImpl: vi.fn(() => fakeChild({ exitCode: SANDBOX_DENIAL_EXIT })),
     });
     const { onData, text } = collectOnData();
     const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
-    expect(result.exitCode).toBe(SANDBOX_DENIAL_EXIT);
-    expect(text()).toContain(`[sandbox: file access denied under read-only mode]`);
-    expect(text()).toMatch(/bash_escalate/);
-    expect(consumePendingDenial(CWD, COMMAND, sessionId)).toEqual({ mode: "read-only" });
-    expect(consumePendingDenial(CWD, COMMAND)).toBeUndefined();
+    expect(result).toEqual({ exitCode: SANDBOX_DENIAL_EXIT, sandbox: { mode: "read-only", denied: true } });
+    expect(text()).toBe("");
   });
 
-  it("records a pending denial from stderr Read-only file system on exit 1", async () => {
-    const sessionId = "ro-session";
+  it("reports a denial from stderr Read-only file system on exit 1; the output is only the command's", async () => {
     const { ops } = makeOps({
       mode: "read-only",
-      sessionId,
-      spawnImpl: vi.fn(() => fakeChild({
-        exitCode: 1,
-        stderr: "touch: foo: Read-only file system\n",
-      })),
+      spawnImpl: vi.fn(() => fakeChild({ exitCode: 1, stderr: "touch: foo: Read-only file system\n" })),
     });
     const { onData, text } = collectOnData();
     const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
-    expect(result.exitCode).toBe(1);
-    expect(text()).toContain(`[sandbox: file access denied under read-only mode]`);
-    expect(text()).toMatch(/bash_escalate/);
-    expect(consumePendingDenial(CWD, COMMAND, sessionId)).toEqual({ mode: "read-only" });
+    expect(result).toEqual({ exitCode: 1, sandbox: { mode: "read-only", denied: true } });
+    expect(text()).toBe("touch: foo: Read-only file system\n");
   });
 
   it("does not treat the same denial phrase on stdout as a denial", async () => {
-    const sessionId = "stdout-echo";
     const { ops } = makeOps({
       mode: "read-only",
-      sessionId,
-      spawnImpl: vi.fn(() => fakeChild({
-        exitCode: 1,
-        stdout: "Read-only file system\n",
-      })),
+      spawnImpl: vi.fn(() => fakeChild({ exitCode: 1, stdout: "Read-only file system\n" })),
     });
     const { onData, text } = collectOnData();
     const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
-    expect(result.exitCode).toBe(1);
-    expect(text()).not.toMatch(/bash_escalate/);
-    expect(consumePendingDenial(CWD, COMMAND, sessionId)).toBeUndefined();
+    expect(result).toEqual({ exitCode: 1, sandbox: { mode: "read-only", denied: false } });
+    expect(text()).toBe("Read-only file system\n");
+  });
+
+  it("reports a runner launch failure matched by its exit code and signature", async () => {
+    const { ops } = makeOps({
+      mode: "read-only",
+      spawnImpl: vi.fn(() => fakeChild({ exitCode: 127, stderr: "bwrap: executable not found\n" })),
+    });
+    const { onData, text } = collectOnData();
+    const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
+    expect(result).toEqual({ exitCode: 127, sandbox: { mode: "read-only", denied: false, runnerFailed: "runner" } });
+    expect(text()).toBe("bwrap: executable not found\n");
   });
 
   it("does not spawn when already aborted", async () => {
@@ -333,7 +326,8 @@ describe("createSandboxedBashOperations", () => {
     const { ops, spawnImpl } = makeOps({ mode: "read-only", confine });
     const env: NodeJS.ProcessEnv = { PI_SANDBOX_MODE_ONCE: "workspace-write", KEEP: "1" };
     const { onData } = collectOnData();
-    await ops.exec(COMMAND, CWD, { onData, env });
+    const result = await ops.exec(COMMAND, CWD, { onData, env });
+    expect(result.sandbox).toEqual({ mode: "workspace-write", denied: false });
     expect(confine).toHaveBeenCalled();
     expect(env.PI_SANDBOX_MODE_ONCE).toBe("workspace-write");
     expect(spawnImpl).toHaveBeenCalledWith(
@@ -358,15 +352,16 @@ describe("createSandboxedBashOperations", () => {
     expect(spawnedEnv.PI_SANDBOX_MODE_ONCE).toBeUndefined();
   });
 
-  it("writes spawnError and attributes runner-failure", async () => {
+  it("reports a shell that cannot spawn as a runner failure", async () => {
     const err = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
-    const { ops } = makeOps({
-      spawnImpl: vi.fn(() => fakeChild({ spawnError: err })),
-    });
+    const { ops } = makeOps({ spawnImpl: vi.fn(() => fakeChild({ spawnError: err })) });
     const { onData, text } = collectOnData();
     const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
-    expect(result.exitCode).toBeNull();
-    expect(text()).toContain("[sandbox: runner failed] The command never started.");
+    expect(result).toEqual({
+      exitCode: null,
+      sandbox: { mode: "read-only", denied: false, runnerFailed: "runner", detail: "the shell could not start (ENOENT)" },
+    });
+    expect(text()).toBe("");
   });
 
   it("reports runner-failure for spawnError without confine", async () => {
@@ -375,11 +370,12 @@ describe("createSandboxedBashOperations", () => {
       mode: "danger-full-access",
       spawnImpl: vi.fn(() => fakeChild({ spawnError: err })),
     });
-    const { onData, text } = collectOnData();
-    const result = await ops.exec(COMMAND, CWD, { onData, env: {} });
+    const result = await ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
     expect(confine).not.toHaveBeenCalled();
-    expect(result.exitCode).toBeNull();
-    expect(text()).toContain("[sandbox: runner failed] The command never started.");
+    expect(result).toEqual({
+      exitCode: null,
+      sandbox: { mode: "danger-full-access", denied: false, runnerFailed: "runner", detail: "the shell could not start (ENOENT)" },
+    });
   });
 
   it("spawns PowerShell -Command with UTF-8 prefix on win32", async () => {
@@ -521,8 +517,10 @@ describe("createSandboxedBashOperations", () => {
     expect(confine).not.toHaveBeenCalled();
     expect(spawnImpl).not.toHaveBeenCalled();
     expect(result.exitCode).toBeNull();
-    expect(text()).toContain("SANDBOX_UNAVAILABLE");
-    expect(text()).toContain("完全权限");
+    expect(result.sandbox).toMatchObject({ mode: "read-only", denied: false, runnerFailed: "unavailable" });
+    expect(result.sandbox.detail).toContain("Git Bash or WSL bash");
+    expect(result.sandbox.detail).toContain("完全权限");
+    expect(text()).toBe("");
   });
 
   it("decodes UTF-16LE WSL errors before display", async () => {

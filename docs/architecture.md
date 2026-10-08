@@ -76,7 +76,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `image-gen` | 文生图 | `generate_image` |
 | `diagnostics` | 环境 / 依赖诊断 | `diagnostics` |
 | `multi-agent` | 子代理委派 | `spawn_agent` |
-| `sandbox` | 自有 bash（对外契约同 pi 1.0.2 内置 bash，不再用 `createBashToolDefinition`）：沙箱 operations（Windows 走 PowerShell），输出流式进卡片。每次调用都是 `bash-N` job，前台等 `timeout`（默认 120 秒，`BASH_FOREGROUND_TIMEOUT_SEC`），仍在跑就交出已有输出并转后台；`run_in_background: true` 直接返回 id，完整日志写临时文件。无会话或超并发上限时退回不受管前台（timeout 到点杀） | `bash`、`bash_escalate` |
+| `sandbox` | 自有 bash（对外契约同 pi 1.0.2 内置 bash，不再用 `createBashToolDefinition`）：沙箱 operations（Windows 走 PowerShell），输出流式进卡片。每次调用都是 `bash-N` job，前台等 `timeout`（默认 120 秒，`BASH_FOREGROUND_TIMEOUT_SEC`），仍在跑就交出已有输出并转后台；`run_in_background: true` 直接返回 id，完整日志写临时文件。无会话或超并发上限时退回不受管前台（timeout 到点杀）。沙箱拒绝和 runner 失败由 operations 作为事实返回（`{ exitCode, sandbox }`），bash 把标记接在输出后、退出码前并放进 `details.sandbox`，后台任务并进结算 detail；被拒后用 `sandbox_permissions` + `justification` 在同一次调用里升权，经用户批准 | `bash` |
 | `jobs` | 进程内后台 job 注册表（语义移植自 DSH jobs / jobs-local / tool-jobs）：每个 job 一个有界输出环（运行期 256KB、结算后 16KB），拉取源每 150ms 泵入；模型按消耗式游标读，`readAt` 非消耗；每个会话最多 10 个存活 job；结算发 `job-done` 通知，等待已收走、模型自己 `job_kill`、会话销毁的不发。`onEvent` 供宿主跟随，`observer.ts` 把事件合并成帧 | `job_output`、`job_list`、`job_kill` |
 | `lsp` | 语言服务器：定义 / 引用 / 悬停等 | `lsp_definition`、`lsp_references` 等 |
 | `ast-tools` | AST 结构化搜索与编辑 | `ast_grep`、`ast_edit` |

@@ -57,8 +57,9 @@ export function __resetAgentModeForTest(): void {
   bySession.clear();
 }
 
-// ask：只读问答。白名单为经核实存在的只读工具 + bash / bash_escalate（写由只读 OS 沙箱拦）：
-//   - pi 内置：read / grep / find / ls / bash / bash_escalate
+// ask：只读问答。白名单为经核实存在的只读工具 + bash（写由只读 OS 沙箱拦；被拦后可用 bash 的
+// sandbox_permissions 在同一次调用里升权，用户批准）：
+//   - pi 内置：read / grep / find / ls / bash
 //   - 联网只读：fetch_url（web-fetch，format 选 markdown / text / html / json / llms）、
 //     web_search / web_search_multi（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
@@ -75,7 +76,6 @@ export const ASK_TOOLS: readonly string[] = [
   "find",
   "ls",
   "bash",
-  "bash_escalate",
   "fetch_url",
   "web_search",
   "web_search_multi",
@@ -113,7 +113,7 @@ export const ASK_TOOLS: readonly string[] = [
   "present",
 ];
 
-// plan：与 ask 共用白名单（已含 bash / bash_escalate）；bash 再由 isSafeCommand 限定为只读命令。
+// plan：与 ask 共用白名单（含 bash）；bash 再由 isSafeCommand 限定为只读命令，带不带 sandbox_permissions 都一样。
 export const PLAN_TOOLS: readonly string[] = ASK_TOOLS;
 
 // brainstorm：使用完整工具集（与 agent 相同），不限制写文件/执行命令。

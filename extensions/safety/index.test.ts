@@ -24,6 +24,7 @@ vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn() }));
 
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getConfig } from "../_shared/runtime-config.js";
+import { __resetEscalationGrantsForTest, takeEscalationGrant } from "../_shared/sandbox/escalationGrant.js";
 import safety from "./index.js";
 
 type ToolCall = (event: unknown, ctx: unknown) => Promise<{ block?: boolean; reason?: string } | undefined>;
@@ -43,6 +44,7 @@ beforeEach(() => {
   delete process.env.SAFETY_READONLY;
   vi.mocked(getConfig).mockReturnValue(undefined);
   mocks.evaluateToolCall.mockResolvedValue({ decision: "allow", auditId: "a1" });
+  __resetEscalationGrantsForTest();
 });
 
 describe("safety approval gating", () => {
@@ -172,5 +174,74 @@ describe("safety approval gating", () => {
     mocks.evaluateToolCall.mockResolvedValue({ decision: "deny", auditId: "a1", ruleId: "builtin.protected-path" } as never);
     const r = await setup()({ toolName: "bash", input: { command: "rm -rf /tmp/x" } }, { hasUI: false, cwd, ui: {} });
     expect(r?.reason).toBe("已被授权规则拒绝：bash");
+  });
+});
+
+describe("safety · bash sandbox escalation", () => {
+  const input = { command: "npm run build", sandbox_permissions: "workspace-write", justification: "需要写构建产物" };
+  const sessionManager = { getSessionId: () => "s1" };
+  const askVerdict = () => mocks.evaluateToolCall.mockResolvedValue({ decision: "ask", auditId: "a1" });
+
+  it("the ask names the target mode and the reason; allowing leaves a grant for this call", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    askVerdict();
+    const ui = { select: vi.fn().mockResolvedValue("允许本次") };
+    const r = await setup()({ toolName: "bash", toolCallId: "call-1", input }, { hasUI: true, cwd, ui, sessionManager });
+    expect(r).toBeUndefined();
+    expect(ui.select.mock.calls[0]?.[0]).toBe(
+      "请求批准：\n\n  npm run build\n\n  沙箱升权 → workspace-write\n  理由：需要写构建产物",
+    );
+    expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(true);
+  });
+
+  it("an escalation ask offers no always-allow: that would only remember the command, not the widening", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    askVerdict();
+    const ui = { select: vi.fn().mockResolvedValue("允许本次") };
+    await setup()({ toolName: "bash", toolCallId: "call-1", input }, { hasUI: true, cwd, ui, sessionManager });
+    expect(ui.select.mock.calls[0]?.[1]).toEqual(["允许本次", "拒绝"]);
+    expect(mocks.rememberToolRule).not.toHaveBeenCalled();
+  });
+
+  it("a rejection leaves no grant", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    askVerdict();
+    const ui = { select: vi.fn().mockResolvedValue("拒绝") };
+    const r = await setup()({ toolName: "bash", toolCallId: "call-1", input }, { hasUI: true, cwd, ui, sessionManager });
+    expect(r).toMatchObject({ block: true });
+    expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
+  });
+
+  it("an auto-allowed call leaves no grant, so bash still asks", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    const ui = { select: vi.fn() };
+    const r = await setup()({ toolName: "bash", toolCallId: "call-1", input }, { hasUI: true, cwd, ui, sessionManager });
+    expect(r).toBeUndefined();
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
+  });
+
+  it("a plain bash ask reads as before and leaves no grant", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    askVerdict();
+    const ui = { select: vi.fn().mockResolvedValue("允许本次") };
+    await setup()(
+      { toolName: "bash", toolCallId: "call-1", input: { command: "rm foo" } },
+      { hasUI: true, cwd, ui, sessionManager },
+    );
+    expect(ui.select.mock.calls[0]?.[0]).toBe("请求批准：\n\n  rm foo");
+    expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
+  });
+
+  it("a blank justification is not an escalation: plain ask, no grant (bash will reject it anyway)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    askVerdict();
+    const ui = { select: vi.fn().mockResolvedValue("允许本次") };
+    await setup()(
+      { toolName: "bash", toolCallId: "call-1", input: { ...input, justification: "   " } },
+      { hasUI: true, cwd, ui, sessionManager },
+    );
+    expect(ui.select.mock.calls[0]?.[0]).toBe("请求批准：\n\n  npm run build");
+    expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
   });
 });

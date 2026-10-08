@@ -1,5 +1,4 @@
 export type {
-  BashEscalationRequest,
   ConfinedArgv,
   FileSandboxMode,
   NetworkSandboxPolicy,
@@ -8,17 +7,22 @@ export type {
   SandboxExecutionPolicy,
   SandboxPolicy,
   SandboxProvider,
+  SandboxRunFacts,
 } from "./types.js";
 export { SANDBOX_DENIAL_EXIT } from "./types.js";
 export { SandboxUnavailableError } from "./errors.js";
 export { fileModeForApproval, isConfined, resolvePreset } from "./resolvePreset.js";
-export { isStrictWidening, justifyOk } from "./escalate.js";
+export { isStrictWidening } from "./escalate.js";
 export {
-  clearPendingDenials,
-  consumePendingDenial,
-  peekPendingDenial,
-  rememberPendingDenial,
-} from "./pendingDenial.js";
+  ESCALATION_TARGETS,
+  escalationHintMarker,
+  parseSandboxNote,
+  runnerFailedMarker,
+  sandboxDenialMarker,
+  sandboxNotes,
+} from "./facts.js";
+export type { EscalationTarget, SandboxNote } from "./facts.js";
+export { clearEscalationGrants, grantEscalation, takeEscalationGrant } from "./escalationGrant.js";
 export { attributeRun } from "./attribute.js";
 export type { RunKind } from "./attribute.js";
 export { createSandboxProvider } from "./provider.js";
@@ -30,4 +34,5 @@ export type {
   SandboxedBashOperationsDeps,
   SpawnImpl,
 } from "./operations.js";
+export { withTextMarkers } from "./userBash.js";
 export { acquireTempDir, dispose as disposeTempDir } from "./tempDirs.js";

@@ -1,37 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setApprovalPolicy, __resetApprovalForTest } from "../_shared/approval.js";
 import {
-  consumePendingDenial,
-  rememberPendingDenial,
-  __resetPendingDenialsForTest,
-} from "../_shared/sandbox/pendingDenial.js";
+  grantEscalation,
+  takeEscalationGrant,
+  __resetEscalationGrantsForTest,
+} from "../_shared/sandbox/escalationGrant.js";
 import { setAgentMode, __resetAgentModeForTest } from "../agent-mode/modes.js";
+import { __resetJobsForTest } from "../jobs/service.js";
 
 const mocks = vi.hoisted(() => ({
-  exec: vi.fn(async () => ({ exitCode: 0 })),
+  exec: vi.fn(),
   dispose: vi.fn(async () => {}),
   getPolicy: undefined as undefined | (() => {
     mode: string;
     workspaceRoot: string;
     sessionId?: string;
-  }),
-}));
-
-vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createBashToolDefinition: (_cwd: string, opts: object) => ({
-    name: "bash",
-    description: "Execute a bash command.",
-    promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
-    promptGuidelines: ["Do not leak PI_* environment variables."],
-    parameters: {
-      properties: {
-        command: { type: "string" },
-        timeout: { type: "number" },
-      },
-      required: ["command"],
-    },
-    ...opts,
   }),
 }));
 
@@ -56,26 +39,23 @@ import sandbox from "./index.js";
 const CWD = "D:/repo";
 const SESSION = "sess-1";
 const COMMAND = "echo denied";
-const JUSTIFY = "need write access for the build output";
-const SHORT_JUSTIFY = "too short";
+const JUSTIFY = "需要把构建产物写进工作区";
+const CLEAN = { exitCode: 0, sandbox: { mode: "read-only", denied: false } };
 
-type ToolResult = { content: Array<{ type: string; text?: string }>; details?: unknown };
-type EscalateParams = { command: string; justification: string; targetMode: string };
-type Tool = {
-  name: string;
-  execute?: (
-    id: string,
-    params: EscalateParams,
-    signal: unknown,
-    onUpdate: unknown,
-    ctx: ExecCtx,
-  ) => Promise<ToolResult>;
-};
+type ToolResult = { content: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean };
 type ExecCtx = {
   cwd: string;
   hasUI: boolean;
   ui: { select: ReturnType<typeof vi.fn> };
   sessionManager: { getSessionId: () => string };
+};
+type Tool = {
+  name: string;
+  description?: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+  parameters?: { properties?: Record<string, unknown>; required?: string[] };
+  execute?: (id: string, params: Record<string, unknown>, signal: unknown, onUpdate: unknown, ctx: ExecCtx) => Promise<ToolResult>;
 };
 
 function load() {
@@ -93,10 +73,7 @@ function load() {
 }
 
 function sessionCtx(cwd = CWD, sessionId = SESSION) {
-  return {
-    cwd,
-    sessionManager: { getSessionId: () => sessionId },
-  };
+  return { cwd, sessionManager: { getSessionId: () => sessionId } };
 }
 
 function execCtx(overrides: Partial<ExecCtx> = {}): ExecCtx {
@@ -113,229 +90,101 @@ async function start(handlers: ReturnType<typeof load>["handlers"], cwd = CWD, s
   await handlers.session_start?.({}, sessionCtx(cwd, sessionId));
 }
 
-function escalateTool(tools: Tool[]) {
-  const tool = tools.find((item) => item.name === "bash_escalate");
-  if (!tool?.execute) throw new Error("bash_escalate not registered");
-  return tool.execute.bind(tool);
+function bash(tools: Tool[]): Tool {
+  const tool = tools.find((item) => item.name === "bash");
+  if (!tool?.execute) throw new Error("bash not registered");
+  return tool;
 }
 
-function resultText(result: ToolResult) {
-  return result.content.map((part) => part.text ?? "").join("");
-}
-
-async function callEscalate(
-  tools: Tool[],
-  ctx: ExecCtx,
-  params: Partial<EscalateParams> = {},
-  extras: { signal?: AbortSignal; onUpdate?: ReturnType<typeof vi.fn> } = {},
-) {
-  return escalateTool(tools)(
-    "call",
-    {
-      command: COMMAND,
-      justification: JUSTIFY,
-      targetMode: "workspace-write",
-      ...params,
-    },
-    extras.signal,
-    extras.onUpdate,
+/** 带升权参数调一次 bash（和模型的调用一样带 description）。 */
+function escalate(tools: Tool[], ctx: ExecCtx, mode: string) {
+  return bash(tools).execute!(
+    "call-1",
+    { command: COMMAND, description: "Write build output", sandbox_permissions: mode, justification: JUSTIFY },
+    undefined,
+    undefined,
     ctx,
   );
 }
 
 beforeEach(() => {
-  mocks.exec.mockReset().mockResolvedValue({ exitCode: 0 });
+  // 子代理里跑测试会继承 PI_IS_SUBAGENT=1，bash 会把审批通道判成没有。
+  delete process.env.PI_IS_SUBAGENT;
+  mocks.exec.mockReset().mockResolvedValue(CLEAN);
   mocks.dispose.mockReset().mockResolvedValue(undefined);
   mocks.getPolicy = undefined;
-  __resetPendingDenialsForTest();
+  __resetEscalationGrantsForTest();
   __resetApprovalForTest();
   __resetAgentModeForTest();
+  __resetJobsForTest();
 });
 
 describe("sandbox extension", () => {
-  it("registers bash and bash_escalate", () => {
-    const { tools } = load();
-    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["bash", "bash_escalate"]));
+  it("registers bash and no separate escalation tool", () => {
+    const names = load().tools.map((tool) => tool.name);
+    expect(names).toContain("bash");
+    expect(names).not.toContain("bash_escalate");
+  });
+
+  it("bash carries the escalation pair", () => {
+    const properties = bash(load().tools).parameters?.properties ?? {};
+    expect(Object.keys(properties)).toEqual(expect.arrayContaining(["sandbox_permissions", "justification"]));
   });
 
   it("annotates the bash tool for PowerShell on win32", () => {
     const original = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
     try {
-      const { tools } = load();
-      const bash = tools.find((tool) => tool.name === "bash") as {
-        promptSnippet?: string;
-        description?: string;
-        promptGuidelines?: string[];
-        parameters?: { properties?: { description?: unknown }; required?: string[] };
-      };
-      expect(bash.promptSnippet).toContain("PowerShell");
-      expect(bash.promptSnippet).not.toContain("ls, grep, find");
-      expect(bash.description).toContain("exit $LASTEXITCODE");
-      expect(bash.promptGuidelines?.some((g) => g.includes("PowerShell"))).toBe(true);
-      expect(bash.parameters?.properties?.description).toBeTruthy();
-      expect(bash.parameters?.required).toContain("description");
-      expect(bash.promptGuidelines?.some((g) => g.includes("shown in the UI"))).toBe(true);
+      const tool = bash(load().tools);
+      expect(tool.promptSnippet).toContain("PowerShell");
+      expect(tool.promptSnippet).not.toContain("ls, grep, find");
+      expect(tool.description).toContain("exit $LASTEXITCODE");
+      expect(tool.promptGuidelines?.some((g) => g.includes("PowerShell"))).toBe(true);
+      expect(tool.parameters?.properties?.description).toBeTruthy();
+      expect(tool.parameters?.required).toContain("description");
+      expect(tool.promptGuidelines?.some((g) => g.includes("shown in the UI"))).toBe(true);
     } finally {
       if (original) Object.defineProperty(process, "platform", original);
     }
   });
 
-  it("subscribes to user_bash and returns operations", () => {
+  it("hands user_bash the sandbox operations with the facts written back as text", async () => {
     const { handlers } = load();
-    expect(typeof handlers.user_bash).toBe("function");
-    expect(handlers.user_bash?.({}, {})).toEqual({ operations: { exec: mocks.exec } });
+    mocks.exec.mockResolvedValue({ exitCode: 1, sandbox: { mode: "read-only", denied: true } });
+    const { operations } = handlers.user_bash?.({}, {}) as {
+      operations: { exec: (c: string, cwd: string, o: { onData?: (d: Buffer) => void }) => Promise<unknown> };
+    };
+    const chunks: string[] = [];
+    const result = await operations.exec(COMMAND, CWD, { onData: (d) => chunks.push(d.toString()) });
+    expect(mocks.exec).toHaveBeenCalledWith(COMMAND, CWD, expect.anything());
+    expect(result).toEqual({ exitCode: 1 });
+    expect(chunks.join("")).toBe("[sandbox: file access denied under read-only mode]\n");
   });
 
-  it("rejects bash_escalate without pending and does not open ui.select", async () => {
+  it("auto: asks before a one-shot widening, then runs it through the sandbox operations", async () => {
+    setApprovalPolicy("auto", CWD);
     const { tools, handlers } = load();
     await start(handlers);
+    expect(mocks.getPolicy?.()).toMatchObject({ mode: "workspace-write" });
     const ctx = execCtx();
-    const result = await callEscalate(tools, ctx);
-    expect(resultText(result)).toContain("no pending denial");
-    expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(mocks.exec).not.toHaveBeenCalled();
+    ctx.ui.select.mockResolvedValue("允许本次");
+    const result = await escalate(tools, ctx, "danger-full-access");
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+    expect(mocks.exec).toHaveBeenCalledWith(
+      COMMAND,
+      CWD,
+      expect.objectContaining({ env: expect.objectContaining({ PI_SANDBOX_MODE_ONCE: "danger-full-access" }) }),
+    );
+    expect(result.isError).toBeUndefined();
   });
 
-  it("rejects bash_escalate when the pending command differs", async () => {
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    const result = await callEscalate(tools, ctx, { command: `${COMMAND} extra` });
-    expect(resultText(result)).toContain("no pending denial");
-    expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(mocks.exec).not.toHaveBeenCalled();
-  });
-
-  it("rejects bash_escalate when justification is shorter than 20", async () => {
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    const result = await callEscalate(tools, ctx, { justification: SHORT_JUSTIFY });
-    expect(resultText(result)).toMatch(/justification/i);
-    expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(mocks.exec).not.toHaveBeenCalled();
-    expect(consumePendingDenial(CWD, COMMAND, SESSION)).toEqual({ mode: "read-only" });
-  });
-
-  it("does not consume pending when targetMode is not a strict widening", async () => {
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    const result = await callEscalate(tools, ctx, { targetMode: "read-only" });
-    expect(resultText(result)).toMatch(/widening/i);
-    expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(consumePendingDenial(CWD, COMMAND, SESSION)).toEqual({ mode: "read-only" });
-  });
-
-  it("rejects workspace-edit escalation without a prompt when resolved mode is workspace-write", async () => {
+  it("workspace-edit preset rejects escalation without a prompt", async () => {
     setApprovalPolicy("workspace", CWD);
     const { tools, handlers } = load();
     await start(handlers);
     expect(mocks.getPolicy?.()).toMatchObject({ mode: "workspace-write", workspaceRoot: CWD });
-    rememberPendingDenial(CWD, COMMAND, "workspace-write", SESSION);
     const ctx = execCtx();
-    const result = await callEscalate(tools, ctx, { targetMode: "danger-full-access" });
-    expect(resultText(result)).toMatch(/workspace/i);
-    expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(mocks.exec).not.toHaveBeenCalled();
-  });
-
-  it("asks via ui.select for auto plus a legal widening and execs once when allowed", async () => {
-    setApprovalPolicy("auto", CWD);
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    ctx.ui.select.mockResolvedValue("允许本次");
-    const result = await callEscalate(tools, ctx);
-    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-    expect(mocks.exec).toHaveBeenCalledTimes(1);
-    expect(mocks.exec).toHaveBeenCalledWith(
-      COMMAND,
-      CWD,
-      expect.objectContaining({
-        env: expect.objectContaining({ PI_SANDBOX_MODE_ONCE: "workspace-write" }),
-      }),
-    );
-    expect(resultText(result).length).toBeGreaterThan(0);
-  });
-
-  it("forwards signal, streams onData through onUpdate, and returns command output", async () => {
-    setApprovalPolicy("auto", CWD);
-    mocks.exec.mockImplementation(async (_command, _cwd, options: { onData?: (data: Buffer) => void }) => {
-      options.onData?.(Buffer.from("hello from bash\n"));
-      return { exitCode: 0 };
-    });
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    ctx.ui.select.mockResolvedValue("允许本次");
-    const signal = new AbortController().signal;
-    const onUpdate = vi.fn();
-    const result = await callEscalate(tools, ctx, {}, { signal, onUpdate });
-    expect(mocks.exec).toHaveBeenCalledWith(
-      COMMAND,
-      CWD,
-      expect.objectContaining({
-        signal,
-        onData: expect.any(Function),
-      }),
-    );
-    expect(onUpdate).toHaveBeenCalled();
-    expect(resultText(result)).toContain("hello from bash");
-    expect(resultText(result)).not.toBe("exit 0");
-  });
-
-  it("matches a pending commandPrefix record by its last newline segment", async () => {
-    setApprovalPolicy("auto", CWD);
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, `pref\n${COMMAND}`, "read-only", SESSION);
-    const ctx = execCtx();
-    ctx.ui.select.mockResolvedValue("拒绝");
-    const result = await callEscalate(tools, ctx);
-    expect(resultText(result)).not.toContain("no pending denial");
-    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-    expect(consumePendingDenial(CWD, `pref\n${COMMAND}`, SESSION)).toBeUndefined();
-  });
-
-  it.each([
-    ["returns undefined", async (select: ReturnType<typeof vi.fn>) => select.mockResolvedValue(undefined)],
-    ["throws", async (select: ReturnType<typeof vi.fn>) => select.mockRejectedValue(new Error("cancelled"))],
-  ])("fails when ui.select %s; pending is consumed and exec is not called", async (_name, arrange) => {
-    setApprovalPolicy("auto", CWD);
-    const { tools, handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    const ctx = execCtx();
-    await arrange(ctx.ui.select);
-    const result = await callEscalate(tools, ctx);
-    expect(resultText(result)).toMatch(/reject|cancel/i);
-    expect(mocks.exec).not.toHaveBeenCalled();
-    expect(consumePendingDenial(CWD, COMMAND, SESSION)).toBeUndefined();
-  });
-
-  it("disposes the provider and clears pending denials on session_shutdown", async () => {
-    const { handlers } = load();
-    await start(handlers);
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
-    await handlers.session_shutdown?.({}, sessionCtx());
-    expect(mocks.dispose).toHaveBeenCalledWith(SESSION);
-    expect(consumePendingDenial(CWD, COMMAND, SESSION)).toBeUndefined();
-  });
-
-  it("rejects bash_escalate under full with no pending and does not open ui.select", async () => {
-    setApprovalPolicy("full", CWD);
-    const { tools, handlers } = load();
-    await start(handlers);
-    const ctx = execCtx();
-    const result = await callEscalate(tools, ctx);
-    expect(resultText(result)).toContain("no pending denial");
+    await expect(escalate(tools, ctx, "danger-full-access")).rejects.toThrow(/workspace-edit approval preset/);
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(mocks.exec).not.toHaveBeenCalled();
   });
@@ -346,13 +195,31 @@ describe("sandbox extension", () => {
     const { tools, handlers } = load();
     await start(handlers);
     expect(mocks.getPolicy?.()).toMatchObject({ mode: "read-only", workspaceRoot: CWD });
-    rememberPendingDenial(CWD, COMMAND, "read-only", SESSION);
     const ctx = execCtx();
     ctx.ui.select.mockResolvedValue("拒绝");
-    const result = await callEscalate(tools, ctx);
+    await expect(escalate(tools, ctx, "workspace-write")).rejects.toThrow(/the user rejected/);
     expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-    expect(resultText(result)).not.toMatch(/workspace-edit preset rejects/i);
     expect(mocks.exec).not.toHaveBeenCalled();
+  });
+
+  it("full: asking for the current mode just runs", async () => {
+    setApprovalPolicy("full", CWD);
+    const { tools, handlers } = load();
+    await start(handlers);
+    const ctx = execCtx();
+    await escalate(tools, ctx, "danger-full-access");
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(mocks.exec).toHaveBeenCalledTimes(1);
+    expect(mocks.exec.mock.calls[0]?.[2]?.env?.PI_SANDBOX_MODE_ONCE).toBeUndefined();
+  });
+
+  it("disposes the provider and drops the session's escalation grants on session_shutdown", async () => {
+    const { handlers } = load();
+    await start(handlers);
+    grantEscalation(SESSION, "call-9", "workspace-write");
+    await handlers.session_shutdown?.({}, sessionCtx());
+    expect(mocks.dispose).toHaveBeenCalledWith(SESSION);
+    expect(takeEscalationGrant(SESSION, "call-9", "workspace-write")).toBe(false);
   });
 
   it("uses session_start ctx.cwd and sessionManager.getSessionId for getPolicy", async () => {

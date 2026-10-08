@@ -3,10 +3,9 @@ import { attributeRun } from "./attribute.js";
 import { decodeSpawnChunk } from "./decodeSpawnChunk.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
-import { rememberPendingDenial } from "./pendingDenial.js";
 import { isConfined } from "./resolvePreset.js";
 import { resolveShellPath } from "./shellPath.js";
-import type { ConfinedArgv, SandboxExecutionPolicy, SandboxPolicy } from "./types.js";
+import type { ConfinedArgv, SandboxExecutionPolicy, SandboxPolicy, SandboxRunFacts } from "./types.js";
 import { randomBytes } from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,12 +23,17 @@ export interface ExecOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+/**
+ * 沙箱事实作为数据返回（DSH ShellSandboxInfo）：拒绝、runner 失败、隔离起不来都不写进 onData，
+ * onData 只转发子进程（含 runner）的输出，执行器不再往里追加沙箱说明。给模型的标记由 bash 工具渲染（facts.ts），
+ * user_bash 经 userBash.ts 写回文字。
+ */
 export interface SandboxedBashOperations {
   exec: (
     command: string,
     cwd: string,
     options: ExecOptions,
-  ) => Promise<{ exitCode: number | null }>;
+  ) => Promise<{ exitCode: number | null; sandbox: SandboxRunFacts }>;
 }
 
 export interface SandboxedBashOperationsDeps {
@@ -48,9 +52,9 @@ interface RunResult {
   stderr?: string;
 }
 
-const RUNNER_FAILED = "[sandbox: runner failed] The command never started.\n";
+/** 受限模式下 Windows 的 bash.exe 起不来。去掉了旧版的 `[sandbox: SANDBOX_UNAVAILABLE] ` 前缀和换行，user_bash 适配器会加回去。 */
 const WINDOWS_BASH_UNAVAILABLE =
-  "[sandbox: SANDBOX_UNAVAILABLE] Windows OS sandbox cannot start Git Bash or WSL bash under a restricted token (Win32 error 5). The command was not executed. Switch approval to 完全权限.\n";
+  "Windows OS sandbox cannot start Git Bash or WSL bash under a restricted token (Win32 error 5). The command was not executed. Switch approval to 完全权限.";
 
 /**
  * CreateProcessWithLogonW passes lpCommandLine through the Secondary Logon
@@ -220,21 +224,24 @@ export function createSandboxedBashOperations(
       if (!env.NO_COLOR) env.NO_COLOR = "1";
       // 管道上的 Python 会把 stdout 整块缓冲到退出，卡片里看不到过程。
       if (env.PYTHONUNBUFFERED === undefined) env.PYTHONUNBUFFERED = "1";
+      const facts = (extra: Partial<SandboxRunFacts> = {}): SandboxRunFacts => ({
+        mode: policy.mode,
+        denied: false,
+        ...extra,
+      });
+      const shellFailed = (result: RunResult) =>
+        facts({ runnerFailed: "runner", detail: `the shell could not start (${String(result.spawnError)})` });
 
       const shell = await resolveShell();
       let base = shellArgv(platform, shell, command);
       let scriptFile: string | undefined;
       if (platform === "win32" && isConfined(policy.mode) && isWindowsBashExe(shell)) {
-        options.onData?.(Buffer.from(WINDOWS_BASH_UNAVAILABLE));
-        return { exitCode: null };
+        return { exitCode: null, sandbox: facts({ runnerFailed: "unavailable", detail: WINDOWS_BASH_UNAVAILABLE }) };
       }
       if (!isConfined(policy.mode)) {
         const result = await run(base, cwd, { ...options, env });
         forgetShellOnSpawnError(result);
-        if (result.spawnError) {
-          options.onData?.(Buffer.from(RUNNER_FAILED));
-        }
-        return { exitCode: result.exitCode };
+        return { exitCode: result.exitCode, sandbox: result.spawnError ? shellFailed(result) : facts() };
       }
 
       // CreateProcessWithLogonW passes lpCommandLine through the Secondary Logon
@@ -264,10 +271,7 @@ export function createSandboxedBashOperations(
           const hint = error.message.includes("failed to grant ")
             ? "The command was not executed."
             : "The command was not executed. Enable the OS runner or switch approval to 完全权限.";
-          options.onData?.(Buffer.from(
-            `[sandbox: SANDBOX_UNAVAILABLE] ${error.message} ${hint}\n`,
-          ));
-          return { exitCode: null };
+          return { exitCode: null, sandbox: facts({ runnerFailed: "unavailable", detail: `${error.message} ${hint}` }) };
         }
         throw error;
       }
@@ -278,16 +282,14 @@ export function createSandboxedBashOperations(
         try { unlinkSync(scriptFile); } catch { /* cleaned by 24h sweep */ }
       }
       const kind = attributeRun(result, confined);
-      if (kind.kind === "denial") {
-        rememberPendingDenial(cwd, command, policy.mode, policy.sessionId);
-        options.onData?.(Buffer.from(
-          `[sandbox: file access denied under ${policy.mode} mode]. Call bash_escalate with the exact same command, justification (>=20 chars), and a wider targetMode.\n`,
-        ));
-      }
+      if (kind.kind === "denial") return { exitCode: result.exitCode, sandbox: facts({ denied: true }) };
       if (kind.kind === "runner-failure") {
-        options.onData?.(Buffer.from(RUNNER_FAILED));
+        return {
+          exitCode: result.exitCode,
+          sandbox: result.spawnError ? shellFailed(result) : facts({ runnerFailed: "runner" }),
+        };
       }
-      return { exitCode: result.exitCode };
+      return { exitCode: result.exitCode, sandbox: facts() };
     },
   };
 }
