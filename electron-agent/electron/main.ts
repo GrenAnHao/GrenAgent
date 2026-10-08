@@ -53,6 +53,7 @@ import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRe
 import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
 import { startJobsBridge } from "./app/jobsBridge";
 import { canSendTo, recordDroppedSend, recordEventSend, startRuntimeDiag } from "./runtimeDiag";
+import { installFastRealpath } from "./fastRealpath";
 
 /** backgroundColor：上次运行时按明暗记下的底色，没有就用 browserWindowOptions 的默认深色。 */
 export function createWindow(backgroundColor?: string) {
@@ -73,6 +74,7 @@ export function createWindow(backgroundColor?: string) {
 }
 
 if (!process.env.VITEST) {
+  installFastRealpath();
   app.whenReady().then(async () => {
     installCursorProvider();
     startRuntimeDiag();

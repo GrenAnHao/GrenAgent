@@ -17,7 +17,8 @@ bun run dev
 
 | 命令 | 说明 |
 | --- | --- |
-| `bun run dev` | 启动桌面端（electron-vite 同时拉起主进程与渲染层） |
+| `bun run start` | 日常使用：渲染层生产构建后启动，比 dev 快得多；源码没改时 `bun run start -- --skipBuild` 跳过构建 |
+| `bun run dev` | 开发界面：Vite 开发服务器 + HMR（React 开发版，启动和切换明显更慢） |
 | `bun run build` | 类型检查后构建（产物 `out/`，渲染层 `dist/`） |
 | `bun run test` | 运行测试（`vitest run`） |
 | `bun run package` | electron-builder 打包，产物 `release/` |

@@ -6,6 +6,7 @@
   "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "start": "electron-vite preview --mode localrun",
     "build": "tsc -p tsconfig.json && electron-vite build",
     "test": "vitest run",
     "test:codegraph": "node scripts/test-codegraph.mjs",

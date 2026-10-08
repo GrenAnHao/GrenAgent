@@ -20,8 +20,10 @@ const mainExternal = [
   /^node:/,
 ];
 
-export default defineConfig(({ command }) => {
-  const production = command === "build";
+export default defineConfig(({ command, mode }) => {
+  // npm run start（--mode localrun）：渲染层用生产构建，主进程保持开发时的 ESM。
+  // CJS 字节码产物 require 不到只有 import 条件的 pi 包，本机直接跑起不来。
+  const production = command === "build" && mode !== "localrun";
   return {
     main: {
       resolve: {

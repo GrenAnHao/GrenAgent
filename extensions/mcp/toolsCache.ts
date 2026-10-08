@@ -30,8 +30,21 @@ export function readToolsCache(): Record<string, string[]> {
   }
 }
 
+function sameEntry(cached: unknown, result: ProbeResult): boolean {
+  if (!cached || typeof cached !== "object") return false;
+  const entry = cached as Partial<ToolsCacheEntry>;
+  return entry.ok === result.ok
+    && entry.error === result.error
+    && Array.isArray(entry.toolNames)
+    && entry.toolNames.length === result.toolNames.length
+    && entry.toolNames.every((tool, index) => tool === result.toolNames[index]);
+}
+
+/**
+ * 每个工作区运行时连上服务器都会调一次。结果没变就不重写：启动时几个项目一起连，
+ * 同步读写加改名在主进程上累计占了 0.7 秒多。probedAt 只是记录，界面不读。
+ */
 export function writeToolsCacheEntry(name: string, result: ProbeResult): void {
-  mkdirSync(DIR, { recursive: true });
   let raw: Record<string, unknown> = {};
   try {
     const parsed = JSON.parse(readFileSync(CACHE_PATH, "utf8")) as unknown;
@@ -41,6 +54,7 @@ export function writeToolsCacheEntry(name: string, result: ProbeResult): void {
   } catch {
     raw = {};
   }
+  if (sameEntry(raw[name], result)) return;
   const entry: ToolsCacheEntry = {
     toolNames: result.toolNames,
     probedAt: new Date().toISOString(),
@@ -48,6 +62,7 @@ export function writeToolsCacheEntry(name: string, result: ProbeResult): void {
   };
   if (result.error) entry.error = result.error;
   raw[name] = entry;
+  mkdirSync(DIR, { recursive: true });
   const tmp = `${CACHE_PATH}.tmp`;
   writeFileSync(tmp, JSON.stringify(raw, null, 2), "utf8");
   renameSync(tmp, CACHE_PATH);
