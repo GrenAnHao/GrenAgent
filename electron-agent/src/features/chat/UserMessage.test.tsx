@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { create } from 'zustand';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
+import { buildCommandBlock } from '@extensions/prompt-commands/syntax';
 import { UserMessage } from './UserMessage';
 
 afterEach(cleanup);
@@ -16,7 +17,7 @@ const { storeState, fakeStore, useOptional } = vi.hoisted(() => {
   };
   const fakeStore = {
     useStore: (sel: (s: typeof storeState) => unknown) => sel(storeState),
-    rewindAndLoad: () => {},
+    rewindAndLoad: vi.fn(),
     regenerate: () => {},
     deleteFrom: () => {},
     excludeMessage: () => {},
@@ -248,5 +249,33 @@ describe('UserMessage', () => {
       </App>,
     );
     expect(screen.getByText('hi')).toBeTruthy();
+  });
+
+  describe('命令消息', () => {
+    const commandText = `${buildCommandBlock('refactor', [{ name: 'file', value: 'a.ts' }], '模板正文')}\n\n顺便看看`;
+    const invocation = '/refactor "a.ts" 顺便看看';
+
+    it('复制得到调用文本，而不是 <command 原文', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      renderMsg(commandText);
+      screen.getByTestId('msg-action-bar-copy').click();
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
+      expect(writeText).toHaveBeenCalledWith(invocation);
+      expect(writeText.mock.calls[0]![0]).not.toContain('<command');
+    });
+
+    it('编辑（后面还没有回复）把调用文本放回输入框', () => {
+      storeState.messages = [{ kind: 'user', entryId: 'e-last', timestamp: 1000, text: commandText }];
+      render(
+        <App>
+          <ThemeProvider>
+            <UserMessage text={commandText} entryId="e-last" timestamp={1000} />
+          </ThemeProvider>
+        </App>,
+      );
+      screen.getByTestId('msg-action-bar-edit').click();
+      expect(fakeStore.rewindAndLoad).toHaveBeenCalledWith('e-last', invocation);
+    });
   });
 });

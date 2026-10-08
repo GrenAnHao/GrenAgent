@@ -15,6 +15,7 @@ import type { AgentStoreApi } from '../../stores/agent';
 import type { ChatMessage, SteerState, UserImage } from '../../stores/agentReducer';
 import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
+import { collapseCommandBlocks } from '@extensions/prompt-commands/syntax';
 import { MessageEditBox } from './MessageEditBox';
 import { TaskPromptFrame } from './TaskPromptFrame';
 import { isBeforeLatestCompaction } from './compactionBoundary';
@@ -224,7 +225,15 @@ function renderUserMessage(
   const hasImages = Boolean(images?.length);
   const hasBubble = hasImages || bodyText.length > 0;
 
-  const ctx: MessageActionContext = { role: 'user', text: bodyText, timestamp, entryId, images, onEdit };
+  // 复制、回退、重新生成用调用文本；气泡仍按原文还原成命令胶囊。
+  const ctx: MessageActionContext = {
+    role: 'user',
+    text: collapseCommandBlocks(bodyText),
+    timestamp,
+    entryId,
+    images,
+    onEdit,
+  };
   const actions = bodyText ? (
     <MessageActionBar
       ctx={ctx}
@@ -308,7 +317,8 @@ function StoreBackedUserMessage({
   editing: boolean;
   setEditing: Dispatch<SetStateAction<boolean>>;
 }) {
-  const bodyText = bodyTextOf(text);
+  // 编辑和回退拿到的是调用文本，不是展开后的 <command> 块。
+  const bodyText = collapseCommandBlocks(bodyTextOf(text));
   const isBusy = store.useStore((s) => s.isStreaming || Boolean(s.awaitingResponse));
   const canEditLast = store.useStore((s) => isLastInContextUser(s.messages, s.excluded, entryId, timestamp));
   const hasReply = store.useStore((s) => hasReplyAfterUser(s.messages, entryId, timestamp));

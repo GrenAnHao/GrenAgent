@@ -36,4 +36,15 @@ describe('promptCommandCache', () => {
     await loadPromptCommands();
     expect(listPromptCommands).toHaveBeenCalledTimes(2);
   });
+
+  it('invalidate 保留旧数据供同步读取，下一次 load 重新请求', async () => {
+    listPromptCommands.mockResolvedValueOnce([review]);
+    await loadPromptCommands();
+    invalidatePromptCommands();
+    expect(getCachedPromptCommands()).toEqual([review]);
+    listPromptCommands.mockResolvedValueOnce([refactor]);
+    expect(await loadPromptCommands()).toEqual([refactor]);
+    expect(listPromptCommands).toHaveBeenCalledTimes(2);
+    expect(getCachedPromptCommands()).toEqual([refactor]);
+  });
 });

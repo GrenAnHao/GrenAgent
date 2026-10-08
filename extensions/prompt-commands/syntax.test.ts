@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   argumentHint,
   buildCommandBlock,
+  collapseCommandBlocks,
   COMMAND_NAME_RE,
   decodeCommandBlock,
   findCommandBlocks,
@@ -172,5 +173,38 @@ describe("<command> 块", () => {
   it("args 坏掉时 block 为 null", () => {
     expect(decodeCommandBlock("x", "not json")).toBeNull();
     expect(decodeCommandBlock("x", "[1]")).toBeNull();
+  });
+});
+
+describe("collapseCommandBlocks", () => {
+  const args = [
+    { name: "file", value: "a.ts" },
+    { name: "style", value: "fp" },
+  ];
+
+  it("命令块还原成调用文本，块后的换行压成一个空格再接补充正文", () => {
+    const text = `${buildCommandBlock("refactor", args, "模板正文")}\n\n顺便看看`;
+    expect(collapseCommandBlocks(text)).toBe('/refactor "a.ts" "fp" 顺便看看');
+  });
+
+  it("块在末尾时不加空格", () => {
+    expect(collapseCommandBlocks(buildCommandBlock("refactor", args, "模板正文"))).toBe('/refactor "a.ts" "fp"');
+  });
+
+  it("坏块和无块的文本原样保留", () => {
+    const bad = '<command name="x" args="not json">\n正文\n</command>\n\n后';
+    expect(collapseCommandBlocks(bad)).toBe(bad);
+    expect(collapseCommandBlocks("普通文本\n第二行")).toBe("普通文本\n第二行");
+  });
+
+  it("参数含引号和反斜杠时，结果经 parseInvocation + splitArgs 往返一致", () => {
+    const tricky = [
+      { name: "a", value: 'say "hi"' },
+      { name: "b", value: "C:\\dir\\x" },
+    ];
+    const text = `${buildCommandBlock("cmd", tricky, "正文")}\n\n补充`;
+    const parsed = parseInvocation(collapseCommandBlocks(text));
+    expect(parsed?.name).toBe("cmd");
+    expect(splitArgs(parsed!.argsText, 2)).toEqual({ args: ['say "hi"', "C:\\dir\\x"], rest: "补充" });
   });
 });

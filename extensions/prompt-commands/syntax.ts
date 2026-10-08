@@ -167,6 +167,27 @@ export function decodeCommandBlock(nameAttr: string, argsAttr: string): CommandB
   }
 }
 
+/** 把展开后的命令块还原成调用文本（编辑、回退、复制用）；块后的换行压成一个空格，坏块原样保留。 */
+export function collapseCommandBlocks(text: string): string {
+  let result = "";
+  let last = 0;
+  for (const hit of findCommandBlocks(text)) {
+    if (!hit.block) continue;
+    result += text.slice(last, hit.start);
+    result += formatInvocation(
+      hit.block.name,
+      hit.block.args.map((arg) => arg.value),
+    );
+    last = hit.end;
+    const trailing = /^\n+/.exec(text.slice(last));
+    if (trailing) {
+      last += trailing[0].length;
+      if (last < text.length) result += " ";
+    }
+  }
+  return result + text.slice(last);
+}
+
 /** 线性扫描：找开头，再向后找结尾；找不到结尾就停，后面的开头也不可能闭合。 */
 export function findCommandBlocks(text: string): CommandBlockHit[] {
   const hits: CommandBlockHit[] = [];

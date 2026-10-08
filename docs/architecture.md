@@ -199,7 +199,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 ## 命令与规则
 
-- **命令**是全局的 Pi prompt template，文件在 `<agentDir>/prompts/<名>.md`。正文里写了 `{参数}` / `{参数=默认值}` 的模板由 `extensions/prompt-commands` 在 `input` 钩子里接管：`/名 "值" …` 展开成 `<command name="…" args="{JSON}">正文</command>`，块后接补充正文；其余模板（包括 `$1` 写法）仍由 Pi 原生展开。语法在 `extensions/prompt-commands/syntax.ts`，扩展、主进程、渲染层共用。`splitArgs` 在双引号内只把 `\"` 和 `\` 当转义，其它反斜杠原样保留；`findCommandBlocks` 线性扫描。
+- **命令**是全局的 Pi prompt template，文件在 `<agentDir>/prompts/<名>.md`。正文里写了 `{参数}` / `{参数=默认值}` 的模板由 `extensions/prompt-commands` 在 `input` 钩子里接管：`/名 "值" …` 展开成 `<command name="…" args="{JSON}">正文</command>`，块后接补充正文；其余模板（包括 `$1` 写法）仍由 Pi 原生展开。语法在 `extensions/prompt-commands/syntax.ts`，扩展、主进程、渲染层共用。`splitArgs` 在双引号内只把 `\"` 和 `\\` 当转义，其它反斜杠原样保留；`findCommandBlocks` 线性扫描。
 - 输入框里带参数的命令是 Lexical `CommandPillNode`（`src/features/chat/input/editor/CommandPill/`），只能放在输入开头，且输入框里最多一个：斜杠菜单与粘贴都要求光标 / 斜杠在整个输入开头且当前没有胶囊，不满足时带参数模板不出现在菜单里，粘贴按普通文本处理。胶囊内嵌原生 `<input>`：最后一个参数上 Tab、末尾 →、Esc 跳到胶囊后；第一个参数上 Shift+Tab、开头 ← 不动；离开胶囊时先 focus 编辑器根节点再移动选区；胶囊内 Ctrl/Cmd+Enter 透传 interrupt。
 - markdown 写出时胶囊写私用区字符 U+E000。发送和存草稿时由 `readComposerText` 把标记换成调用文本，调用文本总在最前，标记前后的正文各自 trim 后用一个空格接在后面。气泡由 `messageTags.tsx` 把 `<command>` 块还原成只读胶囊，不显示正文。
 - **规则**一条一个 Markdown 文件：全局 `<agentDir>/rules/*.md`，项目 `<工作区>/.pi/rules/*.md`，frontmatter 有 `title` 和 `enabled`。`extensions/context-rules` 在每次 `before_agent_start` 把启用的规则追加到 `systemPromptOptions.contextFiles`（全局在前、项目在后，同范围按文件名），按文件 mtime 缓存。读文件失败（如 Windows 上的 EBUSY）不缓存，下一轮重试；YAML 解析错误按 mtime 缓存，日志去重。子代理同样加载。

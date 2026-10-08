@@ -33,6 +33,7 @@ export function loadPromptCommands(): Promise<PromptCommandInfo[]> {
   return inflight;
 }
 
+/** 只让缓存过期：旧数据继续供同步读取（气泡还原），下一次 load 才重新请求。 */
 export function invalidatePromptCommands(): void {
-  cache = null;
+  if (cache) cache = { data: cache.data, expiresAt: 0 };
 }
