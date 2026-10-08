@@ -10,6 +10,11 @@ function $firstPill(): CommandPillNode | null {
   return null;
 }
 
+/** 输入里已经有胶囊：一个输入只允许一个。 */
+export function $hasPill(): boolean {
+  return $firstPill() !== null;
+}
+
 export function readPillInvocation(editor: LexicalEditor | null | undefined): string | null {
   if (!editor) return null;
   return editor.getEditorState().read(() => $firstPill()?.invocation() ?? null);

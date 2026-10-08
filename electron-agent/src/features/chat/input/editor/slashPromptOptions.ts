@@ -15,7 +15,9 @@ export function filterPromptCommands(
   return commands.filter((command) => command.apiSource !== 'prompt' || !paramTemplate(command.name, templates));
 }
 
-export function paramHint(name: string, templates: readonly PromptCommandInfo[]): string | undefined {
-  const template = paramTemplate(name, templates);
+/** 只对提示词模板生效：同名的扩展命令、技能不出参数提示。 */
+export function paramHint(command: PiCommand, templates: readonly PromptCommandInfo[]): string | undefined {
+  if (command.apiSource !== 'prompt') return undefined;
+  const template = paramTemplate(command.name, templates);
   return template ? template.params.map((param) => `{${param.name}}`).join(' ') : undefined;
 }

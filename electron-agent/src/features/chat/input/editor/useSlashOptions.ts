@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import type { IEditor, ISlashMenuOption, ISlashOption } from '@lobehub/editor';
 import { pi } from '../../../../lib/pi';
 import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
@@ -10,10 +10,10 @@ import { commandMatchesQuery, getFrontendCommands, visibleSlashCommands } from '
 import type { CommandApiSource, PiCommand } from '../commandTypes';
 import { loadCommands } from './commandLoader';
 import { INSERT_CHAT_TAG_COMMAND } from './ChatTag/command';
-import { loadPromptCommands } from './promptCommandCache';
+import { findParamTemplate, loadPromptCommands } from './promptCommandCache';
 import { filterPromptCommands, paramHint } from './slashPromptOptions';
 import { INSERT_COMMAND_PILL_COMMAND } from './CommandPill/commands';
-import { $slashAtDocumentStart } from './CommandPill/composerText';
+import { $hasPill, $slashAtDocumentStart } from './CommandPill/composerText';
 import type { PromptCommandInfo } from '../../../../lib/promptLibraryIo';
 
 function stripSkillPrefix(name: string): string {
@@ -71,7 +71,7 @@ function toOptions(commands: PiCommand[], query: string, templates: readonly Pro
       const option: ISlashMenuOption = {
         key: c.source === 'frontend' ? `frontend:${c.name}` : `api:${c.name}`,
         label: c.apiSource === 'skill' ? stripSkillPrefix(c.name) : c.name,
-        extra: [paramHint(c.name, templates), clampDesc(c.description)].filter(Boolean).join(' · ') || undefined,
+        extra: clampDesc([paramHint(c, templates), c.description].filter(Boolean).join(' · ')),
         icon: resolveCommandIcon(c),
         metadata: { kind: c.source === 'frontend' ? 'frontend' : 'api', name: c.name, group: key },
       };
@@ -92,7 +92,6 @@ export function useSlashOptions(workspace: string, clear: () => void, hostEditor
   const { store } = useAgentStoreContext();
   const worksDir = useSessionStore((s) => s.worksDir);
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
-  const templatesRef = useRef<PromptCommandInfo[]>([]);
 
   const slashItems = useCallback(
     async (search: SlashSearch): Promise<ISlashOption[]> => {
@@ -100,12 +99,15 @@ export function useSlashOptions(workspace: string, clear: () => void, hostEditor
         workspace ? loadCommands(workspace) : Promise.resolve(getFrontendCommands()),
         loadPromptCommands(),
       ]);
-      templatesRef.current = templates;
       const query = search?.matchingString ?? '';
-      const atStart =
-        hostEditor?.getLexicalEditor()?.getEditorState().read(() => $slashAtDocumentStart(query)) ?? true;
+      // 带参数的模板只能变成胶囊：必须在文首，且输入里还没有胶囊。
+      const canInsertPill =
+        hostEditor
+          ?.getLexicalEditor()
+          ?.getEditorState()
+          .read(() => $slashAtDocumentStart(query) && !$hasPill()) ?? true;
       const scoped = isConversation ? rawCommands.filter((command) => !command.name.startsWith('mcp__')) : rawCommands;
-      return toOptions(filterPromptCommands(scoped, templates, atStart), query, templates);
+      return toOptions(filterPromptCommands(scoped, templates, canInsertPill), query, templates);
     },
     [workspace, isConversation, hostEditor],
   );
@@ -130,7 +132,7 @@ export function useSlashOptions(workspace: string, clear: () => void, hostEditor
       }
 
       if (meta.group === 'prompt') {
-        const template = templatesRef.current.find((item) => item.name === meta.name && item.params.length > 0);
+        const template = findParamTemplate(meta.name);
         if (template) {
           editor.dispatchCommand(INSERT_COMMAND_PILL_COMMAND, { name: template.name, params: template.params });
           return;

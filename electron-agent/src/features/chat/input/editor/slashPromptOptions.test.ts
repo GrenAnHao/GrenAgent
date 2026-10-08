@@ -24,7 +24,12 @@ describe('filterPromptCommands', () => {
 
 describe('paramHint', () => {
   it('带参数的模板生成 {a} {b}，其他返回 undefined', () => {
-    expect(paramHint('refactor', templates)).toBe('{file} {style}');
-    expect(paramHint('review', templates)).toBeUndefined();
+    expect(paramHint(commands[0], templates)).toBe('{file} {style}');
+    expect(paramHint(commands[1], templates)).toBeUndefined();
+  });
+
+  it('同名但不是提示词模板的命令不出提示', () => {
+    const extension: PiCommand = { name: 'refactor', source: 'api', apiSource: 'extension' };
+    expect(paramHint(extension, templates)).toBeUndefined();
   });
 });

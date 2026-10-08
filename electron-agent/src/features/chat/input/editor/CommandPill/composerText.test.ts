@@ -6,6 +6,7 @@ import { FOCUS_PILL_ARG_COMMAND } from './commands';
 import type { IEditor } from '@lobehub/editor';
 import {
   $caretAtDocumentStart,
+  $hasPill,
   focusMissingPillArg,
   readComposerText,
   readPillInvocation,
@@ -87,6 +88,17 @@ describe('focusMissingPillArg', () => {
   it('有默认值的参数空着不算缺', () => {
     expect(focusMissingPillArg(editorWith(['a.ts', '']).editor)).toBe(false);
     expect(focusMissingPillArg(undefined)).toBe(false);
+  });
+});
+
+describe('$hasPill', () => {
+  it('有胶囊为 true，没有为 false', () => {
+    expect(editorWith(['a', '']).editor.getEditorState().read($hasPill)).toBe(true);
+    const plain = createEditor({ nodes: [CommandPillNode], onError: (error) => { throw error; } });
+    plain.update(() => {
+      $getRoot().append($createParagraphNode().append($createTextNode('abc')));
+    }, { discrete: true });
+    expect(plain.getEditorState().read($hasPill)).toBe(false);
   });
 });
 
