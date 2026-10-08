@@ -91,6 +91,17 @@ describe('规则', () => {
     expect(await readFile(rule.path, 'utf8')).toBe('---\ntitle: "T"\nenabled: false\n---\nbody\n');
   });
 
+  it('标题只差大小写时不覆盖已有规则', async () => {
+    await service.saveRule({ workspace, scope: 'global', title: 'Pnpm', enabled: true, body: 'a' });
+    await service.saveRule({ workspace, scope: 'global', title: 'pnpm', enabled: true, body: 'b' });
+    const rules = await service.listRules(workspace);
+    expect(rules.map((rule) => rule.id).sort()).toEqual(['Pnpm', 'pnpm-2']);
+  });
+
+  it('开关不存在的规则给出友好提示', async () => {
+    await expect(service.setRuleEnabled({ scope: 'global', id: 'nope' }, true, workspace)).rejects.toThrow('规则不存在');
+  });
+
   it('删除和开关拒绝带路径的 id', async () => {
     await expect(service.deleteRule({ scope: 'global', id: '../x' }, workspace)).rejects.toThrow('规则标识无效');
     await expect(service.setRuleEnabled({ scope: 'global', id: 'a/b' }, true, workspace)).rejects.toThrow('规则标识无效');
@@ -102,5 +113,9 @@ describe('ruleIdFromTitle', () => {
     expect(ruleIdFromTitle('提交 前/跑测试!', new Set())).toBe('提交-前-跑测试');
     expect(ruleIdFromTitle('a', new Set(['a', 'a-2']))).toBe('a-3');
     expect(ruleIdFromTitle('!!!', new Set())).toBe('rule');
+  });
+
+  it('按大小写不敏感比较已有 id', () => {
+    expect(ruleIdFromTitle('pnpm', new Set(['Pnpm']))).toBe('pnpm-2');
   });
 });

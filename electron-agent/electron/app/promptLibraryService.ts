@@ -82,8 +82,10 @@ function ruleMarkdown(title: string, enabled: boolean, body: string): string {
 
 export function ruleIdFromTitle(title: string, taken: ReadonlySet<string>): string {
   const base = title.trim().replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'rule';
+  // NTFS / APFS 默认不区分大小写，Pnpm.md 和 pnpm.md 是同一个文件，按小写比较才不会静默覆盖。
+  const takenLower = new Set([...taken].map((existing) => existing.toLowerCase()));
   let id = base;
-  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+  for (let n = 2; takenLower.has(id.toLowerCase()); n++) id = `${base}-${n}`;
   return id;
 }
 
@@ -169,7 +171,14 @@ export class PromptLibraryService {
 
   async setRuleEnabled(ref: RuleRef, enabled: boolean, workspace?: string): Promise<void> {
     const path = this.rulePath(ref, workspace);
-    const rule = parseRule(ref.id, ref.scope, path, await readFile(path, 'utf8'));
+    let content: string;
+    try {
+      content = await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('规则不存在');
+      throw error;
+    }
+    const rule = parseRule(ref.id, ref.scope, path, content);
     if (rule.error) throw new Error(`规则文件解析失败：${rule.error}`);
     await writeAtomic(path, ruleMarkdown(rule.title, enabled, normalizeBody(rule.body)));
   }
