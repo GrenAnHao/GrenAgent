@@ -119,9 +119,21 @@ describe('VirtualizedMessageList', () => {
         data-testid="vlist"
       />,
     );
+    // 跟随判断读滚动容器的 DOM 几何；jsdom 全是 0，这里给一个可写的长列表，先贴在底部。
+    const scroller = screen.getByTestId('virtua-list');
+    let top = 39_400;
+    Object.defineProperties(scroller, {
+      scrollTop: { configurable: true, get: () => top, set: (v: number) => { top = Math.min(39_400, Math.max(0, v)); } },
+      scrollHeight: { configurable: true, value: 40_000 },
+      clientHeight: { configurable: true, value: 600 },
+    });
     act(() => {
-      scrollRef.current?.scrollBy(-40);
       onScrollRef.current?.();
+      // 读者往上滚到中部，停手后浏览器发 scrollend，采样结果是离开底部。
+      scrollRef.current?.scrollBy(-40);
+      top = 20_000;
+      onScrollRef.current?.();
+      scroller.dispatchEvent(new Event('scrollend'));
     });
     expect(screen.getByTestId('jump-to-bottom')).toHaveStyle({ insetBlockEnd: '136px' });
   });

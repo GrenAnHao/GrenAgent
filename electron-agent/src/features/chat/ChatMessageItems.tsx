@@ -202,9 +202,13 @@ export function ChatMessageItems({
     () => (hiddenSpawnIds.size === 0 ? messages : messages.filter((msg) => !hiddenSpawnIds.has(msg.id))),
     [messages, hiddenSpawnIds],
   );
+  // 末尾是用户刚发出的消息时把它的 id 交给列表：新值出现就回到底部继续跟随。
+  const last = visible[visible.length - 1];
+  const followKey = last?.kind === 'user' ? last.id : null;
   return (
     <VirtualizedMessageList
       display={visible}
+      followKey={followKey}
       footer={footer}
       overlay={overlay}
       fill={fill}

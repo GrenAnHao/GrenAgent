@@ -14,8 +14,8 @@ import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDown } from 'lucide-react';
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
-import type { DisplayMessage } from './groupMessages';
 import { scrollbarGutterPx } from './composerWheel';
+import { TranscriptFollow } from './transcriptFollow';
 
 export interface TranscriptScrollHandle {
   scrollBy: (deltaY: number) => void;
@@ -39,10 +39,10 @@ export interface MessageListViewport {
   subscribe: (listener: () => void) => () => void;
 }
 
-interface VirtualizedMessageListProps {
-  display: DisplayMessage[];
+interface VirtualizedMessageListProps<T extends { id: string }> {
+  display: T[];
   /** 单条消息渲染器（user/turn/tool/notice 分发）。 */
-  renderItem: (msg: DisplayMessage) => ReactNode;
+  renderItem: (msg: T) => ReactNode;
   /** 列表末尾附加元素（如「准备响应中」占位），作为最后一个虚拟条目。 */
   footer?: ReactNode;
   /** 覆盖在列表之上的浮层（如 ChatMiniMap），拿到视口把手以跳转与高亮。 */
@@ -53,10 +53,12 @@ interface VirtualizedMessageListProps {
   paddingInline?: number;
   /**
    * 会话 / 对话标识：变化（含首次挂载）时重置滚动锚点并强制贴底。
-   * 主对话在会话间复用同一列表实例，切换会话时若不重置，旧的 atBottom/锚点会导致
+   * 主对话在会话间复用同一列表实例，切换会话时若不重置，旧的跟随状态/锚点会导致
    * 「首次打开不贴底」「切换时用旧锚点回跳而抖动」。传入当前会话 path 即可修复。
    */
   resetKey?: string | null;
+  /** 用户自己刚发出的消息 id（末尾是用户消息时才有）：变成新值时恢复贴底，与读者当前位置无关。 */
+  followKey?: string | null;
   /** 列表末尾座椅留白（px）：作为尾行高度，而不是滚动容器 CSS padding-bottom。 */
   paddingBottom?: number;
   onGutterChange?: (px: number) => void;
@@ -64,8 +66,10 @@ interface VirtualizedMessageListProps {
   'data-testid'?: string;
 }
 
-// 距底多少像素内算「贴底」：与原手写滚动阈值一致。
-const BOTTOM_THRESHOLD = 120;
+// 钉底循环用：virtua 估算高度下离底多少像素内算「已经到底」，到底且总高连续稳定才放手。
+const PIN_THRESHOLD = 120;
+// 钉底最多跑多少帧。用帧数而不是墙上时间：测试环境里 rAF 可能同步空转，performance.now 不前进会死循环。
+const PIN_MAX_FRAMES = 24;
 // 离屏缓冲：virtua 用 bufferSize 取代旧的 overscan 后，单位从「条数」改成了「像素」，默认 200。
 // 快速滚动时浏览器先合成滚动、React 才补渲染新区间，缓冲不足就会先露白再补上；聊天条目高，
 // 一帧位移常有数百像素，200px 挡不住。取 800（约一屏）覆盖数帧的快速滚动。
@@ -75,7 +79,10 @@ const BUFFER_SIZE = 800;
 const JUMP_MIN_ITEMS = 3;
 // footer 槽位：作为 data 的最后一项参与测高与贴底，避免为它单独维护一套下标换算。
 const FOOTER_ROW = '__footer';
-type Row = DisplayMessage | typeof FOOTER_ROW;
+type Row<T> = T | typeof FOOTER_ROW;
+// 读者手势：钉底期间出现就放手，交给滚动归因。
+const READING_INTENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 const styles = createStaticStyles(({ css }) => ({
   jump: css`
@@ -110,8 +117,9 @@ const fillStyle = (fill: 'absolute' | 'flex'): CSSProperties =>
  * 共享虚拟化消息列表：virtua 只渲染视口 ± buffer 的条目（离屏卸载），
  * 并在用户停留在底部时随新内容/流式增长自动滚底（上滑后不打扰）。
  * 主对话与子代理对话共用，替代旧的 LazyMount + 手写 scrollTop/ResizeObserver。
+ * 跟随意图归 TranscriptFollow；这里只负责 DOM 事件、virtua 测高期间的钉底和 resize 锚点。
  */
-export function VirtualizedMessageList({
+export function VirtualizedMessageList<T extends { id: string }>({
   display,
   renderItem,
   footer,
@@ -119,25 +127,27 @@ export function VirtualizedMessageList({
   fill = 'flex',
   paddingInline = 24,
   resetKey,
+  followKey,
   paddingBottom = 0,
   onGutterChange,
   scrollRef,
   'data-testid': testId,
-}: VirtualizedMessageListProps) {
+}: VirtualizedMessageListProps<T>) {
   const ref = useRef<VListHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const atBottomRef = useRef(true);
-  // 打开会话后的测高窗口：virtua 先按估算高度滚，onScroll 会误判「不在底部」并取消贴底。
-  // 这段时间内忽略该误判，持续滚到真实底部，直到高度稳住或用户主动上滚。
+  const [following, setFollowing] = useState(true);
+  const [follow] = useState(() => new TranscriptFollow(setFollowing));
+  // 钉底窗口：virtua 先按估算高度滚，测高后底部会变。这段时间持续贴到真实底部，
+  // 期间的滚动回声只记账，直到高度稳住或读者出手。
   const pinningRef = useRef(false);
+  const pinRafRef = useRef(0);
   const countRef = useRef(0);
   const resizingRef = useRef(false);
-  // 不贴底时 resize 的稳定锚点：顶部可见条目索引 + 该条目已滚过视口顶的像素。
+  // 不跟随时 resize 的稳定锚点：顶部可见条目索引 + 该条目已滚过视口顶的像素。
   const anchorIndexRef = useRef(0);
   const anchorWithinRef = useRef(0);
   // 浮层的视口订阅者：每次滚动（anchor 更新后）通知一次，读数直接走 handle 与 anchor ref。
   const viewportListenersRef = useRef(new Set<() => void>());
-  const [showJump, setShowJump] = useState(false);
 
   // 视口把手对象保持恒等，避免浮层因 props 变化反复重建订阅。
   const viewport = useMemo<MessageListViewport>(
@@ -172,7 +182,7 @@ export function VirtualizedMessageList({
   // 只把数据交给 virtua，元素由渲染函数按需创建：children 数组形态下，每次重渲染都要为全部消息
   // 创建元素、再被 virtua 整体摊平一遍，而流式期间列表每 100ms 就重渲一次，长会话下这笔开销很可观。
   const hasFooter = Boolean(footer) || paddingBottom > 0;
-  const rows = useMemo<Row[]>(
+  const rows = useMemo<Row<T>[]>(
     () => (hasFooter ? [...display, FOOTER_ROW] : display),
     [display, hasFooter],
   );
@@ -181,89 +191,106 @@ export function VirtualizedMessageList({
   // 贴底直接写滚动容器的 scrollTop，不走 virtua 的 scrollToIndex：后者会挂一个「条目测高后 150ms 内
   // 重滚到目标」的任务，用户滚动不会取消它。流式中刚往上滚一下，新挂上的条目一测高就把视图拽回底部。
   // 末尾条目测高后变高由下面的内容 ResizeObserver 跟上。
-  const scrollToEnd = () => {
+  const getScroller = () => {
     const el = containerRef.current?.firstElementChild;
-    if (el instanceof HTMLElement && countRef.current > 0) el.scrollTop = el.scrollHeight;
+    return el instanceof HTMLElement && countRef.current > 0 ? el : null;
   };
 
-  // 贴底：仅在用户停留在底部时滚到最后一条（用 ref 读最新 count，供 resize 回调复用）。
-  const stickToBottom = () => {
-    if (atBottomRef.current) scrollToEnd();
+  // 内容或尺寸变了：跟随中就跟到新的底部（读者移动待采样时不动）。
+  const reconcile = () => {
+    const el = getScroller();
+    if (el) follow.reconcile(el);
   };
 
-  // 一键回到底部：平滑滚到最后一条。
-  const jumpToBottom = () => {
-    if (!ref.current || countRef.current === 0) return;
-    atBottomRef.current = true;
-    setShowJump(false);
-    ref.current.scrollToIndex(countRef.current - 1, { align: 'end', smooth: true });
+  const stopPinning = () => {
+    pinningRef.current = false;
+    cancelAnimationFrame(pinRafRef.current);
   };
 
-  // 内容变化（新消息 / 流式增长）后贴底。用 layout effect：绘制前同步贴底，消除「先显旧位置再跳底」的一帧闪
-  //（旧手写列表用的就是 useLayoutEffect，迁移到 virtua 时曾降级为 useEffect，这里改回）。
-  useLayoutEffect(stickToBottom);
-
-  // 会话切换（resetKey 变）或首次挂载：钉在底部，直到 virtua 把末尾条目测高并稳住。
-  // 两帧 rAF 不够：估算高度下滚到的「底部」在测高后会变，随后 onScroll 把 atBottom 清掉，
-  // 真实高度长出来后就不再贴底。测高期间忽略这次误判，高度连续稳定后再放开。
-  useLayoutEffect(() => {
-    atBottomRef.current = true;
+  // 贴到底部并钉住，直到 virtua 把末尾条目测高、总高连续稳定。
+  // 两帧 rAF 不够：估算高度下滚到的「底部」在测高后会变，钉住期间持续跟到真实底部。
+  const pinToBottom = () => {
+    stopPinning();
     pinningRef.current = true;
-    anchorIndexRef.current = 0;
-    anchorWithinRef.current = 0;
-    notifyViewport();
-    setShowJump(false);
-
-    // 用帧数而不是墙上时间：测试环境里 rAF 可能同步空转，performance.now 不前进会死循环。
-    const maxFrames = 24;
     let frames = 0;
     let lastSize = -1;
     let stableFrames = 0;
-    let raf = 0;
     const tick = () => {
-      if (!pinningRef.current || frames >= maxFrames) {
+      if (!pinningRef.current || frames >= PIN_MAX_FRAMES) {
         pinningRef.current = false;
         return;
       }
       frames += 1;
       const h = ref.current;
-      if (!h || countRef.current === 0) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-      const atBottom = h.scrollOffset + h.viewportSize >= h.scrollSize - BOTTOM_THRESHOLD;
-      if (!atBottom) scrollToEnd();
-      const size = h.scrollSize;
-      if (atBottom && size === lastSize) {
-        stableFrames += 1;
+      const el = getScroller();
+      if (h && el) {
+        const atBottom = h.scrollOffset + h.viewportSize >= h.scrollSize - PIN_THRESHOLD;
+        follow.toBottom(el);
+        const size = h.scrollSize;
+        stableFrames = atBottom && size === lastSize ? stableFrames + 1 : 0;
+        lastSize = size;
         if (stableFrames >= 3) {
           pinningRef.current = false;
           return;
         }
-      } else {
-        stableFrames = 0;
-        lastSize = size;
       }
-      raf = requestAnimationFrame(tick);
+      pinRafRef.current = requestAnimationFrame(tick);
     };
     tick();
-    return () => {
-      pinningRef.current = false;
-      cancelAnimationFrame(raf);
-    };
-    // 仅在会话标识变化时重置贴底；同会话内的增量贴底由上面的 useLayoutEffect(stickToBottom) 负责。
+  };
+
+  // 内容变化（新消息 / 流式增长）后贴底。用 layout effect：绘制前同步贴底，消除「先显旧位置再跳底」的一帧闪。
+  useLayoutEffect(reconcile);
+
+  // 会话切换（resetKey 变）或首次挂载：清掉旧锚点，钉在底部。
+  useLayoutEffect(() => {
+    anchorIndexRef.current = 0;
+    anchorWithinRef.current = 0;
+    notifyViewport();
+    pinToBottom();
+    return stopPinning;
+    // 仅在会话标识变化时重置贴底；同会话内的增量贴底由上面的 useLayoutEffect(reconcile) 负责。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
+  // 用户自己发出新消息：不管读者停在哪里，都回到底部继续跟随（DSH 同一约定）。
+  const followKeyRef = useRef(followKey);
+  useLayoutEffect(() => {
+    const previous = followKeyRef.current;
+    followKeyRef.current = followKey;
+    if (followKey && followKey !== previous) pinToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followKey]);
+
+  useEffect(() => () => follow.dispose(), [follow]);
+
   useImperativeHandle(scrollRef, () => ({
     scrollBy(deltaY) {
-      if (deltaY < 0) {
-        atBottomRef.current = false;
-        pinningRef.current = false;
-      }
+      if (deltaY !== 0) stopPinning();
       ref.current?.scrollBy(deltaY);
     },
   }));
+
+  // 读者手势与 scrollend 挂在滚动容器上：手势只用来打断钉底，是否离开底部由 scroll 落点决定；
+  // scrollend 时读者停手，立即采样。内部滚动区自己的 scrollend 不冒泡，不会误采样。
+  useEffect(() => {
+    const el = containerRef.current?.firstElementChild;
+    if (!(el instanceof HTMLElement)) return;
+    const onIntent = (event: Event) => {
+      if (event instanceof KeyboardEvent && !SCROLL_KEYS.has(event.key)) return;
+      stopPinning();
+    };
+    const onScrollEnd = (event: Event) => {
+      if (event.target === el) follow.onScrollEnd(el);
+    };
+    for (const type of READING_INTENTS) el.addEventListener(type, onIntent, { passive: true, capture: true });
+    el.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      for (const type of READING_INTENTS) el.removeEventListener(type, onIntent, { capture: true });
+      el.removeEventListener('scrollend', onScrollEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow]);
 
   useLayoutEffect(() => {
     const el = containerRef.current?.firstElementChild;
@@ -277,13 +304,13 @@ export function VirtualizedMessageList({
     return () => ro.disconnect();
   }, [onGutterChange]);
 
-  // 内容总高变化（末尾条目测高、流式正文长高、懒加载内容撑开）时，贴底状态下跟到新的底部。
+  // 内容总高变化（末尾条目测高、流式正文长高、懒加载内容撑开）时，跟随状态下跟到新的底部。
   // 视口自身的尺寸变化交给下面的 resize 逻辑，那段时间不在这里插手。
   useEffect(() => {
     const content = containerRef.current?.firstElementChild?.firstElementChild;
     if (!(content instanceof HTMLElement)) return;
     const ro = new ResizeObserver(() => {
-      if (!resizingRef.current) stickToBottom();
+      if (!resizingRef.current) reconcile();
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -291,11 +318,11 @@ export function VirtualizedMessageList({
   }, []);
 
   // 视口尺寸变化（窗口压缩 / 面板折叠 / 文字重排）时保持位置。
-  // 难点：virtua 在 resize 时按自身锚点逐帧重排，中部阅读位会抖；且重排触发的 onScroll 会污染贴底判断。
-  // 方案：resize 期间用 resizingRef 冻结 atBottomRef/锚点（onScroll 跳过），按冻结前意图持续钉回——
-  //   贴底：交给收尾一次性 scrollToEnd（virtua 自身贴底重排是平滑的，逐帧滚反而打架）；
-  //   不贴底：逐帧 scrollTo(锚点条目当前 offset + 偏移)，盖掉 virtua 的抖动，把阅读位钉死。
-  //   收尾再钉一次确保最终位置准确，并延一帧解冻以避开程序化滚动自身触发的 onScroll。
+  // 难点：virtua 在 resize 时按自身锚点逐帧重排，中部阅读位会抖；且重排触发的 scroll 会被当成读者移动。
+  // 方案：resize 期间用 resizingRef 冻结锚点（scroll 回声只记账），按冻结前意图持续钉回——
+  //   跟随：交给收尾一次性贴底（virtua 自身贴底重排是平滑的，逐帧滚反而打架）；
+  //   不跟随：逐帧 scrollTo(锚点条目当前 offset + 偏移)，盖掉 virtua 的抖动，把阅读位钉死。
+  //   收尾再钉一次确保最终位置准确，并延一帧解冻以避开程序化滚动自身触发的 scroll。
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -303,8 +330,8 @@ export function VirtualizedMessageList({
     const restore = () => {
       const h = ref.current;
       if (!h) return;
-      if (atBottomRef.current) {
-        scrollToEnd();
+      if (follow.active && !follow.pending) {
+        reconcile();
       } else {
         // 用 scrollToIndex 而非 scrollTo：它保证锚点条目落入渲染范围，rapid resize 下即使条目高度暂时
         // 还是旧值也不会因 offset 越界而瞬间空白；align:'start'+offset 落点与原 scrollTo 等价。
@@ -313,7 +340,7 @@ export function VirtualizedMessageList({
     };
     const ro = new ResizeObserver(() => {
       resizingRef.current = true;
-      if (!atBottomRef.current) restore();
+      if (!follow.active || follow.pending) restore();
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         restore();
@@ -330,20 +357,16 @@ export function VirtualizedMessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const jumpToBottom = () => {
+    if (countRef.current > 0) pinToBottom();
+  };
+
   return (
     <div style={fillStyle(fill)}>
       <div
         ref={containerRef}
         data-testid={testId}
         style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%' }}
-        onWheel={(e) => {
-          // 用户主动上滚：立刻脱离自动贴底，避免流式输出（每 100ms 重渲染都触发 stickToBottom）
-          // 把视图反复拽回底部、打断阅读。滚回贴近底部后 onScroll 会重新判定 atBottom 恢复自动贴底。
-          if (e.deltaY < 0) {
-            atBottomRef.current = false;
-            pinningRef.current = false;
-          }
-        }}
       >
         <VList
           ref={ref}
@@ -351,20 +374,22 @@ export function VirtualizedMessageList({
           style={{ height: '100%', flex: 1, minHeight: 0 }}
           bufferSize={BUFFER_SIZE}
           onScroll={() => {
-            if (resizingRef.current || pinningRef.current) return;
             const h = ref.current;
-            if (!h) return;
-            const atBottom = h.scrollOffset + h.viewportSize >= h.scrollSize - BOTTOM_THRESHOLD;
-            atBottomRef.current = atBottom;
-            // 离底且列表够长时露出「回到底部」按钮；贴底时隐藏。
-            setShowJump(!atBottom && countRef.current > JUMP_MIN_ITEMS);
+            const el = getScroller();
+            if (!h || !el) return;
+            // 钉底和 resize 期间的滚动都是程序自己造成的：记账，不当成读者移动，也不动锚点。
+            if (resizingRef.current || pinningRef.current) {
+              follow.acknowledge(el);
+              return;
+            }
+            follow.onScroll(el);
             // 记录当前顶部可见条目作为锚点，供 resize 期间钉回阅读位置。
             anchorIndexRef.current = h.findItemIndex(h.scrollOffset);
             anchorWithinRef.current = h.scrollOffset - h.getItemOffset(anchorIndexRef.current);
             notifyViewport();
           }}
         >
-          {(row: Row) =>
+          {(row: Row<T>) =>
             row === FOOTER_ROW ? (
               <div key={FOOTER_ROW}>
                 {footer ? <div style={itemStyle}>{footer}</div> : null}
@@ -381,7 +406,7 @@ export function VirtualizedMessageList({
         </VList>
       </div>
       {overlay?.(viewport)}
-      {showJump ? (
+      {!following && rows.length > JUMP_MIN_ITEMS ? (
         <button
           type="button"
           className={styles.jump}
