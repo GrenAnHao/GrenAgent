@@ -168,6 +168,25 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
     expect(screen.getByRole('button', { name: '复制' })).toBeTruthy();
   });
 
+  it.each(['done', 'error'] as const)('前台命令结束为 %s 后自动收起，手动重开后更新结果不再收起', (status) => {
+    const props = { toolName: 'bash', args: { command: 'npm test', description: 'Run tests' } };
+    const { rerender } = wrap(<ToolExecution {...props} result={undefined} status="running" />);
+    expect(screen.getByTestId('terminal-block')).toBeTruthy();
+
+    const result = { content: [{ type: 'text', text: 'finished\n' }] };
+    rerender(<ThemeProvider themeMode="dark"><ToolExecution {...props} result={result} status={status} /></ThemeProvider>);
+    expect(screen.queryByTestId('terminal-block')).toBeNull();
+
+    fireEvent.click(screen.getByText('bash'));
+    expect(screen.getByTestId('terminal-output').textContent).toBe('finished\n');
+    rerender(
+      <ThemeProvider themeMode="dark">
+        <ToolExecution {...props} result={{ content: [{ type: 'text', text: 'finished\nsummary\n' }] }} status={status} />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('terminal-output').textContent).toBe('finished\nsummary\n');
+  });
+
   it('运行中输出变长时贴住底部', () => {
     const { rerender } = wrap(
       <ToolExecution
@@ -380,6 +399,67 @@ describe('ToolExecution bash row', { timeout: 30_000 }, () => {
     const output = screen.getByTestId('terminal-output');
     expect(output.getAttribute('data-variant')).toBe('terminal');
     expect(output.textContent).toBe('Name    LastWriteTime\n----    -------------');
+  });
+
+  it('沙箱拒绝：折叠行写明被拒和模式，展开后底栏一句说明', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'touch x', description: 'Create a file' }}
+        result={{
+          content: [
+            {
+              type: 'text',
+              text: 'touch: x: Read-only file system\n\n\n[sandbox: file access denied under read-only mode]\n\nCommand exited with code 1',
+            },
+          ],
+          details: { sandbox: { mode: 'read-only', denied: true } },
+          isError: true,
+        }}
+        status="error"
+      />,
+    );
+    expect(screen.getByTestId('bash-sandbox-meta').textContent).toBe('沙箱拒绝 · 只读');
+    fireEvent.click(screen.getByText('bash'));
+    expect(screen.getByTestId('bash-sandbox-note').textContent).toBe('沙箱拦下了文件访问（只读模式）');
+    // 终端正文仍是给模型的文本。
+    expect(screen.getByTestId('terminal-output').textContent).toContain('[sandbox: file access denied under read-only mode]');
+  });
+
+  it('已升权：折叠行和底栏都说明这次用的权限', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{
+          command: 'npm run build',
+          description: 'Build',
+          sandbox_permissions: 'workspace-write',
+          justification: '需要写构建产物',
+        }}
+        result={{
+          content: [{ type: 'text', text: 'built\n' }],
+          details: { sandbox: { mode: 'workspace-write', denied: false, escalatedFrom: 'read-only' } },
+        }}
+        status="done"
+      />,
+    );
+    expect(screen.getByTestId('bash-sandbox-meta').textContent).toBe('已升权 · 工作区写入');
+    fireEvent.click(screen.getByText('bash'));
+    expect(screen.getByTestId('bash-sandbox-note').textContent).toBe('本次已获批准，以工作区写入权限运行');
+  });
+
+  it('普通命令没有沙箱 meta 和底栏', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'echo hi', description: 'Say hi' }}
+        result={{ content: [{ type: 'text', text: 'hi\n' }] }}
+        status="done"
+      />,
+    );
+    expect(screen.queryByTestId('bash-sandbox-meta')).toBeNull();
+    fireEvent.click(screen.getByText('bash'));
+    expect(screen.queryByTestId('bash-sandbox-note')).toBeNull();
   });
 });
 
@@ -773,4 +853,3 @@ describe('ToolExecution 参数生成', () => {
     expect(screen.getByTestId('streaming-file-body').textContent).toContain('等待参数');
   });
 });
-

@@ -131,6 +131,160 @@ describe("runEmbeddedSubagent", () => {
     expect(meta.thinkingLevel).toBe("medium");
   });
 
+  it("does not idle-kill while a tool runs, keeps heartbeating, and resumes idle timing after it ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const listeners: Array<(e: unknown) => void> = [];
+      let finish!: () => void;
+      const session = fakeSession(
+        { provider: "a", id: "b" },
+        { waitForIdle: vi.fn(() => new Promise<void>((resolve) => { finish = resolve; })) },
+      );
+      session.subscribe = vi.fn((fn: (e: unknown) => void) => {
+        listeners.push(fn);
+        return () => {};
+      }) as never;
+      createAgentSessionFromServices.mockResolvedValueOnce({ session });
+      const updates: unknown[] = [];
+      const run = runEmbeddedSubagent({
+        cwd: "/ws",
+        task: "t",
+        agentId: "sa-tool",
+        timeoutMs: 30_000,
+        onUpdate: (u) => updates.push(u),
+      });
+      for (let i = 0; i < 50 && listeners.length < 2; i++) await vi.advanceTimersByTimeAsync(1);
+      expect(listeners.length).toBeGreaterThanOrEqual(2);
+      const emit = (e: unknown) => listeners.forEach((fn) => fn(e));
+
+      emit({ type: "tool_execution_start", toolCallId: "c1", toolName: "bash" });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const before = updates.length;
+      // 工具安静跑 130 秒：远超空闲窗口 30 秒，不能被杀；期间每 60 秒吐一次进度。
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(session.abort).not.toHaveBeenCalled();
+      expect(updates.length - before).toBeGreaterThanOrEqual(2);
+
+      emit({ type: "tool_execution_end", toolCallId: "c1" });
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(session.abort).toHaveBeenCalled();
+      finish();
+      const r = await run;
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("idle timeout: no activity for 30s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("upstream stall watchdog", () => {
+    function stallHarness() {
+      const listeners: Array<(e: unknown) => void> = [];
+      const emit = (e: unknown) => listeners.forEach((fn) => fn(e));
+      let idleResolve: (() => void) | undefined;
+      const prompts: string[] = [];
+      const session = fakeSession(
+        { provider: "a", id: "b" },
+        { waitForIdle: vi.fn(() => new Promise<void>((resolve) => { idleResolve = resolve; })) },
+      );
+      const messages: Array<Record<string, unknown>> = [];
+      session.messages = messages as never;
+      session.subscribe = vi.fn((fn: (e: unknown) => void) => {
+        listeners.push(fn);
+        return () => {};
+      }) as never;
+      session.prompt = vi.fn(async (text: string, o?: { preflightResult?: (d: unknown) => void }) => {
+        prompts.push(text);
+        o?.preflightResult?.("started");
+      }) as never;
+      // 中断在途请求：和 pi 一样留下一条 aborted 的 assistant，然后回到空闲。
+      session.abort = vi.fn(async () => {
+        messages.push({ role: "assistant", content: [], stopReason: "aborted", errorMessage: "Request was aborted" });
+        emit({ type: "message_end", message: { role: "assistant" } });
+        emit({ type: "agent_end" });
+        idleResolve?.();
+      }) as never;
+      const streamThenGoQuiet = async () => {
+        emit({ type: "turn_start" });
+        emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "想…" } });
+        await vi.advanceTimersByTimeAsync(125_000);
+      };
+      const ready = async () => {
+        for (let i = 0; i < 50 && listeners.length < 2; i++) await vi.advanceTimersByTimeAsync(1);
+      };
+      return { session, messages, prompts, emit, ready, streamThenGoQuiet, finishRun: () => idleResolve?.() };
+    }
+
+    it("cuts a request that stops streaming and continues the child instead of killing it", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = stallHarness();
+        createAgentSessionFromServices.mockResolvedValueOnce({ session: h.session });
+        const run = runEmbeddedSubagent({ cwd: "/ws", task: "做事", agentId: "sa-stall", timeoutMs: 300_000 });
+        await h.ready();
+
+        await h.streamThenGoQuiet();
+        expect(h.session.abort).toHaveBeenCalledTimes(1);
+        expect(h.prompts).toHaveLength(2);
+        expect(h.prompts[1]).toContain("自动续跑");
+
+        h.messages.push({ role: "assistant", content: [{ type: "text", text: "做完了" }], stopReason: "stop" });
+        h.finishRun();
+        const r = await run;
+        expect(r.ok).toBe(true);
+        expect(r.output).toBe("做完了");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives up as an idle timeout after the retry budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = stallHarness();
+        createAgentSessionFromServices.mockResolvedValueOnce({ session: h.session });
+        const run = runEmbeddedSubagent({ cwd: "/ws", task: "做事", agentId: "sa-stall2", timeoutMs: 300_000 });
+        await h.ready();
+
+        await h.streamThenGoQuiet();
+        await h.streamThenGoQuiet();
+        expect(h.prompts).toHaveLength(3);
+        await h.streamThenGoQuiet();
+        const r = await run;
+        expect(h.prompts).toHaveLength(3);
+        expect(r.ok).toBe(false);
+        expect(r.error).toMatch(/^idle timeout: upstream sent nothing for 12\ds \(after 2 automatic retries\)$/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("reports why the child stopped instead of a bare (no output)", async () => {
+    const blocked = fakeSession({ provider: "a", id: "b" });
+    blocked.messages = [
+      { role: "assistant", content: [{ type: "toolCall", name: "bash" }], stopReason: "toolUse" },
+      { role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: "只读模式：禁止会改动文件系统的命令" }] },
+    ] as never;
+    createAgentSessionFromServices.mockResolvedValueOnce({ session: blocked });
+    const r1 = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-blocked" });
+    expect(r1.ok).toBe(false);
+    expect(r1.exitCode).toBe(1);
+    expect(r1.error).toBe("stopped after bash without a final reply: 只读模式：禁止会改动文件系统的命令");
+
+    const failed = fakeSession({ provider: "a", id: "b" });
+    failed.messages = [
+      { role: "assistant", content: [{ type: "text", text: "先看入口" }], stopReason: "toolUse" },
+      { role: "toolResult", toolName: "read", content: [{ type: "text", text: "..." }] },
+      { role: "assistant", content: [], stopReason: "error", errorMessage: "upstream stream disconnected: unexpected EOF" },
+    ] as never;
+    createAgentSessionFromServices.mockResolvedValueOnce({ session: failed });
+    const r2 = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-failed" });
+    expect(r2.ok).toBe(false);
+    expect(r2.error).toBe("model error: upstream stream disconnected: unexpected EOF");
+    expect(r2.partial).toBe(true);
+  });
+
   it("omits thinkingLevel when not given", async () => {
     createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
     await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-y" });

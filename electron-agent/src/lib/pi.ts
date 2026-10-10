@@ -6,6 +6,8 @@ export type { UsageReport } from './usageReport';
 import type { PackageListItem, PackageSearchResult } from '../../electron/app/piPackageModel';
 export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
 import type { AskUserDraft } from '../../electron/agent/askUserDraft';
+import type { DevinAccountView } from './devinAccount';
+export type { DevinAccountView } from './devinAccount';
 export type PackageInstallScope = 'user' | 'project';
 
 export interface PiEventEnvelope {
@@ -107,14 +109,34 @@ export interface RefreshResult {
   failed: { workspace: string; error: string }[];
 }
 
+export interface DiagnoseRequest {
+  /** 取消时按它找到这一次请求。 */
+  requestId: string;
+  providerId: string;
+  modelId: string;
+  prompt: string;
+  /** true：输出边到边推送；false：完成后一次给全文。 */
+  stream: boolean;
+  /** pi 思考档（minimal…max）；不传 = 关闭。 */
+  reasoning?: string;
+}
+
+export interface DiagnoseChunk {
+  type: 'text' | 'thinking';
+  text: string;
+}
+
 export interface DiagnoseResult {
   ok: boolean;
+  cancelled?: boolean;
   error?: string | null;
   content: string;
+  thinking?: string;
   ttftMs: number;
   totalMs: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  reasoningTokens?: number | null;
   totalTokens?: number | null;
   tokensPerSec?: number | null;
 }
@@ -131,6 +153,8 @@ export interface SubAgentItem {
   task: string;
   status: 'running' | 'done' | 'error' | 'cancelled' | string;
   model?: string | null;
+  /** 子会话实际运行的思考档位（pi 档位名）。embedded 子代理起会话后才有。 */
+  thinkingLevel?: string | null;
   /** 子进程会话文件已写出时才算真正跑起来。没有它时界面显示启动中。 */
   sessionPath?: string | null;
   /** 已解析能力档案 JSON（含 fs/name），前端据此推断「类型（只读/工作）」。 */
@@ -315,6 +339,9 @@ export const pi = {
   createImage: (workspace: string, name: string) =>
     invoke<string>('create_image', { workspace, name }),
   getSettings: () => invoke<Record<string, string>>('get_settings'),
+  devinAccountStatus: () => invoke<DevinAccountView>('devin_account_status'),
+  devinAccountLogin: () => invoke<DevinAccountView>('devin_account_login'),
+  devinAccountLogout: () => invoke<DevinAccountView>('devin_account_logout'),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
   listMcpConfigs: (workspace: string) =>
@@ -351,8 +378,9 @@ export const pi = {
   /** Mermaid 渲染失败时的非流式一次性修复：用当前会话模型生成修正后的 mermaid 代码（不进对话历史）。 */
   fixMermaid: (workspace: string, code: string, error: string) =>
     invoke<string>('fix_mermaid_diagram', { workspace, code, error }),
-  diagnoseProviderModel: (providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: Channel<string>) =>
-    invoke<DiagnoseResult>('diagnose_provider_model', { providerId, modelId, prompt, stream, onChunk }),
+  diagnoseProviderModel: (request: DiagnoseRequest, onChunk: Channel<DiagnoseChunk>) =>
+    invoke<DiagnoseResult>('diagnose_provider_model', { ...request, onChunk }),
+  abortDiagnoseProviderModel: (requestId: string) => invoke<void>('diagnose_provider_model_abort', { requestId }),
   enhancePrompt: (workspace: string, text: string, onChunk: Channel<string>, goalText?: string) =>
     invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText }),
   abortEnhancePrompt: (workspace: string) => invoke<void>('enhance_prompt_abort', { workspace }),

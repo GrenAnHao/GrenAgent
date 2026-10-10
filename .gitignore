@@ -54,6 +54,10 @@ output/
 nul
 .pi/
 
+# 预编译入仓的 Windows helper（源码在旁边）。放行，免得被全局的 *.exe 规则挡住。
+!/electron-agent/native/bin/*.exe
+!/extensions/_shared/sandbox/windows/bin/*.exe
+
 # Local embedding model weights (download on first run)
 /embedding/.models/
 /embedding/vector-service.exe

@@ -60,6 +60,8 @@ export type ChatMessage =
       durationMs?: number;
       /** 嵌套调用的父工具。codemode 里的 MCP 调用带这个 id，时间线挂到父卡片下面。 */
       parentToolCallId?: string;
+      /** 助手消息中止 / 出错时按「已中断」收掉的卡片。随后到的工具结果消息会把它换成真实结果。 */
+      interrupted?: boolean;
     }
   | { kind: 'notice'; id: string; customType: string; content: string }
   /** 一次成功的上下文压缩留在会话里的分隔。进行中只显示「正在压缩」，结束后写成这一条。 */
@@ -541,10 +543,35 @@ function failRunningToolCards(messages: ChatMessage[], cardIds: Set<string>, too
       ...m,
       status: 'error',
       argsComplete: true,
+      interrupted: true,
       result: { content: [{ type: 'text', text }] },
     };
   }
   return next;
+}
+
+/**
+ * 工具结果消息到了：把还在转、或刚按「已中断」收掉的卡片换成这条结果。
+ * 中止时助手消息可能先到、结果后到。已由 tool_execution_end 定格的卡片不动，那里的结果带着
+ * structuredContent 等字段。
+ */
+function settleToolFromResultMessage(state: AgentState, msg: AgentMessage): AgentState {
+  const raw = msg as { toolCallId?: unknown; isError?: unknown };
+  if (typeof raw.toolCallId !== 'string' || !raw.toolCallId) return state;
+  const idx = lastIndex(state.messages, (m) => m.kind === 'tool' && m.toolCallId === raw.toolCallId);
+  if (idx < 0) return state;
+  const cur = state.messages[idx];
+  if (cur.kind !== 'tool' || (cur.status !== 'running' && !cur.interrupted)) return state;
+  const messages = [...state.messages];
+  const { interrupted: _interrupted, ...rest } = cur;
+  messages[idx] = {
+    ...rest,
+    result: toolResultPayload(msg),
+    status: raw.isError === true ? 'error' : 'done',
+    argsComplete: true,
+    ...(cur.startedAt != null && cur.durationMs == null ? { durationMs: Math.max(0, Date.now() - cur.startedAt) } : {}),
+  };
+  return { ...state, messages };
 }
 
 function settleIncompleteToolCards(messages: ChatMessage[]): ChatMessage[] {
@@ -732,6 +759,24 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           state.todoListFinished,
         ),
         messages,
+      };
+      if (willRetry) {
+        // pi 退避后会自己重发：这一轮没结束，保持 streaming（停止按钮留着、发送等待不放行），
+        // 刚才的报错挪进重试条，不弹红条。次数等紧随其后的 auto_retry_start 再补。
+        return dropDrafts(state, {
+          ...ended,
+          lastError: undefined,
+          retrying: {
+            attempt: state.retrying?.auto ? state.retrying.attempt : 0,
+            max: state.retrying?.auto ? state.retrying.max : 0,
+            auto: true,
+            error: state.lastError ?? state.retrying?.error,
+          },
+        });
+      }
+      return dropDrafts(state, {
+        ...ended,
+        isStreaming: false,
         ...settleAutoRetry(state),
       });
     }
@@ -751,24 +796,6 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         compacting: false,
         waitingUiPrompt: undefined,
         messages,
-      };
-      if (willRetry) {
-        // pi 退避后会自己重发：这一轮没结束，保持 streaming（停止按钮留着、发送等待不放行），
-        // 刚才的报错挪进重试条，不弹红条。次数等紧随其后的 auto_retry_start 再补。
-        return dropDrafts(state, {
-          ...ended,
-          lastError: undefined,
-          retrying: {
-            attempt: state.retrying?.auto ? state.retrying.attempt : 0,
-            max: state.retrying?.auto ? state.retrying.max : 0,
-            auto: true,
-            error: state.lastError ?? state.retrying?.error,
-          },
-        });
-      }
-      return dropDrafts(state, {
-        ...ended,
-        isStreaming: false,
         ...settleAutoRetry(state),
       });
     }
@@ -814,6 +841,7 @@ export function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case 'message_end': {
       const ev = event as Extract<AgentEvent, { type: 'message_end' }>;
       if (ev.message.role === 'custom') return applyCustomMessage(state, ev.message);
+      if (ev.message.role === 'toolResult') return settleToolFromResultMessage(state, ev.message);
       if (ev.message.role !== 'assistant') return state;
       const { text, thinking } = extractText(ev.message);
       const errMsg = messageError(ev.message);
@@ -1161,6 +1189,8 @@ export function messagesFromAgent(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
+  // 最后一条助手消息发出、还没有结果的调用。中途残留的孤儿调用不算，补在末尾会乱序。
+  let trailingCalls = new Map<string, PendingToolCall>();
 
   for (const msg of msgs) {
     if (msg.role === 'custom') {
@@ -1173,6 +1203,7 @@ export function messagesFromAgent(
       continue;
     }
     if (msg.role === 'user') {
+      trailingCalls = new Map();
       const { text } = extractText(msg);
       const images = extractImages(msg);
       const rawEntryId = (msg as { entryId?: unknown }).entryId;
@@ -1190,6 +1221,8 @@ export function messagesFromAgent(
     }
     if (msg.role === 'assistant') {
       registerToolCalls(pendingToolCalls, msg);
+      trailingCalls = new Map();
+      registerToolCalls(trailingCalls, msg);
       const { text, thinking } = extractText(msg);
       if (text.trim() || thinking.trim()) {
         const timestamp = messageTimestamp(msg);
@@ -1221,7 +1254,24 @@ export function messagesFromAgent(
         status: raw.isError === true ? 'error' : 'done',
       });
       pendingToolCalls.delete(toolCallId);
+      trailingCalls.delete(toolCallId);
     }
+  }
+  // 工具正在跑时切进会话 / 重载：结果还没落盘，只靠 toolResult 建卡会让这张卡一直缺席，
+  // 之后的 tool_execution_update 也找不到卡。补成 running；调用方确认回合已结束时用
+  // interruptPendingToolCards 收成已中断。ask_user 由下面单独补。
+  for (const [toolCallId, call] of trailingCalls) {
+    if (call.toolName === 'ask_user') continue;
+    out.push({
+      kind: 'tool',
+      id: nextId(),
+      toolCallId,
+      toolName: call.toolName,
+      args: call.args,
+      result: undefined,
+      status: 'running',
+      argsComplete: true,
+    });
   }
   const pending = findPendingAskUser(msgs);
   if (pending && !out.some((m) => m.kind === 'tool' && m.toolCallId === pending.toolCallId)) {
@@ -1236,6 +1286,27 @@ export function messagesFromAgent(
     });
   }
   return out;
+}
+
+/**
+ * 快照补出来的 running 卡（结果还没落盘的调用）在回合已经不跑时收成「已中断」，
+ * 应用重启留下的调用不能一直转圈。之后真有结果到，按 interrupted 的语义换成真实结果。
+ * ask_user 的等待行有自己的恢复流程，不动。
+ */
+export function interruptPendingToolCards(messages: ChatMessage[]): ChatMessage[] {
+  let touched = false;
+  const next = messages.map((m) => {
+    if (m.kind !== 'tool' || m.status !== 'running' || m.result !== undefined || m.toolName === 'ask_user') return m;
+    touched = true;
+    return {
+      ...m,
+      status: 'error' as const,
+      argsComplete: true,
+      interrupted: true,
+      result: { content: [{ type: 'text', text: '已中断' }] },
+    };
+  });
+  return touched ? next : messages;
 }
 
 /**

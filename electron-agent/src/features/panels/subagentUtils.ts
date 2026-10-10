@@ -1,11 +1,30 @@
 import { messagesFromTranscript, type ChatMessage } from '../../stores/agentReducer';
+import { levelDisplayLabel } from '../chat/input/thinkingLevels';
 
-/** 从 spawn_agent 工具入参里取一个人类可读的任务标签（主对话内联块与右侧面板 tab 共用）。 */
-/** 展示用的模型名：去掉 provider 前缀。 */
-export function displayModel(model: string | undefined): string | undefined {
+/** 供应商 id → 显示名（设置里的供应商列表）。 */
+export type ProviderNames = ReadonlyMap<string, string>;
+
+/**
+ * 展示用的模型路由：`供应商 / 模型 id`。同名模型挂在不同供应商下时靠前半段区分。
+ * provider 是第一个 `/` 之前的部分（模型 id 自己可能带 `/`，如 openrouter 的 `anthropic/...`）；
+ * 有显示名用显示名，没有就用 provider id。没有前缀（别名、旧数据）原样显示。
+ */
+export function displayModel(model: string | undefined, providerNames?: ProviderNames): string | undefined {
   const text = model?.trim();
   if (!text) return undefined;
-  return text.includes('/') ? text.slice(text.lastIndexOf('/') + 1) : text;
+  const slash = text.indexOf('/');
+  if (slash <= 0 || slash === text.length - 1) return text;
+  const provider = text.slice(0, slash);
+  const id = text.slice(slash + 1);
+  const name = providerNames?.get(provider)?.trim() || provider;
+  return `${name} / ${id}`;
+}
+
+const MODEL_ALIASES = new Set(['cheap', 'strong']);
+
+/** spawn_agent 参数里的 cheap / strong 是设置里的档案别名，不是模型名；实际路由以工具结果或注册表为准。 */
+export function isModelAlias(model: string | null | undefined): boolean {
+  return MODEL_ALIASES.has(model?.trim() ?? '');
 }
 
 export function modelFromResult(result: unknown): string | undefined {
@@ -13,6 +32,29 @@ export function modelFromResult(result: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const model = (details as { model?: unknown }).model;
   return typeof model === 'string' && model.trim() ? model.trim() : undefined;
+}
+
+/** 子代理实际运行的思考档位（后端写进工具结果 details；取不到不显示）。 */
+export function thinkingLevelFromResult(result: unknown): string | undefined {
+  const details = result && typeof result === 'object' ? (result as { details?: unknown }).details : undefined;
+  if (!details || typeof details !== 'object') return undefined;
+  return cleanLevel((details as { thinkingLevel?: unknown }).thinkingLevel);
+}
+
+function cleanLevel(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/** 卡片上的模型标签：`供应商 / 模型 · 思考档位`。没有档位时只显示模型；没有模型时不显示。 */
+export function modelWithThinking(
+  model: string | undefined,
+  level: string | undefined,
+  providerNames?: ProviderNames,
+): string | undefined {
+  const name = displayModel(model, providerNames);
+  if (!name) return undefined;
+  const lv = cleanLevel(level);
+  return lv ? `${name} · ${levelDisplayLabel(lv)}` : name;
 }
 
 export function argsLookParallel(args: unknown): boolean {
@@ -309,7 +351,7 @@ function taskAt(args: unknown, index: number): string | null {
   if (chained) return chained;
   const item = a.tasks?.[index];
   if (typeof item === 'string' && item.trim()) return item.trim();
-  if (item && typeof item.task === 'string' && item.task.trim()) return item.task.trim();
+  if (item && typeof item === 'object' && typeof item.task === 'string' && item.task.trim()) return item.task.trim();
   return null;
 }
 
@@ -500,6 +542,7 @@ export function subAgentStats(result: unknown): SubAgentStatsData | null {
 interface SpawnArgs {
   title?: string;
   task?: string;
+  model?: string;
   tasks?: Array<string | { title?: string; task?: string; model?: string }>;
   chain?: Array<{ title?: string; task?: string; model?: string }>;
   agent?: string;
@@ -530,6 +573,7 @@ export function spawnUnitTitle(args: unknown, subIndex: number | null): string |
 
 interface UnitResult {
   task?: string;
+  title?: string;
   ok?: boolean;
   status?: string;
   output?: string;
@@ -538,6 +582,7 @@ interface UnitResult {
   sessionPath?: string;
   stopReason?: string;
   model?: string;
+  thinkingLevel?: string;
 }
 
 interface UnitWork {
@@ -599,6 +644,11 @@ function modelOf(row: UnitResult | undefined): string | undefined {
   return typeof row?.model === 'string' && row.model.trim() ? row.model.trim() : undefined;
 }
 
+/** 逐行结果里的实际档位；还没回来时用调用参数里显式写的 thinking_level。 */
+function thinkingLevelOf(row: UnitResult | undefined, args: unknown): string | undefined {
+  return cleanLevel(row?.thinkingLevel) ?? cleanLevel((args as { thinking_level?: unknown } | null)?.thinking_level);
+}
+
 /** 任务对象里写明的模型。启动阶段结果还没回来时，行上先用这个。 */
 function modelFromTaskArgs(args: unknown, index: number): string | undefined {
   const tasks = (args as SpawnArgs | null)?.tasks;
@@ -648,11 +698,15 @@ export interface SubAgentUnit {
   key: string;
   /** null = 整条消息（单任务）；否则是并行/链式里的下标。 */
   subIndex: number | null;
+  /** 结果中登记的稳定身份；历史补字段时不能只按可能重复的任务名匹配。 */
+  agentId?: string;
   task: string;
   /** 主代理提交的短任务名。缺省时界面从 task 截一句。 */
   title?: string;
   status: SubAgentUnitStatus;
   model?: string;
+  /** 实际运行的思考档位（pi 档位名，如 high）。 */
+  thinkingLevel?: string;
 }
 
 /**
@@ -668,17 +722,29 @@ export function expandSubAgents(
   status: 'running' | 'done' | 'error',
   asGroup = false,
 ): SubAgentUnit[] {
-  const tasks = unitWorks(args);
+  const results = resultsOf(result);
+  const tasks = taskAt(args, 0)
+    ? unitWorks(args)
+    : results?.length
+      ? results.map((row) => withTitle(row.task?.trim() || '子代理任务', cleanTitle(row.title)))
+      : [withTitle(taskFromAgentResult(result) ?? '子代理任务', spawnUnitTitle(args, null) ?? cleanTitle(detailsOf(result)?.title))];
   if (tasks.length <= 1 && !asGroup) {
     const only = tasks[0] ?? { task: '子代理任务' };
-    return [{ key: messageId, subIndex: null, task: only.task, ...(only.title ? { title: only.title } : {}), status }];
+    const agentId = subAgentId(result);
+    const model = modelFromResult(result) ?? cleanTitle((args as SpawnArgs | null)?.model) ?? modelFromUnitArgs(args, 0);
+    const thinkingLevel = thinkingLevelFromResult(result) ?? thinkingLevelOf(undefined, args);
+    return [{
+      key: messageId, subIndex: null, task: only.task, ...(only.title ? { title: only.title } : {}), status,
+      ...(agentId ? { agentId } : {}), ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}),
+    }];
   }
   const grouped = asGroup ? explicitWorks(args) : tasks;
   if (grouped.length === 0) return [];
-  const results = resultsOf(result);
   return grouped.map((work, i) => {
     const row = results?.[i];
+    const agentId = cleanTitle(row?.agentId);
     const model = modelOf(row) ?? modelFromUnitArgs(args, i);
+    const thinkingLevel = thinkingLevelOf(row, args);
     let st: SubAgentUnitStatus;
     if (status === 'running') {
       if (chainStepWaiting(args, results, i, row)) st = 'waiting';
@@ -699,7 +765,9 @@ export function expandSubAgents(
       task: work.task,
       ...(work.title ? { title: work.title } : {}),
       status: st,
+      ...(agentId ? { agentId } : {}),
       ...(model ? { model } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
     };
   });
 }

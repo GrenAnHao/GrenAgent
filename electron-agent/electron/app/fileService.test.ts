@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,6 +36,56 @@ describe('FileService', () => {
     await service.write(root, 'src/new.txt', 'created');
     await expect(readFile(join(root, 'src', 'new.txt'), 'utf8')).resolves.toBe('created');
     await expect(service.read(root, '../outside.txt')).rejects.toThrow('Path escapes workspace');
+  });
+
+  it('lists one level with directories first, dotfiles kept and heavy directories skipped', async () => {
+    const root = await workspace();
+    await mkdir(join(root, '.github'));
+    await mkdir(join(root, 'dist'));
+    await mkdir(join(root, 'out'));
+    await mkdir(join(root, '.git'));
+    await writeFile(join(root, '.gitignore'), 'node_modules\n');
+    await writeFile(join(root, 'file10.txt'), '');
+    await writeFile(join(root, 'file2.txt'), '');
+    const service = new FileService();
+
+    const listing = await service.listDir(root, '');
+    expect(listing.truncated).toBe(false);
+    expect(listing.dir).toBe(await realpath(root));
+    expect(listing.entries.map((entry) => [entry.name, entry.isDir])).toEqual([
+      ['.github', true], ['src', true], ['.gitignore', false], ['file2.txt', false], ['file10.txt', false], ['README.md', false],
+    ]);
+    expect(listing.entries.find((entry) => entry.name === 'README.md')).toMatchObject({ size: 6, path: join(await realpath(root), 'README.md') });
+
+    const nested = await service.listDir(root, join(root, 'src'));
+    expect(nested.entries).toEqual([{ name: 'index.ts', path: join(await realpath(root), 'src', 'index.ts'), isDir: false, size: 23 }]);
+    await expect(service.listDir(root, '..')).rejects.toThrow('Path escapes workspace');
+  });
+
+  it('reads text for the viewer, marks binary files and truncates past 5MB', async () => {
+    const BOM = String.fromCharCode(0xfeff);
+    const root = await workspace();
+    await writeFile(join(root, 'bom.txt'), `${BOM}hello\r\nworld`);
+    await writeFile(join(root, 'blob.bin'), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x14]));
+    await writeFile(join(root, 'big.log'), Buffer.alloc(5 * 1024 * 1024 + 10, 0x61));
+    const service = new FileService();
+
+    await expect(service.readForView(root, 'bom.txt')).resolves.toEqual({
+      kind: 'text', content: `${BOM}hello\r\nworld`, size: 15, truncated: false,
+    });
+    await expect(service.readForView(root, 'blob.bin')).resolves.toEqual({ kind: 'binary', size: 6 });
+    const big = await service.readForView(root, 'big.log');
+    expect(big).toMatchObject({ kind: 'text', size: 5 * 1024 * 1024 + 10, truncated: true });
+    expect(big.kind === 'text' ? big.content.length : 0).toBe(5 * 1024 * 1024);
+    await expect(service.readForView(root, '../../etc/passwd')).rejects.toThrow('Path escapes workspace');
+  });
+
+  it('resolves only existing paths inside the workspace', async () => {
+    const root = await workspace();
+    const service = new FileService();
+    await expect(service.resolveExisting(root, 'README.md')).resolves.toBe(join(await realpath(root), 'README.md'));
+    await expect(service.resolveExisting(root, 'missing.md')).rejects.toThrow('File does not exist');
+    await expect(service.resolveExisting(root, '../x')).rejects.toThrow('Path escapes workspace');
   });
 
   it('allows only registered dropped files and imports an allowed file under .pi/dropped', async () => {

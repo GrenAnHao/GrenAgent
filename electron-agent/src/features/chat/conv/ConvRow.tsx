@@ -76,6 +76,8 @@ interface ConvRowProps {
   metaInline?: boolean;
   /** 提供 body 即可展开；不提供则为纯展示行（无 chevron）。 */
   body?: ReactNode;
+  /** 常驻在行下、展开体之上的内容（codemode 的嵌套调用列表），收起时也显示。 */
+  inline?: ReactNode;
   open?: boolean;
   onToggle?: () => void;
   'data-testid'?: string;
@@ -90,6 +92,7 @@ export const ConvRow = memo(function ConvRow({
   meta,
   metaInline = false,
   body,
+  inline,
   open = false,
   onToggle,
   'data-testid': testId,
@@ -116,6 +119,7 @@ export const ConvRow = memo(function ConvRow({
           {expandable ? <Disclosure open={open} /> : null}
         </div>
       </div>
+      {inline}
       {expandable && open ? <div className={styles.body}>{body}</div> : null}
     </div>
   );

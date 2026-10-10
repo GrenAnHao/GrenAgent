@@ -105,6 +105,48 @@ describe("isMutatingBash", () => {
     expect(isMutatingBash('rg "=>"')).toBe(false);
     expect(isMutatingBash("rg 'a > b'")).toBe(false);
   });
+
+  // 下面的命令来自只读审查子代理的真实会话，旧规则把它们当成写盘拦下。
+  it("does not treat output thrown away to $null / /dev/null / NUL as a file write", () => {
+    expect(isMutatingBash("git show 25bde6e:server/src/a.rs > $null")).toBe(false);
+    expect(isMutatingBash('rg -n "x" src 2>$null | Select-Object -First 40')).toBe(false);
+    expect(isMutatingBash("npx tsx --test t.ts *> $null")).toBe(false);
+    expect(isMutatingBash("ls missing &>/dev/null")).toBe(false);
+    expect(isMutatingBash("dir x 2>NUL")).toBe(false);
+    // 同名但会落盘的目标仍算写入
+    expect(isMutatingBash("echo hi > null")).toBe(true);
+    expect(isMutatingBash("echo hi > nul.txt")).toBe(true);
+    expect(isMutatingBash("git show a:b > $env:TEMP\\b.ts")).toBe(true);
+  });
+
+  it("only matches git mutators in subcommand position", () => {
+    expect(isMutatingBash('git -C "D:\\repo x" merge-base feat/a feat/b')).toBe(false);
+    expect(isMutatingBash("git stash list | Out-Null")).toBe(false);
+    expect(isMutatingBash("git stash show -p")).toBe(false);
+    expect(isMutatingBash('git diff --quiet 746c4c3 -- a.ts; "diff-vs-commit exit: $LASTEXITCODE"')).toBe(false);
+    expect(isMutatingBash('git grep -n -E "reset\\(|clearMall" -- src/a.ts')).toBe(false);
+    expect(isMutatingBash('git show 697ca70:a.ts | Select-String -Pattern "reset|open"')).toBe(false);
+
+    expect(isMutatingBash("git stash")).toBe(true);
+    expect(isMutatingBash("git stash pop")).toBe(true);
+    expect(isMutatingBash("git stash push -- a.ts | Out-Null")).toBe(true);
+    expect(isMutatingBash('git -C "D:\\repo x" checkout -- a.ts')).toBe(true);
+    expect(isMutatingBash("git -c core.autocrlf=false commit -m x")).toBe(true);
+    expect(isMutatingBash("git --no-pager merge feat/x")).toBe(true);
+    expect(isMutatingBash("git status; git reset --soft HEAD~1")).toBe(true);
+    expect(isMutatingBash("git pull --ff-only")).toBe(true);
+    expect(isMutatingBash("git cherry-pick abc123")).toBe(true);
+  });
+
+  it("does not match command words glued to a hyphen", () => {
+    expect(isMutatingBash("docker run --rm alpine ls")).toBe(false);
+    expect(isMutatingBash("pnpm test; rg -i foo src")).toBe(false);
+    expect(isMutatingBash("rg -n shop-control-cp src")).toBe(false);
+    expect(isMutatingBash("pnpm add left-pad")).toBe(true);
+    expect(isMutatingBash("npm i -D vitest")).toBe(true);
+    expect(isMutatingBash("cp a b")).toBe(true);
+    expect(isMutatingBash("git rm --cached a.ts")).toBe(true);
+  });
 });
 
 describe("isUnderCwd", () => {

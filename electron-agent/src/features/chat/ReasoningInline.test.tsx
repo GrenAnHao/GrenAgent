@@ -58,6 +58,12 @@ describe('ReasoningInline', () => {
     expect(screen.getByTestId('reasoning-inline').textContent).toContain('已深度思考 · 3 秒');
   });
 
+  it('结束后展开仍使用可滚动的限高正文容器', () => {
+    render(<ReasoningInline content={'长推理\n'.repeat(80)} streaming={false} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('reasoning-body')).toContainElement(screen.getByTestId('md'));
+  });
+
   it('流式时单行显示最后一行，并带正在深度思考与耗时', () => {
     render(
       <ReasoningInline

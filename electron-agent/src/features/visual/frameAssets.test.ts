@@ -44,8 +44,35 @@ describe('buildSrcDoc', () => {
   it('fills the viewport only when the panel asks for it', () => {
     const doc = buildSrcDoc('<div class="split"></div>', { fill: true });
     expect(doc).toContain('data-visual-layout');
-    expect(doc).toContain('height: 100% !important');
     expect(doc).toContain('.split, .cards { flex: 1 1 auto !important');
+  });
+
+  it('lets the body grow past the viewport so the confirm bar padding stays effective', () => {
+    const doc = buildSrcDoc('<div class="split"></div>', { fill: true });
+    expect(doc).toContain('html { height: 100% !important; }');
+    expect(doc).toContain('body { height: auto !important; min-height: 100% !important;');
+    // body 定高时，溢出内容后面没有 padding-bottom，最后一个选项会被确认条盖住
+    expect(doc).not.toMatch(/html, body \{ height: 100% !important/);
+  });
+
+  it('keeps the fill layout off the confirm bar so it stays a single row', () => {
+    const iframe = document.createElement('iframe');
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument;
+    const win = iframe.contentWindow;
+    if (!doc || !win) throw new Error('iframe unavailable');
+    doc.open();
+    doc.write(buildSrcDoc('<div class="split"><div class="mockup">A</div></div>', { fill: true }));
+    doc.close();
+    if (!doc.getElementById('visual-confirm-bar')) (win as Window & { eval: (code: string) => unknown }).eval(HELPER_JS);
+
+    const bar = doc.getElementById('visual-confirm-bar');
+    expect(bar).toBeTruthy();
+    // 确认条是 body 的直接子节点：撑满规则若命中它，flex-direction: column 会把条竖排成两行、盖住选项
+    const layoutRules = displayRules(doc).filter((selector) => bar!.matches(selector));
+    expect(layoutRules).toEqual(['#visual-confirm-bar']);
+
+    iframe.remove();
   });
 
   it('does not paint the confirm stylesheet as page text when the panel fills', () => {

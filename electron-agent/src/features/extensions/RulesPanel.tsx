@@ -1,6 +1,6 @@
 import { Button, Flexbox } from '@lobehub/ui';
 import { App, Input, Popconfirm, Segmented, Switch, Tooltip } from 'antd';
-import { Plus, TriangleAlert } from 'lucide-react';
+import { BookCheck, Plus, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   deleteContextRule,
@@ -112,8 +112,14 @@ export function RulesPanel({ workspace }: { workspace: string }) {
   return (
     <>
       <div className={styles.heroBar}>
-        <span className={styles.heroTitle}>规则</span>
-        <Button type="primary" size="small" icon={<Plus size={14} />} data-testid="rule-new" onClick={() => setDraft({ scope: 'global', title: '', enabled: true, body: '' })}>
+        <div className={styles.hero}>
+          <span className={styles.heroIcon}><BookCheck size={20} /></span>
+          <span className={styles.heroTitle}>
+            规则
+            {rules.length > 0 ? <span className={styles.count}>{rules.length}</span> : null}
+          </span>
+        </div>
+        <Button type="primary" icon={<Plus size={15} />} data-testid="rule-new" onClick={() => setDraft({ scope: 'global', title: '', enabled: true, body: '' })}>
           新建
         </Button>
       </div>
@@ -123,7 +129,6 @@ export function RulesPanel({ workspace }: { workspace: string }) {
       <div className={styles.split}>
         <div className={styles.list}>
           <Segmented<Filter>
-            size="small"
             value={filter}
             onChange={setFilter}
             options={[
@@ -137,12 +142,12 @@ export function RulesPanel({ workspace }: { workspace: string }) {
             const key = `${rule.scope}-${rule.id}`;
             return (
               <div key={key} className={styles.rowWrap} data-testid={`rule-item-${key}`} data-active={sameRule(draft, rule)}>
-                <Switch size="small" checked={rule.enabled} disabled={Boolean(rule.error)} data-testid={`rule-toggle-${key}`} onChange={(checked) => void toggle(rule, checked)} />
+                <Switch checked={rule.enabled} disabled={Boolean(rule.error)} data-testid={`rule-toggle-${key}`} onChange={(checked) => void toggle(rule, checked)} />
                 <button type="button" className={styles.rowOpen} data-testid={`rule-open-${key}`} onClick={() => setDraft(draftOf(rule))}>
                   <span className={styles.ellipsis}>{rule.title}</span>
                   {rule.error ? (
                     <Tooltip title={rule.error}>
-                      <TriangleAlert size={14} className={styles.warn} data-testid={`rule-warning-${key}`} />
+                      <TriangleAlert size={15} className={styles.warn} data-testid={`rule-warning-${key}`} />
                     </Tooltip>
                   ) : null}
                   <span className={styles.badge}>{SCOPE_LABEL[rule.scope]}</span>
@@ -162,7 +167,6 @@ export function RulesPanel({ workspace }: { workspace: string }) {
               <div>
                 <div className={styles.label}>范围</div>
                 <Segmented<RuleScope>
-                  size="small"
                   value={draft.scope}
                   onChange={(scope) => setDraft({ ...draft, scope })}
                   options={[
@@ -179,15 +183,15 @@ export function RulesPanel({ workspace }: { workspace: string }) {
                   ]}
                 />
               </div>
-              <div>
+              <div className={styles.fillField}>
                 <div className={styles.label}>规则内容（Markdown，启用时每轮注入上下文）</div>
-                <Input.TextArea data-testid="rule-body-input" autoSize={{ minRows: 6, maxRows: 18 }} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+                <Input.TextArea className={styles.fillArea} style={{ resize: 'none' }} data-testid="rule-body-input" value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
               </div>
               <Flexbox horizontal gap={8}>
-                <Button type="primary" size="small" data-testid="rule-save" disabled={!canSave} loading={saving} onClick={() => void save()}>保存</Button>
+                <Button type="primary" data-testid="rule-save" disabled={!canSave} loading={saving} onClick={() => void save()}>保存</Button>
                 {draft.original ? (
                   <Popconfirm title="删除这条规则？" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
-                    <Button size="small" danger data-testid="rule-delete">删除</Button>
+                    <Button danger data-testid="rule-delete">删除</Button>
                   </Popconfirm>
                 ) : null}
               </Flexbox>

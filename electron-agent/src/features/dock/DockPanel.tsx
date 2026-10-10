@@ -12,6 +12,7 @@ import {
   type DockTab,
   type SubAgentPayload,
 } from '../../stores/dockStore';
+import { canCloseDockTab } from './dockCloseGuards';
 import { dockTabStyles, resolveTone } from './dockTabStyles';
 import { TabStrip } from './TabStrip';
 import { TabBodyStack } from './TabBodyStack';
@@ -35,6 +36,15 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
   const activeWorkspace = useSessionStore((s) => s.activeWorkspace);
   const setActive = useDockStore((s) => s.setActive);
   const closeTab = useDockStore((s) => s.closeTab);
+  // 有守卫的标签（文件浏览器有未保存修改）先问用户，答应了再关。
+  const requestClose = useCallback(
+    (id: string) => {
+      void canCloseDockTab(id).then((ok) => {
+        if (ok) closeTab(id);
+      });
+    },
+    [closeTab],
+  );
 
   const subAgentStatus = useMemo(() => {
     const map: Record<string, 'running' | 'done' | 'error'> = {};
@@ -101,8 +111,8 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
         activeId={activeId}
         toneOf={toneOf}
         onActivate={(id) => setActive(region, id)}
-        onClose={closeTab}
-        leading={<DockTabSwitcher region={region} tabs={tabs} onActivate={(id) => setActive(region, id)} onClose={closeTab} />}
+        onClose={requestClose}
+        leading={<DockTabSwitcher region={region} tabs={tabs} onActivate={(id) => setActive(region, id)} onClose={requestClose} />}
         trailing={<DockStripAddMenu region={region} />}
         actions={actions}
       />

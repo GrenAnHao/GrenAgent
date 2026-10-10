@@ -149,11 +149,29 @@ describe('McpConfigService', () => {
     const { home, workspace, settings, currentSettings } = await fixture();
     const reload = vi.fn(async () => {});
     const before = JSON.stringify(currentSettings());
-    const service = new McpConfigService(home, settings, reload);
+    const service = new McpConfigService(home, settings, { reload });
 
     await service.reload(workspace, 'settings');
 
     expect(reload).toHaveBeenCalledWith(workspace, 'settings');
     expect(JSON.stringify(currentSettings())).toBe(before);
+  });
+
+  it('改配置后把该工作区完整的 runtime 列表交给运行时热重载', async () => {
+    const { home, workspace, settings } = await fixture();
+    const hotReload = vi.fn(async () => {});
+    const service = new McpConfigService(home, settings, { hotReload });
+
+    await service.upsert(workspace, 'settings', 'added', { command: 'new' }, true);
+
+    expect(hotReload).toHaveBeenCalledTimes(1);
+    const [target, runtimeJson] = hotReload.mock.calls[0] as unknown as [string, string];
+    expect(target).toBe(workspace);
+    expect((JSON.parse(runtimeJson) as Array<{ name: string }>).map((entry) => entry.name)).toEqual(expect.arrayContaining(['added', 'settings']));
+  });
+
+  it('运行时还没接上时 reload 明确失败', async () => {
+    const { home, workspace, settings } = await fixture();
+    await expect(new McpConfigService(home, settings).reload(workspace, 'settings')).rejects.toThrow('MCP runtime is not available');
   });
 });

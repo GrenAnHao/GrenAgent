@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 捕获事件订阅 handler + pi 命令 mock。用 vi.hoisted 确保在 vi.mock 工厂（被提升到文件顶部）执行前已初始化。
-const { eventHandlers, piMock } = vi.hoisted(() => ({
+const { eventHandlers, exitHandlers, piMock } = vi.hoisted(() => ({
   eventHandlers: [] as Array<(e: { workspace: string; event: unknown; source?: 'interactive' | 'goal'; sessionPath?: string }) => void>,
+  exitHandlers: [] as Array<(e: { workspace: string; code: number | null; source?: 'interactive' | 'goal'; sessionPath?: string }) => void>,
   piMock: {
     excludeEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
     restoreEntry: vi.fn((_ws: string, _ts: number) => Promise.resolve()),
@@ -30,7 +31,10 @@ vi.mock('../lib/pi', () => ({
     eventHandlers.push(h);
     return Promise.resolve(() => {});
   },
-  onPiExit: () => Promise.resolve(() => {}),
+  onPiExit: (h: (e: { workspace: string; code: number | null; source?: 'interactive' | 'goal'; sessionPath?: string }) => void) => {
+    exitHandlers.push(h);
+    return Promise.resolve(() => {});
+  },
 }));
 // agent.ts 直接 import 的符号在本工作树 todo-model 里尚未落地；单测只关心消息载入路径。
 vi.mock('@extensions/_shared/todo-model', () => ({
@@ -53,6 +57,7 @@ describe('createAgentStore', () => {
 
   beforeEach(() => {
     eventHandlers.length = 0;
+    exitHandlers.length = 0;
     rafCallbacks = [];
     piMock.excludeEntry.mockReset().mockResolvedValue(undefined);
     piMock.restoreEntry.mockReset().mockResolvedValue(undefined);
@@ -90,6 +95,24 @@ describe('createAgentStore', () => {
     rafCallbacks = [];
     for (const cb of cbs) cb(performance.now());
   };
+
+  it('前景进程退出先应用排队事件，再清掉运行标记，迟到帧不会恢复运行', () => {
+    store = createAgentStore('.');
+    const path = '/s/exit.jsonl';
+    store.loadMessages([], { force: true, sessionPath: path });
+    store.pushUserMessage('run');
+    store.useStore.setState({ awaitingResponse: true });
+    emit({ type: 'agent_start' }, 'interactive', path);
+    emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } }, 'interactive', path);
+    emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'last output' } }, 'interactive', path);
+
+    for (const h of exitHandlers) h({ workspace: '.', sessionPath: path, code: 1 });
+    expect(store.useStore.getState().messages.some((m) => m.kind === 'assistant' && m.text === 'last output')).toBe(true);
+    expect(store.useStore.getState()).toMatchObject({ isStreaming: false, runActive: false, awaitingResponse: false });
+    expect(store.hasLiveActivity()).toBe(false);
+    flushRAF();
+    expect(store.useStore.getState()).toMatchObject({ isStreaming: false, runActive: false, awaitingResponse: false });
+  });
 
   it('loadMessages is skipped after live user activity unless forced', () => {
     store = createAgentStore('.');
@@ -476,6 +499,38 @@ describe('createAgentStore', () => {
     expect(state.messages.some((m) => m.kind === 'tool' && m.toolCallId === 'live-tool')).toBe(true);
   });
 
+  it('同会话快照先应用排队的实时事件，保留未落盘正文', () => {
+    store = createAgentStore('.');
+    const path = '/s/pending-live.jsonl';
+    store.loadMessages([], { force: true, sessionPath: path });
+    // 后台回报等主动开启的回合没有 awaitingResponse 占位，状态要由排队的 agent_start 接管。
+    emit({ type: 'agent_start' }, 'interactive', path);
+    emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } }, 'interactive', path);
+    emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'live token' } }, 'interactive', path);
+    store.loadMessages([{ role: 'user', content: 'stale snapshot' }], { force: true, sessionPath: path });
+    flushRAF();
+    expect(store.useStore.getState().isStreaming).toBe(true);
+    expect(store.useStore.getState().messages).toMatchObject([{ kind: 'assistant', text: 'live token' }]);
+  });
+
+  it('同会话快照先应用排队的结束事件，再允许更新历史', () => {
+    store = createAgentStore('.');
+    const path = '/s/pending-end.jsonl';
+    store.loadMessages([], { force: true, sessionPath: path });
+    emit({ type: 'agent_start' }, 'interactive', path);
+    emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } }, 'interactive', path);
+    flushRAF();
+    expect(store.useStore.getState().isStreaming).toBe(true);
+    emit({ type: 'agent_end', messages: [] }, 'interactive', path);
+    emit({ type: 'agent_settled' }, 'interactive', path);
+    store.loadMessages([{ role: 'user', content: 'updated history' }], { force: true, sessionPath: path });
+    expect(store.useStore.getState()).toMatchObject({
+      isStreaming: false,
+      messages: [{ kind: 'user', text: 'updated history' }],
+    });
+    expect(Boolean(store.useStore.getState().runActive)).toBe(false);
+  });
+
   it('强制切换到另一会话仍会加载目标快照', () => {
     store = createAgentStore('.');
     store.loadMessages(
@@ -854,6 +909,24 @@ describe('createAgentStore', () => {
     beforeEach(() => {
       invalidateCachedSession(A);
       invalidateCachedSession(B);
+    });
+
+    it('后台连续增量批量更新缓存，切回前先应用排队内容', () => {
+      vi.useFakeTimers();
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task A' }] as never, { force: true, sessionPath: A });
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      const before = getCachedSession(A)?.messages;
+      emit({ type: 'agent_start' }, 'interactive', A);
+      emit({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 101 } }, 'interactive', A);
+      for (let i = 0; i < 100; i++) emit({
+        type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'a' },
+      }, 'interactive', A);
+      expect(getCachedSession(A)?.messages).toBe(before);
+      expect(store.showCachedSession(A)).toBe(true);
+      expect(assistantTexts()).toEqual(['a'.repeat(100)]);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+      expect(piMock.getMessages).not.toHaveBeenCalled();
     });
 
     it('草稿首发绑定 A 后新建 B，交替事件各回各的画面，来回切换都只显示自己的内容', () => {

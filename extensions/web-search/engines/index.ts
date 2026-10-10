@@ -1,8 +1,9 @@
 import type { ParsedSearch } from "../provider.js";
 
-export type BuiltinEngine = "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" | "exa" | "linuxdo" | "zhihu";
+export type BuiltinEngine = "devin" | "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" | "exa" | "linuxdo" | "zhihu";
 
 export const SUPPORTED_SEARCH_ENGINES: BuiltinEngine[] = [
+  "devin",
   "bing",
   "sogou",
   "duckduckgo",
@@ -37,6 +38,23 @@ export function parseEngineChain(raw: string | undefined): BuiltinEngine[] {
     if (name && !out.includes(name)) out.push(name);
   }
   return out;
+}
+
+/** Explicit engine list wins. Otherwise Devin leads when a session is ready, or when the user asked for Devin. */
+export function resolveWebSearchChain(
+  explicit: BuiltinEngine[],
+  provider: BuiltinEngine,
+  devinReady: boolean,
+): BuiltinEngine[] {
+  if (explicit.length > 0) return explicit;
+  return defaultSearchChain(provider, devinReady);
+}
+
+export function defaultSearchChain(provider: BuiltinEngine, devinReady: boolean): BuiltinEngine[] {
+  if (provider === "devin") return ["devin", "bing", "sogou", "baidu"];
+  if (provider === "bing") return devinReady ? ["devin", "bing", "sogou", "baidu"] : ["bing", "sogou", "baidu"];
+  if (provider === "sogou") return ["sogou", "baidu"];
+  return [provider];
 }
 
 export async function runEngineChain(

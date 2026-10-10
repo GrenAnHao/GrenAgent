@@ -1,0 +1,202 @@
+import { createStaticStyles, cssVar } from 'antd-style';
+
+export const fileExplorerStyles = createStaticStyles(({ css }) => ({
+  root: css`
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    background: ${cssVar.colorBgContainer};
+  `,
+  treePane: css`
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    min-height: 0;
+    border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  treeSearch: css`
+    flex: none;
+    padding: 8px 8px 6px;
+  `,
+  treeBody: css`
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+
+    .ant-tree {
+      background: transparent;
+      font-size: 13px;
+    }
+    .ant-tree-treenode {
+      white-space: nowrap;
+    }
+    .ant-tree-node-content-wrapper {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+    .ant-tree-iconEle {
+      display: inline-flex;
+      flex: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .ant-tree-title {
+      overflow: hidden;
+      min-width: 0;
+      text-overflow: ellipsis;
+    }
+    /* DirectoryTree 默认选中是整行主色块；和侧栏会话列表一样用浅底色。 */
+    .ant-tree.ant-tree-directory .ant-tree-treenode-selected {
+      background: ${cssVar.controlItemBgActive};
+
+      .ant-tree-switcher,
+      .ant-tree-node-content-wrapper,
+      .ant-tree-node-content-wrapper:hover {
+        color: ${cssVar.colorText};
+      }
+      .ant-tree-node-content-wrapper:before,
+      .ant-tree-node-content-wrapper:hover:before {
+        background: ${cssVar.controlItemBgActive};
+      }
+    }
+  `,
+  treeHint: css`
+    padding: 4px 12px;
+    color: ${cssVar.colorTextDescription};
+    font-size: 12px;
+  `,
+  match: css`
+    color: ${cssVar.colorPrimary};
+    font-weight: 600;
+  `,
+  truncatedNode: css`
+    color: ${cssVar.colorTextDescription};
+    font-style: italic;
+  `,
+  splitter: css`
+    position: relative;
+    flex: none;
+    width: 5px;
+    margin-inline-start: -3px;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 1;
+
+    &:hover,
+    &[data-dragging='true'] {
+      background: ${cssVar.colorPrimaryBorder};
+    }
+  `,
+  viewer: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    outline: none;
+  `,
+  toolbar: css`
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 4px 8px 4px 12px;
+    border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  crumbs: css`
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    white-space: nowrap;
+
+    ol {
+      flex-wrap: nowrap;
+    }
+  `,
+  meta: css`
+    flex: none;
+    color: ${cssVar.colorTextDescription};
+    font-size: 12px;
+    white-space: nowrap;
+  `,
+  dirtyDot: css`
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: ${cssVar.colorWarning};
+  `,
+  actions: css`
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+  `,
+  banner: css`
+    flex: none;
+    border-radius: 0;
+    border-inline: 0;
+    border-block-start: 0;
+  `,
+  body: css`
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  `,
+  pane: css`
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  `,
+  splitPreview: css`
+    border-inline-start: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  markdown: css`
+    overflow: auto;
+    height: 100%;
+    padding: 16px 20px 32px;
+    outline: none;
+  `,
+  center: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 24px;
+    color: ${cssVar.colorTextDescription};
+    font-size: 13px;
+    text-align: center;
+  `,
+  image: css`
+    overflow: auto;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 16px;
+    background-color: ${cssVar.colorFillQuaternary};
+    background-image:
+      linear-gradient(45deg, ${cssVar.colorFillTertiary} 25%, transparent 25%),
+      linear-gradient(-45deg, ${cssVar.colorFillTertiary} 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, ${cssVar.colorFillTertiary} 75%),
+      linear-gradient(-45deg, transparent 75%, ${cssVar.colorFillTertiary} 75%);
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-size: 16px 16px;
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+  `,
+}));

@@ -250,7 +250,11 @@ export function createProbe(win, scenario, config = {}) {
     await sleep(220)
   }
 
-  /** 按住拖到终点，中途发 steps 个 mousemove（拖选多格、拖拽排序、拖分隔条） */
+  /**
+   * 按住拖到终点，中途发 steps 个 mousemove（拖选多格、拖拽排序、拖分隔条）。
+   * mousemove 必须带 leftButtonDown：只写 button 时 pointermove 的 buttons 是 0，
+   * Chromium 在第一个 move 后就释放 setPointerCapture，后面的 move 落到别的元素上。
+   */
   async function drag(from, to, steps = 8) {
     wc.sendInputEvent({ type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1 })
     for (let i = 1; i <= steps; i++) {
@@ -258,7 +262,8 @@ export function createProbe(win, scenario, config = {}) {
         type: 'mouseMove',
         x: Math.round(from.x + ((to.x - from.x) * i) / steps),
         y: Math.round(from.y + ((to.y - from.y) * i) / steps),
-        button: 'left'
+        button: 'left',
+        modifiers: ['leftButtonDown']
       })
       await sleep(30)
     }

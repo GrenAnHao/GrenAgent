@@ -5,6 +5,11 @@ import type { ProbeResult } from '../../../extensions/mcp/probe.js';
 import type { PermissionManager, PermissionAuthorization, PermissionOperation, PermissionProfileName } from './permissionManager';
 
 export interface McpPolicyServiceOptions {
+  /**
+   * 整个探测（拉起服务器、列工具、写缓存）交给别处，返回 JSON 字符串。
+   * 主进程传 agent-host 子进程的实现：探测要 spawn 服务器进程，不放在主线程上。
+   */
+  probe?: (configJson: string) => Promise<string>;
   probeServer?: (cfg: McpServerConfig) => Promise<ProbeResult>;
   writeToolsCacheEntry?: (name: string, result: ProbeResult) => void;
   permissionManager?: Pick<PermissionManager, 'authorize'>;
@@ -44,6 +49,7 @@ export class McpPolicyService {
   }
 
   async probe(configJson: string): Promise<string> {
+    if (this.options.probe) return this.options.probe(configJson);
     let cfg: McpServerConfig;
     try { cfg = JSON.parse(configJson) as McpServerConfig; }
     catch { return JSON.stringify({ ok: false, toolNames: [], error: 'invalid MCP_PROBE_CONFIG' }); }

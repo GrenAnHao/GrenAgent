@@ -100,8 +100,8 @@ export class WorkspaceHandle {
     this.options.runtime.setRebindSession(async () => { await this.bindAndSubscribe(); });
     this.options.runtime.setBeforeSessionInvalidate(() => { this.sessionInvalidated = true; });
     this.unsubChildEvents = registerEmbeddedSubagentEventSink((event, meta) => {
-      if (this.disposed) return;
-      if (meta.workspace !== this.options.workspace && meta.workspace !== this.options.cwd) return;
+      if (this.disposed) return false;
+      if (meta.workspace !== this.options.workspace && meta.workspace !== this.options.cwd) return false;
       let downgraded = event;
       try {
         downgraded = toRendererEvent(event as unknown as AgentSessionEvent);
@@ -113,6 +113,8 @@ export class WorkspaceHandle {
         sessionPath: meta.sessionPath,
         source: 'subagent',
       });
+      // 同一项目的其他 handle 不再重复广播：渲染层按 delta 累加，收到 N 遍就叠字 N 遍。
+      return true;
     });
     this.unsubCatalogEvents = registerCatalogChangeSink((meta) => {
       if (this.disposed) return;

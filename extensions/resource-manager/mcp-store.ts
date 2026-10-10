@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { mkdirSync, readFileSync, watch } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -54,10 +54,29 @@ export function readLayeredMcpServersSync(cwd: string, desktopJson: string, home
 }
 export function watchMcpConfigFiles(cwd: string, onChange: () => void, home = homedir()): () => void {
   const paths = mcpConfigPaths(cwd, home);
+  // 监听的是整个目录（~/.pi/agent 里有 db、日志、会话，写入很频繁），
+  // 只认 mcp.json，并防抖：否则每次无关写入都会在主线程同步重读并重算全部服务器配置。
+  const targets = new Set([basename(paths.global), basename(paths.project)]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = (): void => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { timer = undefined; onChange(); }, 150);
+  };
   const watchers = [dirname(paths.global), dirname(paths.project)].map((dir) => {
-    try { mkdirSync(dir, { recursive: true }); return watch(dir, () => onChange()); } catch { return undefined; }
+    try {
+      mkdirSync(dir, { recursive: true });
+      const watcher = watch(dir, (_event, filename) => {
+        if (filename && !targets.has(String(filename))) return;
+        schedule();
+      });
+      watcher.on("error", () => {});
+      return watcher;
+    } catch { return undefined; }
   }).filter(Boolean) as import("node:fs").FSWatcher[];
-  return () => watchers.forEach((w) => w.close());
+  return () => {
+    if (timer) clearTimeout(timer);
+    watchers.forEach((w) => w.close());
+  };
 }
 export async function findMcpConflict(name: string, cwd: string, desktopJson: string, home = homedir()): Promise<McpScope | "settings" | undefined> {
   if (parseMcpServers(desktopJson).some((s) => s.name === name)) return "settings";

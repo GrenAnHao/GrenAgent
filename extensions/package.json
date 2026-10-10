@@ -36,6 +36,7 @@
     "@vscode/ripgrep": "^1.18.0",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
+    "ignore": "7.0.5",
     "tinyglobby": "^0.2.17",
     "typebox": "*"
   }

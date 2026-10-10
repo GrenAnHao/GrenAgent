@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import { cx } from 'antd-style';
 import { chatStyles } from './chatStyles';
 
@@ -11,14 +11,16 @@ interface ChatItemShellProps {
   actions?: ReactNode;
   /** 用户消息占满会话列宽。任务提示词限高时用，避免气泡缩成内容宽度。 */
   fullWidth?: boolean;
+  /** 按行虚拟化时仅整轮首尾保留消息留白，内部行距由列表负责。 */
+  paddingBlock?: CSSProperties['paddingBlock'];
   children: ReactNode;
 }
 
 /** 自研无头像消息外壳：对齐 lobehub 间距（gap 8 / paddingBlock 8 / 用户 paddingInlineStart 36）。 */
-function ChatItemShellInner({ placement, bubble, actions, children, fullWidth }: ChatItemShellProps) {
+function ChatItemShellInner({ placement, bubble, actions, children, fullWidth, paddingBlock }: ChatItemShellProps) {
   const isUser = placement === 'right';
   return (
-    <div className={cx(chatStyles.item, isUser && chatStyles.itemUser)}>
+    <div className={cx(chatStyles.item, isUser && chatStyles.itemUser)} style={paddingBlock === undefined ? undefined : { paddingBlock }}>
       <div className={cx(chatStyles.body, (!isUser || fullWidth) && chatStyles.bodyAssistant)}>
         {bubble ? <div className={chatStyles.bubble}>{children}</div> : children}
         {actions ? (

@@ -5,6 +5,7 @@ import { ThemeProvider } from '@lobehub/ui';
 import { SubAgentGroupInline, type NumberedUnit } from './SubAgentGroupInline';
 import { pi } from '../../lib/pi';
 import type { SubAgentUnit } from '../panels/subagentUtils';
+import { invalidateProviderList } from '../settings/providerListCache';
 
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws', store: { getLoadedSessionPath: () => null } }),
@@ -14,6 +15,7 @@ vi.mock('../../lib/pi', () => ({
   pi: {
     abort: vi.fn(),
     subagentList: vi.fn().mockResolvedValue([]),
+    getProviderConfig: vi.fn().mockRejectedValue(new Error('no provider config')),
   },
 }));
 
@@ -21,6 +23,8 @@ afterEach(() => {
   cleanup();
   vi.mocked(pi.subagentList).mockReset();
   vi.mocked(pi.subagentList).mockResolvedValue([]);
+  vi.mocked(pi.getProviderConfig).mockRejectedValue(new Error('no provider config'));
+  invalidateProviderList();
 });
 
 const wrap = (ui: ReactElement) => render(<ThemeProvider themeMode="dark">{ui}</ThemeProvider>);
@@ -45,9 +49,9 @@ describe('SubAgentGroupInline chain status', () => {
       />,
     );
     expect(screen.getAllByTestId('subagent-step-model').map((node) => node.textContent)).toEqual([
-      'deepseek-v4-flash',
-      'deepseek-v4-flash',
-      'deepseek-v4-flash',
+      'deepseek / deepseek-v4-flash',
+      'deepseek / deepseek-v4-flash',
+      'deepseek / deepseek-v4-flash',
     ]);
     expect(screen.getByText('已完成')).toBeTruthy();
     expect(screen.getByText(/正在处理/)).toBeTruthy();
@@ -80,5 +84,40 @@ describe('SubAgentGroupInline chain status', () => {
     );
     expect(await screen.findByTestId('subagent-step-model')).toHaveTextContent('deepseek-v4-flash');
     expect(screen.getByText('已完成')).toBeTruthy();
+  });
+
+  it('same model id under two custom providers is told apart by the provider display name', async () => {
+    vi.mocked(pi.getProviderConfig).mockResolvedValue({
+      modelsJson: JSON.stringify({ providers: { 'custom-a': { name: '官方直连' }, 'custom-b': { name: '中转站' } } }),
+      authJson: null,
+    } as never);
+    wrap(<SubAgentGroupInline messageId="prov" toolCallId="prov-c" mode="parallel" status="done"
+      units={[
+        row(1, { task: 'A', status: 'done', model: 'custom-a/deepseek-v4.1-flash' }),
+        row(2, { task: 'B', status: 'done', model: 'custom-b/deepseek-v4.1-flash' }),
+      ]} />);
+    await vi.waitFor(() => expect(screen.getAllByTestId('subagent-step-model').map((node) => node.textContent)).toEqual([
+      '官方直连 / deepseek-v4.1-flash',
+      '中转站 / deepseek-v4.1-flash',
+    ]));
+  });
+
+  it('a step whose args only named the strong alias shows the registry route', async () => {
+    vi.mocked(pi.subagentList).mockResolvedValue([
+      { id: 'sa-strong', task: '重试', status: 'error', model: 'p/claude-sonnet-5-5', createdAt: 1, updatedAt: 1 },
+    ]);
+    wrap(<SubAgentGroupInline messageId="alias" toolCallId="alias-c" mode="parallel" status="done"
+      units={[row(1, { agentId: 'sa-strong', task: '重试', status: 'error', model: 'strong' })]} />);
+    await vi.waitFor(() => expect(screen.getByTestId('subagent-step-model')).toHaveTextContent('claude-sonnet-5-5'));
+  });
+
+  it('reopened repeated tasks match the saved agent id rather than another child task', async () => {
+    vi.mocked(pi.subagentList).mockResolvedValue([
+      { id: 'sa-other', task: '同一个任务', status: 'done', model: 'p/wrong', createdAt: 2, updatedAt: 2 },
+      { id: 'sa-history', task: '同一个任务', status: 'done', model: 'p/correct', thinkingLevel: 'medium', createdAt: 1, updatedAt: 1 },
+    ]);
+    wrap(<SubAgentGroupInline messageId="history" toolCallId="history-c" mode="parallel" status="done"
+      units={[row(1, { agentId: 'sa-history', task: '同一个任务', status: 'done' })]} />);
+    expect(await screen.findByTestId('subagent-step-model')).toHaveTextContent('correct · 中');
   });
 });

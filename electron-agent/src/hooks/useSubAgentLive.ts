@@ -3,6 +3,8 @@ import { useSubAgentLiveStore, selectSubAgentById } from '../stores/subagentLive
 
 export interface SubAgentLive {
   model: string | null;
+  /** 注册表里记的实际思考档位（embedded 子会话起来后才有）。 */
+  thinkingLevel: string | null;
   /** 注册表里的启动时间。还没轮询到时为 null。 */
   createdAt: number | null;
   step: number | null;
@@ -38,6 +40,7 @@ export function useSubAgentLive(
   const createdAt = item?.createdAt;
   return {
     model: item?.model ?? null,
+    thinkingLevel: item?.thinkingLevel?.trim() || null,
     createdAt: typeof createdAt === 'number' && createdAt > 0 ? createdAt : null,
     step: null,
     action: running && item ? '运行中…' : null,

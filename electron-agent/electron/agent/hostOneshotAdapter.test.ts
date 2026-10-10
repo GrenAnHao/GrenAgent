@@ -41,6 +41,25 @@ describe('runHostOneshot', () => {
     ]);
   });
 
+  it('流式透传思考档并转发 thinking 行；非法档位丢弃', async () => {
+    const streamSimple = vi.fn(async function* (_input: Record<string, unknown>) {
+      yield { type: 'thinking' as const, text: 'hmm' };
+      yield { type: 'delta' as const, text: 'ok' };
+    });
+    const host = hostStub({ streamSimple });
+    const lines: unknown[] = [];
+    await runHostOneshot(host as never, {
+      provider: 'openai', modelId: 'gpt-x', user: 'hi', stream: true, reasoning: 'high',
+    }, (line) => lines.push(JSON.parse(line)));
+    await runHostOneshot(host as never, {
+      provider: 'openai', modelId: 'gpt-x', user: 'hi', stream: true, reasoning: 'bogus',
+    }, () => {});
+
+    expect(streamSimple.mock.calls[0]![0]).toMatchObject({ reasoning: 'high' });
+    expect(streamSimple.mock.calls[1]![0]).not.toHaveProperty('reasoning');
+    expect(lines).toEqual([{ type: 'thinking', text: 'hmm' }, { type: 'delta', text: 'ok' }]);
+  });
+
   it('模型不可用 emit model not found: provider/id', async () => {
     const host = hostStub({
       completeSimple: vi.fn().mockRejectedValue(new Error('模型不可用')),

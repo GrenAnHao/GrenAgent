@@ -12,6 +12,7 @@
 // 再调 setSessionName 会抛 "extension ctx is stale"。标题仍属于开头那个会话：
 // reload 交给新实例的 pi.setSessionName（侧栏照常收到 session_info_changed）；
 // 其余替换则 appendSessionInfo 写回原会话文件，并由宿主广播一次同名事件刷新侧栏。
+import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getConfig } from "../_shared/runtime-config.js";
 import { resolveSummaryModel, summarize } from "../_shared/summarize.js";
@@ -160,6 +161,9 @@ function captureSession(ctx: ExtensionContext): CapturedSession {
 
 function writeIfUnnamed(captured: CapturedSession, title: string): void {
   if (!captured.writeName || !title) return;
+  // 会话已经换走、文件也没了，只可能是被删了。SessionManager 会 appendFileSync 把它重建成只有标题的无头文件，
+  // 侧栏按路径推断 cwd 会把这份空会话列回来。
+  if (captured.file && !existsSync(captured.file)) return;
   try {
     if (entriesNamed(readEntries(captured.entries))) return;
     captured.writeName(title);

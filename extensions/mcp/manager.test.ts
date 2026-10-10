@@ -320,6 +320,50 @@ describe("getMcpManager 分键", () => {
     fire();
     expect(reads.length).toBe(1);
   });
+
+  it("closeAll 等到每个连接都关完再结束（进程随后就要退出）", async () => {
+    let finishClose!: () => void;
+    const closed = vi.fn();
+    const client = {
+      ...fakeClient([{ name: "t" }]),
+      close: () => new Promise<void>((resolve) => { finishClose = () => { closed(); resolve(); }; }),
+    };
+    const mgr = createManager({ connect: async () => client, readServers: () => [srv("s")], watch: () => () => {}, writeCache: () => {} });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("s")?.status === "connected");
+    let done = false;
+    const closing = mgr.closeAll().then(() => { done = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(done).toBe(false);
+    finishClose();
+    await closing;
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it("closeAll 不会被关不掉的连接一直卡住", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = { ...fakeClient([]), close: () => new Promise<void>(() => {}) };
+      const mgr = createManager({ connect: async () => client, readServers: () => [srv("s")], watch: () => () => {}, writeCache: () => {} });
+      mgr.init();
+      await vi.waitFor(() => expect(mgr.snapshot().servers.get("s")?.status).toBe("connected"));
+      let done = false;
+      const closing = mgr.closeAll().then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await closing;
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disposeMcpManager 返回关闭完成的 promise，之后同一工作区拿到新的管理器", async () => {
+    const mgr = getMcpManagerFor("D:/dispose-ws");
+    const disposing = disposeMcpManager("D:/dispose-ws");
+    expect(disposing).toBeInstanceOf(Promise);
+    await disposing;
+    expect(getMcpManagerFor("D:/dispose-ws")).not.toBe(mgr);
+  });
 });
 
 describe("已启动会话中途添加 MCP", () => {

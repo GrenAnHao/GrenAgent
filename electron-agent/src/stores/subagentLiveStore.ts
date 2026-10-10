@@ -42,18 +42,33 @@ export const useSubAgentLiveStore = create<SubAgentLiveState>((set) => ({
     }
 
     let cancelled = false;
+    let inFlight = false;
 
     const poll = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
         const rows = await pi.subagentList(workspace);
         if (cancelled) return;
         set((s) => {
+          const previous = s.itemsByWorkspace.get(workspace);
+          const byId = new Map(previous?.map((row) => [row.id, row]));
+          // IPC 每次给新对象，复用未变化的行，让别的代理更新时已完成卡片不跟着重渲染。
+          const stable = rows.map((row) => {
+            const old = byId.get(row.id);
+            if (!old) return row;
+            const keys = Object.keys(row) as Array<keyof SubAgentItem>;
+            return keys.length === Object.keys(old).length && keys.every((key) => row[key] === old[key]) ? old : row;
+          });
+          if (previous && previous.length === stable.length && stable.every((row, i) => row === previous[i])) return s;
           const next = new Map(s.itemsByWorkspace);
-          next.set(workspace, rows);
+          next.set(workspace, stable);
           return { itemsByWorkspace: next };
         });
       } catch {
         // 跨进程读 registry 偶发 SQLITE_BUSY：保留上次结果，下个 tick 再试。
+      } finally {
+        inFlight = false;
       }
     };
 

@@ -47,11 +47,18 @@ export function matchWriteAllowed(path: string, allowlist: string[]): boolean {
     .some((prefix) => np === prefix || np.startsWith(prefix + "/"));
 }
 
+// 词边界把 `-` 也算进词里：`merge-base`、`diff-vs-commit`、`--rm`、`rg -i` 里的同名片段不是命令。
+// git 只看子命令位置（可先跟 -C <路径> / -c k=v / --flag），否则 `git grep "reset"`、同一行后面的文案都会命中。
+const GIT_GLOBAL_OPTS = String.raw`(?:\s+(?:-C|-c|--git-dir|--work-tree)\s+(?:"[^"]*"|'[^']*'|\S+)|\s+--?[\w-]+(?:=\S+)?)*`;
 const MUTATING_BASH = [
-  /\b(rm|mv|cp|mkdir|rmdir|touch|tee|truncate|dd|ln)\b/,
-  /\bsed\b[^\n]*\s-i/,
-  /\bgit\b[^\n]*\b(commit|checkout|reset|merge|rebase|apply|stash|clean|restore)\b/,
-  /\b(npm|pnpm|yarn|bun)\b[^\n]*\b(install|add|i|ci|remove|rm)\b/,
+  /(?<![\w-])(rm|mv|cp|mkdir|rmdir|touch|tee|truncate|dd|ln)(?![\w-])/,
+  /(?<![\w-])sed(?![\w-])[^\n]*\s-i/,
+  new RegExp(
+    String.raw`(?<![\w-])git${GIT_GLOBAL_OPTS}\s+(?:commit|checkout|switch|reset|merge|rebase|apply|clean|restore|pull|cherry-pick|revert)(?![\w-])`,
+  ),
+  // `git stash list` / `git stash show` 只读；裸 `git stash` 和 push/pop/drop 等都会改工作区。
+  new RegExp(String.raw`(?<![\w-])git${GIT_GLOBAL_OPTS}\s+stash(?![\w-])(?!\s+(?:list|show)(?![\w-]))`),
+  /(?<![\w-])(npm|pnpm|yarn|bun)(?![\w-])[^\n]*(?<![\w-])(install|add|i|ci|remove|rm)(?![\w-])/,
 ];
 
 /** 去掉引号内容，避免把 `rg "=>"` 里的 `>` 当成重定向。 */
@@ -59,12 +66,15 @@ function stripQuoted(command: string): string {
   return command.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, " ");
 }
 
+/** 丢弃输出的重定向：`> $null` / `2>$null` / `*> $null` / `&>/dev/null` / `> NUL`，不落盘。 */
+const NULL_SINK = /(?:\d|\*|&)?>{1,2}\s*(?:\$null|\/dev\/null|nul)(?![\w.:\\/-])/gi;
+
 /**
  * 真正写文件的重定向：`> file` / `>> file` / `2> file`。
- * `2>&1` 只是 fd 复制，`=>` 是搜索模式，都不能算改盘。
+ * `2>&1` 只是 fd 复制，`=>` 是搜索模式，丢到 `$null` / `/dev/null` 不落盘，都不能算改盘。
  */
 function hasFileRedirect(command: string): boolean {
-  const withoutFdDup = stripQuoted(command).replace(/\d*>&\d+/g, " ");
+  const withoutFdDup = stripQuoted(command).replace(/\d*>&\d+/g, " ").replace(NULL_SINK, " ");
   return /(?<![=>])>{1,2}(?!&)/.test(withoutFdDup);
 }
 

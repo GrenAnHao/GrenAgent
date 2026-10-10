@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({ autoTitle: undefined as string | undefined }));
 const mocks = vi.hoisted(() => ({
@@ -56,6 +59,21 @@ function setup(
 }
 
 const STALE = "This extension ctx is stale after session replacement or reload.";
+
+const tempDirs: string[] = [];
+
+/** 写回原会话前会检查文件还在：需要落盘的用例用真实文件。 */
+function existingSessionFile(): string {
+  const dir = mkdtempSync(join(tmpdir(), "auto-title-"));
+  tempDirs.push(dir);
+  const file = join(dir, "a.jsonl");
+  writeFileSync(file, `${JSON.stringify({ type: "session", id: "a" })}\n`);
+  return file;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   runtime.autoTitle = undefined;
@@ -242,9 +260,8 @@ describe("auto-title", () => {
         finish = resolve;
       }),
     );
-    const { agentEnd, ctx, event, setSessionName, appendSessionInfo, emit } = setup([], {
-      sessionFile: "C:/sessions/a.jsonl",
-    });
+    const sessionFile = existingSessionFile();
+    const { agentEnd, ctx, event, setSessionName, appendSessionInfo, emit } = setup([], { sessionFile });
 
     await agentEnd(event, ctx);
     await emit("session_shutdown", { type: "session_shutdown", reason: "new" });
@@ -253,7 +270,35 @@ describe("auto-title", () => {
 
     expect(setSessionName).not.toHaveBeenCalled();
     expect(spy).not.toHaveBeenCalled();
-    expect(notes).toEqual(["C:/sessions/a.jsonl"]);
+    expect(notes).toEqual([sessionFile]);
+    unsubscribe();
+    spy.mockRestore();
+  });
+
+  it("原会话文件已被删除时不写回，免得重建成只有标题的无头文件", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const notes: Array<string | undefined> = [];
+    const unsubscribe = subscribeSessionTitleWritten((file) => notes.push(file));
+    let finish!: (value: string) => void;
+    mocks.summarize.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const sessionFile = existingSessionFile();
+    const { agentEnd, ctx, event, setSessionName, appendSessionInfo, emit } = setup([], { sessionFile });
+
+    await agentEnd(event, ctx);
+    // 删除会话：宿主先把它从 handle 上换走（session_shutdown），再删文件。
+    await emit("session_shutdown", { type: "session_shutdown", reason: "new" });
+    rmSync(sessionFile);
+    finish("Generated Title");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(appendSessionInfo).not.toHaveBeenCalled();
+    expect(setSessionName).not.toHaveBeenCalled();
+    expect(notes).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
     unsubscribe();
     spy.mockRestore();
   });
@@ -310,7 +355,7 @@ describe("auto-title", () => {
   it("setSessionName 抛出 stale 时改写原会话且不打错误日志", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { agentEnd, ctx, event, setSessionName, appendSessionInfo } = setup([], {
-      sessionFile: "C:/sessions/a.jsonl",
+      sessionFile: existingSessionFile(),
     });
     setSessionName.mockImplementation(() => {
       throw new Error(STALE);

@@ -13,6 +13,7 @@ import {
   type InboxSession,
 } from "./inbox.js";
 import { jobs } from "../jobs/service.js";
+import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 import { registerParentSessionHost, sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
 
@@ -497,6 +498,7 @@ export async function coldResumeAndDeliver(
     services,
     sessionManager,
   });
+  installToolRefreshBatching(session);
   await session.bindExtensions({
     uiContext: noopUi,
     mode: "rpc",

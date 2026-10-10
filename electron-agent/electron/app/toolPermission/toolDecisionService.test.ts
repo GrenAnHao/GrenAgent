@@ -152,28 +152,24 @@ describe('ToolDecisionService.evaluate', () => {
   });
 });
 
-describe('ToolDecisionService live approval preset', () => {
-  it('uses a mid-turn full switch even when the sidecar still sent auto', async () => {
+describe('ToolDecisionService approval preset', () => {
+  it('按扩展现读的 facts.preset 决定：full 放行危险命令', async () => {
     const { service } = await fixture();
-    setApprovalPolicy('full', 'D:/repo');
-    const decision = service.evaluate(facts({ flags: { ...NO_FLAGS, dangerousCommand: true } }));
+    const decision = service.evaluate(facts({ preset: 'full', flags: { ...NO_FLAGS, dangerousCommand: true } }));
     expect(decision.decision).toBe('allow');
     expect(decision.ruleId).toBeUndefined();
   });
 
-  it('uses a mid-turn ask switch even when the sidecar still sent auto', async () => {
+  it('按扩展现读的 facts.preset 决定：ask 拦改动命令', async () => {
     const { service } = await fixture();
-    setApprovalPolicy('ask', 'D:/repo');
-    const decision = service.evaluate(facts({ flags: { ...NO_FLAGS, mutatingCommand: true } }));
+    const decision = service.evaluate(facts({ preset: 'ask', flags: { ...NO_FLAGS, mutatingCommand: true } }));
     expect(decision).toMatchObject({ decision: 'ask', ruleId: 'builtin.mutating-command' });
   });
 
-  it('空表时忽略 facts.preset=full，按 auto 拦危险命令', async () => {
+  it('主进程的审批档表不再覆盖 facts.preset（表在 agent-host 子进程里）', async () => {
     const { service } = await fixture();
-    const decision = service.evaluate(facts({
-      preset: 'full',
-      flags: { ...NO_FLAGS, dangerousCommand: true },
-    }));
+    setApprovalPolicy('full', 'D:/repo');
+    const decision = service.evaluate(facts({ preset: 'auto', flags: { ...NO_FLAGS, dangerousCommand: true } }));
     expect(decision).toMatchObject({ decision: 'ask', ruleId: 'builtin.dangerous-command' });
   });
 });

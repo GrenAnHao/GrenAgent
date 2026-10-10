@@ -20,20 +20,43 @@ export interface ProviderServiceOptions {
   oneshot?: (request: Record<string, unknown>, onLine?: (line: string) => void, signal?: AbortSignal) => Promise<void>;
 }
 
+export interface DiagnoseRequest {
+  /** 渲染层生成；取消时按它找到这一次请求。 */
+  requestId: string;
+  providerId: string;
+  modelId: string;
+  prompt: string;
+  /** true：输出边到边推给渲染层；false：只在结果里给全文。线上都走流式（pi-ai 的 completeSimple 也是流式）。 */
+  stream: boolean;
+  /** pi 思考档（minimal…max）。不传 = 关闭思考。 */
+  reasoning?: string;
+}
+
+export interface DiagnoseChunk {
+  type: 'text' | 'thinking';
+  text: string;
+}
+
 export interface DiagnoseResult {
   ok: boolean;
+  cancelled: boolean;
   error: string | null;
   content: string;
+  thinking: string;
+  /** 首个输出（思考或正文）到达的耗时；没有任何输出时为 0。 */
   ttftMs: number;
   totalMs: number;
   promptTokens: number | null;
   completionTokens: number | null;
+  /** 思考 token，包含在 completionTokens 里；供应商不报时为 null。 */
+  reasoningTokens: number | null;
   totalTokens: number | null;
   tokensPerSec: number | null;
 }
 
 export class ProviderService {
   private readonly fetchImpl: typeof fetch;
+  private readonly diagnoses = new Map<string, AbortController>();
 
   constructor(private readonly options: ProviderServiceOptions) {
     this.fetchImpl = options.fetch ?? fetch;
@@ -118,29 +141,57 @@ export class ProviderService {
     return fixed;
   }
 
-  async diagnose(providerId: string, modelId: string, prompt: string, stream: boolean, onChunk: (chunk: string) => void): Promise<DiagnoseResult> {
+  async diagnose(request: DiagnoseRequest, onChunk: (chunk: DiagnoseChunk) => void): Promise<DiagnoseResult> {
     if (!this.options.oneshot) throw new Error('Pi oneshot runtime is unavailable');
+    this.abortDiagnose(request.requestId);
+    const controller = new AbortController();
+    this.diagnoses.set(request.requestId, controller);
+    const { signal } = controller;
     const started = Date.now();
-    let content = ''; let error: string | null = null; let ttftMs = 0; let first = false;
+    let content = ''; let thinking = ''; let error: string | null = null; let ttftMs = 0; let first = false;
     let usage: Record<string, unknown> = {};
-    await this.options.oneshot({ provider: providerId, modelId, user: prompt.trim() || 'Who are you?', stream }, (line) => {
-      const result = parseOneshot(line);
-      if (result.type === 'delta' && typeof result.text === 'string') {
-        if (!first) { first = true; ttftMs = Date.now() - started; }
-        content += result.text; onChunk(result.text); return;
-      }
-      if (result.type === 'error') { error = result.error || 'oneshot failed'; return; }
-      if (result.type === 'done') { usage = result.usage ?? {}; return; }
-      if (result.ok === false) { error = result.error || 'oneshot failed'; return; }
-      if (result.ok === true) { content = result.content ?? ''; usage = result.usage ?? {}; }
-    });
-    const totalMs = Date.now() - started;
-    const completionTokens = numberValue(usage.completion_tokens);
-    return {
-      ok: error === null, error, content, ttftMs, totalMs,
-      promptTokens: numberValue(usage.prompt_tokens), completionTokens, totalTokens: numberValue(usage.total_tokens),
-      tokensPerSec: completionTokens !== null && totalMs > 0 ? completionTokens / (totalMs / 1000) : null,
+    const output = (type: DiagnoseChunk['type'], text: string) => {
+      if (!first) { first = true; ttftMs = Date.now() - started; }
+      if (type === 'text') content += text; else thinking += text;
+      if (request.stream) onChunk({ type, text });
     };
+    // 思考档只在流式路径生效（host.completeSimple 有意丢掉 reasoning），所以测活一律走流式。
+    const run = this.options.oneshot({
+      provider: request.providerId,
+      modelId: request.modelId,
+      user: request.prompt.trim() || 'Who are you?',
+      stream: true,
+      ...(request.reasoning ? { reasoning: request.reasoning } : {}),
+    }, (line) => {
+      if (signal.aborted) return;
+      const result = parseOneshot(line);
+      if (result.type === 'delta' && typeof result.text === 'string') { output('text', result.text); return; }
+      if (result.type === 'thinking' && typeof result.text === 'string') { output('thinking', result.text); return; }
+      if (result.type === 'error') { error = result.error || 'oneshot failed'; usage = result.usage ?? usage; return; }
+      if (result.type === 'done') { usage = result.usage ?? {}; return; }
+      if (result.ok === false) error = result.error || 'oneshot failed';
+    }, signal).catch((e: unknown) => { error = e instanceof Error ? e.message : String(e); });
+    try {
+      // 供应商卡在连接上时 stream 未必响应 signal；取消以 abort 为准立即返回，不等它收尾。
+      await Promise.race([run, abortedPromise(signal)]);
+    } finally {
+      if (this.diagnoses.get(request.requestId) === controller) this.diagnoses.delete(request.requestId);
+    }
+    const totalMs = Date.now() - started;
+    const tokens = readUsage(usage);
+    if (signal.aborted) {
+      return { ok: false, cancelled: true, error: null, content, thinking, ttftMs, totalMs, ...tokens, tokensPerSec: null };
+    }
+    if (error === null && !content.trim()) error = thinking.trim() ? '模型只返回了思考，没有正文' : '模型返回了空内容';
+    return {
+      ok: error === null, cancelled: false, error, content, thinking, ttftMs, totalMs, ...tokens,
+      tokensPerSec: tokens.completionTokens !== null && totalMs > 0 ? tokens.completionTokens / (totalMs / 1000) : null,
+    };
+  }
+
+  /** 取消一次测活；requestId 不在飞时什么都不做。 */
+  abortDiagnose(requestId: string): void {
+    this.diagnoses.get(requestId)?.abort();
   }
 
   private async getJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
@@ -162,6 +213,23 @@ function extractMermaid(content: string): string {
 
 function numberValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** pi-ai 的 Usage 是 input / output / reasoning / totalTokens；OpenAI 原生字段名留作兜底。 */
+function readUsage(usage: Record<string, unknown>): Pick<DiagnoseResult, 'promptTokens' | 'completionTokens' | 'reasoningTokens' | 'totalTokens'> {
+  return {
+    promptTokens: numberValue(usage.input) ?? numberValue(usage.prompt_tokens),
+    completionTokens: numberValue(usage.output) ?? numberValue(usage.completion_tokens),
+    reasoningTokens: numberValue(usage.reasoning),
+    totalTokens: numberValue(usage.totalTokens) ?? numberValue(usage.total_tokens),
+  };
+}
+
+function abortedPromise(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) { resolve(); return; }
+    signal.addEventListener('abort', () => resolve(), { once: true });
+  });
 }
 
 /** 剔除认证类 header（大小写不敏感），确保用户自定义 headers 不会意外覆盖真正的鉴权凭据。 */

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { releaseChildForDelete, releaseSubagentControlPlane } from '../../../extensions/multi-agent/controlPlane.js';
 import { readSubagentSessionMeta, type SubagentSessionMeta } from './subagentSession.js';
 import { isSystemWorkerSessionLines } from './systemWorkerSession.js';
 import { readFirstLine } from './sessionIdentity.js';
@@ -39,6 +38,23 @@ interface ChildSession {
   parentSession: string | null;
 }
 
+/**
+ * 子代理的控制面（registry、活着的子会话）在 agent-host 子进程里。删会话 / 会话目录前要先经它收口。
+ * 默认在本进程内调用（测试与单进程场景），主进程用 setSubagentControl 换成 RPC。
+ */
+export interface SubagentControlPort {
+  release(path: string): Promise<void>;
+  releaseChildForDelete(workspace: string, agentId: string | null, path: string): Promise<{ quiescent: boolean }>;
+}
+
+const inProcessSubagentControl: SubagentControlPort = {
+  release: async (path) => {
+    (await import('../../../extensions/multi-agent/controlPlane.js')).releaseSubagentControlPlane(path);
+  },
+  releaseChildForDelete: async (workspace, agentId, path) =>
+    (await import('../../../extensions/multi-agent/controlPlane.js')).releaseChildForDelete(workspace, agentId, path),
+};
+
 export class WorkspaceService {
   private readonly agentDir: string;
   private readonly worksDir: string;
@@ -46,6 +62,8 @@ export class WorkspaceService {
   private readonly drafts = new Set<string>();
   private readonly records = new Map<string, CachedRecord>();
   private closeWorkspace?: (workspace: string) => Promise<void>;
+  private releaseSessions?: (sessionPaths: string[]) => Promise<void>;
+  private subagentControl: SubagentControlPort = inProcessSubagentControl;
 
   constructor(agentDir: string) {
     this.agentDir = agentDir;
@@ -53,8 +71,20 @@ export class WorkspaceService {
     this.sessionsDir = join(agentDir, 'sessions');
   }
 
+  setSubagentControl(port: SubagentControlPort): void {
+    this.subagentControl = port;
+  }
+
   setWorkspaceCloser(closeWorkspace: (workspace: string) => Promise<void>): void {
     this.closeWorkspace = closeWorkspace;
+  }
+
+  /**
+   * 删会话文件前先把它从运行时摘下（停掉在跑的回合、拆掉或换走持有它的 handle）。
+   * 还挂着的会话会把后续条目 append 回同一路径，删了也会被重建成无头文件。抛错时不删。
+   */
+  setSessionReleaser(releaseSessions: (sessionPaths: string[]) => Promise<void>): void {
+    this.releaseSessions = releaseSessions;
   }
 
   async getWorksDir(): Promise<string> {
@@ -141,7 +171,7 @@ export class WorkspaceService {
       // 目录里只剩隐藏会话（子代理 / 系统短调用）时才会走到这里，随目录一起清掉，避免 JSONL 孤儿。
       // 先删会话再释放 registry：子级收尾写 registry 必须落在关闭之前，否则懒重建的 registry.db 会顶住 rm。
       await this.deleteSessionsForWorkspace(resolved);
-      releaseSubagentControlPlane(resolved);
+      await this.subagentControl.release(resolved);
       await rmWithBusyRetry(resolved);
       removed += 1;
     }
@@ -158,7 +188,7 @@ export class WorkspaceService {
       try {
         await this.closeWorkspace?.(target);
       } finally {
-        releaseSubagentControlPlane(target);
+        await this.subagentControl.release(target);
       }
       await this.deleteSessionsForWorkspace(workspace);
       await rmWithBusyRetry(target);
@@ -192,6 +222,8 @@ export class WorkspaceService {
     const target = await realpath(sessionPath).catch(() => { throw new Error('session file not found'); });
     if (!isWithin(root, target) || !target.endsWith('.jsonl')) throw new Error('session file not in sessions directory');
     const info = await this.readSession(target); if (!info || !info.cwd || !pathsEquivalent(info.cwd, workspace)) throw new Error('session does not belong to workspace');
+    // 先停父会话：它还在跑就可能再开子代理，换走时收口的子级结算也得落在文件删掉之前。
+    await this.releaseSessions?.([...new Set([sessionPath, target])]);
     const children = await this.childSessionsIn(workspace);
     // 子会话 parentSession 是 SDK 落盘写法，与调用方传入 / realpath 后的拼法都可能不同，两者都作根。
     await this.removeChildSessions(workspace, descendantsLeafFirst(children, [sessionPath, target]));
@@ -200,6 +232,7 @@ export class WorkspaceService {
 
   private async deleteSessionsForWorkspace(workspace: string): Promise<void> {
     const records = await this.sessionRecordsIn(workspace);
+    if (records.length > 0) await this.releaseSessions?.(records.map((record) => record.info.path));
     const kept = await this.removeChildSessions(workspace, await this.orderedChildren(records));
     for (const record of records) {
       if (!kept.has(record.info.path)) await rm(record.info.path, { force: true });
@@ -209,7 +242,7 @@ export class WorkspaceService {
   /** 只收口不删文件：deleteConversation 在 closeWorkspace 前调用。 */
   private async tearDownChildSessions(workspace: string): Promise<void> {
     for (const child of await this.orderedChildren(await this.sessionRecordsIn(workspace))) {
-      await releaseChildForDelete(workspace, child.agentId, child.path);
+      await this.subagentControl.releaseChildForDelete(workspace, child.agentId, child.path);
     }
   }
 
@@ -220,7 +253,7 @@ export class WorkspaceService {
   private async removeChildSessions(workspace: string, children: ChildSession[]): Promise<Set<string>> {
     const kept = new Set<string>();
     for (const child of children) {
-      const { quiescent } = await releaseChildForDelete(workspace, child.agentId, child.path);
+      const { quiescent } = await this.subagentControl.releaseChildForDelete(workspace, child.agentId, child.path);
       if (!quiescent) {
         kept.add(child.path);
         continue;

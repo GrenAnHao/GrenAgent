@@ -1,17 +1,27 @@
 import { cssVar } from 'antd-style';
-import { FilePlus, Globe, ListChecks, Search, Sparkles, type LucideIcon } from 'lucide-react';
+import { Braces, FilePlus, Globe, ListChecks, Plug, Search, Sparkles, type LucideIcon } from 'lucide-react';
 import { normalizeTodos, todoSummary } from '@extensions/_shared/todo-model';
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { CodeSurface } from '../chat/conv/CodeSurface';
 import { ConvRow } from '../chat/conv/ConvRow';
 import { TerminalBlock } from '../chat/conv/TerminalBlock';
-import { bashJobRef, bashRowSummary } from './bashCardModel';
+import {
+  bashJobRef,
+  bashRowSummary,
+  bashSandboxFacts,
+  bashSandboxMeta,
+  bashSandboxNote,
+  foregroundJobRef,
+  jobRowStatus,
+  jobTiming,
+} from './bashCardModel';
 import { BashJobMeta, BashJobTerminal } from './BashJobTerminal';
 import type { ConvStatus } from '../chat/conv/StatusGlyph';
 import { PromptPendingRow } from '../chat/PromptPendingRow';
 import { todoRowCopy } from '../chat/input/todoRow';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
+import { useJobLive } from '../../stores/jobLiveStore';
 import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
 import { AnsweredQuestionsCard, parseAnswers } from './AnsweredQuestionsCard';
 import { FileDiffBlock } from './FileDiffBlock';
@@ -25,7 +35,22 @@ import { LazyHighlighter } from './LazyHighlighter';
 import { RunDuration } from './RunDuration';
 import { CodeSearchCard, GlobCard, GrepCard } from './SearchCards';
 import { cardStyles } from './cardStyles';
+import { CodemodeCalls, CodemodeDetail, McpResultBody, ToolNameLabel } from './CodemodeCard';
+import {
+  codemodeCallSummary,
+  codemodeCalls,
+  codemodeCode,
+  firstCodeLine,
+  formatCallDuration,
+  isCodemodeTool,
+  isMcpTool,
+  mergeCodemodeCalls,
+  parseCodemodeOutput,
+  toolArgsSummary,
+  type CodemodeCallItem,
+} from './codemodeModel';
 import { renderExtensionCard } from './extensionCards';
+import type { ToolSegment } from '../chat/groupMessages';
 import {
   argSummary,
   extractContentImages,
@@ -53,6 +78,8 @@ interface ToolExecutionProps {
   startedAt?: number;
   /** 执行耗时（ms），结束后定格显示。 */
   durationMs?: number;
+  /** 挂在本工具下的嵌套调用（codemode 脚本里的 tools.* 调用）。 */
+  nested?: ToolSegment[];
 }
 
 function codeSearchPatterns(args: unknown): string {
@@ -114,7 +141,8 @@ function toolTitle(
   result: unknown,
   status: ConvStatus,
   argsStreaming = false,
-  timing: { startedAt?: number; durationMs?: number } = {},
+  /** running 只给后台 bash 用：行状态跟着后台任务走时，时长是否还在自增。 */
+  timing: { startedAt?: number; durationMs?: number; running?: boolean } = {},
 ): { icon: LucideIcon; name: ReactNode; args?: ReactNode; meta?: ReactNode; metaInline?: boolean } {
   const c = cardStyles;
   const lname = toolName.toLowerCase();
@@ -161,6 +189,16 @@ function toolTitle(
     };
   }
 
+  if (isMcpTool(toolName)) {
+    const duration = status !== 'running' && timing.durationMs != null ? formatCallDuration(timing.durationMs) : '';
+    return {
+      icon: Plug,
+      name: <ToolNameLabel name={toolName} />,
+      args: toolArgsSummary(args) || undefined,
+      meta: duration || undefined,
+    };
+  }
+
   if (lname === 'fetch_url') {
     return {
       icon: Globe,
@@ -196,6 +234,8 @@ function toolTitle(
   if (lname === 'bash' || lname === 'shell' || lname === 'run_terminal_cmd') {
     // 转到后台的命令（run_in_background / 前台超时）：工具调用已结束，状态跟着 job 走。
     const jobRef = status === 'running' ? null : bashJobRef(result);
+    // 前台结果里的沙箱事实（details.sandbox）：被拒 / 沙箱没启动 / 已升权。后台任务行跟着 job 走。
+    const sandboxMeta = jobRef ? undefined : bashSandboxMeta(bashSandboxFacts(result));
     return {
       icon: toolMeta(toolName).icon,
       name: (
@@ -204,12 +244,16 @@ function toolTitle(
           <RunDuration
             startedAt={timing.startedAt}
             durationMs={timing.durationMs}
-            running={status === 'running'}
+            running={timing.running ?? status === 'running'}
           />
         </>
       ),
       args: bashRowSummary(args) || undefined,
-      meta: jobRef ? <BashJobMeta jobRef={jobRef} /> : undefined,
+      meta: jobRef ? (
+        <BashJobMeta jobRef={jobRef} />
+      ) : sandboxMeta ? (
+        <span data-testid="bash-sandbox-meta">{sandboxMeta}</span>
+      ) : undefined,
     };
   }
 
@@ -307,6 +351,7 @@ function ToolDetail({
     );
   }
   const name = toolName.toLowerCase();
+  if (isMcpTool(toolName)) return <McpResultBody result={result} status={status} />;
   const text = extractText(result);
   const isError = status === 'error';
 
@@ -323,6 +368,20 @@ function ToolDetail({
         />
       );
     }
+    // 运行中的前台命令：匠名 job，引用只在 partial 结果里，最终结果不带（下面落到普通终端）。
+    const anonymousRef = status === 'running' ? foregroundJobRef(result) : null;
+    if (anonymousRef) {
+      return (
+        <BashJobTerminal
+          anonymous
+          jobRef={anonymousRef}
+          command={getArgString(args, 'command')}
+          cwd={workspace}
+          resultText={text}
+        />
+      );
+    }
+    const sandboxNote = bashSandboxNote(bashSandboxFacts(result));
     return (
       <TerminalBlock
         command={getArgString(args, 'command')}
@@ -330,6 +389,7 @@ function ToolDetail({
         output={text}
         running={status === 'running'}
         isError={isError}
+        footer={sandboxNote ? <span data-testid="bash-sandbox-note">{sandboxNote}</span> : undefined}
       />
     );
   }
@@ -390,13 +450,95 @@ function ToolDetail({
   );
 }
 
+function renderNestedTool(segment: ToolSegment, durationMs?: number): ReactNode {
+  return (
+    <ToolExecution
+      toolName={segment.toolName}
+      toolCallId={segment.toolCallId}
+      args={segment.args}
+      result={segment.result}
+      status={segment.status}
+      argsComplete={segment.argsComplete}
+      startedAt={segment.startedAt}
+      durationMs={segment.status === 'running' ? segment.durationMs : (durationMs ?? segment.durationMs)}
+      nested={segment.children}
+    />
+  );
+}
+
+function codemodeMeta(items: CodemodeCallItem[]): string {
+  if (items.length === 0) return '';
+  const failed = items.filter((item) => item.status === 'error').length;
+  return `${items.length} 次调用${failed ? ` · ${failed} 失败` : ''}`;
+}
+
+/**
+ * codemode：标题「运行脚本 · 耗时 · 调用了哪些工具」，行下常驻嵌套调用列表（实时段可展开看结果，
+ * 历史回放靠 details.calls），展开体是脚本和输出。
+ */
+const CodemodeExecution = memo(function CodemodeExecution({
+  args,
+  result,
+  status,
+  startedAt,
+  durationMs,
+  nested,
+}: ToolExecutionProps) {
+  const [expanded, setExpanded] = useState(false);
+  const items = useMemo(() => mergeCodemodeCalls(codemodeCalls(result), nested), [result, nested]);
+  const wallMs = useMemo(() => parseCodemodeOutput(result).wallMs, [result]);
+  const code = codemodeCode(args);
+  const running = status === 'running';
+  const summary = items.length > 0 ? codemodeCallSummary(items.map((item) => item.name)) : firstCodeLine(code);
+  const meta = codemodeMeta(items);
+  const canExpand = Boolean(code) || running || Boolean(extractText(result));
+
+  return (
+    <div className={cardStyles.toolRow} data-testid="codemode-card">
+      <ConvRow
+        data-testid="tool-execution"
+        status={status}
+        icon={Braces}
+        name={
+          <>
+            运行脚本
+            <RunDuration
+              startedAt={startedAt}
+              durationMs={running ? undefined : (wallMs ?? durationMs)}
+              running={running}
+              format={formatCallDuration}
+            />
+          </>
+        }
+        args={summary ? <span data-testid="codemode-summary">{summary}</span> : undefined}
+        meta={meta ? <span data-testid="codemode-meta">{meta}</span> : undefined}
+        open={expanded}
+        onToggle={canExpand ? () => setExpanded((v) => !v) : undefined}
+        inline={<CodemodeCalls items={items} renderLive={renderNestedTool} />}
+        body={
+          canExpand ? (
+            <ErrorBoundary>
+              <CodemodeDetail args={args} result={result} status={status} />
+            </ErrorBoundary>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+});
+
 /** 运行中默认展开的只有命令行，方便看流式输出。写入和编辑保持收起。 */
 function opensWhileRunning(toolName: string): boolean {
   const name = toolName.toLowerCase();
   return name === 'bash' || name === 'shell' || name === 'run_terminal_cmd';
 }
 
-function ToolExecutionInner({ toolName, args, result, status, argsComplete, startedAt, durationMs }: ToolExecutionProps) {
+function ToolExecutionInner(props: ToolExecutionProps) {
+  if (isCodemodeTool(props.toolName)) return <CodemodeExecution {...props} />;
+  return <PlainToolExecution {...props} />;
+}
+
+function PlainToolExecution({ toolName, args, result, status, argsComplete, startedAt, durationMs }: ToolExecutionProps) {
   const { workspace } = useAgentStoreContext();
   const hasPendingQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
   const [expanded, setExpanded] = useState(status === 'running' && opensWhileRunning(toolName));
@@ -411,6 +553,18 @@ function ToolExecutionInner({ toolName, args, result, status, argsComplete, star
     if (isShell && getArgString(args, 'command')) return true;
     return Boolean(extractText(result) || getDiff(result) || stringifyJson(result));
   }, [args, argsStreaming, isShell, result, status, toolName]);
+  // 后台 bash：调用本身瞬间返回，行图标和时长要跟着后台任务走，否则还在跑的任务显示成 ✓ 0s。
+  const backgroundRef = isShell && status !== 'running' ? bashJobRef(result) : null;
+  const backgroundJob = useJobLive(backgroundRef)?.job;
+  const rowStatus = jobRowStatus(status, backgroundJob);
+  // 前台转后台时快照可能还没到，未知状态不能当完成；历史首次拿到终态也不能关掉手动展开。
+  const shellRunning = isShell ? (backgroundRef && !backgroundJob ? null : rowStatus === 'running') : false;
+  const wasShellRunning = useRef(shellRunning === true);
+  useEffect(() => {
+    if (shellRunning === null) return;
+    if (wasShellRunning.current && !shellRunning) setExpanded(false);
+    wasShellRunning.current = shellRunning;
+  }, [shellRunning]);
 
   // ask_user：运行中 → 工具行占位；完成 → 紧凑问答摘要。浮层由 ComposerPromptOverlay 渲染。
   if (bareName === 'ask_user') {
@@ -488,14 +642,21 @@ function ToolExecutionInner({ toolName, args, result, status, argsComplete, star
     }
   }
 
-  const title = toolTitle(toolName, args, result, status, argsStreaming, { startedAt, durationMs });
+  const title = toolTitle(
+    toolName,
+    args,
+    result,
+    status,
+    argsStreaming,
+    backgroundJob ? jobTiming(backgroundJob) : { startedAt, durationMs },
+  );
   const canExpand = hasDetail;
 
   return (
     <div className={cardStyles.toolRow}>
       <ConvRow
         data-testid="tool-execution"
-        status={status}
+        status={rowStatus}
         icon={title.icon}
         name={title.name}
         args={title.args}

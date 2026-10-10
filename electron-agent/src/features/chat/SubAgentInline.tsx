@@ -9,6 +9,7 @@ import { LazyMarkdown } from './LazyMarkdown';
 import { TaskPromptFrame } from './TaskPromptFrame';
 import {
   formatTokens,
+  isModelAlias,
   backgroundRegistryStatus,
   isBackgroundSpawn,
   subAgentFinalText,
@@ -16,17 +17,22 @@ import {
   subAgentRecordStatus,
   subAgentResultIndicatesTimeout,
   subAgentTimeoutText,
-  displayModel,
   modelFromResult,
+  modelWithThinking,
+  thinkingLevelFromResult,
   subAgentCardTitle,
   subAgentStats,
   subAgentStepCount,
+  taskFromAgentResult,
 } from '../panels/subagentUtils';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
 import { PendingResponseStatus } from './PendingResponseStatus';
 import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
+import type { SubAgentItem } from '../../lib/pi';
+import { selectSubAgentById, useSubAgentLiveStore } from '../../stores/subagentLiveStore';
+import { useProviderNames } from '../settings/providerListCache';
 
 const styles = createStaticStyles(({ css }) => ({
   root: css`
@@ -108,6 +114,8 @@ interface SubAgentInlineProps {
   task: string;
   /** 主代理提交的短任务名。缺省时从 task 截一句。 */
   title?: string;
+  model?: string;
+  thinkingLevel?: string;
   result: unknown;
   status: 'running' | 'done' | 'error';
 }
@@ -123,7 +131,7 @@ function mapRegistryStatus(status: string | undefined): ConvStatus {
  * 运行中左图标 hover 变停止；点横条本体在右坞打开完整对话，折叠箭头才展开/收起）；展开=E1（统计头 + 打开完整对话 + 结果优先 + 指令默认折叠）。
  * 展开只渲染静态任务与最终结果文本，不内联回放流式 transcript（完整回放在右坞）。
  */
-function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result, status }: SubAgentInlineProps) {
+function SubAgentInlineInner({ messageId, toolCallId, index, task, title, model, thinkingLevel, result, status }: SubAgentInlineProps) {
   const { workspace, store } = useAgentStoreContext();
   const agentId = useMemo(() => subAgentId(result), [result]);
   const background = useMemo(() => isBackgroundSpawn(result), [result]);
@@ -131,6 +139,16 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result
   const [bgError, setBgError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const registryRow = useSubAgentLiveStore(selectSubAgentById(workspace, agentId));
+  const registryLoaded = useSubAgentLiveStore((s) => s.itemsByWorkspace.has(workspace));
+  const [remembered, setRemembered] = useState<SubAgentItem | undefined>();
+  const [registryRead, setRegistryRead] = useState(false);
+  const providerNames = useProviderNames();
+  // 参数里的 cheap / strong 只是别名：结果没写实际路由时（中途出错、运行中）去注册表取，别把别名当模型名。
+  const savedModel = modelFromResult(result) || (isModelAlias(model) ? undefined : model);
+  const missingTask = !task.trim() || task === '子代理任务';
+  const needsMetadata = Boolean(agentId && !registryRead && (!savedModel || missingTask));
+  const shownTask = missingTask ? taskFromAgentResult(result) || remembered?.task || task : task;
   const effectiveStatus = useMemo<ConvStatus>(() => {
     if (status === 'running') return 'running';
     if (background && bgStatus === 'running') return 'running';
@@ -141,39 +159,24 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result
   }, [status, background, bgStatus, result]);
 
   useEffect(() => {
-    if (!background || !agentId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const poll = async () => {
-      try {
-        const rows = await pi.subagentList(workspace);
-        if (cancelled) return;
-        const row = rows.find((r) => r.id === agentId);
-        const next = backgroundRegistryStatus(row);
-        setBgStatus(next);
-        setBgError(typeof row?.error === 'string' ? row.error : null);
-        if (next !== 'running' && timer) {
-          clearInterval(timer);
-          timer = undefined;
-        }
-      } catch {
-        // 跨进程读 registry 偶发 SQLITE_BUSY：保留上次状态，下个 tick 再试。
-      }
-    };
-    void poll();
-    timer = setInterval(() => void poll(), 2000);
-    return () => {
-      cancelled = true;
-      if (timer) clearInterval(timer);
-    };
-  }, [workspace, background, agentId]);
+    if (!registryLoaded || !agentId) return;
+    if (registryRow) setRemembered(registryRow);
+    setRegistryRead(true);
+    if (background) {
+      setBgStatus(backgroundRegistryStatus(registryRow));
+      setBgError(typeof registryRow?.error === 'string' ? registryRow.error : null);
+    }
+  }, [registryLoaded, registryRow, background, agentId]);
 
   const running = effectiveStatus === 'running';
 
   // 运行中轮询 registry 取模型与状态（通过单例 store，多卡片共享一次轮询）。
-  const live = useSubAgentLive(workspace, agentId, running);
+  // 旧历史缺字段时只共享首包查询；回包后保留这行、释放订阅，不为每张完成卡单独轮询。
+  const live = useSubAgentLive(workspace, agentId, running || needsMetadata);
   const seenModel = useRef<string | undefined>(undefined);
   if (live.model) seenModel.current = live.model;
+  const seenLevel = useRef<string | undefined>(undefined);
+  if (live.thinkingLevel) seenLevel.current = live.thinkingLevel;
 
   const openInDock = (e?: MouseEvent) => {
     e?.stopPropagation();
@@ -181,7 +184,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result
       messageId,
       toolCallId,
       subIndex: null,
-      title: `#${index} ${subAgentCardTitle(title, task)}`,
+      title: `#${index} ${subAgentCardTitle(title, shownTask)}`,
       // tab 归属当前渲染这条消息的会话，切会话后不跟过去。
       ...dockOwnerFromStore(store, workspace),
     });
@@ -226,9 +229,16 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result
               : `出错${steps ? ` · ${steps} 步` : ''}`
         : '';
 
-  const role = subAgentCardTitle(title, task);
+  const role = subAgentCardTitle(title, shownTask);
   // 终态优先用写进工具结果的模型。内嵌子代理没有 transcript，不能等统计去扫。
-  const modelLabel = displayModel(modelFromResult(result) || (running ? live.model : undefined) || seenModel.current || stats?.model) ?? '';
+  // 标签：模型 · 思考档位。档位同样终态优先用工具结果里写的，运行中读注册表。
+  const modelLabel =
+    modelWithThinking(
+      savedModel || remembered?.model || (running ? live.model : undefined) || seenModel.current || stats?.model || model,
+      // 参数里的档位是请求值，子会话会按模型能力收窄；注册表记的是实际值，排在它前面。
+      thinkingLevelFromResult(result) || remembered?.thinkingLevel || (running ? live.thinkingLevel : undefined) || seenLevel.current || thinkingLevel,
+      providerNames,
+    ) ?? '';
   const line2 = running ? (
     <PendingResponseStatus label="正在处理…" startedAt={live.createdAt ?? undefined} />
   ) : (
@@ -280,7 +290,7 @@ function SubAgentInlineInner({ messageId, toolCallId, index, task, title, result
           <button type="button" className={styles.toggleLink} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? '收起指令' : '查看指令'}
           </button>
-          {showPrompt ? <TaskPromptFrame text={task} /> : null}
+          {showPrompt ? <TaskPromptFrame text={shownTask} /> : null}
         </div>
       ) : null}
     </div>

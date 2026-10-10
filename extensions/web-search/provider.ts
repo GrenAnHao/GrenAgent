@@ -42,7 +42,7 @@ function sourceLabel(url: string, title: string): string {
 
 export type ProviderChoice =
   | { ok: true; provider: "tavily" | "brave"; apiKey: string }
-  | { ok: true; provider: "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" }
+  | { ok: true; provider: "devin" | "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" }
   | { ok: false; reason: string };
 
 // 选择搜索 provider。Bing / DuckDuckGo 是零配置（无 key）白嫖源，保证 web_search 开箱即用：
@@ -52,6 +52,7 @@ export type ProviderChoice =
 export function resolveProvider(env: Record<string, string | undefined>): ProviderChoice {
   const explicit = (env.WEB_SEARCH_PROVIDER ?? "").trim().toLowerCase();
 
+  if (explicit === "devin") return { ok: true, provider: "devin" };
   if (explicit === "bing") return { ok: true, provider: "bing" };
   if (explicit === "sogou") return { ok: true, provider: "sogou" };
   if (explicit === "baidu") return { ok: true, provider: "baidu" };

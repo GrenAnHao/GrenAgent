@@ -110,8 +110,145 @@ describe('ProviderService', () => {
     const chunks: string[] = [];
 
     await expect(service.fixMermaid('C:/project', 'graph TD', 'parse error')).resolves.toBe('hello');
-    await expect(service.diagnose('openai', 'gpt-5', '', true, (chunk) => chunks.push(chunk))).resolves.toMatchObject({ ok: true, content: 'hello', totalTokens: 3 });
+    await expect(service.diagnose(
+      { requestId: 'r1', providerId: 'openai', modelId: 'gpt-5', prompt: '', stream: true },
+      (chunk) => chunks.push(chunk.text),
+    )).resolves.toMatchObject({ ok: true, cancelled: false, content: 'hello', totalTokens: 3 });
     expect(requests[0]).toMatchObject({ provider: 'openai', modelId: 'gpt-5' });
     expect(chunks).toEqual(['hello']);
+  });
+
+  describe('diagnose', () => {
+    const base = { requestId: 'r1', providerId: 'p', modelId: 'm', prompt: 'hi' };
+
+    it('思考档透传给 oneshot，关闭时不带 reasoning；两种显示模式线上都走流式', async () => {
+      const requests: Record<string, unknown>[] = [];
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async (request, onLine) => {
+          requests.push(request);
+          onLine?.('{"type":"delta","text":"ok"}');
+          onLine?.('{"type":"done","usage":{}}');
+        },
+      });
+
+      await service.diagnose({ ...base, stream: false, reasoning: 'high' }, () => {});
+      await service.diagnose({ ...base, stream: true }, () => {});
+
+      expect(requests[0]).toEqual({ provider: 'p', modelId: 'm', user: 'hi', stream: true, reasoning: 'high' });
+      expect(requests[1]).not.toHaveProperty('reasoning');
+    });
+
+    it('思考与正文分开收集；按 pi-ai Usage 字段读 token，思考 token 单列', async () => {
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async (_request, onLine) => {
+          onLine?.('{"type":"thinking","text":"let me "}');
+          onLine?.('{"type":"thinking","text":"think"}');
+          onLine?.('{"type":"delta","text":"answer"}');
+          onLine?.('{"type":"done","usage":{"input":12,"output":30,"reasoning":20,"totalTokens":42}}');
+        },
+      });
+      const chunks: unknown[] = [];
+
+      const result = await service.diagnose({ ...base, stream: true, reasoning: 'low' }, (chunk) => chunks.push(chunk));
+
+      expect(result).toMatchObject({
+        ok: true, content: 'answer', thinking: 'let me think',
+        promptTokens: 12, completionTokens: 30, reasoningTokens: 20, totalTokens: 42,
+      });
+      expect(result.ttftMs).toBeGreaterThanOrEqual(0);
+      expect(chunks).toEqual([
+        { type: 'thinking', text: 'let me ' },
+        { type: 'thinking', text: 'think' },
+        { type: 'text', text: 'answer' },
+      ]);
+    });
+
+    it('stream=false 不推分片，全文只在结果里', async () => {
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async (_request, onLine) => { onLine?.('{"type":"delta","text":"full"}'); },
+      });
+      const onChunk = vi.fn();
+
+      await expect(service.diagnose({ ...base, stream: false }, onChunk)).resolves.toMatchObject({ ok: true, content: 'full' });
+      expect(onChunk).not.toHaveBeenCalled();
+    });
+
+    it('没有正文算失败：只有思考、什么都没有分别报', async () => {
+      const thinkingOnly = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async (_request, onLine) => { onLine?.('{"type":"thinking","text":"hmm"}'); },
+      });
+      const empty = new ProviderService({ agentDir: 'C:/agent', oneshot: async () => {} });
+
+      await expect(thinkingOnly.diagnose({ ...base, stream: true }, () => {})).resolves.toMatchObject({ ok: false, error: '模型只返回了思考，没有正文' });
+      await expect(empty.diagnose({ ...base, stream: true }, () => {})).resolves.toMatchObject({ ok: false, error: '模型返回了空内容' });
+    });
+
+    it('供应商报错原样带回', async () => {
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async (_request, onLine) => { onLine?.('{"type":"error","error":"401 invalid key"}'); },
+      });
+
+      await expect(service.diagnose({ ...base, stream: true }, () => {})).resolves.toMatchObject({ ok: false, cancelled: false, error: '401 invalid key' });
+    });
+
+    it('abortDiagnose 立即返回 cancelled，不等卡住的请求收尾，也不再推分片', async () => {
+      let signal: AbortSignal | undefined;
+      let late: ((line: string) => void) | undefined;
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: (_request, onLine, s) => {
+          signal = s;
+          late = onLine;
+          onLine?.('{"type":"delta","text":"par"}');
+          return new Promise<void>(() => {}); // 供应商卡住，永不结束
+        },
+      });
+      const chunks: string[] = [];
+
+      const pending = service.diagnose({ ...base, stream: true }, (chunk) => chunks.push(chunk.text));
+      service.abortDiagnose('r1');
+      const result = await pending;
+      late?.('{"type":"delta","text":"tial"}');
+
+      expect(signal?.aborted).toBe(true);
+      expect(result).toMatchObject({ ok: false, cancelled: true, error: null, content: 'par', tokensPerSec: null });
+      expect(chunks).toEqual(['par']);
+    });
+
+    it('abortDiagnose 只取消对应 requestId；未知 id 什么都不做', async () => {
+      const signals: AbortSignal[] = [];
+      const finish: Array<() => void> = [];
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: (_request, onLine, s) => new Promise<void>((resolve) => {
+          signals.push(s!);
+          finish.push(() => { onLine?.('{"type":"delta","text":"ok"}'); resolve(); });
+        }),
+      });
+
+      const a = service.diagnose({ ...base, requestId: 'a', stream: true }, () => {});
+      const b = service.diagnose({ ...base, requestId: 'b', stream: true }, () => {});
+      service.abortDiagnose('nope');
+      service.abortDiagnose('a');
+      finish[1]!();
+
+      await expect(a).resolves.toMatchObject({ cancelled: true });
+      await expect(b).resolves.toMatchObject({ ok: true, cancelled: false });
+      expect(signals.map((s) => s.aborted)).toEqual([true, false]);
+    });
+
+    it('oneshot 抛错算失败，不冒泡', async () => {
+      const service = new ProviderService({
+        agentDir: 'C:/agent',
+        oneshot: async () => { throw new Error('runtime down'); },
+      });
+
+      await expect(service.diagnose({ ...base, stream: true }, () => {})).resolves.toMatchObject({ ok: false, error: 'runtime down' });
+    });
   });
 });

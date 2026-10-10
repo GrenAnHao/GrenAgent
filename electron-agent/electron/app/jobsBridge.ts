@@ -8,8 +8,8 @@ import {
 } from '../../../extensions/jobs/observer.js';
 
 /**
- * 后台 job 的界面通道：jobs 注册表与扩展同在主进程（同一模块实例），这里订阅它的事件，
- * 合并成帧经 `pi://jobs` 广播；晚加入的卡片用 job_snapshot 拿保留输出，再接后续帧。
+ * 后台 job 的界面通道：jobs 注册表与扩展同在 agent-host 子进程（同一模块实例），这里订阅它的事件，
+ * 合并成帧经 `pi://jobs` 广播（子进程 → 主进程 → 窗口）；晚加入的卡片用 job_snapshot 拿保留输出，再接后续帧。
  * 只读非消耗偏移，不碰模型的读取游标和完成通知。
  */
 export interface JobsBridgeService {

@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { isSafeUrl } from "../web-fetch/html.js";
 import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
 import {
+  resolveWebSearchChain,
   filterResultsByHost,
   normalizeEngineName,
   parseBaidu,
@@ -18,6 +19,8 @@ import {
   SUPPORTED_SEARCH_ENGINES,
   type BuiltinEngine,
 } from "./engines/index.js";
+import { codeSearchFolder, devinSessionReady, devinUserMessage, runDevinCodeSearch, runDevinWebSearch } from "./devin.js";
+import { toolPrompt } from "../_shared/toolPrompt.js";
 import {
   clampWebSearchLimit,
   formatResults,
@@ -228,13 +231,8 @@ async function runBuiltinEngine(
   if (engine === "juejin") return juejinSearch(query, maxResults, signal);
   if (engine === "exa") return exaSearch(query, maxResults, signal);
   if (engine === "zhihu") return zhihuSearch(query, maxResults, signal);
+  if (engine === "devin") return { results: await runDevinWebSearch(query, maxResults, signal) };
   return linuxdoSearch(query, maxResults, signal);
-}
-
-function defaultEngineChain(provider: BuiltinEngine): BuiltinEngine[] {
-  if (provider === "bing") return ["bing", "sogou", "baidu"];
-  if (provider === "sogou") return ["sogou", "baidu"];
-  return [provider];
 }
 
 function buildEngineExecutors(signal: AbortSignal | undefined): Record<string, SearchEngineExecutor> {
@@ -287,7 +285,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web with zero-config fallback (Bing → Sogou → Baidu). Use web_search_multi for multi-engine control, or fetch_* tools for full article bodies.",
+      "Search the web with zero-config fallback (Bing → Sogou → Baidu). When a Devin login is present and no engine chain is set, Devin is tried first. Use web_search_multi for multi-engine control, or fetch_* tools for full article bodies.",
     promptSnippet: "Search the web; returns summary + result links.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
@@ -316,7 +314,9 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
           parsed = parseTavily(await tavilySearch(choice.apiKey, query, maxResults, signal ?? undefined));
         } else {
           const explicitChain = parseEngineChain(getConfig("WEB_SEARCH_ENGINES"));
-          const chain = explicitChain.length > 0 ? explicitChain : defaultEngineChain(choice.provider as BuiltinEngine);
+          const provider = choice.provider as BuiltinEngine;
+          const devinReady = explicitChain.length === 0 && provider === "bing" ? await devinSessionReady() : false;
+          const chain = resolveWebSearchChain(explicitChain, provider, devinReady);
           const out = await runEngineChain(chain, query, maxResults, signal ?? undefined, (engine) =>
             runBuiltinEngine(engine, query, maxResults, signal ?? undefined),
           );
@@ -350,7 +350,7 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     name: "web_search_multi",
     label: "Multi-Engine Search",
     description:
-      "Search the web using one or more built-in engines (bing, baidu, sogou, csdn, juejin, exa, linuxdo, duckduckgo). No API key required.",
+      "Search the web using one or more built-in engines (devin, bing, baidu, sogou, csdn, juejin, exa, linuxdo, duckduckgo). Devin needs a login from Settings; the others need no API key.",
     promptSnippet: "Multi-engine web search (open-webSearch compatible).",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
@@ -390,6 +390,59 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
           })),
         },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "devin_code_search",
+    label: "Devin Code Search",
+    description:
+      "Semantic code search through a logged-in Devin account. Sends the query and selected file excerpts to Windsurf. " +
+      "The folder must stay inside the workspace. One search runs at a time. Use search for exact regex, or when code must stay on this machine.",
+    ...toolPrompt(
+      "Semantic code search via Devin; sends the query and selected excerpts to Windsurf.",
+      [
+        "Use devin_code_search to locate code by meaning when a Devin login exists. It sends the query and selected file excerpts to Windsurf.",
+        "Use search for exact regex or literal text, and whenever code must stay on this machine. Do not use devin_code_search on a workspace that contains secrets.",
+      ],
+    ),
+    parameters: Type.Object({
+      query: Type.String({ description: "What to find in the workspace" }),
+      path: Type.Optional(Type.String({ description: "Subdirectory inside the workspace (default: workspace root)." })),
+    }),
+    async execute(_toolCallId, params, signal, _update, ctx) {
+      const denied = await requireNetwork(control, "devin_code_search", toolCwd(ctx));
+      if (denied) return denied;
+      const cwd = toolCwd(ctx);
+      let folder: string;
+      try {
+        folder = codeSearchFolder(cwd, params.path);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text }], details: { error: text } };
+      }
+      const query = params.query.trim();
+      try {
+        const out = await runDevinCodeSearch(query, cwd, folder, signal ?? new AbortController().signal);
+        if (out.status === "error") {
+          const text = devinUserMessage(out.content);
+          return { content: [{ type: "text", text }], details: { error: text, query, folder } };
+        }
+        return {
+          content: [{ type: "text", text: out.content }],
+          details: {
+            query,
+            folder,
+            files: out.files.map((file) => ({
+              path: file.path,
+              ranges: file.ranges.map((range) => ({ start: range.start, end: range.end })),
+            })),
+          },
+        };
+      } catch (error) {
+        const text = devinUserMessage(error instanceof Error ? error.message : String(error));
+        return { content: [{ type: "text", text }], details: { error: text, query, folder } };
+      }
     },
   });
 }

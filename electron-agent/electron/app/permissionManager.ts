@@ -9,7 +9,7 @@ export interface PermissionOperation { kind: string; workspace?: string; path?: 
 export interface PermissionProvider { name: string; evaluate(operation: PermissionOperation, profile: PermissionProfileName): PermissionDecision | Promise<PermissionDecision>; }
 export interface PermissionRequest { id: string; operation: PermissionOperation; profile: PermissionProfileName; createdAt: number; status: 'blocked' | 'resolved'; resolution?: PermissionResolution; }
 export interface PermissionAuthorization { status: 'allowed' | 'denied' | 'blocked'; decision: PermissionDecision; request?: PermissionRequest; }
-export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; resolveProfile?: (operation: PermissionOperation, requested: PermissionProfileName) => PermissionProfileName; now?: () => number; }
+export interface PermissionManagerOptions { dataDir: string; providers?: PermissionProvider[]; /** 会话的权限档记在 agent-host 子进程里，主进程要异步去问。 */ resolveProfile?: (operation: PermissionOperation, requested: PermissionProfileName) => PermissionProfileName | Promise<PermissionProfileName>; now?: () => number; }
 
 export class PermissionManager {
   private readonly requests = new Map<string, PermissionRequest>();
@@ -25,7 +25,7 @@ export class PermissionManager {
   }
 
   async authorize(operation: PermissionOperation, profile: PermissionProfileName): Promise<PermissionAuthorization> {
-    const effectiveProfile = this.options.resolveProfile?.(operation, profile) ?? profile;
+    const effectiveProfile = (await this.options.resolveProfile?.(operation, profile)) ?? profile;
     const decision = await this.evaluate(operation, effectiveProfile);
     if (decision === 'allow') return { status: 'allowed', decision };
     if (decision === 'deny') return { status: 'denied', decision };

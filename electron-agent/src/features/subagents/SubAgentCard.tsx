@@ -14,6 +14,8 @@ import {
 import { useMemo, type MouseEvent } from 'react';
 import { formatRelative } from '../../lib/relativeTime';
 import type { SubAgentItem } from '../../lib/pi';
+import { modelWithThinking } from '../panels/subagentUtils';
+import { useProviderNames } from '../settings/providerListCache';
 import { accessLabel, parseSubAgentType, presetLabel, subAgentColor } from './subAgentType';
 
 export { formatRelative };
@@ -83,7 +85,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   dim: css`
     overflow: hidden;
-    max-width: 120px;
+    max-width: 240px;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
@@ -126,6 +128,9 @@ export function SubAgentCard({ item, label, onOpen, onStop }: SubAgentCardProps)
   const sm = statusMeta(item.status);
   const running = item.status === 'running';
   const access = accessLabel(type);
+  // 供应商 / 模型 · 思考档位；没记到档位时只显示模型。
+  const providerNames = useProviderNames();
+  const modelText = modelWithThinking(item.model ?? undefined, item.thinkingLevel ?? undefined, providerNames) ?? '';
 
   const stop = (e: MouseEvent) => {
     e.stopPropagation();
@@ -161,9 +166,9 @@ export function SubAgentCard({ item, label, onOpen, onStop }: SubAgentCardProps)
             <Icon icon={type.access === 'readonly' ? Eye : type.restricted ? FilePen : PencilLine} size={11} />
             {access}
           </span>
-          {item.model ? (
-            <span className={styles.dim} title={item.model}>
-              {item.model}
+          {modelText ? (
+            <span className={styles.dim} title={item.model ? `${modelText}\n${item.model}` : modelText}>
+              {modelText}
             </span>
           ) : null}
           <span>{formatRelative(item.updatedAt)}</span>

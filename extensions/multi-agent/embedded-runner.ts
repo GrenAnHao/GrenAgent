@@ -13,6 +13,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { promptWasAccepted } from "../_shared/promptDisposition.js";
+import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
 import { continuableReturnGuidance } from "./adjacent-tools.js";
@@ -23,7 +24,7 @@ import {
   type ActivationSettledInfo,
   type AgentSessionLike,
 } from "./activation.js";
-import { extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
+import { describeUnfinishedRun, extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
 import { type CapabilityProfile } from "./capability.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
 import { wipeSessionFile, writeSeed } from "./fork-seed.js";
@@ -97,6 +98,14 @@ export interface EmbeddedSubagentResult extends AgentResult {
   stopReason: SubagentStopReason;
   structured?: unknown;
 }
+
+/** 工具在跑时吐进度的间隔。要明显短于父侧卡死回收阈值 SUBAGENT_STUCK_MS（默认 300 秒）。 */
+const TOOL_HEARTBEAT_MS = 60_000;
+/** 流已经开始后，两个事件之间允许的最长安静。思考、文字、工具参数都会逐段推送，两分钟没动静基本是卡住了。 */
+const DEFAULT_STREAM_STALL_MS = 120_000;
+/** 卡住后自动中断并续跑的次数。用完还卡就按空闲超时结束。 */
+const DEFAULT_STALL_RETRIES = 2;
+const STALL_CHECK_MS = 5_000;
 
 const CHAT_EXCLUDED = new Set([
   "lsp",
@@ -273,6 +282,8 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
 type OpenedEmbedded = EmbeddedChildHandle & {
   getTranscript: () => string;
   getStreamingDelta: () => string;
+  /** 把当前进度再发一次 onUpdate（注册表据此刷新 updatedAt）。 */
+  heartbeat: () => void;
   clearEmitTimer: () => void;
   inheritedEventCount: number;
   structured?: StructuredCapture;
@@ -349,6 +360,8 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     excludeTools,
     sessionStartEvent: { type: "session_start", reason: "startup" },
   });
+  // 子会话也加载 MCP 扩展；绑定扩展前装上，首次投影的一批工具只刷新一次工具表。
+  installToolRefreshBatching(session);
 
   const sessionPath = sessionManager.getSessionFile();
   if (!sessionPath) throw new Error("embedded sub-agent: session file not created");
@@ -357,7 +370,9 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     sessionManager.appendModelChange(resolvedModel.provider, resolvedModel.id);
   }
   const workspace = currentWorkspaceContext()?.workspace ?? prepared.workspace;
-  opts.onUpdate?.({ text: "", transcript: "", sessionPath });
+  // 子会话真实生效的档位（已按模型能力收窄），不是调用参数里请求的那个。
+  const runningThinkingLevel: string | undefined = session.thinkingLevel;
+  opts.onUpdate?.({ text: "", transcript: "", sessionPath, thinkingLevel: runningThinkingLevel });
 
   let transcript = "";
   let streamingDelta = "";
@@ -371,7 +386,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     const emit = (): void => {
       lastEmitAt = Date.now();
       const { output } = extractAssistantOutput(session.messages, { streamingDelta, skipPrefix: inheritedEventCount });
-      opts.onUpdate!({ text: output, transcript, sessionPath });
+      opts.onUpdate!({ text: output, transcript, sessionPath, thinkingLevel: session.thinkingLevel });
     };
     if (elapsed >= streamThrottleMs) {
       if (emitTimer) {
@@ -433,6 +448,7 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     structured,
     getTranscript: () => transcript,
     getStreamingDelta: () => streamingDelta,
+    heartbeat: scheduleEmit,
     clearEmitTimer: () => {
       if (emitTimer) clearTimeout(emitTimer);
     },
@@ -476,11 +492,45 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         aborted = true;
         void session.abort();
       };
+      // 在跑的工具（含嵌套调用）。工具有自己的 timeout，安静不等于卡死：`cargo build *> log` 这类命令
+      // 整段没有输出，跑 6 分钟就会被当成空闲杀掉。工具在跑时空闲计时不到期，硬上限照管。
+      const toolsInFlight = new Set<string>();
+      // 上游卡住：模型请求在途（turn_start 到 assistant 的 message_end）却长时间没有任何流事件。
+      // 不整段杀掉子代理，只中断这一次请求，再补一句继续；被中断的半条回复不会发给模型，
+      // 它从最后一个有效状态接着跑。连续卡住超过次数才按空闲超时结束。
+      const stallMs = configMs("SUBAGENT_STREAM_STALL_MS", DEFAULT_STREAM_STALL_MS);
+      const firstTokenMs = configMs("SUBAGENT_FIRST_TOKEN_MS", idleMs);
+      const maxStallCuts = configCount("SUBAGENT_STALL_RETRIES", DEFAULT_STALL_RETRIES);
+      let awaitingModel = false;
+      let streamStarted = false;
+      let lastModelEventAt = Date.now();
+      let stallCuts = 0;
+      /** 刚中断的那次请求安静了多久；waitForIdle 返回后据此续跑。 */
+      let stallCutSilentMs: number | undefined;
+      const stallTimer = setInterval(() => {
+        if (!awaitingModel || stallCutSilentMs !== undefined || aborted || toolsInFlight.size > 0) return;
+        const silentMs = Date.now() - lastModelEventAt;
+        if (silentMs < (streamStarted ? stallMs : firstTokenMs)) return;
+        if (stallCuts >= maxStallCuts) {
+          expire(
+            `idle timeout: upstream sent nothing for ${Math.round(silentMs / 1000)}s` +
+              (stallCuts > 0 ? ` (after ${stallCuts} automatic ${stallCuts === 1 ? "retry" : "retries"})` : ""),
+          );
+          return;
+        }
+        stallCuts += 1;
+        stallCutSilentMs = silentMs;
+        awaitingModel = false;
+        void session.abort();
+      }, STALL_CHECK_MS);
+      stallTimer.unref?.();
       // 每个事件只记时间戳，不重建定时器：流式 delta 很密，到点时再按最后一次活动顺延。
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const armIdle = (delay: number): void => {
         idleTimer = setTimeout(() => {
           const limit = sawOutput ? idleMs : startupMs;
+          // 工具在跑归工具自己的 timeout，等模型归上面的卡顿看门狗。
+          if (toolsInFlight.size > 0 || awaitingModel || stallCutSilentMs !== undefined) return armIdle(limit);
           const left = lastActivity + limit - Date.now();
           if (left > 0) return armIdle(left);
           expire(
@@ -492,9 +542,34 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
       };
       armIdle(startupMs);
       const hardTimer = setTimeout(() => expire(`hard timeout after ${Math.round(maxMs / 1000)}s`), maxMs);
+      // 工具安静跑的时候没有事件，onUpdate 不触发，注册表 updatedAt 不动，父侧 reapStuck 会把它当卡死回收。
+      // 工具在跑就定时吐一次进度。
+      const heartbeatTimer = setInterval(() => {
+        if (toolsInFlight.size > 0 || awaitingModel) child.heartbeat();
+      }, TOOL_HEARTBEAT_MS);
+      heartbeatTimer.unref?.();
       const unsubActivity = session.subscribe((event: AgentSessionEvent) => {
         lastActivity = Date.now();
         const type = (event as { type?: string }).type;
+        const toolCallId = (event as { toolCallId?: unknown }).toolCallId;
+        if (typeof toolCallId === "string") {
+          if (type === "tool_execution_start") toolsInFlight.add(toolCallId);
+          else if (type === "tool_execution_end") toolsInFlight.delete(toolCallId);
+        }
+        if (type === "turn_start") {
+          awaitingModel = true;
+          streamStarted = false;
+          lastModelEventAt = lastActivity;
+        } else if (type === "message_update") {
+          streamStarted = true;
+          lastModelEventAt = lastActivity;
+        } else if (
+          (type === "message_end" && (event as { message?: { role?: string } }).message?.role === "assistant") ||
+          type === "agent_end" ||
+          type === "compaction_start"
+        ) {
+          awaitingModel = false;
+        }
         if (!sawOutput && (type === "message_update" || type === "tool_execution_start" || type === "tool_execution_update")) {
           // 启动宽限结束：换成常规空闲窗口重新计时，否则要等整段宽限过完才开始查空闲。
           sawOutput = true;
@@ -511,25 +586,18 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
 
       let result: EmbeddedSubagentResult;
       try {
-        await new Promise<void>((resolve, reject) => {
-          let accepted = false;
-          void session
-            .prompt(opts.task, {
-              source: "rpc",
-              preflightResult: (disposition) => {
-                if (!promptWasAccepted(disposition)) return;
-                accepted = true;
-                resolve();
-              },
-            })
-            .then(() => {
-              if (!accepted) reject(new Error("embedded sub-agent: prompt not accepted"));
-            })
-            .catch((error) => {
-              if (!accepted) reject(error);
-            });
-        });
+        await acceptPrompt(session, opts.task);
         await session.waitForIdle();
+        // 卡顿看门狗刚中断了一次请求：子会话停在那条被中断的 assistant 上，补一句继续接着跑。
+        // 中断和回复恰好同时完成时最后一条不是 aborted，不续。
+        while (stallCutSilentMs !== undefined && !aborted) {
+          const silentMs = stallCutSilentMs;
+          stallCutSilentMs = undefined;
+          if (!endedOnAbortedReply(session.messages as Parameters<typeof endedOnAbortedReply>[0])) break;
+          lastActivity = Date.now();
+          await acceptPrompt(session, stallContinuePrompt(silentMs));
+          await session.waitForIdle();
+        }
         const streamingDelta = child.getStreamingDelta();
         transcript = child.getTranscript();
         const { output, stopReason } = extractAssistantOutput(
@@ -538,11 +606,19 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         );
         const interrupted = aborted || stopReason === "aborted";
         const ok = !interrupted && stopReason === "completed" && output.trim().length > 0;
+        // 没有最终答复时把停下的原因交给父代理（模型报错原文 / 停在哪个工具上），而不是光秃秃的 "(no output)"。
+        const unfinished = ok || interrupted
+          ? undefined
+          : describeUnfinishedRun(session.messages as Parameters<typeof describeUnfinishedRun>[0], child.inheritedEventCount);
         result = {
           ok,
           output,
           exitCode: ok ? 0 : interrupted ? -1 : 1,
-          error: ok ? undefined : interrupted ? (timedOut ?? "aborted") : output.trim() ? undefined : "(no output)",
+          error: ok
+            ? undefined
+            : interrupted
+              ? (timedOut ?? "aborted")
+              : (unfinished ?? (output.trim() ? undefined : "(no output)")),
           transcript,
           sessionPath,
           stopReason,
@@ -572,6 +648,8 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         unsubActivity();
         if (idleTimer) clearTimeout(idleTimer);
         clearTimeout(hardTimer);
+        clearInterval(heartbeatTimer);
+        clearInterval(stallTimer);
         clearEmitTimer();
         opts.signal?.removeEventListener("abort", onAbort);
         try {
@@ -596,6 +674,31 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
   } finally {
     prepared.cleanup();
   }
+}
+
+function configMs(key: string, fallback: number): number {
+  const n = Number(getConfig(key)?.trim() || "");
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** 非负整数配置；`0` 是合法值（关掉自动续跑），不能用 `||` 回退。 */
+function configCount(key: string, fallback: number): number {
+  const raw = getConfig(key)?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
+function endedOnAbortedReply(messages: Array<{ role?: string; stopReason?: string }>): boolean {
+  const last = messages[messages.length - 1];
+  return last?.role === "assistant" && last.stopReason === "aborted";
+}
+
+export function stallContinuePrompt(silentMs: number): string {
+  return (
+    `（自动续跑）上游模型 ${Math.round(silentMs / 1000)} 秒没有任何响应，上一次请求已在本地中断。` +
+    "请从中断前的状态继续完成原任务，已经完成的步骤不要重做。"
+  );
 }
 
 function acceptPrompt(session: EmbeddedChildHandle["session"], text: string): Promise<void> {

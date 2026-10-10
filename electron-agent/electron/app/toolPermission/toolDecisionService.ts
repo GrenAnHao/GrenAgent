@@ -1,5 +1,4 @@
 import { digestArgs } from './argsDigest';
-import { getApprovalPolicy } from '../../../../extensions/_shared/approval.js';
 import { SUBAGENT_ASK_PINNED_RULE_ID } from '../../../../extensions/_shared/delegation-scope.js';
 import { matchBuiltinRules } from './builtinRules';
 import { matchUserRules } from './rules';
@@ -27,9 +26,9 @@ export class ToolDecisionService {
    * 内置 deny，也降不掉内置 ask。规则查询失败时降级为 ask 而非放行。
    */
   evaluate(call: ToolCallFacts): ToolDecision {
-    // 对话中切档写进 live 表。这里现读，覆盖 sidecar 可能过期的 facts.preset。
-    const live = getApprovalPolicy(call.workspace, call.sessionId);
-    const facts = live !== call.preset ? { ...call, preset: live } : call;
+    // 审批档表和 safety 扩展都在 agent-host 子进程里：facts.preset 是扩展在工具调用那一刻现读的，
+    // 对话中切档已经包含在内。主进程这边没有这张表，不能再拿它覆盖。
+    const facts = call;
     const builtin = matchBuiltinRules(facts);
     let user: ToolRule | undefined;
     let lookupFailed = false;

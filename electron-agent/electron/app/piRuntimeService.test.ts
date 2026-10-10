@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
 import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
@@ -994,6 +994,109 @@ describe('进程内宿主交互路径', () => {
     }
   });
 
+  describe('后台任务跟着会话走', () => {
+    const roots: string[] = [];
+    afterEach(async () => {
+      for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+    });
+
+    /** 前景会话空闲（没在流式、没有进行中的回合），但它名下有后台任务。 */
+    async function idleForegroundHost() {
+      const root = await mkdtemp(join(tmpdir(), 'pi-session-jobs-'));
+      roots.push(root);
+      const ownerFile = join(root, 'owner.jsonl');
+      const otherFile = join(root, 'other.jsonl');
+      await writeFile(ownerFile, JSON.stringify({ type: 'session', id: 'owner-session', cwd: 'C:/work' }) + '\n');
+      await writeFile(otherFile, JSON.stringify({ type: 'session', id: 'other-session', cwd: 'C:/work' }) + '\n');
+      const original = fakeHandle({ sessionId: 'owner-session', sessionFile: ownerFile });
+      const handles = [original];
+      let foreground = original;
+      const host = {
+        open: vi.fn(async () => original),
+        get: vi.fn(() => foreground),
+        close: vi.fn(async () => {}),
+        workspaces: vi.fn(() => ['C:/work']),
+        list: vi.fn(() => handles),
+        focus: vi.fn((_workspace: string, handle: typeof original) => { foreground = handle; }),
+        evict: vi.fn(async (_workspace: string, handle: typeof original) => {
+          handles.splice(handles.indexOf(handle), 1);
+        }),
+        openAdditional: vi.fn(async () => {
+          const extra = fakeHandle({ sessionId: 'fresh', sessionFile: join(root, 'fresh.jsonl') });
+          handles.push(extra);
+          return extra;
+        }),
+      } as AgentHostPort;
+      return { host, original, handles, ownerFile, otherFile };
+    }
+
+    const base = { agentDir: 'C:/a', modelRuntimeHost: noopModelHost };
+
+    it('回合已结束、名下有存活后台任务的会话，切到另一个会话时停靠，不原地替换', async () => {
+      const { host, original, handles, otherFile } = await idleForegroundHost();
+      const hasLiveJobs = vi.fn((sessionId: string) => sessionId === 'owner-session');
+      const service = new PiRuntimeService({ ...base, agentHost: host, hasLiveJobs });
+      await service.openWorkspace('C:/work');
+      await service.send('C:/work', 'agent_switch_session', { sessionPath: otherFile });
+      // 原地 switchSession 会触发 session_shutdown，把这个会话的后台任务一并取消。
+      expect(original.switchSession).not.toHaveBeenCalled();
+      expect(host.openAdditional).toHaveBeenCalledTimes(1);
+      expect(handles[1].switchSession).toHaveBeenCalledWith(otherFile);
+      expect(hasLiveJobs).toHaveBeenCalledWith('owner-session');
+    });
+
+    it('新建会话同样停靠有存活后台任务的会话', async () => {
+      const { host, original } = await idleForegroundHost();
+      const service = new PiRuntimeService({ ...base, agentHost: host, hasLiveJobs: () => true });
+      await service.openWorkspace('C:/work');
+      await service.send('C:/work', 'agent_new_session', {});
+      expect(original.newSession).not.toHaveBeenCalled();
+      expect(host.openAdditional).toHaveBeenCalledTimes(1);
+    });
+
+    it('没有存活后台任务时行为不变：空闲会话原地切换', async () => {
+      const { host, original, otherFile } = await idleForegroundHost();
+      const service = new PiRuntimeService({ ...base, agentHost: host, hasLiveJobs: () => false });
+      await service.openWorkspace('C:/work');
+      await service.send('C:/work', 'agent_switch_session', { sessionPath: otherFile });
+      expect(original.switchSession).toHaveBeenCalledWith(otherFile);
+      expect(host.openAdditional).not.toHaveBeenCalled();
+    });
+
+    it('宿主不支持停靠时退回原地切换，不对空闲会话报 SESSION_BUSY', async () => {
+      const { host, original, otherFile } = await idleForegroundHost();
+      delete (host as { openAdditional?: unknown }).openAdditional;
+      const service = new PiRuntimeService({ ...base, agentHost: host, hasLiveJobs: () => true });
+      await service.openWorkspace('C:/work');
+      await expect(service.send('C:/work', 'agent_switch_session', { sessionPath: otherFile })).resolves.toBeDefined();
+      expect(original.switchSession).toHaveBeenCalledWith(otherFile);
+    });
+
+    it('停靠的会话回合结束后，有存活后台任务就不释放，任务结束后再释放', async () => {
+      const { host, original, handles, otherFile, ownerFile } = await idleForegroundHost();
+      const live = { value: true };
+      const service = new PiRuntimeService({
+        ...base,
+        agentHost: host,
+        hasLiveJobs: (sessionId) => sessionId === 'owner-session' && live.value,
+      });
+      await service.openWorkspace('C:/work');
+      await service.send('C:/work', 'agent_switch_session', { sessionPath: otherFile });
+      expect(handles).toHaveLength(2);
+
+      const turnEnd = { type: 'agent_end', messages: [] };
+      const meta = { sessionId: 'owner-session', sessionPath: ownerFile };
+      await service.handlePiEvent('C:/work', turnEnd, meta);
+      await vi.waitFor(() => expect(original.session.waitForIdle).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(host.evict).not.toHaveBeenCalled();
+
+      live.value = false;
+      await service.handlePiEvent('C:/work', turnEnd, meta);
+      await vi.waitFor(() => expect(host.evict).toHaveBeenCalledWith('C:/work', original));
+    });
+  });
+
   it('agent_set_mode 写 runtime config，不发斜杠 prompt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-set-mode-'));
     const runtimeConfigPath = join(root, 'runtime-settings.json');
@@ -1188,6 +1291,109 @@ describe('进程内宿主交互路径', () => {
       await service.refreshModelRegistry();
       expect(parked.session.state.model).toBe(live);
       expect(front.session.state.model).toBe(live);
+    });
+  });
+
+  describe('删会话前把它从运行时摘下', () => {
+    const roots: string[] = [];
+    afterEach(async () => {
+      for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+    });
+
+    /** 前景 front 空闲、后台 parked 正在跑；会话文件按 SDK 的目录 / 文件名写法落盘。 */
+    async function project() {
+      const root = await mkdtemp(join(tmpdir(), 'pi-release-session-'));
+      roots.push(root);
+      const dir = join(root, '--C--work--');
+      await mkdir(dir);
+      const files = {
+        front: join(dir, '2026-10-07T00-00-00-000Z_front.jsonl'),
+        parked: join(dir, '2026-10-07T00-00-01-000Z_parked.jsonl'),
+        fresh: join(dir, '2026-10-07T00-00-02-000Z_fresh.jsonl'),
+      };
+      await writeFile(files.front, JSON.stringify({ type: 'session', id: 'front', cwd: 'C:/work' }) + '\n');
+      await writeFile(files.parked, JSON.stringify({ type: 'session', id: 'parked', cwd: 'C:/work' }) + '\n');
+      const parked = fakeHandle({ sessionId: 'parked', sessionFile: files.parked, isStreaming: true });
+      const front = fakeHandle({ sessionId: 'front', sessionFile: files.front });
+      front.getState = vi.fn(() => ({ sessionFile: front.session.sessionFile, sessionId: front.session.sessionId }));
+      // 新会话在第一条助手消息前不落盘，fresh 文件不存在。
+      front.newSession = vi.fn(async () => {
+        front.session.sessionFile = files.fresh;
+        front.session.sessionId = 'fresh';
+        front.session.isStreaming = false;
+        return { cancelled: false };
+      });
+      const handles = [parked, front];
+      let foreground = front;
+      const host = {
+        open: vi.fn(async () => foreground),
+        get: vi.fn(() => foreground),
+        close: vi.fn(async () => {}),
+        workspaces: vi.fn(() => ['C:/work']),
+        list: vi.fn(() => [...handles]),
+        focus: vi.fn((_w: string, handle: typeof front) => { foreground = handle; }),
+        evict: vi.fn(async (_w: string, handle: typeof front) => {
+          handles.splice(handles.indexOf(handle), 1);
+          if (foreground === handle) foreground = handles[0];
+        }),
+      } as AgentHostPort & { evict: ReturnType<typeof vi.fn> };
+      const store = {
+        createThread: vi.fn(async (i: never) => i),
+        createTurn: vi.fn(async (i: never) => i),
+        updateTurn: vi.fn(async (i: never) => i),
+      };
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost, threadStore: store as never });
+      await service.openWorkspace('C:/work');
+      return { files, parked, front, host, store, service, foreground: () => foreground };
+    }
+
+    it('停在后台、正在跑的会话：拆掉它的 handle，回合记成取消，排队的跟进不再发回去', async () => {
+      const { files, parked, front, host, store, service, foreground } = await project();
+      await service.send('C:/work', 'agent_prompt', { message: 'run', targetSessionPath: files.parked });
+      await service.send('C:/work', 'agent_prompt', { message: 'later', streamingBehavior: 'followUp', targetSessionPath: files.parked });
+      expect(service.listRunningTurns()).toEqual([expect.objectContaining({ sessionId: 'parked' })]);
+
+      // 渲染层传来的拼法（分隔符 / 大小写）可以和 SDK 的不同。
+      await service.releaseSessions([files.parked.replace(/\\/g, '/').toUpperCase()]);
+
+      expect(host.evict).toHaveBeenCalledWith('C:/work', parked);
+      expect(front.newSession).not.toHaveBeenCalled();
+      expect(foreground()).toBe(front);
+      expect(service.listRunningTurns()).toEqual([]);
+      expect(store.updateTurn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'cancelled' }));
+      // 拆除时迟到的回合结束事件：排队那条不能再发回已删的会话。
+      await service.handlePiEvent('C:/work', { type: 'agent_end', messages: [] }, { sessionId: 'parked', sessionPath: files.parked, source: 'interactive' });
+      expect(parked.session.followUp).not.toHaveBeenCalled();
+      expect(parked.prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('前景正在跑的会话：同一个 handle 换成新的空会话，getState 拿到新会话', async () => {
+      const { files, front, host, store, service, foreground } = await project();
+      front.session.isStreaming = true;
+      await service.send('C:/work', 'agent_prompt', { message: 'run' });
+
+      await service.releaseSessions([files.front]);
+
+      expect(front.newSession).toHaveBeenCalledTimes(1);
+      expect(host.evict).not.toHaveBeenCalled();
+      expect(foreground()).toBe(front);
+      expect(store.updateTurn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'cancelled' }));
+      expect(service.listRunningTurns()).toEqual([expect.objectContaining({ sessionId: 'parked' })]);
+      await expect(service.send('C:/work', 'agent_get_state', {})).resolves.toMatchObject({ sessionFile: files.fresh, sessionId: 'fresh' });
+    });
+
+    it('不在任何 handle 上的会话什么都不动', async () => {
+      const { parked, front, host, service } = await project();
+      await service.releaseSessions(['C:/elsewhere/gone.jsonl']);
+      expect(host.evict).not.toHaveBeenCalled();
+      expect(front.newSession).not.toHaveBeenCalled();
+      expect(parked.session.abort).not.toHaveBeenCalled();
+    });
+
+    it('前景换新会话被扩展取消时报错，调用方不能删掉还挂在 handle 上的文件', async () => {
+      const { files, front, service } = await project();
+      front.newSession = vi.fn(async () => ({ cancelled: true }));
+      await expect(service.releaseSessions([files.front])).rejects.toThrow('SESSION_RELEASE_CANCELLED');
     });
   });
 });

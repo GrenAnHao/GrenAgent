@@ -10,6 +10,8 @@ installDevElectronHeapArg();
 const mainInput = {
   main: resolve(__dirname, "electron/main.ts"),
   "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
+  // 交互运行时所在的子进程（ELECTRON_RUN_AS_NODE）。主进程只经 IPC 和它对话。
+  "agent-host": resolve(__dirname, "electron/agentProcess/hostEntry.ts"),
 };
 
 const mainExternal = [

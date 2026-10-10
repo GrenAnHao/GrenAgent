@@ -21,16 +21,20 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 │  │ 记忆 L0-L3 / Wiki FTS5 / 任务与审计（node:sqlite）    │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                          │
-│  主进程内嵌 Pi SDK                                        │
-│    → AgentSessionRuntime / ModelRuntime（交互、Goal、短调用）│
+│  主进程：ModelRuntime（短调用）                            │
+│    │ Node IPC（RpcPeer，结构化克隆）                         │
+│    ▼                                                     │
+│  agent-host 子进程（ELECTRON_RUN_AS_NODE，所有工作区共用）     │
+│    → AgentSessionRuntime / ModelRuntime（交互、Goal）        │
+│    → 全部扩展、MCP 管理器、后台 job、进程内子代理               │
 │    → spawn(process.execPath, [PI_WORKER_ENTRY])          │
-│      + ELECTRON_RUN_AS_NODE（子代理）                      │
+│      + ELECTRON_RUN_AS_NODE（worktree 隔离的子代理）         │
 └────────────────────────────────────────────────────────┘
 ```
 
-- **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。
-- **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）由主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`，统一 `gren:event:` 前缀）。
-- **执行**：主进程内嵌 Pi SDK。交互与 Goal 走 `AgentSessionRuntime`；短调用走 `ModelRuntime.completeSimple`；子代理 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。
+- **请求**：渲染层通过 `window.gren.invoke(command, args)` 调用主进程，走单业务通道 `gren:invoke`（`electron/ipc/contracts.ts` 定义、按命令名分发）。运行时命令（`agent_*`、子代理、后台 job、MCP 热重载与探测）由主进程原样转发给 agent-host 子进程。
+- **流式回传**：Agent 运行过程中的事件（`agent_start` / `message_start` / `message_delta` / `agent_end` 等）在 agent-host 子进程里产生，经 IPC 的 `broadcast` 事件交给主进程，主进程 `broadcastPiEvent` 广播到所有窗口（`pi://event`、`pi://ui-request`、`pi://exit`、`pi://jobs`，统一 `gren:event:` 前缀）。
+- **执行**：Pi SDK 跑在 agent-host 子进程里。交互与 Goal 走 `AgentSessionRuntime`；主进程的短调用（记忆、知识库、增强提示词、测活）走主进程自己的 `ModelRuntime.completeSimple`；需要 worktree 隔离的子代理由子进程 `spawn(process.execPath, [PI_WORKER_ENTRY])` 并设 `ELECTRON_RUN_AS_NODE=1`。
 - **隔离**：业务代码只依赖 `src/platform/runtime.ts` 定义的 `GrenRuntimeBridge`，不直接引用 Electron；无 bridge 时自动降级为浏览器预览实现。
 
 ## 模块职责
@@ -43,7 +47,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### extensions —— 内置扩展包
 
-包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进主进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端经 `PiPackageService` 管理官方 `settings.packages`：扩展 tab 列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后 `requestResourceReload()`。
+包名 `pi-extensions-pack`。`extensions/index.ts` 的 `allExtensions` 定义打进 agent-host 子进程 / worker 的工厂，实际加载还要经过 `cli/src/extension-profile.ts`。Electron 的 `builtinPlugins.ts` 注册 `goal`、`web-search`、`mcp`、`memory`、`wiki-rag`、`code-retrieval`，仅 ready 插件进入白名单；`safety` 和 `auto-title` 保留为内置基础服务。短调用不加载扩展。`extensions/package.json` 的 `pi.extensions` 字段只用于独立安装元数据。桌面端主进程保留 `PiPackageService` 与 `package_*` IPC 管理官方 `settings.packages`（渲染层已无扩展页签，没有入口调用）：可列出当前会话实际会加载的内置工厂（`filterManagedExtensions(filterExtensionsByProfile(manifestExtensions, profile), allowedPluginIds)`，与 `gren-runtime` 同源；内置清单向 agent-host 子进程要）以及用户 / 项目安装的 Pi Package；市场检索 npm `keywords:pi-package`，安装走 SDK `DefaultPackageManager`，写入后经子进程 `requestResourceReload()`。
 
 扩展通过 `pi.registerTool()` 注册工具、`pi.registerCommand()` 注册斜杠命令。能力类扩展（生图 / TTS / Embedding）通过共享的 `resolveCapabilityEndpoint` 从模型注册表解析供应商与模型。
 
@@ -70,7 +74,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files`、`code_status`、`code_usages`、`code_path`、`code_hierarchy`、`code_call_graph`、`code_deps`、`code_cycles`、`code_dead_code`、`code_metrics`、`code_routes`、`code_traverse`、`code_context`、`code_changed` |
 | `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`（`format`: markdown / text / html / json / llms） |
-| `web-search` | 多引擎联网搜索 | `web_search`、`web_search_multi` |
+| `web-search` | 多引擎联网搜索。Devin 登录有效且未指定引擎链时，`web_search` 先走 Devin，失败再回退 Bing、搜狗、百度。`devin_code_search` 把查询和选中片段发往 Windsurf | `web_search`、`web_search_multi`、`devin_code_search` |
 | `mcp` | 外部 MCP server 工具桥接 | `mcp__<server>__<tool>`（动态） |
 | `mcp-policy` | MCP 工具权限策略与审计 | 策略 / 中间件，无显式工具 |
 | `image-gen` | 文生图 | `generate_image` |
@@ -96,7 +100,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **渲染层（`electron-agent/src`）：**
 
-- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（记忆与知识资产）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
+- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件」标签里的项目文件浏览器）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（记忆与知识资产）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
 - `stores/`：zustand store 群，`agent.ts` / `agentReducer.ts` 为核心，把 pi 事件流折叠为会话状态。
 - `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（记忆与 Wiki API）等。
 - `platform/`：**后端抽象层**。`runtime.ts` 定义 `GrenRuntimeBridge` 并对接 `window.gren`，无 bridge 时降级为 `browserPreviewBridge`，使渲染层可在纯浏览器预览态运行。
@@ -105,14 +109,15 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **主进程（`electron-agent/electron`）：**
 
-- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `AgentHost` / `ModelRuntimeHost` 并启动 Agent Data Runtime，`before-quit` 关闭 workspace handle 与运行时。
-- `app/`：服务层——`piRuntimeService`（`agent_*` 到进程内 `WorkspaceHandle`；模式 / 审批 / 删段写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。`jobsBridge` 订阅同进程的 jobs 注册表，把后台 job 的状态与输出增量经 `pi://jobs` 广播（100ms 合并），另有 `job_snapshot` / `job_kill` 命令；渲染层 `jobLiveStore` 按字节偏移接帧，bash 卡片凭结果 details 里的 `jobId` + `jobStartedAt` 跟随后台输出并可停止。
+- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `ModelRuntimeHost`（短调用）、启动 Agent Data Runtime、拉起 agent-host 子进程（`AgentProcessClient`），`before-quit` 先关子进程、再停 Agent Data。主进程不静态引入 `extensions/**` 的运行时模块。
+- `agentProcess/`：主进程与 agent-host 子进程之间的一层。`rpcPeer.ts` 是对称 RPC（请求 / 响应两个方向 + 单向事件），`contract.ts` 列出两个方向的方法名（`AGENT_METHODS` / `HOST_METHODS`）。`agentProcessClient.ts` 负责拉起（同一份 Electron 可执行文件 + `ELECTRON_RUN_AS_NODE`，不带 V8 参数：生产入口是字节码，参数不同缓存会被拒）、`host.ready` 握手、意外退出时拒绝在途请求并对打开过的工作区广播 `pi://exit`、下一条运行时命令再拉起（60 秒内崩 3 次暂停 30 秒）、关停（`host.shutdown`，10 秒不退就整树杀掉）。`mainBindings.ts` 是主进程这一侧的接线：子进程回调主进程的处理表（解析工作区、AgentData 令牌、MCP 运行配置、`pi.*` 授权、回合入库、带锁合并 `runtime-settings.json`），以及给 IPC 命令和各服务用的转发端口；释放 / 查询类端口只在子进程在跑时转发，不在就给兜底值。子进程每 10 秒报一次内存与事件循环延迟（`runtime-diag.jsonl` 里的 `agent-host-sample`）。`jobGuard.ts` 在 Windows 上为每个 agent-host 启动 `pi-job-guard.exe`（源码 `electron-agent/native/job-guard.c`，预编译入仓，构建时拷到 `out/main`）：把 agent-host 放进一个不允许静默脱离的 Job，agent-host 退出（崩溃、关停或主进程崩溃）后结束 Job 里残留的、没有可见窗口的子孙进程（`agent-host-sweep`）。`hostEntry.ts` 是子进程入口，`runtimeGraph.ts` 在子进程里装配 `AgentHost` / `PiRuntimeService` / `SubagentService` / jobs 桥 / MCP 操作。冒烟脚本 `scripts/agent-host-smoke.mjs` 在临时 HOME 里跑真实子进程。
+- `app/`：服务层——`piRuntimeService`（在 agent-host 子进程里运行：`agent_*` 到 `WorkspaceHandle`；模式 / 审批 / 删段经主进程带锁写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`（工作区内的读写与按层列目录，路径一律 realpath 后校验不越界）、`fileWatchService`（文件浏览器展开的目录各开一个非递归 `fs.watch`，合并后经 `files://changed` 推回发起的窗口）、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。`jobsBridge` 在 agent-host 子进程里订阅同进程的 jobs 注册表，把后台 job 的状态与输出增量经 `pi://jobs` 广播（100ms 合并，经主进程转发到窗口），另有 `job_snapshot` / `job_kill` 命令；渲染层 `jobLiveStore` 按字节偏移接帧，bash 卡片凭结果 details 里的 `jobId` + `jobStartedAt` 跟随后台输出并可停止。后台任务归启动它的会话（owner = sessionId），没有全局入口；名下有存活任务的会话被切走时 `piRuntimeService` 把它的 handle 停靠在后台（`hasLiveJobs`），任务跑完才释放，否则 `session_shutdown` 会把任务一并取消。前台 bash 也是匿名 job（模型拿不到 id），运行中的 partial 更新把 `details.foregroundJob` 带给界面，卡片据此跟随输出并可单独停止这一条命令。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
-- `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`。同一项目里空闲会话共用前景 handle，用 `switchSession` 换文件；正在跑的会话留在自己的 handle 上，再打开另一个会话不会拆掉它。
+- `agent/`：`WorkspaceHandle`、`AgentHost`、`ModelRuntimeHost`、`SessionUiAdapter`（`ModelRuntimeHost` 两个进程各一份，其余都在 agent-host 子进程里）。同一项目里空闲会话共用前景 handle，用 `switchSession` 换文件；正在跑的会话留在自己的 handle 上，再打开另一个会话不会拆掉它。
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
-- `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY`。
+- `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY` 与 agent-host 入口（打包后都从 `app.asar.unpacked/out/main/` 加载）。
 
 **Agent Data Runtime（`electron-agent/electron/agentData`）：**
 

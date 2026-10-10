@@ -196,13 +196,14 @@ function setup(options?: {
     streamSimple,
     ensure: vi.fn(async () => ({ stream, complete, getModel })),
   };
-  const agentHost = {
-    get: vi.fn(() => options?.sessionModel ? { session: { model: options.sessionModel }, getState: () => ({ model: options.sessionModel }) } : undefined),
-  };
+  const activeModel = vi.fn(async () => {
+    const model = options?.sessionModel as { provider?: string; id?: string } | undefined;
+    return model?.provider && model.id ? { provider: model.provider, modelId: model.id } : null;
+  });
   const agentData = { request: vi.fn() };
   const service = createEnhancePrompt({
     host: host as never,
-    agentHost: agentHost as never,
+    activeModel,
     settings: async () => options?.settings ?? {},
     agentData: agentData as never,
   });
@@ -335,7 +336,7 @@ describe('createEnhancePrompt 实验路径', () => {
     };
     const service = createEnhancePrompt({
       host: host as never,
-      agentHost: { get: () => ({ session: { model }, getState: () => ({ model }) }) } as never,
+      activeModel: async () => ({ provider: model.provider, modelId: model.id }),
       settings: async () => ({ enhancePromptUseProjectContext: '1' }),
       agentData: { request } as never,
     });
@@ -494,7 +495,7 @@ describe('createEnhancePrompt 实验路径', () => {
     };
     const service = createEnhancePrompt({
       host: host as never,
-      agentHost: { get: () => ({ session: { model }, getState: () => ({ model }) }) } as never,
+      activeModel: async () => ({ provider: model.provider, modelId: model.id }),
       settings: async () => ({ enhancePromptUseProjectContext: '1' }),
       agentData: { request } as never,
     });
@@ -614,10 +615,9 @@ describe('createEnhancePrompt 准备阶段', () => {
         streamSimple,
         ensure: vi.fn(async () => ({ stream: vi.fn(), complete: vi.fn(), getModel: vi.fn(() => model) })),
       };
-      const agentHost = { get: () => ({ session: { model } }) };
       const service = createEnhancePrompt({
         host: host as never,
-        agentHost: agentHost as never,
+        activeModel: async () => ({ provider: model.provider, modelId: model.id }),
         settings: () => new Promise<Record<string, string>>(() => {}),
         agentData: { request: vi.fn() } as never,
       });

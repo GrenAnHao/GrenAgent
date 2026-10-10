@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { Fragment, memo, type ReactNode } from 'react';
 import { Icon } from '@lobehub/ui';
 import { EyeOff } from 'lucide-react';
 import { createStaticStyles } from 'antd-style';
@@ -11,8 +11,9 @@ import { formatStructuredMessageText } from './structuredMessageText';
 import { StructuredMessageBody } from './StructuredMessageBody';
 import { ToolExecution } from '../tools/ToolExecution';
 import { ContextToolGroup } from '../tools/ContextToolGroup';
+import { isCodemodeTool } from '../tools/codemodeModel';
 import type { TimelineSegment, ToolSegment } from './groupMessages';
-import { buildTurnRows } from './turnRows';
+import { buildTurnRows, type TurnRow } from './turnRows';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import type { AgentStoreApi } from '../../stores/agent';
 import { changesForTurn, presentedForTurn, turnSettled } from './turnDeliverables';
@@ -45,6 +46,8 @@ interface TurnTimelineProps {
 }
 
 function ToolSegmentBody({ segment }: { segment: ToolSegment }) {
+  // codemode 自己把嵌套调用和 details.calls 合成一张列表画在卡片里。
+  const ownsChildren = isCodemodeTool(segment.toolName);
   return (
     <>
       <ToolExecution
@@ -56,8 +59,9 @@ function ToolSegmentBody({ segment }: { segment: ToolSegment }) {
         argsComplete={segment.argsComplete}
         startedAt={segment.startedAt}
         durationMs={segment.durationMs}
+        nested={ownsChildren ? segment.children : undefined}
       />
-      {segment.children && segment.children.length > 0 ? (
+      {!ownsChildren && segment.children && segment.children.length > 0 ? (
         <div className={styles.nestedTools}>
           {segment.children.map((child) => (
             <ToolSegmentBody key={child.id} segment={child} />
@@ -146,6 +150,27 @@ const MemoSegment = memo(SegmentItem, (prev, next) => {
   return false;
 });
 
+function renderTurnRow(row: TurnRow): ReactNode {
+  return row.kind === 'context' ? (
+    <ContextToolGroup tools={row.tools} />
+  ) : (
+    <MemoSegment segment={row.segment} />
+  );
+}
+
+/** 子代理长工具循环按行虚拟化；整轮的复制入口只随最后一行渲染。 */
+export function TurnTimelineRow({ row, first, last, actionText }: { row: TurnRow; first: boolean; last: boolean; actionText?: string }) {
+  const actions = actionText ? (
+    <MessageActionBar ctx={{ role: 'assistant', text: actionText }} bar={['copy']} menu={['copy']} />
+  ) : undefined;
+  // 列表每行已有上下各 4px，正好等于主时间线的 8px gap；消息的 8px padding 只留在整轮首尾。
+  return (
+    <ChatItemShell placement="left" actions={actions} paddingBlock={`${first ? 8 : 0}px ${last ? 8 : 0}px`}>
+      {renderTurnRow(row)}
+    </ChatItemShell>
+  );
+}
+
 /**
  * 助手回合时间线：把同一轮的 reasoning / tool / text 按真实发生顺序平铺渲染
  *（对齐 MiMo SessionTurn / AssistantParts），每段独立、稳定 key；连续的查找类工具
@@ -186,13 +211,7 @@ function renderTurn(
           已移出上下文
         </span>
       ) : null}
-      {rows.map((row) =>
-        row.kind === 'context' ? (
-          <ContextToolGroup key={row.id} tools={row.tools} />
-        ) : (
-          <MemoSegment key={row.id} segment={row.segment} />
-        ),
-      )}
+      {rows.map((row) => <Fragment key={row.id}>{renderTurnRow(row)}</Fragment>)}
       {showDeliverables && turnId && !live && turnSettled(segments) ? (
         <TurnTail
           turnId={turnId}

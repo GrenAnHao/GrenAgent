@@ -63,6 +63,13 @@ export default async function (t) {
   await t.waitForText(`${done} [data-testid="codemode-output"]`, '"search": "fulfilled"', 5000)
   t.ok('展开：返回值 JSON 格式化', ((await t.text(`${done} [data-testid="codemode-output"]`)) ?? '').includes('"search": "fulfilled"'))
   t.ok('展开：文本输出保留', output.includes('Split panels to isolate content areas.'))
+  t.check('展开：1.1.0 的 ==> text N/M <== 标记不显示', output.includes('==> text'), false)
+  t.check('展开：<console_output> 标签不显示', output.includes('console_output'), false)
+  t.check('展开：text() 与返回值拆成一个文本块 + 一个 JSON 块', [
+    await t.count(`${done} [data-testid="codemode-output"] [data-block="text"]`),
+    await t.count(`${done} [data-testid="codemode-output"] [data-block="json"]`),
+  ], [1, 1])
+  t.ok('展开：控制台输出单独成块', ((await t.text(`${done} [data-testid="codemode-output"] [data-block="console"]`)) ?? '').includes('wiki fulfilled'))
   t.check('展开：没有横向溢出', await noHorizontalOverflow(t, 'live-done'), 0)
   await t.shot('live-done-expanded')
 
@@ -95,6 +102,8 @@ export default async function (t) {
   await t.waitFor(`${fail} [data-testid="codemode-error"]`)
   t.ok('失败：脚本错误单独标红', (await t.text(`${fail} [data-testid="codemode-error"]`))?.includes('not indexed'))
   t.check('失败：没有普通输出块', await t.count(`${fail} [data-testid="codemode-output"] [data-block="text"]`), 0)
+  t.ok('失败：报错前的控制台输出单独成块', ((await t.text(`${fail} [data-testid="codemode-output"] [data-block="console"]`)) ?? '').includes('search fulfilled'))
+  t.check('失败：错误块不带控制台内容', ((await t.text(`${fail} [data-testid="codemode-error"]`)) ?? '').includes('console_output'), false)
   const outRect = await t.rect(`${fail} [data-testid="codemode-output"]`)
   const scriptRect = await t.rect(`${fail} [data-testid="codemode-script"]`)
   t.ok('失败：输出（错误）排在脚本前面', outRect != null && scriptRect != null && outRect.y < scriptRect.y)
@@ -115,6 +124,10 @@ export default async function (t) {
   await clickRow(t, `${hist} [data-testid="codemode-card"] > [data-testid="tool-execution"] > div`)
   await t.waitForText(`${hist} [data-testid="codemode-output"]`, '脚本耗时 3.4s', 5000)
   t.ok('历史：展开后输出标明脚本耗时', ((await t.text(`${hist} [data-testid="codemode-output"]`)) ?? '').includes('脚本耗时 3.4s'))
+  await t.waitForText(`${hist} [data-testid="codemode-output"]`, '"search": "fulfilled"', 5000)
+  const histOutput = (await t.text(`${hist} [data-testid="codemode-output"]`)) ?? ''
+  t.ok('历史（1.0.2 形状）：console 行和文本合并显示', histOutput.includes('wiki fulfilled') && histOutput.includes('Split panels to isolate content areas.'))
+  t.check('历史（1.0.2 形状）：没有控制台块', await t.count(`${hist} [data-testid="codemode-output"] [data-block="console"]`), 0)
   await t.shot('history-expanded')
 
   // —— 调用很多：只露最后 5 条，前面折成一行，点开全部 ——

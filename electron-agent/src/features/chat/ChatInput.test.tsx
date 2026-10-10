@@ -1,7 +1,8 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { onSend, cancelPendingOverlay, getDocument, cleanDocument, setDocument, toastError, abortEnhancePrompt, chatState } = vi.hoisted(() => ({
+const { onSend, cancelPendingOverlay, getDocument, cleanDocument, setDocument, toastError, abortEnhancePrompt, chatState, sessionState } = vi.hoisted(() => ({
+  sessionState: { activeSessionPath: null as string | null },
   onSend: vi.fn(() => Promise.resolve()),
   cancelPendingOverlay: vi.fn(() => Promise.resolve('cancelled' as const)),
   getDocument: vi.fn(() => 'hello'),
@@ -39,7 +40,7 @@ vi.mock('../../stores/AgentStoreContext', () => ({
   }),
   useAgentStoreContext: () => ({ workspace: '/ws' }),
 }));
-vi.mock('../../store', () => ({ useSessionStore: (sel: (s: { activeSessionPath: null }) => unknown) => sel({ activeSessionPath: null }) }));
+vi.mock('../../store', () => ({ useSessionStore: (sel: (s: typeof sessionState) => unknown) => sel(sessionState) }));
 vi.mock('../../stores/chatDraftStore', () => ({
   useChatDraftStore: { getState: () => ({ setDraft: vi.fn(), clearDraft: vi.fn(), getDraft: () => '' }) },
 }));
@@ -47,9 +48,17 @@ vi.mock('./input/editor/MessageEditor', async () => {
   const { useChatInput } = await import('./input/ChatInputContext');
   return {
     MessageEditor: () => {
-      const { send, pastedTexts } = useChatInput();
+      const { send, pastedTexts, attachments, addAttachments } = useChatInput();
       return (
         <>
+          <button
+            type="button"
+            data-testid="add-image"
+            onClick={() =>
+              addAttachments([{ type: 'image', mimeType: 'image/png', data: `img-${sessionState.activeSessionPath}`, name: 'a.png', url: 'blob:a' }])
+            }
+          />
+          <span data-testid="image-count">{attachments.length}</span>
           <button type="button" data-testid="do-send" onClick={() => void send()} />
           <button type="button" data-testid="do-interrupt" onClick={() => void send({ interrupt: true })} />
           <span data-testid="pasted-count">{pastedTexts.length}</span>
@@ -63,9 +72,12 @@ vi.mock('./input/editor/MessageEditor', async () => {
 import { ChatInput } from './ChatInput';
 import { fireEvent, screen } from '@testing-library/react';
 import { offerBrowserElementToChat } from '../dock/browser/browserElementPicker';
+import { useComposerFilesStore } from './input/composerFiles';
 
 afterEach(() => {
   cleanup();
+  sessionState.activeSessionPath = null;
+  useComposerFilesStore.setState({ byKey: {} });
   onSend.mockClear();
   cancelPendingOverlay.mockClear();
   toastError.mockClear();
@@ -210,5 +222,78 @@ describe('ChatInput send markdown unescape', () => {
     offerBrowserElementToChat({ title: 'button#go', text: '浏览器元素\n标签页 id: browser-9' });
     await vi.waitFor(() => expect(screen.getByTestId('pasted-count')).toHaveTextContent('1'));
     expect(screen.getByTestId('pasted-source')).toHaveTextContent('button#go');
+  });
+});
+
+describe('ChatInput attachments follow their session', () => {
+  const A = 'D:/ws/a.jsonl';
+  const B = 'D:/ws/b.jsonl';
+
+  function switchTo(view: ReturnType<typeof render>, path: string | null) {
+    sessionState.activeSessionPath = path;
+    view.rerender(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+  }
+
+  it('does not carry images or pasted chips into another session, and brings them back', async () => {
+    sessionState.activeSessionPath = A;
+    const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('add-image'));
+    offerBrowserElementToChat({ title: 'button#go', text: '浏览器元素\n标签页 id: browser-9' });
+    await vi.waitFor(() => expect(screen.getByTestId('pasted-count')).toHaveTextContent('1'));
+    expect(screen.getByTestId('image-count')).toHaveTextContent('1');
+
+    switchTo(view, B);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('pasted-count')).toHaveTextContent('0');
+
+    switchTo(view, A);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('pasted-count')).toHaveTextContent('1');
+  });
+
+  it('keeps a draft-page attachment (keyed by workspace) off the session you switch to', () => {
+    sessionState.activeSessionPath = null;
+    const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('add-image'));
+    expect(screen.getByTestId('image-count')).toHaveTextContent('1');
+
+    switchTo(view, A);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('0');
+
+    switchTo(view, null);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('1');
+  });
+
+  it('sending clears only the sending session own files', async () => {
+    sessionState.activeSessionPath = B;
+    const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('add-image'));
+    switchTo(view, A);
+    fireEvent.click(screen.getByTestId('add-image'));
+
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith(
+        'hello',
+        [{ type: 'image', mimeType: 'image/png', data: `img-${A}` }],
+        undefined,
+      ),
+    );
+    expect(screen.getByTestId('image-count')).toHaveTextContent('0');
+
+    switchTo(view, B);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('1');
+  });
+
+  it('puts the files back under the same session when send fails', async () => {
+    onSend.mockResolvedValueOnce('failed');
+    sessionState.activeSessionPath = A;
+    const view = render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('add-image'));
+    fireEvent.click(screen.getByTestId('do-send'));
+    await vi.waitFor(() => expect(screen.getByTestId('image-count')).toHaveTextContent('1'));
+
+    switchTo(view, B);
+    expect(screen.getByTestId('image-count')).toHaveTextContent('0');
   });
 });

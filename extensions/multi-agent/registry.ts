@@ -24,6 +24,8 @@ export interface SubAgentRow {
   /** JSON of the resolved capability profile, for display. */
   profile: string | null;
   model: string | null;
+  /** 子会话当前实际运行的思考档位（embedded 子代理起会话后写入）；未知为 null。 */
+  thinkingLevel: string | null;
   status: SubAgentStatus;
   output: string | null;
   error: string | null;
@@ -59,6 +61,7 @@ export class SubAgentRegistry {
          task TEXT NOT NULL,
          profile TEXT,
          model TEXT,
+         thinkingLevel TEXT,
          status TEXT NOT NULL,
          output TEXT,
          error TEXT,
@@ -85,6 +88,7 @@ export class SubAgentRegistry {
     if (!cols.some((c) => c.name === "parentId")) db.exec("ALTER TABLE subagents ADD COLUMN parentId TEXT");
     if (!cols.some((c) => c.name === "depth")) db.exec("ALTER TABLE subagents ADD COLUMN depth INTEGER NOT NULL DEFAULT 0");
     if (!cols.some((c) => c.name === "jobId")) db.exec("ALTER TABLE subagents ADD COLUMN jobId TEXT");
+    if (!cols.some((c) => c.name === "thinkingLevel")) db.exec("ALTER TABLE subagents ADD COLUMN thinkingLevel TEXT");
     // 列表索引：parentId / sessionPath / createdAt 都排在 transcript 后面，大 transcript 在溢出页里，
     // 不走索引时每次列表都要顺着所有行的溢出链读到行尾（百兆级 transcript 时一次上百毫秒，
     // 且在 Electron 主线程上）。覆盖索引让「按时间取最新 N 条」和「按会话收归属」都不碰表行。
@@ -122,6 +126,7 @@ export class SubAgentRegistry {
       task: input.task,
       profile: input.profile ?? null,
       model: input.model ?? null,
+      thinkingLevel: null,
       status: "running",
       output: null,
       error: null,
@@ -157,10 +162,21 @@ export class SubAgentRegistry {
     return row;
   }
 
-  setSessionPath(id: string, path: string): void {
+  /** thinkingLevel 缺省时保留库里已有的值，流式帧不带档位也不会把它清掉。 */
+  setSessionPath(id: string, path: string, thinkingLevel?: string): void {
     const trimmed = path.trim();
     if (!trimmed) return;
-    this.database.prepare("UPDATE subagents SET sessionPath=?, updatedAt=? WHERE id=?").run(trimmed, Date.now(), id);
+    const level = thinkingLevel?.trim() || null;
+    this.database
+      .prepare("UPDATE subagents SET sessionPath=?, thinkingLevel=COALESCE(?, thinkingLevel), updatedAt=? WHERE id=?")
+      .run(trimmed, level, Date.now(), id);
+  }
+
+  /** 前台单任务路径不写 sessionPath，档位单独落库。 */
+  setThinkingLevel(id: string, level: string): void {
+    const trimmed = level.trim();
+    if (!trimmed) return;
+    this.database.prepare("UPDATE subagents SET thinkingLevel=? WHERE id=?").run(trimmed, id);
   }
 
   setJobId(id: string, jobId: string): void {

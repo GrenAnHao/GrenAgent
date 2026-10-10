@@ -14,6 +14,8 @@ export interface ModelRow {
   reasoning: boolean;
   input: string[];
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** pi 档位 → 供应商原生取值；桌面端按它列出可选思考档（设置页测活、无项目时的输入栏）。 */
+  thinkingLevelMap?: Record<string, string | null>;
 }
 
 type RawModel = Partial<ModelRow> & { provider: string; id: string };
@@ -35,6 +37,7 @@ export function collectModels(registry: RegistryLike): ModelRow[] {
     reasoning: m.reasoning ?? false,
     input: m.input ?? ["text"],
     cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
   }));
 }
 

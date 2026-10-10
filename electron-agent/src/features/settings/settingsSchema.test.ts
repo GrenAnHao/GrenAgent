@@ -122,6 +122,45 @@ describe('loop guard settings', () => {
   });
 });
 
+describe('subagent stall settings', () => {
+  const fields = () =>
+    SETTINGS_SCHEMA.find((category) => category.id === 'subagent')?.sections?.find((section) => section.title === '超时与回收')?.fields ?? [];
+
+  it('在超时与回收里紧跟空闲超时提供上游卡住的三项，留空走扩展默认', () => {
+    expect(fields().map((field) => field.key)).toEqual([
+      'SUBAGENT_TIMEOUT_MS',
+      'SUBAGENT_STREAM_STALL_MS',
+      'SUBAGENT_FIRST_TOKEN_MS',
+      'SUBAGENT_STALL_RETRIES',
+      'SUBAGENT_STUCK_MS',
+    ]);
+    expect(fields().find((field) => field.key === 'SUBAGENT_STREAM_STALL_MS')).toMatchObject({
+      type: 'number',
+      min: 10000,
+      placeholder: '120000',
+    });
+    expect(fields().find((field) => field.key === 'SUBAGENT_FIRST_TOKEN_MS')).toMatchObject({
+      type: 'number',
+      min: 10000,
+      placeholder: '同空闲超时',
+    });
+    expect(fields().find((field) => field.key === 'SUBAGENT_STALL_RETRIES')).toMatchObject({
+      type: 'number',
+      min: 0,
+      max: 10,
+      placeholder: '2',
+    });
+  });
+
+  it('续跑次数允许 0，判定时长太短或非整数在保存前拒绝', () => {
+    expect(validateSettingValues({ SUBAGENT_STALL_RETRIES: '0', SUBAGENT_STREAM_STALL_MS: '', SUBAGENT_FIRST_TOKEN_MS: '' })).toBeUndefined();
+    expect(validateSettingValues({ SUBAGENT_STREAM_STALL_MS: '180000', SUBAGENT_FIRST_TOKEN_MS: '600000' })).toBeUndefined();
+    expect(validateSettingValues({ SUBAGENT_STREAM_STALL_MS: '5000' })).toMatch(/10000 到 3600000/);
+    expect(validateSettingValues({ SUBAGENT_FIRST_TOKEN_MS: '1.5' })).toMatch(/10000 到 3600000/);
+    expect(validateSettingValues({ SUBAGENT_STALL_RETRIES: '11' })).toMatch(/0 到 10/);
+  });
+});
+
 describe('subagent max depth', () => {
   it('exposes SUBAGENT_MAX_DEPTH as a number with default 2', () => {
     const all = SETTINGS_SCHEMA.flatMap((c) => [...(c.fields ?? []), ...(c.sections ?? []).flatMap((s) => s.fields)]);

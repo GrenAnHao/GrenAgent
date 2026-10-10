@@ -7,12 +7,11 @@ import { useChatDraftStore } from '../../stores/chatDraftStore';
 import {
   ChatInputProvider,
   type ChatInputContextValue,
-  type ImageAttachment,
   type PromptImage,
 } from './input/ChatInputContext';
 import { MessageEditor } from './input/editor/MessageEditor';
 import { composeMessage } from './input/editor/composeMessage';
-import type { PastedText } from './input/editor/types';
+import { EMPTY_COMPOSER_FILES, useComposerFilesStore } from './input/composerFiles';
 import { DEFAULT_LEFT_ACTIONS, DEFAULT_RIGHT_ACTIONS, type ActionKey } from './input/config';
 import { cancelPendingOverlay } from './input/overlayPrompt';
 import {
@@ -70,15 +69,19 @@ export function ChatInput({
   const composerQueue = useStore((s) => s.composerQueue) ?? [];
   const editor = useEditor();
   const [empty, setEmpty] = useState(true);
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const [pastedTexts, setPastedTexts] = useState<PastedText[]>([]);
+  // 待发图片和粘贴块按 draftKey 分桶。放在组件本地 state 里会在切会话时原样带到另一个会话的输入框。
+  const files = useComposerFilesStore((s) => s.byKey[draftKey]) ?? EMPTY_COMPOSER_FILES;
+  const attachments = files.attachments;
+  const pastedTexts = files.pastedTexts;
 
   useEffect(() => {
     bindBrowserElementChatSink((offer) => {
-      setPastedTexts((prev) => [...prev, { ...makePastedText(offer.text), label: offer.title }]);
+      useComposerFilesStore
+        .getState()
+        .addPastedText(draftKey, { ...makePastedText(offer.text), label: offer.title });
     });
     return () => bindBrowserElementChatSink(null);
-  }, []);
+  }, [draftKey]);
 
   // 读当前编辑器正文：markdown 去转义，命令胶囊换成调用文本（见 composerText.ts）。
   const readDraft = useCallback(() => readComposerText(editor), [editor]);
@@ -183,8 +186,7 @@ export function ChatInput({
         return;
       }
       editor.cleanDocument();
-      setAttachments([]);
-      setPastedTexts([]);
+      useComposerFilesStore.getState().clear(draftKey);
       setEmpty(true);
       // 已发送：清掉该会话草稿（debounce 也一并取消，避免随后把空内容当草稿又写回）。
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -213,8 +215,7 @@ export function ChatInput({
       sendingRef.current = false;
       const outcome = await onSend(text, images.length ? images : undefined, behavior);
       if (outcome === 'failed') {
-        setAttachments(snapshot.attachments);
-        setPastedTexts(snapshot.pastedTexts);
+        useComposerFilesStore.getState().restore(draftKey, snapshot);
         if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
         else editor.cleanDocument();
         setEmpty(!snapshot.markdown);
@@ -222,8 +223,7 @@ export function ChatInput({
         requestAnimationFrame(() => editor.focus());
       }
     } catch {
-      setAttachments(snapshot.attachments);
-      setPastedTexts(snapshot.pastedTexts);
+      useComposerFilesStore.getState().restore(draftKey, snapshot);
       if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
       else editor.cleanDocument();
       setEmpty(!snapshot.markdown);
@@ -298,11 +298,11 @@ export function ChatInput({
       setEmpty: handleChange,
       setValue,
       attachments,
-      addAttachments: (items) => setAttachments((prev) => [...prev, ...items]),
-      removeAttachment: (index) => setAttachments((prev) => prev.filter((_, i) => i !== index)),
+      addAttachments: (items) => useComposerFilesStore.getState().addAttachments(draftKey, items),
+      removeAttachment: (index) => useComposerFilesStore.getState().removeAttachment(draftKey, index),
       pastedTexts,
-      addPastedText: (text) => setPastedTexts((prev) => [...prev, text]),
-      removePastedText: (id) => setPastedTexts((prev) => prev.filter((p) => p.id !== id)),
+      addPastedText: (text) => useComposerFilesStore.getState().addPastedText(draftKey, text),
+      removePastedText: (id) => useComposerFilesStore.getState().removePastedText(draftKey, id),
       isStreaming,
       isGenerating,
       hasRunningTool,
@@ -339,6 +339,7 @@ export function ChatInput({
       send,
       stop,
       scrollTranscript,
+      draftKey,
     ],
   );
 

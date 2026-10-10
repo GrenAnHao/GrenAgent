@@ -42,14 +42,13 @@ afterEach(() => {
 });
 
 describe('ExtensionsPanel', () => {
-  it('exposes MCP, packages, and skills tabs, without retired code intelligence', async () => {
+  it('exposes MCP and skills tabs, without retired packages or code intelligence tabs', async () => {
     getSettings.mockResolvedValueOnce({});
     render(<ExtensionsPanel />);
     await waitFor(() => expect(screen.getByTestId('ext-tab-mcp')).toBeTruthy());
     expect(screen.getByTestId('ext-tab-mcp').textContent).toContain('MCP');
     expect(screen.getByTestId('ext-tab-mcp').textContent).not.toContain('插件');
-    expect(screen.getByTestId('ext-tab-packages')).toBeTruthy();
-    expect(screen.getByTestId('ext-tab-packages').textContent).toContain('扩展');
+    expect(screen.queryByTestId('ext-tab-packages')).toBeNull();
     expect(screen.getByTestId('ext-tab-skills')).toBeTruthy();
     expect(screen.queryByTestId('ext-tab-code-intel')).toBeNull();
   });

@@ -258,6 +258,29 @@ describe("spawn_agent · named agent infers capability profile", () => {
   });
 });
 
+// codemode 脚本到 timeout_ms 会取消脚本里在跑的子代理。
+describe("codemode deadline around spawn_agent", () => {
+  it("drops timeout_ms from a codemode script that spawns sub-agents", async () => {
+    const { handlers } = loadSpawnHarness();
+    const event = {
+      toolName: "codemode",
+      input: { code: '// @options: {"max_output_tokens": 3000, "timeout_ms": 900000}\nawait tools.spawn_agent({ task: "x" });' },
+    };
+    await handlers.tool_call?.(event as never, ctx as never);
+    expect(event.input.code).toBe('// @options: {"max_output_tokens":3000}\nawait tools.spawn_agent({ task: "x" });');
+  });
+
+  it("leaves other tools and scripts without spawn_agent alone", async () => {
+    const { handlers } = loadSpawnHarness();
+    const plain = { toolName: "codemode", input: { code: '// @options: {"timeout_ms": 60000}\nawait tools.read({ path: "a" });' } };
+    await handlers.tool_call?.(plain as never, ctx as never);
+    expect(plain.input.code).toContain('"timeout_ms": 60000');
+    const bash = { toolName: "bash", input: { command: "echo spawn_agent" } };
+    await handlers.tool_call?.(bash as never, ctx as never);
+    expect(bash.input.command).toBe("echo spawn_agent");
+  });
+});
+
 // 并行健壮性：一个任务出错（这里用未知 agent 触发 agentLayer 抛错）不应 reject 整个 Promise.all
 // 而遗弃其它正在运行的兄弟任务——应就地记为该任务失败、其余照常跑完。
 describe("spawn_agent · early parallel start", () => {
@@ -986,6 +1009,58 @@ describe("spawn_agent · model selection policy", () => {
     const r = await loadSpawnAgent()("t", { tasks: [{ task: "ok", model: "a/b" }, { task: "bad", model: "a/c" }] }, null, null, ctxM);
     expect(r.isError).toBe(true);
     expect(spawnPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("enabled: allowlist edits reach a session that was already open", async () => {
+    enable('["a/b"]');
+    const exec = loadSpawnAgent();
+    enable('["a/c"]');
+    const rejected = await exec("t1", { task: "x", model: "a/b" }, null, null, ctxM);
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content[0].text).toContain("不在授权白名单");
+    const accepted = await exec("t2", { task: "x", model: "a/c" }, null, null, ctxM);
+    expect(accepted.isError).toBeFalsy();
+    expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.model).toBe("a/c");
+  });
+
+  describe("cheap / strong aliases as explicit model", () => {
+    const enableWith = (extra: Record<string, string>, list = '["a/b"]') =>
+      vi.mocked(getConfig).mockImplementation((k: string) =>
+        k === "SUBAGENT_MAX_PER_SESSION" ? "0" : k === "SUBAGENT_MODEL_SELECTION" ? "1" : k === "SUBAGENT_MODEL_ALLOWLIST" ? list : extra[k],
+      );
+
+    it("top-level model: cheap resolves to the configured route without being allowlisted", async () => {
+      enableWith({ SUBAGENT_MODEL_CHEAP: "deepseek/flash" });
+      const r = await loadSpawnAgent()("t", { task: "x", model: "cheap" }, null, null, ctxM);
+      expect(r.isError).toBeFalsy();
+      expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.model).toBe("deepseek/flash");
+    });
+
+    it("tasks[] and chain[] accept the aliases too", async () => {
+      enableWith({ SUBAGENT_MODEL_CHEAP: "deepseek/flash", SUBAGENT_MODEL_STRONG: "a/b" });
+      const r = await loadSpawnAgent()("t", { tasks: [{ task: "p", model: "cheap" }, { task: "q", model: "strong" }] }, null, null, ctxM);
+      expect(r.isError).toBeFalsy();
+      const models = vi.mocked(spawnPiAgent).mock.calls.map((c) => c[2]?.model).sort();
+      expect(models).toEqual(["a/b", "deepseek/flash"]);
+    });
+
+    it("an alias with nothing behind it is rejected before spawning", async () => {
+      enableWith({});
+      const r = await loadSpawnAgent()("t", { task: "x", model: "strong" }, null, null, ctxM);
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain("别名 strong 没有对应模型");
+      expect(spawnPiAgent).not.toHaveBeenCalled();
+    });
+
+    it("thinking_level is checked against the model the alias resolves to", async () => {
+      enableWith({ SUBAGENT_MODEL_CHEAP: "a/c", SUBAGENT_MODEL_STRONG: "a/b" });
+      const bad = await loadSpawnAgent()("t1", { task: "x", model: "cheap", thinking_level: "medium" }, null, null, ctxM);
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0].text).toContain("不支持思考档");
+      const good = await loadSpawnAgent()("t2", { task: "x", model: "strong", thinking_level: "high" }, null, null, ctxM);
+      expect(good.isError).toBeFalsy();
+      expect(vi.mocked(spawnPiAgent).mock.calls[0]?.[2]?.thinkingLevel).toBe("high");
+    });
   });
 });
 

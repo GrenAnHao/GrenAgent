@@ -4,6 +4,9 @@ import { ThemeProvider } from '@lobehub/ui';
 import { SubAgentInline } from './SubAgentInline';
 import { useDockStore } from '../../stores/dockStore';
 import { useLayoutStore } from '../../stores/layoutStore';
+import { pi } from '../../lib/pi';
+import { useSubAgentLiveStore } from '../../stores/subagentLiveStore';
+import { levelDisplayLabel } from './input/thinkingLevels';
 
 vi.mock('../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
@@ -17,12 +20,54 @@ vi.mock('../../lib/pi', () => ({
   },
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.mocked(pi.subagentList).mockClear();
+  vi.mocked(pi.subagentList).mockResolvedValue([]);
+  useSubAgentLiveStore.setState({ itemsByWorkspace: new Map() });
+});
 
 const wrap = (ui: React.ReactElement) =>
   render(<ThemeProvider themeMode="dark">{ui}</ThemeProvider>);
 
 describe('SubAgentInline', { timeout: 30_000 }, () => {
+  it('reopened completed cards share one registry lookup and restore missing task and model', async () => {
+    vi.mocked(pi.subagentList).mockResolvedValue([
+      { id: 'sa-history-a', task: '检查历史卡片', status: 'done', model: 'p/model-a', thinkingLevel: 'high', createdAt: 1, updatedAt: 1 },
+      { id: 'sa-history-b', task: '检查并发刷新', status: 'done', model: 'p/model-b', createdAt: 2, updatedAt: 2 },
+    ]);
+    wrap(<>
+      <SubAgentInline messageId="history-a" toolCallId="history-ca" index={1} task="子代理任务" result={{ details: { agentId: 'sa-history-a', status: 'done' } }} status="done" />
+      <SubAgentInline messageId="history-b" toolCallId="history-cb" index={2} task="子代理任务" result={{ details: { agentId: 'sa-history-b', status: 'done' } }} status="done" />
+    </>);
+    expect(await screen.findByText('检查历史卡片')).toBeTruthy();
+    expect(await screen.findByText('检查并发刷新')).toBeTruthy();
+    expect(screen.getAllByTestId('conv-strip-model').map((node) => node.textContent)).toEqual(['p / model-a · 高', 'p / model-b']);
+    expect(pi.subagentList).toHaveBeenCalledTimes(1);
+  });
+
+  it('参数里的 cheap 别名不当模型名：结果没写路由时用注册表里的实际模型和档位', async () => {
+    vi.mocked(pi.subagentList).mockResolvedValue([
+      { id: 'sa-alias', task: '修复审查意见', status: 'error', model: 'p/deepseek-v4.1-flash', thinkingLevel: 'xhigh', createdAt: 1, updatedAt: 1 },
+    ]);
+    wrap(
+      <SubAgentInline
+        messageId="m-alias"
+        toolCallId="c-alias"
+        index={45}
+        task="修复审查意见"
+        model="cheap"
+        thinkingLevel="max"
+        result={{ content: [{ type: 'text', text: '部分输出\n\n_(未正常结束：model error: 503)_' }], details: { agentId: 'sa-alias', partial: true } }}
+        status="done"
+      />,
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('conv-strip-model')).toHaveTextContent(`p / deepseek-v4.1-flash · ${levelDisplayLabel('xhigh')}`),
+    );
+    expect(screen.queryByText(/cheap/)).toBeNull();
+  });
+
   it('没有模型时不留模型标签', () => {
     wrap(
       <SubAgentInline messageId="m-empty" toolCallId="c-empty" index={35} task="整体实现终审" result={{}} status="error" />,
@@ -44,9 +89,9 @@ describe('SubAgentInline', { timeout: 30_000 }, () => {
         status="done"
       />,
     );
-    expect(screen.getByTestId('conv-strip-model')).toHaveTextContent('deepseek-v4-flash');
+    expect(screen.getByTestId('conv-strip-model')).toHaveTextContent('deepseek / deepseek-v4-flash');
     fireEvent.click(screen.getByRole('button', { name: '展开' }));
-    expect(screen.getByTestId('subagent-inline-model')).toHaveTextContent('deepseek-v4-flash');
+    expect(screen.getByTestId('subagent-inline-model')).toHaveTextContent('deepseek / deepseek-v4-flash');
   });
 
   it('折叠头显示子代理编号与任务名', () => {

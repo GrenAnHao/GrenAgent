@@ -1,6 +1,6 @@
 ---
 title: 对话列表贴底改用 DSH 的「位置账本 + 停手采样」归因，不再按滚轮判断读者
-status: active
+status: superseded
 date: 2026-10-09
 scope: electron-agent/chat
 files:
@@ -10,8 +10,10 @@ files:
   - electron-agent/ui-harness/scenarios/chat-follow.tsx
   - electron-agent/ui-harness/probes/chat-follow.mjs
 supersedes:
-superseded_by:
+superseded_by: 2026-10-09-follow-ledger-gesture-gate.md
 ---
+
+> 已过时 → 见 2026-10-09-follow-ledger-gesture-gate.md
 
 ## 背景
 

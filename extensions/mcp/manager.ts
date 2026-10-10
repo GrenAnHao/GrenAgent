@@ -18,6 +18,8 @@ import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
 import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
 export const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
+/** SDK 关 stdio 连接：结束 stdin 后等 2 秒，再 SIGTERM 等 2 秒。多留一秒。 */
+export const MCP_CLOSE_TIMEOUT_MS = 5_000;
 
 function mcpLogPath(): string {
   return join(homedir(), ".pi", "agent", "mcp.log");
@@ -104,7 +106,11 @@ export interface McpManager {
   subscribe(listener: (snap: McpSnapshot) => void): () => void;
   /** 配置已落盘后立刻重读（不依赖 fs.watch）。未 init 时为空操作。 */
   reconcile(): void;
-  closeAll(): void;
+  /**
+   * 停止监听并关掉所有连接。返回的 promise 等每个连接关完（单个最多 MCP_CLOSE_TIMEOUT_MS）：
+   * agent-host 子进程关停时随后就退出，不等的话 stdio 服务器的收尾（结束 stdin → SIGTERM）走不完。
+   */
+  closeAll(): Promise<void>;
   /** 该服务器仍在连接时返回本次连接的 promise。已结束则没有。 */
   connectPromise(name: string): Promise<void> | undefined;
   /** 用扩展登记替换上一份。同名文件服务器保留，只差 - / _ 的名字不进入连接列表。 */
@@ -781,9 +787,10 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
       started = false;
       unwatch?.();
       unwatch = undefined;
-      for (const c of clients.values()) void c.close().catch(() => {});
+      const closing = [...clients.values()].map((c) => withTimeout(c.close(), MCP_CLOSE_TIMEOUT_MS).catch(() => {}));
       clients.clear();
       inflight.clear();
+      return Promise.all(closing).then(() => undefined);
     },
   };
 }
@@ -805,12 +812,13 @@ export async function reloadMcpServer(workspace: string, name: string): Promise<
   await getMcpManagerFor(workspace).reloadServer(name);
 }
 
-export function disposeMcpManager(workspace: string): void {
+export function disposeMcpManager(workspace: string): Promise<void> {
   const mgr = managers.get(workspace);
-  if (!mgr) return;
-  mgr.closeAll();
+  if (!mgr) return Promise.resolve();
+  const closing = mgr.closeAll();
   managers.delete(workspace);
   alsConfigByWorkspace.delete(workspace);
+  return closing;
 }
 
 /** 配置落盘后刷新 runtime-settings 缓存并重读该 workspace 的 MCP 连接。 */
@@ -820,7 +828,7 @@ export function reconcileMcpManager(workspace: string): void {
 }
 
 export function __resetMcpManagersForTest(): void {
-  for (const mgr of managers.values()) mgr.closeAll();
+  for (const mgr of managers.values()) void mgr.closeAll();
   managers.clear();
   alsConfigByWorkspace.clear();
 }

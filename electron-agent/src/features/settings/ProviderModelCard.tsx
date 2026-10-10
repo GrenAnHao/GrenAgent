@@ -1,7 +1,8 @@
+import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
 import { Icon } from '@lobehub/ui';
 import { Checkbox, Collapse, Input, InputNumber, Select } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react';
 import {
   THINKING_FORMAT_OPTIONS,
   THINKING_LEVEL_ROWS,
@@ -10,7 +11,15 @@ import {
   thinkingFormatChip,
   type CompatField,
 } from './modelCompatCatalog';
-import { defaultThinkingLevelMap, type ModelCompat, type ThinkingLevel, type UiModel } from './providerConfigAdapter';
+import {
+  defaultThinkingLevelMap,
+  type ModelCompat,
+  type ModelCost,
+  type ModelCostRates,
+  type ModelCostTier,
+  type ThinkingLevel,
+  type UiModel,
+} from './providerConfigAdapter';
 
 const styles = createStaticStyles(({ css }) => ({
   card: css`
@@ -57,6 +66,30 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorText};
     cursor: pointer;
     font-size: 12px;
+  `,
+  handle: css`
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    align-self: stretch;
+    margin-inline-start: -4px;
+    padding: 0;
+    border: 0;
+    border-radius: ${cssVar.borderRadiusSM};
+    background: transparent;
+    color: ${cssVar.colorTextQuaternary};
+    cursor: grab;
+    touch-action: none;
+    &:hover,
+    &:focus-visible {
+      color: ${cssVar.colorTextSecondary};
+      background: ${cssVar.colorFillTertiary};
+    }
+    &:active {
+      cursor: grabbing;
+    }
   `,
   delBtn: css`
     display: inline-flex;
@@ -124,7 +157,162 @@ const styles = createStaticStyles(({ css }) => ({
       border-block-end: 0;
     }
   `,
+  tiers: css`
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) repeat(4, minmax(0, 1fr)) auto;
+    gap: 6px 8px;
+    align-items: center;
+    margin: 8px 0;
+  `,
+  tierWarn: css`
+    margin: 4px 0 8px;
+    color: ${cssVar.colorWarningText};
+    font-size: 12px;
+  `,
 }));
+
+const COST_RATE_COLUMNS = [
+  { key: 'input', label: '输入', testId: 'in' },
+  { key: 'output', label: '输出', testId: 'out' },
+  { key: 'cacheRead', label: '缓存读', testId: 'cr' },
+  { key: 'cacheWrite', label: '缓存写', testId: 'cw' },
+] as const satisfies ReadonlyArray<{ key: keyof ModelCostRates; label: string; testId: string }>;
+
+const BASE_PRICE_FIELDS = [
+  { key: 'input', testId: 'in', label: '输入价格', help: '每百万输入 token 的价格，用于用量统计。没有就填 0。' },
+  { key: 'output', testId: 'out', label: '输出价格', help: '每百万输出 token 的价格。没有就填 0。' },
+  { key: 'cacheRead', testId: 'cache-read', label: '缓存读价格', help: '每百万命中缓存（读）token 的价格。没有就填 0。' },
+  {
+    key: 'cacheWrite',
+    testId: 'cache-write',
+    label: '缓存写价格',
+    help: '每百万 token 写入 5 分钟缓存的价格。1 小时缓存写由 Pi 按输入价 ×2 计，不用另填。没有就填 0。',
+  },
+] as const satisfies ReadonlyArray<{ key: keyof ModelCostRates; testId: string; label: string; help: string }>;
+
+/** 「添加分段」的默认阈值步长：第一档 100000，之后每档在当前最高阈值上再加这么多。 */
+const TIER_THRESHOLD_STEP = 100_000;
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function duplicateThresholds(tiers: ModelCostTier[]): Set<number> {
+  const seen = new Set<number>();
+  const dup = new Set<number>();
+  for (const { inputTokensAbove } of tiers) {
+    if (typeof inputTokensAbove !== 'number') continue;
+    if (seen.has(inputTokensAbove)) dup.add(inputTokensAbove);
+    seen.add(inputTokensAbove);
+  }
+  return dup;
+}
+
+interface CostTiersEditorProps {
+  cost: ModelCost | undefined;
+  index: number;
+  onChange: (cost: ModelCost) => void;
+}
+
+function CostTiersEditor({ cost, index, onChange }: CostTiersEditorProps) {
+  const tiers = cost?.tiers ?? [];
+  const dup = duplicateThresholds(tiers);
+  const missingThreshold = tiers.some((t) => typeof t.inputTokensAbove !== 'number');
+
+  const setTiers = (next: ModelCostTier[]) => onChange({ ...cost, tiers: next.length ? next : undefined });
+  const patchTier = (tierIndex: number, patch: Partial<ModelCostTier>) =>
+    setTiers(tiers.map((t, i) => (i === tierIndex ? { ...t, ...patch } : t)));
+  const addTier = () => {
+    const top = tiers.reduce((max, t) => Math.max(max, t.inputTokensAbove ?? 0), 0);
+    setTiers([
+      ...tiers,
+      {
+        inputTokensAbove: top + TIER_THRESHOLD_STEP,
+        input: cost?.input,
+        output: cost?.output,
+        cacheRead: cost?.cacheRead,
+        cacheWrite: cost?.cacheWrite,
+      },
+    ]);
+  };
+
+  return (
+    <div className={styles.field} style={{ marginBottom: 12 }}>
+      <FieldLabel
+        label="分段计费"
+        en="cost.tiers"
+        help="当次总输入（input + cacheRead + cacheWrite）严格大于阈值时，整单按该档计价；可配多档，取最高匹配。Haiku 5.5 长上下文档可填 100000。不配就是单档定价。"
+      />
+      {tiers.length > 0 ? (
+        <div className={styles.tiers}>
+          <div className={styles.mapHead}>阈值 tokens</div>
+          {COST_RATE_COLUMNS.map((c) => (
+            <div key={c.key} className={styles.mapHead}>
+              {c.label}
+            </div>
+          ))}
+          <div />
+          {tiers.map((tier, tierIndex) => {
+            const prefix = `prov-model-cost-tier-${index}-${tierIndex}`;
+            const threshold = tier.inputTokensAbove;
+            return (
+              <div key={tierIndex} style={{ display: 'contents' }}>
+                {/* parser 清空时回 ''，组件才会发 null（阈值未填）；按数字类型写会被当成 0。 */}
+                <InputNumber<number | string>
+                  data-testid={`${prefix}-above`}
+                  value={threshold ?? null}
+                  min={0}
+                  step={10_000}
+                  precision={0}
+                  controls={false}
+                  variant="filled"
+                  style={{ width: '100%' }}
+                  status={threshold === undefined ? 'error' : dup.has(threshold) ? 'warning' : undefined}
+                  formatter={(v) => (v ? String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '')}
+                  parser={(v) => (v ?? '').replace(/,/g, '')}
+                  onChange={(v) => patchTier(tierIndex, { inputTokensAbove: asNumber(v) })}
+                />
+                {COST_RATE_COLUMNS.map((c) => (
+                  <InputNumber
+                    key={c.key}
+                    data-testid={`${prefix}-${c.testId}`}
+                    value={tier[c.key] ?? null}
+                    min={0}
+                    controls={false}
+                    variant="filled"
+                    style={{ width: '100%' }}
+                    onChange={(v) => patchTier(tierIndex, { [c.key]: asNumber(v) })}
+                  />
+                ))}
+                <button
+                  type="button"
+                  data-testid={`${prefix}-remove`}
+                  className={styles.delBtn}
+                  title="删除这一档"
+                  onClick={() => setTiers(tiers.filter((_, i) => i !== tierIndex))}
+                >
+                  <Icon icon={Trash2} size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {dup.size > 0 ? <div className={styles.tierWarn}>阈值重复：保存时同一阈值只留最后一行。</div> : null}
+      {missingThreshold ? <div className={styles.tierWarn}>没填阈值的分段不会保存。</div> : null}
+      <button
+        type="button"
+        data-testid={`prov-model-cost-tier-add-${index}`}
+        className={styles.iconBtn}
+        style={{ marginTop: tiers.length ? 0 : 8 }}
+        onClick={addTier}
+      >
+        <Icon icon={Plus} size={14} />
+        添加分段
+      </button>
+    </div>
+  );
+}
 
 function hasImage(input: UiModel['input']): boolean {
   return !!input?.includes('image');
@@ -202,6 +390,13 @@ function renderCompatControl(field: CompatField, model: UiModel, index: number, 
   );
 }
 
+/** 拖动手柄要挂的 dnd-kit 引用与事件：只有手柄能发起拖动，卡片里的输入框不受影响。 */
+export interface ModelCardDragHandle {
+  ref: (element: HTMLElement | null) => void;
+  attributes: DraggableAttributes;
+  listeners: DraggableSyntheticListeners;
+}
+
 export interface ProviderModelCardProps {
   model: UiModel;
   index: number;
@@ -210,9 +405,10 @@ export interface ProviderModelCardProps {
   onToggle: () => void;
   onChange: (patch: Partial<UiModel>) => void;
   onRemove: () => void;
+  dragHandle?: ModelCardDragHandle;
 }
 
-export function ProviderModelCard({ model, index, api, expanded, onToggle, onChange, onRemove }: ProviderModelCardProps) {
+export function ProviderModelCard({ model, index, api, expanded, onToggle, onChange, onRemove, dragHandle }: ProviderModelCardProps) {
   const formatChip = thinkingFormatChip(model.thinkingFormat);
   const groups = groupsForEditor(api);
   const showFormat = showsThinkingFormat(api);
@@ -245,6 +441,20 @@ export function ProviderModelCard({ model, index, api, expanded, onToggle, onCha
   return (
     <div className={styles.card} data-testid={`prov-model-card-${index}`}>
       <div className={styles.row}>
+        {dragHandle ? (
+          <button
+            type="button"
+            ref={dragHandle.ref}
+            className={styles.handle}
+            data-testid={`prov-model-drag-${index}`}
+            title="拖动调整顺序"
+            {...dragHandle.attributes}
+            {...dragHandle.listeners}
+            aria-label="拖动调整顺序"
+          >
+            <Icon icon={GripVertical} size={14} />
+          </button>
+        ) : null}
         <Input
           className={styles.grow}
           data-testid={`prov-model-id-${index}`}
@@ -346,31 +556,23 @@ export function ProviderModelCard({ model, index, api, expanded, onToggle, onCha
                 onChange={(v) => onChange({ maxTokens: typeof v === 'number' ? v : undefined })}
               />
             </div>
-            <div className={styles.field}>
-              <FieldLabel label="输入价格" en="cost.input" help="每百万输入 token 的价格，用于用量统计。没有就填 0。" />
-              <InputNumber
-                data-testid={`prov-model-cost-in-${index}`}
-                value={model.cost?.input}
-                style={{ width: '100%', marginTop: 8 }}
-                min={0}
-                controls={false}
-                variant="filled"
-                onChange={(v) => onChange({ cost: { ...model.cost, input: typeof v === 'number' ? v : undefined } })}
-              />
-            </div>
-            <div className={styles.field}>
-              <FieldLabel label="输出价格" en="cost.output" help="每百万输出 token 的价格。没有就填 0。" />
-              <InputNumber
-                data-testid={`prov-model-cost-out-${index}`}
-                value={model.cost?.output}
-                style={{ width: '100%', marginTop: 8 }}
-                min={0}
-                controls={false}
-                variant="filled"
-                onChange={(v) => onChange({ cost: { ...model.cost, output: typeof v === 'number' ? v : undefined } })}
-              />
-            </div>
+            {BASE_PRICE_FIELDS.map((f) => (
+              <div key={f.key} className={styles.field}>
+                <FieldLabel label={f.label} en={`cost.${f.key}`} help={f.help} />
+                <InputNumber
+                  data-testid={`prov-model-cost-${f.testId}-${index}`}
+                  value={model.cost?.[f.key]}
+                  style={{ width: '100%', marginTop: 8 }}
+                  min={0}
+                  controls={false}
+                  variant="filled"
+                  onChange={(v) => onChange({ cost: { ...model.cost, [f.key]: asNumber(v) } })}
+                />
+              </div>
+            ))}
           </div>
+
+          <CostTiersEditor cost={model.cost} index={index} onChange={(cost) => onChange({ cost })} />
 
           {showFormat ? (
             <div className={styles.field} style={{ marginBottom: 12 }}>

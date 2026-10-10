@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../_shared/runtime-config.js", () => ({ getConfig: vi.fn() }));
 import { getConfig } from "../_shared/runtime-config.js";
-import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, THINKING_LEVELS } from "./model-selection.js";
+import { assertRouteAllowed, assertThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, THINKING_LEVELS } from "./model-selection.js";
 
 function cfg(map: Record<string, string | undefined>): void {
   vi.mocked(getConfig).mockImplementation((k: string) => map[k]);
@@ -31,6 +31,38 @@ describe("readModelSelectionPolicy", () => {
     cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: "not json" });
     expect(readModelSelectionPolicy().enabled).toBe(false);
   });
+  it("allowlist is re-read on every access; enabled stays as decided at load", () => {
+    cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
+    const p = readModelSelectionPolicy();
+    cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["c/d"]' });
+    expect([...p.allowlist]).toEqual(["c/d"]);
+    expect(p.enabled).toBe(true);
+  });
+  it("turning the switch off empties the live allowlist", () => {
+    cfg({ SUBAGENT_MODEL_SELECTION: "1", SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
+    const p = readModelSelectionPolicy();
+    cfg({ SUBAGENT_MODEL_SELECTION: "0", SUBAGENT_MODEL_ALLOWLIST: '["a/b"]' });
+    expect(p.allowlist.size).toBe(0);
+  });
+});
+
+describe("resolveRouteAlias", () => {
+  it("maps cheap / strong to their settings and passes literal routes through", () => {
+    cfg({ SUBAGENT_MODEL_CHEAP: "deepseek/flash", SUBAGENT_MODEL_STRONG: "c/sonnet" });
+    expect(resolveRouteAlias("cheap")).toBe("deepseek/flash");
+    expect(resolveRouteAlias("strong")).toBe("c/sonnet");
+    expect(resolveRouteAlias("a/b")).toBe("a/b");
+  });
+  it("falls back to SUBAGENT_MODEL, and is undefined when nothing is configured", () => {
+    cfg({ SUBAGENT_MODEL: "x/y" });
+    expect(resolveRouteAlias("cheap")).toBe("x/y");
+    cfg({});
+    expect(resolveRouteAlias("strong")).toBeUndefined();
+  });
+  it("is undefined when the policy inherits the parent model", () => {
+    cfg({ SUBAGENT_MODE: "inherit", SUBAGENT_MODEL_CHEAP: "deepseek/flash" });
+    expect(resolveRouteAlias("cheap")).toBeUndefined();
+  });
 });
 
 describe("assertRouteAllowed", () => {
@@ -43,6 +75,14 @@ describe("assertRouteAllowed", () => {
   });
   it("passes an allowlisted, available route", () => {
     expect(() => assertRouteAllowed("a/b", policy, [model("a", "b")])).not.toThrow();
+  });
+  it("cheap / strong skip the allowlist and the catalog when they resolve", () => {
+    cfg({ SUBAGENT_MODEL_CHEAP: "deepseek/flash" });
+    expect(() => assertRouteAllowed("cheap", policy, [])).not.toThrow();
+  });
+  it("an alias that resolves to nothing is an explicit error, not a silent fallback", () => {
+    cfg({});
+    expect(() => assertRouteAllowed("strong", policy, [])).toThrow("别名 strong 没有对应模型");
   });
 });
 

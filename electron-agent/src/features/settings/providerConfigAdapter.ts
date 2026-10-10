@@ -6,11 +6,22 @@ export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
 /** models.json 模型 compat：按当前 API 过滤后写入。对象型路由字段用字符串编辑，保存时再解析。 */
 export type ModelCompat = Record<string, unknown>;
 
-export interface ModelCost {
+/** 单价：$/百万 token。cacheWrite 是 5 分钟缓存写；1 小时缓存写由 pi 按 input × 2 计，没有单独字段。 */
+export interface ModelCostRates {
   input?: number;
   output?: number;
   cacheRead?: number;
   cacheWrite?: number;
+}
+
+/** 分段计费：当次 input + cacheRead + cacheWrite 严格大于 inputTokensAbove 时整单按这一档，多档取阈值最高的命中档。 */
+export interface ModelCostTier extends ModelCostRates {
+  /** UI 里新加的一行可能还没填阈值；落盘前没填的行会被丢掉。 */
+  inputTokensAbove?: number;
+}
+
+export interface ModelCost extends ModelCostRates {
+  tiers?: ModelCostTier[];
 }
 
 export interface UiModel {
@@ -77,14 +88,6 @@ interface ProviderEntry {
 const OPENAI_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
 const GOOGLE_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: null };
 const ANTHROPIC_THINKING_MAP: ThinkingLevelMap = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
-const CURSOR_THINKING_MAP: ThinkingLevelMap = {
-  minimal: 'minimal',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max',
-};
 
 /**
  * 按供应商 API 类型给出官方原生推理档位映射；勾「推理」时写入自定义模型，让 pi 按各家原生档位生效、不会钳回 off。
@@ -99,8 +102,6 @@ export function defaultThinkingLevelMap(api: string | undefined, _modelId?: stri
     case 'openai-completions':
     case 'openai-responses':
       return OPENAI_THINKING_MAP;
-    case 'cursor-agent':
-      return CURSOR_THINKING_MAP;
     default:
       return undefined;
   }
@@ -192,20 +193,49 @@ function toUiModel(m: ModelEntry, api: string | undefined): UiModel {
  * - 非推理模型清掉映射。
  * - compat 按当前 API 过滤；thinkingFormat 写入 compat。
  */
+type CompleteRates = Required<ModelCostRates>;
+type CompleteTier = CompleteRates & { inputTokensAbove: number };
+
+function isValidThreshold(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * 分段落盘：没填阈值的行丢掉，没填的价格沿用基础价；同阈值只留最后一行，按阈值升序。
+ * pi 的 tier schema 同样要求四个价格都是数字。
+ */
+function completeTiers(tiers: ModelCostTier[] | undefined, base: CompleteRates): CompleteTier[] {
+  const byThreshold = new Map<number, CompleteTier>();
+  for (const tier of tiers ?? []) {
+    if (!isValidThreshold(tier?.inputTokensAbove)) continue;
+    byThreshold.set(tier.inputTokensAbove, {
+      inputTokensAbove: tier.inputTokensAbove,
+      input: tier.input ?? base.input,
+      output: tier.output ?? base.output,
+      cacheRead: tier.cacheRead ?? base.cacheRead,
+      cacheWrite: tier.cacheWrite ?? base.cacheWrite,
+    });
+  }
+  return [...byThreshold.values()].sort((a, b) => a.inputTokensAbove - b.inputTokensAbove);
+}
+
 /**
  * Pi 的 models.json schema 要求 cost 一旦出现，input/output/cacheRead/cacheWrite 四个数字都必须在。
- * 设置页只编辑输入/输出价格；缺任一字段时整份文件会被拒绝，自定义供应商会全部从模型列表消失。
+ * 缺任一字段时整份文件会被拒绝，自定义供应商会全部从模型列表消失，所以没填的基础价补 0。
+ * 基础价一个没填、也没有有效分段时不写 cost；有分段时照样写，不把用户填的分段吞掉。
  */
 function completeCost(cost: ModelCost | undefined): ModelCost | undefined {
   if (!cost) return undefined;
-  const rates = [cost.input, cost.output, cost.cacheRead, cost.cacheWrite];
-  if (rates.every((value) => typeof value !== 'number')) return undefined;
-  return {
+  const base: CompleteRates = {
     input: cost.input ?? 0,
     output: cost.output ?? 0,
     cacheRead: cost.cacheRead ?? 0,
     cacheWrite: cost.cacheWrite ?? 0,
   };
+  const tiers = completeTiers(cost.tiers, base);
+  const rates = [cost.input, cost.output, cost.cacheRead, cost.cacheWrite];
+  if (rates.every((value) => typeof value !== 'number') && tiers.length === 0) return undefined;
+  return tiers.length > 0 ? { ...base, tiers } : base;
 }
 
 function serializeModel(m: UiModel, api: string | undefined): ModelEntry {

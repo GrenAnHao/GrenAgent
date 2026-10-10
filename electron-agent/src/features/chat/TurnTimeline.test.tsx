@@ -5,10 +5,10 @@ vi.mock('../../stores/AgentStoreContext', () => ({
 }));
 vi.mock('../dock/openLauncherTab', () => ({ openTurnReview: vi.fn() }));
 vi.mock('../../platform/runtime', () => ({ openPath: vi.fn(), revealItemInDir: vi.fn() }));
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { ThemeProvider } from '@lobehub/ui';
 import { App } from 'antd';
-import { TurnTimeline } from './TurnTimeline';
+import { TurnTimeline, TurnTimelineRow } from './TurnTimeline';
 import type { TimelineSegment } from './groupMessages';
 
 afterEach(cleanup);
@@ -54,6 +54,22 @@ const wrap = (
   );
 
 describe('TurnTimeline 助手复制', () => {
+  it('虚拟化的末行复制整轮正文，其他行不重复显示操作栏', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(
+      <App>
+        <ThemeProvider themeMode="dark">
+          <TurnTimelineRow row={{ kind: 'segment', id: 'first', segment: textTurn[0]! }} first last={false} />
+          <TurnTimelineRow row={{ kind: 'segment', id: 'last', segment: textTurn[0]! }} first={false} last actionText={'开始调查\n调查完成'} />
+        </ThemeProvider>
+      </App>,
+    );
+    expect(screen.getAllByTestId('message-action-bar')).toHaveLength(1);
+    screen.getByTestId('msg-action-bar-copy').click();
+    expect(writeText).toHaveBeenCalledWith('开始调查\n调查完成');
+  });
+
   it('有正文时渲染复制按钮并复制拼接文本', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -100,7 +116,7 @@ describe('TurnTimeline 产物尾栏', () => {
 });
 
 describe('TurnTimeline argsComplete', () => {
-  it('argsComplete 变化时从流式预览切到 diff', () => {
+  it('argsComplete 变化时从流式预览切到 diff', async () => {
     const args = { path: 'a.txt', content: 'hello' };
     const segment = (argsComplete: boolean): TimelineSegment => ({
       kind: 'tool',
@@ -113,7 +129,8 @@ describe('TurnTimeline argsComplete', () => {
       argsComplete,
     });
     const { rerender } = wrap([segment(false)]);
-    expect(screen.getByTestId('streaming-file-body')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('tool-execution').firstElementChild!);
+    expect(await screen.findByTestId('streaming-code-view')).toBeTruthy();
     expect(screen.queryByTestId('file-diff-block')).toBeNull();
     rerender(
       <App>
@@ -122,7 +139,7 @@ describe('TurnTimeline argsComplete', () => {
         </ThemeProvider>
       </App>,
     );
-    expect(screen.queryByTestId('streaming-file-body')).toBeNull();
+    expect(screen.queryByTestId('streaming-code-view')).toBeNull();
     expect(screen.getByTestId('file-diff-block')).toBeTruthy();
   });
 });

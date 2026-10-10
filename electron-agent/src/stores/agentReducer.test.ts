@@ -9,6 +9,7 @@ import {
   rollbackUnansweredSend,
   messagesFromAgent,
   messagesFromTranscript,
+  interruptPendingToolCards,
   excludedFromAgent,
   materializeToolDrafts,
   LARGE_ARGS_CHARS,
@@ -679,6 +680,78 @@ describe('applyEvent', () => {
     expect(msgs.some((m) => m.kind === 'tool' && m.status === 'done')).toBe(true);
   });
 
+  // 工具正在跑时切进会话：快照里只有调用、没有结果。以前只靠 toolResult 建卡，这张卡一直缺席，
+  // 画面停在思考和「正在处理」上，看起来像卡死。
+  it('messagesFromAgent restores a still-running tool call from the last assistant as a running card', () => {
+    const msgs = messagesFromAgent([
+      { role: 'user', content: 'run checks' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'All tests pass now.' },
+          { type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'npm run ui:check', timeout: 1600 } },
+        ],
+      },
+    ] as never);
+    expect(msgs.map((m) => m.kind)).toEqual(['user', 'assistant', 'tool']);
+    expect(msgs[2]).toMatchObject({ toolCallId: 'b1', toolName: 'bash', status: 'running', argsComplete: true, result: undefined });
+    expect((msgs[2] as { args: unknown }).args).toEqual({ command: 'npm run ui:check', timeout: 1600 });
+  });
+
+  it('live updates after the snapshot land on the restored running card', () => {
+    let s: AgentState = {
+      ...initialAgentState(),
+      isStreaming: true,
+      messages: messagesFromAgent([
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'sleep 60' } }] },
+      ] as never),
+    };
+    s = applyEvent(s, {
+      type: 'tool_execution_update', toolCallId: 'b1', toolName: 'bash', args: { command: 'sleep 60' },
+      partialResult: { content: [], details: { foregroundJob: { jobId: 'bash-1', jobStartedAt: 1 } } },
+    } as never);
+    s = applyEvent(s, {
+      type: 'tool_execution_end', toolCallId: 'b1', toolName: 'bash', result: { content: [{ type: 'text', text: 'ok' }] }, isError: false,
+    } as never);
+    const cards = s.messages.filter((m) => m.kind === 'tool');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ toolCallId: 'b1', status: 'done' });
+  });
+
+  it('messagesFromAgent only restores pending calls of the last assistant, finished ones keep their result', () => {
+    const msgs = messagesFromAgent([
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'old', name: 'bash', arguments: {} }] },
+      { role: 'user', content: 'continue' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'r1', name: 'read', arguments: { path: 'a' } },
+          { type: 'toolCall', id: 'r2', name: 'read', arguments: { path: 'b' } },
+        ],
+      },
+      { role: 'toolResult', toolCallId: 'r1', toolName: 'read', content: [{ type: 'text', text: 'a' }], isError: false },
+    ] as never);
+    const tools = msgs.filter((m) => m.kind === 'tool');
+    expect(tools.map((m) => [m.toolCallId, m.status])).toEqual([['r1', 'done'], ['r2', 'running']]);
+  });
+
+  it('interruptPendingToolCards settles restored running cards but leaves ask_user waiting', () => {
+    const msgs = messagesFromAgent([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'x' } },
+          { type: 'toolCall', id: 'q1', name: 'ask_user', arguments: { questions: [] } },
+        ],
+      },
+    ] as never);
+    const settled = interruptPendingToolCards(msgs);
+    expect(settled.find((m) => m.kind === 'tool' && m.toolCallId === 'b1')).toMatchObject({ status: 'error', interrupted: true });
+    expect(settled.find((m) => m.kind === 'tool' && m.toolCallId === 'q1')).toMatchObject({ status: 'running' });
+    const done = messagesFromAgent([{ role: 'user', content: 'hi' }] as never);
+    expect(interruptPendingToolCards(done)).toBe(done);
+  });
+
   it('accumulates thinking from thinking_delta and keeps it after message_end', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);
@@ -1084,6 +1157,53 @@ describe('toolcall streaming', () => {
     } as AgentEvent);
     expect(aborted.lastError).toBeUndefined();
     expect(toolCards(aborted)[0]).toMatchObject({ status: 'error' });
+  });
+
+  it('中止后补写的结果消息把「已中断」换成真实结果', () => {
+    let s = applyEvent(initialAgentState(), toolUpdate({
+      type: 'toolcall_end', contentIndex: 0,
+      toolCall: { type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'pwd' } },
+    }));
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'aborted',
+        content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'pwd' } }],
+      },
+    } as AgentEvent);
+    expect(toolCards(s)[0]).toMatchObject({ status: 'error', interrupted: true });
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [{ type: 'text', text: 'C:\\work' }], isError: false },
+    } as AgentEvent);
+    expect(toolCards(s)).toHaveLength(1);
+    expect(toolCards(s)[0]).toMatchObject({ status: 'done', result: { content: [{ type: 'text', text: 'C:\\work' }] } });
+    expect((toolCards(s)[0] as { interrupted?: boolean }).interrupted).toBeUndefined();
+  });
+
+  it('工具结果消息收掉仍在转的卡片，不改 tool_execution_end 已定格的卡片', () => {
+    let s = applyEvent(initialAgentState(), {
+      type: 'tool_execution_start', toolCallId: 'r1', toolName: 'read', args: { path: 'a.ts' },
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'r1', toolName: 'read', content: [{ type: 'text', text: 'body' }], isError: true },
+    } as AgentEvent);
+    expect(toolCards(s)[0]).toMatchObject({ status: 'error', result: { content: [{ type: 'text', text: 'body' }] } });
+
+    s = applyEvent(s, {
+      type: 'tool_execution_start', toolCallId: 'r2', toolName: 'codemode', args: {},
+    } as AgentEvent);
+    const structured = { content: [{ type: 'text', text: 'ok' }], details: { calls: [] }, structuredContent: { x: 1 } };
+    s = applyEvent(s, {
+      type: 'tool_execution_end', toolCallId: 'r2', toolName: 'codemode', result: structured, isError: false,
+    } as AgentEvent);
+    s = applyEvent(s, {
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'r2', toolName: 'codemode', content: [{ type: 'text', text: 'ok' }], isError: false },
+    } as AgentEvent);
+    expect((toolCards(s)[1] as { result?: unknown }).result).toBe(structured);
   });
 
   it('agent_end 兜底收尾未完成的参数卡', () => {

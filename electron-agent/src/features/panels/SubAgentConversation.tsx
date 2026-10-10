@@ -15,6 +15,7 @@ import { buildSubAgentConversationMessages, subAgentSessionPath } from './subage
 import { pi } from '../../lib/pi';
 import { useChildSessionBinding } from './useChildSessionBinding';
 import { useSubAgentLive } from '../../hooks/useSubAgentLive';
+import { useSubAgentLiveStore } from '../../stores/subagentLiveStore';
 import { PendingResponseStatus } from '../chat/PendingResponseStatus';
 
 /** 列表末尾留白（px）：贴底跟随时最新内容停在这段空白之上。 */
@@ -140,6 +141,8 @@ interface SubAgentConversationProps {
   /** 跨会话 / 后台 spawn 时传入，用于从 registry 按需拉取 transcript。 */
   workspace?: string;
   agentId?: string | null;
+  /** 调用方已经从登记表记下的子会话路径（后台回执里没有）。 */
+  sessionPath?: string | null;
   'data-testid'?: string;
 }
 
@@ -150,14 +153,31 @@ export function SubAgentConversation({
   status,
   workspace,
   agentId,
+  sessionPath: knownPath,
   'data-testid': testId,
 }: SubAgentConversationProps) {
   const liveResult = useThrottledValue(result, 100, { enabled: status === 'running' });
-  const live = useSubAgentLive(workspace ?? '', agentId ?? null, status === 'running');
+  const givenPath = subAgentSessionPath(liveResult) ?? (knownPath?.trim() || null);
+  // 登记表轮询在最后一个消费者退出时会清掉整个项目的行，路径不能只从 store 里现读：
+  // 见过就按 agentId 记住；终态挂载时还没有，就借共享轮询补查一次首包，读到就释放。
+  const [seenPath, setSeenPath] = useState<{ agentId: string; path: string } | null>(null);
+  const [lookedUp, setLookedUp] = useState<string | null>(null);
+  const rememberedPath = agentId && seenPath?.agentId === agentId ? seenPath.path : null;
+  const needsPathLookup = Boolean(
+    workspace && agentId && status !== 'running' && !givenPath && !rememberedPath && lookedUp !== agentId,
+  );
+  const live = useSubAgentLive(workspace ?? '', agentId ?? null, status === 'running' || needsPathLookup);
+  const registryLoaded = useSubAgentLiveStore((s) => s.itemsByWorkspace.has(workspace ?? ''));
+  useEffect(() => {
+    if (!agentId) return;
+    const path = live.sessionPath;
+    if (path) setSeenPath((prev) => (prev?.agentId === agentId && prev.path === path ? prev : { agentId, path }));
+    if (registryLoaded) setLookedUp(agentId);
+  }, [agentId, live.sessionPath, registryLoaded]);
 
   // 后台 one-shot 的工具结果在子会话建立前就返回了，里面没有 sessionPath；注册表行里有。
   // 有了它就和主代理一样吃流式事件，不再靠 2.5s 拉 registry transcript 回放。
-  const sessionPath = subAgentSessionPath(liveResult) ?? live.sessionPath;
+  const sessionPath = givenPath ?? live.sessionPath ?? rememberedPath;
   const sessionMessages = useChildSessionBinding(sessionPath, status === 'running');
   // 真会话还没回放出助手/工具时，先走 registry transcript（和气泡卡片同一条路），
   // 避免右坞只剩一条任务原文。
@@ -202,6 +222,8 @@ export function SubAgentConversation({
       hiddenSpawnIds={subAgents.hidden}
       spawnOverlay={subAgents.overlay}
       answeredQuestions={answeredQuestions}
+      virtualizeTurnRows
+      sessionLive={status === 'running'}
       footer={footer}
       paddingInline={16}
       resetKey={sessionPath ?? task}

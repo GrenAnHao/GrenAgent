@@ -11,6 +11,7 @@ import { registerToolName } from "./naming.js";
 import { shapeMcpResult } from "./resultShape.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 import { currentCwd } from "../_shared/workspace-context.js";
+import { batchToolRefresh } from "../_shared/tool-refresh-batch.js";
 import { waitForDirect } from "./wait.js";
 
 export const pluginManifest = {
@@ -217,17 +218,71 @@ function outstandingMcpName(name: string, snap: McpSnapshot, registeredNow: Read
   return !matched;
 }
 
+/**
+ * 每个 pi 会话一份：工具名 → 上次 registerTool 时的定义指纹。
+ * 每次快照推送都会投影一遍；定义没变的工具不再注册，否则连接中 / 断开 / 重连都要把全部工具重注册一遍。
+ */
+export type ProjectionCache = Map<string, string>;
+
+interface RegisteredProjection {
+  direct: string[];
+  hasCodemodeServer: boolean;
+  hasDeferred: boolean;
+  taken: Set<string>;
+}
+
 export function project(
   pi: ProjectablePi,
   snap: McpSnapshot,
   mgr: ResourceManager,
   control?: DesktopControlPort,
   savedMcpNames: readonly string[] = [],
+  registered: ProjectionCache = new Map(),
 ): string[] {
+  // pi 每次 registerTool 都全量刷新一次工具表（重渲染全部 codemode 描述）。整批注册合并成一次刷新；
+  // 下面算活动工具要用刷新后的工具表，所以必须放在批量结束之后。
+  const { direct, hasCodemodeServer, hasDeferred, taken } = batchToolRefresh(
+    () => registerProjectedTools(pi, snap, mgr, control, registered),
+  );
+  const pending = savedMcpNames.filter((name) => outstandingMcpName(name, snap, taken));
+  try {
+    const active = pi.getActiveTools();
+    const preservePending = pending.length > 0;
+    const next = preservePending
+      ? [...active]
+      : active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
+    for (const n of direct) if (!next.includes(n)) next.push(n);
+    if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
+    if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
+    const finalNames = preservePending ? next : retainDeferredNames(pending, next);
+    // 清单没变就不再设：每次 setActiveTools 都会让 codemode 重新渲染全部工具描述。
+    if (!sameNames(finalNames, active)) pi.setActiveTools(finalNames);
+  } catch {
+    // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活
+  }
+  return pending;
+}
+
+function sameNames(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((name, index) => name === right[index]);
+}
+
+function registerProjectedTools(
+  pi: ProjectablePi,
+  snap: McpSnapshot,
+  mgr: ResourceManager,
+  control: DesktopControlPort | undefined,
+  registered: ProjectionCache,
+): RegisteredProjection {
   const direct: string[] = [];
   let hasCodemodeServer = false;
   let hasDeferred = false;
   const taken = new Set<string>();
+  const registerChanged = (name: string, fingerprint: string, register: () => void): void => {
+    if (registered.get(name) === fingerprint) return;
+    register();
+    registered.set(name, fingerprint);
+  };
 
   for (const [server, entry] of snap.servers) {
     if (entry.status !== "connected") continue;
@@ -245,7 +300,8 @@ export function project(
       if (exposure === "codemode") hasCodemodeServer = true;
       if (exposure === "deferred") hasDeferred = true;
       if (exposure === "direct") direct.push(name);
-      pi.registerTool({
+      const fingerprint = JSON.stringify([server, t.name, t.description ?? null, t.inputSchema ?? null, exposure, namespace.name, namespace.description ?? null]);
+      registerChanged(name, fingerprint, () => pi.registerTool({
         name,
         originalToolName,
         label: `${server}: ${t.name}`,
@@ -285,7 +341,7 @@ export function project(
             structuredContent: shaped.structuredContent as AgentToolResult<McpToolDetails>["structuredContent"],
           };
         },
-      } as Parameters<ProjectablePi["registerTool"]>[0]);
+      } as Parameters<ProjectablePi["registerTool"]>[0]));
     }
   }
   const resourcesExposure = widestResourceExposure(snap);
@@ -297,7 +353,7 @@ export function project(
     }
     for (const name of RESOURCE_TOOL_NAMES) {
       const copy = RESOURCE_COPY[name];
-      pi.registerTool({
+      registerChanged(name, JSON.stringify(["resource", resourcesExposure]), () => pi.registerTool({
         name,
         label: name,
         description: copy.description,
@@ -337,29 +393,10 @@ export function project(
             structuredContent: shaped.structuredContent as AgentToolResult<McpToolDetails>["structuredContent"],
           };
         },
-      } as Parameters<ProjectablePi["registerTool"]>[0]);
+      } as Parameters<ProjectablePi["registerTool"]>[0]));
     }
   }
-  const pending = savedMcpNames.filter((name) => outstandingMcpName(name, snap, taken));
-  try {
-    const active = pi.getActiveTools();
-    const preservePending = pending.length > 0;
-    const next = preservePending
-      ? [...active]
-      : active.filter((n) => !isProjectedMcpName(n) || direct.includes(n));
-    for (const n of direct) if (!next.includes(n)) next.push(n);
-    if (hasCodemodeServer && snap.autoEnableCodemode !== false && !next.includes("codemode")) next.push("codemode");
-    if (hasDeferred && !next.includes("tool_search")) next.push("tool_search");
-    if (preservePending) {
-      const changed = next.length !== active.length || next.some((name, index) => name !== active[index]);
-      if (changed) pi.setActiveTools(next);
-    } else {
-      pi.setActiveTools(retainDeferredNames(pending, next));
-    }
-  } catch {
-    // active-tool plumbing 尚未就绪：工具已登记，稍后可被激活
-  }
-  return pending;
+  return { direct, hasCodemodeServer, hasDeferred, taken };
 }
 
 function serverIncludesDirect(entry: { exposure?: string; toolExposure?: Record<string, string>; tools: { name: string }[] }): boolean {
@@ -441,6 +478,8 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
   let unsub: (() => void) | undefined;
   let tokenRuntime: ProviderTokenRuntime | undefined;
   let savedMcpNames: string[] = [];
+  // 工具登记在这个 pi 的扩展上，跟着 pi 实例走；每次快照推送只补登记有变化的。
+  const registered: ProjectionCache = new Map();
 
   pi.on("session_start", (event, ctx) => {
     const runtime = providerRuntimeOf(ctx);
@@ -463,7 +502,7 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     }
     const render = (snap: McpSnapshot): void => {
       if (!alive) return;
-      savedMcpNames = project(pi, snap, mgr, control, savedMcpNames);
+      savedMcpNames = project(pi, snap, mgr, control, savedMcpNames, registered);
       void control.request('mcp.state.publish', {
         workspace: typeof ctx.cwd === 'string' ? ctx.cwd : currentCwd(),
         servers: summary(snap),

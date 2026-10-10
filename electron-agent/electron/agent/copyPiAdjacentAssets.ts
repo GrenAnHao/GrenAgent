@@ -8,6 +8,8 @@ export const PI_ADJACENT_ASSETS = [
   { from: 'extensions/code-exec/runner.mjs', to: 'runner.mjs' },
   { from: 'extensions/_shared/sandbox/windows/bin/pi-sandbox-win.exe', to: 'pi-sandbox-win.exe' },
   { from: 'extensions/_shared/sandbox/windows/bin/pi-sandbox-launch.exe', to: 'pi-sandbox-launch.exe' },
+  // agent-host 的进程树守卫（electron-agent/native/job-guard.c），主进程按 out/main 旁找它。
+  { from: 'electron-agent/native/bin/pi-job-guard.exe', to: 'pi-job-guard.exe' },
   { from: 'extensions/fable-behavior/prompts', to: 'prompts', dir: true },
 ] as const;
 

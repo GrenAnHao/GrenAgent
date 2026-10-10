@@ -83,10 +83,11 @@ interface SessionOps {
 interface PiEventMeta { sessionId?: string; sessionPath?: string; source?: 'interactive' | 'goal' | 'subagent' }
 type EventMeta = string | PiEventMeta | SessionEventMeta;
 
+/** 返回值不用：agent-host 子进程里经 RPC 交给主进程的 AgentData 写库。 */
 interface ThreadStorePort {
-  createThread(input: { id: string; projectId: string; workspace: string; title?: string; sessionId?: string }): Promise<Thread> | Thread;
-  createTurn(input: { id: string; threadId: string; input: string; permissionProfile: string; mode?: Turn['mode']; sessionId?: string }): Promise<Turn> | Turn;
-  updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn> | Turn;
+  createThread(input: { id: string; projectId: string; workspace: string; title?: string; sessionId?: string }): Promise<Thread | unknown> | Thread;
+  createTurn(input: { id: string; threadId: string; input: string; permissionProfile: string; mode?: Turn['mode']; sessionId?: string }): Promise<Turn | unknown> | Turn;
+  updateTurn(id: string, patch: Partial<Pick<Turn, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<Turn | unknown> | Turn;
   upsertItem?(item: { id: string; threadId: string; turnId: string; type: 'assistant_message' | 'tool_call'; status: 'started' | 'streaming' | 'completed' | 'failed'; payload: unknown }): Promise<unknown> | unknown;
 }
 interface McpConfigPort { effective(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; runtime?(workspace: string): Promise<Array<{ name: string; config: Record<string, unknown> }>>; }
@@ -126,7 +127,13 @@ interface ActiveTurn {
 export interface PiRuntimeOptions {
   agentDir: string;
   runtimeConfigPath?: string;
-  agentDataEndpoint?: (workspace: string) => string | undefined;
+  /** agent-host 子进程里向主进程要；主进程的 AgentData 才发得出令牌。 */
+  agentDataEndpoint?: (workspace: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * 合并写 runtime-settings.json。主进程的 SettingsService 也写这份文件，锁只在主进程里，
+   * 子进程必须交给主进程写。不传时在本进程内直接合并（单进程测试）。
+   */
+  mergeRuntimeSettings?: (patch: Record<string, string>) => Promise<void>;
   resolveWorkspace?: (workspace: string) => Promise<string>;
   resolveEnv?: (workspace: string) => Promise<Record<string, string>>;
   threadStore?: ThreadStorePort;
@@ -135,7 +142,13 @@ export interface PiRuntimeOptions {
   onSessionForked?: (input: { workspace: string; sourceSessionId: string; targetSessionId: string }) => void | Promise<void>;
   permissionManager?: Pick<PermissionManager, 'authorize'>;
   mcpConfig?: McpConfigPort;
-  allowedPluginIds?: () => string[];
+  allowedPluginIds?: () => string[] | Promise<string[]>;
+  /**
+   * 这个会话名下是否还有存活的后台任务。任务属于启动它的会话（owner = sessionId），
+   * 会话被销毁（换走、拆掉停靠的 handle）时 jobs 扩展会把它的任务一并取消，
+   * 所以有存活任务的会话换走时要停靠，停靠期间也不能被当成空闲拆掉。
+   */
+  hasLiveJobs?: (sessionId: string) => boolean;
   agentHost: AgentHostPort;
   modelRuntimeHost: { refresh(): Promise<void>; workspaces?(): string[] };
 }
@@ -219,6 +232,58 @@ export class PiRuntimeService {
     await this.options.agentHost.close(workspace);
   }
 
+  /**
+   * 删会话前把它从运行时摘下。SDK 的会话一旦落盘就逐条 appendFileSync：文件删了、会话还挂在 handle 上
+   * （尤其还在跑），后面的条目会把同一路径重建成无头文件，侧栏按路径推断 cwd 照样列出来，重启后会话又回来。
+   * 停在后台的 handle 直接拆掉；前景是它就在同一个 handle 上换成新的空会话（渲染层删当前会话后按 getState 取这份）。
+   * 换会话被扩展取消时抛错：调用方不能接着删掉还挂在 handle 上的文件。
+   */
+  async releaseSessions(sessionPaths: readonly string[]): Promise<void> {
+    const wanted = sessionPaths.filter((path) => typeof path === 'string' && path.length > 0);
+    if (wanted.length === 0) return;
+    for (const workspace of this.options.agentHost.workspaces?.() ?? []) {
+      for (const handle of this.handlesOf(workspace)) {
+        const file = sessionFileOf(handle);
+        if (!file || !wanted.some((path) => sameSessionPath(file, path))) continue;
+        await this.releaseHandleSession(workspace, handle);
+      }
+    }
+  }
+
+  private async releaseHandleSession(workspace: string, handle: WorkspaceHandlePort): Promise<void> {
+    const { sessionId } = this.contextOf(handle);
+    const stateKey = this.sessionKey(workspace, sessionId);
+    // 先清排队：回合结算时 drainQueuedTurn 会把下一条再发回这份会话。
+    this.queuedTurns.delete(stateKey);
+    try { handle.session.clearQueue(); } catch { /* 会话已经拆了 */ }
+    const active = this.activeTurns.get(stateKey);
+    const host = this.options.agentHost;
+    if (host.evict && handle !== host.get(workspace)) {
+      // dispose 会先取消挂起的询问再 abort，然后 session_shutdown（后台任务、子代理跟着收口）。
+      await host.evict.call(host, workspace, handle);
+    } else {
+      // 不走 send('agent_new_session')：忙的前景会被停靠、有后台任务的也会被停靠，而这里就是要拆掉它。
+      // newSession 自己会先 abort 在跑的回合。
+      const result = await handle.newSession();
+      if (isCancelledResult(result)) throw new Error('SESSION_RELEASE_CANCELLED');
+      await this.refreshCurrentSession(workspace, this.handleOps(handle));
+    }
+    // 回合结算事件可能在拆除后才到，也可能随 handle 一起丢了。这里收尾，
+    // 否则 listRunningTurns 仍把它当成在跑，渲染层重载后侧栏又亮起来。
+    if (active && this.activeTurns.get(stateKey) === active) {
+      this.activeTurns.delete(stateKey);
+      try {
+        await this.options.threadStore?.updateTurn(active.turnId, { status: 'cancelled', completedAt: Date.now() });
+      } catch {
+        /* 回合记录写失败不阻断删除 */
+      }
+    }
+    this.queuedTurns.delete(stateKey);
+    this.assistantItems.delete(stateKey);
+    this.workspaceThreads.delete(stateKey);
+    this.permissionProfiles.delete(stateKey);
+  }
+
   async send(workspace: string, command: string, rawArgs: Record<string, unknown>): Promise<unknown> {
     const type = commandTypes[command as PiCommand];
     if (!type) throw new Error(`Unsupported Pi command: ${command}`);
@@ -259,10 +324,16 @@ export class PiRuntimeService {
       const focused = await this.focusExistingSession(workspace, args);
       if (focused) return focused;
     }
-    if (SESSION_REPLACING_COMMANDS.includes(command) && this.foregroundIsBusy(workspace)) {
+    if (SESSION_REPLACING_COMMANDS.includes(command)) {
       // 换会话 / 新建可以停靠正在跑的 handle，再开一个。fork / rewind 会改正在跑的那份，仍然拒绝。
       const canPark = command === 'agent_switch_session' || command === 'agent_new_session';
-      if (!canPark || !await this.parkForeground(workspace)) throw new Error('SESSION_BUSY');
+      if (this.foregroundIsBusy(workspace)) {
+        if (!canPark || !await this.parkForeground(workspace)) throw new Error('SESSION_BUSY');
+      } else if (canPark && this.foregroundOwnsLiveJobs(workspace)) {
+        // 回合已经结束、只剩后台任务在跑的会话：原地替换会触发 session_shutdown，把任务一并取消。
+        // 停靠失败（宿主不支持）时退回原地替换，不能因为这个拒绝用户切会话。
+        await this.parkForeground(workspace);
+      }
     }
     const session = await this.resolveSessionForCommand(workspace, command, args);
     const sourceSessionId = session.sessionId;
@@ -463,6 +534,8 @@ export class PiRuntimeService {
     if ((handle.session.getFollowUpMessages?.() ?? []).length > 0) return;
     const ui = handle.ui as { hasAnyPending?: () => boolean };
     if (ui.hasAnyPending?.()) return;
+    // 后台任务还在跑：任务跟着这个会话，拆掉 handle 会把它们取消。任务结算后会话被叫醒，跑完那一轮会再走到这里。
+    if (this.ownsLiveJobs(handle)) return;
     await evict.call(this.options.agentHost, workspace, handle);
   }
 
@@ -643,12 +716,11 @@ export class PiRuntimeService {
   ): Promise<{ ok: true; op: 'add' | 'remove'; timestamp: number }> {
     const timestamp = typeof rawTimestamp === 'number' ? rawTimestamp : Number(rawTimestamp);
     if (!Number.isFinite(timestamp)) throw new Error('INVALID_CONTEXT_EXCLUSION_TIMESTAMP');
-    const path = this.options.runtimeConfigPath;
-    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
     this.exclusionPulseRev = Math.max(Date.now(), this.exclusionPulseRev + 1);
     const pulse = JSON.stringify({ op, ts: timestamp, rev: this.exclusionPulseRev });
-    await mergeRuntimeSettingsFile(path, {
+    await this.mergeRuntimeSettings({
       [contextExclusionConfigKey(workspace)]: pulse,
       [contextExclusionConfigKey(resolved)]: pulse,
     });
@@ -681,11 +753,10 @@ export class PiRuntimeService {
     if (!isAgentMode(mode)) throw new Error('INVALID_AGENT_MODE');
     this.pinSessionControl(workspace, targetPath, { mode });
     setAgentMode(mode, workspace);
-    const path = this.options.runtimeConfigPath;
-    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
     setAgentMode(mode, resolved);
-    await mergeRuntimeSettingsFile(path, {
+    await this.mergeRuntimeSettings({
       [agentModeConfigKey(workspace)]: mode,
       [agentModeConfigKey(resolved)]: mode,
     });
@@ -697,11 +768,10 @@ export class PiRuntimeService {
     if (!level) throw new Error('INVALID_APPROVAL_POLICY');
     this.pinSessionControl(workspace, targetPath, { approval: level });
     setApprovalPolicy(level, workspace);
-    const path = this.options.runtimeConfigPath;
-    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
     const resolved = await (this.options.resolveWorkspace?.(workspace) ?? Promise.resolve(workspace));
     setApprovalPolicy(level, resolved);
-    await mergeRuntimeSettingsFile(path, {
+    await this.mergeRuntimeSettings({
       [approvalPolicyConfigKey(workspace)]: level,
       [approvalPolicyConfigKey(resolved)]: level,
     });
@@ -875,6 +945,15 @@ export class PiRuntimeService {
     return true;
   }
 
+  private ownsLiveJobs(handle: WorkspaceHandlePort | undefined): boolean {
+    const sessionId = handle?.session?.sessionId;
+    return typeof sessionId === 'string' && sessionId !== '' && Boolean(this.options.hasLiveJobs?.(sessionId));
+  }
+
+  private foregroundOwnsLiveJobs(workspace: string): boolean {
+    return this.ownsLiveJobs(this.options.agentHost.get(workspace));
+  }
+
   private foregroundIsBusy(workspace: string): boolean {
     const handle = this.options.agentHost.get(workspace);
     if (handle?.session.isStreaming) return true;
@@ -892,13 +971,20 @@ export class PiRuntimeService {
       PI_PACKAGE_DIR: this.options.agentDir,
     };
     if (this.options.runtimeConfigPath) env.PI_RUNTIME_CONFIG = this.options.runtimeConfigPath;
-    const endpoint = this.options.agentDataEndpoint?.(cwd);
+    const endpoint = await this.options.agentDataEndpoint?.(cwd);
     if (endpoint) env.AGENT_DATA_ENDPOINT = endpoint;
     env.PI_PERMISSION_PROFILE = workspace === '__system__' ? 'automation' : 'workspace';
     env.PI_HUMAN_ORIGIN_TOKEN = source === 'interactive' ? '1' : '0';
     if (this.options.mcpConfig) env.PI_MCP_CONFIG = JSON.stringify(await (this.options.mcpConfig.runtime?.(workspace) ?? this.options.mcpConfig.effective(workspace)));
-    if (this.options.allowedPluginIds) env.PI_ALLOWED_EXTENSIONS = JSON.stringify(this.options.allowedPluginIds());
+    if (this.options.allowedPluginIds) env.PI_ALLOWED_EXTENSIONS = JSON.stringify(await this.options.allowedPluginIds());
     return env;
+  }
+
+  private async mergeRuntimeSettings(patch: Record<string, string>): Promise<void> {
+    if (this.options.mergeRuntimeSettings) return this.options.mergeRuntimeSettings(patch);
+    const path = this.options.runtimeConfigPath;
+    if (!path) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');
+    await mergeRuntimeSettingsFile(path, patch);
   }
 
   private authorize(workspace: string, command: string, args: Record<string, unknown>): Promise<PermissionAuthorization> {

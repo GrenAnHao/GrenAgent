@@ -6,11 +6,11 @@ import { SettingCard } from './SettingCard';
 import { SettingFieldInput } from './SettingField';
 import { useSettingsForm } from './useSettingsForm';
 import { AppearanceSettings } from './AppearanceSettings';
+import { DevinAccountCard } from './DevinAccountCard';
 import { ProvidersSettings } from './ProvidersSettings';
 import { CapabilityModelField } from './CapabilityModelField';
 import { migratePhase2 } from './phase2Migration';
 import { pi } from '../../lib/pi';
-import { invoke } from '../../platform/runtime';
 
 const useStyles = createStyles(({ css, token }) => ({
   root: css`
@@ -118,56 +118,7 @@ const useStyles = createStyles(({ css, token }) => ({
   footerMsgError: css`
     color: ${token.colorError};
   `,
-  cursorLogin: css`
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  `,
 }));
-
-function CursorLoginButton() {
-  const { styles, cx } = useStyles();
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
-  const [failed, setFailed] = useState(false);
-
-  const onClick = () => {
-    if (busy) return;
-    setBusy(true);
-    setFailed(false);
-    setNotice('等待浏览器完成登录…');
-    void invoke<void>('cursor_login')
-      .then(() => {
-        setFailed(false);
-        setNotice('已登录');
-      })
-      .catch((error: unknown) => {
-        setFailed(true);
-        setNotice(visibleLoginError(error));
-      })
-      .finally(() => {
-        setBusy(false);
-      });
-  };
-
-  return (
-    <div className={styles.cursorLogin}>
-      <button type="button" data-testid="cursor-login" className={styles.saveBtn} disabled={busy} onClick={onClick}>
-        登录 Cursor
-      </button>
-      {notice ? <span className={cx(styles.footerMsg, failed && styles.footerMsgError)}>{notice}</span> : null}
-    </div>
-  );
-}
-
-function visibleLoginError(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
-  if (!message || /bearer\s+\S+/i.test(message) || /accessToken|refreshToken/i.test(message) || /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/.test(message)) {
-    return 'Cursor 登录失败';
-  }
-  return message;
-}
 
 export function SettingsPanel() {
   const { styles, cx } = useStyles();
@@ -218,7 +169,7 @@ export function SettingsPanel() {
           {activeId === 'providers' ? (
             <div className={styles.providersHost}>
               <div className={styles.pageTitle}>{cat.title}</div>
-              <ProvidersSettings cursorLogin={<CursorLoginButton />} />
+              <ProvidersSettings />
             </div>
           ) : (
             <>
@@ -245,6 +196,7 @@ export function SettingsPanel() {
                                 />
                               ),
                             )}
+                          {sec.title === '搜索' ? <DevinAccountCard /> : null}
                         </SettingCard>
                       ))}
                     </>

@@ -20,6 +20,7 @@ export interface SubagentItem {
   task: string;
   status: string;
   model: string | null;
+  thinkingLevel: string | null;
   sessionPath: string | null;
   profile: string | null;
   output: string | null;
@@ -46,8 +47,9 @@ export class SubagentService {
       const parentColumn = hasColumn(db, 'subagents', 'parentId');
       const owner = ownerSessionPath?.trim();
       if (owner && !parentColumn) return [];
+      const thinkingColumn = hasColumn(db, 'subagents', 'thinkingLevel');
       const columns = `${sessionColumn ? ', sessionPath' : ''}${parentColumn ? ', parentId' : ''}`;
-      const select = `SELECT id, task, status, model, output, error, exitCode, createdAt, updatedAt, profile${columns} FROM subagents`;
+      const select = `SELECT id, task, status, model${thinkingColumn ? ', thinkingLevel' : ''}, output, error, exitCode, createdAt, updatedAt, profile${columns} FROM subagents`;
       let rows: Array<Record<string, unknown>>;
       if (owner) {
         // 先只拿归属要用的短列（有 idx_subagents_listing 时不碰表行），收出归属于这份会话的 id 后，
@@ -67,6 +69,7 @@ export class SubagentService {
         task: asString(row.task),
         status: asString(row.status),
         model: asNullableString(row.model),
+        thinkingLevel: thinkingColumn ? asNullableString(row.thinkingLevel) : null,
         sessionPath: sessionColumn ? asNullableString(row.sessionPath) : null,
         profile: asNullableString(row.profile),
         output: asNullableString(row.output),

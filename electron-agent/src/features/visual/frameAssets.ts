@@ -310,10 +310,13 @@ const LAYOUT_PATCH = `
 `;
 
 const FILL_PATCH = `
-html, body { height: 100% !important; min-height: 100% !important; }
-body { display: flex !important; flex-direction: column !important; }
-/* 确认条的 style 挂在 body 上。display 一旦不是 none，浏览器会把 CSS 原文画进页面。 */
-body > *:not(script):not(style), #claude-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* html 定高、body 用 min-height：内容矮时比较区撑满剩余空间，内容高时 body 跟着长、整页滚动。
+   body 定高的话，溢出的内容后面没有底边距，确认条给 body 留的 padding-bottom 不起作用，最后一个选项会被条盖住。 */
+html { height: 100% !important; }
+body { height: auto !important; min-height: 100% !important; box-sizing: border-box !important; display: flex !important; flex-direction: column !important; }
+/* 确认条的 style 挂在 body 上。display 一旦不是 none，浏览器会把 CSS 原文画进页面。
+   确认条本身也是 body 的直接子节点：它是 fixed 的单行横条，被改成竖向 flex 会变成两行高，盖住底部的选项。 */
+body > *:not(script):not(style):not(#visual-confirm-bar), #claude-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 h1, h2, h3, h4, p, .subtitle, .label, .options, .option { flex: 0 0 auto !important; }
 .split, .cards { flex: 1 1 auto !important; min-height: 0 !important; }
 .mockup { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }

@@ -37,8 +37,8 @@ export interface ModelRuntimeHostOptions {
 }
 
 /**
- * 进程内唯一的 ModelRuntime。今日每个 sidecar 各持一份；进程内嵌后鉴权与模型表只需一份，
- * 由各 WorkspaceHandle 共用。
+ * 本进程内唯一的 ModelRuntime。主进程一份（记忆 / 知识库 / 增强提示词等短调用），
+ * agent-host 子进程一份（各 WorkspaceHandle 共用）。改 provider 配置时两份都要 refresh。
  */
 export class ModelRuntimeHost {
   private runtime: ModelRuntime | undefined;
@@ -99,7 +99,7 @@ export class ModelRuntimeHost {
     return formatted.content;
   }
 
-  async *streamSimple(input: ShortCallInput): AsyncGenerator<{ type: 'delta' | 'done' | 'error'; text?: string; usage?: unknown; error?: string }> {
+  async *streamSimple(input: ShortCallInput): AsyncGenerator<{ type: 'delta' | 'thinking' | 'done' | 'error'; text?: string; usage?: unknown; error?: string }> {
     const runtime = await this.ensure();
     const model = await this.resolveCallModel(input, runtime);
     // 条件透传：undefined 不覆盖 provider/模型自带的采样配置，保持「不传即默认」语义。
@@ -118,6 +118,7 @@ export class ModelRuntimeHost {
       options,
     )) {
       if (ev.type === 'text_delta' && ev.delta) yield { type: 'delta', text: ev.delta };
+      else if (ev.type === 'thinking_delta' && ev.delta) yield { type: 'thinking', text: ev.delta };
       else if (ev.type === 'done') yield { type: 'done', usage: ev.message.usage };
       else if (ev.type === 'error') yield { type: 'error', usage: ev.error.usage, error: ev.error.errorMessage };
     }

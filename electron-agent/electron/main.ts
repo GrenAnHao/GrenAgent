@@ -5,12 +5,10 @@ import { WindowBackgroundStore } from "./app/windowBackground";
 import { SettingsService } from "./app/settingsService";
 import { McpPolicyService } from "./app/mcpPolicyService";
 import { McpConfigService } from "./app/mcpConfigService";
-import { SubagentService } from "./app/subagentService";
 import { FileService } from "./app/fileService";
 import { SkillService } from "./app/skillService";
 import { PromptLibraryService } from "./app/promptLibraryService";
 import { UsageService } from "./app/usageService";
-import { PiRuntimeService } from "./app/piRuntimeService";
 import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
@@ -38,22 +36,20 @@ import { CodeGraphService } from "./app/codeGraph/codeGraphService";
 import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
-import { resolveWorkerEntry } from "./agent/workerEntry";
-import { subscribeSessionTitleWritten } from "../../extensions/auto-title/notify.js";
-import { AgentHost } from "./agent/agentHost";
-import { createWorkspaceHandle } from "./agent/createWorkspaceHandle";
+import { resolveAgentHostEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
 import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
 import { getAgentDir, ModelRegistry, ModelRuntime, SettingsManager } from "../../cli/src/pi-sdk.js";
-import { installCursorProvider, registerCursorNativeProvider } from "../../cli/src/cursor/install.js";
 import { collectModels } from "../../cli/src/probe-models.js";
 import { runHostOneshot } from "./agent/hostOneshotAdapter";
-import { killAllSubagents } from "../../extensions/multi-agent/subagentProcessRegistry.js";
-import { releaseSubagentControlPlane } from "../../extensions/multi-agent/controlPlane.js";
-import { startJobsBridge } from "./app/jobsBridge";
-import { canSendTo, recordDroppedSend, recordEventSend, startRuntimeDiag } from "./runtimeDiag";
+import { canSendTo, recordDiagEvent, recordDroppedSend, recordEventSend, startRuntimeDiag } from "./runtimeDiag";
 import { installFastRealpath } from "./fastRealpath";
+import { mergeRuntimeSettingsFile } from "./app/settingsService";
+import { AgentProcessClient } from "./agentProcess/agentProcessClient";
+import { BROADCAST_CHANNEL, DIAG_CHANNEL, type BroadcastPayload } from "./agentProcess/contract";
+import { createAgentPorts, createHostMethods } from "./agentProcess/mainBindings";
+import { startJobGuard } from "./agentProcess/jobGuard";
 
 /** backgroundColor：上次运行时按明暗记下的底色，没有就用 browserWindowOptions 的默认深色。 */
 export function createWindow(backgroundColor?: string) {
@@ -76,7 +72,6 @@ export function createWindow(backgroundColor?: string) {
 if (!process.env.VITEST) {
   installFastRealpath();
   app.whenReady().then(async () => {
-    installCursorProvider();
     startRuntimeDiag();
     // userData 随应用名变化（dev 用 package.json name，打包用 productName），
     // 早期版本的数据留在旧目录；读不到时回退到 com.rxstudio.grenagent。
@@ -85,17 +80,30 @@ if (!process.env.VITEST) {
     ].filter((dir) => dir !== app.getPath('userData')));
     const dataPath = join(app.getPath('userData'), 'agent-data.db');
     const windowBackground = new WindowBackgroundStore(app.getPath('userData'));
-    let piRuntime: PiRuntimeService | undefined;
-    let agentHost: AgentHost | undefined;
     let agentData: AgentDataService;
-    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: (operation, requested) => {
+    // 交互运行时在 agent-host 子进程里。这里的调用都经 RPC 转发；子进程按需拉起。
+    let agentProcess: AgentProcessClient | undefined;
+    const agent = createAgentPorts({
+      request: (method, params) => {
+        if (!agentProcess) return Promise.reject(new Error('AGENT_HOST_NOT_READY'));
+        return agentProcess.request(method, params);
+      },
+      isRunning: () => agentProcess?.isRunning ?? false,
+    });
+    const permissions = new PermissionManager({ dataDir: app.getPath('userData'), resolveProfile: async (operation, requested) => {
       const workspace = typeof operation.workspace === 'string' ? operation.workspace : undefined;
       const args = isRecord(operation.args) ? operation.args : undefined;
       const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : undefined;
-      return workspace ? (piRuntime?.permissionProfile(workspace, sessionId) ?? requested) : requested;
+      if (!workspace) return requested;
+      return (await agent.pi.permissionProfile(workspace, sessionId).catch(() => undefined)) ?? requested;
     } });
     const sandbox = new SandboxManager({});
-    const mcpConfig = new McpConfigService(app.getPath('home'), settings);
+    const mcpConfig = new McpConfigService(app.getPath('home'), settings, {
+      // 配置已经落盘；子进程暂时不在时它下次启动会读到新配置，这里只记下，不让保存失败。
+      hotReload: (workspace, runtimeJson) => agent.mcp.hotReload(workspace, runtimeJson)
+        .catch((error) => console.error('MCP hot reload failed', error)),
+      reload: (workspace, name) => agent.mcp.reload(workspace, name),
+    });
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     const worksDir = await workspace.getWorksDir();
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
@@ -107,11 +115,7 @@ if (!process.env.VITEST) {
     });
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent');
     const modelRuntimeHost = new ModelRuntimeHost({
-      create: async () => {
-        const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
-        registerCursorNativeProvider((provider) => runtime.registerNativeProvider(provider));
-        return runtime;
-      },
+      create: () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
       resolveSettings: async () => {
         const defaults = SettingsManager.create(app.getPath('userData'), getAgentDir());
         return { provider: defaults.getDefaultProvider() ?? '', modelId: defaults.getDefaultModel() ?? '' };
@@ -142,7 +146,7 @@ if (!process.env.VITEST) {
     agentData = new AgentDataService({
       dataPath,
       validateProject: (project) => validateProject(project, worksDir),
-      resolveSession: (project, sessionId) => piRuntime?.ownsSession(project, sessionId) ?? false,
+      resolveSession: (project, sessionId) => agent.pi.ownsSession(project, sessionId).catch(() => false),
       completeSimple: (input) => completeAgentData(input),
       executeServiceTask: (task, hooks) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }, hooks),
       jobRunners: {
@@ -155,7 +159,7 @@ if (!process.env.VITEST) {
         call: (workspace, tool, args) => codeGraph.call(workspace, tool, args),
       },
       methods: {
-        'turn.start': (params) => piRuntime?.enqueueTurn(
+        'turn.start': (params) => agent.pi.enqueueTurn(
           readRpcString(params, 'workspace'),
           readRpcString(params, 'input'),
           typeof params.permissionProfile === 'string' ? params.permissionProfile : 'workspace',
@@ -172,11 +176,11 @@ if (!process.env.VITEST) {
             typeof params.profile === 'string' ? params.profile : 'workspace',
           );
         },
-        // pi 子进程推送 MCP 连接状态。转成 setStatus('mcp')，面板才能看到 exposure、auth 和 loginUrl。
-        // 扩展发的是 ctx.cwd；面板按 AgentStore workspace 读。对上活 handle 就改成 handle.workspace。
-        'mcp.state.publish': (params) => {
+        // agent-host 子进程里的 MCP 扩展推送连接状态。转成 setStatus('mcp')，面板才能看到 exposure、auth 和 loginUrl。
+        // 扩展发的是 ctx.cwd；面板按 AgentStore workspace 读。对上活 handle 就改成 handle.workspace（向子进程查）。
+        'mcp.state.publish': async (params) => {
           const published = typeof params.workspace === 'string' ? params.workspace : '';
-          const workspace = agentHost?.workspaceForCwd(published) ?? published;
+          const workspace = published ? await agent.mcp.workspaceForCwd(published).catch(() => published) : published;
           const servers = Array.isArray(params.servers) ? params.servers : [];
           broadcastPiEvent('pi://ui-request', {
             workspace,
@@ -201,106 +205,103 @@ if (!process.env.VITEST) {
     const piPackages = new PiPackageService({
       agentDir,
       allowedPluginIds: () => plugins.allowedPluginIds(),
+      extensions: () => agent.extensions.catalog(),
+      requestReload: () => agent.resources.reload(),
     });
-    agentHost = new AgentHost({
-      createHandle: async (workspace, cwd) => createWorkspaceHandle({
-        workspace,
-        cwd,
-        modelRuntime: await modelRuntimeHost.ensure(),
-        allowedExtensionsJson: JSON.stringify(plugins.allowedPluginIds()),
-        resolveConfig: (origin) => piRuntime!.turnConfig(workspace, cwd, origin),
-        emitUiRequest: (envelope) => {
-          broadcastPiEvent('pi://ui-request', {
-            workspace: envelope.workspace,
-            request: envelope.request,
-            ...(envelope.sessionId ? { sessionId: envelope.sessionId } : {}),
-            ...(envelope.sessionPath ? { sessionPath: envelope.sessionPath } : {}),
-            source: envelope.source,
-          });
-        },
-        onEvent: (event, meta) => {
-          const envelope = piRuntime?.eventEnvelope(workspace, event, meta) ?? {
-            workspace,
-            event,
-            source: meta.source,
-            ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
-            ...(meta.sessionPath ? { sessionPath: meta.sessionPath } : {}),
-          };
-          broadcastPiEvent('pi://event', envelope);
-          void piRuntime?.handlePiEvent(workspace, event, meta).catch((error) => console.error('Pi event handling failed', error));
-        },
-        onFatal: (error, handle) => {
-          console.error('WorkspaceHandle fatal', error);
-          let sessionId: string | undefined;
-          let sessionPath: string | undefined;
-          try {
-            const id = handle?.session?.sessionId;
-            if (typeof id === 'string' && id) sessionId = id;
-            const file = handle?.session?.sessionFile;
-            if (typeof file === 'string' && file) sessionPath = file;
-          } catch { /* 会话已经拆掉 */ }
-          const task = handle ? agentHost.evict(workspace, handle) : agentHost.close(workspace);
-          void task.catch(() => {});
-          broadcastPiEvent('pi://exit', {
-            workspace,
-            code: 1,
-            ...(sessionId ? { sessionId } : {}),
-            ...(sessionPath ? { sessionPath } : {}),
-          });
-          void piRuntime?.handlePiExit(workspace, 1, sessionId ? { sessionId, source: 'interactive' } : undefined).catch(() => {});
-        },
-      }),
-    });
-    const enhancePrompt = createEnhancePrompt({
-      host: modelRuntimeHost,
-      agentHost,
-      settings: () => settings.getAll(),
-      agentData,
-    });
-    // 后台 bash job（含前台超时转后台的）的实时输出推给界面。
-    const jobsBridge = startJobsBridge((event, payload) => broadcastPiEvent(event, payload), {
-      workspaceForCwd: (cwd) => agentHost.workspaceForCwd(cwd) ?? cwd,
-    });
-    registerIpcHandlers({
-      settings,
-      jobs: jobsBridge,
-      mcpPolicy: new McpPolicyService(app.getPath('home'), {
-        permissionManager: permissions,
-      }),
-      mcpConfig,
-      subagent: new SubagentService(sandbox),
-      files: new FileService(),
-      skills: new SkillService(app.getPath('home')),
-      promptLibrary: new PromptLibraryService(agentDir),
-      piPackages,
-      usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
-      pi: piRuntime = new PiRuntimeService({
-        agentDir,
-        runtimeConfigPath,
-        agentHost,
-        modelRuntimeHost,
-        agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
+    const entryInput = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname };
+    const jobGuardExe = resolveJobGuardExe(entryInput);
+    agentProcess = new AgentProcessClient({
+      entry: resolveAgentHostEntry(entryInput),
+      // 子进程崩溃（或主进程崩溃）时，它拉起的 MCP 服务器、bash、子代理留下的子孙进程由守卫清掉。
+      guard: (pid) => startJobGuard(pid, { exePath: jobGuardExe }),
+      onSweep: (summary, exit) => recordDiagEvent({ kind: 'agent-host-sweep', summary, expected: exit.expected }),
+      execPath: process.execPath,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      // 不带任何 V8 参数：字节码缓存里记着编译时的 V8 参数指纹，参数不同整份缓存被拒，子进程起不来。
+      // RunAsNode 的默认老生代上限按物理内存算（16GB 以上的机器就是 4096MB），不需要再调。
+      hostMethods: createHostMethods({
         resolveWorkspace: async (path) => {
           const resolved = await workspace.ensureWorkspace(path);
           knownWorkspaces.add(resolved);
           return resolved;
         },
-        permissionManager: permissions,
-        mcpConfig,
+        agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
+        mcpRuntime: (target) => mcpConfig.runtime(target),
         allowedPluginIds: () => plugins.allowedPluginIds(),
-        threadStore: agentData,
+        authorize: (operation, profile) => permissions.authorize(operation, profile),
+        // 主进程的 SettingsService 也写这份文件；同一把锁在这个进程里。
+        mergeRuntimeSettings: (patch) => mergeRuntimeSettingsFile(runtimeConfigPath, patch),
+        thread: {
+          createThread: (input) => agentData.createThread(input),
+          createTurn: (input) => agentData.createTurn(input),
+          updateTurn: (id, patch) => agentData.updateTurn(id, patch),
+          upsertItem: (item) => agentData.upsertItem(item),
+        },
       }),
+      onEvent: (channel, payload) => {
+        if (channel === DIAG_CHANNEL) {
+          recordDiagEvent({ kind: 'agent-host-sample', ...(payload as Record<string, unknown>) });
+          return;
+        }
+        if (channel !== BROADCAST_CHANNEL) return;
+        const message = payload as BroadcastPayload;
+        if (typeof message?.channel === 'string') broadcastPiEvent(message.channel, message.payload);
+      },
+      onExit: (exit) => {
+        recordDiagEvent({
+          kind: 'agent-host-exit',
+          code: exit.code,
+          signal: exit.signal,
+          expected: exit.expected,
+          ...(exit.fatal ? { fatal: exit.fatal } : {}),
+          stderrTail: exit.stderrTail.slice(-4096),
+        });
+        if (exit.expected) return;
+        console.error('agent-host exited unexpectedly', exit.code, exit.signal, exit.fatal ?? exit.stderrTail.slice(-2000));
+        // 运行时整个没了：每个打开过的工作区发一条不带会话的 pi://exit，渲染层把这个项目的运行态全部熄灭。
+        for (const target of agent.tracker.drain()) {
+          broadcastPiEvent('pi://exit', { workspace: target, code: exit.code ?? 1, source: 'interactive' });
+        }
+      },
+    });
+    const enhancePrompt = createEnhancePrompt({
+      host: modelRuntimeHost,
+      activeModel: (target) => agent.pi.activeModel(target),
+      settings: () => settings.getAll(),
+      agentData,
+    });
+    registerIpcHandlers({
+      settings,
+      // 后台 bash job 的实时输出由子进程经 pi://jobs 推送；这里只有快照和停止。
+      jobs: agent.jobs,
+      mcpPolicy: new McpPolicyService(app.getPath('home'), {
+        permissionManager: permissions,
+        probe: (configJson) => agent.mcp.probe(configJson),
+      }),
+      mcpConfig,
+      subagent: agent.subagent,
+      files: new FileService(),
+      skills: new SkillService(app.getPath('home')),
+      promptLibrary: new PromptLibraryService(agentDir),
+      piPackages,
+      usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
+      pi: agent.pi,
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),
         probeModels: async () => {
           const runtime = await modelRuntimeHost.ensure();
-          return JSON.stringify({ ok: true, models: collectModels(new ModelRegistry(runtime) as never) });
+          const models = collectModels(new ModelRegistry(runtime) as never);
+          return JSON.stringify({ ok: true, models });
         },
-        refresh: () => piRuntime!.refreshModelRegistry(),
-        activeModel: async (workspace) => {
-          const model = agentHost.get(workspace)?.session.model;
-          if (!model) throw new Error(`workspace not open: ${workspace}`);
-          return { provider: model.provider, modelId: model.id };
+        // 主进程的短调用和子进程里的会话各持一份 ModelRuntime，两边都要重读。
+        refresh: async () => {
+          await modelRuntimeHost.refresh();
+          return agent.pi.refreshModelRegistry();
+        },
+        activeModel: async (target) => {
+          const model = await agent.pi.activeModel(target);
+          if (!model) throw new Error(`workspace not open: ${target}`);
+          return model;
         },
         oneshot: (request, onLine, signal) => runHostOneshot(modelRuntimeHost, request, onLine, signal),
       }),
@@ -326,32 +327,24 @@ if (!process.env.VITEST) {
       dev: app.isPackaged ? undefined : new DevService(),
     });
     workspace.setWorkspaceCloser(async (project) => {
-      await piRuntime?.closeWorkspace(project);
-      releaseSubagentControlPlane(project);
+      await agent.pi.closeWorkspace(project);
+      await agent.controlPlane.release(project);
     });
+    // 删会话前先停掉并摘下持有它的 handle，否则还在跑的会话会把文件写回来。
+    workspace.setSessionReleaser((paths) => agent.pi.releaseSessions(paths));
+    workspace.setSubagentControl(agent.controlPlane);
     let shutdownStarted = false;
     let shutdownDone = false;
-    // 会话已被替换时，auto-title 把标题写进原 jsonl，不会再走当前 pi 的 session_info_changed。
-    // 补一次同名事件，侧栏会重读会话列表。workspace 留空，避免被当成当前画面上的会话事件。
-    const stopAutoTitleNotice = subscribeSessionTitleWritten(() => {
-      broadcastPiEvent('pi://event', {
-        workspace: '',
-        event: { type: 'session_info_changed' },
-        source: 'interactive',
-      });
-    });
     app.on('before-quit', (event) => {
       if (shutdownDone) return;
       event.preventDefault();
       if (shutdownStarted) return;
       shutdownStarted = true;
-      stopAutoTitleNotice();
-      jobsBridge.stop();
       void (async () => {
         await Promise.allSettled([codeGraphJobs.close()]);
         systemWorker.close();
-        await agentHost.closeAll();
-        killAllSubagents();
+        // 子进程收尾时扩展还会经 AgentData 记账（记忆、回合状态），必须先于 agentData.stop。
+        await agentProcess?.shutdown();
         await agentData.stop();
         pluginStorage.close();
       })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {
@@ -359,6 +352,8 @@ if (!process.env.VITEST) {
         app.quit();
       });
     });
+    // 子进程加载 pi SDK 和全部扩展要一两秒，和窗口加载并行。
+    void agentProcess.start().catch((error) => console.error('agent-host failed to start', error));
     createWindow(windowBackground.read());
   });
   app.on("window-all-closed", () => app.quit());

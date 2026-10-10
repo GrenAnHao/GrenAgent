@@ -8,7 +8,10 @@ import {
   emitCatalogChanged,
   __resetCatalogChangeSinksForTest,
 } from '../../../extensions/multi-agent/catalog-events.js';
-import { emitEmbeddedSubagentEvent } from '../../../extensions/multi-agent/embedded-events.js';
+import {
+  emitEmbeddedSubagentEvent,
+  __resetEmbeddedSubagentEventSinksForTest,
+} from '../../../extensions/multi-agent/embedded-events.js';
 import { lookupParentHost, __resetParentHostsForTest } from '../../../extensions/multi-agent/parent-host.js';
 import { WorkspaceHandle } from './workspaceHandle.js';
 
@@ -79,6 +82,11 @@ function makeHandle(runtime: unknown, over: Record<string, unknown> = {}) {
 }
 
 describe('WorkspaceHandle', () => {
+  // 很多用例 start 后不 dispose；模块级 sink 表会留着旧 handle，并按“第一个认领”吞掉子会话事件。
+  beforeEach(() => {
+    __resetEmbeddedSubagentEventSinksForTest();
+  });
+
   it('start：注册 setRebindSession，bindExtensions 全量 + subscribe', async () => {
     const { runtime, first } = makeRuntime();
     const { handle } = makeHandle(runtime);
@@ -171,6 +179,46 @@ describe('WorkspaceHandle', () => {
       { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', source: 'subagent' },
     );
     await handle.dispose();
+  });
+
+  it('同一项目多个 handle 同时在线时，子会话事件只广播一次', async () => {
+    const foreground = makeHandle(makeRuntime().runtime);
+    const docked = makeHandle(makeRuntime().runtime);
+    const docked2 = makeHandle(makeRuntime().runtime);
+    await foreground.handle.start();
+    await docked.handle.start();
+    await docked2.handle.start();
+    const delta = {
+      type: 'message_update',
+      assistantMessageEvent: { type: 'thinking_delta', delta: 'Wal' },
+    };
+    const meta = { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', workspace: 'D:/proj' };
+    emitEmbeddedSubagentEvent(delta, meta);
+    const total = () => foreground.onEvent.mock.calls.length + docked.onEvent.mock.calls.length + docked2.onEvent.mock.calls.length;
+    expect(total()).toBe(1);
+
+    // 认领的 handle 被淘汰后，下一个顶上，仍然只发一次。
+    await foreground.handle.dispose();
+    emitEmbeddedSubagentEvent(delta, meta);
+    expect(total()).toBe(2);
+    expect(docked.onEvent.mock.calls.length + docked2.onEvent.mock.calls.length).toBe(1);
+    await docked.handle.dispose();
+    await docked2.handle.dispose();
+  });
+
+  it('别的项目的子会话事件不会被认领，也不挡住本项目的 handle', async () => {
+    const other = makeHandle(makeRuntime().runtime, { workspace: 'D:/other', cwd: 'D:/other' });
+    const mine = makeHandle(makeRuntime().runtime);
+    await other.handle.start();
+    await mine.handle.start();
+    emitEmbeddedSubagentEvent(
+      { type: 'message_end', message: { role: 'assistant', content: [] } },
+      { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', workspace: 'D:/proj' },
+    );
+    expect(other.onEvent).not.toHaveBeenCalled();
+    expect(mine.onEvent).toHaveBeenCalledTimes(1);
+    await other.handle.dispose();
+    await mine.handle.dispose();
   });
 
   it('非 message_update 原样转发', async () => {

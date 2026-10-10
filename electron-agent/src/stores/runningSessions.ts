@@ -56,6 +56,23 @@ export function markSessionIdle(workspace: string, sessionPath: string): void {
   publish();
 }
 
+/**
+ * 会话被删：不论记在哪个 workspace 下都熄灭。主进程拆掉停靠的 handle 时不再转发它的 agent_end，
+ * 不在这里熄灭就一直记着。bump 纪元：等待中的旧快照不能再把它点亮。
+ */
+export function forgetRunningSession(sessionPath: string): void {
+  let changed = false;
+  for (const [workspace, list] of [...byWorkspace]) {
+    const next = list.filter((path) => !pathsEquivalent(path, sessionPath));
+    if (next.length === list.length) continue;
+    bump(workspace);
+    changed = true;
+    if (next.length) byWorkspace.set(workspace, next);
+    else byWorkspace.delete(workspace);
+  }
+  if (changed) publish();
+}
+
 /** 主进程快照对账：快照里出现过的 workspace，以快照为准整体替换；没出现的全部熄灭。 */
 export function reconcileRunningSessions(
   turns: ReadonlyArray<{ workspace: string; sessionPath?: string }>,

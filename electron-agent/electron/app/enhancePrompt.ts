@@ -1,7 +1,5 @@
 import { Type, type AssistantMessage, type Message, type Tool } from '@earendil-works/pi-ai';
-import { snapshotSessionModel } from '../agent/workspaceHandle.js';
 import type { ModelRuntimeHost, ShortCallInput } from '../agent/modelRuntimeHost.js';
-import type { AgentHost } from '../agent/agentHost.js';
 import type { AgentDataService } from './agentDataService.js';
 
 export const MAX_ENHANCE_CHARS = 16000;
@@ -226,7 +224,8 @@ export interface EnhancePromptResult {
 
 export interface EnhancePromptDeps {
   host: Pick<ModelRuntimeHost, 'streamSimple' | 'ensure'>;
-  agentHost: Pick<AgentHost, 'get'>;
+  /** 该工作区前景会话正在用的模型。会话在 agent-host 子进程里，主进程经 RPC 问。 */
+  activeModel: (workspace: string) => Promise<{ provider: string; modelId: string } | null | undefined>;
   settings: () => Promise<Record<string, string>>;
   agentData: Pick<AgentDataService, 'request'>;
 }
@@ -429,11 +428,8 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
       if (!found) throw new Error('增强提示词模型不可用，请在设置中重选或留空');
       return found;
     }
-    const handle = deps.agentHost.get(workspace);
-    const snap = snapshotSessionModel(handle?.session.model);
-    const provider = typeof snap?.provider === 'string' ? snap.provider : '';
-    const id = typeof snap?.id === 'string' ? snap.id : '';
-    const found = provider && id ? runtime.getModel(provider, id) : undefined;
+    const active = await deps.activeModel(workspace).catch(() => undefined);
+    const found = active ? runtime.getModel(active.provider, active.modelId) : undefined;
     if (!found) throw new Error('没有可用模型');
     return found;
   }

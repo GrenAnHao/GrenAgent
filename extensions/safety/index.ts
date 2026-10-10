@@ -66,8 +66,18 @@ function collectFacts(
   };
 }
 
-/** 硬拒绝：block 且 terminate，让本批工具结束后不再自动再调一轮模型。 */
+/** 子代理被拦后的去向提示：不 terminate，模型据此换路或在最终答复里交代缺口。 */
+const SUBAGENT_REFUSE_HINT = "这一步没有执行。不要原样重试，换不受限的办法继续；做不到就在最终答复里说明这一步没做。";
+
+/**
+ * 硬拒绝。主会话 block 且 terminate：本批工具结束后不再自动续一轮，由用户决定下一步。
+ * 子代理没有用户可交还：terminate 会让它停在 toolUse 上、没有最终答复，父代理只拿到
+ * `sub-agent failed (exit 1): (no output)`，整段已做的工作作废。子代理里只 block，把原因交给模型。
+ */
 function refuse(reason: string) {
+  if (resolveToolOrigin() === "subagent") {
+    return { block: true as const, reason: `${reason}。${SUBAGENT_REFUSE_HINT}` };
+  }
   return { block: true as const, reason, terminate: true as const };
 }
 

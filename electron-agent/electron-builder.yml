@@ -26,6 +26,11 @@ asarUnpack:
   - node_modules/.pnpm/@vscode+ripgrep*/**
   - out/main/pi-worker.js
   - out/main/pi-worker.jsc
+  # agent-host 子进程和 pi-worker 一样以 RunAsNode 加载，入口要在 asar 外面。
+  - out/main/agent-host.js
+  - out/main/agent-host.jsc
+  # agent-host 的进程树守卫：主进程 spawn 它，asar 里的 exe 起不来。
+  - out/main/pi-job-guard.exe
   - out/main/bytecode-loader.cjs
   - out/main/chunks/**
   - out/main/runner.py

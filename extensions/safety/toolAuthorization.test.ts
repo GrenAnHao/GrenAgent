@@ -86,6 +86,43 @@ describe('safety tool_call · capability hard limits still come first', () => {
   });
 });
 
+// terminate 让子代理停在 toolUse 上、没有最终答复，父代理只拿到 "(no output)"。子代理里只 block。
+describe('safety tool_call · sub-agent refusals do not end the run', () => {
+  beforeEach(() => {
+    process.env.PI_IS_SUBAGENT = '1';
+  });
+
+  it('readonly mutating bash: blocks, keeps the reason, no terminate', async () => {
+    process.env.SAFETY_READONLY = '1';
+    const result = await loadToolCall()({ toolName: 'bash', input: { command: 'echo x > out.txt' } }, ctx({ hasUI: false }));
+    expect(result).toMatchObject({ block: true });
+    expect(result).not.toHaveProperty('terminate', true);
+    expect(result?.reason).toContain('只读模式');
+    expect(result?.reason).toContain('不要原样重试');
+  });
+
+  it('capability-denied tool: blocks without terminate', async () => {
+    process.env.SAFETY_DENY_TOOLS = 'bash';
+    const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx({ hasUI: false }));
+    expect(result).toMatchObject({ block: true });
+    expect(result).not.toHaveProperty('terminate', true);
+  });
+
+  it('host deny: blocks without terminate', async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: 'deny', auditId: 'a1' });
+    const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx({ hasUI: false }));
+    expect(result).toMatchObject({ block: true });
+    expect(result).not.toHaveProperty('terminate', true);
+    expect(result?.reason).toContain('已被授权规则拒绝');
+  });
+
+  it('readonly lets read-only git through (merge-base, stash list, > $null)', async () => {
+    process.env.SAFETY_READONLY = '1';
+    const command = 'git merge-base a b; git stash list | Out-Null; git show HEAD:x.ts > $null; rg foo 2>$null';
+    await expect(loadToolCall()({ toolName: 'bash', input: { command } }, ctx({ hasUI: false }))).resolves.toBeUndefined();
+  });
+});
+
 describe('safety tool_call · host decision', () => {
   it('passes the extracted facts to the host', async () => {
     await loadToolCall()({ toolName: 'bash', toolCallId: 'c1', input: { command: 'rm -rf /' } }, ctx());

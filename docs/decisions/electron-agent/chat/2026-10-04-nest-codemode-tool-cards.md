@@ -10,8 +10,10 @@ files:
   - electron-agent/src/features/chat/turnRows.ts
   - electron-agent/src/features/chat/TurnTimeline.tsx
 supersedes:
-superseded_by:
+superseded_by: electron-agent/tools/2026-10-05-codemode-card-calls-and-output.md
 ---
+
+> 「`TurnTimeline` 在父工具下面再渲染子工具」这一条对 codemode 已过时 → 见 [../tools/2026-10-05-codemode-card-calls-and-output.md](../tools/2026-10-05-codemode-card-calls-and-output.md)
 
 ## 背景
 codemode 执行脚本时，里面的 MCP 调用会再发出 `tool_execution_*`，`toolCallId` 形如 `parent/1`，并带上 `parentToolCallId`。这些事件原先和父工具一样各自成行，时间线上分不清哪些调用属于同一次 codemode。

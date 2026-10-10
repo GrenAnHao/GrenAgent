@@ -8,6 +8,8 @@ import { useSessionStore } from '../../../../store/session';
 import { pathsEquivalent } from '../../../../lib/pathUtils';
 import { wsStyles as s } from './styles';
 import { useComposerCompact } from '../composerCompact';
+import { displayModel } from '../../../panels/subagentUtils';
+import { useProviderNames } from '../../../settings/providerListCache';
 
 const spin = keyframes`
   to { transform: rotate(360deg); }
@@ -117,6 +119,7 @@ function isAutoTask(task: SubAgentItem): boolean {
  */
 export function TaskTray() {
   const { workspace } = useAgentStoreContext();
+  const providerNames = useProviderNames();
   const sessionPath = useSessionStore((s) => s.activeSessionPath);
   const compact = useComposerCompact();
   const [open, setOpen] = useState(false);
@@ -201,7 +204,7 @@ export function TaskTray() {
             <div className={t.body}>
               <div className={t.t1}>{task.task}</div>
               <div className={t.t2}>
-                {task.model ? `${task.model} · ` : ''}
+                {task.model ? `${displayModel(task.model, providerNames)} · ` : ''}
                 {isRun ? `已运行 ${elapsed(task.createdAt, liveTo)}` : label}
               </div>
             </div>

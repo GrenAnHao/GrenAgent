@@ -2,7 +2,7 @@
 // 挂载/卸载；若每次都拉 getProviderConfig 会先空后填、造成闪动。这里缓存一次，挂载时
 // 同步读缓存，仅在供应商配置真正变更（ProvidersSettings 保存）时定向失效刷新。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { pi } from '../../lib/pi';
 import { loadState } from './providerConfigAdapter';
 import { PROVIDER_PRESETS } from './providerPresets';
@@ -53,6 +53,12 @@ export function invalidateProviderList(): void {
   cache = null;
   inflight = null;
   notifyProviderList();
+}
+
+/** 供应商 id → 显示名。列表没变时返回同一个 Map，下游 memo 不会白算。 */
+export function useProviderNames(): ReadonlyMap<string, string> {
+  const list = useProviderList();
+  return useMemo(() => new Map(list.map((p) => [p.id, p.name])), [list]);
 }
 
 /** 读供应商列表：初始同步返回缓存（无闪动），后台校验刷新。 */

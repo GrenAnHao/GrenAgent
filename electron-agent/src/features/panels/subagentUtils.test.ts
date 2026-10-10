@@ -13,6 +13,8 @@ import {
   isEmbeddedChildEvent,
   backgroundRegistryStatus,
   isBackgroundSpawn,
+  modelWithThinking,
+  thinkingLevelFromResult,
   shouldBindChildSession,
   subAgentId,
   subAgentSessionPath,
@@ -152,6 +154,27 @@ describe('subAgentMode', () => {
 });
 
 describe('expandSubAgents', () => {
+  it('restores completed child metadata from the result when the original args are absent', () => {
+    const units = expandSubAgents('reopened', {}, {
+      details: { agentId: 'sa-history', task: '检查历史卡片', title: '历史检查', model: 'p/actual', thinkingLevel: 'high' },
+    }, 'done');
+    expect(units).toEqual([{
+      key: 'reopened', subIndex: null, agentId: 'sa-history', task: '检查历史卡片', title: '历史检查',
+      model: 'p/actual', thinkingLevel: 'high', status: 'done',
+    }]);
+  });
+
+  it('preserves child ids so repeated tasks can recover the correct model', () => {
+    const units = expandSubAgents('reopened-group', { tasks: ['同一个任务', '同一个任务'] }, {
+      details: { results: [{ task: '同一个任务', agentId: 'sa-first', ok: true }, { task: '同一个任务', agentId: 'sa-second', ok: true }] },
+    }, 'done');
+    expect(units.map((u) => u.agentId)).toEqual(['sa-first', 'sa-second']);
+  });
+
+  it('retains an explicit single model when old results omitted model details', () => {
+    expect(expandSubAgents('old', { task: '审查', model: 'p/explicit' }, {}, 'done')[0]?.model).toBe('p/explicit');
+  });
+
   it('single → one unit with null subIndex reusing the message', () => {
     const units = expandSubAgents('m1', { task: 'solo' }, {}, 'done');
     expect(units).toEqual([{ key: 'm1', subIndex: null, task: 'solo', status: 'done' }]);
@@ -218,6 +241,32 @@ describe('expandSubAgents', () => {
     expect(units.map((u) => u.status)).toEqual(['running', 'starting', 'starting']);
     expect(units[0]?.model).toBe('anthropic/claude-opus');
     expect(units[1]?.model).toBe('anthropic/claude-opus');
+  });
+
+  it('carries the running thinking level from result rows, falling back to the explicit thinking_level arg', () => {
+    const units = expandSubAgents(
+      'm5b',
+      { thinking_level: 'low', tasks: ['a', 'b'] },
+      { details: { results: [{ task: 'a', sessionPath: '/tmp/a.jsonl', model: 'p/m', thinkingLevel: 'high', status: 'running' }] } },
+      'running',
+      true,
+    );
+    expect(units.map((u) => u.thinkingLevel)).toEqual(['high', 'low']);
+  });
+
+  it('builds the card label as model · thinking level, and drops the level when unknown', () => {
+    expect(modelWithThinking('deepseek/deepseek-v4-flash', 'high')).toBe('deepseek / deepseek-v4-flash · 高');
+    expect(modelWithThinking('deepseek/deepseek-v4-flash', undefined)).toBe('deepseek / deepseek-v4-flash');
+    // 同名模型挂在两个自定义供应商下：靠供应商显示名区分，查不到显示名时用 id。
+    const names = new Map([['custom-muc3psr5', '官方直连']]);
+    expect(modelWithThinking('custom-muc3psr5/deepseek-v4.1-flash', 'xhigh', names)).toMatch(/^官方直连 \/ deepseek-v4\.1-flash · /);
+    expect(modelWithThinking('custom-muktjnnu/deepseek-v4.1-flash', undefined, names)).toBe('custom-muktjnnu / deepseek-v4.1-flash');
+    // provider 取第一段，模型 id 里的 / 保留；没有前缀的原样显示。
+    expect(modelWithThinking('openrouter/anthropic/claude-sonnet-4', undefined, new Map([['openrouter', 'OpenRouter']]))).toBe('OpenRouter / anthropic/claude-sonnet-4');
+    expect(modelWithThinking('cheap', undefined)).toBe('cheap');
+    expect(modelWithThinking(undefined, 'high')).toBeUndefined();
+    expect(thinkingLevelFromResult({ details: { thinkingLevel: ' medium ' } })).toBe('medium');
+    expect(thinkingLevelFromResult({ details: {} })).toBeUndefined();
   });
 
   it('chain running with no snapshot → only the first step starts, the rest wait', () => {

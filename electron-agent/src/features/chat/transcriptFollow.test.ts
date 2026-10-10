@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FOLLOW_THRESHOLD, SAMPLE_INTERVAL_MS, TranscriptFollow } from './transcriptFollow';
+import { FOLLOW_THRESHOLD, INTENT_WINDOW_MS, SAMPLE_INTERVAL_MS, TranscriptFollow } from './transcriptFollow';
 
 /** jsdom 没有布局：用可写的 scrollTop 和固定的 scrollHeight / clientHeight 模拟滚动容器。 */
 function scroller(scrollHeight: number, clientHeight = 600) {
@@ -32,7 +32,7 @@ describe('TranscriptFollow', () => {
 
   function setup() {
     const changes: boolean[] = [];
-    const follow = new TranscriptFollow((v) => changes.push(v));
+    const follow = new TranscriptFollow((v) => changes.push(v), () => Date.now());
     const s = scroller(5000);
     follow.toBottom(s.el);
     return { follow, changes, ...s };
@@ -67,6 +67,7 @@ describe('TranscriptFollow', () => {
 
   it('holds a reader move pending and does not pull it back on growth', () => {
     const { follow, el, grow, floor } = setup();
+    follow.noteIntent();
     el.scrollTop = floor() - 10;
     follow.onScroll(el);
     expect(follow.pending).toBe(true);
@@ -78,6 +79,7 @@ describe('TranscriptFollow', () => {
 
   it('releases follow when the sampled position is beyond the threshold', () => {
     const { follow, el, grow, floor, changes } = setup();
+    follow.noteIntent();
     el.scrollTop = floor() - 10;
     follow.onScroll(el);
     grow(400); // 待采样期间内容长高：离底变大
@@ -88,6 +90,7 @@ describe('TranscriptFollow', () => {
 
   it('resumes follow when the reader stops within the threshold at scrollend', () => {
     const { follow, el, floor } = setup();
+    follow.noteIntent();
     el.scrollTop = floor() - 200;
     follow.onScroll(el);
     vi.advanceTimersByTime(SAMPLE_INTERVAL_MS);
@@ -101,6 +104,7 @@ describe('TranscriptFollow', () => {
 
   it('resumes follow immediately when the reader reaches the floor', () => {
     const { follow, el, floor } = setup();
+    follow.noteIntent();
     el.scrollTop = floor() - 300;
     follow.onScroll(el);
     follow.onScrollEnd(el);
@@ -113,6 +117,7 @@ describe('TranscriptFollow', () => {
 
   it('acknowledged programmatic scrolls do not count as reader movement', () => {
     const { follow, el, floor } = setup();
+    follow.noteIntent();
     el.scrollTop = floor() - 300;
     follow.onScroll(el);
     follow.onScrollEnd(el);
@@ -121,5 +126,30 @@ describe('TranscriptFollow', () => {
     follow.onScroll(el);
     expect(follow.pending).toBe(false);
     expect(follow.active).toBe(false);
+  });
+
+  it('pulls an upward move without a reader gesture back to the floor while following', () => {
+    const { follow, el, floor, changes } = setup();
+    // 内容缩短：浏览器钳制一次、virtua 跳变补偿再减一次，视图落在底部上方
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 4956 });
+    el.scrollTop = floor() - 45;
+    follow.onScroll(el);
+    expect(follow.pending).toBe(false);
+    expect(el.scrollTop).toBe(4356);
+    expect(changes).toEqual([]);
+  });
+
+  it('expires the gesture window and keeps scrollbar drags as reader movement', () => {
+    const { follow, el, floor } = setup();
+    follow.noteIntent();
+    vi.advanceTimersByTime(INTENT_WINDOW_MS);
+    el.scrollTop = floor() - 300;
+    follow.onScroll(el);
+    expect(follow.pending).toBe(false);
+    follow.holdPointer(true);
+    vi.advanceTimersByTime(INTENT_WINDOW_MS * 3);
+    el.scrollTop = floor() - 300;
+    follow.onScroll(el);
+    expect(follow.pending).toBe(true);
   });
 });

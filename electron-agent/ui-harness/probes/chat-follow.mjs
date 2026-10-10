@@ -57,6 +57,18 @@ export default async function (t) {
   const afterShort = await pos(t)
   t.ok(`短会话上滚后内容长过一屏：仍然贴底（离底 ${Math.round(afterShort.fromBottom)}px）`, afterShort.canScroll && afterShort.fromBottom < 4)
 
+  // 快速输出：每帧都长高、不时插入新条目，一下挤过一屏也要一直贴底。
+  await load(t, 'long')
+  await t.act('burst', 2500, 8, 6)
+  await t.sleep(600)
+  const afterBurst = await pos(t)
+  t.ok(`快速输出（每 8ms 长 6 行）：仍然贴底（离底 ${Math.round(afterBurst.fromBottom)}px）`, afterBurst.fromBottom < 4)
+  await load(t, 'long')
+  await t.act('burst', 2500, 16, 20, 5)
+  await t.sleep(600)
+  const afterBurst2 = await pos(t)
+  t.ok(`快速输出夹着新条目：仍然贴底（离底 ${Math.round(afterBurst2.fromBottom)}px）`, afterBurst2.fromBottom < 4)
+
   // 一次追加一大段（远超贴底阈值）：贴底不能因为测高赶在滚动事件前面而丢掉。
   await load(t, 'long')
   for (let i = 0; i < 4; i++) {
@@ -110,4 +122,46 @@ export default async function (t) {
   await stream(t, 5, 4)
   t.ok('滚回底部：恢复贴底', (await pos(t)).fromBottom < 4)
   t.check('滚回底部：「回到底部」隐藏', await t.countVisible('[data-testid="jump-to-bottom"]'), 0)
+
+  // 真实对话组件：Markdown、代码高亮、表格、工具卡都会在提交之后自己再长高。
+  await t.act('loadReal')
+  await t.sleep(1500)
+  t.ok('真实对话：打开即贴底', (await pos(t)).fromBottom < 4)
+  // 抖动：跟随中视图被往上推离底部、下一帧再拉回。document 的 capture 阶段先于列表自己的 scroll 处理，
+  // 读到的就是上一帧画出来的位置；往上走且不在底部的帧就是抖的那一下。往下走的是正常的跟随滞后。
+  await t.js(`(() => {
+    const h = document.querySelector('${scroller}')
+    window.__shake = []
+    window.__lastTop = h.scrollTop
+    document.addEventListener('scroll', (e) => {
+      if (e.target !== h) return
+      const top = h.scrollTop
+      const fromBottom = h.scrollHeight - top - h.clientHeight
+      if (top < window.__lastTop - 0.5 && fromBottom > 2) window.__shake.push([Math.round(top - window.__lastTop), Math.round(fromBottom)])
+      window.__lastTop = top
+    }, true)
+  })()`)
+  for (const [every, toolEvery] of [[100, 6], [30, 4], [10, 3]]) {
+    await t.js(`window.__shake = []`)
+    await t.act('streamReal', 3000, every, toolEvery)
+    await t.sleep(1500)
+    const real = await pos(t)
+    t.ok(`真实对话快速输出（每 ${every}ms 一段，每 ${toolEvery} 段一张工具卡）：仍然贴底（离底 ${Math.round(real.fromBottom)}px）`, real.fromBottom < 4)
+    const shake = await t.js(`window.__shake`)
+    t.check(`真实对话快速输出（每 ${every}ms）：没有被往上推离底部的帧 ${JSON.stringify(shake.slice(0, 6))}`, shake.length, 0)
+  }
+
+  // 快速输出中读者往上滚：照样离开底部，输出继续也不把视图拽回去。
+  // 不 await：executeJavaScript 会等 Promise 结束，那样上滚就落在输出结束之后了。
+  await t.js(`void (window.__realDone = window.__uiActions.streamReal(4000, 30, 4)); 0`)
+  await t.sleep(800)
+  await t.wheel(await topPoint(t), -900)
+  await t.sleep(400)
+  const leftReal = await pos(t)
+  await t.js(`window.__realDone`)
+  await t.sleep(800)
+  const afterReal = await pos(t)
+  t.ok(`真实对话快速输出中上滚：离开底部（离底 ${Math.round(leftReal.fromBottom)}px）`, leftReal.fromBottom > 300)
+  t.ok(`真实对话快速输出中上滚：输出结束后仍停在读者位置（scrollTop ${Math.round(leftReal.top)} → ${Math.round(afterReal.top)}）`, Math.abs(afterReal.top - leftReal.top) < 40 && afterReal.fromBottom > 300)
+  t.check('真实对话快速输出中上滚：露出「回到底部」', await t.countVisible('[data-testid="jump-to-bottom"]'), 1)
 }

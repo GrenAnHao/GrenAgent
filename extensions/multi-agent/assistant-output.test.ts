@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractAssistantOutput } from "./assistant-output.js";
+import { describeUnfinishedRun, extractAssistantOutput } from "./assistant-output.js";
 
 describe("extractAssistantOutput", () => {
   it("returns last non-empty assistant message", () => {
@@ -98,5 +98,41 @@ describe("extractAssistantOutput", () => {
       { skipPrefix: 1 },
     );
     expect(r.output).toBe("child said");
+  });
+});
+
+describe("describeUnfinishedRun", () => {
+  it("reports the provider error of the terminal assistant message", () => {
+    const why = describeUnfinishedRun([
+      { role: "assistant", content: [{ type: "toolCall", name: "read" }], stopReason: "toolUse" },
+      { role: "toolResult", toolName: "read", content: [{ type: "text", text: "ok" }] },
+      {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: '503 {"error":{"message":"No available accounts"}}\nstack...',
+      },
+    ]);
+    expect(why).toBe('model error: 503 {"error":{"message":"No available accounts"}}');
+  });
+
+  it("reports the blocked tool when the run stopped on a tool result", () => {
+    const why = describeUnfinishedRun([
+      { role: "assistant", content: [{ type: "toolCall", name: "bash" }], stopReason: "toolUse" },
+      { role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: "只读模式：禁止会改动文件系统的命令" }] },
+    ]);
+    expect(why).toBe("stopped after bash without a final reply: 只读模式：禁止会改动文件系统的命令");
+  });
+
+  it("names the tool without a reason when the last tool succeeded", () => {
+    const why = describeUnfinishedRun([{ role: "toolResult", toolName: "grep", content: [{ type: "text", text: "hits" }] }]);
+    expect(why).toBe("stopped after grep without a final reply");
+  });
+
+  it("returns undefined for a normal ending and ignores the seeded prefix", () => {
+    expect(describeUnfinishedRun([{ role: "assistant", content: [{ type: "thinking" }], stopReason: "stop" }])).toBeUndefined();
+    expect(
+      describeUnfinishedRun([{ role: "toolResult", toolName: "read", content: [] }], 1),
+    ).toBeUndefined();
   });
 });

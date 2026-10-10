@@ -7,10 +7,15 @@ export interface EmbeddedSubagentEventMeta {
   workspace: string;
 }
 
+/**
+ * 返回 true 表示这个 sink 认领了事件（已经转发出去）。
+ * 同一项目里会同时活着多个 host（前景会话加停靠的忙会话），它们都按 workspace 过滤；
+ * 一个子会话事件只能被广播一次，否则渲染层的增量累加器会把每个 delta 追加 N 遍。
+ */
 export type EmbeddedSubagentEventSink = (
   event: Record<string, unknown>,
   meta: EmbeddedSubagentEventMeta,
-) => void;
+) => void | boolean;
 
 const sinks = new Set<EmbeddedSubagentEventSink>();
 
@@ -24,7 +29,7 @@ export function registerEmbeddedSubagentEventSink(sink: EmbeddedSubagentEventSin
 export function emitEmbeddedSubagentEvent(event: Record<string, unknown>, meta: EmbeddedSubagentEventMeta): void {
   for (const sink of sinks) {
     try {
-      sink(event, meta);
+      if (sink(event, meta) === true) return;
     } catch {
       /* one broken host must not drop sibling workspaces */
     }

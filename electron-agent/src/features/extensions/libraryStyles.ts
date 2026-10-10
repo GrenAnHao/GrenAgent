@@ -9,39 +9,70 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     justify-content: space-between;
     margin-block-end: 8px;
   `,
+  hero: css`
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  `,
+  heroIcon: css`
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    color: ${cssVar.colorText};
+    background: ${cssVar.colorFillTertiary};
+  `,
   heroTitle: css`
-    font-size: 17px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 20px;
     font-weight: 600;
     color: ${cssVar.colorText};
   `,
-  desc: css`
-    margin-block: 0 14px;
+  count: css`
+    margin-inline-start: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
     font-size: 13px;
+    font-weight: 500;
+    color: ${cssVar.colorTextSecondary};
+    background: ${cssVar.colorFillSecondary};
+  `,
+  desc: css`
+    margin-block: 0 20px;
+    font-size: 14px;
     line-height: 1.55;
     color: ${cssVar.colorTextSecondary};
   `,
   split: css`
     display: flex;
+    flex: 1;
     min-height: 420px;
+    overflow: hidden;
     border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: 8px;
+    border-radius: 10px;
     background: ${cssVar.colorBgContainer};
   `,
   list: css`
     display: flex;
-    flex: 0 0 42%;
+    flex: 0 0 300px;
     flex-direction: column;
     gap: 2px;
-    padding: 8px;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 10px;
     border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
   `,
   item: css`
     display: flex;
     gap: 8px;
     align-items: center;
-    padding: 6px 8px;
+    padding: 10px 12px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 7px;
     text-align: start;
     color: ${cssVar.colorText};
     background: transparent;
@@ -59,8 +90,8 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     display: flex;
     gap: 8px;
     align-items: center;
-    padding-inline-start: 8px;
-    border-radius: 6px;
+    padding-inline-start: 12px;
+    border-radius: 7px;
 
     &[data-active='true'] {
       background: ${cssVar.colorFillSecondary};
@@ -76,7 +107,7 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     gap: 8px;
     align-items: center;
     min-width: 0;
-    padding: 6px 8px 6px 0;
+    padding: 10px 12px 10px 0;
     border: 0;
     text-align: start;
     color: ${cssVar.colorText};
@@ -98,8 +129,8 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
   `,
   listNote: css`
     margin-block-start: auto;
-    padding: 8px 4px 0;
-    font-size: 11px;
+    padding: 10px 4px 0;
+    font-size: 12px;
     line-height: 1.5;
     color: ${cssVar.colorTextTertiary};
   `,
@@ -109,7 +140,7 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     margin-inline-start: auto;
     padding: 0 6px;
     border-radius: 4px;
-    font-size: 11px;
+    font-size: 12px;
     color: ${cssVar.colorTextTertiary};
     background: ${cssVar.colorFillTertiary};
   `,
@@ -117,22 +148,33 @@ export const libraryStyles = createStaticStyles(({ css }) => ({
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
     min-width: 0;
-    padding: 14px 16px;
+    overflow-y: auto;
+    padding: 20px 24px;
+  `,
+  fillField: css`
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  `,
+  fillArea: css`
+    flex: 1;
+    min-height: 160px;
   `,
   label: css`
-    margin-block-end: 4px;
-    font-size: 12px;
+    margin-block-end: 6px;
+    font-size: 13px;
     color: ${cssVar.colorTextSecondary};
   `,
   error: css`
-    font-size: 12px;
+    font-size: 13px;
     color: ${cssVar.colorError};
   `,
   empty: css`
-    padding: 32px 0;
-    font-size: 12px;
+    padding: 40px 0;
+    font-size: 13px;
     text-align: center;
     color: ${cssVar.colorTextTertiary};
   `,

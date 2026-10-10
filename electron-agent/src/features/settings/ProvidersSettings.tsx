@@ -2,7 +2,7 @@ import { Icon } from '@lobehub/ui';
 import { Input, Popconfirm, Select } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { pi } from '../../lib/pi';
 import { invalidateAvailableModels } from './availableModelsCache';
 import { loadState, modelsWithApiThinkingLevels, serializeState, withDefaultUserAgent, type UiModel, type UiProvider } from './providerConfigAdapter';
@@ -12,7 +12,7 @@ import { scrubLinkedModelSettings } from './scrubLinkedModelSettings';
 import { hydrateSettingsValues } from './useSettingsForm';
 import { ProviderDiagnostics } from './ProviderDiagnostics';
 import { ModelSyncModal } from './ModelSyncModal';
-import { ProviderModelCard } from './ProviderModelCard';
+import { SortableModelCards } from './SortableModelCards';
 
 const API_OPTIONS: { value: ApiType; label: string }[] = [
   { value: 'openai-completions', label: 'OpenAI Completions 兼容' },
@@ -302,7 +302,7 @@ function validateProviderIds(ps: EditProvider[]): string | null {
   return null;
 }
 
-export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } = {}) {
+export function ProvidersSettings() {
   const [providers, setProviders] = useState<EditProvider[]>([]);
   const [activeId, setActiveId] = useState('openai');
   const [saving, setSaving] = useState(false);
@@ -467,7 +467,6 @@ export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } =
   const customs = providers.filter((p) => !p.builtIn);
   const preset = PROVIDER_PRESETS.find((p) => p.id === active?.id);
   const models = active?.models ?? [];
-  const modelIds = models.map((m) => m.id.trim()).filter(Boolean);
 
   const footerText = error
     ? error
@@ -494,7 +493,10 @@ export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } =
       }}
     >
       <span className={styles.itemName}>{p.name}</span>
-      <span className={styles.dot} style={{ background: p.apiKey ? cssVar.colorSuccess : cssVar.colorFillSecondary }} />
+      <span
+        className={styles.dot}
+        style={{ background: p.apiKey ? cssVar.colorSuccess : cssVar.colorFillSecondary }}
+      />
     </button>
   );
 
@@ -590,7 +592,6 @@ export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } =
 
                 <div className={styles.group}>
                   <div className={styles.groupTitle}>凭据</div>
-                  {active.id === 'cursor' && cursorLogin ? <div className={styles.field}>{cursorLogin}</div> : null}
                   <div className={styles.field}>
                     <div className={styles.label}>API Key</div>
                     <Input.Password
@@ -672,18 +673,15 @@ export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } =
                       ? '内置模型由 Pi 提供（配 Key 后自动出现在对话）；此处仅添加额外模型'
                       : '至少添加一个模型；ID 需与服务端一致。同一协议下，每个模型可单独配置思考协议、档位映射和兼容项。'}
                   </div>
-                  {models.map((m, i) => (
-                    <ProviderModelCard
-                      key={m._uid}
-                      model={m}
-                      index={i}
-                      api={active.api}
-                      expanded={!!expanded[m._uid]}
-                      onToggle={() => setExpanded((cur) => ({ ...cur, [m._uid]: !cur[m._uid] }))}
-                      onChange={(patch) => updateModel(i, patch)}
-                      onRemove={() => removeModel(i)}
-                    />
-                  ))}
+                  <SortableModelCards
+                    models={models}
+                    api={active.api}
+                    expanded={expanded}
+                    onToggle={(uid) => setExpanded((cur) => ({ ...cur, [uid]: !cur[uid] }))}
+                    onChange={updateModel}
+                    onRemove={removeModel}
+                    onReorder={(next) => patchActive({ models: next })}
+                  />
                   <div className={styles.modelActions}>
                     <button type="button" data-testid="prov-add-model" className={styles.addBtn} onClick={addModel}>
                       <Icon icon={Plus} size={14} />
@@ -703,16 +701,17 @@ export function ProvidersSettings({ cursorLogin }: { cursorLogin?: ReactNode } =
                   </div>
                 </div>
 
-                {!active.builtIn && (
-                  <ProviderDiagnostics
-                    hasApiKey={Boolean(active.apiKey?.trim())}
-                    modelIds={modelIds}
-                    providerId={active.id}
-                  />
-                )}
               </>
             )}
           </div>
+          {/* 下层：模型测活。和上面的设置分开滚动，走已保存的配置。 */}
+          {active ? (
+            <ProviderDiagnostics
+              dirty={dirty}
+              missingKey={!active.builtIn && !active.apiKey?.trim()}
+              providerId={active.id}
+            />
+          ) : null}
         </div>
       </div>
       {active && !active.builtIn ? (

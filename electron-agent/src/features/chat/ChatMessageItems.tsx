@@ -2,7 +2,8 @@ import { useMemo, type ReactNode, type Ref } from 'react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import type { DisplayMessage } from './groupMessages';
 import { UserMessage } from './UserMessage';
-import { TurnTimeline } from './TurnTimeline';
+import { TurnTimeline, TurnTimelineRow } from './TurnTimeline';
+import { buildTurnRows, type TurnRow } from './turnRows';
 import { NoticePill } from './NoticePill';
 import { SubagentSettledPill } from './SubagentSettledPill';
 import { JobDonePill } from './JobDonePill';
@@ -63,7 +64,11 @@ interface ChatMessageItemsProps {
   showDeliverables?: boolean;
   /** 当前会话仍在跑（流式 / 等首包 / 重试）。仅压住仍挂在列表末尾的那一轮。 */
   sessionLive?: boolean;
+  /** 子代理通常只有一轮：把这轮的渲染行分别交给共享虚拟列表，避免整轮工具全挂载。 */
+  virtualizeTurnRows?: boolean;
 }
+
+type TurnRowMessage = { kind: 'turn-row'; id: string; row: TurnRow; first: boolean; last: boolean; actionText?: string };
 
 /** 会话仍在跑时，压住当前这一轮。通知 / spawn_agent / 引导消息不把上一截当成已结束。 */
 export function liveTurnId(messages: DisplayMessage[], sessionLive: boolean): string | undefined {
@@ -122,6 +127,8 @@ export function renderMessageBody(
               index={only?.no ?? 1}
               task={only?.unit.task ?? taskLabel(msg.args)}
               title={only?.unit.title}
+              model={only?.unit.model}
+              thinkingLevel={only?.unit.thinkingLevel}
               result={followed?.result ?? msg.result}
               status={followed?.status ?? msg.status}
             />
@@ -196,18 +203,35 @@ export function ChatMessageItems({
   'data-testid': testId,
   showDeliverables,
   sessionLive,
+  virtualizeTurnRows = false,
 }: ChatMessageItemsProps) {
   const liveId = liveTurnId(messages, Boolean(sessionLive));
   const visible = useMemo(
     () => (hiddenSpawnIds.size === 0 ? messages : messages.filter((msg) => !hiddenSpawnIds.has(msg.id))),
     [messages, hiddenSpawnIds],
   );
+  const items = useMemo<(DisplayMessage | TurnRowMessage)[]>(() => {
+    if (!virtualizeTurnRows) return visible;
+    return visible.flatMap((msg): (DisplayMessage | TurnRowMessage)[] => {
+      if (msg.kind !== 'turn') return [msg];
+      const rows = buildTurnRows(msg.segments);
+      const text = msg.segments.map((s) => s.kind === 'text' ? s.content : '').join('\n').trim();
+      return rows.map((row, i) => ({
+        kind: 'turn-row',
+        id: `${msg.id}:${row.id}`,
+        row,
+        first: i === 0,
+        last: i === rows.length - 1,
+        actionText: i === rows.length - 1 && text ? text : undefined,
+      }));
+    });
+  }, [visible, virtualizeTurnRows]);
   // 末尾是用户刚发出的消息时把它的 id 交给列表：新值出现就回到底部继续跟随。
   const last = visible[visible.length - 1];
   const followKey = last?.kind === 'user' ? last.id : null;
   return (
     <VirtualizedMessageList
-      display={visible}
+      display={items}
       followKey={followKey}
       footer={footer}
       overlay={overlay}
@@ -218,16 +242,16 @@ export function ChatMessageItems({
       scrollRef={scrollRef}
       onGutterChange={onGutterChange}
       data-testid={testId}
-      renderItem={(msg) =>
-        renderMessageBody(
+      renderItem={(msg) => msg.kind === 'turn-row' ? (
+        <TurnTimelineRow row={msg.row} first={msg.first} last={msg.last} actionText={msg.actionText} />
+      ) : renderMessageBody(
           msg,
           unitsByMessage,
           answeredQuestions,
           showDeliverables,
           Boolean(liveId && msg.kind === 'turn' && msg.id === liveId),
           spawnOverlay,
-        )
-      }
+        )}
     />
   );
 }

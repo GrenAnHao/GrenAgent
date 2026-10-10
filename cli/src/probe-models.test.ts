@@ -31,6 +31,19 @@ test("collectModels maps registry models to serializable rows", () => {
   ]);
 });
 
+test("collectModels passes thinkingLevelMap through only when present", () => {
+  const map = { off: null, high: "high", max: "max" };
+  const registry: RegistryLike = {
+    getAll: () => [
+      { provider: "anthropic", id: "opus", reasoning: true, thinkingLevelMap: map },
+      { provider: "x", id: "plain" },
+    ],
+  };
+  const [withMap, without] = collectModels(registry);
+  assert.deepEqual(withMap.thinkingLevelMap, map);
+  assert.equal("thinkingLevelMap" in without, false);
+});
+
 test("collectModels fills defaults for sparse models", () => {
   const registry: RegistryLike = { getAll: () => [{ provider: "x", id: "m1" }] };
   const [row] = collectModels(registry);

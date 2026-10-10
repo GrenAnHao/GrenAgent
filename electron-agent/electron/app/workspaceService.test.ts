@@ -479,6 +479,58 @@ describe('WorkspaceService', () => {
     await expect(service.deleteSession(workspace, foreign)).rejects.toThrow('session does not belong to workspace');
   });
 
+  it('takes a session off the runtime before removing its file', async () => {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const owned = join(sessions, 'owned.jsonl');
+    await writeFile(owned, `{"type":"session","cwd":${JSON.stringify(workspace)}}\n`);
+    const seen: Array<{ paths: string[]; existed: boolean }> = [];
+    // 还在跑的会话会把后续条目 append 回同一路径：必须先停下、再删文件。
+    service.setSessionReleaser(async (paths) => {
+      seen.push({ paths, existed: await readFile(owned, 'utf8').then(() => true, () => false) });
+    });
+
+    await service.deleteSession(workspace, owned);
+
+    expect(seen).toEqual([{ paths: expect.arrayContaining([owned]), existed: true }]);
+    await expect(readFile(owned, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps the file when the runtime cannot let go of the session', async () => {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const owned = join(sessions, 'owned.jsonl');
+    await writeFile(owned, `{"type":"session","cwd":${JSON.stringify(workspace)}}\n`);
+    service.setSessionReleaser(async () => { throw new Error('SESSION_RELEASE_CANCELLED'); });
+
+    await expect(service.deleteSession(workspace, owned)).rejects.toThrow('SESSION_RELEASE_CANCELLED');
+    await expect(readFile(owned, 'utf8')).resolves.toContain('"session"');
+  });
+
+  it('takes every session of a removed project off the runtime before deleting files', async () => {
+    const { service, agentDir } = await createService();
+    const project = join(agentDir, 'project'); await mkdir(project);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const first = join(sessions, 'first.jsonl');
+    const second = join(sessions, 'second.jsonl');
+    await writeFile(first, `{"type":"session","cwd":${JSON.stringify(project)}}\n`);
+    await writeFile(second, `{"type":"session","cwd":${JSON.stringify(project)}}\n`);
+    const released: string[] = [];
+    service.setSessionReleaser(async (paths) => {
+      for (const path of paths) {
+        if (await readFile(path, 'utf8').then(() => true, () => false)) released.push(path);
+      }
+    });
+
+    await service.removeProject(project);
+
+    expect(released.sort()).toEqual([first, second].sort());
+    await expect(readFile(first, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(second, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('cascades a session delete to its subagent children and grandchildren only', async () => {
     const { service, agentDir } = await createService();
     const workspace = join(agentDir, 'project'); await mkdir(workspace);

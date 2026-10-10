@@ -1,6 +1,7 @@
 import { memo, useCallback } from 'react';
 import type { SessionInfo } from '../../lib/pi';
 import { SessionItem } from './SessionItem';
+import { friendlyTime } from './useConversations';
 
 interface GroupSessionRowProps {
   cwd: string;
@@ -41,7 +42,7 @@ export const GroupSessionRow = memo(function GroupSessionRow({
 
   return (
     <SessionItem
-      title={session.name || '新对话'}
+      title={session.name || friendlyTime(session.timestamp)}
       active={active}
       running={running}
       pinned={pinned}

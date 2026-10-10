@@ -60,6 +60,9 @@ const styles = createStaticStyles(({ css }) => ({
   del: css`
     color: ${cssVar.colorError};
   `,
+  extra: css`
+    color: ${cssVar.colorTextTertiary};
+  `,
   body: css`
     min-width: 0;
     max-height: min(50vh, 360px);
@@ -101,10 +104,18 @@ export const CodeCard = memo(function CodeCard({
   deleted = 0,
   contained = false,
   maxHeight,
+  label,
+  extra,
+  testId = 'code-card',
   children,
 }: {
   fileName?: string;
   language?: string;
+  /** 标题文字；不给就用文件名或语言名。图标仍按文件名 / 语言取。 */
+  label?: ReactNode;
+  /** 标题栏右侧的补充信息（行数、耗时），和增删统计同一位置。 */
+  extra?: ReactNode;
+  testId?: string;
   added?: number;
   deleted?: number;
   /** 正文不自己滚，高度交给内部组件，避免把整个子组件拖着走。 */
@@ -113,12 +124,12 @@ export const CodeCard = memo(function CodeCard({
   maxHeight?: string;
   children: ReactNode;
 }) {
-  const title = fileName || (language ? languageLabel(language) : '');
+  const title = label ?? (fileName || (language ? languageLabel(language) : ''));
   const iconName = fileName || (language ? languageFileName(language) : 'file');
-  const showStats = added > 0 || deleted > 0;
+  const showStats = added > 0 || deleted > 0 || extra != null;
 
   return (
-    <div className={styles.shell} data-testid="code-card">
+    <div className={styles.shell} data-testid={testId}>
       <div className={styles.header} data-testid="code-card-header">
         <div className={styles.title}>
           <FileIcon fileName={iconName} size={18} variant="raw" />
@@ -130,6 +141,7 @@ export const CodeCard = memo(function CodeCard({
           <div className={styles.stats} data-testid="code-card-stats">
             {added > 0 ? <span className={styles.add}>+{added}</span> : null}
             {deleted > 0 ? <span className={styles.del}>-{deleted}</span> : null}
+            {extra != null ? <span className={styles.extra}>{extra}</span> : null}
           </div>
         ) : null}
       </div>

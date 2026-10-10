@@ -2,14 +2,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
-const { getProviderConfig, setProviderConfig, getSettings, setSettings } = vi.hoisted(() => ({
+const { getProviderConfig, setProviderConfig, getSettings, setSettings, listModelsGlobal } = vi.hoisted(() => ({
   getProviderConfig: vi.fn(() => Promise.resolve({ modelsJson: '{}', authJson: '{}', agentDir: '/a' })),
   setProviderConfig: vi.fn(() => Promise.resolve({ refreshed: ['/ws'], failed: [] })),
   getSettings: vi.fn(() => Promise.resolve({} as Record<string, string>)),
   setSettings: vi.fn(() => Promise.resolve()),
+  listModelsGlobal: vi.fn(() => Promise.resolve({ ok: true, models: [{ provider: 'openai', id: 'gpt-5', reasoning: true }] })),
 }));
 vi.mock('../../lib/pi', () => ({
-  pi: { getProviderConfig, setProviderConfig, getSettings, setSettings },
+  pi: { getProviderConfig, setProviderConfig, getSettings, setSettings, listModelsGlobal },
 }));
 vi.mock('antd', async (importOriginal) => {
   const actual = await importOriginal<typeof import('antd')>();
@@ -60,6 +61,19 @@ function expectLadder(api: string) {
 }
 
 describe('ProvidersSettings', () => {
+  it('详情分两层：上层是供应商设置，下层是测活（内置供应商也有，模型来自已保存的配置）', async () => {
+    render(<ProvidersSettings />);
+    await screen.findByTestId('prov-item-openai');
+
+    const dock = screen.getByTestId('prov-diagnostics');
+    expect(dock.previousElementSibling?.contains(screen.getByTestId('prov-apikey'))).toBe(true);
+    await waitFor(() => expect((screen.getByTestId('prov-diag-run') as HTMLButtonElement).disabled).toBe(false));
+    expect(dock.querySelector('.ant-select')?.textContent).toContain('gpt-5');
+
+    fireEvent.change(screen.getByPlaceholderText('sk-...'), { target: { value: 'sk-new' } });
+    expect(screen.getByText('有未保存的改动，测活使用的是已保存的配置。')).toBeTruthy();
+  }, 30000);
+
   it('loads providers and saves a built-in key to auth.json', async () => {
     render(<ProvidersSettings />);
     await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
@@ -146,6 +160,56 @@ describe('ProvidersSettings', () => {
     fireEvent.click(screen.getByTestId('prov-model-expand-0'));
     expect(screen.getByTestId('prov-model-format-0')).toBeTruthy();
     expect(screen.getByTestId('prov-compat-supportsReasoningEffort-0')).toBeTruthy();
+  }, 30000);
+
+  it('saves cache prices and a cost tier typed into the model card', async () => {
+    render(<ProvidersSettings />);
+    await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('prov-add-provider'));
+    fireEvent.click(await screen.findByTestId('prov-add-model', undefined, { timeout: 10000 }));
+    fireEvent.change(await screen.findByTestId('prov-model-id-0'), { target: { value: 'claude-haiku-5-5' } });
+    fireEvent.click(screen.getByTestId('prov-model-expand-0'));
+
+    const typeInto = (testId: string, value: string) => {
+      const wrap = screen.getByTestId(testId);
+      const input = (wrap.querySelector('input') ?? wrap) as HTMLInputElement;
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+    };
+    typeInto('prov-model-cost-in-0', '0.1');
+    typeInto('prov-model-cost-out-0', '0.5');
+    typeInto('prov-model-cost-cache-read-0', '0.01');
+    typeInto('prov-model-cost-cache-write-0', '0.125');
+
+    // 新加的一档默认阈值 100000、四价抄基础价；改成长上下文档的价格。
+    fireEvent.click(screen.getByTestId('prov-model-cost-tier-add-0'));
+    const above = screen.getByTestId('prov-model-cost-tier-0-0-above');
+    expect((above.querySelector('input') ?? (above as HTMLInputElement)).value).toBe('100,000');
+    typeInto('prov-model-cost-tier-0-0-in', '0.5');
+    typeInto('prov-model-cost-tier-0-0-out', '2.5');
+    typeInto('prov-model-cost-tier-0-0-cr', '0.05');
+    typeInto('prov-model-cost-tier-0-0-cw', '0.625');
+
+    // 第二档阈值改成和第一档相同 → 提示重复；删掉后提示消失。
+    fireEvent.click(screen.getByTestId('prov-model-cost-tier-add-0'));
+    typeInto('prov-model-cost-tier-0-1-above', '100000');
+    expect(screen.getByText('阈值重复：保存时同一阈值只留最后一行。')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('prov-model-cost-tier-0-1-remove'));
+    expect(screen.queryByText('阈值重复：保存时同一阈值只留最后一行。')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('prov-save'));
+    await waitFor(() => expect(setProviderConfig).toHaveBeenCalled());
+    const raw = JSON.parse((setProviderConfig.mock.calls.at(-1) as unknown as [string, string])[0]);
+    const model = Object.values(raw.providers as Record<string, { models?: Array<Record<string, unknown>> }>)
+      .flatMap((p) => p.models ?? [])
+      .find((m) => m.id === 'claude-haiku-5-5');
+    expect(model?.cost).toEqual({
+      input: 0.1,
+      output: 0.5,
+      cacheRead: 0.01,
+      cacheWrite: 0.125,
+      tiers: [{ inputTokensAbove: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }],
+    });
   }, 30000);
 
   it('re-maps reasoning models to the new protocol ladder when the API type changes', async () => {

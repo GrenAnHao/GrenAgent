@@ -49,17 +49,23 @@ export function jobDisplayText(entry: JobLiveEntry): string {
 /**
  * 后台 bash job 的命令卡：run_in_background 起的，或前台等待超时转后台的。
  * 输出跟随 pi://jobs 实时增长，底栏给状态和停止；job 已不在（应用重启）就回退到工具结果文本。
+ *
+ * anonymous：运行中的前台命令。它一起来就是个匠名 job（DSH 的前台匠名管道），模型没拿到 id。
+ * 同样跟随 job 的保留输出、可以单独停止；底栏不写 id；job 找不到时静默回退到 partial 文本，
+ * 不说「任务已不在」——它本来就没有对外的身份。
  */
 export const BashJobTerminal = memo(function BashJobTerminal({
   jobRef,
   command,
   cwd,
   resultText,
+  anonymous = false,
 }: {
   jobRef: JobRef;
   command: string;
   cwd?: string;
   resultText: string;
+  anonymous?: boolean;
 }) {
   const entry = useJobLive(jobRef);
   const kill = useJobLiveStore((s) => s.kill);
@@ -79,6 +85,7 @@ export const BashJobTerminal = memo(function BashJobTerminal({
     return <TerminalBlock command={command} cwd={cwd} output={resultText} running />;
   }
   if (entry.state === 'missing' || !job) {
+    if (anonymous) return <TerminalBlock command={command} cwd={cwd} output={resultText} running />;
     return (
       <TerminalBlock
         command={command}
@@ -90,7 +97,8 @@ export const BashJobTerminal = memo(function BashJobTerminal({
   }
 
   const live = jobIsLive(job);
-  const output = entry.text || entry.lossy ? jobDisplayText(entry) : live ? '' : resultText;
+  // 匠名命令还没有任何输出时，partial 文本和 job 是同一路输出，回退到它不会错。
+  const output = entry.text || entry.lossy ? jobDisplayText(entry) : live && !anonymous ? '' : resultText;
   return (
     <TerminalBlock
       command={command}
@@ -101,7 +109,7 @@ export const BashJobTerminal = memo(function BashJobTerminal({
       footer={
         <>
           <span className={styles.label} data-testid="bash-job-status" title={job.detail}>
-            {jobFooterText(job)}
+            {jobFooterText(job, anonymous)}
           </span>
           {job.status === 'running' ? (
             <button type="button" className={styles.stop} onClick={stop} disabled={stopping} data-testid="bash-job-stop">

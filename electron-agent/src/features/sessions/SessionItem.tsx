@@ -36,8 +36,23 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
+  /* 行尾一格：转圈和「更多」叠在同一格里，悬停只切换谁可见，标题不会被挤动。
+     24px 是 ActionIcon size="small" 的边长，ui-harness 的 session-row 场景会断言两者同尺寸。 */
+  tail: css`
+    display: none;
+    flex: none;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+
+    .pi-session-row:hover &,
+    &[data-running='true'] {
+      display: grid;
+    }
+  `,
   spin: css`
     display: inline-flex;
+    grid-area: 1 / 1;
     color: ${cssVar.colorWarning};
     animation: piSidebarSpin 1.1s linear infinite;
 
@@ -46,12 +61,18 @@ const styles = createStaticStyles(({ css }) => ({
         transform: rotate(360deg);
       }
     }
-  `,
-  acts: css`
-    display: none;
 
     .pi-session-row:hover & {
-      display: flex;
+      visibility: hidden;
+    }
+  `,
+  acts: css`
+    display: flex;
+    grid-area: 1 / 1;
+    visibility: hidden;
+
+    .pi-session-row:hover & {
+      visibility: visible;
     }
   `,
   editWrap: css`
@@ -152,12 +173,15 @@ export const SessionItem = memo(function SessionItem(props: SessionItemProps) {
           }}
         >
           <span className={styles.title}>{title}</span>
-          {running && (
-            <span data-testid="session-running" className={styles.spin}>
-              <Icon icon={waiting ? Hand : LoaderCircle} size="small" />
-            </span>
-          )}
-          <span className={styles.acts}>{hovered && <RowActions menuItems={menuItems} />}</span>
+          <span className={styles.tail} data-running={running}>
+            {running && (
+              <span data-testid="session-running" className={styles.spin}>
+                <Icon icon={waiting ? Hand : LoaderCircle} size="small" />
+              </span>
+            )}
+            {/* 运行中的行靠 CSS 在这一格里换转圈和按钮，按钮得提前挂好，否则首次悬停会空一帧 */}
+            <span className={styles.acts}>{(hovered || running) && <RowActions menuItems={menuItems} />}</span>
+          </span>
         </div>
       </Dropdown>
       <Modal

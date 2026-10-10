@@ -13,11 +13,13 @@
 
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
+// Not named `require`: electron-vite's ESM build injects its own top-level `const require`
+// shim into any chunk that calls require, and two declarations in one chunk is a SyntaxError.
+const loadModule = createRequire(import.meta.url);
 const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
 // Variable module id → bun --compile won't try to bundle/resolve "node:sqlite".
 const moduleName = isBun ? "bun:sqlite" : "node:sqlite";
-const driver = require(moduleName) as Record<string, unknown>;
+const driver = loadModule(moduleName) as Record<string, unknown>;
 
 interface RawStatement {
   get(...params: unknown[]): unknown;

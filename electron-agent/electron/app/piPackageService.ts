@@ -1,7 +1,5 @@
 import { DefaultPackageManager, SettingsManager, type PackageSource } from '../../../cli/src/pi-sdk.js';
-import { manifestExtensions } from '../../../extensions/index.js';
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from '../../../cli/src/extension-profile.js';
-import { requestResourceReload } from '../../../extensions/_shared/resource-reload.js';
 import {
   findRawEntry,
   isPackageEnabled,
@@ -33,35 +31,48 @@ export interface PackageManagerPort {
 export interface PiPackageServiceOptions {
   agentDir: string;
   allowedPluginIds: () => string[];
-  extensions?: Array<{ name: string; manifest?: { id: string } }>;
+  /**
+   * 内置扩展清单。主进程传向 agent-host 子进程要清单的函数：静态引入 extensions/index.js
+   * 会把全部扩展模块加载进主进程。不传时按需动态引入（测试与单进程场景）。
+   */
+  extensions?: BuiltinExtensionEntry[] | (() => Promise<BuiltinExtensionEntry[]>);
   profile?: ExtensionProfile;
   createSettingsManager?: (cwd: string, agentDir: string) => SettingsPort;
   createPackageManager?: (input: { cwd: string; agentDir: string; settingsManager: SettingsPort }) => PackageManagerPort;
   fetchImpl?: typeof fetch;
-  requestReload?: () => boolean;
+  /** 让运行中的会话重载资源。运行时在 agent-host 子进程里，主进程传 RPC。 */
+  requestReload?: () => boolean | Promise<boolean>;
 }
+
+type BuiltinExtensionEntry = { name: string; manifest?: { id: string } };
 
 export class PiPackageService {
   private readonly agentDir: string;
   private readonly allowedPluginIds: () => string[];
-  private readonly extensions: Array<{ name: string; manifest?: { id: string } }>;
+  private readonly extensions: () => Promise<BuiltinExtensionEntry[]>;
   private readonly profile: ExtensionProfile;
   private readonly createSettingsManager: (cwd: string, agentDir: string) => SettingsPort;
   private readonly createPackageManager: (input: { cwd: string; agentDir: string; settingsManager: SettingsPort }) => PackageManagerPort;
   private readonly fetchImpl: typeof fetch;
-  private readonly requestReload: () => boolean;
+  private readonly requestReload: () => boolean | Promise<boolean>;
 
   constructor(options: PiPackageServiceOptions) {
     this.agentDir = options.agentDir;
     this.allowedPluginIds = options.allowedPluginIds;
-    this.extensions = options.extensions ?? manifestExtensions;
+    const extensions = options.extensions;
+    this.extensions = typeof extensions === 'function'
+      ? extensions
+      : extensions
+        ? async () => extensions
+        : async () => (await import('../../../extensions/index.js')).manifestExtensions;
     this.profile = options.profile ?? 'project';
     this.createSettingsManager = options.createSettingsManager
       ?? ((cwd, agentDir) => SettingsManager.create(cwd, agentDir));
     this.createPackageManager = options.createPackageManager
       ?? ((input) => new DefaultPackageManager(input as { cwd: string; agentDir: string; settingsManager: SettingsManager }));
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.requestReload = options.requestReload ?? requestResourceReload;
+    this.requestReload = options.requestReload
+      ?? (async () => (await import('../../../extensions/_shared/resource-reload.js')).requestResourceReload());
   }
 
   async search(query: string): Promise<PackageSearchResult> {
@@ -75,7 +86,7 @@ export class PiPackageService {
 
   async list(workspace: string): Promise<PackageListItem[]> {
     const loaded = filterManagedExtensions(
-      filterExtensionsByProfile(this.extensions, this.profile),
+      filterExtensionsByProfile(await this.extensions(), this.profile),
       JSON.stringify(this.allowedPluginIds()),
     );
     const builtins: PackageListItem[] = loaded.map((entry) => ({
@@ -122,7 +133,7 @@ export class PiPackageService {
       if (!matched) throw new Error('PACKAGE_NOT_FOUND');
       settings.setProjectPackages(replacePackageEntry(current, source, withAutoload(matched, enabled)));
     }
-    this.requestReload();
+    await this.requestReload();
   }
 
   async install(workspace: string, name: string, version: string, scope: 'user' | 'project'): Promise<void> {
@@ -130,14 +141,14 @@ export class PiPackageService {
     if (!isValidNpmName(name) || !isValidSemver(version)) throw new Error('INVALID_PACKAGE');
     const { packages } = this.open(workspace);
     await packages.installAndPersist(pinNpmSource(name, version), { local: scope === 'project' });
-    this.requestReload();
+    await this.requestReload();
   }
 
   async remove(workspace: string, source: string, scope: 'user' | 'project'): Promise<void> {
     this.assertProjectWorkspace(workspace, scope);
     const { packages } = this.open(workspace);
     await packages.removeAndPersist(source, { local: scope === 'project' });
-    this.requestReload();
+    await this.requestReload();
   }
 
   private assertProjectWorkspace(workspace: string, scope: 'user' | 'project'): void {

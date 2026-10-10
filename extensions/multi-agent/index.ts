@@ -6,7 +6,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { parentModelSpec, resolveSubagentModel, spawnPiAgent, type AgentResult } from "./runner.js";
 import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
-import { assertRouteAllowed, assertThinkingLevel, isThinkingLevel, readModelSelectionPolicy, routeOf, THINKING_LEVELS } from "./model-selection.js";
+import { assertRouteAllowed, assertThinkingLevel, isThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, routeOf, THINKING_LEVELS } from "./model-selection.js";
 import { availableModels, registerListSubagentModels } from "./list-models-tool.js";
 import type { SubagentStopReason } from "./assistant-output.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
@@ -19,6 +19,7 @@ import { discoverAgents, inferNamedAgentProfile, resolveAgent, suggestAgent, wit
 import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
 import { cancelSubAgent } from "./cancel.js";
+import { withoutSubagentDeadline } from "./codemode-deadline.js";
 import { forEachRegistry, getRegistry, inflight } from "./controlPlane.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
@@ -186,20 +187,39 @@ function subagentDetails(
   };
 }
 
+/**
+ * 子代理当前实际运行的思考档位。embedded 子会话起来后把实际档位写进注册表（已按模型能力收窄），以注册表为准；
+ * 进程回退路径没有这个值，退到调用参数里显式给的档位；都没有就是未知。
+ */
+function runningThinkingLevel(
+  registry: SubAgentRegistry,
+  id: string | undefined,
+  requested?: string,
+): string | undefined {
+  let fromRegistry: string | null | undefined;
+  try {
+    fromRegistry = id ? registry.get(id)?.thinkingLevel : undefined;
+  } catch {
+    fromRegistry = undefined;
+  }
+  return fromRegistry?.trim() || requested?.trim() || undefined;
+}
+
 function cleanModel(value: string | undefined): string | undefined {
   const t = value?.trim();
   return t ? t : undefined;
 }
 
-/** explicit spawn model → named agent → profile → SUBAGENT_MODEL → parent session model. */
+/** explicit spawn model (cheap/strong resolve to the configured route) → named agent → profile → SUBAGENT_MODEL → parent session model. */
 function pickSubagentModel(
   explicit: string | undefined,
   layerModel: string | undefined,
   profileModel: string | undefined,
   parent: { provider?: string; id?: string } | undefined,
 ): string | undefined {
+  const explicitRoute = cleanModel(explicit);
   return (
-    cleanModel(explicit) ??
+    (explicitRoute ? resolveRouteAlias(explicitRoute) : undefined) ??
     cleanModel(layerModel) ??
     cleanModel(profileModel) ??
     resolveSubagentModel() ??
@@ -315,6 +335,16 @@ export default function (pi: ExtensionAPI) {
   // + seed default named agents (scout/planner/reviewer/worker).
   registerWorkflows(pi);
 
+  // codemode 脚本到 timeout_ms 会取消脚本里跑到一半的子代理。脚本调用 spawn_agent 时去掉脚本级时限，
+  // 由子代理自己的空闲 / 硬超时兆底。tool_call 可以就地改 input，只影响执行，不改会话里记下的调用。
+  pi.on("tool_call", (event) => {
+    if (event.toolName !== "codemode") return;
+    const input = event.input as { code?: unknown };
+    if (typeof input?.code !== "string") return;
+    const next = withoutSubagentDeadline(input.code);
+    if (next !== undefined) input.code = next;
+  });
+
   // 进程启动即回收上一个进程遗留的孤儿子代理（registry.db 里卡在 "running" 的行）并装好取消监听，
   // 而不是仅靠 spawn_agent 懒触发 getRegistry。否则 sidecar 重启后只要主代理不再 spawn，遗留的
   // running 行没有任何路径会被清理：前端任务托盘直接读 registry.db，会一直显示"运行中"；面板上的
@@ -403,7 +433,7 @@ export default function (pi: ExtensionAPI) {
       onUpdate: (u) => {
         registry.progress(id, u.transcript);
         if (u.sessionPath) {
-          registry.setSessionPath(id, u.sessionPath);
+          registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
           slot.sessionPath = u.sessionPath;
         }
       },
@@ -415,9 +445,16 @@ export default function (pi: ExtensionAPI) {
       slot.sessionPath = r.sessionPath;
       slot.stopReason = r.stopReason;
       slot.settled = true;
+      // 父回合中止（abortEarly）记 cancelled，和其余路径一致；否则注册表里分不出是被停还是自己失败。
       registry.finish(id, r.ok
         ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
-        : { status: "error", output: r.output, error: r.error, exitCode: r.exitCode, transcript: r.transcript });
+        : {
+            status: controller.signal.aborted ? "cancelled" : "error",
+            output: r.output,
+            error: r.error,
+            exitCode: r.exitCode,
+            transcript: r.transcript,
+          });
     }).catch((e: unknown) => {
       const msg = String((e as Error)?.message ?? e);
       slot.ok = false;
@@ -479,7 +516,7 @@ export default function (pi: ExtensionAPI) {
       "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
       ...(modelPolicy.enabled
         ? [
-            "开启自选路由时先调用 list_subagent_models，只用它列出的路由。",
+            "开启自选路由时先调用 list_subagent_models，只用它列出的路由。它列出的 cheap / strong 别名可直接写进 model：省钱的调研用 cheap，难任务用 strong。",
             "fork: true 时换模型会失去父前缀缓存，非必要不换。",
           ]
         : []),
@@ -492,7 +529,7 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       task: Type.Optional(Type.String({ description: "A single task for one sub-agent" })),
-      ...maybeModel("Model route (provider/id) for `task`. Must come from `list_subagent_models`; omit to use the configured default."),
+      ...maybeModel("Model route (provider/id) or alias `cheap` / `strong` for `task`. Must come from `list_subagent_models`; omit to use the configured default."),
       tasks: Type.Optional(
         Type.Array(
           Type.Union([
@@ -504,7 +541,7 @@ export default function (pi: ExtensionAPI) {
                 }),
               ),
               task: Type.String(),
-              ...maybeModel("Model route for this task; must come from `list_subagent_models`."),
+              ...maybeModel("Model route or alias `cheap` / `strong` for this task; must come from `list_subagent_models`."),
               agent: Type.Optional(Type.String()),
             }),
           ]),
@@ -533,7 +570,7 @@ export default function (pi: ExtensionAPI) {
             ),
             task: Type.String(),
             agent: Type.Optional(Type.String()),
-            ...maybeModel("Model route for this step; must come from `list_subagent_models`."),
+            ...maybeModel("Model route or alias `cheap` / `strong` for this step; must come from `list_subagent_models`."),
           }),
           { description: "Sequential steps; each step's task may contain {previous} (replaced by the prior step's output). Pass title on each step." },
         ),
@@ -733,7 +770,8 @@ export default function (pi: ExtensionAPI) {
             assertRouteAllowed(inlineProfileModel, modelPolicy, avail);
           }
           if (thinkingLevel) {
-            const target = explicitRoutes[0] ?? inlineProfileModel;
+            const targetRaw = explicitRoutes[0] ?? inlineProfileModel;
+            const target = targetRaw ? resolveRouteAlias(targetRaw) : undefined;
             const model = avail.find((m) => routeOf(m) === target) ?? avail.find((m) => routeOf(m) === (parentModelSpec(ctx.model) ?? ""));
             if (!model) throw new Error("thinking_level 需要一个可解析的目标模型");
             assertThinkingLevel(thinkingLevel, model);
@@ -742,6 +780,10 @@ export default function (pi: ExtensionAPI) {
           return { content: [{ type: "text", text: String((e as Error).message ?? e) }], details: {}, isError: true };
         }
       }
+      const thinkingOf = (id: string | undefined): { thinkingLevel?: string } => {
+        const level = runningThinkingLevel(registry, id, thinkingLevel);
+        return level ? { thinkingLevel: level } : {};
+      };
       const hasChain = (params.chain?.length ?? 0) > 0;
       if (!spawnHasWork(params)) throw new Error("provide `task`, `tasks`, or `chain`");
 
@@ -905,6 +947,7 @@ export default function (pi: ExtensionAPI) {
                 task: s.task,
                 ...(s.agent ? { agent: s.agent } : {}),
                 ...(s.model ? { model: s.model } : {}),
+                ...thinkingOf(s.agentId),
                 ...(s.agentId ? { agentId: s.agentId } : {}),
                 ...(s.sessionPath ? { sessionPath: s.sessionPath } : {}),
                 ...(s.stopReason ? { stopReason: s.stopReason } : {}),
@@ -930,6 +973,7 @@ export default function (pi: ExtensionAPI) {
               sessionPath: s.sessionPath,
               stopReason: s.stopReason,
               ...(s.model ? { model: s.model } : {}),
+              ...thinkingOf(s.agentId),
             }));
         publishChain();
         let previous = "";
@@ -973,7 +1017,7 @@ export default function (pi: ExtensionAPI) {
               const slot = slots[i];
               if (!slot || slot.status === "done" || slot.status === "error" || slot.status === "cancelled") return;
               if (!u.sessionPath || slot.sessionPath === u.sessionPath) return;
-              registry.setSessionPath(id, u.sessionPath);
+              registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
               slots[i] = { ...slot, sessionPath: u.sessionPath, status: "running" };
               publishChain();
             },
@@ -1056,7 +1100,7 @@ export default function (pi: ExtensionAPI) {
                 thinkingLevel: thinkingLevel || undefined,
                 signal: controller.signal,
                 onUpdate: (u) => {
-                  if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
+                  if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
                   registry.progress(id, u.transcript);
                 },
               })
@@ -1088,7 +1132,7 @@ export default function (pi: ExtensionAPI) {
           transferOne();
           return {
             content: [{ type: "text", text: `Background one-shot sub-agent started as job ${jobId}. Collect with job_output({ job_id: "${jobId}" }).` }],
-            details: { agentId: id, jobId, mode: "one-shot", status: "running", ...(chosenModel ? { model: chosenModel } : {}) },
+            details: { agentId: id, jobId, mode: "one-shot", status: "running", ...(chosenModel ? { model: chosenModel } : {}), ...thinkingOf(id) },
           };
         }
 
@@ -1121,7 +1165,7 @@ export default function (pi: ExtensionAPI) {
               parentActivationId: parentSid && getActivation(parentSid) ? parentSid : undefined,
               signal: controller.signal,
               onUpdate: (u) => {
-                if (u.sessionPath) registry.setSessionPath(id, u.sessionPath);
+                if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
                 registry.progress(id, u.transcript);
               },
               onSettled: (info) => {
@@ -1157,6 +1201,7 @@ export default function (pi: ExtensionAPI) {
                 mode: "continuable",
                 status: "running",
                 ...(chosenModel ? { model: chosenModel } : {}),
+                ...thinkingOf(id),
                 ...forkDetails(params.fork, seedMessages),
               },
             };
@@ -1175,7 +1220,7 @@ export default function (pi: ExtensionAPI) {
         transferOne();
         return {
           content: [{ type: "text", text: `${spawnedText}\nAlso tracked as job ${jobId} (job_output / job_kill).` }],
-          details: { agentId: id, jobId, status: "running", ...(chosenModel ? { model: chosenModel } : {}) },
+          details: { agentId: id, jobId, status: "running", ...(chosenModel ? { model: chosenModel } : {}), ...thinkingOf(id) },
         };
       }
 
@@ -1199,6 +1244,7 @@ export default function (pi: ExtensionAPI) {
           parentId: parentSid ?? null, depth: childDepth,
         });
         const controller = registerInflight(id, signal);
+        let seenThinkingLevel: string | undefined;
         try {
           const r = await executeSubagent(runCwd, task, id, profile, {
             parentSessionPath: parentSessionPath(ctx),
@@ -1216,11 +1262,15 @@ export default function (pi: ExtensionAPI) {
               // 写 transcript（registry 内部截断；progress 也 bump updatedAt → 保留 stuck detection 心跳）：
               // 让从 Bot 菜单点开「运行中的前台单任务」也能像主对话内联一样实时回放（兜底视图读 registry）。
               registry.progress(id, u.transcript);
+              if (u.thinkingLevel && u.thinkingLevel !== seenThinkingLevel) {
+                seenThinkingLevel = u.thinkingLevel;
+                registry.setThinkingLevel(id, u.thinkingLevel);
+              }
               if (onUpdate) {
                 onUpdate({
                   content: [{ type: "text", text: u.text }],
                   details: u.sessionPath
-                    ? { streaming: true, agentId: id, sessionPath: u.sessionPath }
+                    ? { streaming: true, agentId: id, sessionPath: u.sessionPath, ...thinkingOf(id) }
                     : {
                         streaming: true,
                         transcriptTail: tailLines(u.transcript, LIVE_TRANSCRIPT_TAIL),
@@ -1238,14 +1288,17 @@ export default function (pi: ExtensionAPI) {
               exitCode: r.exitCode,
               transcript: r.transcript,
             });
-            // 超时被杀但已产出实质内容：保留「已写部分」返回（附截断说明），而不是抛错把成果丢掉。
+            // 超时被杀或模型报错但已产出实质内容：保留「已写部分」返回（附中断原因），而不是抛错把成果丢掉。
             if (!aborted && r.partial && r.output.trim()) {
-              const partialText = `${r.output}\n\n_(超时截断：${r.error ?? "timeout"}；以上为已产出部分)_`;
+              const partialText = `${r.output}\n\n_(未正常结束：${r.error ?? "timeout"}；以上为已产出部分)_`;
               return {
                 content: [{ type: "text", text: partialText }],
                 details: subagentDetails(id, r, {
                   partial: true,
                   transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
+                  // 和正常完成一样写实际路由与档位：否则卡片只能退回参数里的 cheap / strong 别名。
+                  ...(chosenModel ? { model: chosenModel } : {}),
+                  ...thinkingOf(id),
                 }),
               };
             }
@@ -1264,6 +1317,7 @@ export default function (pi: ExtensionAPI) {
               isolated: !!wt,
               diff,
               ...(chosenModel ? { model: chosenModel } : {}),
+              ...thinkingOf(id),
               ...forkDetails(params.fork, seedMessages),
             }),
           };
@@ -1301,6 +1355,7 @@ export default function (pi: ExtensionAPI) {
               ...(s.agentId ? { agentId: s.agentId } : {}),
               ...(s.sessionPath ? { sessionPath: s.sessionPath } : {}),
               ...(s.model ? { model: s.model } : {}),
+              ...thinkingOf(s.agentId),
               ...(s.settled
                 ? { ok: s.ok, status: s.ok ? "done" : "error" }
                 : { status: s.sessionPath ? "running" : "starting" }),
@@ -1345,7 +1400,7 @@ export default function (pi: ExtensionAPI) {
             onUpdate: (u) => {
               registry.progress(subId, u.transcript);
               if (!u.sessionPath || slots[i]?.sessionPath === u.sessionPath) return;
-              registry.setSessionPath(subId, u.sessionPath);
+              registry.setSessionPath(subId, u.sessionPath, u.thinkingLevel);
               slots[i] = { ...slots[i], task: t.task, agentId: subId, sessionPath: u.sessionPath };
               publishLive();
             },
@@ -1412,9 +1467,9 @@ export default function (pi: ExtensionAPI) {
         .map((r, i) => {
           const head = `## Sub-agent ${i + 1}${r.ok ? "" : " (failed)"}`;
           if (r.ok) return `${head}\n\n${r.output || "(no output)"}`;
-          // 失败但已产出部分内容（超时截断）：保留已写部分 + 超时原因，而不是丢成纯 Error。
+          // 失败但已产出部分内容（超时 / 模型报错）：保留已写部分 + 中断原因，而不是丢成纯 Error。
           if (r.partial && r.output.trim()) {
-            return `${head}\n\n${r.output}\n\n_(超时截断：${r.error ?? "timeout"}；以上为已产出部分)_`;
+            return `${head}\n\n${r.output}\n\n_(未正常结束：${r.error ?? "timeout"}；以上为已产出部分)_`;
           }
           return `${head}\n\nError: ${r.error}`;
         })
@@ -1435,6 +1490,7 @@ export default function (pi: ExtensionAPI) {
             sessionPath: r.sessionPath,
             stopReason: r.stopReason,
             ...(r.model ? { model: r.model } : {}),
+            ...thinkingOf(r.agentId),
           })),
         },
       };

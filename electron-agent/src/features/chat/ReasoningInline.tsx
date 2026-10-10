@@ -5,7 +5,7 @@ import { Disclosure } from './conv/Disclosure';
 import { LazyMarkdown } from './LazyMarkdown';
 import { cardStyles } from '../tools/cardStyles';
 
-/** 流式展开后的推理窗口最大高度（px）。默认收起，只有点开才出现。 */
+/** 展开后的推理窗口最大高度（px）。流式和完成态共用，默认收起。 */
 const REASONING_MAX_HEIGHT = 160;
 /** 顶部渐隐：超出限高时用 mask 淡出顶部，替代滚动条（基于内容透明度，不依赖背景色）。 */
 const TOP_FADE = 'linear-gradient(to bottom, transparent 0, #000 28px)';
@@ -253,9 +253,11 @@ function ReasoningInlineInner({ content, streaming, durationMs, startedAt }: Rea
     <div className={styles.wrap} data-testid="reasoning-inline">
       <MutedLine text={label} open={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
-        <LazyMarkdown variant="chat" tone="secondary">
-          {text}
-        </LazyMarkdown>
+        <div className={styles.scroll} data-testid="reasoning-body">
+          <LazyMarkdown variant="chat" tone="secondary">
+            {text}
+          </LazyMarkdown>
+        </div>
       ) : null}
     </div>
   );

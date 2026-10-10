@@ -30,6 +30,8 @@ export interface AgentUpdate {
   transcript: string;
   /** Set by embedded runner once the child session file exists. */
   sessionPath?: string;
+  /** Set by embedded runner: the level the child session actually runs at (after model clamping). */
+  thinkingLevel?: string;
 }
 
 const timeoutMs = () => Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000;

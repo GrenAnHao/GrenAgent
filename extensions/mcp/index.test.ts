@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
 import { createManager, type McpSnapshot } from "./manager";
 import { bind, project, retainDeferredNames, summary } from "./index";
+import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 
 const RESOURCE_TOOLS = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] as const;
 
@@ -369,6 +370,86 @@ describe("project", () => {
   });
 });
 
+describe("project 增量注册", () => {
+  /** 和真实 pi 一样：每次 registerTool 都同步刷新一次工具表。 */
+  function piWithRefreshCount() {
+    const base = fakeProjectPi();
+    const session = { refreshes: 0, _refreshToolRegistry() { this.refreshes += 1; } };
+    installToolRefreshBatching(session);
+    let setCalls = 0;
+    return {
+      session,
+      registered: base.registered,
+      get active() { return base.active; },
+      get setCalls() { return setCalls; },
+      registerTool: (t: { name: string }) => { base.registerTool(t); session._refreshToolRegistry(); },
+      getActiveTools: () => base.getActiveTools(),
+      setActiveTools: (names: string[]) => { setCalls += 1; base.setActiveTools(names); },
+    };
+  }
+
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+
+  it("同一份快照再投影一次，不重新注册任何工具", () => {
+    const pi = fakeProjectPi();
+    const cache = new Map<string, string>();
+    const s = snap({ a: { status: "connected", tools: ["x", "y"] }, r: { status: "connected", tools: [], resources: true } });
+    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    const first = pi.registered.length;
+    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    expect(first).toBe(2 + RESOURCE_TOOLS.length);
+    expect(pi.registered).toHaveLength(first);
+  });
+
+  it("只有定义变了的工具重新注册", () => {
+    const pi = fakeProjectPi();
+    const cache = new Map<string, string>();
+    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"] } }), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: ["x", "y"], toolExposure: { y: "direct" } } }), fakeMgr(), undefined, [], cache);
+    expect(pi.registered).toEqual(["mcp__a__x", "mcp__a__y", "mcp__a__y"]);
+  });
+
+  it("服务器连接中 / 断开再连回同样的工具，都不重新注册", () => {
+    const pi = fakeProjectPi();
+    const cache = new Map<string, string>();
+    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({ a: { status: "connecting", tools: [] } }), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({}), fakeMgr(), undefined, [], cache);
+    project(pi as never, snap({ a: { status: "connected", tools: many(50) } }), fakeMgr(), undefined, [], cache);
+    expect(pi.registered).toHaveLength(50);
+  });
+
+  it("一次投影里注册再多工具，工具表也只刷新一次", () => {
+    const pi = piWithRefreshCount();
+    project(pi as never, snap({ a: { status: "connected", tools: many(300) }, b: { status: "connected", tools: many(20) } }), fakeMgr(), undefined, [], new Map());
+    expect(pi.registered).toHaveLength(320);
+    expect(pi.session.refreshes).toBe(1);
+  });
+
+  it("活动工具清单没变时不再调用 setActiveTools", () => {
+    const pi = piWithRefreshCount();
+    const cache = new Map<string, string>();
+    const s = snap({ a: { status: "connected", tools: ["x"] } });
+    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    const afterFirst = pi.setCalls;
+    project(pi as never, s, fakeMgr(), undefined, [], cache);
+    expect(afterFirst).toBe(1);
+    expect(pi.setCalls).toBe(1);
+    expect(pi.active).toEqual(["codemode"]);
+  });
+
+  it("bind 里连续多次推送同样的快照，只在第一次注册", async () => {
+    const pi = fakePiWithOn();
+    const s = snap({ a: { status: "connected", tools: ["x", "y"] } });
+    const mgr = fakeBindMgr(s);
+    bind(pi as never, mgr as never);
+    await pi.fire("session_start", { type: "session_start", reason: "startup" }, { hasUI: false });
+    mgr.emit(s);
+    mgr.emit(s);
+    expect(pi.registered).toEqual(["mcp__a__x", "mcp__a__y"]);
+  });
+});
+
 function piWithPendingRule(initial: { active: string[]; pending: string[]; registered: string[] }) {
   const registry = new Set(initial.registered);
   let active = [...initial.active];
@@ -657,23 +738,26 @@ describe("bind", () => {
       writeCache: () => {},
     });
     const pi = fakePiWithOn();
-    let projections = 0;
-    const setActiveTools = pi.setActiveTools;
-    pi.setActiveTools = (names: string[]) => {
-      projections += 1;
-      setActiveTools(names);
+    // 每次投影都会发一条 mcp.state.publish；活动工具没变时不再 setActiveTools，不能拿它计数。
+    const published: Array<Array<{ name: string }>> = [];
+    const control = {
+      request: vi.fn(async (kind: string, params: { servers?: Array<{ name: string }> }) => {
+        if (kind === "mcp.state.publish") published.push(params.servers ?? []);
+        return null;
+      }),
     };
     pi.getMcpServers = () => [{ name: "extra", config: { command: "extra-bin" }, extensionPath: "ext.ts" }];
-    bind(pi as never, mgr as never);
+    bind(pi as never, mgr as never, control as never);
     await pi.fire("session_start", { type: "session_start", reason: "startup" }, { hasUI: false });
     await vi.waitFor(() => {
       expect(mgr.snapshot().servers.get("extra")?.status).toBe("connected");
     });
-    const before = projections;
+    const before = published.length;
     await pi.fire("mcp_servers_change", { type: "mcp_servers_change", servers: [] }, {});
     await vi.waitFor(() => {
       expect(mgr.snapshot().servers.has("extra")).toBe(false);
     });
-    expect(projections).toBeGreaterThan(before);
+    expect(published.length).toBeGreaterThan(before);
+    expect(published.at(-1)?.some((server) => server.name === "extra")).toBe(false);
   });
 });

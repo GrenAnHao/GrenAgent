@@ -70,8 +70,8 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     flex: 0 0 auto;
     border-radius: 8px;
     background: ${cssVar.colorFillTertiary};
@@ -80,7 +80,7 @@ const styles = createStaticStyles(({ css }) => ({
   heroTitle: css`
     display: inline-flex;
     align-items: center;
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 600;
     color: ${cssVar.colorText};
   `,
@@ -90,12 +90,12 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 999px;
     background: ${cssVar.colorFillSecondary};
     color: ${cssVar.colorTextSecondary};
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
   `,
   desc: css`
-    margin-block: 8px 16px;
-    font-size: 13px;
+    margin-block: 8px 20px;
+    font-size: 14px;
     line-height: 1.55;
     color: ${cssVar.colorTextSecondary};
   `,
@@ -104,7 +104,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 4px;
     background: ${cssVar.colorFillTertiary};
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: 12px;
   `,
   viewToggle: css`
     display: inline-flex;
@@ -118,8 +118,8 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
     border: 0;
     border-radius: 6px;
     background: transparent;
@@ -137,14 +137,14 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   catalogGrid: css`
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 10px;
   `,
   card: css`
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 11px 14px;
+    padding: 15px 18px;
     margin-block-end: 10px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 8px;
@@ -176,12 +176,12 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     flex: 0 0 auto;
     border-radius: 8px;
     color: ${cssVar.colorTextLightSolid};
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     text-transform: uppercase;
   `,
@@ -195,14 +195,14 @@ const styles = createStaticStyles(({ css }) => ({
   name: css`
     overflow: hidden;
     color: ${cssVar.colorText};
-    font-size: 13px;
+    font-size: 14px;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
   summary: css`
     overflow: hidden;
     color: ${cssVar.colorTextTertiary};
-    font-size: 11px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
@@ -217,18 +217,18 @@ const styles = createStaticStyles(({ css }) => ({
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    padding: 40px 0;
+    padding: 48px 0;
     border: 1px dashed ${cssVar.colorBorderSecondary};
     border-radius: 8px;
     color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
+    font-size: 13px;
   `,
   delete: css`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     flex: 0 0 auto;
     border: 0;
     border-radius: 8px;
@@ -336,19 +336,19 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
       {
         key: 'zip',
         label: '从 Zip 安装',
-        icon: <FileArchive size={14} />,
+        icon: <FileArchive size={15} />,
         onClick: async () => runImport(await openDialog({ multiple: false, filters: [{ name: 'Zip', extensions: ['zip'] }] }), installSkillFromZip),
       },
       {
         key: 'dir',
         label: '导入技能目录',
-        icon: <FolderInput size={14} />,
+        icon: <FolderInput size={15} />,
         onClick: async () => runImport(await openDialog({ directory: true, multiple: false }), importSkillFromDir),
       },
       {
         key: 'file',
         label: '导入单文件 (SKILL.md)',
-        icon: <FileText size={14} />,
+        icon: <FileText size={15} />,
         onClick: async () => runImport(await openDialog({ multiple: false, filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }] }), importSkillFromFile),
       },
     ],
@@ -366,7 +366,7 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
     <>
       <div className={styles.heroBar}>
         <div className={styles.hero}>
-          <span className={styles.heroIcon}><Sparkles size={18} /></span>
+          <span className={styles.heroIcon}><Sparkles size={20} /></span>
           <span className={styles.heroTitle}>
             本机 Skills
             {skills.length > 0 ? <span className={styles.count}>{skills.length}</span> : null}
@@ -375,25 +375,25 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
         <Flexbox horizontal align="center" gap={8}>
           <div className={styles.viewToggle} role="group" aria-label="视图">
             <button type="button" className={styles.viewBtn} data-active={view === 'list'} data-testid="skill-view-list" title="列表" aria-pressed={view === 'list'} onClick={() => setCatalogView('list')}>
-              <Icon icon={List} size={14} />
+              <Icon icon={List} size={15} />
             </button>
             <button type="button" className={styles.viewBtn} data-active={view === 'grid'} data-testid="skill-view-grid" title="网格" aria-pressed={view === 'grid'} onClick={() => setCatalogView('grid')}>
-              <Icon icon={LayoutGrid} size={14} />
+              <Icon icon={LayoutGrid} size={15} />
             </button>
           </div>
-          <Button size="small" loading={loading} data-testid="skill-refresh" icon={<RefreshCw size={14} />} onClick={() => void handleRefresh()}>刷新</Button>
-          <Button size="small" data-testid="skill-open-dir" icon={<FolderOpen size={14} />} onClick={() => void openDirectory()}>打开目录</Button>
+          <Button loading={loading} data-testid="skill-refresh" icon={<RefreshCw size={15} />} onClick={() => void handleRefresh()}>刷新</Button>
+          <Button data-testid="skill-open-dir" icon={<FolderOpen size={15} />} onClick={() => void openDirectory()}>打开目录</Button>
           <Dropdown menu={importMenu} trigger={['click']}>
-            <Button size="small" data-testid="skill-import" icon={<Import size={14} />}>导入</Button>
+            <Button data-testid="skill-import" icon={<Import size={15} />}>导入</Button>
           </Dropdown>
-          <Button type="primary" size="small" data-testid="skill-add" icon={<Plus size={14} />} onClick={() => setModalOpen(true)}>新增技能</Button>
+          <Button type="primary" data-testid="skill-add" icon={<Plus size={15} />} onClick={() => setModalOpen(true)}>新增技能</Button>
         </Flexbox>
       </div>
       <div className={styles.desc}>
         原生 Skill 保存在 <code className={styles.code}>~/.agents/skills</code> 与 <code className={styles.code}>~/.pi/agent/skills</code>；自研 Agent Data 模块不修改本机 Skill 目录。
       </div>
       {skills.length === 0 ? (
-        <div className={styles.empty} data-testid="skills-empty"><Sparkles size={22} /><span>未发现本机技能，点右上「新增技能」或导入</span></div>
+        <div className={styles.empty} data-testid="skills-empty"><Sparkles size={24} /><span>未发现本机技能，点右上「新增技能」或导入</span></div>
       ) : (
         <div className={`${styles.catalog} ${view === 'grid' ? styles.catalogGrid : ''}`} data-testid="skill-catalog" data-view={view}>
           {skills.map((skill) => {
@@ -409,7 +409,7 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
                   </div>
                 </div>
                 <div className={`${styles.actions} ${view === 'grid' ? styles.actionsGrid : ''}`}>
-                  <Switch size="small" checked={!off} onChange={() => toggleSkill(skill.name)} data-testid={`skill-toggle-${skill.name}`} />
+                  <Switch checked={!off} onChange={() => toggleSkill(skill.name)} data-testid={`skill-toggle-${skill.name}`} />
                   <Popconfirm
                     title="永久删除技能"
                     description={`确定删除「${skill.name}」吗？将从磁盘移除整个文件夹，不可恢复。`}
@@ -418,7 +418,7 @@ export function NativeSkillsPanel({ values, setValue, onChanged }: NativeSkillsP
                     okButtonProps={{ danger: true, 'data-testid': `skill-delete-confirm-${skill.name}` }}
                     onConfirm={() => void handleDelete(skill)}
                   >
-                    <button type="button" className={styles.delete} data-testid={`skill-delete-${skill.name}`} title="永久删除"><Trash2 size={15} /></button>
+                    <button type="button" className={styles.delete} data-testid={`skill-delete-${skill.name}`} title="永久删除"><Trash2 size={16} /></button>
                   </Popconfirm>
                 </div>
               </div>

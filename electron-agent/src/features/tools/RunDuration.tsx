@@ -19,10 +19,13 @@ export const RunDuration = memo(function RunDuration({
   startedAt,
   durationMs,
   running,
+  format = formatRunDuration,
 }: {
   startedAt?: number;
   durationMs?: number;
   running: boolean;
+  /** 定格后的写法。运行中按秒自增，始终用 formatRunDuration。 */
+  format?: (ms: number) => string;
 }) {
   const live = running && startedAt != null;
   const [now, setNow] = useState(() => Date.now());
@@ -38,7 +41,7 @@ export const RunDuration = memo(function RunDuration({
   if (ms == null) return null;
   return (
     <span className={styles.duration} data-testid="tool-run-duration">
-      · {formatRunDuration(ms)}
+      · {live ? formatRunDuration(ms) : format(ms)}
     </span>
   );
 });

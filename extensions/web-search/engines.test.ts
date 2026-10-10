@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBaidu, parseCsdn, parseEngineChain, parseJuejin } from "./engines/index.js";
+import { defaultSearchChain, parseBaidu, parseCsdn, parseEngineChain, parseJuejin, resolveWebSearchChain, runEngineChain } from "./engines/index.js";
 
 describe("parseBaidu", () => {
   it("parses #content_left blocks with h3/a and cos-row snippet", () => {
@@ -69,5 +69,25 @@ describe("parseJuejin", () => {
 describe("parseEngineChain", () => {
   it("dedupes and filters unknown engines", () => {
     expect(parseEngineChain("bing, baidu, bing, foo, csdn")).toEqual(["bing", "baidu", "csdn"]);
+    expect(parseEngineChain("devin, bing, devin")).toEqual(["devin", "bing"]);
+  });
+});
+
+describe("defaultSearchChain", () => {
+  it("leads with devin when a session is ready, and falls back when the user asks for devin", () => {
+    expect(defaultSearchChain("bing", false)).toEqual(["bing", "sogou", "baidu"]);
+    expect(defaultSearchChain("bing", true)).toEqual(["devin", "bing", "sogou", "baidu"]);
+    expect(defaultSearchChain("devin", false)).toEqual(["devin", "bing", "sogou", "baidu"]);
+    expect(defaultSearchChain("sogou", true)).toEqual(["sogou", "baidu"]);
+    expect(resolveWebSearchChain(["csdn"], "bing", true)).toEqual(["csdn"]);
+  });
+
+  it("keeps later engines when devin fails", async () => {
+    const out = await runEngineChain(["devin", "bing"], "q", 8, undefined, async (engine) => {
+      if (engine === "devin") throw new Error("Devin session missing; run: devin-search auth");
+      return { results: [{ title: "B", url: "https://b.example", snippet: "s" }] };
+    });
+    expect(out.engine).toBe("bing");
+    expect(out.parsed.results).toEqual([{ title: "B", url: "https://b.example", snippet: "s" }]);
   });
 });

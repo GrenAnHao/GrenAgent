@@ -1,6 +1,6 @@
 import { Button, Flexbox, Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { BookCheck, Package, Plus, ScrollText, Server, Sparkles, SquareSlash } from 'lucide-react';
+import { BookCheck, Plus, ScrollText, Server, Sparkles, SquareSlash } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { probeMcpServer, readMcpPolicy, readMcpToolsCache, writeMcpPolicy } from '../../lib/mcpPolicyIo';
 import { pi, type McpConfigScope } from '../../lib/pi';
@@ -12,7 +12,6 @@ import { AuditModal } from './AuditModal';
 import { CommandsPanel } from './CommandsPanel';
 import { McpServerCard } from './McpServerCard';
 import { NativeSkillsPanel } from './NativeSkillsPanel';
-import { PiPackagesPanel } from './PiPackagesPanel';
 import { RulesPanel } from './RulesPanel';
 import {
   listEntries,
@@ -40,8 +39,8 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     flex: 0 0 auto;
     align-items: center;
-    height: 46px;
-    padding-inline: 14px;
+    height: 50px;
+    padding-inline: 20px;
     border-block-end: 1px solid ${cssVar.colorBorderSecondary};
     background: ${cssVar.colorBgContainer};
   `,
@@ -56,13 +55,13 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
     gap: 6px;
     height: 100%;
-    padding-inline: 10px;
+    padding-inline: 12px;
     margin-block-end: -1px;
     border: 0;
     border-block-end: 2px solid transparent;
     background: transparent;
     color: ${cssVar.colorTextTertiary};
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
   `,
   tabActive: css`
@@ -72,21 +71,29 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   errorBar: css`
     flex: 0 0 auto;
-    padding: 8px 14px;
+    padding: 10px 32px;
     background: ${cssVar.colorErrorBg};
     color: ${cssVar.colorError};
-    font-size: 12px;
+    font-size: 13px;
   `,
   body: css`
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 20px 16px 32px;
+    padding: 28px 32px 40px;
   `,
   inner: css`
     width: 100%;
-    max-width: 680px;
-    margin-inline: auto;
+  `,
+  // 命令 / 规则：左右分栏撑到面板底边，列表和编辑区各自滚动
+  bodyFill: css`
+    display: flex;
+    flex-direction: column;
+  `,
+  innerFill: css`
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
   `,
   heroBar: css`
     display: flex;
@@ -103,8 +110,8 @@ const styles = createStaticStyles(({ css }) => ({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     flex: 0 0 auto;
     border-radius: 8px;
     background: ${cssVar.colorFillTertiary};
@@ -113,7 +120,7 @@ const styles = createStaticStyles(({ css }) => ({
   heroTitle: css`
     display: inline-flex;
     align-items: center;
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 600;
     color: ${cssVar.colorText};
   `,
@@ -123,12 +130,12 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 999px;
     background: ${cssVar.colorFillSecondary};
     color: ${cssVar.colorTextSecondary};
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
   `,
   heroDesc: css`
-    margin-block: 8px 16px;
-    font-size: 13px;
+    margin-block: 8px 20px;
+    font-size: 14px;
     line-height: 1.55;
     color: ${cssVar.colorTextSecondary};
   `,
@@ -137,18 +144,18 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 4px;
     background: ${cssVar.colorFillTertiary};
     font-family: ${mono};
-    font-size: 11px;
+    font-size: 12px;
   `,
   empty: css`
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    padding: 40px 0;
+    padding: 48px 0;
     border: 1px dashed ${cssVar.colorBorderSecondary};
     border-radius: 8px;
     color: ${cssVar.colorTextTertiary};
-    font-size: 12px;
+    font-size: 13px;
   `,
 }));
 
@@ -163,7 +170,8 @@ export function ExtensionsPanel() {
   const runtimeServers = useMcpStatusStore((state) => state.serversByWorkspace[workspace] ?? EMPTY_SERVERS);
   const existingNames = entries.map((entry) => entry.name);
 
-  const [tab, setTab] = useState<'mcp' | 'packages' | 'skills' | 'commands' | 'rules'>('mcp');
+  const [tab, setTab] = useState<'mcp' | 'skills' | 'commands' | 'rules'>('mcp');
+  const fill = tab === 'commands' || tab === 'rules';
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<(McpEntry & { scope: McpConfigScope }) | undefined>(undefined);
   const touchedRef = useRef(false);
@@ -327,23 +335,19 @@ export function ExtensionsPanel() {
       <div className={styles.header}>
         <div className={styles.tabBar}>
           <button type="button" className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`} data-testid="ext-tab-mcp" onClick={() => setTab('mcp')}>
-            <Icon icon={Server} size={15} />
+            <Icon icon={Server} size={16} />
             MCP
           </button>
-          <button type="button" className={`${styles.tab} ${tab === 'packages' ? styles.tabActive : ''}`} data-testid="ext-tab-packages" onClick={() => setTab('packages')}>
-            <Icon icon={Package} size={15} />
-            扩展
-          </button>
           <button type="button" className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`} data-testid="ext-tab-skills" onClick={() => setTab('skills')}>
-            <Icon icon={Sparkles} size={15} />
+            <Icon icon={Sparkles} size={16} />
             技能
           </button>
           <button type="button" className={`${styles.tab} ${tab === 'commands' ? styles.tabActive : ''}`} data-testid="ext-tab-commands" onClick={() => setTab('commands')}>
-            <Icon icon={SquareSlash} size={15} />
+            <Icon icon={SquareSlash} size={16} />
             命令
           </button>
           <button type="button" className={`${styles.tab} ${tab === 'rules' ? styles.tabActive : ''}`} data-testid="ext-tab-rules" onClick={() => setTab('rules')}>
-            <Icon icon={BookCheck} size={15} />
+            <Icon icon={BookCheck} size={16} />
             规则
           </button>
         </div>
@@ -351,21 +355,19 @@ export function ExtensionsPanel() {
 
       {(error || mcpError) && <div className={styles.errorBar}>{error || mcpError}</div>}
 
-      <div className={styles.body}>
-        <div className={styles.inner}>
+      <div className={`${styles.body} ${fill ? styles.bodyFill : ''}`}>
+        <div className={`${styles.inner} ${fill ? styles.innerFill : ''}`}>
           {tab === 'commands' ? (
             <CommandsPanel workspace={workspace} onResourcesChanged={bumpResources} />
           ) : tab === 'rules' ? (
             <RulesPanel workspace={workspace} />
           ) : tab === 'skills' ? (
             <NativeSkillsPanel values={values} setValue={setValue} onChanged={markChanged} />
-          ) : tab === 'packages' ? (
-            <PiPackagesPanel workspace={workspace} />
           ) : <>
           <div className={styles.heroBar}>
             <div className={styles.hero}>
               <span className={styles.heroIcon}>
-                <Icon icon={Server} size={18} />
+                <Icon icon={Server} size={20} />
               </span>
               <span className={styles.heroTitle}>
                 MCP 服务器
@@ -374,8 +376,7 @@ export function ExtensionsPanel() {
             </div>
             <Flexbox horizontal align="center" gap={8}>
               <Button
-                size="small"
-                icon={<ScrollText size={14} />}
+                icon={<ScrollText size={15} />}
                 data-testid="mcp-audit-open"
                 onClick={() => setAuditOpen(true)}
               >
@@ -383,9 +384,8 @@ export function ExtensionsPanel() {
               </Button>
               <Button
                 type="primary"
-                size="small"
                 data-testid="mcp-add"
-                icon={<Plus size={14} />}
+                icon={<Plus size={15} />}
                 onClick={() => {
                   setEditing(undefined);
                   setModalOpen(true);
@@ -401,7 +401,7 @@ export function ExtensionsPanel() {
 
           {!mcpLoading && entries.length === 0 ? (
             <div className={styles.empty} data-testid="mcp-empty">
-              <Icon icon={Server} size={22} />
+              <Icon icon={Server} size={24} />
               <span>未配置 MCP server，点右上「添加 MCP」</span>
             </div>
           ) : (

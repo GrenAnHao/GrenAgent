@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { manifestExtensions } from "../../extensions/index.js";
 import { getConfig } from "../../extensions/_shared/runtime-config.js";
-import { createCursorExecHandlers, registerCursorExecSession } from "./cursor/exec-handlers.js";
+import { installToolRefreshBatching } from "../../extensions/_shared/tool-refresh-batch.js";
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
 
 function bareSkillName(name: string): string {
@@ -92,20 +92,8 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
       },
     });
     const created = await deps.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent });
-    const session = created.session;
-    const sessionId = session.sessionId;
-    if (sessionId) {
-      registerCursorExecSession(sessionId, () =>
-        createCursorExecHandlers({
-          cwd: session.sessionManager.getCwd(),
-          getTools: () => session.agent.state.tools,
-          getContext: () => ({
-            cwd: session.sessionManager.getCwd(),
-            sessionManager: session.sessionManager,
-          }),
-        }),
-      );
-    }
+    // 绑定扩展（session_start 里 MCP 首次投影一批工具）之前装上，批量注册时工具表只刷新一次。
+    installToolRefreshBatching(created.session);
     return {
       ...created,
       services,

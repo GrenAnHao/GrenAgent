@@ -46,6 +46,30 @@ describe('SessionItem', () => {
     expect(within(row).queryAllByRole('button', { hidden: true }).length).toBeGreaterThan(0);
   });
 
+  it('puts the running indicator and the row actions in one slot', () => {
+    const { container } = render(<SessionItem {...base} running />);
+    const row = container.querySelector('.pi-session-row') as HTMLElement;
+    const slot = screen.getByTestId('session-running').parentElement as HTMLElement;
+    expect(slot.parentElement).toBe(row);
+    expect(slot.dataset.running).toBe('true');
+    // 悬停只靠 CSS 在这一格里换转圈和按钮，所以按钮不等悬停就已经挂在同一格里
+    const buttons = within(slot).queryAllByRole('button', { hidden: true });
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(within(row).queryAllByRole('button', { hidden: true })).toHaveLength(buttons.length);
+  });
+
+  it('keeps the row actions mounted when the run state flips', () => {
+    const { container, rerender } = render(<SessionItem {...base} />);
+    const row = container.querySelector('.pi-session-row') as HTMLElement;
+    fireEvent.mouseEnter(row);
+    const [button] = within(row).queryAllByRole('button', { hidden: true });
+    expect(button).toBeTruthy();
+    rerender(<SessionItem {...base} running />);
+    expect(within(row).queryAllByRole('button', { hidden: true })[0]).toBe(button);
+    rerender(<SessionItem {...base} running={false} />);
+    expect(within(row).queryAllByRole('button', { hidden: true })[0]).toBe(button);
+  });
+
   it('opens the same menu on right-click and asks before delete', () => {
     const onDelete = vi.fn();
     const { container } = render(<SessionItem {...base} onDelete={onDelete} />);

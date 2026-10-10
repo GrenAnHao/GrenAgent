@@ -3,13 +3,12 @@ import { IPC_CHANNELS, isInvokeRequest, type InvokeRequest } from './contracts';
 import type { SettingsService } from '../app/settingsService';
 import type { McpPolicyService } from '../app/mcpPolicyService';
 import type { McpConfigService } from '../app/mcpConfigService';
-import type { SubagentService } from '../app/subagentService';
-import type { FileService } from '../app/fileService';
+import { isListingSkippedName, type FileService } from '../app/fileService';
+import { FileWatchService } from '../app/fileWatchService';
 import type { SkillService } from '../app/skillService';
 import type { PromptLibraryService } from '../app/promptLibraryService';
 import type { UsageService } from '../app/usageService';
-import type { PiRuntimeService } from '../app/piRuntimeService';
-import type { ProviderService } from '../app/providerService';
+import type { DiagnoseChunk, ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
 import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
@@ -23,23 +22,53 @@ import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
 import type { PiPackageService } from '../app/piPackageService';
-import type { JobsBridgeService } from '../app/jobsBridge';
+import { devinAccount } from '../app/devinAccount';
+import { openDevinOAuthWindow } from '../app/devinOAuthWindow';
 import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
 import { recordIpc } from '../runtimeDiag';
-import { startCursorLogin } from '../agent/cursorLogin';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
+
+/**
+ * 运行时命令的三组接口。实现在 agent-host 子进程里，主进程注入的是经 RPC 转发的薄封装；
+ * 单测可以直接塞进程内的 PiRuntimeService / SubagentService / JobsBridge。
+ */
+export interface PiCommandsPort {
+  openWorkspace(workspace: string): unknown;
+  listRunningTurns(): unknown;
+  warmWorkspace(workspace: string): unknown;
+  closeWorkspace(workspace: string): unknown;
+  respondUi(workspace: string, response: Record<string, unknown>): unknown;
+  send(workspace: string, command: string, args: Record<string, unknown>): unknown;
+}
+
+export interface SubagentPort {
+  list(workspace: string, sessionPath?: string): unknown;
+  transcript(workspace: string, agentId: string): unknown;
+  sessionMessages(sessionPath: string): unknown[] | Promise<unknown[]>;
+  cancel(workspace: string, agentId: string): unknown;
+  catalog(parentSessionPath: string): unknown;
+  catalogRowSample(sessionPath: string): unknown;
+  promptChild(workspace: string, parentSessionPath: string, sessionPath: string, message: string, delivery: 'followUp' | 'steer'): unknown;
+  interruptChild(workspace: string, parentSessionPath: string, sessionPath: string): unknown;
+}
+
+/** 后台 job 的界面通道：快照与用户停止（实时帧走 pi://jobs 广播）。 */
+export interface JobsPort {
+  snapshot(jobId: string, startedAt: number): unknown;
+  kill(jobId: string, startedAt: number): unknown;
+}
 
 export interface IpcServices {
   settings?: SettingsService;
   mcpPolicy?: McpPolicyService;
   mcpConfig?: McpConfigService;
-  subagent?: SubagentService;
+  subagent?: SubagentPort;
   files?: FileService;
   skills?: SkillService;
   promptLibrary?: PromptLibraryService;
   usage?: UsageService;
-  pi?: PiRuntimeService;
+  pi?: PiCommandsPort;
   provider?: ProviderService;
   enhancePrompt?: {
     run(input: { workspace: string; text: string; goalText?: string }, emit: (chunk: string) => void): Promise<unknown>;
@@ -57,8 +86,7 @@ export interface IpcServices {
   permissions?: PermissionManager;
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
   piPackages?: PiPackageService;
-  /** 后台 job 的界面通道：快照与用户停止（实时帧走 pi://jobs 广播）。 */
-  jobs?: JobsBridgeService;
+  jobs?: JobsPort;
   /** 记住原生窗口底色，供下次启动建窗口时使用。 */
   windowBackground?: Pick<WindowBackgroundStore, 'save'>;
   /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
@@ -114,6 +142,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   });
 
   if (services.settings) registerSettingsCommands(services.settings);
+  registerDevinAccountCommands();
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.permissions) registerPermissionCommands(services.permissions);
@@ -322,7 +351,7 @@ function registerPermissionCommands(service: PermissionManager): void {
   ));
 }
 
-function registerJobCommands(service: JobsBridgeService): void {
+function registerJobCommands(service: JobsPort): void {
   registerCommand('job_snapshot', (_event, args) => service.snapshot(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
   registerCommand('job_kill', (_event, args) => service.kill(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
 }
@@ -333,7 +362,7 @@ function readFiniteNumber(args: Record<string, unknown>, key: string): number {
   return value;
 }
 
-function registerSubagentCommands(service: SubagentService): void {
+function registerSubagentCommands(service: SubagentPort): void {
   registerCommand('subagent_list', (_event, args) => service.list(
     readString(args, 'workspace'),
     typeof args.sessionPath === 'string' && args.sessionPath.trim() ? args.sessionPath : undefined,
@@ -341,8 +370,8 @@ function registerSubagentCommands(service: SubagentService): void {
   registerCommand('subagent_get_transcript', (_event, args) => service.transcript(
     readString(args, 'workspace'), readString(args, 'agentId'),
   ));
-  registerCommand('subagent_get_session_messages', (_event, args) => ({
-    messages: service.sessionMessages(readString(args, 'sessionPath')),
+  registerCommand('subagent_get_session_messages', async (_event, args) => ({
+    messages: await service.sessionMessages(readString(args, 'sessionPath')),
   }));
   registerCommand('subagent_cancel', (_event, args) => service.cancel(
     readString(args, 'workspace'), readString(args, 'agentId'),
@@ -376,6 +405,40 @@ function registerFileCommands(service: FileService): void {
   registerCommand('write_file', (_event, args) => service.write(
     readString(args, 'workspace'), readString(args, 'path'), readText(args, 'content'),
   ));
+  registerCommand('list_dir', (_event, args) => service.listDir(readString(args, 'workspace'), readText(args, 'dir')));
+  registerCommand('read_file_view', (_event, args) => service.readForView(readString(args, 'workspace'), readString(args, 'path')));
+  registerCommand('open_workspace_file', async (_event, args) => {
+    const target = await service.resolveExisting(readString(args, 'workspace'), readString(args, 'path'));
+    const error = await shell.openPath(target);
+    if (error) throw new Error(error);
+  });
+  registerFileWatchCommands(service);
+}
+
+/** 文件浏览器标签的目录监听。key 带上 webContents id，窗口销毁时一并关掉。 */
+function registerFileWatchCommands(service: FileService): void {
+  const watcher = new FileWatchService((workspace, dir) => service.resolveExisting(workspace, dir), isListingSkippedName);
+  const trackedSenders = new Set<number>();
+  registerCommand('watch_workspace_dirs', async (event, args) => {
+    const workspace = readString(args, 'workspace');
+    const watchId = readString(args, 'watchId');
+    const dirs = readStringArray(args, 'dirs');
+    const sender = event.sender;
+    if (!trackedSenders.has(sender.id)) {
+      trackedSenders.add(sender.id);
+      const senderId = sender.id;
+      sender.once('destroyed', () => {
+        trackedSenders.delete(senderId);
+        watcher.clearPrefix(`${senderId}:`);
+      });
+    }
+    await watcher.setDirs(`${sender.id}:${watchId}`, workspace, dirs, (batch) => {
+      if (!sender.isDestroyed()) sender.send(`${IPC_CHANNELS.eventPrefix}files://changed`, { watchId, ...batch });
+    });
+  });
+  registerCommand('unwatch_workspace_dirs', (event, args) => {
+    watcher.clear(`${event.sender.id}:${readString(args, 'watchId')}`);
+  });
 }
 
 function registerSkillCommands(service: SkillService): void {
@@ -432,14 +495,19 @@ function registerPromptLibraryCommands(service: PromptLibraryService): void {
   ));
 }
 
+const DIAGNOSE_REASONING_LEVELS: ReadonlySet<string> = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+/** 测活的思考档：缺省 = 关闭；给了就必须是 pi 的档位名。 */
+function readOptionalReasoning(args: Record<string, unknown>): string | undefined {
+  const value = args.reasoning;
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !DIAGNOSE_REASONING_LEVELS.has(value)) {
+    throw new Error('reasoning must be one of minimal, low, medium, high, xhigh, max');
+  }
+  return value;
+}
+
 function registerProviderCommands(service: ProviderService): void {
-  registerCommand('cursor_login', async () => {
-    const { agentDir } = await service.getConfig();
-    await startCursorLogin({
-      agentDir,
-      openLoginUrl: (url) => shell.openExternal(url),
-    });
-  });
   registerCommand('get_provider_config', () => service.getConfig());
   registerCommand('set_provider_config', (_event, args) => service.setConfig(readString(args, 'modelsJson'), readString(args, 'authJson')));
   registerCommand('refresh_model_registry', () => service.refresh());
@@ -449,11 +517,26 @@ function registerProviderCommands(service: ProviderService): void {
   registerCommand('diagnose_provider_model', (event, args) => {
     const channel = args.onChunk;
     const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
-      ? (chunk: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
+      ? (chunk: DiagnoseChunk) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
       : () => {};
     if (typeof args.stream !== 'boolean') throw new Error('stream must be a boolean');
-    return service.diagnose(readString(args, 'providerId'), readString(args, 'modelId'), readText(args, 'prompt'), args.stream, emit);
+    const reasoning = readOptionalReasoning(args);
+    return service.diagnose({
+      requestId: readString(args, 'requestId'),
+      providerId: readString(args, 'providerId'),
+      modelId: readString(args, 'modelId'),
+      prompt: readText(args, 'prompt'),
+      stream: args.stream,
+      ...(reasoning ? { reasoning } : {}),
+    }, emit);
   });
+  registerCommand('diagnose_provider_model_abort', (_event, args) => service.abortDiagnose(readString(args, 'requestId')));
+}
+
+function registerDevinAccountCommands(): void {
+  registerCommand('devin_account_status', () => devinAccount.status());
+  registerCommand('devin_account_login', () => devinAccount.login(openDevinOAuthWindow));
+  registerCommand('devin_account_logout', () => devinAccount.logout());
 }
 
 function registerSettingsCommands(service: SettingsService): void {
@@ -548,7 +631,7 @@ function registerShellCommands(service: ShellService): void {
   registerCommand('shell_stop', (_event, args) => service.stop(readString(args, 'sessionId')));
 }
 
-function registerPiCommands(service: PiRuntimeService): void {
+function registerPiCommands(service: PiCommandsPort): void {
   registerCommand('open_workspace', (_event, args) => service.openWorkspace(readString(args, 'workspace')));
   registerCommand('agent_list_running_turns', () => service.listRunningTurns());
   registerCommand('warm_workspace', (_event, args) => service.warmWorkspace(readString(args, 'workspace')));
@@ -649,6 +732,12 @@ function readString(args: Record<string, unknown>, key: string): string {
 function readText(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string') throw new Error(`${key} must be a string`);
+  return value;
+}
+
+function readStringArray(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new Error(`${key} must be a string array`);
   return value;
 }
 

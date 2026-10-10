@@ -5,6 +5,10 @@ import { tokenizePromptBody } from '@extensions/prompt-commands/syntax';
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
     position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 160px;
     border: 1px solid ${cssVar.colorBorder};
     border-radius: ${cssVar.borderRadius};
     background: ${cssVar.colorBgContainer};
@@ -16,9 +20,8 @@ const styles = createStaticStyles(({ css }) => ({
   layer: css`
     margin: 0;
     padding: 8px 10px;
-    min-height: 160px;
     font-family: ${cssVar.fontFamilyCode};
-    font-size: 12.5px;
+    font-size: 13.5px;
     line-height: 1.7;
     white-space: pre-wrap;
     word-break: break-word;
@@ -39,8 +42,10 @@ const styles = createStaticStyles(({ css }) => ({
   textarea: css`
     position: relative;
     display: block;
+    flex: 1;
     width: 100%;
-    resize: vertical;
+    min-height: 0;
+    resize: none;
     border: 0;
     outline: none;
     color: transparent;

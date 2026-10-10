@@ -39,6 +39,7 @@ describe("resolveProvider", () => {
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "baidu" })).toEqual({ ok: true, provider: "baidu" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "csdn" })).toEqual({ ok: true, provider: "csdn" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "juejin" })).toEqual({ ok: true, provider: "juejin" });
+    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "devin", TAVILY_API_KEY: "tvly-x" })).toEqual({ ok: true, provider: "devin" });
   });
 });
 

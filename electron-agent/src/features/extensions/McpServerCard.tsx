@@ -63,7 +63,7 @@ function statusColor(probing: boolean, probeError: string | undefined, count: nu
 
 const styles = createStaticStyles(({ css }) => ({
   wrap: css`
-    margin-block-end: 10px;
+    margin-block-end: 12px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 12px;
     background: ${cssVar.colorBgContainer};
@@ -73,7 +73,7 @@ const styles = createStaticStyles(({ css }) => ({
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 11px 14px;
+    padding: 15px 18px;
   `,
   disabled: css`
     opacity: 0.55;
@@ -92,7 +92,7 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 50%;
   `,
   name: css`
-    font-size: 13px;
+    font-size: 14px;
     color: ${cssVar.colorText};
   `,
   pill: css`
@@ -101,7 +101,7 @@ const styles = createStaticStyles(({ css }) => ({
     background: ${cssVar.colorFillTertiary};
     color: ${cssVar.colorTextSecondary};
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
   `,
   authLabel: css`
@@ -109,19 +109,19 @@ const styles = createStaticStyles(({ css }) => ({
     border-radius: 6px;
     background: ${cssVar.colorFillTertiary};
     color: ${cssVar.colorTextSecondary};
-    font-size: 11px;
+    font-size: 12px;
   `,
   grow: css`
     flex: 1;
     min-width: 0;
   `,
   status: css`
-    font-size: 11px;
+    font-size: 12px;
   `,
   ops: css`
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     color: ${cssVar.colorTextTertiary};
   `,
   iconbtn: css`
@@ -147,19 +147,19 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   tools: css`
     border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    padding: 6px 14px 10px;
+    padding: 8px 18px 12px;
   `,
   toolRow: css`
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-block: 6px;
+    padding-block: 8px;
   `,
   toolName: css`
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 13px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: ${cssVar.colorTextSecondary};
     text-overflow: ellipsis;
@@ -167,7 +167,7 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   hint: css`
     padding: 8px 0;
-    font-size: 12px;
+    font-size: 13px;
     color: ${cssVar.colorTextTertiary};
   `,
   loginRow: css`
@@ -175,13 +175,13 @@ const styles = createStaticStyles(({ css }) => ({
     align-items: center;
     gap: 8px;
     border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-    padding: 8px 14px;
+    padding: 10px 18px;
   `,
   loginUrl: css`
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 13px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: ${cssVar.colorTextSecondary};
     text-overflow: ellipsis;
@@ -189,22 +189,22 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   loginBtn: css`
     flex: 0 0 auto;
-    padding: 2px 10px;
+    padding: 4px 12px;
     border: none;
     border-radius: 6px;
     background: ${cssVar.colorPrimary};
     color: ${cssVar.colorBgContainer};
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
   `,
   copyBtn: css`
     flex: 0 0 auto;
-    padding: 2px 10px;
+    padding: 4px 12px;
     border: 1px solid ${cssVar.colorBorderSecondary};
     border-radius: 6px;
     background: transparent;
     color: ${cssVar.colorText};
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
   `,
 }));
@@ -278,7 +278,7 @@ export function McpServerCard({
           data-testid={`mcp-expand-${name}`}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
         <span className={styles.dot} style={{ background: color }} />
         <span className={styles.name}>{name}</span>
@@ -300,14 +300,14 @@ export function McpServerCard({
             disabled={!enabled || probing || status === 'connecting'}
             onClick={onReload}
           >
-            <RefreshCw size={14} className={probing ? styles.spin : undefined} />
+            <RefreshCw size={15} className={probing ? styles.spin : undefined} />
           </button>
-          <Switch size="small" checked={enabled} onChange={onToggle} data-testid={`mcp-toggle-${name}`} />
+          <Switch checked={enabled} onChange={onToggle} data-testid={`mcp-toggle-${name}`} />
           <button type="button" className={styles.iconbtn} data-testid={`mcp-edit-${name}`} onClick={onEdit}>
-            <PencilLine size={15} />
+            <PencilLine size={16} />
           </button>
           <button type="button" className={styles.iconbtn} data-testid={`mcp-delete-${name}`} onClick={onDelete}>
-            <Trash2 size={15} />
+            <Trash2 size={16} />
           </button>
         </span>
       </div>
@@ -328,7 +328,6 @@ export function McpServerCard({
               <div key={full} className={styles.toolRow} data-testid={`mcp-tool-${full}`}>
                 <span className={styles.toolName} title={full}>{shortToolName(full)}</span>
                 <Segmented
-                  size="small"
                   value={getToolPerm(policyRaw, full)}
                   options={PERM_OPTIONS}
                   onChange={(v) => onPermChange?.(full, v as Perm)}
@@ -341,7 +340,7 @@ export function McpServerCard({
                   data-testid={`mcp-rules-${full}`}
                   onClick={() => onOpenRules?.(full)}
                 >
-                  <SlidersHorizontal size={14} />
+                  <SlidersHorizontal size={15} />
                 </button>
               </div>
             ))

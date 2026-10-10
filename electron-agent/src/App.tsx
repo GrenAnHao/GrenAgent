@@ -19,7 +19,7 @@ import { useAskConfirm } from './components/askConfirm';
 import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreContext';
 import { agentStoreRegistry, useAgentRegistryStore } from './stores/agentStoreRegistry';
 import { restoreRunningTurns } from './stores/restoreRunningTurns';
-import { resolveRunningSessionPaths, startRunningSessionTracking } from './stores/runningSessions';
+import { forgetRunningSession, resolveRunningSessionPaths, startRunningSessionTracking } from './stores/runningSessions';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
 import { MainChatColumn } from './features/layout/MainChatColumn';
@@ -559,6 +559,8 @@ const Workspace = memo(function Workspace() {
     }
     try {
       await pi.deleteSession(cwd, path);
+      // 主进程已经停掉并摘下这份会话；停靠的 handle 被拆时不再发 agent_end，这里自己熄灭运行态。
+      forgetRunningSession(path);
       // 会话删成功后再删 UI 历史：若 deleteSession 失败（会话仍在），不应抹掉其完整历史。
       const histKey = sessionKeyFromPath(path);
       if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
@@ -760,6 +762,7 @@ const Workspace = memo(function Workspace() {
         st.registerProject(cwd);
         useSidebarPrefsStore.getState().keepProject(cwd);
         for (const path of pathsUnderCwd) {
+          forgetRunningSession(path);
           const histKey = sessionKeyFromPath(path);
           if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
         }

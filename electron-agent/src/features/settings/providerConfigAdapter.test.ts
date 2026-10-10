@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
 import { defaultThinkingLevelMap, loadState, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
-import { PROVIDER_PRESETS } from './providerPresets';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
 
@@ -71,15 +70,6 @@ describe('providerConfigAdapter', () => {
     ]);
     const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
     expect(back?.headers).toMatchObject({ 'X-Foo': 'bar', 'User-Agent': 'pi-agent/1.0' });
-  });
-
-  it('cursor-agent 使用目录阶梯，不用 openai-responses 的四档', () => {
-    expect(PROVIDER_PRESETS.some((preset) => preset.id === 'cursor' && preset.api === 'cursor-agent')).toBe(true);
-    const cursor = defaultThinkingLevelMap('cursor-agent');
-    const openai = defaultThinkingLevelMap('openai-responses');
-    expect(cursor).not.toEqual(openai);
-    expect(cursor?.high).toBe('high');
-    expect(cursor && 'xhigh' in cursor).toBe(true);
   });
 
   it('maps each API type to its native reasoning ladder', () => {
@@ -180,6 +170,75 @@ describe('providerConfigAdapter', () => {
     expect(JSON.parse(modelsJson).providers.p.models[0].cost).toEqual({
       input: 4, output: 20, cacheRead: 0, cacheWrite: 0,
     });
+  });
+
+  const costOf = (providers: UiProvider[]) => JSON.parse(serializeState(providers).modelsJson).providers.p.models[0].cost;
+  const priced = (cost: UiProvider['models'][number]['cost']): UiProvider[] => [
+    { id: 'p', name: 'P', builtIn: false, api: 'anthropic-messages', models: [{ id: 'claude-haiku-5-5', cost }] },
+  ];
+
+  it('fills missing cache rates with 0 without dropping existing tiers', () => {
+    const cost = costOf(priced({
+      input: 0.1,
+      output: 0.5,
+      tiers: [{ inputTokensAbove: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }],
+    }));
+    expect(cost).toEqual({
+      input: 0.1, output: 0.5, cacheRead: 0, cacheWrite: 0,
+      tiers: [{ inputTokensAbove: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }],
+    });
+  });
+
+  it('writes every tier with its threshold and all four rates, borrowing unset rates from the base price', () => {
+    const cost = costOf(priced({
+      input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125,
+      tiers: [{ inputTokensAbove: 100000, input: 0.5, output: 2.5 }],
+    }));
+    expect(cost.tiers).toEqual([
+      { inputTokensAbove: 100000, input: 0.5, output: 2.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    ]);
+  });
+
+  it('keeps the last row of a duplicated threshold, sorts tiers ascending and drops rows without a threshold', () => {
+    const cost = costOf(priced({
+      input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25,
+      tiers: [
+        { inputTokensAbove: 200000, input: 3 },
+        { inputTokensAbove: 100000, input: 2 },
+        { input: 9 },
+        { inputTokensAbove: -1, input: 9 },
+        { inputTokensAbove: 200000, input: 4 },
+      ],
+    }));
+    expect(cost.tiers.map((t: { inputTokensAbove: number; input: number }) => [t.inputTokensAbove, t.input])).toEqual([
+      [100000, 2],
+      [200000, 4],
+    ]);
+  });
+
+  it('omits tiers when no row is valid, and omits cost entirely when nothing is priced', () => {
+    expect(costOf(priced({ input: 1, tiers: [{ input: 2 }] }))).toEqual({ input: 1, output: 0, cacheRead: 0, cacheWrite: 0 });
+    expect(costOf(priced({ tiers: [] }))).toBeUndefined();
+  });
+
+  it('keeps tiers even when only the tier is priced', () => {
+    expect(costOf(priced({ tiers: [{ inputTokensAbove: 100000, input: 2 }] }))).toEqual({
+      input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+      tiers: [{ inputTokensAbove: 100000, input: 2, output: 0, cacheRead: 0, cacheWrite: 0 }],
+    });
+  });
+
+  it('loads tiers from models.json back into UiModel.cost.tiers and survives another save', () => {
+    const fileCost = {
+      input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125,
+      tiers: [{ inputTokensAbove: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }],
+    };
+    const modelsJson = JSON.stringify({
+      providers: { p: { name: 'P', api: 'anthropic-messages', apiKey: 'k', models: [{ id: 'claude-haiku-5-5', cost: fileCost }] } },
+    });
+    const loaded = loadState(modelsJson, '{}', presets);
+    expect(loaded.find((x) => x.id === 'p')?.models[0].cost).toEqual(fileCost);
+    expect(costOf(loaded.filter((x) => x.id === 'p'))).toEqual(fileCost);
   });
 
   it('round-trips image input, thinkingFormat and openai compat flags', () => {

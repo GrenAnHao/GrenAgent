@@ -1,7 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { reconcileMcpManager, reloadMcpServer, setLiveWorkspaceMcpConfig } from '../../../extensions/mcp/manager.js';
 
 type Config = Record<string, unknown>;
 type Scope = 'settings' | 'global' | 'project';
@@ -20,15 +19,23 @@ export interface McpConfigEntry {
 
 export interface EffectiveMcpConfig { name: string; config: Config; }
 
+/** 运行中的 MCP 管理器在 agent-host 子进程里；配置落盘后经这两个口子通知它。 */
+export interface McpRuntimeHooks {
+  /** runtimeJson：该工作区完整的 runtime 列表（含密钥），替换管理器冻住的快照后立刻重读。 */
+  hotReload?(workspace: string, runtimeJson: string): Promise<void>;
+  reload?(workspace: string, name: string): Promise<void>;
+}
+
 export class McpConfigService {
   constructor(
     private readonly home: string,
     private readonly settings: SettingsPort,
-    private readonly reloadFn: (workspace: string, name: string) => Promise<void> = reloadMcpServer,
+    private readonly runtimeHooks: McpRuntimeHooks = {},
   ) {}
 
   async reload(workspace: string, name: string): Promise<void> {
-    await this.reloadFn(workspace, name);
+    if (!this.runtimeHooks.reload) throw new Error('MCP runtime is not available');
+    await this.runtimeHooks.reload(workspace, name);
   }
 
   async list(workspace: string): Promise<McpConfigEntry[]> {
@@ -69,8 +76,8 @@ export class McpConfigService {
   }
 
   private async hotReload(workspace: string): Promise<void> {
-    setLiveWorkspaceMcpConfig(workspace, JSON.stringify(await this.runtime(workspace)));
-    reconcileMcpManager(workspace);
+    if (!this.runtimeHooks.hotReload) return;
+    await this.runtimeHooks.hotReload(workspace, JSON.stringify(await this.runtime(workspace)));
   }
 
   private async mutateSettings(name: string, config: Config | undefined, enabled: boolean): Promise<void> {

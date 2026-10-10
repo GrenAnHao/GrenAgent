@@ -41,12 +41,15 @@ export async function createWorkspaceHandle(input: CreateWorkspaceHandleInput): 
       onFatal: input.onFatal,
       onDispose: async (workspace, cwd) => {
         await releaseWorkspaceLease(workspace, async () => {
-          disposeMcpManager(workspace);
+          // 先同步摘下 MCP 管理器、IM 绑定和子代理控制面，再等 MCP 连接关完（最多几秒）。
+          // 反过来的话，等待期间同一工作区新开的 handle 会先声明 IM、打开 registry，随后被这里释放掉。
+          const closingMcp = disposeMcpManager(workspace);
           // IM 在 session_start 用 ctx.cwd 声明；workspace ≠ resolved 时两键都释放。
           releaseImBinding(workspace);
           if (cwd !== workspace) releaseImBinding(cwd);
           releaseSubagentControlPlane(cwd);
           if (cwd !== workspace) releaseSubagentControlPlane(workspace);
+          await closingMcp;
         });
       },
     });

@@ -75,13 +75,11 @@ const PIN_MAX_FRAMES = 24;
 // 一帧位移常有数百像素，200px 挡不住。取 800（约一屏）覆盖数帧的快速滚动。
 // 缓冲只在滚动方向生效（静止时两侧才都加），代价约是多挂载一两条消息。
 const BUFFER_SIZE = 800;
-// 「回到底部」按钮显示所需最少条数（对齐旧手写列表：太短的列表不必显示）。
-const JUMP_MIN_ITEMS = 3;
 // footer 槽位：作为 data 的最后一项参与测高与贴底，避免为它单独维护一套下标换算。
 const FOOTER_ROW = '__footer';
 type Row<T> = T | typeof FOOTER_ROW;
-// 读者手势：钉底期间出现就放手，交给滚动归因。
-const READING_INTENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+// 读者手势：打断钉底，并告诉 TranscriptFollow 接下来的上移是读者造成的。
+const READING_INTENTS = ['wheel', 'touchstart', 'keydown'] as const;
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 const styles = createStaticStyles(({ css }) => ({
@@ -266,12 +264,15 @@ export function VirtualizedMessageList<T extends { id: string }>({
 
   useImperativeHandle(scrollRef, () => ({
     scrollBy(deltaY) {
-      if (deltaY !== 0) stopPinning();
+      if (deltaY === 0) return;
+      stopPinning();
+      follow.noteIntent();
       ref.current?.scrollBy(deltaY);
     },
   }));
 
-  // 读者手势与 scrollend 挂在滚动容器上：手势只用来打断钉底，是否离开底部由 scroll 落点决定；
+  // 读者手势与 scrollend 挂在滚动容器上：手势打断钉底、给随后的上移记上读者；是否离开底部仍由
+  // scroll 落点和停手采样决定。指针按住（拖滚动条）期间一直算读者，松开在 window 上收。
   // scrollend 时读者停手，立即采样。内部滚动区自己的 scrollend 不冒泡，不会误采样。
   useEffect(() => {
     const el = containerRef.current?.firstElementChild;
@@ -279,17 +280,47 @@ export function VirtualizedMessageList<T extends { id: string }>({
     const onIntent = (event: Event) => {
       if (event instanceof KeyboardEvent && !SCROLL_KEYS.has(event.key)) return;
       stopPinning();
+      follow.noteIntent();
     };
+    const onPointerDown = () => {
+      stopPinning();
+      follow.holdPointer(true);
+    };
+    const onPointerUp = () => follow.holdPointer(false);
     const onScrollEnd = (event: Event) => {
       if (event.target === el) follow.onScrollEnd(el);
     };
     for (const type of READING_INTENTS) el.addEventListener(type, onIntent, { passive: true, capture: true });
+    el.addEventListener('pointerdown', onPointerDown, { passive: true, capture: true });
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerUp, true);
     el.addEventListener('scrollend', onScrollEnd);
     return () => {
       for (const type of READING_INTENTS) el.removeEventListener(type, onIntent, { capture: true });
+      el.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      window.removeEventListener('pointerup', onPointerUp, true);
+      window.removeEventListener('pointercancel', onPointerUp, true);
       el.removeEventListener('scrollend', onScrollEnd);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow]);
+
+  // virtua 的跳变补偿（视口上方条目变高变矮时保持画面不跳）只在 _fixScrollJump 里调滚动容器的
+  // scrollBy。贴在底部时内容缩短，浏览器已经钳制到新底部，virtua 判断「是否到边」又差一个小数像素，
+  // 于是在钳制之上再相对滚一次，视图被推到底部上方，下一帧才被拉回——跑起来就是抖。
+  // 跟随中（且读者没在滚）在它之后同一个任务里贴回底部，这一帧画出来就是对的；读者在看中部时不插手。
+  useLayoutEffect(() => {
+    const el = containerRef.current?.firstElementChild;
+    // jsdom 没有 Element.scrollBy。
+    if (!(el instanceof HTMLElement) || typeof el.scrollBy !== 'function') return;
+    const nativeScrollBy = el.scrollBy.bind(el) as (options?: ScrollToOptions) => void;
+    el.scrollBy = ((options?: ScrollToOptions) => {
+      nativeScrollBy(options);
+      follow.reconcile(el);
+    }) as typeof el.scrollBy;
+    return () => {
+      delete (el as { scrollBy?: unknown }).scrollBy;
+    };
   }, [follow]);
 
   useLayoutEffect(() => {
@@ -406,7 +437,9 @@ export function VirtualizedMessageList<T extends { id: string }>({
         </VList>
       </div>
       {overlay?.(viewport)}
-      {!following && rows.length > JUMP_MIN_ITEMS ? (
+      {/* 「回到底部」只看跟随意图（DSH 同）：不跟随必然是读者滚离底部 25px 以上，列表一定可滚。
+          不按条数判断——一整轮长回复加工具卡只算一行，按条数会让长会话永远没有这个按钮。 */}
+      {!following ? (
         <button
           type="button"
           className={styles.jump}

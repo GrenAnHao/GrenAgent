@@ -23,6 +23,7 @@ describe('copyPiAdjacentAssets', () => {
     expect(existsSync(join(dir, 'runner.mjs'))).toBe(true);
     expect(existsSync(join(dir, 'pi-sandbox-win.exe'))).toBe(true);
     expect(existsSync(join(dir, 'pi-sandbox-launch.exe'))).toBe(true);
+    expect(existsSync(join(dir, 'pi-job-guard.exe'))).toBe(true);
     expect(existsSync(join(dir, 'prompts/tier1/identity.md'))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -44,5 +45,6 @@ describe('copyPiAdjacentAssets', () => {
     expect(config.asarUnpack).toContain('out/main/pi-sandbox-launch.exe');
     expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-win.exe');
     expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-launch.exe');
+    expect(config.asarUnpack).toContain('out/main/pi-job-guard.exe');
   });
 });

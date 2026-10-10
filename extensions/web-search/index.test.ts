@@ -15,4 +15,15 @@ describe('web-search desktop authorization', () => {
     expect(result.details).toEqual({ error: 'network_denied' });
     fetchSpy.mockRestore();
   });
+
+  it('does not start devin code search when Electron denies the network operation', async () => {
+    const tools = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+    const control = { request: vi.fn(async () => ({ status: 'denied' })) };
+    factory({ registerTool: (tool: { name: string; execute: (...args: any[]) => Promise<any> }) => tools.set(tool.name, tool) } as never, control as never);
+
+    const result = await tools.get('devin_code_search')!.execute('call-2', { query: 'oauth callback' }, undefined, undefined, { cwd: 'D:/repo' });
+
+    expect(control.request).toHaveBeenCalledWith('permission.authorize', expect.objectContaining({ operation: expect.objectContaining({ kind: 'network.request', toolName: 'devin_code_search' }) }));
+    expect(result.details).toEqual({ error: 'network_denied' });
+  });
 });

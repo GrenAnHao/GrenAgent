@@ -1,6 +1,6 @@
 import { Button, Flexbox } from '@lobehub/ui';
 import { App, Input, Popconfirm, Tooltip } from 'antd';
-import { Plus, TriangleAlert } from 'lucide-react';
+import { Plus, SquareSlash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { parsePromptParams } from '@extensions/prompt-commands/syntax';
 import { deletePromptCommand, listPromptCommands, savePromptCommand, type PromptCommandInfo } from '../../lib/promptLibraryIo';
@@ -98,8 +98,14 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
   return (
     <>
       <div className={styles.heroBar}>
-        <span className={styles.heroTitle}>命令</span>
-        <Button type="primary" size="small" icon={<Plus size={14} />} data-testid="command-new" onClick={() => setDraft({ ...EMPTY_COMMAND_DRAFT })}>
+        <div className={styles.hero}>
+          <span className={styles.heroIcon}><SquareSlash size={20} /></span>
+          <span className={styles.heroTitle}>
+            命令
+            {commands.length > 0 ? <span className={styles.count}>{commands.length}</span> : null}
+          </span>
+        </div>
+        <Button type="primary" icon={<Plus size={15} />} data-testid="command-new" onClick={() => setDraft({ ...EMPTY_COMMAND_DRAFT })}>
           新建
         </Button>
       </div>
@@ -119,7 +125,7 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
               <CommandPillView name={command.name} args={[]} />
               {command.error ? (
                 <Tooltip title={command.error}>
-                  <TriangleAlert size={14} className={styles.warn} data-testid={`command-warning-${command.name}`} />
+                  <TriangleAlert size={15} className={styles.warn} data-testid={`command-warning-${command.name}`} />
                 </Tooltip>
               ) : null}
               {command.params.length > 0 ? <span className={styles.badge}>{command.params.length} 参数</span> : null}
@@ -137,7 +143,7 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
                 <div className={styles.label}>描述（菜单里显示）</div>
                 <Input data-testid="command-description-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
               </div>
-              <div>
+              <div className={styles.fillField}>
                 <div className={styles.label}>提示词</div>
                 <PromptBodyEditor value={draft.body} onChange={(body) => setDraft({ ...draft, body })} />
               </div>
@@ -152,12 +158,12 @@ export function CommandsPanel({ workspace, onResourcesChanged }: CommandsPanelPr
               </div>
               {error ? <div className={styles.error} data-testid="command-error">{error}</div> : null}
               <Flexbox horizontal gap={8}>
-                <Button type="primary" size="small" data-testid="command-save" disabled={Boolean(error)} loading={saving} onClick={() => void save()}>
+                <Button type="primary" data-testid="command-save" disabled={Boolean(error)} loading={saving} onClick={() => void save()}>
                   保存
                 </Button>
                 {draft.originalName ? (
                   <Popconfirm title={`删除 /${draft.originalName}？`} okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
-                    <Button size="small" danger data-testid="command-delete">删除</Button>
+                    <Button danger data-testid="command-delete">删除</Button>
                   </Popconfirm>
                 ) : null}
               </Flexbox>

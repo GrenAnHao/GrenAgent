@@ -7,6 +7,7 @@ vi.mock('../lib/pi', () => ({
 
 import {
   captureRunningEpochs,
+  forgetRunningSession,
   handleRunningEvent,
   handleRunningExit,
   isSessionRunning,
@@ -79,6 +80,20 @@ describe('runningSessions', () => {
     // 过期快照仍说 B 在跑，但期间 B 已结束，不能再点亮。
     reconcileRunningSessions([{ workspace: WS, sessionPath: B }], moved);
     expect(lit()).toEqual([]);
+  });
+
+  it('会话被删后不论记在哪个 workspace 下都熄灭，等待中的旧快照也不能再点亮', () => {
+    handleRunningEvent(ev(A, { type: 'agent_start' }));
+    handleRunningEvent(ev(B, { type: 'agent_start' }));
+    const before = captureRunningEpochs();
+
+    // 拆掉停靠的 handle 时它的 agent_end 不再转发，只能靠删除侧主动熄灭。
+    // 渲染层会话列表里的拼法可以和事件里的不同。
+    forgetRunningSession('\\PROJ\\A.jsonl');
+    expect(lit()).toEqual([B]);
+
+    reconcileRunningSessions([{ workspace: WS, sessionPath: A }, { workspace: WS, sessionPath: B }], workspacesMovedSince(before));
+    expect(lit()).toEqual([B]);
   });
 
   it('侧边栏集合只来自按路径的运行态，并换成会话列表里的写法', () => {

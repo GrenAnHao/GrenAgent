@@ -7,10 +7,10 @@ import { getHeapStatistics } from 'node:v8';
 /**
  * 主进程运行诊断：每 10 秒往 <logs>/runtime-diag.jsonl 写一行。
  *
- * 子代理跑在主进程里，内存、事件循环卡顿、渲染进程崩溃此前都没有任何记录，出了问题只能猜。
+ * 交互 Agent 和子代理现在跑在 agent-host 子进程里；主进程这边仍要知道自己有没有被卡住。
  * 这里记的是定位要用的最小集合：各进程内存、主进程 V8 堆、事件循环延迟、渲染层 JS 堆、
  * 这段时间里最耗主线程的 IPC 命令、推给渲染层的事件数和因帧已销毁被丢掉的推送数，
- * 以及渲染/子进程退出的原因。
+ * 以及渲染/子进程退出的原因（agent-host 退出记为 kind: 'agent-host-exit'）。
  */
 
 const INTERVAL_MS = 10_000;
@@ -31,6 +31,12 @@ interface IpcStat {
 const ipcStats = new Map<string, IpcStat>();
 const eventCounts = new Map<string, number>();
 let droppedSends = 0;
+let writeRecord: ((record: Record<string, unknown>) => void) | undefined;
+
+/** 写一行带 kind 的事件记录（例如 agent-host 子进程退出）。诊断没启动时丢弃。 */
+export function recordDiagEvent(record: { kind: string } & Record<string, unknown>): void {
+  writeRecord?.(record);
+}
 
 /** 一次 invoke 命令在主进程里花了多久（含 await）。 */
 export function recordIpc(command: string, ms: number): void {
@@ -98,6 +104,7 @@ export function startRuntimeDiag(dir: string = app.getPath('logs')): () => void 
       })
       .catch(() => {});
   };
+  writeRecord = write;
 
   const lag = monitorEventLoopDelay({ resolution: 20 });
   lag.enable();

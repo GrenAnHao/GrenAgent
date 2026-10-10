@@ -1,5 +1,6 @@
 /**
- * codemode 卡片场景的假数据：按 pi 1.0.2 真实的事件 / 消息形状造。
+ * codemode 卡片场景的假数据：按 pi 真实的事件 / 消息形状造。实时用 1.1.0 的结果（相邻文本并成一块，
+ * 带 `==> text N/M <==` 标记和 `<console_output>`），历史回放用 1.0.2 的结果（每项各占一块）。
  * - 实时：codemode 的 tool_execution_* + 嵌套 MCP 调用（带 parentToolCallId）+ 进度 partialResult.details.calls
  * - 历史：get_messages 还原的 assistant toolCall + toolResult，只有 details.calls，没有嵌套事件
  * 不用随机数；时间相关的只有 reducer 自己记的 startedAt，probe 不断言具体时长。
@@ -16,6 +17,8 @@ const [search, wiki] = await Promise.allSettled([
     question: "How does Splitter handle collapsible panels?",
   }),
 ]);
+console.log("search", search.status);
+console.log("wiki", wiki.status);
 const doc = await tools.mcp__antd__antd_doc({ component: "Splitter" });
 text(doc.content[0].text.slice(0, 400));
 return { search: search.status, wiki: wiki.status, docChars: doc.content[0].text.length };`
@@ -115,11 +118,26 @@ function doneCalls(parent: string): CallRecord[] {
   ]
 }
 
+export const CONSOLE_LINES = 'search fulfilled\nwiki fulfilled'
+
+/** 1.1.0：text() 和返回值各带标记，console 收在末尾，整段一块。 */
 function doneResult(parent: string): unknown {
+  const joined = `==> text 1/2 <==\n${OUTPUT_TEXT}\n==> text 2/2 <==\n${RETURN_TEXT}\n<console_output>\n${CONSOLE_LINES}\n</console_output>`
   return {
-    content: [header(true, '3.4'), { type: 'text', text: OUTPUT_TEXT }, { type: 'text', text: RETURN_TEXT }],
+    content: [header(true, '3.4'), { type: 'text', text: joined }],
     details: { calls: doneCalls(parent) }
   }
+}
+
+/** 1.0.2：console 行、text() 和返回值按出现顺序各占一块。 */
+function legacyDoneContent(): unknown[] {
+  return [
+    header(true, '3.4'),
+    { type: 'text', text: 'search fulfilled' },
+    { type: 'text', text: 'wiki fulfilled' },
+    { type: 'text', text: OUTPUT_TEXT },
+    { type: 'text', text: RETURN_TEXT }
+  ]
 }
 
 function start(toolCallId: string, toolName: string, args: unknown, parentToolCallId?: string): AgentEvent {
@@ -188,7 +206,7 @@ export function liveFailedEvents(): AgentEvent[] {
           header(false, '2.0'),
           {
             type: 'text',
-            text: `Script error:\nError: ${wikiError}\n    at <anonymous> (script:12)\n\nTool calls made before the failure (they are not undone): mcp__anysearch__batch_search (ok), mcp__deepwiki__ask_wiki_question (error)`
+            text: `<console_output>\nsearch fulfilled\n</console_output>\nScript error:\nError: ${wikiError}\n    at <anonymous> (script:12)\n\nTool calls made before the failure (they are not undone): mcp__anysearch__batch_search (ok), mcp__deepwiki__ask_wiki_question (error)`
           }
         ],
         details: { calls }
@@ -248,7 +266,7 @@ export function historyMessages(): AgentMessage[] {
       role: 'toolResult',
       toolCallId: p,
       toolName: 'codemode',
-      content: (doneResult(p) as { content: unknown }).content,
+      content: legacyDoneContent(),
       details: { calls: doneCalls(p) },
       isError: false,
       timestamp: 3

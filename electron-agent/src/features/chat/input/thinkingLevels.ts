@@ -21,13 +21,6 @@ const SAFE_LADDER: Record<string, [string, ThinkingLevel][]> = {
   'openai-completions': [['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']],
   'openai-responses': [['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']],
   'google-generative-ai': [['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']],
-  'cursor-agent': [
-    ['minimal', 'minimal'],
-    ['low', 'low'],
-    ['medium', 'medium'],
-    ['high', 'high'],
-    ['xhigh', 'xhigh'],
-  ],
 };
 const SAFE_LADDER_FALLBACK: [string, ThinkingLevel][] = [['low', 'low'], ['medium', 'medium'], ['high', 'high']];
 

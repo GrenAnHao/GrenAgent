@@ -325,4 +325,27 @@ describe('registerIpcHandlers', () => {
     expect(abort).toHaveBeenCalledWith('/ws');
   });
 
+  it('diagnose_provider_model 带 requestId / 思考档、分片推到 channel；abort 按 requestId 取消；非法档位拒绝', async () => {
+    const diagnose = vi.fn(async (_request: unknown, emit: (chunk: unknown) => void) => {
+      emit({ type: 'thinking', text: 't' });
+      return { ok: true };
+    });
+    const abortDiagnose = vi.fn();
+    registerIpcHandlers({ provider: { diagnose, abortDiagnose } } as never);
+    const invoke = handler(IPC_CHANNELS.invoke);
+    const sender = { send: vi.fn() };
+    const args = { requestId: 'req-1', providerId: 'p', modelId: 'm', prompt: 'hi', stream: true, onChunk: { __grenChannelId: 'c-1' } };
+
+    await invoke({ sender }, { command: 'diagnose_provider_model', args: { ...args, reasoning: 'high' } });
+    await invoke({ sender }, { command: 'diagnose_provider_model', args });
+    await expect(invoke({ sender }, { command: 'diagnose_provider_model', args: { ...args, reasoning: 'off' } })).rejects.toThrow(/reasoning/);
+    await invoke({ sender }, { command: 'diagnose_provider_model_abort', args: { requestId: 'req-1' } });
+
+    expect(diagnose.mock.calls[0]![0]).toEqual({ requestId: 'req-1', providerId: 'p', modelId: 'm', prompt: 'hi', stream: true, reasoning: 'high' });
+    expect(diagnose.mock.calls[1]![0]).not.toHaveProperty('reasoning');
+    expect(diagnose).toHaveBeenCalledTimes(2);
+    expect(sender.send).toHaveBeenCalledWith(`${IPC_CHANNELS.eventPrefix}channel:c-1`, { type: 'thinking', text: 't' });
+    expect(abortDiagnose).toHaveBeenCalledWith('req-1');
+  });
+
 });

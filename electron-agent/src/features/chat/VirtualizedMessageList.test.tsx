@@ -137,4 +137,44 @@ describe('VirtualizedMessageList', () => {
     });
     expect(screen.getByTestId('jump-to-bottom')).toHaveStyle({ insetBlockEnd: '136px' });
   });
+
+  it('lands virtua jump compensation back on the floor while following, but not while the reader scrolls', () => {
+    // virtua 的跳变补偿走滚动容器的 scrollBy；jsdom 没有这个方法，这里装一个按 scrollTop 相对滚动的。
+    const proto = HTMLElement.prototype as { scrollBy?: unknown };
+    proto.scrollBy = function (this: HTMLElement, options: ScrollToOptions) {
+      this.scrollTop += options.top ?? 0;
+    };
+    try {
+      const scrollRef = { current: null as { scrollBy: (deltaY: number) => void } | null };
+      render(
+        <VirtualizedMessageList
+          display={longConversation()}
+          renderItem={(m) => <div>{m.id}</div>}
+          scrollRef={scrollRef}
+          data-testid="vlist"
+        />,
+      );
+      const scroller = screen.getByTestId('virtua-list');
+      let top = 39_400;
+      Object.defineProperties(scroller, {
+        scrollTop: { configurable: true, get: () => top, set: (v: number) => { top = Math.min(39_400, Math.max(0, v)); } },
+        scrollHeight: { configurable: true, value: 40_000 },
+        clientHeight: { configurable: true, value: 600 },
+      });
+      act(() => onScrollRef.current?.());
+      // 贴底时内容缩短后 virtua 在浏览器钳制之上又往上补了一次：同一个任务里贴回底部。
+      scroller.scrollBy({ top: -44 });
+      expect(top).toBe(39_400);
+      // 读者往上滚、还没停手：virtua 的补偿是在保持阅读位置，不插手。
+      act(() => {
+        scrollRef.current?.scrollBy(-40);
+        top = 20_000;
+        onScrollRef.current?.();
+      });
+      scroller.scrollBy({ top: -44 });
+      expect(top).toBe(19_956);
+    } finally {
+      delete proto.scrollBy;
+    }
+  });
 });

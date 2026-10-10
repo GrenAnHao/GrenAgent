@@ -14,8 +14,9 @@ import {
 import { memo, useEffect, useState, type MouseEvent } from 'react';
 import { cardStyles } from '../tools/cardStyles';
 import { ModelNameTag } from './ModelNameTag';
-import { displayModel, subAgentCardTitle, type SubAgentMode, type SubAgentUnit, type SubAgentUnitStatus } from '../panels/subagentUtils';
+import { isModelAlias, modelWithThinking, subAgentCardTitle, type SubAgentMode, type SubAgentUnit, type SubAgentUnitStatus } from '../panels/subagentUtils';
 import { PendingResponseStatus } from './PendingResponseStatus';
+import { useProviderNames } from '../settings/providerListCache';
 import { dockOwnerFromStore, useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { pi } from '../../lib/pi';
@@ -107,27 +108,25 @@ function withLiveStart(
   items: SubAgentItem[],
   used: Set<string>,
 ): { unit: SubAgentUnit; createdAt?: number } {
-  const match = items.find((item) =>
-    !used.has(item.id) && item.task === unit.task && (item.status === 'running' || item.status === 'starting'),
+  const active = unit.status === 'starting' || unit.status === 'running';
+  const match = unit.status === 'waiting' || unit.status === 'pending' ? undefined : items.find((item) =>
+    !used.has(item.id) && (unit.agentId
+      ? item.id === unit.agentId
+      : item.task === unit.task && (active
+        ? item.status === 'running' || item.status === 'starting'
+        : item.status === 'done' || item.status === 'error' || item.status === 'cancelled')),
   );
   if (match) used.add(match.id);
-  let model = unit.model || modelText(match?.model);
-  // 已经写进结果的模型优先。旧的链式结果没带模型，完成行再按任务原文对上 registry。
-  if (!model && unit.status !== 'waiting' && unit.status !== 'pending') {
-    const remembered = items.find((item) =>
-      !used.has(item.id)
-      && item.task === unit.task
-      && (item.status === 'done' || item.status === 'error' || item.status === 'cancelled')
-      && modelText(item.model),
-    );
-    if (remembered) {
-      used.add(remembered.id);
-      model = modelText(remembered.model);
-    }
-  }
+  // 行上的 cheap / strong 来自调用参数，只是别名；注册表里有实际路由时用注册表。
+  const model = (isModelAlias(unit.model) ? undefined : unit.model) || modelText(match?.model) || unit.model;
+  // 实际档位：结果行里的优先，运行中再看注册表。
+  const thinkingLevel = unit.thinkingLevel || modelText(match?.thinkingLevel);
   const status = unit.status === 'starting' && match?.sessionPath ? 'running' : unit.status;
   const createdAt = typeof match?.createdAt === 'number' && match.createdAt > 0 ? match.createdAt : undefined;
-  const next = model === unit.model && status === unit.status ? unit : { ...unit, status, ...(model ? { model } : {}) };
+  const next =
+    model === unit.model && thinkingLevel === unit.thinkingLevel && status === unit.status
+      ? unit
+      : { ...unit, status, ...(model ? { model } : {}), ...(thinkingLevel ? { thinkingLevel } : {}) };
   return { unit: next, createdAt };
 }
 
@@ -171,22 +170,20 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
   const running = status === 'running';
   const startPolling = useSubAgentLiveStore((s) => s.startPolling);
   const liveItems = useSubAgentLiveStore(selectSubAgentList(workspace));
-  const modelGap = units.some((u) => !u.unit.model && u.unit.status !== 'waiting' && u.unit.status !== 'pending');
+  const registryLoaded = useSubAgentLiveStore((s) => s.itemsByWorkspace.has(workspace));
+  const modelGap = units.some((u) => (!u.unit.model || isModelAlias(u.unit.model)) && u.unit.status !== 'waiting' && u.unit.status !== 'pending');
   const [remembered, setRemembered] = useState<SubAgentItem[]>([]);
+  const [registryRead, setRegistryRead] = useState(false);
+  const providerNames = useProviderNames();
   useEffect(() => {
-    if (!workspace || !running) return;
+    if (!workspace || (!running && (!modelGap || registryRead))) return;
     return startPolling(workspace);
-  }, [workspace, running, startPolling]);
+  }, [workspace, running, modelGap, registryRead, startPolling]);
   useEffect(() => {
-    if (!workspace || !modelGap) return;
-    let cancelled = false;
-    void pi.subagentList(workspace).then((rows) => {
-      if (!cancelled) setRemembered(rows);
-    }).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [workspace, modelGap]);
+    if (!registryLoaded || !modelGap) return;
+    setRemembered(liveItems);
+    setRegistryRead(true);
+  }, [registryLoaded, modelGap, liveItems]);
   const knownItems = liveItems.length > 0 ? liveItems : remembered;
   // 组头成败汇总：非运行态时统计失败子代理数（与工具聚合一致，部分失败用琥珀计数而非整组标红）。
   const errorCount = units.filter((u) => u.unit.status === 'error').length;
@@ -239,7 +236,7 @@ function SubAgentGroupInlineInner({ messageId, toolCallId, mode, status, units }
             const shown = liveRow.unit;
             const sm = statusMeta(shown.status);
             const pending = shown.status === 'running' || shown.status === 'starting';
-            const modelLabel = displayModel(shown.model);
+            const modelLabel = modelWithThinking(shown.model, shown.thinkingLevel, providerNames);
             return (
             <div
               key={u.unit.key}
