@@ -9,6 +9,7 @@ import { probeServer } from '../../../extensions/mcp/probe.js';
 import { writeToolsCacheEntry } from '../../../extensions/mcp/toolsCache.js';
 import type { McpServerConfig } from '../../../extensions/mcp/config.js';
 import { requestResourceReload } from '../../../extensions/_shared/resource-reload.js';
+import { setSharedModelRuntime } from '../../../extensions/_shared/shared-model-runtime.js';
 import { manifestExtensions } from '../../../extensions/index.js';
 import type { Delivery } from '../../../extensions/multi-agent/inbox.js';
 import { AgentHost } from '../agent/agentHost';
@@ -42,7 +43,12 @@ export interface RuntimeGraph {
 export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
   const { host, broadcast, agentDir } = options;
   const modelRuntimeHost = new ModelRuntimeHost({
-    create: () => ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') }),
+    create: async () => {
+      const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
+      // 嵌入式子代理、冷恢复的子会话复用这一份，不再各自重建
+      setSharedModelRuntime(runtime);
+      return runtime;
+    },
   });
   let piRuntime: PiRuntimeService | undefined;
 

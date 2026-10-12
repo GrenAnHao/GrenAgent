@@ -40,9 +40,7 @@ describe('agent-data-plugins', () => {
 
     expect(tools.sort()).toEqual([
       'memory_search', 'conversation_search', 'wiki_list', 'wiki_read', 'wiki_search',
-      'code_search', 'code_explore', 'code_callers', 'code_callees', 'code_impact', 'code_node', 'code_files',
-      'code_status', 'code_usages', 'code_path', 'code_hierarchy', 'code_call_graph', 'code_deps', 'code_cycles',
-      'code_dead_code', 'code_metrics', 'code_routes', 'code_traverse', 'code_context', 'code_changed',
+      'code_explore',
     ].sort());
   });
 

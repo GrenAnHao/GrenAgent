@@ -71,7 +71,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `goal` | 设定会话完成条件并自动驱动 / 判定 | `/goal` |
 | `memory` | AgentData 分层记忆、自动召回及活动分支会话捕获 | `memory_search`、`conversation_search` |
 | `wiki-rag` | TencentDB 风格 Wiki 只读检索（列出 / 检索 / 阅读） | `wiki_list`、`wiki_read`、`wiki_search` |
-| `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_search`、`code_explore`、`code_callers`、`code_callees`、`code_impact`、`code_node`、`code_files`、`code_status`、`code_usages`、`code_path`、`code_hierarchy`、`code_call_graph`、`code_deps`、`code_cycles`、`code_dead_code`、`code_metrics`、`code_routes`、`code_traverse`、`code_context`、`code_changed` |
+| `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_explore` |
 | `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`（`format`: markdown / text / html / json / llms） |
 | `web-search` | 多引擎联网搜索。Devin 登录有效且未指定引擎链时，`web_search` 先走 Devin，失败再回退 Bing、搜狗、百度。`devin_code_search` 把查询和选中片段发往 Windsurf | `web_search`、`web_search_multi`、`devin_code_search` |

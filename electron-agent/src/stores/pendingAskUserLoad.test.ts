@@ -18,13 +18,30 @@ function tool(
 }
 
 describe('applyPendingAskUserOnLoad', () => {
-  it('marks non-ask_user running tools as error', () => {
+  it('结果还没落盘的普通调用保持 running，交给调用方判断还在不在跑', () => {
     const out = applyPendingAskUserOnLoad(
       [tool({ toolCallId: 'b1', toolName: 'bash', status: 'running' })],
       null,
     );
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ kind: 'tool', toolCallId: 'b1', status: 'error' });
+    expect(out[0]).toMatchObject({ kind: 'tool', toolCallId: 'b1', status: 'running' });
+    expect((out[0] as { result?: unknown }).result).toBeUndefined();
+  });
+
+  it('已有结果却还标着 running 的卡（旧界面历史残留）收成 error', () => {
+    const out = applyPendingAskUserOnLoad(
+      [tool({ toolCallId: 'b2', toolName: 'bash', status: 'running', result: { content: [{ type: 'text', text: 'partial' }] } })],
+      null,
+    );
+    expect(out[0]).toMatchObject({ toolCallId: 'b2', status: 'error' });
+  });
+
+  it('不再等待的 ask_user 行收成 error', () => {
+    const out = applyPendingAskUserOnLoad(
+      [tool({ toolCallId: 'q0', toolName: 'ask_user', status: 'running' })],
+      null,
+    );
+    expect(out[0]).toMatchObject({ toolCallId: 'q0', status: 'error' });
   });
 
   it('keeps the current pending ask_user as running', () => {

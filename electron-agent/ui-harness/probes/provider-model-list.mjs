@@ -21,9 +21,8 @@ export default async function (t) {
   t.ok('三张模型卡片', await t.waitUntil(`${ids}.length === 3`))
   t.check('初始顺序', await t.js(ids), ['alpha', 'beta', 'gamma'])
 
-  // 测活层贴在详情列底部，会盖住列表下半截：先收起，再把卡片滚到可视区中间。
-  await t.click('[data-testid="prov-diag-toggle"]', 20)
-  t.ok('收起测活层', await t.waitUntil(`!document.querySelector('[data-testid="prov-diag-body"]')`))
+  // 测活层贴在详情列底部，展开时会盖住列表下半截。默认是收起的，确认一下再把卡片滚到可视区中间。
+  t.ok('测活层默认收起', await t.waitUntil(`!document.querySelector('[data-testid="prov-diag-body"]')`))
   await t.js(`document.querySelector('[data-testid="prov-model-card-1"]').scrollIntoView({ block: 'center' })`)
   await t.sleep(200)
 

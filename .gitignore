@@ -33,7 +33,13 @@ output/
 
 # Editor / agent tool state (same class as .cursor/.claude/.codex above)
 /.idea/
-/.agents/
+!/.agents/
+/.agents/*
+# Agent Notes 体系要入库：笔记、校验脚本、证据、项目级 skill
+!/.agents/notes/
+!/.agents/scripts/
+!/.agents/evidence/
+!/.agents/skills/
 /.codebuddy/
 
 # Debug + throwaway run artifacts
@@ -62,3 +68,5 @@ nul
 /embedding/.models/
 /embedding/vector-service.exe
 /embedding/dist/
+board.html
+demo.html

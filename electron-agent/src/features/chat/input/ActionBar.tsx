@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { ActionIcon, Flexbox, Popover } from '@lobehub/ui';
 import { MoreHorizontal } from 'lucide-react';
+import { useElementMeasure } from '../../../hooks/useElementMeasure';
 import {
   actionMap,
   ACTION_LABELS,
@@ -18,27 +19,20 @@ interface ActionBarProps {
 
 export function ActionBar({ actions }: ActionBarProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
 
-  // 量自身可用宽度（作为 flex:1 占满左侧剩余空间），ResizeObserver 实时跟随窗口/面板变化。
-  // 参考 App.tsx 的面板宽度测量：用 useLayoutEffect 在首帧前量好，避免折叠态闪烁。
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => setWidth(el.clientWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const { visible, collapsed } = resolveToolbarOverflow(
-    width,
-    actions,
-    COLLAPSE_PRIORITY,
-    ACTION_WIDTH,
-    MORE_BUTTON_WIDTH,
+  // 量自身可用宽度（作为 flex:1 占满左侧剩余空间），在首帧前量好，避免折叠态闪烁。
+  // 只记折进「更多」的是哪几个：拖分隔条时宽度每帧都变，折叠结果不变就不重渲。
+  const collapsedKey = useElementMeasure(
+    ref,
+    useCallback(
+      (width: number) =>
+        resolveToolbarOverflow(width, actions, COLLAPSE_PRIORITY, ACTION_WIDTH, MORE_BUTTON_WIDTH).collapsed.join(','),
+      [actions],
+    ),
   );
+  const collapsedSet = new Set(collapsedKey.split(','));
+  const visible = actions.filter((key) => !collapsedSet.has(key));
+  const collapsed = actions.filter((key) => collapsedSet.has(key));
 
   return (
     <Flexbox horizontal align="center" gap={10} flex={1} ref={ref} style={{ minWidth: 0, overflow: 'hidden' }}>

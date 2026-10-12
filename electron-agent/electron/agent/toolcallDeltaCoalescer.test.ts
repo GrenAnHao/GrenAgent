@@ -1,5 +1,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createToolcallDeltaCoalescer } from './toolcallDeltaCoalescer.js';
+import { createDeltaCoalescer, createToolcallDeltaCoalescer, STREAM_DELTA_TYPES } from './toolcallDeltaCoalescer.js';
+
+describe('createDeltaCoalescer（子代理流）', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const ev = (type: string, contentIndex: number, delta: string) => ({ type: 'message_update', assistantMessageEvent: { type, contentIndex, delta } });
+
+  it('文字增量合并成一条', () => {
+    vi.useFakeTimers();
+    const emit = vi.fn();
+    const { push } = createDeltaCoalescer(emit, { windowMs: 60, types: STREAM_DELTA_TYPES });
+    push(ev('text_delta', 1, 'hel'));
+    push(ev('text_delta', 1, 'lo'));
+    vi.advanceTimersByTime(60);
+    expect(emit.mock.calls.map(([e]) => e.assistantMessageEvent.delta)).toEqual(['hello']);
+  });
+
+  it('同一 contentIndex 的思考和文字不混在一起', () => {
+    vi.useFakeTimers();
+    const emit = vi.fn();
+    const { push, flush } = createDeltaCoalescer(emit, { windowMs: 60, types: STREAM_DELTA_TYPES });
+    push(ev('thinking_delta', 0, 'think'));
+    push(ev('text_delta', 0, 'say'));
+    flush();
+    expect(emit.mock.calls.map(([e]) => `${e.assistantMessageEvent.type}:${e.assistantMessageEvent.delta}`)).toEqual(['thinking_delta:think', 'text_delta:say']);
+  });
+
+  it('主会话的合并器不碰文字增量', () => {
+    const emit = vi.fn();
+    const { push } = createToolcallDeltaCoalescer(emit);
+    push(ev('text_delta', 0, 'a'));
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+});
 
 function delta(contentIndex: number, text: string, extra: Record<string, unknown> = {}, usage: unknown = { output: 1 }) {
   return {

@@ -82,7 +82,7 @@ describe('embedded CodeGraph lifecycle', () => {
     const { engine, sdk, graph } = fixture();
     await Promise.all([engine.call('/repo', 'codegraph_search', { query: 'a' }), engine.call('/repo', 'codegraph_search', { query: 'b' })]);
     expect(sdk.CodeGraph.open).toHaveBeenCalledTimes(1);
-    expect(await engine.status('/repo')).toMatchObject({ connected: true, indexed: true, state: 'indexed', files: 2, nodes: 5, edges: 6, sdkVersion: '1.6.0' });
+    expect(await engine.status('/repo')).toMatchObject({ connected: true, indexed: true, state: 'indexed', files: 2, nodes: 5, edges: 6, sdkVersion: '1.6.2' });
     expect(graph.watch).not.toHaveBeenCalled();
   });
 

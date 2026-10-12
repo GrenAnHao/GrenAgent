@@ -43,7 +43,7 @@ pi.registerTool({
 
 - `promptSnippet` 只写一行，不要复述整个 schema。
 - `promptGuidelines` 只写模型不看字段就会用错的纪律。不要给每个工具都堆一条复述 snippet 的空话，以免撑爆 Guidelines、反复重建系统提示前缀缓存。
-- AgentData 一族只在主工具上写 `promptGuidelines`（`code_explore` / `wiki_search` / `memory_search`），不要把同一段纪律复制到每个兄弟工具上。索引是否存在只由 `code-retrieval` 每轮 hint 说一次。Fable 默认只注行为核，不要把工具手册再抄回去。
+- AgentData 一族只在主工具上写 `promptGuidelines`（`code_explore` / `wiki_search` / `memory_search`）。代码检索只注册 `code_explore`，不要再加 `code_search` 等兄弟工具。wiki / memory 不要把同一段纪律复制到每个兄弟工具上。索引是否存在只由 `code-retrieval` 每轮 hint 说一次。Fable 默认只注行为核，不要把工具手册再抄回去。
 - 动态投射的 MCP 工具用 server 给出的 description 填 `promptSnippet`；不要在 Fable 里枚举 `mcp__*` 名字。
 - 懒加载、会话中途才激活的工具：加上 `promptSnippet` / `promptGuidelines` 会重建系统提示。需要进 Available tools 的产品工具仍然要写 snippet；纯发现/代理类工具可以只靠 `description`。
 
@@ -101,7 +101,7 @@ node scripts/check-notes.mjs
 
 ### 跑哪些场景
 
-原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer` 十二个场景，全量就是它们。
+原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer`、`panel-resize` 十三个场景，全量就是它们。
 
 - 改了某个工具卡 / 时间线组件的 UI：点名对应的场景（查下面「现有场景」），可以是几个，但都属于本次需求。
 - 新增组件 / 面板：先写新场景 + probe，只跑这个新场景。其他场景一个不跑。
@@ -142,10 +142,11 @@ node scripts/check-notes.mjs
 - 侧栏会话行：`session-row`（真实 SessionItem，回调只记事件；运行中的行转圈和「更多」共用行尾同一格：静止只有转圈，悬停整行或鼠标正好停在转圈上，转圈在原位换成「更多」，标题宽度和占位格都不变、按钮中心就是转圈原来的位置、格子与按钮同尺寸、鼠标下面点得到按钮；点按钮只开菜单不触发整行点击，点行本身仍打开会话；移开变回转圈；空闲行照旧悬停才出现「更多」，位置和运行行同一列）
 - 命令胶囊：`command-pill`（真实 lobehub Editor + CommandPill 插件，插入走 `INSERT_COMMAND_PILL_COMMAND`，`list_prompt_commands` 用桩；插入后焦点在第一个参数；Tab / Shift+Tab 轮转，最后一个参数上 Tab 跳出到胶囊后，第一个参数上 Shift+Tab / ← 不动；必填参数空着时 Enter 被拦下、焦点回到缺的参数并标红；发送文本是调用文本 `/名 "值" ""` 加补充正文；空参数 Backspace 回退、第一个参数里删整个胶囊；气泡里 `<command>` 块整块成胶囊且正文不出现，刚发出的调用文本也成胶囊、空参数显示默认值；浅色主题）
 - 命令与规则面板：`prompt-library-panel`（真实 CommandsPanel / RulesPanel，主进程命令用内存桩；命令列表项是胶囊带参数个数；改提示词时参数实时识别、占位符背景高亮；与保留名重名就地报错、保存不可点；规则开关立即写盘；没有工作区时项目范围置灰）
-- 供应商测活：`provider-diagnostics`（真实 ProvidersSettings + ProviderDiagnostics，`get_provider_config` / `list_models_global` / `diagnose_provider_model` / `diagnose_provider_model_abort` 用桩，分片和放行由 probe 用 `t.act` 推；详情分两层，设置层单独滚动、测活层贴住详情列底边，滚设置时测活层不动；思考档位按模型映射列出，null 档隐藏、原生名不同附在后面；发送中锁住模型和档位、出现取消，思考和正文分开流式显示；取消只发当前 requestId 的 abort，保留已收到的正文、不出指标、回到可发送；Ctrl+Enter 发送，完成后标题栏写成功与总耗时、指标含思考 tokens、模型和档位解锁；分隔条上拖变高、拖到顶仍给设置层留高度；标题栏收起 / 展开；内置供应商也能测，换供应商清掉上一次结果；浅色主题）
-- 供应商模型列表：`provider-model-list`（真实 ProvidersSettings + SortableModelCards；先收起测活层再把卡片滚进可视区，测活层贴底会盖住列表；只有卡片左侧手柄能拖、从输入框开始拖不排序，拖到第三张下面后顺序变化且没有残留位移，键盘空格拿起 / ↓ / 空格放下也能排；展开后有缓存读 / 写价，加一档分段默认阈值 100,000、四价抄基础价，分段行在卡片里、窄视口也不撑破；保存后 models.json 顺序跟着拖动、带 tiers；浅色主题）
-- 文件浏览器：`file-explorer`（真实 FileTreeBody → FileExplorer，内存文件树做桩，`files://changed` 由 `act('externalEdit' / 'addFile')` 按主进程形状推；只列根、展开才列、展开的目录交给主进程监听；2000 个文件只渲染可视区、滚到底见最后一个；.md 默认预览、只看不挂编辑器，Ctrl+E 进编辑、宽屏左右分栏、窄屏只有编辑器，Ctrl+S 写盘，Esc 回预览；.ts 默认只读敲字不进文档，切编辑后可改可存；未保存切文件弹「保存 / 放弃 / 取消」；切主题编辑器 DOM 不换、颜色跟着变，预览也变；二进制不支持预览可用系统打开，超大文件标已截断且进不了编辑，svg 显示；外部改动无本地修改静默换新、有本地修改出冲突提示可保留；CRLF 保存后原有行仍是 CRLF；新文件出现在树里；筛选只留命中项和祖先；分隔条可拖。CodeMirror 的文档读 `.cm-line`，往编辑器里敲字先 `t.click('.cm-content', 40)` 再 Ctrl+End）
+- 供应商测活：`provider-diagnostics`（真实 ProvidersSettings + ProviderDiagnostics，`get_provider_config` / `list_models_global` / `diagnose_provider_model` / `diagnose_provider_model_abort` 用桩，分片和放行由 probe 用 `t.act` 推；详情分两层，设置层单独滚动、测活层贴住详情列底边，滚设置时测活层不动；思考档位按模型映射列出，null 档隐藏、原生名不同附在后面；发送中锁住模型和档位、出现取消，思考和正文分开流式显示；取消只发当前 requestId 的 abort，保留已收到的正文、不出指标、回到可发送；Ctrl+Enter 发送，完成后标题栏写成功与总耗时、指标含思考 tokens、模型和档位解锁；分隔条上拖变高、拖到顶仍给设置层留高度；测活层默认收起只有标题栏，标题栏收起 / 展开；内置供应商也能测，换供应商清掉上一次结果；浅色主题）
+- 供应商模型列表：`provider-model-list`（真实 ProvidersSettings + SortableModelCards；测活层默认收起（展开时贴底会盖住列表），再把卡片滚进可视区；只有卡片左侧手柄能拖、从输入框开始拖不排序，拖到第三张下面后顺序变化且没有残留位移，键盘空格拿起 / ↓ / 空格放下也能排；展开后有缓存读 / 写价，加一档分段默认阈值 100,000、四价抄基础价，分段行在卡片里、窄视口也不撑破；保存后 models.json 顺序跟着拖动、带 tiers；浅色主题）
+- 文件浏览器：`file-explorer`（真实 FileTreeBody → FileExplorer，内存文件树做桩，`files://changed` 由 `act('externalEdit' / 'addFile')` 按主进程形状推；只列根、展开才列、展开的目录交给主进程监听；2000 个文件只渲染可视区、滚到底见最后一个；.md 默认预览、只看不挂编辑器，Ctrl+E 进编辑、宽屏左右分栏、窄屏只有编辑器，Ctrl+S 写盘，Esc 回预览；.ts 默认只读敲字不进文档，切编辑后可改可存；未保存切文件弹「保存 / 放弃 / 取消」；切主题编辑器 DOM 不换、颜色跟着变，预览也变；二进制不支持预览可用系统打开，超大文件标已截断且进不了编辑，svg 显示；外部改动无本地修改静默换新、有本地修改出冲突提示可保留；CRLF 保存后原有行仍是 CRLF；新文件出现在树里；筛选只留命中项和祖先；文件树在内容右边，可以收起再展开；分隔条往左拖文件树变宽。CodeMirror 的文档读 `.cm-line`，往编辑器里敲字先 `t.click('.cm-content', 40)` 再 Ctrl+End）
 - 对话列表贴底：`chat-follow`（真实 VirtualizedMessageList，条目是定高文字块、其中一条带内部滚动区；流式增长一路贴底；在内部滚动区上滚轮、会话不满一屏时上滚都不停止贴底；一次追加大段内容不因测高超前丢掉贴底；真的把列表往上滚（滚轮或键盘 PageUp，含远小于旧阈值的小幅上滚）才停止贴底，流式增长时阅读位置不动并露出「回到底部」；发出新消息、点「回到底部」、滚回底部都恢复贴底；真实对话模式走真实 reducer → ChatMessageItems（Markdown、代码块、表格、bash 工具卡），每 10~100ms 一段快速输出时持续贴底、没有被往上推离底部的帧（document capture 阶段读 scroll 事件，抓「推上去再拉回」的抖动；内容缩短时浏览器钳制 + virtua 跳变补偿会把视图推离底部），快速输出中读者上滚照样离开底部、停在原处并露出「回到底部」）
+- 面板分隔条：`panel-resize`（真实 ResizeHandle，左边长对话、右边文件浏览器打开长 markdown；拖动宽度跟手，拖动中面板没有宽度过渡，松手恢复 0.2s，双击回到初始尺寸，往两边拖停在最小 / 最大宽度；折叠有中间帧并收到 0，展开回到原宽度；对话列表滚动时 virtua 仍写 inline pointer-events: none，但计算值保持 auto）
 
 harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness 本身坏了（所有场景都「页面没就绪」、输入全部失效、升级 Electron / Vite 之后），用 electron-ui-harness skill 的 `scripts/smoke.mjs --app electron-agent` 跑一次，它跑完会自动删掉临时场景。在 `scenarios/` 里看到 `harness-smoke` 就是漏删的，直接删掉。
 
@@ -188,3 +189,11 @@ harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness
 - 沙箱 iframe（`srcdoc` 且没有 `allow-same-origin`，例如 `HtmlPreview`）是独立进程：页面里读不到它的 DOM，离屏渲染下 `sendInputEvent` 的鼠标事件也进不去（先移动再点也一样，`seen` 里一个事件都收不到）。读几何、触发点击走 `t.win.webContents.mainFrame.framesInSubtree` 里 `url === 'about:srcdoc'` 的那一项的 `executeJavaScript`；「点击」写成对 `elementFromPoint(x, y)` 的最上层元素派发 `click`，被遮住就会点到遮挡物上，和用户点同一个位置等效。换页面后 iframe 会重建，句柄每次现取。截图前多等几百毫秒，跨进程 iframe 滚动后合成帧刷新有延迟，否则截到滚动前的旧帧。
 - fps 只用 `t.info` 记录，同一台机器上会抖 ±30%。判断快慢只看生产构建。静默模式不上屏，fps 只作参考，要下性能结论用 `--show` 跑。
 - Linux 上离屏渲染也要显示服务，CI 照旧用 `xvfb-run -a node ui-harness/check.mjs`。
+
+## 落地必须有实跑证据
+
+1. 写 proposed 笔记时，在 `## 验证` 段先写计划：要用哪个 `verify-*` skill 跑哪些 feature、看到什么算通过。
+2. 改完代码，用项目的 `verify-*` skill（在 .agents/skills、.claude/skills 或 .cursor/skills 下）真实启动程序、按用户路径操作，证据存到 `.agents/evidence/<笔记文件名>/`。
+3. 笔记转 implemented 前，`## 验证` 段写明：跑了哪些 feature、证据路径、结果（通过 / 失败 / 部分通过）。只跑了测试的，写出具体命令（如 `pnpm exec vitest run …`、`pnpm ui:check <场景>`）和结果，也算证据。失败就不要转，先修。
+4. 确实没法实跑的改动写 `verify: n/a <原因>`，原因必须具体。
+5. 跑 verify 时发现的回归或 harness 失效，单独开一篇 bug-fix 笔记，不要在原笔记里一笔带过。

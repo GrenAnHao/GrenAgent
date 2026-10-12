@@ -2,11 +2,11 @@ import { Alert, App, Button } from 'antd';
 import { cx } from 'antd-style';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { files } from '../../lib/files';
+import { useElementMeasure } from '../../hooks/useElementMeasure';
 import { formatBytes } from '../devtools/devtoolsFormat';
 import { fileExplorerStyles as styles } from './fileExplorerStyles';
 import { LARGE_TEXT_BYTES, pathSegments } from './fileKinds';
 import { MarkdownPreview } from './MarkdownPreview';
-import { useElementSize } from './useElementSize';
 import type { OpenFileApi, TextFile } from './useOpenFile';
 import { ViewerToolbar } from './ViewerToolbar';
 
@@ -16,6 +16,7 @@ const LazyCodeEditor = lazy(() => import('./CodeEditor'));
 /** 内容区比这宽时，markdown 编辑模式左边编辑、右边预览。 */
 const SPLIT_PREVIEW_MIN_WIDTH = 1100;
 const SPLIT_PREVIEW_DEBOUNCE_MS = 300;
+const fitsSplitPreview = (width: number) => width >= SPLIT_PREVIEW_MIN_WIDTH;
 
 export interface FileViewerProps {
   workspace: string;
@@ -28,7 +29,7 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
   const { file } = api;
   const { message } = App.useApp();
   const ref = useRef<HTMLDivElement | null>(null);
-  const { width } = useElementSize(ref);
+  const splitFits = useElementMeasure(ref, fitsSplitPreview);
 
   const openExternal = (path: string) => {
     files.openExternal(workspace, path).catch((err: unknown) => {
@@ -38,7 +39,7 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
 
   let content;
   if (file.status === 'idle') {
-    content = <div className={styles.center}>从左边选一个文件查看</div>;
+    content = <div className={styles.center}>从右边选一个文件查看</div>;
   } else if (file.status === 'loading') {
     content = <div className={styles.center}>加载中…</div>;
   } else if (file.status === 'error') {
@@ -65,7 +66,7 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
           file={file}
           api={api}
           isDark={isDark}
-          width={width}
+          splitFits={splitFits}
           toolbarBase={toolbarBase}
           onOpenExternal={openExternal}
           refocus={() => ref.current?.focus({ preventScroll: true })}
@@ -109,14 +110,15 @@ interface TextViewerProps {
   file: TextFile;
   api: OpenFileApi;
   isDark: boolean;
-  width: number;
+  /** 内容区够宽，编辑 markdown 时能左右分栏。 */
+  splitFits: boolean;
   toolbarBase: ToolbarBase;
   onOpenExternal: (path: string) => void;
   /** 横幅里的按钮点完会消失，把焦点还给内容区。 */
   refocus: () => void;
 }
 
-function TextViewer({ file, api, isDark, width, toolbarBase, onOpenExternal, refocus }: TextViewerProps) {
+function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal, refocus }: TextViewerProps) {
   const [showDiff, setShowDiff] = useState(false);
   const [editorPath, setEditorPath] = useState<string | null>(null);
   const editing = file.mode === 'edit';
@@ -133,7 +135,7 @@ function TextViewer({ file, api, isDark, width, toolbarBase, onOpenExternal, ref
   }, [file.path, isMarkdown, editing]);
   const mountEditor = !isMarkdown || editing || editorPath === file.path;
   const showEditor = !isMarkdown || editing;
-  const showPreview = isMarkdown && (!editing || width >= SPLIT_PREVIEW_MIN_WIDTH);
+  const showPreview = isMarkdown && (!editing || splitFits);
 
   return (
     <>

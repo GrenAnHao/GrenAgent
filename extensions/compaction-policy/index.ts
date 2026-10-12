@@ -67,7 +67,9 @@ export default function (pi: ExtensionAPI) {
     if (decision.apply) applyOp({ op: pulse.op, ts: pulse.ts });
   };
 
-  watchConfig(() => consumeDesktopPulse());
+  // 每个会话（含子代理）各订一份，会话结束退订：不退订的话，每次配置变动都要为每个死掉的会话同步读一遍配置文件。
+  const unwatch = watchConfig(() => consumeDesktopPulse());
+  pi.on("session_shutdown", () => { unwatch(); });
 
   pi.on("session_start", async (_event, ctx) => {
     workspaceCwd = ctx.cwd;

@@ -549,7 +549,7 @@ describe('createEnhancePrompt 实验路径', () => {
     }
   });
 
-  it('codegraph_search 走 codeRetrieval.call', async () => {    const request = vi.fn().mockResolvedValue({ hits: [] });
+  it('codegraph_explore 走 codeRetrieval.call', async () => {    const request = vi.fn().mockResolvedValue({ hits: [] });
     let round = 0;
     async function* impl() {
       round += 1;
@@ -558,7 +558,7 @@ describe('createEnhancePrompt 实验路径', () => {
           type: 'done',
           message: {
             role: 'assistant',
-            content: [{ type: 'toolCall', id: '1', name: 'codegraph_search', arguments: { query: 'Login' } }],
+            content: [{ type: 'toolCall', id: '1', name: 'codegraph_explore', arguments: { query: 'Login' } }],
             reason: 'toolUse',
           },
         };
@@ -571,7 +571,7 @@ describe('createEnhancePrompt 实验路径', () => {
     await expect(service.run({ workspace: '/ws', text: 'x' }, () => {})).resolves.toMatchObject({ ok: true, content: '稿' });
     expect(req).toHaveBeenCalledWith('codeRetrieval.call', expect.objectContaining({
       workspace: '/ws',
-      tool: 'codegraph_search',
+      tool: 'codegraph_explore',
       args: expect.objectContaining({ query: 'Login' }),
     }));
   });

@@ -21,14 +21,14 @@ describe('code retrieval extension', () => {
     expect(tools).toEqual(CODE_GRAPH_AGENT_TOOLS);
   });
 
-  it('tells the model to use CodeGraph before bash or grep', () => {
+  it('tells the model to use code_explore before grep or bash', () => {
     const tools: Array<{ name: string; description: string }> = [];
     codeRetrieval({ registerTool: (tool: { name: string; description: string }) => tools.push(tool), on: () => {} } as never);
-    expect(tools.find((tool) => tool.name === 'code_search')?.description).toMatch(/before bash|prefer over grep/i);
-    expect(tools.find((tool) => tool.name === 'code_explore')?.description).toMatch(/before bash|prefer over grep/i);
+    expect(tools.map((tool) => tool.name)).toEqual(['code_explore']);
+    expect(tools[0]?.description).toMatch(/prefer over grep or bash/i);
   });
 
-  it('registers promptSnippet on every CodeGraph tool and family guidelines only on code_explore', () => {
+  it('registers promptSnippet and family guidelines only on code_explore', () => {
     const tools: RegisteredTool[] = [];
     codeRetrieval({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
     expect(tools.map((tool) => tool.name)).toEqual(CODE_GRAPH_AGENT_TOOLS);
@@ -62,7 +62,7 @@ describe('code retrieval extension', () => {
       message: { customType: 'codegraph', display: false },
     });
     expect(String((injected as { message: { content: string } }).message.content)).toMatch(/do not start with/i);
-    expect(String((injected as { message: { content: string } }).message.content)).toMatch(/code_\*/);
+    expect(String((injected as { message: { content: string } }).message.content)).toMatch(/code_explore/);
   });
 
   it('injects a grep/find fallback when the workspace has no index', async () => {
@@ -83,17 +83,7 @@ describe('code retrieval extension', () => {
   });
 
   it.each([
-    ['code_search', 'codegraph_search', { query: 'parse', limit: 5 }],
-    ['code_explore', 'codegraph_explore', { query: 'parse' }],
-    ['code_callers', 'codegraph_callers', { symbol: 'parse' }],
-    ['code_callees', 'codegraph_callees', { symbol: 'parse' }],
-    ['code_impact', 'codegraph_impact', { symbol: 'parse', depth: 2 }],
-    ['code_node', 'codegraph_node', { file: 'src/parser.ts', offset: 2, limit: 10 }],
-    ['code_files', 'codegraph_files', { path: 'src', pattern: '**/*.ts' }],
-    ['code_status', 'codegraph_status', {}],
-    ['code_usages', 'codegraph_usages', { symbol: 'parse' }],
-    ['code_path', 'codegraph_path', { from: 'main', to: 'parse' }],
-    ['code_context', 'codegraph_context', { query: 'parse', format: 'markdown' }],
+    ['code_explore', 'codegraph_explore', { query: 'parse', maxFiles: 4 }],
   ])('sends %s through the AgentData RPC and keeps the raw result', async (name, remote, params) => {
     const raw = { content: [{ type: 'text', text: 'result' }], structuredContent: { nodes: [1] }, isError: true };
     const request = vi.spyOn(MemoryClient.prototype, 'request').mockResolvedValue(raw);
@@ -105,30 +95,11 @@ describe('code retrieval extension', () => {
     expect(result).toEqual({ content: raw.content, details: raw });
   });
 
-  it('exposes node file mode without requiring a symbol', () => {
+  it('exposes only query and maxFiles, and query is required', () => {
     const tools: RegisteredTool[] = [];
     codeRetrieval({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
-    const node = tools.find((tool) => tool.name === 'code_node')!;
-    expect(node.parameters.properties).toHaveProperty('file');
-    expect(node.parameters.properties).toHaveProperty('offset');
-    expect(node.parameters.properties).toHaveProperty('includeMetrics');
-    expect(node.parameters.required ?? []).not.toContain('symbol');
-  });
-
-  it('exposes full SDK search, explore and files parameters', () => {
-    const tools: RegisteredTool[] = [];
-    codeRetrieval({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
-    const search = tools.find((tool) => tool.name === 'code_search')!;
     const explore = tools.find((tool) => tool.name === 'code_explore')!;
-    const files = tools.find((tool) => tool.name === 'code_files')!;
-    for (const key of ['kinds', 'languages', 'includePatterns', 'excludePatterns', 'offset', 'caseSensitive', 'mode', 'words']) {
-      expect(search.parameters.properties).toHaveProperty(key);
-    }
-    for (const key of ['searchLimit', 'traversalDepth', 'maxNodes', 'minScore', 'edgeKinds', 'nodeKinds', 'seedNames']) {
-      expect(explore.parameters.properties).toHaveProperty(key);
-    }
-    for (const key of ['format', 'includeMetadata', 'maxDepth']) {
-      expect(files.parameters.properties).toHaveProperty(key);
-    }
+    expect(Object.keys(explore.parameters.properties).sort()).toEqual(['maxFiles', 'query']);
+    expect(explore.parameters.required).toEqual(['query']);
   });
 });

@@ -8,7 +8,15 @@ import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, PromptOption
 import { expandSpacedSkillCommand, skillsFromSession } from './expandSkillCommand.js';
 import { SessionUiAdapter } from './sessionUiAdapter.js';
 import { toRendererEvent } from './streamingEvent.js';
-import { createToolcallDeltaCoalescer } from './toolcallDeltaCoalescer.js';
+import { createDeltaCoalescer, createToolcallDeltaCoalescer, STREAM_DELTA_TYPES } from './toolcallDeltaCoalescer.js';
+
+/**
+ * 子会话增量的合并窗口。子代理逐 token 出事件，十个并行时主进程每秒要转发上百条，渲染层逐条处理；
+ * 按会话合并到这个粒度，肉眼仍是连续流式。
+ */
+const SUBAGENT_DELTA_WINDOW_MS = 60;
+
+type DeltaCoalescer = ReturnType<typeof createDeltaCoalescer>;
 
 type TurnOrigin = 'main' | 'goal';
 export type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -65,6 +73,8 @@ export class WorkspaceHandle {
   private unregisterParentHost: (() => void) | undefined;
   private switching = false;
   private deltas = createToolcallDeltaCoalescer((event) => this.forward(event));
+  /** 每个子会话一个合并器（按 sessionPath），子会话结束或 handle 拆掉时冲掉。 */
+  private readonly childDeltas = new Map<string, DeltaCoalescer>();
 
   constructor(private readonly options: WorkspaceHandleOptions) {
     this.ui = new SessionUiAdapter({
@@ -108,11 +118,22 @@ export class WorkspaceHandle {
       } catch {
         /* already JSON-shaped */
       }
-      this.options.onEvent(downgraded, {
+      const childMeta: HandleEventMeta = {
         ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
         sessionPath: meta.sessionPath,
         source: 'subagent',
-      });
+      };
+      const key = meta.sessionPath ?? '';
+      let coalescer = this.childDeltas.get(key);
+      if (!coalescer) {
+        coalescer = createDeltaCoalescer((merged) => this.options.onEvent(merged, childMeta), {
+          windowMs: SUBAGENT_DELTA_WINDOW_MS,
+          types: STREAM_DELTA_TYPES,
+        });
+        this.childDeltas.set(key, coalescer);
+      }
+      coalescer.push(downgraded);
+      if (downgraded.type === 'agent_end' && downgraded.willRetry !== true) this.childDeltas.delete(key);
       // 同一项目的其他 handle 不再重复广播：渲染层按 delta 累加，收到 N 遍就叠字 N 遍。
       return true;
     });
@@ -224,6 +245,8 @@ export class WorkspaceHandle {
     this.ui.cancelAll();
     try { await this.session.abort(); } catch { /* 清理阶段 abort 失败不阻断 */ }
     this.deltas.flush();
+    for (const coalescer of this.childDeltas.values()) coalescer.flush();
+    this.childDeltas.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.unsubChildEvents?.();

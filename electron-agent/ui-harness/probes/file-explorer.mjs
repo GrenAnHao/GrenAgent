@@ -16,14 +16,14 @@ const PREVIEW = '[data-testid="file-markdown-preview"]'
 const MODAL = '.ant-modal-confirm'
 
 const docText = `[...document.querySelectorAll('${CONTENT} .cm-line')].map((l) => l.textContent).join('\\n')`
-const treeTitles = `[...document.querySelectorAll('${TREE} .ant-tree-title')].map((el) => el.textContent)`
+const treeTitles = `[...document.querySelectorAll('${TREE} [data-tree-title]')].map((el) => el.textContent)`
 const isVisible = (sel) => `(() => { const el = document.querySelector('${sel}'); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 })()`
 
 /** 给树里名字为 name 的节点打标记，返回能点的选择器。 */
 async function treeNode(t, name) {
   const found = await t.js(`(() => {
     document.querySelectorAll('[data-probe-node]').forEach((n) => n.removeAttribute('data-probe-node'))
-    const el = [...document.querySelectorAll('${TREE} .ant-tree-title')].find((n) => n.textContent === ${JSON.stringify(name)})
+    const el = [...document.querySelectorAll('${TREE} [data-tree-title]')].find((n) => n.textContent === ${JSON.stringify(name)})
     if (!el) return false
     el.setAttribute('data-probe-node', '1')
     return true
@@ -92,16 +92,16 @@ export default async function (t) {
   // —— 大目录：虚拟滚动 ——
   await openNode(t, 'big')
   t.ok('展开 big', await t.waitUntil(`${treeTitles}.includes('file-0001.ts')`))
-  const rendered = await t.count(`${TREE} .ant-tree-treenode`)
+  const rendered = await t.count(`${TREE} [data-tree-row]`)
   t.info('big 展开后渲染的节点数', rendered)
   t.ok(`${bigCount} 个文件只渲染可视区`, rendered < 200)
-  const fps = await t.scrollFps(`${TREE} .ant-tree-list-holder`, 1200)
+  const fps = await t.scrollFps(TREE, 1200)
   t.info('树滚动 fps（静默模式仅参考）', fps)
   for (let i = 0; i < 30 && !(await t.js(`${treeTitles}.includes('file-2000.ts')`)); i++) {
-    await t.wheel(`${TREE} .ant-tree-list-holder`, 4000)
+    await t.wheel(TREE, 4000)
   }
   t.ok('滚到底能看到最后一个文件', await t.js(`${treeTitles}.includes('file-2000.ts')`))
-  await t.js(`document.querySelector('${TREE} .ant-tree-list-holder').scrollTop = 0`)
+  await t.js(`document.querySelector('${TREE}').scrollTop = 0`)
   t.ok('滚回顶部', await t.waitUntil(`${treeTitles}.includes('big')`))
   await openNode(t, 'big')
   t.ok('收起 big', await t.waitUntil(`!${treeTitles}.includes('file-0001.ts')`))
@@ -226,17 +226,28 @@ export default async function (t) {
   await t.key('Backspace')
   t.ok('清空筛选：恢复', await t.waitUntil(`${treeTitles}.includes('README.md')`))
 
-  // —— 分隔条 ——
+  // —— 分隔条（文件树在右边，往左拖变宽）——
+  const treeWidthOf = () =>
+    t.js(`Math.round(document.querySelector('[data-testid="file-explorer-tree"]').getBoundingClientRect().width)`)
   const pane = await t.rect('[data-testid="file-explorer-splitter"]')
-  const treeBefore = await t.js(`Math.round(document.querySelector('[data-testid="file-explorer-splitter"]').previousElementSibling.getBoundingClientRect().width)`)
-  await t.drag({ x: pane.x + 2, y: pane.y + 300 }, { x: pane.x + 102, y: pane.y + 300 })
-  const treeAfter = await t.js(`Math.round(document.querySelector('[data-testid="file-explorer-splitter"]').previousElementSibling.getBoundingClientRect().width)`)
+  const treeBefore = await treeWidthOf()
+  await t.drag({ x: pane.x + 2, y: pane.y + 300 }, { x: pane.x - 98, y: pane.y + 300 })
+  const treeAfter = await treeWidthOf()
   t.checkNear('拖分隔条：文件树变宽 100px', treeAfter, treeBefore + 100, 3)
+
+  // —— 收起 / 展开 ——
+  await t.click('[data-testid="file-explorer-tree-toggle"]', 8)
+  t.ok('收起：文件树不占位', await t.waitUntil(`!document.querySelector('[data-testid="file-explorer-tree"]')`))
+  t.ok('收起：内容还在', await t.js(isVisible('[data-testid="file-viewer"]')))
+  t.check('收起：按钮改成展开', await t.js(`document.querySelector('[data-testid="file-explorer-tree-toggle"]').getAttribute('aria-expanded')`), 'false')
+  await t.click('[data-testid="file-explorer-tree-toggle"]', 8)
+  t.ok('展开：文件树回来', await t.waitFor('[data-testid="file-explorer-tree"]'))
+  t.ok('展开：文件还在', await t.waitUntil(`${treeTitles}.includes('README.md')`))
 
   await t.shot('dark')
   await t.setTheme('light')
   await t.mouse(2, 2)
-  const selected = await t.style(`${TREE} .ant-tree-treenode-selected .ant-tree-node-content-wrapper`, ['color'])
+  const selected = await t.style(`${TREE} [data-tree-row][data-selected="true"]`, ['color'])
   t.info('选中项文字颜色', selected)
   t.ok('选中项是浅底色、文字不是反白', selected.color !== 'rgb(255, 255, 255)')
   await t.shot('light')

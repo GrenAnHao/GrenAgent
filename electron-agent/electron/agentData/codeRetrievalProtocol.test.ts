@@ -16,7 +16,7 @@ const READ_TOOLS = [
 ] as const;
 
 describe('CodeGraph read-only RPC validation', () => {
-  it('mirrors SDK 1.6.0 kind, edge and language enums', () => {
+  it('mirrors SDK 1.6.2 kind, edge and language enums', () => {
     expect(CODEGRAPH_NODE_KINDS).toEqual([...NODE_KINDS]);
     expect(CODEGRAPH_EDGE_KINDS).toEqual([...EDGE_KINDS]);
     expect(CODEGRAPH_LANGUAGES).toEqual([...LANGUAGES]);

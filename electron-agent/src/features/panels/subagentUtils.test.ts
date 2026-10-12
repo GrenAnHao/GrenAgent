@@ -325,6 +325,37 @@ describe('subAgentUnitView', () => {
     expect(textOf(bad.result)).toContain('boom');
   });
 
+  it('链式整条还在跑时，已经结束的那一步按它自己的终态显示，不再算运行中', () => {
+    const args = { chain: [{ task: 'gen token' }, { task: 'write file' }, { task: 'verify' }] };
+    const result = {
+      details: {
+        results: [
+          { task: 'gen token', status: 'done', ok: true, output: 'TOKEN=21914203', agentId: 'sa-3', sessionPath: '/s/3.jsonl' },
+          { task: 'write file', status: 'error', ok: false, error: 'disk full', agentId: 'sa-4', sessionPath: '/s/4.jsonl' },
+          { task: 'verify', status: 'running', agentId: 'sa-5', sessionPath: '/s/5.jsonl' },
+        ],
+      },
+    };
+    const done = subAgentUnitView(args, result, 'running', 0);
+    expect(done.status).toBe('done');
+    expect(textOf(done.result)).toContain('TOKEN=21914203');
+    expect((done.result as { details: { sessionPath?: string; agentId?: string } }).details).toMatchObject({ sessionPath: '/s/3.jsonl', agentId: 'sa-3' });
+
+    const failed = subAgentUnitView(args, result, 'running', 1);
+    expect(failed.status).toBe('error');
+    expect(textOf(failed.result)).toContain('disk full');
+
+    const current = subAgentUnitView(args, result, 'running', 2);
+    expect(current.status).toBe('running');
+    expect((current.result as { details: { streaming?: boolean } }).details.streaming).toBe(true);
+  });
+
+  it('并行组还在跑时，先结束的那个子代理也显示完成', () => {
+    const result = { details: { results: [{ task: 'a', status: 'done', ok: true, output: 'a out', sessionPath: '/s/a.jsonl' }, { task: 'b', status: 'running', sessionPath: '/s/b.jsonl' }] } };
+    expect(subAgentUnitView({ tasks: ['a', 'b'] }, result, 'running', 0).status).toBe('done');
+    expect(subAgentUnitView({ tasks: ['a', 'b'] }, result, 'running', 1).status).toBe('running');
+  });
+
   it('parallel unit forwards sessionPath so the dock binds the child session', () => {
     const result = {
       details: {

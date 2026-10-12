@@ -142,12 +142,13 @@ describe("builtinDefaultAgents", () => {
   it("gives read-only defaults CodeGraph tools so they do not fall back to bash search", () => {
     const byName = Object.fromEntries(builtinDefaultAgents().map((a) => [a.name, a]));
     for (const name of ["scout", "planner", "reviewer"]) {
-      expect(byName[name]?.tools).toEqual(
-        expect.arrayContaining(["code_search", "code_explore", "code_node", "code_files"]),
-      );
-      expect(byName[name]?.systemPrompt).toMatch(/code_\*/);
+      expect(byName[name]?.tools).toContain("code_explore");
+      expect(byName[name]?.tools).not.toEqual(expect.arrayContaining(["code_search", "code_node"]));
+      expect(byName[name]?.systemPrompt).toMatch(/code_explore/);
+      expect(byName[name]?.systemPrompt).not.toMatch(/code_\*/);
     }
-    expect(byName.worker?.tools).toEqual(expect.arrayContaining(["code_search", "code_explore"]));
+    expect(byName.worker?.tools).toContain("code_explore");
+    expect(byName.worker?.tools).not.toEqual(expect.arrayContaining(["code_search"]));
   });
 });
 

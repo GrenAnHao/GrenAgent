@@ -1,14 +1,25 @@
-import { Button, Input, Tree, type TreeDataNode, type TreeProps } from 'antd';
-import { Search } from 'lucide-react';
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from '@headless-tree/core';
+import { useTree } from '@headless-tree/react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { cx } from 'antd-style';
+import { Button, Input } from 'antd';
+import { ChevronRight, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import FileIcon from '../../components/FileIcon';
+import type { DirEntry } from '../../lib/files';
 import { fileExplorerStyles as styles } from './fileExplorerStyles';
-import { buildTree, searchTree, type TreeNode } from './treeModel';
-import { useElementSize } from './useElementSize';
+import { searchTree } from './treeModel';
 import type { FileTreeState } from './useFileTree';
 
 /** 条目太多只列了一部分的目录，末尾挂一个不可选的提示节点。 */
 const TRUNCATED_KEY_SUFFIX = '\u0000truncated';
+const ROW_HEIGHT = 28;
+
+interface NodeData {
+  name: string;
+  isDir: boolean;
+  truncated?: boolean;
+}
 
 function highlight(name: string, needle: string): ReactNode {
   if (!needle) return name;
@@ -23,60 +34,24 @@ function highlight(name: string, needle: string): ReactNode {
   );
 }
 
-function truncatedNode(dir: string): TreeDataNode {
-  return {
-    key: `${dir}${TRUNCATED_KEY_SUFFIX}`,
-    title: <span className={styles.truncatedNode}>条目太多，只列出前 5000 个</span>,
-    isLeaf: true,
-    selectable: false,
-    disabled: true,
-  };
-}
-
-function toDataNodes(nodes: TreeNode[], dir: string, truncatedDirs: ReadonlySet<string>, needle: string): TreeDataNode[] {
-  const out: TreeDataNode[] = nodes.map((node) => ({
-    key: node.key,
-    title: highlight(node.entry.name, needle),
-    isLeaf: node.isLeaf,
-    icon: <FileIcon fileName={node.entry.name} isDirectory={node.entry.isDir} size={16} />,
-    ...(node.children ? { children: toDataNodes(node.children, node.key, truncatedDirs, needle) } : {}),
-  }));
-  if (truncatedDirs.has(dir)) out.push(truncatedNode(dir));
-  return out;
-}
-
 export interface FileTreeProps {
   tree: FileTreeState;
   selectedPath: string | null;
   onOpen: (path: string) => void;
 }
 
-/** 文件树：只渲染可视区（virtual）；展开目录时才列那一层；筛选只在已加载的节点里找。 */
+/** 文件树：headless-tree 管展开和键盘，浏览器原生滚动；只渲染可视区。展开目录时才列那一层。 */
 export function FileTree({ tree, selectedPath, onOpen }: FileTreeProps) {
   const [query, setQuery] = useState('');
-  const needle = useDeferredValue(query).trim().toLowerCase();
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const { height } = useElementSize(bodyRef);
-
+  const needle = query.trim().toLowerCase();
   const search = useMemo(() => (tree.root ? searchTree(tree.root, tree.dirs, needle) : null), [tree.root, tree.dirs, needle]);
+  const searchKey = search ? [...search.expand].sort().join('\0') : '';
+  const [storedSearchKey, setStoredSearchKey] = useState(searchKey);
   const [searchExpanded, setSearchExpanded] = useState<string[]>([]);
-  useEffect(() => {
+  if (searchKey !== storedSearchKey) {
+    setStoredSearchKey(searchKey);
     setSearchExpanded(search ? [...search.expand] : []);
-  }, [search]);
-
-  const treeData = useMemo(
-    () => (tree.root ? toDataNodes(buildTree(tree.root, tree.dirs, search?.visible), tree.root, tree.truncatedDirs, search ? needle : '') : []),
-    [tree.root, tree.dirs, tree.truncatedDirs, search, needle],
-  );
-  const loadedKeys = useMemo(() => [...tree.dirs.keys()], [tree.dirs]);
-
-  const loadData: TreeProps['loadData'] = async (node) => {
-    try {
-      await tree.loadDir(String(node.key));
-    } catch {
-      // 列不出来（刚被删、没权限）：保持未加载，下次展开再试。
-    }
-  };
+  }
 
   if (tree.error) {
     return (
@@ -104,22 +79,18 @@ export function FileTree({ tree, selectedPath, onOpen }: FileTreeProps) {
         />
       </div>
       {search && search.matches === 0 ? <div className={styles.treeHint}>已展开的目录里没有匹配的文件</div> : null}
-      <div ref={bodyRef} className={styles.treeBody} data-testid="file-tree">
+      <div className={styles.treeBody}>
         {tree.root ? (
-          <Tree.DirectoryTree
-            blockNode
-            showIcon
-            virtual={height > 0}
-            height={height > 0 ? height : undefined}
-            treeData={treeData}
-            loadData={loadData}
-            loadedKeys={loadedKeys}
-            expandedKeys={search ? searchExpanded : tree.expanded}
-            onExpand={(keys) => (search ? setSearchExpanded(keys.map(String)) : tree.setExpanded(keys.map(String)))}
-            selectedKeys={selectedPath ? [selectedPath] : []}
-            onSelect={(_keys, info) => {
-              if (info.node.isLeaf && !String(info.node.key).endsWith(TRUNCATED_KEY_SUFFIX)) onOpen(String(info.node.key));
-            }}
+          <HeadlessFileTree
+            key={tree.root}
+            root={tree.root}
+            tree={tree}
+            needle={search ? needle : ''}
+            searchVisible={search?.visible ?? null}
+            expandedItems={search ? searchExpanded : tree.expanded}
+            onExpandedItems={search ? setSearchExpanded : tree.setExpanded}
+            selectedPath={selectedPath}
+            onOpen={onOpen}
           />
         ) : (
           <div className={styles.treeHint} data-testid="file-tree-loading">
@@ -128,5 +99,162 @@ export function FileTree({ tree, selectedPath, onOpen }: FileTreeProps) {
         )}
       </div>
     </>
+  );
+}
+
+interface HeadlessFileTreeProps {
+  root: string;
+  tree: FileTreeState;
+  needle: string;
+  searchVisible: ReadonlySet<string> | null;
+  expandedItems: string[];
+  onExpandedItems: (ids: string[]) => void;
+  selectedPath: string | null;
+  onOpen: (path: string) => void;
+}
+
+function HeadlessFileTree({
+  root,
+  tree,
+  needle,
+  searchVisible,
+  expandedItems,
+  onExpandedItems,
+  selectedPath,
+  onOpen,
+}: HeadlessFileTreeProps) {
+  const dirsRef = useRef(tree.dirs);
+  dirsRef.current = tree.dirs;
+  const truncatedRef = useRef(tree.truncatedDirs);
+  truncatedRef.current = tree.truncatedDirs;
+  const visibleRef = useRef(searchVisible);
+  visibleRef.current = searchVisible;
+  const entries = useMemo(() => {
+    const map = new Map<string, DirEntry>();
+    for (const listing of tree.dirs.values()) {
+      for (const entry of listing) map.set(entry.path, entry);
+    }
+    return map;
+  }, [tree.dirs]);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizerRef = useRef<ReturnType<typeof useVirtualizer<HTMLDivElement, Element>> | null>(null);
+
+  const instance = useTree<NodeData>({
+    rootItemId: root,
+    indent: 16,
+    initialState: { expandedItems, selectedItems: selectedPath ? [selectedPath] : [] },
+    state: { expandedItems, selectedItems: selectedPath ? [selectedPath] : [] },
+    setExpandedItems: (update) => {
+      const next = typeof update === 'function' ? update(expandedItems) : update;
+      onExpandedItems(next);
+      // 搜索时展开的是已经列过的祖先。平时展开一个还没列过的目录，这时才去列。
+      if (visibleRef.current) return;
+      for (const id of next) {
+        if (id !== root && !dirsRef.current.has(id)) void tree.loadDir(id).catch(() => {});
+      }
+    },
+    // 选中跟着当前打开的文件走，不把点过的目录记成选中。
+    setSelectedItems: () => {},
+    getItemName: (item) => item.getItemData().name,
+    isItemFolder: (item) => item.getItemData().isDir,
+    scrollToItem: (item) => {
+      virtualizerRef.current?.scrollToIndex(item.getItemMeta().index, { align: 'auto' });
+    },
+    onPrimaryAction: (item) => {
+      const data = item.getItemData();
+      if (!data.truncated && !data.isDir) onOpen(item.getId());
+    },
+    ignoreHotkeysOnInputs: true,
+    dataLoader: {
+      getItem: (id) => {
+        if (id === root) return { name: '', isDir: true };
+        if (id.endsWith(TRUNCATED_KEY_SUFFIX)) return { name: '条目太多，只列出前 5000 个', isDir: false, truncated: true };
+        const entry = entriesRef.current.get(id);
+        return entry ? { name: entry.name, isDir: entry.isDir } : { name: id.slice(id.lastIndexOf('/') + 1), isDir: false };
+      },
+      getChildren: (id) => {
+        const listing = dirsRef.current.get(id);
+        if (!listing) return [];
+        const visible = visibleRef.current;
+        const ids = listing.map((entry) => entry.path).filter((path) => !visible || visible.has(path));
+        if (truncatedRef.current.has(id)) ids.push(`${id}${TRUNCATED_KEY_SUFFIX}`);
+        return ids;
+      },
+    },
+    features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
+  });
+
+  useEffect(() => {
+    instance.rebuildTree();
+  }, [instance, tree.dirs, tree.truncatedDirs, searchVisible]);
+
+  const items = instance.getItems();
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+    // 还没量到容器时按 800px 算，jsdom 里高度是 0 也能画出开头几行。
+    initialRect: { width: 300, height: 800 },
+  });
+  virtualizerRef.current = virtualizer;
+  const containerProps = instance.getContainerProps('文件');
+  const virtualRows = virtualizer.getVirtualItems();
+  const rows =
+    virtualRows.length > 0
+      ? virtualRows
+      : items.slice(0, 80).map((_, index) => ({ index, start: index * ROW_HEIGHT, key: index, size: ROW_HEIGHT }));
+
+  return (
+    <div
+      {...containerProps}
+      ref={(el) => {
+        scrollRef.current = el;
+        containerProps.ref?.(el);
+      }}
+      className={styles.treeScroll}
+      data-testid="file-tree"
+    >
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        {rows.map((virtualRow) => {
+          const item = items[virtualRow.index];
+          if (!item) return null;
+          const props = item.getProps();
+          const data = item.getItemData();
+          return (
+            <div
+              {...props}
+              key={item.getId()}
+              data-index={virtualRow.index}
+              data-tree-row=""
+              data-selected={item.isSelected() ? 'true' : undefined}
+              ref={(el) => {
+                props.ref?.(el);
+              }}
+              className={cx(styles.treeRow, item.isSelected() && styles.treeRowSelected)}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: ROW_HEIGHT,
+                transform: `translateY(${virtualRow.start}px)`,
+                paddingLeft: 4 + item.getItemMeta().level * 16,
+              }}
+            >
+              <span className={styles.treeChevron} data-expanded={item.isFolder() && item.isExpanded() ? 'true' : undefined}>
+                {item.isFolder() ? <ChevronRight size={14} /> : null}
+              </span>
+              {data.truncated ? null : <FileIcon fileName={data.name} isDirectory={data.isDir} size={16} />}
+              <span className={cx(styles.treeTitle, data.truncated && styles.truncatedNode)} data-tree-title="">
+                {highlight(data.name, needle)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

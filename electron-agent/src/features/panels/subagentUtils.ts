@@ -778,6 +778,22 @@ export interface SubAgentUnitView {
   status: 'running' | 'done' | 'error';
 }
 
+function terminalUnitView(task: string, row: UnitResult, ok: boolean): SubAgentUnitView {
+  const text = ok ? row.output || '(no output)' : row.error || row.output || '(failed)';
+  return {
+    task,
+    result: {
+      content: [{ type: 'text', text }],
+      details: {
+        ...(row.agentId ? { agentId: row.agentId } : {}),
+        ...(row.sessionPath ? { sessionPath: row.sessionPath } : {}),
+        ...(row.stopReason ? { stopReason: row.stopReason } : {}),
+      },
+    },
+    status: ok ? 'done' : 'error',
+  };
+}
+
 /**
  * 右坞单个子代理的会话视图入参：单任务（subIndex=null）复用整条消息结果（含完整 transcript）；
  * 并行/链式在运行中也带上该子项的 agentId / sessionPath，右坞才能绑到真会话而不是只画任务原文。
@@ -801,6 +817,11 @@ export function subAgentUnitView(
     };
   }
   if (status === 'running') {
+    // 链式 / 并行整条调用还在跑，但这一步已经结束（后端逐步写终态行）：按它自己的终态显示。
+    // 否则组卡片写着已完成，详情还在计时「正在处理」。判断和 expandSubAgents 一致。
+    if (live && rowTerminal(live)) {
+      return terminalUnitView(task, live, live.ok === true || (live.ok !== false && live.status === 'done'));
+    }
     if (live && (live.agentId || live.sessionPath)) {
       return {
         task,
@@ -817,21 +838,7 @@ export function subAgentUnitView(
     return { task, result: undefined, status: 'running' };
   }
   const r = resultsOf(result)?.[subIndex];
-  if (r) {
-    const text = r.ok ? r.output || '(no output)' : r.error || r.output || '(failed)';
-    return {
-      task,
-      result: {
-        content: [{ type: 'text', text }],
-        details: {
-          ...(r.agentId ? { agentId: r.agentId } : {}),
-          ...(r.sessionPath ? { sessionPath: r.sessionPath } : {}),
-          ...(r.stopReason ? { stopReason: r.stopReason } : {}),
-        },
-      },
-      status: r.ok ? 'done' : 'error',
-    };
-  }
+  if (r) return terminalUnitView(task, r, Boolean(r.ok));
   return {
     task,
     result: { content: [{ type: 'text', text: '该步骤未执行：上游步骤失败或链路中止。' }] },

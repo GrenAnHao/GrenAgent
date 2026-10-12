@@ -5,7 +5,7 @@ import { seedAgentTemplates, seedModeFromConfig } from "../_shared/seed-agents.j
 import { DEFAULT_AGENT_TEMPLATES } from "./default-agents.js";
 
 /** Seed version — bump when enriched templates change materially (diagnostic only). */
-export const FABLE_AGENT_SEED_VERSION = "2026-09-19.3";
+export const FABLE_AGENT_SEED_VERSION = "2026-10-11.1";
 
 /**
  * Seed enriched agent templates into ~/.pi/agent/agents/, self-healing on template

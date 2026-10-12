@@ -43,7 +43,7 @@ it('indexes through AgentData jobs and serves the same SDK graph to an authentic
     const result = await agent.request<CodeRetrievalResult>('codeRetrieval.call', { workspace, tool: 'codegraph_search', args: { query: 'parse' } });
     expect(result.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: 'parse', file: 'source.ts', id: expect.any(String) })]));
     const status = await admin.request<{ files: number; connected: boolean; sdkVersion: string }>('codeRetrieval.admin.status', { workspace });
-    expect(status).toMatchObject({ files: 1, connected: true, sdkVersion: '1.6.0' });
+    expect(status).toMatchObject({ files: 1, connected: true, sdkVersion: '1.6.2' });
     await expect(agent.request('codeRetrieval.call', { workspace: root, tool: 'codegraph_search', args: { query: 'parse' } })).rejects.toThrow();
   } finally {
     await jobs.close();

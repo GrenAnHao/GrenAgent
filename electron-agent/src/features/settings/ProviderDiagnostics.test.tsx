@@ -43,8 +43,14 @@ async function openSelect(testId: string): Promise<HTMLElement[]> {
   });
 }
 
+/** 测活层默认收起，开合记在模块内存里跨用例保留：没展开才点一下。 */
+function ensureOpen(): void {
+  if (!screen.queryByTestId('prov-diag-body')) fireEvent.click(screen.getByTestId('prov-diag-toggle'));
+}
+
 async function renderReady(props: Partial<Parameters<typeof ProviderDiagnostics>[0]> = {}) {
   const view = render(<ProviderDiagnostics providerId="relay" dirty={false} missingKey={false} {...props} />);
+  ensureOpen();
   await waitFor(() => expect((screen.getByTestId('prov-diag-run') as HTMLButtonElement).disabled).toBe(false));
   return view;
 }
@@ -60,6 +66,13 @@ afterEach(() => {
 });
 
 describe('ProviderDiagnostics', () => {
+  // 必须排第一个：开合记在模块内存里，后面的用例会把它展开。
+  it('测活层默认收起，只有标题栏', async () => {
+    render(<ProviderDiagnostics providerId="relay" dirty={false} missingKey={false} />);
+    expect(screen.getByTestId('prov-diag-toggle').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('prov-diag-body')).toBeNull();
+  });
+
   it('只列当前供应商的模型，默认选第一个、思考档默认关闭', async () => {
     await renderReady();
 
@@ -167,6 +180,7 @@ describe('ProviderDiagnostics', () => {
     noKey.unmount();
 
     render(<ProviderDiagnostics providerId="unsaved" dirty missingKey={false} />);
+    ensureOpen();
     expect(await screen.findByText('保存后才能测活：测活走已保存的配置。')).toBeTruthy();
     expect((screen.getByTestId('prov-diag-run') as HTMLButtonElement).disabled).toBe(true);
   });

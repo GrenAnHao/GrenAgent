@@ -67,6 +67,8 @@ describe('ProvidersSettings', () => {
 
     const dock = screen.getByTestId('prov-diagnostics');
     expect(dock.previousElementSibling?.contains(screen.getByTestId('prov-apikey'))).toBe(true);
+    // 测活层默认收起，先点开
+    if (!screen.queryByTestId('prov-diag-body')) fireEvent.click(screen.getByTestId('prov-diag-toggle'));
     await waitFor(() => expect((screen.getByTestId('prov-diag-run') as HTMLButtonElement).disabled).toBe(false));
     expect(dock.querySelector('.ant-select')?.textContent).toContain('gpt-5');
 

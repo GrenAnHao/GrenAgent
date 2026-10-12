@@ -391,7 +391,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         if (key) shadowStreams.get(key)?.flush();
         const shadow = key ? shadows.get(key) : undefined;
         if (key && shadow && partialShadows.has(key)) {
-          const merged = mergeLiveTail(snapshotMessages(res.messages, uiHistory).sanitized, shadow.messages);
+          // 快照把结果还没落盘的调用补成 running 卡；后台这一轮已经不跑了就收成已中断。
+          const snapshot = snapshotMessages(res.messages, uiHistory).sanitized;
+          const shadowRunning = shadow.isStreaming || shadow.runActive || shadow.awaitingResponse;
+          const merged = mergeLiveTail(shadowRunning ? snapshot : interruptPendingToolCards(snapshot), shadow.messages);
           shadows.set(key, { ...shadow, messages: merged, excluded: excludedFromAgent(res.messages) });
           partialShadows.delete(key);
           setCachedSession(key, merged, sessionSignature(merged));

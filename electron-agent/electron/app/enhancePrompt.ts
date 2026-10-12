@@ -169,8 +169,7 @@ const ENHANCE_TOOLS: Tool[] = [
   { name: 'wiki_search', description: '按关键词搜索本工作区 wiki。', parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number()) }) },
   { name: 'wiki_read', description: '读取 wiki 页面。', parameters: Type.Object({ page: Type.String() }) },
   { name: 'memory_search', description: '搜索本工作区记忆。', parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number()) }) },
-  { name: 'codegraph_search', description: '搜索代码图符号。', parameters: Type.Object({ query: Type.String(), kind: Type.Optional(Type.String()), kinds: Type.Optional(Type.Array(Type.String())), languages: Type.Optional(Type.Array(Type.String())), includePatterns: Type.Optional(Type.Array(Type.String())), excludePatterns: Type.Optional(Type.Array(Type.String())), limit: Type.Optional(Type.Number()), offset: Type.Optional(Type.Number()), caseSensitive: Type.Optional(Type.Boolean()), mode: Type.Optional(Type.String()) }) },
-  { name: 'codegraph_explore', description: '展开代码图上下文。', parameters: Type.Object({ query: Type.String(), maxFiles: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()), searchLimit: Type.Optional(Type.Number()), traversalDepth: Type.Optional(Type.Number()), maxNodes: Type.Optional(Type.Number()), minScore: Type.Optional(Type.Number()), edgeKinds: Type.Optional(Type.Array(Type.String())), nodeKinds: Type.Optional(Type.Array(Type.String())), seedNames: Type.Optional(Type.Array(Type.String())) }) },
+  { name: 'codegraph_explore', description: '查阅代码图：一次返回相关源码和调用路径。', parameters: Type.Object({ query: Type.String(), maxFiles: Type.Optional(Type.Number()) }) },
 ];
 
 type DrainEvent = {
@@ -388,7 +387,7 @@ async function executeEnhanceTool(
         query: args.query,
         limit: typeof args.limit === 'number' ? args.limit : 8,
       });
-    } else if (name === 'codegraph_search' || name === 'codegraph_explore') {
+    } else if (name === 'codegraph_explore') {
       result = await request('codeRetrieval.call', { workspace, tool: name, args });
     } else {
       return { isError: true, text: '不允许的工具' };

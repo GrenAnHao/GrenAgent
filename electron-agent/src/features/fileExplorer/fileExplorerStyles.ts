@@ -13,7 +13,44 @@ export const fileExplorerStyles = createStaticStyles(({ css }) => ({
     flex: none;
     flex-direction: column;
     min-height: 0;
-    border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
+    border-inline-start: 1px solid ${cssVar.colorBorderSecondary};
+  `,
+  treeHeader: css`
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 4px 0 12px;
+    color: ${cssVar.colorTextSecondary};
+    font-size: 12px;
+  `,
+  treeToggle: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    color: ${cssVar.colorTextSecondary};
+    background: transparent;
+    cursor: pointer;
+
+    &:hover {
+      color: ${cssVar.colorText};
+      background: ${cssVar.colorFillTertiary};
+    }
+  `,
+  treeRail: css`
+    display: flex;
+    flex: none;
+    align-items: flex-start;
+    justify-content: center;
+    width: 32px;
+    padding-top: 4px;
+    border-inline-start: 1px solid ${cssVar.colorBorderSecondary};
   `,
   treeSearch: css`
     flex: none;
@@ -23,44 +60,54 @@ export const fileExplorerStyles = createStaticStyles(({ css }) => ({
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  `,
+  treeScroll: css`
+    height: 100%;
+    overflow: auto;
+    font-size: 13px;
+  `,
+  treeRow: css`
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    box-sizing: border-box;
+    height: 28px;
+    padding-right: 8px;
+    color: ${cssVar.colorText};
+    white-space: nowrap;
+    cursor: pointer;
 
-    .ant-tree {
-      background: transparent;
-      font-size: 13px;
+    &:hover {
+      background: ${cssVar.colorFillTertiary};
     }
-    .ant-tree-treenode {
-      white-space: nowrap;
-    }
-    .ant-tree-node-content-wrapper {
-      display: flex;
-      align-items: center;
-      min-width: 0;
-    }
-    .ant-tree-iconEle {
-      display: inline-flex;
-      flex: none;
-      align-items: center;
-      justify-content: center;
-    }
-    .ant-tree-title {
-      overflow: hidden;
-      min-width: 0;
-      text-overflow: ellipsis;
-    }
-    /* DirectoryTree 默认选中是整行主色块；和侧栏会话列表一样用浅底色。 */
-    .ant-tree.ant-tree-directory .ant-tree-treenode-selected {
+  `,
+  treeRowSelected: css`
+    background: ${cssVar.controlItemBgActive};
+
+    &:hover {
       background: ${cssVar.controlItemBgActive};
-
-      .ant-tree-switcher,
-      .ant-tree-node-content-wrapper,
-      .ant-tree-node-content-wrapper:hover {
-        color: ${cssVar.colorText};
-      }
-      .ant-tree-node-content-wrapper:before,
-      .ant-tree-node-content-wrapper:hover:before {
-        background: ${cssVar.controlItemBgActive};
-      }
     }
+  `,
+  treeChevron: css`
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    color: ${cssVar.colorTextTertiary};
+
+    svg {
+      transition: transform 0.15s ease;
+    }
+
+    &[data-expanded='true'] svg {
+      transform: rotate(90deg);
+    }
+  `,
+  treeTitle: css`
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
   `,
   treeHint: css`
     padding: 4px 12px;
@@ -79,7 +126,7 @@ export const fileExplorerStyles = createStaticStyles(({ css }) => ({
     position: relative;
     flex: none;
     width: 5px;
-    margin-inline-start: -3px;
+    margin-inline-end: -3px;
     cursor: col-resize;
     touch-action: none;
     z-index: 1;

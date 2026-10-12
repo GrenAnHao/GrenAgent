@@ -4,7 +4,16 @@ import { makeProjectContextPastedText } from './projectContextCitation';
 import { useDockStore } from '../../../../stores/dockStore';
 import { useLayoutStore } from '../../../../stores/layoutStore';
 
-vi.mock('../../../../lib/pi', () => ({ onPiEvent: vi.fn(() => Promise.resolve(() => {})) }));
+const { gitLoad, piHandlers } = vi.hoisted(() => ({
+  gitLoad: vi.fn(),
+  piHandlers: [] as Array<(e: { workspace: string; source?: string; event: { type: string } }) => void>,
+}));
+vi.mock('../../../../lib/pi', () => ({
+  onPiEvent: vi.fn((handler: (typeof piHandlers)[number]) => {
+    piHandlers.push(handler);
+    return Promise.resolve(() => {});
+  }),
+}));
 vi.mock('../../../../store/session', () => ({
   useSessionStore: (selector: (state: { worksDir: string }) => unknown) => selector({ worksDir: '/works' }),
 }));
@@ -13,13 +22,15 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
 }));
 vi.mock('../../../../stores/gitStore', () => ({
   useGitInfo: () => ({ current: '', branches: [], changes: [], loading: false, loaded: true }),
-  useGitStore: { getState: () => ({ load: vi.fn() }) },
+  useGitStore: { getState: () => ({ load: gitLoad }) },
 }));
 vi.mock('./TaskTray', () => ({ TaskTray: () => <span data-testid="task-tray" /> }));
 
 import { WorkspaceBar } from './WorkspaceBar';
 
 beforeEach(() => {
+  gitLoad.mockClear();
+  piHandlers.length = 0;
   useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
   useLayoutStore.setState({ rightPanelOpen: false });
 });
@@ -57,6 +68,21 @@ describe('WorkspaceBar', () => {
         referenceOnly: false,
       }),
     );
+  });
+
+  it('子代理的工具事件不刷新 git；主会话的工具结束才刷新', async () => {
+    render(<WorkspaceBar />);
+    await Promise.resolve();
+    expect(gitLoad).toHaveBeenCalledTimes(1);
+    const emit = (source: string, type: string) => {
+      for (const handler of piHandlers) handler({ workspace: '/repo', source, event: { type } });
+    };
+    // 十个子代理并行时每个工具结束都会来一条，每条都跑 git status / branch 会把机器拖慢
+    emit('subagent', 'tool_execution_end');
+    emit('subagent', 'agent_end');
+    expect(gitLoad).toHaveBeenCalledTimes(1);
+    emit('interactive', 'tool_execution_end');
+    expect(gitLoad).toHaveBeenCalledTimes(2);
   });
 
   it('places the project context chip last and opens it in the existing right dock', () => {

@@ -19,8 +19,8 @@ import {
 const DEFAULT_PROMPT = 'Who are you?';
 const DEFAULT_BODY_HEIGHT = 300;
 
-// 测活层的开合与高度跨供应商、跨设置页保留；只在内存里，重启回默认。
-let dockMemory = { open: true, height: DEFAULT_BODY_HEIGHT };
+// 测活层的开合与高度跨供应商、跨设置页保留；只在内存里，重启回默认。默认收起：进供应商详情先看设置，要测再点开。
+let dockMemory = { open: false, height: DEFAULT_BODY_HEIGHT };
 let requestSeq = 0;
 
 const styles = createStaticStyles(({ css }) => ({

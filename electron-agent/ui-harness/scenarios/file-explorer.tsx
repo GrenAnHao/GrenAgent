@@ -4,13 +4,14 @@ import { FileTreeBody } from '../../src/features/dock/FileTreeBody'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
 /**
- * 「文件」标签里的文件浏览器：真实 FileTreeBody → FileExplorer（antd 虚拟树 + CodeMirror + LazyMarkdown）。
+ * 「文件」标签里的文件浏览器：真实 FileTreeBody → FileExplorer（headless-tree + CodeMirror + LazyMarkdown）。
  * 主进程用桩：内存里的一棵文件树；写盘、列目录、监听都记下来给 probe 断言；
  * probe 用 act('externalEdit' / 'addFile') 模拟别的程序改文件，桩按主进程的形状推 files://changed。
  */
 
 // 文件树宽度存在 localStorage 里，上一次跑拖过分隔条会影响宽屏分栏的断言。
 localStorage.removeItem('hermes-file-explorer-tree-width')
+localStorage.removeItem('hermes-file-explorer-tree-collapsed')
 
 const ROOT = '/repo'
 const TAB_ID = `file:right:${ROOT}`

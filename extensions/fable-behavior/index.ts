@@ -16,10 +16,16 @@ const RefParams = Type.Object({
   topic: StringEnum(TIER3_TOPICS),
 });
 
+let seededThisProcess = false;
+
 export default function (pi: ExtensionAPI) {
   console.error("[fable-behavior] extension loaded");
 
   pi.on("session_start", async () => {
+    // 模板目录是全局的（~/.pi/agent/agents/），一个进程播一次就够。每个子代理也会走到这里，
+    // 每次都读清单、逐个算 sha256 是并行启动时白花的同步读写。
+    if (seededThisProcess) return;
+    seededThisProcess = true;
     seedFableAgents();
   });
 

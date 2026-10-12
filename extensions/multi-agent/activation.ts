@@ -14,6 +14,7 @@ import {
 } from "./inbox.js";
 import { jobs } from "../jobs/service.js";
 import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
+import { sharedModelRuntime } from "../_shared/shared-model-runtime.js";
 import { registerParentSessionHost, sendSettlementToParent } from "./parent-host.js";
 import { formatSettlementNotice } from "./settlement-notice.js";
 
@@ -490,9 +491,11 @@ export async function coldResumeAndDeliver(
     throw new SubagentError(`child ${childId} is not resumable`, "NOT_RESUMABLE");
   }
   const cwd = sessionCwd(sessionManager);
+  const modelRuntime = sharedModelRuntime();
   const services = await createAgentSessionServices({
     cwd,
     agentDir: getAgentDir(),
+    ...(modelRuntime ? { modelRuntime } : {}),
   });
   const { session } = await createAgentSessionFromServices({
     services,

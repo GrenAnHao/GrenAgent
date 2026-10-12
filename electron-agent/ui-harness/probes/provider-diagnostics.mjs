@@ -2,7 +2,7 @@
  * 供应商详情两层：上层设置（单独滚动），下层模型测活（贴住详情列底边）。
  * 测活：思考档位按模型映射列出；发送中出现取消，取消命中当前请求、保留已收到的正文、不出指标；
  * Ctrl+Enter 发送；完成后标题栏显示成功与耗时、指标含思考 tokens。
- * 分隔条上拖变高、拖到顶给设置层留高度；标题栏收起 / 展开；内置供应商也能测；浅色主题截图。
+ * 测活层默认收起、点标题栏展开；分隔条上拖变高、拖到顶给设置层留高度；标题栏收起 / 展开；内置供应商也能测；浅色主题截图。
  */
 
 const DOCK = '[data-testid="prov-diagnostics"]'
@@ -28,6 +28,14 @@ export default async function (t) {
   t.ok('供应商列表渲染', await t.waitFor('[data-testid="prov-item-relay"]'))
   await t.click('[data-testid="prov-item-relay"]', 20)
   t.ok('切到自定义供应商', await t.waitUntil(`document.querySelector('[data-testid="prov-name"]')?.value === 'Relay 中转'`))
+
+  // —— 默认收起 ——
+  t.check('测活层默认收起：没有正文', await t.count(BODY), 0)
+  const collapsed = await t.js(geometry)
+  t.ok('默认收起：只剩标题栏', collapsed.dock.h < 50)
+  t.checkNear('默认收起：测活层仍贴住详情列底边', collapsed.dock.bottom, collapsed.column.bottom, 1)
+  await t.click(HEADER, 20)
+  t.ok('点标题栏展开', await t.waitFor(BODY))
   t.ok('测活层模型就绪', await t.waitUntil(`document.querySelector('[data-testid="prov-diag-run"]')?.disabled === false`))
 
   // —— 两层布局 ——

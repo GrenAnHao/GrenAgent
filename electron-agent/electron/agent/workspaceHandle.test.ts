@@ -188,10 +188,8 @@ describe('WorkspaceHandle', () => {
     await foreground.handle.start();
     await docked.handle.start();
     await docked2.handle.start();
-    const delta = {
-      type: 'message_update',
-      assistantMessageEvent: { type: 'thinking_delta', delta: 'Wal' },
-    };
+    // 增量会先合并再发，这里只关心认领，用会立即转发的事件。
+    const delta = { type: 'message_end', message: { role: 'assistant', content: [] } };
     const meta = { sessionId: 'sa-1', sessionPath: '/tmp/child.jsonl', workspace: 'D:/proj' };
     emitEmbeddedSubagentEvent(delta, meta);
     const total = () => foreground.onEvent.mock.calls.length + docked.onEvent.mock.calls.length + docked2.onEvent.mock.calls.length;
@@ -204,6 +202,49 @@ describe('WorkspaceHandle', () => {
     expect(docked.onEvent.mock.calls.length + docked2.onEvent.mock.calls.length).toBe(1);
     await docked.handle.dispose();
     await docked2.handle.dispose();
+  });
+
+  it('子会话的文字 / 思考增量按会话合并后再发，其它事件到来或会话结束时先冲掉', async () => {
+    const { handle, onEvent } = makeHandle(makeRuntime().runtime);
+    await handle.start();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const a = { sessionId: 'sa-1', sessionPath: '/tmp/a.jsonl', workspace: 'D:/proj' };
+      const b = { sessionId: 'sa-2', sessionPath: '/tmp/b.jsonl', workspace: 'D:/proj' };
+      const think = (delta: string) => ({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta } });
+      const text = (delta: string) => ({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta } });
+      emitEmbeddedSubagentEvent(think('Wal'), a);
+      emitEmbeddedSubagentEvent(think('king'), b);
+      emitEmbeddedSubagentEvent(think('king'), a);
+      // 另一个子会话的增量不打断这一个的合并
+      expect(onEvent).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(100);
+      const deltas = () => onEvent.mock.calls.map(([event, meta]) => `${meta.sessionPath}:${event.assistantMessageEvent?.type ?? event.type}:${event.assistantMessageEvent?.delta ?? ''}`);
+      expect(deltas()).toEqual(['/tmp/a.jsonl:thinking_delta:Walking', '/tmp/b.jsonl:thinking_delta:king']);
+
+      onEvent.mockClear();
+      emitEmbeddedSubagentEvent(text('hel'), a);
+      emitEmbeddedSubagentEvent(text('lo'), a);
+      emitEmbeddedSubagentEvent({ type: 'agent_end', messages: [] }, a);
+      // 结束事件之前先冲掉挂起的增量，顺序不变
+      expect(deltas()).toEqual(['/tmp/a.jsonl:text_delta:hello', '/tmp/a.jsonl:agent_end:']);
+      expect(onEvent.mock.calls[0][1]).toEqual({ sessionId: 'sa-1', sessionPath: '/tmp/a.jsonl', source: 'subagent' });
+    } finally {
+      vi.useRealTimers();
+    }
+    await handle.dispose();
+  });
+
+  it('handle 拆掉时把子会话挂起的增量冲掉，不丢最后几个字', async () => {
+    const { handle, onEvent } = makeHandle(makeRuntime().runtime);
+    await handle.start();
+    emitEmbeddedSubagentEvent(
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'tail' } },
+      { sessionId: 'sa-1', sessionPath: '/tmp/a.jsonl', workspace: 'D:/proj' },
+    );
+    expect(onEvent).not.toHaveBeenCalled();
+    await handle.dispose();
+    expect(onEvent.mock.calls.map(([event]) => event.assistantMessageEvent?.delta)).toEqual(['tail']);
   });
 
   it('别的项目的子会话事件不会被认领，也不挡住本项目的 handle', async () => {

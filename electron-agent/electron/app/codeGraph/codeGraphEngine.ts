@@ -6,7 +6,7 @@ import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { executeCodeGraphTool } from './codeGraphQuery';
 import { isIndexed } from './indexProbe';
 
-export const CODEGRAPH_SDK_VERSION = '1.6.0';
+export const CODEGRAPH_SDK_VERSION = '1.6.2';
 export type CodeGraphSdk = Pick<typeof import('@colbymchenry/codegraph'), 'CodeGraph' | 'isInitialized'>;
 export interface CodeGraphStatusView {
   workspace: string;

@@ -1,19 +1,19 @@
 import { posix, win32 } from 'node:path';
 
-/** Snapshot of CodeGraph 1.6.0 NODE_KINDS. A protocol test compares this to the SDK export. */
+/** Snapshot of CodeGraph 1.6.2 NODE_KINDS. A protocol test compares this to the SDK export. */
 export const CODEGRAPH_NODE_KINDS = [
   'file', 'module', 'class', 'struct', 'interface', 'trait', 'protocol', 'function', 'method',
   'property', 'field', 'variable', 'constant', 'enum', 'enum_member', 'type_alias', 'namespace',
   'parameter', 'import', 'export', 'route', 'component', 'union',
 ] as const;
 
-/** Snapshot of CodeGraph 1.6.0 EDGE_KINDS. */
+/** Snapshot of CodeGraph 1.6.2 EDGE_KINDS. */
 export const CODEGRAPH_EDGE_KINDS = [
   'contains', 'calls', 'imports', 'exports', 'extends', 'implements', 'references',
-  'type_of', 'returns', 'instantiates', 'overrides', 'decorates',
+  'type_of', 'returns', 'instantiates', 'overrides', 'decorates', 'navigates',
 ] as const;
 
-/** Snapshot of CodeGraph 1.6.0 LANGUAGES. */
+/** Snapshot of CodeGraph 1.6.2 LANGUAGES. */
 export const CODEGRAPH_LANGUAGES = [
   'typescript', 'javascript', 'tsx', 'jsx', 'arkts', 'python', 'go', 'rust', 'java', 'c', 'cpp',
   'csharp', 'razor', 'php', 'ruby', 'swift', 'kotlin', 'dart', 'svelte', 'vue', 'astro', 'liquid',

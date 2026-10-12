@@ -10,7 +10,7 @@ describe('embedded CodeGraph packaging', () => {
   it('pins the SDK and unpacks its platform resources', () => {
     const manifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
     const config = parse(readFileSync(resolve('electron-builder.yml'), 'utf8'));
-    expect(manifest.dependencies['@colbymchenry/codegraph']).toBe('1.6.0');
+    expect(manifest.dependencies['@colbymchenry/codegraph']).toBe('1.6.2');
     expect(manifest.scripts['test:codegraph']).toBe('node scripts/test-codegraph.mjs');
     expect(manifest.dependencies.electron).toBeUndefined();
     expect(manifest.devDependencies.electron).toBe('^38.0.0');

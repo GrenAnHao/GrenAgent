@@ -11,13 +11,19 @@ export function useElementSize(ref: RefObject<HTMLElement | null>): ElementSize 
   useEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      const next = { width: Math.floor(rect.width), height: Math.floor(rect.height) };
+    const apply = (width: number, height: number) => {
+      const next = { width: Math.floor(width), height: Math.floor(height) };
       setSize((prev) => (prev.width === next.width && prev.height === next.height ? prev : next));
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    const rect = el.getBoundingClientRect();
+    apply(rect.width, rect.height);
+    // 回调里直接用 entry 的尺寸：同一轮里别的观察者可能刚改过 DOM，再读 getBoundingClientRect 会把整页强制重排一遍。
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const box = entry.borderBoxSize?.[0];
+      if (box) apply(box.inlineSize, box.blockSize);
+      else apply(entry.contentRect.width, entry.contentRect.height);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [ref]);

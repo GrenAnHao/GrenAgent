@@ -43,6 +43,9 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
     let unlisten: (() => void) | undefined;
     void onPiEvent((e) => {
       if (e.workspace !== workspace) return;
+      // 子代理的事件不刷新：十个并行时每个工具结束都来一条，每条都跑一遍 git status / branch。
+      // 子代理改动的文件在父会话这一轮结束（agent_end）时一并刷新到。
+      if (e.source === 'subagent') return;
       if (e.event.type === 'agent_end' || e.event.type === 'tool_execution_end') {
         void useGitStore.getState().load(workspace, true);
       }

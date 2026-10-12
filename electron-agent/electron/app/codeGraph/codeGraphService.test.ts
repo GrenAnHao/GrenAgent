@@ -28,7 +28,7 @@ describe('embedded CodeGraph AgentData service', () => {
     const phases: string[] = [];
     await service.runSync('init', root, ({ phase }) => phases.push(phase));
     expect(phases).toContain('parsing');
-    expect(await service.status(root)).toMatchObject({ connected: true, indexed: true, sdkVersion: '1.6.0', files: 2, state: 'indexed' });
+    expect(await service.status(root)).toMatchObject({ connected: true, indexed: true, sdkVersion: '1.6.2', files: 2, state: 'indexed' });
     expect(await service.search(root, 'parse', 10)).toMatchObject({ available: true, results: expect.arrayContaining([expect.objectContaining({ symbol: 'parse', file: 'src/parser.ts', line: 1 })]) });
     const callers = await service.call(root, 'codegraph_callers', { symbol: 'parse', file: 'src/parser.ts' });
     expect(callers.structuredContent.rows).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: 'main' })]));

@@ -45,11 +45,13 @@ export default function (pi: ExtensionAPI) {
   };
 
   // 盘上的项目默认档变了：只灌项目默认，不碰已钉住档位的会话。
-  watchConfig((next) => {
+  // 每个会话（含子代理）各订一份，会话结束必须退订，否则越积越多、还会作用在已销毁的会话上。
+  const unwatch = watchConfig((next) => {
     const nextPolicy = parseApproval(next[approvalPolicyConfigKey(cwd())]);
     if (!nextPolicy || nextPolicy === getDefaultApprovalPolicy(cwd())) return;
     setApprovalPolicy(nextPolicy, cwd());
   });
+  pi.on("session_shutdown", () => { unwatch(); });
 
   pi.on("session_start", async (_event, ctx) => {
     workspaceCwd = ctx.cwd;

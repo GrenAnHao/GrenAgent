@@ -140,7 +140,8 @@ export default function (pi: ExtensionAPI) {
 
   // 盘上的项目默认模式变了：只更新默认（给新会话继承），不改已打开会话的模式。
   // 当前会话的切换由宿主直接写会话内存，before_agent_start 按 live 对齐工具集。
-  watchConfig((next) => {
+  // 每个会话（含子代理）各订一份，会话结束退订。
+  const unwatch = watchConfig((next) => {
     if (!sessionCtx) return;
     const parsed = parseModeArg(next[agentModeConfigKey(sessionCtx.cwd)] ?? "");
     if (!sessionId) {
@@ -151,6 +152,7 @@ export default function (pi: ExtensionAPI) {
     if (!parsed || parsed === getDefaultAgentMode(sessionCtx.cwd)) return;
     setAgentMode(parsed, sessionCtx.cwd);
   });
+  pi.on("session_shutdown", () => { unwatch(); });
 
   // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
   // AI 在确认设计、准备开始实施时调用，省去用户手动切换模式的操作。

@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { promptWasAccepted } from "../_shared/promptDisposition.js";
 import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
+import { sharedModelRuntime } from "../_shared/shared-model-runtime.js";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
 import { continuableReturnGuidance } from "./adjacent-tools.js";
@@ -322,9 +323,12 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
   const extensionFactories = structured ? [...baseFactories, structured.factory] : baseFactories;
   const systemPrompt = structured ? withStructuredInstruction(opts.systemPrompt) : opts.systemPrompt?.trim();
 
+  const modelRuntime = sharedModelRuntime();
   const services = await createAgentSessionServices({
     cwd: opts.cwd,
     agentDir: getAgentDir(),
+    // 复用宿主的 ModelRuntime：每个子会话各建一份是并行冷启动的大头之一
+    ...(modelRuntime ? { modelRuntime } : {}),
     resourceLoaderOptions: {
       extensionFactories,
       noContextFiles: getConfig("PI_DISABLE_PROJECT_CONTEXT") === "1",

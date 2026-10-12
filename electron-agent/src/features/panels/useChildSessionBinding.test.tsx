@@ -184,6 +184,29 @@ describe('useChildSessionBinding', () => {
     expect(piMock.subagentGetSessionMessages).toHaveBeenCalledTimes(2);
   });
 
+  it('运行中安静补读：结果还没落盘的命令仍是运行中，不显示失败；子代理结束后才收成已中断', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    const silentBash = {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'Start-Sleep 5' } }],
+      timestamp: 3,
+    };
+    piMock.subagentGetSessionMessages.mockResolvedValue({ messages: [user, silentBash] });
+    const { result, rerender } = renderHook(({ running }) => useChildSessionBinding(CHILD, running), {
+      initialProps: { running: true },
+    });
+    await settle();
+    // 静默命令没有事件：满 5 秒触发补读，用 JSONL 快照整份替换
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(piMock.subagentGetSessionMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const bash = result.current.find((m) => m.kind === 'tool');
+    expect(bash).toMatchObject({ toolName: 'bash', status: 'running' });
+
+    rerender({ running: false });
+    await settle();
+    expect(result.current.find((m) => m.kind === 'tool')).toMatchObject({ toolName: 'bash', status: 'error', interrupted: true });
+  });
+
   it('换 sessionPath 会退订旧的、清空画面', async () => {
     piMock.subagentGetSessionMessages.mockResolvedValue({ messages: [user, first] });
     const { result, rerender } = renderHook(({ path }) => useChildSessionBinding(path, false), {

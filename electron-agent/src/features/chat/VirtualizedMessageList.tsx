@@ -83,6 +83,14 @@ const READING_INTENTS = ['wheel', 'touchstart', 'keydown'] as const;
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 const styles = createStaticStyles(({ css }) => ({
+  // virtua 滚动期间给条目容器写 inline pointer-events: none，停下再撤掉。pointer-events 会继承，
+  // 每切一次，已挂载的全部消息（代码高亮的 span 动辄上千个）都要重算样式，单次 40~60ms；
+  // 拖分隔条、流式贴底带来的程序化滚动会反复触发它。钉住计算值，切换就只落在容器自己身上。
+  scroller: css`
+    > div {
+      pointer-events: auto !important;
+    }
+  `,
   jump: css`
     position: absolute;
     inset-inline-end: 16px;
@@ -402,6 +410,7 @@ export function VirtualizedMessageList<T extends { id: string }>({
         <VList
           ref={ref}
           data={rows}
+          className={styles.scroller}
           style={{ height: '100%', flex: 1, minHeight: 0 }}
           bufferSize={BUFFER_SIZE}
           onScroll={() => {

@@ -1,0 +1,12 @@
+{
+  "name": "Pi-root",
+  "private": true,
+  "scripts": {
+    "verify-notes": "pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts && pnpm exec tsx .agents/scripts/verify-note-evidence.ts",
+    "archive-note": "pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/archive-agent-note.ts",
+    "notes-board": "pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/build-board.ts --init board.html \"项目决策看板\""
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

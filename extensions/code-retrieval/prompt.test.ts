@@ -17,7 +17,8 @@ describe('codeGraphIndexHint', () => {
   it('tells the model to start with CodeGraph when the project is indexed', () => {
     const hint = codeGraphIndexHint(tempWorkspace(true));
     expect(hint).toMatch(/has a CodeGraph index/i);
-    expect(hint).toMatch(/code_\*/);
+    expect(hint).toMatch(/code_explore/);
+    expect(hint).not.toMatch(/code_\*/);
     expect(hint).toMatch(/do not start with (bash|grep|find)/i);
   });
 
