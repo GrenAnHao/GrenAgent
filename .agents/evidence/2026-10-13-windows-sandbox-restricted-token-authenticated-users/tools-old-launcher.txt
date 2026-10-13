@@ -1,0 +1,11 @@
+== tools with the old launcher (no restricted token), same helper ==
+git --version: exit=0 git version 2.46.0.windows.1
+git init + status: exit=128 fatal: unable to access 'C:/Users/rxstudio/AppData/Local/Atlassian/SourceTree/git_local/etc/gitconfig': Permission denied
+git commit: exit=128 fatal: unable to access 'C:/Users/rxstudio/AppData/Local/Atlassian/SourceTree/git_local/etc/gitconfig': Permission denied
+npm --version: exit=0 11.8.0
+pnpm --version: exit=1 Error: × load configuration ╰─▶ Failed to read pnpm-workspace.yaml at C:\Users\rxstudio\pnpm- workspace.yaml: 拒绝访问。 (os error 5)
+python --version: exit=0 Python 3.13.7
+node spawns cmd: exit=0 hi
+node writes file: exit=0 ok
+powershell Get-Process: exit=0 541
+curl --version: exit=0 curl 8.9.0 (i686-w64-mingw32) libcurl/8.9.0 Schannel zlib/1.3.1 brotli/1.1.0 zstd/1.5.6 libidn2/2.3.7 libpsl/0.21.5 libssh2/1.11.0 Release-Date: 2024-07-24 Protocols: dict file ftp ftps gopher gophers http https imap ima

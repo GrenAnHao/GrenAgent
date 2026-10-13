@@ -680,6 +680,25 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
                 fail("SetInformationJobObject");
             }
             {
+                /* The command shares the user's interactive desktop. Without these limits it can read the
+                 * clipboard, change system parameters and display settings, and reach USER handles outside
+                 * the job. A low-level keyboard hook is not covered; only a separate desktop would stop that. */
+                JOBOBJECT_BASIC_UI_RESTRICTIONS ui;
+                ZeroMemory(&ui, sizeof(ui));
+                ui.UIRestrictionsClass = JOB_OBJECT_UILIMIT_HANDLES
+                    | JOB_OBJECT_UILIMIT_READCLIPBOARD
+                    | JOB_OBJECT_UILIMIT_WRITECLIPBOARD
+                    | JOB_OBJECT_UILIMIT_GLOBALATOMS
+                    | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
+                    | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
+                    | JOB_OBJECT_UILIMIT_DESKTOP
+                    | JOB_OBJECT_UILIMIT_EXITWINDOWS;
+                if (!SetInformationJobObject(job, JobObjectBasicUIRestrictions, &ui, sizeof(ui))) {
+                    CloseHandle(job);
+                    fail("SetInformationJobObject(UI restrictions)");
+                }
+            }
+            {
                 size_t wrappedLen = wcslen(wrapped);
                 if (wrappedLen > 1000) {
                     fprintf(stderr, "pi-sandbox-win: command line too long (%zu chars, limit ~1024)\n", wrappedLen);
@@ -723,10 +742,21 @@ static int run_as_user(LPCWSTR username, LPCWSTR blobPath, LPCWSTR sandboxHome, 
                 }
                 Sleep(50);
             }
+#ifdef PI_TEST_FAIL_ASSIGN
+            Sleep(2000); /* let the launcher start the command first: the case the launcher job must cover */
+            SetLastError(ERROR_ACCESS_DENIED);
+            if (1) {
+#else
             if (!AssignProcessToJobObject(job, pi.hProcess)) {
+#endif
+                /* Without the job the descendants would outlive an abort or timeout, because taskkill on this
+                 * helper does not reach the sandbox account's tree. Stop the launcher and report failure.
+                 * Best effort: a command the launcher already started is not reachable from here, because
+                 * this process cannot open handles to the sandbox account's processes. */
                 fprintf(stderr, "pi-sandbox-win: AssignProcessToJobObject failed %lu\n", (unsigned long)GetLastError());
-                CloseHandle(job);
-                job = NULL;
+                if (!TerminateProcess(pi.hProcess, HELPER_FAIL_EXIT)) {
+                    fail("TerminateProcess");
+                }
             }
             CloseHandle(pi.hThread);
             pi.hThread = NULL;

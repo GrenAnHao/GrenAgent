@@ -1,7 +1,11 @@
 // Dedicated local account for the Windows sandbox, same shape as Codex's elevated
 // backend: the command runs as PiSandbox, so named pipes it creates are owned by
 // that account and node/vitest piped spawn is allowed. Writes outside the granted
-// workspace and temp directory fail because the account has no ACL there.
+// workspace and temp directory fail because the account has no ACL there. Two inherited
+// sources of write would break that, and both are closed: the launcher drops the
+// Authenticated Users group to deny-only (a data drive root grants it Modify), and
+// ambient.ts denies the stock world-writable system directories (Users can write there).
+// A drive whose ACL grants Users or Everyone write is not covered.
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -11,6 +15,7 @@ import { dirname, join, parse, resolve } from "node:path";
 import { promisify } from "node:util";
 import { SandboxUnavailableError } from "../errors.js";
 import type { SandboxPolicy } from "../types.js";
+import { applyAmbientDenies, stampAmbientDenies, type AmbientStamp } from "./ambient.js";
 import type { SandboxLogon } from "./runner.js";
 
 export const SANDBOX_USERNAME = "PiSandbox";
@@ -138,6 +143,8 @@ export interface AccountIo {
   grant(target: string, username: string, rights: GrantRights, propagate: boolean, signal?: AbortSignal): Promise<void>;
   /** Paths the sandbox account cannot read attributes of. Without it, workspace ancestors are left alone. */
   unreachable?(paths: string[], signal?: AbortSignal): Promise<string[]>;
+  /** Stamps a write-deny for the account on world-writable system directories (one elevation); returns the confirmed ones. */
+  stampAmbient?: AmbientStamp;
   pathEnv(): string;
   home(): string;
   blobPath(): string;
@@ -450,6 +457,7 @@ export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo
       await writeFile(path, JSON.stringify(grants), "utf8");
     },
     grant: defaultGrant,
+    stampAmbient: stampAmbientDenies,
     pathEnv: () => process.env.PATH ?? "",
     home: () => homedir(),
     blobPath: () => join(root, "account.bin"),
@@ -528,6 +536,7 @@ export async function grantSandboxAccess(
     }
   }
   if (await grantWorkspaceAncestors(username, policy.workspaceRoot, grants, io, signal)) changed = true;
+  if (io.stampAmbient && await applyAmbientDenies(username, grants, io.stampAmbient, { signal })) changed = true;
   if (changed) await io.writeGrants(grantsPath, grants);
 }
 

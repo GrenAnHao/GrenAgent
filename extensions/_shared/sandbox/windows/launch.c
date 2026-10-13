@@ -28,6 +28,35 @@ static void fail(const char *api) {
     ExitProcess(HELPER_FAIL_EXIT);
 }
 
+/* A restricted copy of this process's own token with Authenticated Users turned into a deny-only group.
+ * A data drive root grants Authenticated Users Modify (Users only get read), and that is how this account
+ * could write next to the workspace without any grant. Deny-only means ACEs that allow the group no longer
+ * count while ACEs that deny it still do. The account's own SID is untouched, so the explicit grants on the
+ * workspace and temp directory keep working. Deriving it from our own token needs no extra privilege.
+ * Fail closed: without it the command would run with the wider token. */
+static HANDLE restricted_token(void) {
+    HANDLE self = NULL;
+    HANDLE restricted = NULL;
+    PSID authenticatedUsers = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+    SID_AND_ATTRIBUTES disable;
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &self)) {
+        fail("OpenProcessToken");
+    }
+    if (!AllocateAndInitializeSid(&ntAuthority, 1, SECURITY_AUTHENTICATED_USER_RID, 0, 0, 0, 0, 0, 0, 0, &authenticatedUsers)) {
+        fail("AllocateAndInitializeSid");
+    }
+    disable.Sid = authenticatedUsers;
+    disable.Attributes = 0;
+    if (!CreateRestrictedToken(self, 0, 1, &disable, 0, NULL, 0, NULL, &restricted)) {
+        fail("CreateRestrictedToken");
+    }
+    FreeSid(authenticatedUsers);
+    CloseHandle(self);
+    return restricted;
+}
+
 /* The logged-on profile may not have Local\Temp yet. Create it before the command. */
 static void ensure_dir(wchar_t *path) {
     size_t i;
@@ -91,6 +120,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR command, int show) 
     wchar_t *commandLine = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, chars * sizeof(wchar_t));
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
+    HANDLE job;
+    HANDLE token;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo;
     DWORD wait;
     DWORD exitCode;
     (void)instance;
@@ -124,21 +156,48 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR command, int show) 
         SetHandleInformation(si.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     }
 
+    /* The helper can only put this launcher into its own job after CreateProcessWithLogonW returns, and cannot
+     * reach this account's other processes. So the command gets a job of its own, owned by this launcher: when the
+     * launcher is killed (job assignment failed, abort, timeout) the last handle closes and the command dies too.
+     * The command starts suspended so it never runs outside the job. No breakaway, as in the helper's job. */
+    job = CreateJobObjectW(NULL, NULL);
+    if (!job) {
+        fail("CreateJobObjectW");
+    }
+    ZeroMemory(&jobInfo, sizeof(jobInfo));
+    jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo))) {
+        fail("SetInformationJobObject");
+    }
+
     ZeroMemory(&pi, sizeof(pi));
-    if (!CreateProcessW(
+    token = restricted_token();
+    if (!CreateProcessAsUserW(
+            token,
             NULL,
             commandLine,
             NULL,
             NULL,
             TRUE,
-            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
             NULL,
             NULL,
             &si,
             &pi)) {
-        fail("CreateProcessW");
+        fail("CreateProcessAsUserW");
     }
+    CloseHandle(token);
     HeapFree(GetProcessHeap(), 0, commandLine);
+    if (!AssignProcessToJobObject(job, pi.hProcess)) {
+        DWORD err = GetLastError();
+        TerminateProcess(pi.hProcess, HELPER_FAIL_EXIT);
+        SetLastError(err);
+        fail("AssignProcessToJobObject");
+    }
+    if (ResumeThread(pi.hThread) == (DWORD)-1) {
+        TerminateProcess(pi.hProcess, HELPER_FAIL_EXIT);
+        fail("ResumeThread");
+    }
     CloseHandle(pi.hThread);
     wait = WaitForSingleObject(pi.hProcess, INFINITE);
     if (wait != WAIT_OBJECT_0) {

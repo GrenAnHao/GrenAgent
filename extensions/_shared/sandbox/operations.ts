@@ -1,6 +1,7 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { attributeRun } from "./attribute.js";
 import { decodeSpawnChunk } from "./decodeSpawnChunk.js";
+import { filterSecretEnv } from "./env.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { isConfined } from "./resolvePreset.js";
@@ -255,8 +256,10 @@ export function createSandboxedBashOperations(
         forgetShellOnSpawnError(result);
         return { exitCode: result.exitCode, sandbox: result.spawnError ? shellFailed(result) : facts() };
       }
+      // 沙箱没有网络围栏，凭据类环境变量不带进受限命令。
+      const confinedEnv = filterSecretEnv(env);
       if (platform === "win32") {
-        env[PS_CWD_GUARD_ENV] = PS_CWD_GUARD;
+        confinedEnv[PS_CWD_GUARD_ENV] = PS_CWD_GUARD;
         base = shellArgv(platform, shell, PS_CWD_GUARD_LINE + command);
       }
 
@@ -292,7 +295,7 @@ export function createSandboxedBashOperations(
         throw error;
       }
 
-      const result = await run(confined.argv, cwd, { ...options, env });
+      const result = await run(confined.argv, cwd, { ...options, env: confinedEnv });
       forgetShellOnSpawnError(result);
       if (scriptFile) {
         try { unlinkSync(scriptFile); } catch { /* cleaned by 24h sweep */ }

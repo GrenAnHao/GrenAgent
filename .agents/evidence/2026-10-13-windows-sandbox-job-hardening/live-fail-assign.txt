@@ -1,0 +1,19 @@
+== live: with -DPI_TEST_FAIL_ASSIGN temp helper (2s delay hook) ==
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > blocks writes outside the workspace and allows inside 6884ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > throws SANDBOX_UNAVAILABLE when the runner cannot be found 1ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > still runs ordinary commands under the UI restrictions 21877ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > blocks clipboard writes from inside the sandbox 5392ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > stops the launcher and exits 163 when the job cannot be joined 7706ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > lets the sandbox write inside its workspace (control) 5362ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into ProgramData 5358ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into Public 5399ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows write boundary on the data drive > writes inside the workspace but not into a sibling directory on the same drive 10754ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  06:11:53
+   Duration  69.04s (transform 84ms, setup 0ms, import 117ms, tests 68.73s, environment 0ms)
+

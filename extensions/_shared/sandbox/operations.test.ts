@@ -353,6 +353,26 @@ describe("createSandboxedBashOperations", () => {
     expect(spawnedEnv.PI_SANDBOX_MODE_ONCE).toBeUndefined();
   });
 
+  it("drops credential-looking variables from a confined run but keeps PI_ and ordinary ones", async () => {
+    const { ops, spawnImpl } = makeOps({ mode: "workspace-write" });
+    const env: NodeJS.ProcessEnv = { GH_TOKEN: "t", OPENAI_API_KEY: "k", PI_HUMAN_ORIGIN_TOKEN: "1", KEEP: "1" };
+    await ops.exec(COMMAND, CWD, { onData: () => {}, env });
+    const spawnedEnv = spawnImpl.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+    expect(spawnedEnv.GH_TOKEN).toBeUndefined();
+    expect(spawnedEnv.OPENAI_API_KEY).toBeUndefined();
+    expect(spawnedEnv.PI_HUMAN_ORIGIN_TOKEN).toBe("1");
+    expect(spawnedEnv.KEEP).toBe("1");
+    expect(env.GH_TOKEN).toBe("t");
+  });
+
+  it("passes credential-looking variables through when the run is not confined", async () => {
+    const { ops, spawnImpl } = makeOps({ mode: "danger-full-access" });
+    const env: NodeJS.ProcessEnv = { GH_TOKEN: "t" };
+    await ops.exec(COMMAND, CWD, { onData: () => {}, env });
+    const spawnedEnv = spawnImpl.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+    expect(spawnedEnv.GH_TOKEN).toBe("t");
+  });
+
   it("reports a shell that cannot spawn as a runner failure", async () => {
     const err = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
     const { ops } = makeOps({ spawnImpl: vi.fn(() => fakeChild({ spawnError: err })) });

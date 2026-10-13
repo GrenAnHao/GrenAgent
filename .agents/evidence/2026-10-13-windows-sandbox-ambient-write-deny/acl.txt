@@ -1,0 +1,3 @@
+== ACL on stamped dirs ==
+C:\ProgramData  C:\ProgramData ��\PiSandbox:(OI)(CI)(DENY)(W,D,DC)
+C:\Users\Public  C:\Users\Public ��\PiSandbox:(OI)(CI)(DENY)(W,D,DC)
