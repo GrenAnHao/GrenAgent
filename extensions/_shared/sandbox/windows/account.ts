@@ -8,7 +8,7 @@
 // A drive whose ACL grants Users or Everyone write is not covered.
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
@@ -18,14 +18,17 @@ import type { SandboxPolicy } from "../types.js";
 import { applyAmbientDenies, stampAmbientDenies, type AmbientStamp } from "./ambient.js";
 import {
   ELEVATED_DONE,
+  PS_ICACLS,
   psHasAce,
   psQuote,
   psSidOf,
   runElevated,
   windowsPowerShellEnv,
   windowsPowerShellPath,
+  windowsSystemExe,
   type ElevatedRun,
 } from "./elevate.js";
+import { mergeGrantChanges, reclaimGrants, revokeArgs, USED_REFRESH_MS } from "./reclaim.js";
 import type { SandboxLogon } from "./runner.js";
 
 export { windowsPowerShellEnv };
@@ -144,6 +147,8 @@ export interface AccountIo {
   unreachable?(paths: string[], signal?: AbortSignal): Promise<string[]>;
   /** Stamps a write-deny for the account on world-writable system directories (one elevation); returns the confirmed ones. */
   stampAmbient?: AmbientStamp;
+  /** Starts revoking the account's grants under `path` in the background, without waiting for it. Without it, grants are never reclaimed. */
+  revoke?(username: string, path: string): void;
   pathEnv(): string;
   home(): string;
   blobPath(): string;
@@ -156,7 +161,7 @@ function password(): string {
 
 async function defaultUserExists(username: string): Promise<boolean> {
   try {
-    await execFileAsync("net", ["user", username], { windowsHide: true });
+    await execFileAsync(windowsSystemExe("net.exe"), ["user", username], { windowsHide: true });
     return true;
   } catch {
     return false;
@@ -194,7 +199,7 @@ Remove-LocalGroupMember -Group 'Administrators' -Member ${psQuote(username)} -Er
 # on its own later (confirmElevatedListGrant).
 $winTemp = Join-Path $env:SystemRoot 'Temp'
 if (Test-Path $winTemp) {
-  try { & icacls.exe $winTemp /grant ${psQuote(username + ':(S,RD,RA)')} /C 2>&1 | Out-Null } catch {}
+  try { & ${PS_ICACLS} $winTemp /grant ${psQuote(username + ':(S,RD,RA)')} /C 2>&1 | Out-Null } catch {}
 }
 exit (${ELEVATED_DONE} -bor 1)
 `.trim();
@@ -268,7 +273,7 @@ async function defaultGrant(
 ): Promise<void> {
   if (rights === "RAX") {
     // Add-Type compiles C# on first use; with powershell.exe startup that alone can pass 5s.
-    await runCommand("powershell.exe", [
+    await runCommand(windowsPowerShellPath(), [
       "-NoProfile",
       "-NonInteractive",
       "-Command",
@@ -278,11 +283,11 @@ async function defaultGrant(
   }
   const args = icaclsGrantArgs(target, username, rights, propagate);
   if (!LIST_RIGHTS.has(rights)) {
-    await runCommand("icacls", args, signal);
+    await runCommand(windowsSystemExe("icacls.exe"), args, signal);
     return;
   }
   try {
-    await runCommand("icacls", args, signal);
+    await runCommand(windowsSystemExe("icacls.exe"), args, signal);
   } catch (error) {
     if (error instanceof Error && error.message === "aborted") throw error;
     await confirmElevatedListGrant(target, username, args, signal);
@@ -293,7 +298,7 @@ async function defaultGrant(
 export function listGrantScript(target: string, username: string, args: string[]): string {
   return [
     "$ErrorActionPreference = 'Continue'",
-    `& icacls.exe ${args.map(psQuote).join(" ")} | Out-Null`,
+    `& ${PS_ICACLS} ${args.map(psQuote).join(" ")} | Out-Null`,
     psSidOf(username),
     "$ok = 0",
     `try { if (${psHasAce(psQuote(target), "$sid", { type: "Allow", mask: LIST_DIRECTORY })}) { $ok = 1 } } catch {}`,
@@ -385,7 +390,7 @@ export function unreachableAs(argv: string[], paths: string[], signal?: AbortSig
     let stdout = "";
     let stderr = "";
     const onAbort = () => {
-      if (child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+      if (child.pid) spawn(windowsSystemExe("taskkill.exe"), ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
     };
     stop.addEventListener("abort", onAbort, { once: true });
     child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -412,7 +417,7 @@ function runCommand(command: string, args: string[], signal?: AbortSignal, timeo
     const child = spawn(command, args, { env: windowsPowerShellEnv(), windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     const kill = () => {
-      if (child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+      if (child.pid) spawn(windowsSystemExe("taskkill.exe"), ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
     };
     const onAbort = () => kill();
     stop.addEventListener("abort", onAbort, { once: true });
@@ -429,6 +434,23 @@ function runCommand(command: string, args: string[], signal?: AbortSignal, timeo
       else reject(new Error(stderr.trim() || `${command} exited ${code}`));
     });
   });
+}
+
+let lastReclaimPruneAt = 0;
+
+export function __resetReclaimPruneForTest(): void {
+  lastReclaimPruneAt = 0;
+}
+
+/** Revokes in a detached icacls so the command in flight does not wait for a large tree. A failure only leaves an ACE behind; the next use grants again. */
+function revokeInBackground(username: string, path: string): void {
+  try {
+    const child = spawn(windowsSystemExe("icacls.exe"), revokeArgs(path.replace(/\//g, "\\"), username), { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => undefined);
+    child.unref();
+  } catch {
+    // nothing to do: the record is dropped either way
+  }
 }
 
 export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo {
@@ -450,6 +472,7 @@ export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo
     },
     grant: defaultGrant,
     stampAmbient: stampAmbientDenies,
+    revoke: revokeInBackground,
     pathEnv: () => process.env.PATH ?? "",
     home: () => homedir(),
     blobPath: () => join(root, "account.bin"),
@@ -489,6 +512,7 @@ export async function grantSandboxAccess(
 ): Promise<void> {
   const grantsPath = io.grantsPath();
   const grants = await io.readGrants(grantsPath);
+  const before = { ...grants };
   const targets: Array<{ path: string; rights: GrantRights }> = [
     { path: tempDir, rights: "M" },
     { path: policy.workspaceRoot, rights: policy.mode === "workspace-write" ? "M" : "RX" },
@@ -529,7 +553,26 @@ export async function grantSandboxAccess(
   }
   if (await grantWorkspaceAncestors(username, policy.workspaceRoot, grants, io, signal)) changed = true;
   if (io.stampAmbient && await applyAmbientDenies(username, grants, io.stampAmbient, { signal })) changed = true;
-  if (changed) await io.writeGrants(grantsPath, grants);
+  const revoke = io.revoke;
+  if (revoke) {
+    const now = Date.now();
+    // One filesystem call per record: look for deleted directories at most once an hour per process.
+    const prune = now - lastReclaimPruneAt >= USED_REFRESH_MS;
+    if (prune) lastReclaimPruneAt = now;
+    if (reclaimGrants(grants, {
+      now,
+      keep: [policy.workspaceRoot, tempDir],
+      exists: existsSync,
+      revoke: (path) => revoke(username, path),
+      prune,
+      real: (path) => realpathSync.native(path),
+    })) changed = true;
+  }
+  if (changed) {
+    // Other processes share this file and nothing locks it: write this call's changes on top of what is there now,
+    // so a record another process just revoked and forgot is not written back.
+    await io.writeGrants(grantsPath, mergeGrantChanges(before, grants, await io.readGrants(grantsPath)));
+  }
 }
 
 /** grants.json value for an ancestor the probe found the account can already stat. */

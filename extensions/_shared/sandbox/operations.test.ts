@@ -256,7 +256,7 @@ describe("createSandboxedBashOperations", () => {
   it("uses taskkill /t on Windows abort and throws aborted", async () => {
     let hung: ReturnType<typeof fakeChild> | undefined;
     const spawnImpl = vi.fn((file: string, args: readonly string[]) => {
-      if (file === "taskkill") {
+      if (/taskkill/i.test(file)) {
         queueMicrotask(() => hung?.emit("close", 1));
         return fakeChild({ exitCode: 0 });
       }
@@ -270,9 +270,11 @@ describe("createSandboxedBashOperations", () => {
     await waitForSpawn(spawnImpl);
     ac.abort();
     await expect(promise).rejects.toThrow("aborted");
-    const taskkill = spawnImpl.mock.calls.find((call) => call[0] === "taskkill");
+    const taskkill = spawnImpl.mock.calls.find((call) => /taskkill/i.test(String(call[0])));
     expect(taskkill).toBeTruthy();
     expect(taskkill?.[1]).toEqual(expect.arrayContaining(["/t"]));
+    // A bare name is looked up in the process's working directory first, and that can be the workspace.
+    expect(String(taskkill?.[0])).toMatch(/^[A-Za-z]:[\\/].*System32[\\/]taskkill\.exe$/i);
   });
 
   it("terminates once pid appears after a pending abort", async () => {

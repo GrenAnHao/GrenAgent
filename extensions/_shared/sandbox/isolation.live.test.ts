@@ -1,17 +1,29 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { createSandboxedBashOperations } from "./operations.js";
 import { createSandboxProvider } from "./provider.js";
-import { defaultIo, SANDBOX_GROUP, SANDBOX_USERNAME } from "./windows/account.js";
+import { defaultIo, grantKey, grantSandboxAccess, SANDBOX_GROUP, SANDBOX_USERNAME, type AccountIo } from "./windows/account.js";
 import { stampAmbientDenies } from "./windows/ambient.js";
 import { ELEVATED_DONE, runElevated } from "./windows/elevate.js";
+import { GRANT_MAX_IDLE_MS, usedKey } from "./windows/reclaim.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
+
+// 每个测试建的目录都登记下来，整个文件跑完统一删掉：工作区会被授 PiSandbox 的修改权，留下来就是永久的授权。
+const createdDirs: string[] = [];
+async function scratchDir(parent: string, prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(parent, prefix));
+  createdDirs.push(dir);
+  return dir;
+}
+afterAll(async () => {
+  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)));
+});
 
 function writeProbeArgv(inside: string, outside: string): string[] {
   // Git bash / WSL bash cannot start under a WRITE_RESTRICTED token
@@ -28,9 +40,9 @@ function writeProbeArgv(inside: string, outside: string): string[] {
 
 describe.skipIf(!live)("live OS isolation", () => {
   it("blocks writes outside the workspace and allows inside", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sbx-"));
+    const root = await scratchDir(tmpdir(), "sbx-");
     const inside = join(root, "ok.txt");
-    const outsideDir = await mkdtemp(join(tmpdir(), "sbx-out-"));
+    const outsideDir = await scratchDir(tmpdir(), "sbx-out-");
     const outside = join(outsideDir, "no.txt");
     const provider = createSandboxProvider();
     const confined = await provider.confine(
@@ -83,7 +95,7 @@ describe.skipIf(!live)("live OS isolation", () => {
       }
 
       const prevPath = process.env.PATH;
-      const empty = await mkdtemp(join(tmpdir(), "sbx-nopath-"));
+      const empty = await scratchDir(tmpdir(), "sbx-nopath-");
       process.env.PATH = empty;
       try {
         const provider = createSandboxProvider();
@@ -106,7 +118,7 @@ interface ConfinedRun {
 }
 
 async function runConfinedWin(argv: string[], helperPath?: string): Promise<ConfinedRun> {
-  const root = await mkdtemp(join(tmpdir(), "sbx-job-"));
+  const root = await scratchDir(tmpdir(), "sbx-job-");
   const provider = createSandboxProvider(helperPath ? { helperPath } : {});
   const confined = await provider.confine(
     argv,
@@ -219,8 +231,8 @@ describe.skipIf(!live || process.platform !== "win32")("live windows write bound
   }
 
   it("writes inside the workspace but not into a sibling directory on the same drive", async () => {
-    const workspace = await mkdtemp(join(driveRoot, "sbx-bnd-ws-"));
-    const sibling = await mkdtemp(join(driveRoot, "sbx-bnd-sib-"));
+    const workspace = await scratchDir(driveRoot, "sbx-bnd-ws-");
+    const sibling = await scratchDir(driveRoot, "sbx-bnd-sib-");
     try {
       expect(await tryWrite(workspace, join(workspace, "in.txt"))).toBe(true);
       expect(await tryWrite(workspace, join(sibling, "out.txt"))).toBe(false);
@@ -236,7 +248,7 @@ describe.skipIf(!live || process.platform !== "win32")("live windows write bound
 const liveGit = process.env.PI_SANDBOX_LIVE_GIT;
 describe.skipIf(!live || process.platform !== "win32" || !liveGit)("live git in the sandbox account", () => {
   it("runs init, commit and log in a workspace owned by another user", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sbx-git-"));
+    const root = await scratchDir(tmpdir(), "sbx-git-");
     const provider = createSandboxProvider();
     const ops = createSandboxedBashOperations({
       getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: root, sessionId: "live-git" }),
@@ -292,5 +304,97 @@ describe.skipIf(!liveElevate)("live elevation without temp files", () => {
     expect(tempEntries()).toEqual(before);
     const result = await runConfinedWin(["whoami.exe"]);
     expect(result.exitCode).toBe(0);
+  });
+});
+
+// 用真的 icacls 在一棵临时目录树上验证回收：闲置超时的修改权被撤掉，在用的工作区不动。不需要提权。
+describe.skipIf(!live || process.platform !== "win32")("live windows grant reclaim", () => {
+  const aceCount = (path: string) => execFileSync("icacls", [path]).toString("latin1")
+    .split(/\r?\n/).filter((line) => /PiSandbox/i.test(line)).length;
+
+  it("revokes a long-idle modify grant on the whole tree and keeps the one in use", async () => {
+    const root = await scratchDir(tmpdir(), "sbx-reclaim-");
+    const workspace = join(root, "ws");
+    const idle = join(root, "idle");
+    const tempDir = join(root, "tmp");
+    for (const dir of [workspace, idle, tempDir, join(idle, "sub")]) mkdirSync(dir);
+    writeFileSync(join(idle, "sub", "f.txt"), "x");
+
+    const io = defaultIo();
+    await io.grant(idle, SANDBOX_USERNAME, "M", true);
+    expect([aceCount(idle), aceCount(join(idle, "sub", "f.txt"))]).toEqual([1, 1]);
+
+    const store: Record<string, string> = {
+      // Already recorded, so the Windows Temp list grant is not attempted (it would elevate).
+      [grantKey(join(process.env.SystemRoot || "C:\\Windows", "Temp"))]: "RD1",
+      [grantKey(idle)]: "M",
+      [usedKey(grantKey(idle))]: String(Date.now() - GRANT_MAX_IDLE_MS - 24 * 60 * 60 * 1000),
+    };
+    // Only what this test is about: no elevation, no PATH directories, nothing else granted on the real machine.
+    const withStore: AccountIo = {
+      ...io,
+      stampAmbient: undefined,
+      pathEnv: () => "",
+      readGrants: async () => ({ ...store }),
+      writeGrants: async (_path, next) => {
+        for (const key of Object.keys(store)) delete store[key];
+        Object.assign(store, next);
+      },
+    };
+    await grantSandboxAccess(
+      SANDBOX_USERNAME,
+      { mode: "workspace-write", network: "enabled", workspaceRoot: workspace, sessionId: "reclaim-live" },
+      tempDir,
+      withStore,
+    );
+
+    expect(store[grantKey(idle)]).toBeUndefined();
+    // 撤销在后台进程里跑，等它做完。
+    await expect.poll(() => aceCount(idle) + aceCount(join(idle, "sub", "f.txt")), { timeout: 15_000 }).toBe(0);
+    expect(aceCount(workspace)).toBeGreaterThan(0);
+  });
+});
+
+// 撤销带 /T，闲置的祖先目录被撤销会连带摘掉在用的子目录的 ACE：回收必须挡住这种情况。
+describe.skipIf(!live || process.platform !== "win32")("live windows grant reclaim of a parent", () => {
+  const aceCount = (path: string) => execFileSync("icacls", [path]).toString("latin1")
+    .split(/\r?\n/).filter((line) => /PiSandbox/i.test(line)).length;
+
+  it("keeps the ACE of a workspace that sits under a long-idle directory", async () => {
+    const parent = await scratchDir(tmpdir(), "sbx-parent-");
+    const workspace = join(parent, "ws");
+    const tempDir = await scratchDir(tmpdir(), "sbx-parent-tmp-");
+    mkdirSync(workspace);
+
+    const io = defaultIo();
+    await io.grant(parent, SANDBOX_USERNAME, "M", true);
+    expect(aceCount(workspace)).toBeGreaterThan(0);
+
+    const store: Record<string, string> = {
+      [grantKey(join(process.env.SystemRoot || "C:\Windows", "Temp"))]: "RD1",
+      [grantKey(parent)]: "M",
+      [usedKey(grantKey(parent))]: String(Date.now() - GRANT_MAX_IDLE_MS - 24 * 60 * 60 * 1000),
+    };
+    const withStore: AccountIo = {
+      ...io,
+      stampAmbient: undefined,
+      pathEnv: () => "",
+      readGrants: async () => ({ ...store }),
+      writeGrants: async (_path, next) => {
+        for (const key of Object.keys(store)) delete store[key];
+        Object.assign(store, next);
+      },
+    };
+    await grantSandboxAccess(
+      SANDBOX_USERNAME,
+      { mode: "workspace-write", network: "enabled", workspaceRoot: workspace, sessionId: "reclaim-parent" },
+      tempDir,
+      withStore,
+    );
+    // Give a (wrongly) started background revoke time to finish before looking.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    expect(store[grantKey(parent)]).toBe("M");
+    expect(aceCount(workspace)).toBeGreaterThan(0);
   });
 });

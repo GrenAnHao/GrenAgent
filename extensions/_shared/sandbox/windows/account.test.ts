@@ -24,7 +24,7 @@ import {
   type AccountIo,
   type GrantRights,
 } from "./account.js";
-import { ELEVATED_DONE } from "./elevate.js";
+import { ELEVATED_DONE, PS_ICACLS } from "./elevate.js";
 
 describe("windows sandbox account grants", () => {
   it("builds an inheritable icacls grant and propagates only when asked", () => {
@@ -264,7 +264,7 @@ describe("account setup and the Windows Temp list grant without temp files", () 
   });
 
   it("does not fail the whole setup when the Windows Temp list grant fails; that grant is confirmed on its own", () => {
-    expect(provisionScript("PiSandbox", "PiSandboxUsers", CIPHER)).toContain("try { & icacls.exe $winTemp");
+    expect(provisionScript("PiSandbox", "PiSandboxUsers", CIPHER)).toContain(`try { & ${PS_ICACLS} $winTemp`);
   });
 
   it("encrypts first, drops the old blob, elevates with ciphertext only, then writes the new blob", async () => {
@@ -308,7 +308,7 @@ describe("account setup and the Windows Temp list grant without temp files", () 
   it("grants list on Windows Temp elevated and confirms it from the ACL by SID, with no log file", () => {
     const args = icaclsGrantArgs("C:\\Windows\\Temp", "PiSandbox", "RD1", false);
     const script = listGrantScript("C:\\Windows\\Temp", "PiSandbox", args);
-    expect(script).toContain("& icacls.exe 'C:\\Windows\\Temp' '/grant:r' 'PiSandbox:(S,RD,RA)' '/C'");
+    expect(script).toContain(`& ${PS_ICACLS} 'C:\\Windows\\Temp' '/grant:r' 'PiSandbox:(S,RD,RA)' '/C'`);
     expect(script).toContain("'Allow'");
     expect(script).toContain("([int]$_.FileSystemRights -band 1) -eq 1");
     expect(script).toContain(`exit (${ELEVATED_DONE} -bor $ok)`);

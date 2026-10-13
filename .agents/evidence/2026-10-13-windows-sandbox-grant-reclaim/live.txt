@@ -1,0 +1,26 @@
+== live: whole file (ELEVATE=1, GIT set) ==
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > blocks writes outside the workspace and allows inside 6517ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > throws SANDBOX_UNAVAILABLE when the runner cannot be found 1ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > still runs ordinary commands under the UI restrictions 22392ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > blocks clipboard writes from inside the sandbox 5524ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > stops the launcher and exits 163 when the job cannot be joined
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > lets the sandbox write inside its workspace (control) 5536ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into ProgramData 5568ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into Public 5540ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows write boundary on the data drive > writes inside the workspace but not into a sibling directory on the same drive 10947ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live git in the sandbox account > runs init, commit and log in a workspace owned by another user 6719ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > reads the elevated script's result bits back, and null when it fails 2090ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > stamps the ambient write-deny and confirms it from the ACL 1451ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > grants and confirms list on Windows Temp through the elevated path 521ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > re-provisions the account and the sandbox still logs on with the new blob
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows grant reclaim > revokes a long-idle modify grant on the whole tree and keeps the one in use 728ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows grant reclaim of a parent > keeps the ACE of a workspace that sits under a long-idle directory 2149ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed | 2 skipped (16)
+   Start at  07:50:38
+   Duration  76.13s (transform 157ms, setup 0ms, import 208ms, tests 75.70s, environment 0ms)
+

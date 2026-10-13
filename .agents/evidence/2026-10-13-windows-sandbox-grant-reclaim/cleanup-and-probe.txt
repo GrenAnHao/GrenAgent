@@ -1,0 +1,6 @@
+== live tests leave no workspaces behind ==
+sbx-* directories in %TEMP% before the full live run: 0
+sbx-* directories in %TEMP% after  the full live run: 0
+
+== PiSandbox ACEs on C:\Users\Public after the whole run (must stay exactly one) ==
+1

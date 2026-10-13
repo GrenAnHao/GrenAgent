@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ELEVATED_DONE,
@@ -7,9 +10,11 @@ import {
   encodePowerShell,
   parseElevationResult,
   psHasAce,
+  PS_ICACLS,
   psQuote,
   windowsPowerShellEnv,
   windowsPowerShellPath,
+  windowsSystemExe,
 } from "./elevate.js";
 
 const SHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
@@ -28,6 +33,22 @@ describe("elevation without files", () => {
 
   it("uses Windows PowerShell by absolute path, never a PATH lookup", () => {
     expect(windowsPowerShellPath("C:\\Windows")).toBe(SHELL);
+  });
+
+  it("finds system tools under System32, never by a bare name that Windows would look up in the working directory first", () => {
+    expect(windowsSystemExe("icacls.exe", "C:\\Windows")).toBe("C:\\Windows\\System32\\icacls.exe");
+    // Inside an elevated script the Windows directory comes from the API, not from an environment variable the caller controls.
+    expect(PS_ICACLS).toBe("(Join-Path ([Environment]::GetFolderPath('System')) 'icacls.exe')");
+  });
+
+  it("has no code path that spawns icacls, taskkill, net, where or powershell by bare name", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const files = ["elevate.ts", "ambient.ts", "account.ts", "reclaim.ts", "../operations.ts", "../provider.ts"];
+    const bare = /\b(spawn|spawnImpl|execFile|execFileAsync|execFileSync|runCommand)\(\s*"(icacls|taskkill|net|where|powershell|cmd)(\.exe)?"/;
+    const hits = files.flatMap((file) => readFileSync(join(here, file), "utf8").split(/\r?\n/)
+      .map((line, index) => ({ file, line: index + 1, text: line }))
+      .filter(({ text }) => bare.test(text)));
+    expect(hits).toEqual([]);
   });
 
   it("passes the elevated script inline and reads its exit code back", () => {

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import {
   ELEVATED_DONE,
   ELEVATED_PAYLOAD_BITS,
+  PS_ICACLS,
   psHasAce,
   psQuote,
   psSidOf,
@@ -75,7 +76,7 @@ export function ambientStampScript(targets: string[], username: string): string 
     // icacls /deny does not merge: running it on a directory that already has the deny adds a second identical ACE.
     "  $has = $false",
     `  try { $has = ${psHasAce("$t", "$sid", { type: "Deny", mask: WRITE_DENY_MASK, inheritable: true })} } catch {}`,
-    "  if (-not $has) { & icacls.exe $t @denyArgs | Out-Null }",
+    `  if (-not $has) { & ${PS_ICACLS} $t @denyArgs | Out-Null }`,
     `  try { if (${psHasAce("$t", "$sid", { type: "Deny", mask: WRITE_DENY_MASK, inheritable: true })}) { $mask = $mask -bor (1 -shl $i) } } catch {}`,
     "}",
     `exit (${ELEVATED_DONE} -bor $mask)`,

@@ -12,7 +12,7 @@ import {
   applyAmbientDenies,
   createStampAmbient,
 } from "./ambient.js";
-import { ELEVATED_DONE } from "./elevate.js";
+import { ELEVATED_DONE, PS_ICACLS } from "./elevate.js";
 
 const ENV = { ProgramData: "C:\\ProgramData", PUBLIC: "C:\\Users\\Public", SystemRoot: "C:\\Windows" };
 
@@ -67,10 +67,10 @@ describe("ambient write-deny icacls", () => {
   it("stamps a directory only when the deny is not there yet, so re-running adds no duplicate ACE", () => {
     const script = ambientStampScript(["C:\\ProgramData"], "PiSandbox");
     const check = script.indexOf("$has = ");
-    const stamp = script.indexOf("& icacls.exe");
+    const stamp = script.indexOf(`& ${PS_ICACLS}`);
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(stamp);
-    expect(script).toContain("if (-not $has) { & icacls.exe $t @denyArgs | Out-Null }");
+    expect(script).toContain(`if (-not $has) { & ${PS_ICACLS} $t @denyArgs | Out-Null }`);
   });
 
   it("maps the result bits back to the confirmed targets", async () => {

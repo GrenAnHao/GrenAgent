@@ -4,6 +4,7 @@ import { decodeSpawnChunk } from "./decodeSpawnChunk.js";
 import { filterSecretEnv, withGitSafeDirectory } from "./env.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
+import { windowsSystemExe } from "./windows/elevate.js";
 import { isConfined } from "./resolvePreset.js";
 import { resolveShellPath } from "./shellPath.js";
 import type { ConfinedArgv, SandboxExecutionPolicy, SandboxPolicy, SandboxRunFacts } from "./types.js";
@@ -142,7 +143,7 @@ export function createSandboxedBashOperations(
           return;
         }
         if (platform === "win32") {
-          spawnImpl("taskkill", ["/pid", String(pid), "/t", "/f"]);
+          spawnImpl(windowsSystemExe("taskkill.exe"), ["/pid", String(pid), "/t", "/f"]);
           return;
         }
         try {

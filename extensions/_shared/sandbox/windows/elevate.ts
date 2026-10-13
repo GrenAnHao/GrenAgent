@@ -33,6 +33,18 @@ export function windowsPowerShellPath(systemRoot = process.env.SystemRoot || "C:
 }
 
 /**
+ * 系统自带工具（icacls、taskkill、net……）一律走 System32 下的绝对路径。裸名字会让 Windows 先在进程的当前目录里
+ * 找可执行文件：Pi 或子代理在工作区里启动时，沙箱命令往工作区根目录放一个 icacls.exe，下次授权或回收就会以真实
+ * 用户身份运行它。默认环境里没有 NoDefaultCurrentDirectoryInExePath，实测会被打中。
+ */
+export function windowsSystemExe(name: string, systemRoot = process.env.SystemRoot || "C:\\Windows"): string {
+  return join(systemRoot, "System32", name);
+}
+
+/** 提权脚本里的 icacls：Windows 目录取自 API，不取环境变量（环境变量由发起提权的进程决定）。 */
+export const PS_ICACLS = "(Join-Path ([Environment]::GetFolderPath('System')) 'icacls.exe')";
+
+/**
  * Environment for a Windows PowerShell 5.1 child. A PSModulePath inherited from
  * pwsh 7 (app started from a pwsh terminal) makes 5.1 autoload 7's modules and
  * fail: Get-Acl reports CouldNotAutoloadMatchingModule. Without it, 5.1 uses its own.
