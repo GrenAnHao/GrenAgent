@@ -9,8 +9,8 @@ import { bwrapArgv } from "./linux/bwrap.js";
 import type { ConfinedArgv, SandboxPolicy, SandboxProvider } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
 import { acquireTempDir, dispose as disposeTempDir } from "./tempDirs.js";
-import { defaultSandboxHome, ensureSandboxAccount, grantSandboxAccess } from "./windows/account.js";
-import { windowsAccountConfined, type SandboxLogon } from "./windows/runner.js";
+import { defaultIo, defaultSandboxHome, ensureSandboxAccount, grantSandboxAccess, statProbeArgv, unreachableAs } from "./windows/account.js";
+import { windowsAccountArgv, windowsAccountConfined, type SandboxLogon } from "./windows/runner.js";
 import { assertWritableRootsDisjoint } from "./windows/sids.js";
 
 const execFileAsync = promisify(execFile);
@@ -47,7 +47,7 @@ export interface SandboxProviderDeps {
   helperPath?: string;
   helperLookup?: WinHelperLookup;
   /** Win32 only. Default creates the PiSandbox account and grants workspace ACLs. */
-  prepareWindowsIdentity?: (policy: SandboxPolicy, tempDir: string, signal?: AbortSignal) => Promise<SandboxLogon>;
+  prepareWindowsIdentity?: (policy: SandboxPolicy, tempDir: string, signal?: AbortSignal, helperPath?: string) => Promise<SandboxLogon>;
 }
 
 /**
@@ -171,11 +171,24 @@ function probeWinHelper(helperPath: string | undefined): SandboxProbeResult {
   return { ok: false, reason: `windows helper not found at ${helperPath ?? "any probe path"}` };
 }
 
-async function prepareWindowsIdentity(policy: SandboxPolicy, tempDir: string, signal?: AbortSignal): Promise<SandboxLogon> {
+async function prepareWindowsIdentity(
+  policy: SandboxPolicy,
+  tempDir: string,
+  signal?: AbortSignal,
+  helperPath?: string,
+): Promise<SandboxLogon> {
   if (signal?.aborted) throw new Error("aborted");
   const identity = await ensureSandboxAccount();
-  await grantSandboxAccess(identity.username, policy, tempDir, undefined, signal);
-  return { ...identity, home: identity.home ?? defaultSandboxHome(identity.username) };
+  const logon = { ...identity, home: identity.home ?? defaultSandboxHome(identity.username) };
+  // Workspace ancestors are probed as the account itself, through the same helper the command uses.
+  const io = helperPath
+    ? defaultIo({
+      unreachable: (paths, probeSignal) =>
+        unreachableAs(windowsAccountArgv({ mode: "read-only", workspaceRoot: policy.workspaceRoot }, statProbeArgv(), helperPath, tempDir, logon), paths, probeSignal),
+    })
+    : undefined;
+  await grantSandboxAccess(identity.username, policy, tempDir, io, signal);
+  return logon;
 }
 
 function unwiredReason(platform: NodeJS.Platform): string {
@@ -226,7 +239,7 @@ export function createSandboxProvider(deps: SandboxProviderDeps = {}): SandboxPr
         if (!helperPath) {
           throw new SandboxUnavailableError("windows helper not found at any probe path");
         }
-        const identity = await (deps.prepareWindowsIdentity ?? prepareWindowsIdentity)(policy, tempDir, signal);
+        const identity = await (deps.prepareWindowsIdentity ?? prepareWindowsIdentity)(policy, tempDir, signal, helperPath);
         confined = windowsAccountConfined(policy, argv, helperPath, tempDir, identity);
       } else {
         throw new SandboxUnavailableError(unwiredReason(platform));

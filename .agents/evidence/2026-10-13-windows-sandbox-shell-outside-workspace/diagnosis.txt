@@ -1,0 +1,41 @@
+诊断记录（2026-10-13，修复前）
+
+1. 现场会话 ~/.pi/agent/sessions/--D--System Dir-Downloads-note-pocock-flow-note-pocock-flow--/2026-10-13T10-41-01-283Z_01a134d9-....jsonl
+   - 系统提示 <cwd> 正确：D:/System Dir/Downloads/note-pocock-flow/note-pocock-flow
+   - 审批档「工作区」（workspace-write），bash 由 PiSandbox 账户执行
+   - 第一条 `pwd; ls` 输出 Path = C:\，列出的是 C 盘根目录
+   - 模型随后推断「workspace is D:\OneDrive\Project Files\Pi\electron-agent based on the codemode docs path」
+     （<docs> 段里 pi 文档路径在开发目录的 node_modules 下），之后一直在开发目录里检索
+   - 显式 Set-Location 到工作区：Access to the path 'D:\System Dir\Downloads\note-pocock-flow' is denied.
+
+2. ACL：D:\System Dir\Downloads 断开继承，只有 Administrators / SYSTEM / rxstudio；
+   工作区本身有 PiSandbox:(OI)(CI)(M)，两级祖先上 PiSandbox 什么都没有。
+
+3. 用真实 helper 以 PiSandbox 启动（cwd = 工作区）：
+   pwsh.exe       pwsh-loc=C:\   proc-cwd=D:\System Dir\Downloads\note-pocock-flow\note-pocock-flow
+   powershell.exe pwsh-loc=C:\   proc-cwd=（同上）
+   进程当前目录是对的，PowerShell 自己的位置退回 C:\；相对路径、原生命令都在 C:\ 跑。
+   Set-Location 的栈：FileSystemProvider.NormalizeThePath -> GetFileSystemInfo -> FileSystemInfo.Attributes
+   （pwsh 7）/ Utils.NativeFileExists（5.1）：逐级读祖先目录属性。
+
+4. 以 PiSandbox 读属性（[IO.File]::GetAttributes）：
+   ok   C:\Users\rxstudio, ...\AppData, ...\AppData\Local
+   FAIL C:\Users\rxstudio\AppData\Local\Temp
+   ok   D:\System Dir, D:\System Dir\Downloads
+   FAIL D:\System Dir\Downloads\note-pocock-flow
+   ok   D:\System Dir\Downloads\note-pocock-flow\note-pocock-flow
+   FAIL C:\Users\rxstudio\.agents, C:\Users\rxstudio\.agents\skills   （另一个工作区 uumit-agent 同样中招）
+
+5. 写 ACL 的代价（临时目录树，30000 个文件）：
+   icacls <dir> /grant PiSandbox:(RA,X)        47243 ms   （不继承的 ACE 也遍历整棵子树）
+   Set-Acl 同一条规则                            30095 ms
+   SetFileSecurityW（本次实现）                  61 ms（同规模、带 AI 标志的目录）
+   不带 SE_DACL_AUTO_INHERIT_REQ 时 SetFileSecurityW 会丢掉 DACL 的 AI 标志；带上后 before + 新 ACE 原样落盘。
+
+6. 由 pwsh 7 启动的 node 再起 powershell.exe 时继承 pwsh 7 的 PSModulePath，
+   Get-Acl 报 CouldNotAutoloadMatchingModule。子进程去掉 PSModulePath 后正常。
+
+7. -File 与 -Command 的退出码（最后一条原生命令 exit 5）：
+   pwsh.exe       -Command=1  -File=0
+   powershell.exe -Command=1  -File=0
+   所以守卫不能挤占内联命令行、把更多命令推到 -File。

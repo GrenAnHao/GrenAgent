@@ -51,11 +51,6 @@ export function windowsTempAllowsList(dump: string, username: string): boolean {
   });
 }
 
-/**
- * Ancestors worth a traverse grant. Skip the profile root, AppData and Temp:
- * Set-Acl on those hangs, and Users can already stat them. `.pi` and the
- * private `pi-sandbox` folder are the ones node cannot lstat.
- */
 /** Profile directory the sandbox account actually owns. */
 export function defaultSandboxHome(username: string, systemDrive = process.env.SystemDrive || "C:"): string {
   return join(systemDrive, "Users", username);
@@ -83,6 +78,11 @@ export function sandboxIdentityEnv(home: string, username: string): Record<strin
   };
 }
 
+/**
+ * Ancestors granted traverse up front: `.pi` and the private `pi-sandbox`
+ * folder, which node cannot lstat. Workspace ancestors are probed instead
+ * (grantWorkspaceAncestors), so only the ones the account cannot stat change.
+ */
 export function isGrantableAncestor(dir: string, home: string, tempDir: string): boolean {
   const key = grantKey(dir);
   const pi = `${grantKey(home)}/.pi`;
@@ -130,12 +130,14 @@ export function profilePathDirs(pathEnv: string, home: string): string[] {
   return out;
 }
 
-interface AccountIo {
+export interface AccountIo {
   userExists(username: string): Promise<boolean>;
   provision(username: string, group: string, password: string, blobPath: string): Promise<void>;
   readGrants(path: string): Promise<Record<string, string>>;
   writeGrants(path: string, grants: Record<string, string>): Promise<void>;
   grant(target: string, username: string, rights: GrantRights, propagate: boolean, signal?: AbortSignal): Promise<void>;
+  /** Paths the sandbox account cannot read attributes of. Without it, workspace ancestors are left alone. */
+  unreachable?(paths: string[], signal?: AbortSignal): Promise<string[]>;
   pathEnv(): string;
   home(): string;
   blobPath(): string;
@@ -231,12 +233,13 @@ async function defaultGrant(
   signal?: AbortSignal,
 ): Promise<void> {
   if (rights === "RAX") {
+    // Add-Type compiles C# on first use; with powershell.exe startup that alone can pass 5s.
     await runCommand("powershell.exe", [
       "-NoProfile",
       "-NonInteractive",
       "-Command",
       raxScript(target, username),
-    ], signal);
+    ], signal, 30_000);
     return;
   }
   const args = icaclsGrantArgs(target, username, rights, propagate);
@@ -301,14 +304,105 @@ if ($code -ne 0) { exit $code }
   }
 }
 
+/**
+ * Adds SYNCHRONIZE | FILE_READ_ATTRIBUTES | FILE_TRAVERSE (icacls `(S,X,RA)`) on this
+ * directory only. Set-Acl and icacls go through SetNamedSecurityInfo, which rewrites
+ * every descendant even for a non-inheritable ACE: 30k files took 30-47s, so a
+ * profile root or a Downloads folder looked hung. SetFileSecurityW writes this one
+ * descriptor. Setting SE_DACL_AUTO_INHERIT_REQ (0x0100, high byte of the control
+ * word) keeps the DACL's auto-inherited flag, which SetFileSecurityW drops otherwise.
+ */
 function raxScript(target: string, username: string): string {
   return `
 $ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath ${psQuote(target)}
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(${psQuote(username)}, 'ReadAttributes, ExecuteFile', 'None', 'None', 'Allow')
-$acl.SetAccessRule($rule)
-Set-Acl -LiteralPath ${psQuote(target)} -AclObject $acl
+Add-Type -Namespace PiSandbox -Name Acl -MemberDefinition '[DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool SetFileSecurityW(string path, int info, byte[] sd);'
+$sid = (New-Object System.Security.Principal.NTAccount(${psQuote(username)})).Translate([System.Security.Principal.SecurityIdentifier])
+$current = New-Object System.Security.AccessControl.DirectorySecurity(${psQuote(target)}, [System.Security.AccessControl.AccessControlSections]::Access)
+$raw = New-Object System.Security.AccessControl.RawSecurityDescriptor($current.GetSecurityDescriptorSddlForm('Access'))
+$sd = New-Object System.Security.AccessControl.CommonSecurityDescriptor($true, $false, $raw)
+$sd.DiscretionaryAcl.AddAccess('Allow', $sid, 0x1000a0, 'None', 'None')
+$bytes = New-Object byte[] $sd.BinaryLength
+$sd.GetBinaryForm($bytes, 0)
+if ($sd.ControlFlags -band [System.Security.AccessControl.ControlFlags]::DiscretionaryAclAutoInherited) { $bytes[3] = $bytes[3] -bor 0x01 }
+if (-not [PiSandbox.Acl]::SetFileSecurityW(${psQuote(target)}, 4, $bytes)) {
+  throw (New-Object System.ComponentModel.Win32Exception([Runtime.InteropServices.Marshal]::GetLastWin32Error()))
+}
 `.trim();
+}
+
+const STAT_PROBE_ENV = "PI_SANDBOX_STAT_PATHS";
+/** Prints the index of every listed path the running account cannot read attributes of. */
+const STAT_PROBE_SCRIPT =
+  `$i = 0; foreach ($p in $env:${STAT_PROBE_ENV}.Split('|')) { try { [void][IO.File]::GetAttributes($p) } catch { $i }; $i++ }`;
+
+/** Windows PowerShell argv for the stat probe; the caller wraps it to run as the sandbox account. */
+export function statProbeArgv(systemRoot = process.env.SystemRoot || "C:\\Windows"): string[] {
+  const shell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return [shell, "-NoProfile", "-NonInteractive", "-Command", STAT_PROBE_SCRIPT];
+}
+
+/** Indices printed by the stat probe, mapped back to paths. */
+export function parseStatProbe(stdout: string, paths: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!/^\d+$/.test(trimmed)) continue;
+    const path = paths[Number(trimmed)];
+    if (path !== undefined) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * Runs the stat probe through `argv` (the helper launching statProbeArgv as the
+ * sandbox account). Paths go through the environment, which the helper copies,
+ * so the 1024-character CreateProcessWithLogonW command line stays short.
+ */
+export function unreachableAs(argv: string[], paths: string[], signal?: AbortSignal): Promise<string[]> {
+  if (paths.length === 0) return Promise.resolve([]);
+  if (signal?.aborted) return Promise.reject(new Error("aborted"));
+  const limit = AbortSignal.timeout(30_000);
+  const stop = signal ? AbortSignal.any([signal, limit]) : limit;
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(argv[0] ?? "", argv.slice(1), {
+      cwd: process.env.SystemRoot || "C:\\Windows",
+      env: { ...windowsPowerShellEnv(), [STAT_PROBE_ENV]: paths.join("|") },
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const onAbort = () => {
+      if (child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+    };
+    stop.addEventListener("abort", onAbort, { once: true });
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", (error) => {
+      stop.removeEventListener("abort", onAbort);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      stop.removeEventListener("abort", onAbort);
+      if (signal?.aborted) reject(new Error("aborted"));
+      else if (limit.aborted) reject(new Error("timed out probing sandbox access"));
+      else if (code === 0) resolvePromise(parseStatProbe(stdout, paths));
+      else reject(new Error(stderr.trim() || `sandbox access probe exited ${code}`));
+    });
+  });
+}
+
+/**
+ * Environment for a Windows PowerShell 5.1 child. A PSModulePath inherited from
+ * pwsh 7 (app started from a pwsh terminal) makes 5.1 autoload 7's modules and
+ * fail: Get-Acl reports CouldNotAutoloadMatchingModule. Without it, 5.1 uses its own.
+ */
+export function windowsPowerShellEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === "psmodulepath") delete env[key];
+  }
+  return env;
 }
 
 function runCommand(command: string, args: string[], signal?: AbortSignal, timeoutMs = 5000): Promise<void> {
@@ -316,7 +410,7 @@ function runCommand(command: string, args: string[], signal?: AbortSignal, timeo
   const limit = AbortSignal.timeout(timeoutMs);
   const stop = signal ? AbortSignal.any([signal, limit]) : limit;
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(command, args, { env: windowsPowerShellEnv(), windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     const kill = () => {
       if (child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
@@ -338,9 +432,10 @@ function runCommand(command: string, args: string[], signal?: AbortSignal, timeo
   });
 }
 
-function defaultIo(): AccountIo {
+export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo {
   const root = join(homedir(), ".pi", "sandbox");
   return {
+    ...extra,
     userExists: defaultUserExists,
     provision: defaultProvision,
     async readGrants(path) {
@@ -432,5 +527,69 @@ export async function grantSandboxAccess(
       throw new SandboxUnavailableError(`failed to grant ${username} access to ${target.path}: ${detail}`);
     }
   }
+  if (await grantWorkspaceAncestors(username, policy.workspaceRoot, grants, io, signal)) changed = true;
   if (changed) await io.writeGrants(grantsPath, grants);
+}
+
+/** grants.json value for an ancestor the probe found the account can already stat. */
+export const REACHABLE = "reachable";
+const ANCESTOR_RETRY_MS = 5 * 60 * 1000;
+/** Workspace ancestors whose probe or grant failed in this process, keyed to when they may be retried. */
+const ancestorRetryAt = new Map<string, number>();
+
+export function __resetAncestorRetryForTest(): void {
+  ancestorRetryAt.clear();
+}
+
+/**
+ * PowerShell resolves its location by reading the attributes of every ancestor
+ * of the process cwd. When the sandbox account cannot (a private Downloads,
+ * anything two levels under the user profile), it silently starts in C:\ and
+ * every command runs there. Probe the ancestors not yet in grants.json as the
+ * sandbox account and grant (RA,X) only on the ones it cannot stat.
+ * A failed probe or grant is retried after a cooldown, not on every command;
+ * meanwhile the shell's working-directory guard stops the command instead.
+ */
+async function grantWorkspaceAncestors(
+  username: string,
+  workspaceRoot: string,
+  grants: Record<string, string>,
+  io: AccountIo,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (!io.unreachable) return false;
+  const now = Date.now();
+  const pending = ancestorDirectories(workspaceRoot).filter((dir) => {
+    const key = grantKey(dir);
+    return grants[key] === undefined && (ancestorRetryAt.get(key) ?? 0) <= now && existsSync(dir);
+  });
+  if (pending.length === 0) return false;
+  const retryLater = (dir: string) => ancestorRetryAt.set(grantKey(dir), now + ANCESTOR_RETRY_MS);
+  let blocked: Set<string>;
+  try {
+    blocked = new Set((await io.unreachable(pending, signal)).map(grantKey));
+  } catch (error) {
+    if (error instanceof Error && error.message === "aborted") throw error;
+    pending.forEach(retryLater);
+    return false;
+  }
+  let changed = false;
+  for (const dir of pending) {
+    if (signal?.aborted) throw new Error("aborted");
+    const key = grantKey(dir);
+    if (!blocked.has(key)) {
+      grants[key] = REACHABLE;
+      changed = true;
+      continue;
+    }
+    try {
+      await io.grant(dir, username, "RAX", false, signal);
+      grants[key] = "RAX";
+      changed = true;
+    } catch (error) {
+      if (error instanceof Error && error.message === "aborted") throw error;
+      retryLater(dir);
+    }
+  }
+  return changed;
 }

@@ -78,6 +78,18 @@ function isWindowsBashExe(path: string): boolean {
 export const PS_UTF8_PREFIX =
   "if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }; try { $__piOut = New-Object System.IO.StreamWriter ([Console]::OpenStandardOutput()); $__piOut.AutoFlush = $true; [Console]::SetOut($__piOut); $__piErr = New-Object System.IO.StreamWriter ([Console]::OpenStandardError()); $__piErr.AutoFlush = $true; [Console]::SetError($__piErr) } catch {} }\n$env:NO_COLOR = '1'\n";
 
+/**
+ * PowerShell 把进程当前目录规范成自己的位置时，要读每一级祖先目录的属性。沙箱账户读不到（私有的
+ * Downloads、用户目录下两层以上）时它不报错，静默从 C:\ 开始，命令全在错的目录里跑。受限运行先执行这段：
+ * 位置和进程当前目录对不上就切过去，切不过去以 163 退出，按 runner 失败归因、命令不执行。
+ * 代码经环境变量带进去（helper 照抄调用方环境），命令行只多一行 iex，不挤 CreateProcessWithLogonW
+ * 约 1024 字符的上限；进来先删掉变量，用户命令和它的子进程看不到。约束语言模式不碰 .NET，跳过检查。
+ */
+export const PS_CWD_GUARD_ENV = "PI_SANDBOX_CWD_GUARD";
+export const PS_CWD_GUARD =
+  "Remove-Item Env:PI_SANDBOX_CWD_GUARD; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and (Get-Location).ProviderPath -ne ($__piCwd = [Environment]::CurrentDirectory)) { try { Set-Location -LiteralPath $__piCwd -ErrorAction Stop } catch { [Console]::Error.WriteLine(\"pi-sandbox-win: the sandbox account cannot open the working directory $__piCwd; the command did not run\"); exit 163 } }";
+const PS_CWD_GUARD_LINE = `iex $env:${PS_CWD_GUARD_ENV}\n`;
+
 export function shellArgv(platform: NodeJS.Platform, shell: string, command: string): string[] {
   if (platform === "win32") {
     return [shell, "-NoProfile", "-NonInteractive", "-Command", PS_UTF8_PREFIX + command];
@@ -243,6 +255,10 @@ export function createSandboxedBashOperations(
         forgetShellOnSpawnError(result);
         return { exitCode: result.exitCode, sandbox: result.spawnError ? shellFailed(result) : facts() };
       }
+      if (platform === "win32") {
+        env[PS_CWD_GUARD_ENV] = PS_CWD_GUARD;
+        base = shellArgv(platform, shell, PS_CWD_GUARD_LINE + command);
+      }
 
       // CreateProcessWithLogonW passes lpCommandLine through the Secondary Logon
       // Service RPC which has a ~1024 character limit. When the user command
@@ -256,7 +272,7 @@ export function createSandboxedBashOperations(
         const name = `pi-cmd-${randomBytes(4).toString("hex")}.ps1`;
         scriptFile = join(policy.workspaceRoot, name);
         // UTF-8 BOM so both PowerShell 5.1 and 7 read the file correctly.
-        writeFileSync(scriptFile, "\ufeff" + PS_UTF8_PREFIX + command, "utf8");
+        writeFileSync(scriptFile, "\ufeff" + PS_UTF8_PREFIX + PS_CWD_GUARD_LINE + command, "utf8");
         base = [shell, "-NoProfile", "-NonInteractive", "-File", scriptFile];
       }
 

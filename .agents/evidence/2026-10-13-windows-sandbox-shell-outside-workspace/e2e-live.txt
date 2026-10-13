@@ -1,0 +1,23 @@
+workspace=C:\Users\rxstudio\pi-cwd-e2e\mid\ws
+--- A: probe disabled (ancestors left unreadable) -> guard must stop the command (9116 ms)
+exitCode=163 sandbox={"mode":"workspace-write","denied":false,"runnerFailed":"runner"}
+pi-sandbox-win: the sandbox account cannot open the working directory C:\Users\rxstudio\pi-cwd-e2e\mid\ws; the command did not run
+--- B: probe enabled, first command (probe + grant) (7303 ms)
+exitCode=0 sandbox={"mode":"workspace-write","denied":false}
+location=C:\Users\rxstudio\pi-cwd-e2e\mid\ws
+hello from ws
+--- C: probe enabled, second command (cached) (5726 ms)
+exitCode=0 sandbox={"mode":"workspace-write","denied":false}
+location=C:\Users\rxstudio\pi-cwd-e2e\mid\ws
+hello from ws
+--- D: probe enabled, third command (cached) (5750 ms)
+exitCode=0 sandbox={"mode":"workspace-write","denied":false}
+location=C:\Users\rxstudio\pi-cwd-e2e\mid\ws
+hello from ws
+--- scratch grants.json
+ "c:/users/rxstudio/appdata/local/temp/pi-sandbox/pi-cwd-e2e": "M",
+ "c:/users/rxstudio/pi-cwd-e2e/mid/ws": "M",
+ "c:/users/rxstudio/pi-cwd-e2e/mid": "RAX",
+ "c:/users/rxstudio/pi-cwd-e2e": "RAX",
+ "c:/users/rxstudio": "reachable",
+ "c:/users": "reachable"

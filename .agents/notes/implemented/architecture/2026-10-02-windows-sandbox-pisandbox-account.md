@@ -44,7 +44,7 @@ helper 用 `CreateProcessWithLogonW` 启动旁边的 `pi-sandbox-launch.exe`。�
 
 ### Windows 沙箱补祖先遍历、工作目录和进程树回收
 
-给工作区和临时目录的每个祖先目录只授 `FILE_READ_ATTRIBUTES | FILE_TRAVERSE`（icacls `(RA,X)`，不继承、不传播）。不授列出和读取内容的权限。临时目录本身仍授 Modify，并且 helper 把当前目录（operations 设成会话工作区）传给 `CreateProcessWithLogonW`。启动器进程放进带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、不允许 breakaway 的 Job；helper 在读完退出码后关闭 Job，回收还活着的后代。`CreateProcessWithLogonW` 遇到 `ERROR_INVALID_PARAMETER` 时最多再试两次。
+祖先目录只授 `FILE_READ_ATTRIBUTES | FILE_TRAVERSE`（`(RA,X)`，不继承），用 `SetFileSecurityW` 只写这一个目录。`.pi` 祖先和临时目录父级直接授；工作区祖先先以 `PiSandbox` 身份探测，只授读不到属性的那几级。受限 PowerShell 进不了工作目录时以 163 退出，不在别处跑（见 [PowerShell 静默从 C:\ 开始](../bug-fix/2026-10-13-windows-sandbox-shell-outside-workspace.md)）。不授列出和读取内容的权限。临时目录本身仍授 Modify，并且 helper 把当前目录（operations 设成会话工作区）传给 `CreateProcessWithLogonW`。启动器进程放进带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、不允许 breakaway 的 Job；helper 在读完退出码后关闭 Job，回收还活着的后代。`CreateProcessWithLogonW` 遇到 `ERROR_INVALID_PARAMETER` 时最多再试两次。
 
 ### Windows Temp 的列出权必须看到 ACL 才算授上
 

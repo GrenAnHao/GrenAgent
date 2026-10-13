@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxUnavailableError } from "./errors.js";
-import { createSandboxedBashOperations, PS_UTF8_PREFIX } from "./operations.js";
+import { createSandboxedBashOperations, PS_CWD_GUARD, PS_CWD_GUARD_ENV, PS_UTF8_PREFIX } from "./operations.js";
 import type { ConfinedArgv, FileSandboxMode, SandboxExecutionPolicy } from "./types.js";
 import { SANDBOX_DENIAL_EXIT } from "./types.js";
+import { windowsAccountConfined } from "./windows/runner.js";
 
 const SHELL = "bash";
 const COMMAND = "echo hi";
@@ -412,12 +413,51 @@ describe("createSandboxedBashOperations", () => {
     const handed = confine.mock.calls[0]?.[0] as string[];
     expect(handed[0]).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
     expect(handed.slice(1, 4)).toEqual(["-NoProfile", "-NonInteractive", "-Command"]);
-    expect(handed[4]).toBe(`${PS_UTF8_PREFIX}echo hi`);
+    expect(handed[4]).toBe(`${PS_UTF8_PREFIX}iex $env:${PS_CWD_GUARD_ENV}\necho hi`);
     expect(spawnImpl).toHaveBeenCalledWith(
       "runner",
       ["--", ...handed],
-      expect.objectContaining({ cwd: CWD }),
+      expect.objectContaining({
+        cwd: CWD,
+        env: expect.objectContaining({ [PS_CWD_GUARD_ENV]: PS_CWD_GUARD }),
+      }),
     );
+  });
+
+  it("guards the working directory only for confined PowerShell", async () => {
+    const { ops, spawnImpl } = makeOps({
+      mode: "danger-full-access",
+      platform: "win32",
+      resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    });
+    await ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
+    const [, args, options] = spawnImpl.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }];
+    expect(args[3]).not.toContain(PS_CWD_GUARD_ENV);
+    expect(options.env[PS_CWD_GUARD_ENV]).toBeUndefined();
+  });
+
+  it("stops with a runner failure instead of running elsewhere when the shell cannot enter cwd", async () => {
+    const confine = vi.fn(async (argv: string[]) => ({
+      ...windowsAccountConfined(
+        { mode: "workspace-write", network: "enabled", workspaceRoot: CWD, sessionId: "g" },
+        argv,
+        "C:\\helper\\pi-sandbox-win.exe",
+        "C:\\temp",
+        { username: "PiSandbox", blobPath: "C:\\blob" },
+      ),
+    }));
+    const { ops } = makeOps({
+      mode: "workspace-write",
+      platform: "win32",
+      resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      confine,
+      spawnImpl: vi.fn(() => fakeChild({
+        exitCode: 163,
+        stderr: `pi-sandbox-win: the sandbox account cannot open the working directory ${CWD}; the command did not run\n`,
+      })),
+    });
+    const result = await ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
+    expect(result.sandbox).toMatchObject({ mode: "workspace-write", denied: false, runnerFailed: "runner" });
   });
 
   it("PowerShell prefix only sets Console.OutputEncoding in FullLanguage", () => {
@@ -641,4 +681,39 @@ describe.skipIf(process.platform !== "win32")("PowerShell UTF-8 prefix live", ()
     expect(text).not.toMatch(/Cannot set property/i);
     expect(text).not.toMatch(/language mode/i);
   }, 15000);
+
+  it("cwd guard re-enters a reachable cwd, hides its variable, and stays silent under ConstrainedLanguage", async () => {
+    const { spawn } = await import("node:child_process");
+    const { resolveShellPath } = await import("./shellPath.js");
+    const shell = await resolveShellPath();
+    const cwd = mkdtempSync(join(tmpdir(), "pi-cwd-guard-"));
+    const run = (before: string) => new Promise<{ code: number | null; text: string }>((resolve, reject) => {
+      const script = `${before}${PS_UTF8_PREFIX}iex $env:${PS_CWD_GUARD_ENV}\n`
+        + "'loc=' + (Get-Location).Path; 'leaked=' + [bool]$env:" + PS_CWD_GUARD_ENV;
+      const child = spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", script], {
+        cwd,
+        env: { ...process.env, [PS_CWD_GUARD_ENV]: PS_CWD_GUARD },
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (d: Buffer) => chunks.push(d));
+      child.stderr.on("data", (d: Buffer) => chunks.push(d));
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, text: Buffer.concat(chunks).toString("utf8") }));
+    });
+    try {
+      // PowerShell's location drifted away from the process cwd, as when the sandbox account cannot normalize it.
+      const drifted = await run("Set-Location -LiteralPath $env:SystemRoot; ");
+      expect(drifted.code).toBe(0);
+      expect(drifted.text).toContain(`loc=${cwd}`);
+      expect(drifted.text).toContain("leaked=False");
+      const clm = await run("$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'; ");
+      expect(clm.code).toBe(0);
+      expect(clm.text).toContain("leaked=False");
+      expect(clm.text).not.toContain("pi-sandbox-win:");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30000);
 });
