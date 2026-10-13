@@ -1,7 +1,7 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { attributeRun } from "./attribute.js";
 import { decodeSpawnChunk } from "./decodeSpawnChunk.js";
-import { filterSecretEnv } from "./env.js";
+import { filterSecretEnv, withGitSafeDirectory } from "./env.js";
 import { isStrictWidening } from "./escalate.js";
 import { SandboxUnavailableError } from "./errors.js";
 import { isConfined } from "./resolvePreset.js";
@@ -257,7 +257,10 @@ export function createSandboxedBashOperations(
         return { exitCode: result.exitCode, sandbox: result.spawnError ? shellFailed(result) : facts() };
       }
       // 沙箱没有网络围栏，凭据类环境变量不带进受限命令。
-      const confinedEnv = filterSecretEnv(env);
+      const filteredEnv = filterSecretEnv(env);
+      const confinedEnv = platform === "win32"
+        ? withGitSafeDirectory(filteredEnv, policy.workspaceRoot)
+        : filteredEnv;
       if (platform === "win32") {
         confinedEnv[PS_CWD_GUARD_ENV] = PS_CWD_GUARD;
         base = shellArgv(platform, shell, PS_CWD_GUARD_LINE + command);

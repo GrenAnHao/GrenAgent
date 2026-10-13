@@ -444,6 +444,31 @@ describe("createSandboxedBashOperations", () => {
     );
   });
 
+  it("lets git in the sandbox account trust the workspace on confined Windows runs", async () => {
+    const { ops, spawnImpl } = makeOps({
+      mode: "workspace-write",
+      platform: "win32",
+      resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    });
+    await ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
+    const spawned = spawnImpl.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+    expect(spawned.GIT_CONFIG_KEY_0).toBe("safe.directory");
+    expect(spawned.GIT_CONFIG_VALUE_0).toBe(CWD);
+  });
+
+  it("does not touch git config on unconfined or non-Windows runs", async () => {
+    const full = makeOps({
+      mode: "danger-full-access",
+      platform: "win32",
+      resolveShell: async () => "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    });
+    await full.ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
+    expect((full.spawnImpl.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv).GIT_CONFIG_COUNT).toBeUndefined();
+    const linux = makeOps({ mode: "workspace-write" });
+    await linux.ops.exec(COMMAND, CWD, { onData: () => {}, env: {} });
+    expect((linux.spawnImpl.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv).GIT_CONFIG_COUNT).toBeUndefined();
+  });
+
   it("guards the working directory only for confined PowerShell", async () => {
     const { ops, spawnImpl } = makeOps({
       mode: "danger-full-access",

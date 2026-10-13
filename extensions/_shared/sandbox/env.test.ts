@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSecretEnv } from "./env.js";
+import { filterSecretEnv, withGitSafeDirectory } from "./env.js";
 
 describe("filterSecretEnv", () => {
   it("drops variables whose name looks like a credential", () => {
@@ -40,5 +40,49 @@ describe("filterSecretEnv", () => {
 
   it("skips undefined values", () => {
     expect(filterSecretEnv({ A: undefined, B: "1" })).toEqual({ B: "1" });
+  });
+});
+
+describe("withGitSafeDirectory", () => {
+  it("trusts the workspace and the repositories under it through git's env-based config", () => {
+    const env = withGitSafeDirectory({ KEEP: "1" }, "D:/work/repo");
+    expect(env).toMatchObject({
+      KEEP: "1",
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "safe.directory",
+      GIT_CONFIG_VALUE_0: "D:/work/repo",
+      GIT_CONFIG_KEY_1: "safe.directory",
+      GIT_CONFIG_VALUE_1: "D:/work/repo/*",
+    });
+  });
+
+  it("writes the path the way git compares it: forward slashes, no trailing slash", () => {
+    const env = withGitSafeDirectory({}, "D:\\work\\repo\\");
+    expect(env.GIT_CONFIG_VALUE_0).toBe("D:/work/repo");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("D:/work/repo/*");
+  });
+
+  it("appends after config the caller already passed instead of replacing it", () => {
+    const env = withGitSafeDirectory(
+      { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.autocrlf", GIT_CONFIG_VALUE_0: "false" },
+      "D:/work/repo",
+    );
+    expect(env.GIT_CONFIG_COUNT).toBe("3");
+    expect(env.GIT_CONFIG_KEY_0).toBe("core.autocrlf");
+    expect(env.GIT_CONFIG_VALUE_0).toBe("false");
+    expect(env.GIT_CONFIG_KEY_1).toBe("safe.directory");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("D:/work/repo");
+    expect(env.GIT_CONFIG_KEY_2).toBe("safe.directory");
+  });
+
+  it("starts from zero when the existing count is not a number", () => {
+    expect(withGitSafeDirectory({ GIT_CONFIG_COUNT: "abc" }, "D:/w").GIT_CONFIG_COUNT).toBe("2");
+    expect(withGitSafeDirectory({ GIT_CONFIG_COUNT: "-3" }, "D:/w").GIT_CONFIG_COUNT).toBe("2");
+  });
+
+  it("does not mutate its input", () => {
+    const input = { GIT_CONFIG_COUNT: "1" };
+    withGitSafeDirectory(input, "D:/w");
+    expect(input).toEqual({ GIT_CONFIG_COUNT: "1" });
   });
 });

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createSandboxedBashOperations } from "./operations.js";
 import { createSandboxProvider } from "./provider.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
@@ -222,5 +223,32 @@ describe.skipIf(!live || process.platform !== "win32")("live windows write bound
       await rm(workspace, { recursive: true, force: true });
       await rm(sibling, { recursive: true, force: true });
     }
+  });
+});
+
+// 沙箱以 PiSandbox 运行，工作区归真实用户所有；没有 safe.directory 注入时 git 会报 dubious ownership。
+// 用 PI_SANDBOX_LIVE_GIT 指向一个机器级 git.exe（装在用户目录里的 git 读不到自己的 etc\gitconfig，是另一个问题）。
+const liveGit = process.env.PI_SANDBOX_LIVE_GIT;
+describe.skipIf(!live || process.platform !== "win32" || !liveGit)("live git in the sandbox account", () => {
+  it("runs init, commit and log in a workspace owned by another user", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sbx-git-"));
+    const provider = createSandboxProvider();
+    const ops = createSandboxedBashOperations({
+      getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: root, sessionId: "live-git" }),
+      confine: (argv, policy) => provider.confine(argv, policy),
+    });
+    const env = { ...process.env };
+    delete env.HOME;
+    const chunks: string[] = [];
+    const git = `& '${liveGit}'`;
+    const result = await ops.exec(
+      `${git} init -q; ${git} -c user.name=t -c user.email=t@t commit -q --allow-empty -m first; ${git} log --oneline`,
+      root,
+      { onData: (data) => chunks.push(data.toString()), env },
+    );
+    await provider.dispose?.("live-git");
+    expect(chunks.join("")).not.toContain("dubious ownership");
+    expect(chunks.join("")).toMatch(/[0-9a-f]{7} first/);
+    expect(result.exitCode).toBe(0);
   });
 });
