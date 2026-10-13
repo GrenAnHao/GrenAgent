@@ -62,11 +62,8 @@ interface TrackedJob {
   ring: OutputRing;
   /** 模型的消耗式游标；readAt 从不移动它。 */
   modelCursor: number;
-  resultDelivered: boolean;
   state: ProducerState;
   detail: string | undefined;
-  output: string | undefined;
-  error: string | undefined;
   startedAt: number;
   finishedAt: number | undefined;
   killReason: string | undefined;
@@ -76,18 +73,11 @@ interface TrackedJob {
   waitResolvers: Set<() => void>;
   pump: PumpHandle | undefined;
   spillPaths: (string | undefined)[];
-  stream: boolean;
   reported: boolean;
 }
 
 function isTerminal(status: JobStatus): boolean {
   return status === "completed" || status === "killed" || status === "failed";
-}
-
-function resultText(job: Pick<TrackedJob, "output" | "error">): string | undefined {
-  // 失败 / 被终止的 job 输出常是空串：用 ?? 会把错误原因吞掉。
-  if (job.output?.trim()) return job.output;
-  return job.error ?? (job.output || undefined);
 }
 
 export class JobsService {
@@ -161,11 +151,8 @@ export class JobsService {
       status: "running",
       ring,
       modelCursor: 0,
-      resultDelivered: false,
       state,
       detail: undefined,
-      output: undefined,
-      error: undefined,
       startedAt: Date.now(),
       finishedAt: undefined,
       killReason: undefined,
@@ -175,7 +162,6 @@ export class JobsService {
       waitResolvers: new Set(),
       pump: undefined,
       spillPaths: [],
-      stream: (spec.output?.length ?? 0) > 0,
       reported: false,
     };
     // 绑定共享状态就是提交：run 期间暂存的写入已在环里，之后的写入都打到这条记录。
@@ -188,7 +174,7 @@ export class JobsService {
       (outcome) => outcome,
       (error: unknown): JobOutcome => {
         const message = String((error as Error)?.message ?? error);
-        return { status: "failed", detail: message, error: message };
+        return { status: "failed", detail: message };
       },
     );
     if (spec.output !== undefined && spec.output.length > 0) {
@@ -251,10 +237,7 @@ export class JobsService {
       await this.waitJob(job, Math.max(1, opts.timeoutMs ?? 60_000), opts.signal);
     }
     const read = this.consumeJob(job);
-    const delta = renderModelDelta(read.chunks, read.lossy, read.job.ring.spillPaths ?? []);
-    const text = read.result === undefined
-      ? delta
-      : `${delta}${delta.length > 0 && !delta.endsWith("\n") ? "\n" : ""}${read.result}`;
+    const text = renderModelDelta(read.chunks, read.lossy, read.job.ring.spillPaths ?? []);
     return { status: read.job.status, text, job: read.job };
   }
 
@@ -365,11 +348,8 @@ export class JobsService {
       ...(job.detail !== undefined ? { detail: job.detail } : {}),
       startedAt: job.startedAt,
       ...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
-      ...(job.output !== undefined ? { output: job.output } : {}),
-      ...(job.error !== undefined ? { error: job.error } : {}),
       reported: job.reported,
       outputLimitBytes: job.outputLimitBytes,
-      stream: job.stream,
       ring: {
         total: job.ring.total,
         earliest: job.ring.earliest,
@@ -383,9 +363,7 @@ export class JobsService {
     const read = job.ring.readFrom(job.modelCursor);
     job.modelCursor = job.ring.total;
     const terminal = isTerminal(job.status);
-    const result = terminal && !job.resultDelivered ? resultText(job) : undefined;
     if (terminal) {
-      job.resultDelivered = true;
       // 模型已经收走终态：完成通知不必再发。
       job.reported = true;
       job.ring.trim(this.config.settledRetainBytes);
@@ -393,7 +371,6 @@ export class JobsService {
     return {
       chunks: read.chunks,
       lossy: read.lossy,
-      ...(result !== undefined ? { result } : {}),
       job: this.view(job),
     };
   }
@@ -476,8 +453,6 @@ export class JobsService {
       job.detail = detail;
     }
     job.state.progress = undefined;
-    if (outcome.output !== undefined) job.output = outcome.output;
-    if (outcome.error !== undefined) job.error = outcome.error;
     job.finishedAt = Date.now();
     // 结算即封流：裁到结算上限，但不低于模型游标尚未消费的字节。
     job.ring.trim(Math.max(this.config.settledRetainBytes, job.ring.total - job.modelCursor));

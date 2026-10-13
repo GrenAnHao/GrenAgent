@@ -122,6 +122,20 @@ function entriesNamed(entries: SessionInfoEntry[]): boolean {
   );
 }
 
+/**
+ * 子代理的会话（JSONL 里有 subagent_meta）。进程内的子代理跑在 agent-host 里，没有 PI_IS_SUBAGENT，
+ * 只看环境变量会给每个子代理白花一次模型调用起标题；子会话卸载后这个后台任务还可能经旧的会话管理器往它的 JSONL 写一条。
+ */
+function isSubagentSession(ctx: ExtensionContext): boolean {
+  try {
+    return (ctx.sessionManager.getEntries() as Array<{ type?: string; customType?: string }>).some(
+      (e) => e?.type === "custom" && e.customType === "subagent_meta",
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** 会话是否已有名字（用户手动命名或此前已生成）。扫描 session_info entry。 */
 function alreadyNamed(ctx: ExtensionContext): boolean {
   try {
@@ -211,7 +225,7 @@ export default function (pi: ExtensionAPI) {
     try {
       if ((getConfig("AUTO_TITLE") ?? "1") === "0") return;
       // 子代理(--no-session, PI_IS_SUBAGENT)不需要标题，跳过以省一次模型调用。
-      if (process.env.PI_IS_SUBAGENT === "1") return;
+      if (process.env.PI_IS_SUBAGENT === "1" || isSubagentSession(ctx)) return;
       // 已命名（用户手动 / 此前已生成）则不覆盖。
       if (alreadyNamed(ctx)) return;
       // 无可用标题模型（titleModel 未配且 ctx.model 为空）则放弃。

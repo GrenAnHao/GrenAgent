@@ -1,0 +1,47 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:47492) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67824) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+'this_binary_does_not_exist_zzz' ²»ÊÇÄÚ²¿»òÍâ²¿ÃüÁî£¬Ò²²»ÊÇ¿ÉÔËĞĞµÄ³ÌĞò
+»òÅú´¦ÀíÎÄ¼ş¡£
+ â¯ _shared/sandbox/windows/deleteSemantics.test.ts (1 test | 1 failed) 7316ms
+     Ã— splits until the directory allows FindFirstFile 7314ms
+(node:29452) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:47796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:43212) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29420) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61004) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60096) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46228) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+â¯â¯â¯â¯â¯â¯â¯ Failed Tests 1 â¯â¯â¯â¯â¯â¯â¯
+
+ FAIL  _shared/sandbox/windows/deleteSemantics.test.ts > windows delete without list > splits until the directory allows FindFirstFile
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ â¯ _shared/sandbox/windows/deleteSemantics.test.ts:24:3
+     22| // the four paths agree. This recreates that ACL on a private directorâ€¦
+     23| describe.skipIf(pwsh === undefined)("windows delete without list", () â€¦
+     24|   it("splits until the directory allows FindFirstFile", () => {
+       |   ^
+     25|     const dir = mkdtempSync(join(tmpdir(), "pi-del-"));
+     26|     const user = process.env.USERNAME || "";
+
+â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯â¯[1/1]â¯
+
+
+ Test Files  1 failed | 224 passed | 2 skipped (227)
+      Tests  1 failed | 1945 passed | 4 skipped (1950)
+   Start at  09:35:15
+   Duration  45.78s (transform 134.27s, setup 0ms, import 357.96s, tests 137.26s, environment 52ms)
+

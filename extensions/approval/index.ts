@@ -2,6 +2,7 @@
 // 策略本体在 _shared/approval（进程内共享），供 safety / 沙箱消费者读取。
 // 桌面切换走宿主 agent_set_approval：写该会话的进程内内存 + 会话条目 session-controls，
 // 并更新项目默认档（只给新会话继承）。session_start 把本会话的档钉进内存，之后项目默认档变化不再影响它。
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type ApprovalPolicy,
@@ -54,27 +55,27 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", () => { unwatch(); });
 
   pi.on("session_start", async (_event, ctx) => {
-    workspaceCwd = ctx.cwd;
+    workspaceCwd = projectCwd(ctx);
     sessionId = ctx.sessionManager.getSessionId?.() || undefined;
     const entries = ctx.sessionManager.getEntries() as SessionEntry[];
-    if (!hasApprovalPolicy(ctx.cwd)) {
+    if (!hasApprovalPolicy(projectCwd(ctx))) {
       setApprovalPolicy(
         parseApproval(getConfig(approvalPolicyConfigKey(cwd()))) ??
           parseApproval(getConfig("APPROVAL_POLICY")) ??
           // 无会话身份（旧 worker / 测试桩）时沿用旧行为：会话条目兜底项目档。
           (sessionId ? undefined : legacyApproval(entries)) ??
           "auto",
-        ctx.cwd,
+        projectCwd(ctx),
       );
     }
-    if (sessionId && !hasApprovalPolicy(ctx.cwd, sessionId)) {
+    if (sessionId && !hasApprovalPolicy(projectCwd(ctx), sessionId)) {
       // 会话自己记的档优先；没有时继承 ALS 里的父会话（子代理），再退项目默认。
       const parent = currentSessionId();
-      const inherited = parent && parent !== sessionId && hasApprovalPolicy(ctx.cwd, parent)
-        ? getApprovalPolicy(ctx.cwd, parent)
+      const inherited = parent && parent !== sessionId && hasApprovalPolicy(projectCwd(ctx), parent)
+        ? getApprovalPolicy(projectCwd(ctx), parent)
         : undefined;
       const own = persistedApproval(entries);
-      setApprovalPolicy(own ?? inherited ?? getDefaultApprovalPolicy(ctx.cwd), ctx.cwd, sessionId);
+      setApprovalPolicy(own ?? inherited ?? getDefaultApprovalPolicy(projectCwd(ctx)), projectCwd(ctx), sessionId);
     }
     push(ctx);
   });

@@ -9,6 +9,7 @@ import { escalationHintMarker, runnerFailedMarker, sandboxDenialMarker } from ".
 import { createSandboxedBashOperations } from "../_shared/sandbox/operations.js";
 import type { FileSandboxMode, SandboxRunFacts } from "../_shared/sandbox/types.js";
 import { runInWorkspace } from "../_shared/workspace-context.js";
+import { __resetApprovalRoutesForTest, registerChildApprovalRoute, registerTopApprovalRoute } from "../_shared/approval-route.js";
 import { jobs, __resetJobsForTest } from "../jobs/service.js";
 import type { JobDoneInfo } from "../jobs/types.js";
 import { jobLabel, processOutcome, type ExecFn } from "./bashJob.js";
@@ -663,6 +664,47 @@ describe("bash · same-call escalation (DSH sandbox_permissions)", () => {
     const t = tool(fake, 120, { sandboxGate: () => READ_ONLY });
     await expect(
       runInWorkspace({ origin: "goal", workspace: tempDir, cwd: tempDir, config: {} }, () =>
+        run(t, widen("touch x"), { ctx: c }),
+      ),
+    ).rejects.toThrow("no approval channel is available");
+    expect(c.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("a subagent with a route to its parent window asks there, then runs widened", async () => {
+    __resetApprovalRoutesForTest();
+    const parentSelect = vi.fn<(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>>(async () => "允许本次");
+    registerTopApprovalRoute("/sessions/top.jsonl", { select: parentSelect });
+    registerChildApprovalRoute({
+      sessionPath: "/sessions/s1.jsonl",
+      parentSessionPath: "/sessions/top.jsonl",
+      agentId: "sa-1",
+      label: "build",
+    });
+    try {
+      const fake = scriptedExec();
+      const c = ask("拒绝");
+      const t = tool(fake, 120, { sandboxGate: () => READ_ONLY });
+      const pending = runInWorkspace({ origin: "subagent", workspace: tempDir, cwd: tempDir, config: {} }, () =>
+        run(t, widen("npm run build"), { ctx: c }),
+      );
+      await started(fake);
+      expect(parentSelect.mock.calls[0]?.[0]).toBe(`子代理 build（sa-1） 沙箱升权\n\nnpm run build\n\n${JUSTIFY}\n\n→ workspace-write`);
+      expect(c.ui.select).not.toHaveBeenCalled();
+      expect(fake.calls[0]?.options.env?.PI_SANDBOX_MODE_ONCE).toBe("workspace-write");
+      fake.exit(0, { mode: "workspace-write", denied: false });
+      await pending;
+    } finally {
+      __resetApprovalRoutesForTest();
+    }
+  });
+
+  it("a subagent without a route still cannot escalate", async () => {
+    __resetApprovalRoutesForTest();
+    const fake = scriptedExec();
+    const c = ask("允许本次");
+    const t = tool(fake, 120, { sandboxGate: () => READ_ONLY });
+    await expect(
+      runInWorkspace({ origin: "subagent", workspace: tempDir, cwd: tempDir, config: {} }, () =>
         run(t, widen("touch x"), { ctx: c }),
       ),
     ).rejects.toThrow("no approval channel is available");

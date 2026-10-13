@@ -126,6 +126,28 @@ describe('ToolDecisionService.evaluate', () => {
     expect(row?.queuePayload).toBeUndefined();
   });
 
+  it('lets a subagent that can reach its parent window ask: queued until settled, no queue payload', async () => {
+    const { audit, service } = await fixture();
+    const decision = service.evaluate(facts({
+      origin: 'subagent', approvalRoute: true, flags: { ...NO_FLAGS, dangerousCommand: true },
+    }));
+    expect(decision).toMatchObject({ decision: 'ask', ruleId: 'builtin.dangerous-command' });
+    const row = audit.get(decision.auditId);
+    expect(row).toMatchObject({ decision: 'ask', resolution: 'queued' });
+    expect(row?.queuePayload).toBeUndefined();
+    expect(service.settle(decision.auditId!, 'timeout')).toBe(true);
+    expect(audit.get(decision.auditId)).toMatchObject({ resolution: 'timeout' });
+  });
+
+  it('an approval route does not loosen anything else for a subagent', async () => {
+    const { service } = await fixture();
+    const deny = service.evaluate(facts({
+      origin: 'subagent', approvalRoute: true, tool: 'write', path: 'D:/repo/.git/config',
+      flags: { ...NO_FLAGS, write: true, protectedPath: true },
+    }));
+    expect(deny).toMatchObject({ decision: 'deny', ruleId: 'builtin.protected-path' });
+  });
+
   it('keeps goal ask queued (only subagent is pinned)', async () => {
     const { audit, service } = await fixture();
     const decision = service.evaluate(facts({ origin: 'goal', flags: { ...NO_FLAGS, dangerousCommand: true } }));

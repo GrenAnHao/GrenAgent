@@ -1,0 +1,24 @@
+
+> electron-agent@0.1.0 ui:check
+> node ui-harness/check.mjs subagent-history
+
+构建产物和源码一致，跳过构建（--rebuild 强制重建）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ subagent-history
+  PASS 历史：两张单卡和组合卡共享一次 registry 查询
+  PASS 历史：缺标题的完成卡按保存的 agentId 恢复任务
+  PASS 历史：单卡恢复实际模型和思考档位，模型前带供应商显示名
+  PASS 历史：重复任务按 agentId 恢复对应模型，没有显示名的供应商用 id
+  PASS 历史：没有借用同名其他子代理模型
+  PASS 历史：完成卡没有运行转圈
+  INFO 截图 history-restored  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-history-history-restored.png
+  PASS 重开：再次共享一次查询
+  PASS 重开：标题不依赖上次挂载的内存
+  PASS 重开：模型和档位不依赖上次挂载的内存
+  PASS 终态：首包补齐后释放轮询
+  INFO 截图 history-reopened  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-history-history-reopened.png
+  ── 10 passed, 0 failed
+
+通过：subagent-history（4.6s）。只跑了 1/16 个场景，其余 15 个没指定，未运行

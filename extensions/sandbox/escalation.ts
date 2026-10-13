@@ -55,7 +55,7 @@ export function canOfferEscalation(gate: SandboxGate, effectiveMode: FileSandbox
 }
 
 export interface EscalationApproval {
-  /** 能弹审批：有界面，且是主会话回合（子代理、goal 回合没有人能批）。 */
+  /** 能弹审批：有界面的主会话回合，或能经父会话问人的子代理（approval-route.ts）。goal 回合没有人能批。 */
   channel: boolean;
   select?: (title: string, options: string[], opts?: { signal?: AbortSignal }) => Promise<string | undefined>;
   /** safety 已经为这次调用问过并允许（一次性许可），不再问第二次。 */

@@ -27,4 +27,19 @@ describe("formatSettlementNotice", () => {
     expect(n.content).toContain("It left no closing message.");
     expect(n.summary).toBe("Background subagent sa-x failed before it finished.");
   });
+
+  it("non-continuable completion does not invite follow-up messages", () => {
+    expect(formatSettlementNotice({ childId: "sa-w", stopReason: "completed", output: "OK", continuable: false }).content).toBe(
+      "Background subagent sa-w finished. It cannot receive further messages.\nIts closing message:\nOK",
+    );
+  });
+
+  it("diagnostic goes on its own line, only for non-completed results", () => {
+    expect(
+      formatSettlementNotice({ childId: "sa-w", stopReason: "error", output: "", diagnostic: "idle timeout" }).content,
+    ).toBe("Background subagent sa-w failed before it finished.\nIt left no closing message.\nDiagnostic: idle timeout");
+    expect(
+      formatSettlementNotice({ childId: "sa-w", stopReason: "completed", output: "OK", diagnostic: "ignored" }).content,
+    ).not.toContain("Diagnostic");
+  });
 });

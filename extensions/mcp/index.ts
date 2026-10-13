@@ -1,6 +1,7 @@
 // mcp: 把外部 MCP server（stdio/SSE）的工具暴露给 agent，名为 mcp__<server>__<tool>。
 // 连接/热更新在进程级管理器（manager.ts），跨会话存活；本文件只做每会话薄绑定：
 // session_start 用新鲜 pi 登记+激活当前目录并订阅变化，session_shutdown 解绑。
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { AgentToolResult, ExtensionAPI, RegisteredMcpServer } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { toolPrompt } from "../_shared/toolPrompt.js";
@@ -315,7 +316,7 @@ function registerProjectedTools(
           if (control) {
             const authorization = await authorizeDesktopOperation(control, {
               kind: 'mcp.call',
-              workspace: typeof ctx?.cwd === 'string' ? ctx.cwd : currentCwd(),
+              workspace: typeof ctx?.cwd === 'string' ? projectCwd(ctx) : currentCwd(),
               server,
               toolName: originalToolName,
               args: params ?? {},
@@ -367,7 +368,7 @@ function registerProjectedTools(
           if (control) {
             const authorization = await authorizeDesktopOperation(control, {
               kind: "mcp.call",
-              workspace: typeof ctx?.cwd === "string" ? ctx.cwd : currentCwd(),
+              workspace: typeof ctx?.cwd === "string" ? projectCwd(ctx) : currentCwd(),
               server,
               toolName: name,
               args,
@@ -504,7 +505,7 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
       if (!alive) return;
       savedMcpNames = project(pi, snap, mgr, control, savedMcpNames, registered);
       void control.request('mcp.state.publish', {
-        workspace: typeof ctx.cwd === 'string' ? ctx.cwd : currentCwd(),
+        workspace: typeof ctx.cwd === 'string' ? projectCwd(ctx) : currentCwd(),
         servers: summary(snap),
       }).catch(() => {});
     };

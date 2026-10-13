@@ -93,6 +93,45 @@ describe('SessionUiAdapter', () => {
     vi.useRealTimers();
   });
 
+  it('子代理的审批带上 subagents 和 timeout；到点后发 dismiss 收回卡片', async () => {
+    vi.useFakeTimers();
+    const { adapter, emit } = makeAdapter();
+    const subagents = [{ agentId: 'sa-1', label: 'fix' }];
+    const p = adapter.context.select('请求批准', ['允许本次', '拒绝'], { timeout: 1000, subagents } as never);
+    const id = emit.mock.calls[0][0].request.id;
+    expect(emit.mock.calls[0][0].request).toMatchObject({ method: 'select', timeout: 1000, subagents });
+    vi.advanceTimersByTime(1001);
+    await expect(p).resolves.toBeUndefined();
+    expect(emit.mock.calls[1][0].request).toEqual({ type: 'extension_ui_request', id, method: 'dismiss' });
+    vi.useRealTimers();
+  });
+
+  it('没有子代理身份时不带 subagents 字段', () => {
+    const { adapter, emit } = makeAdapter();
+    void adapter.context.select('一', ['a'], { subagents: [] } as never);
+    expect(emit.mock.calls[0][0].request).not.toHaveProperty('subagents');
+  });
+
+  it('答复、撤回、整体取消都发 dismiss（别的窗口里的同一张卡也要收掉），只发一次', async () => {
+    const { adapter, emit } = makeAdapter();
+    void adapter.context.confirm('一', '');
+    const answered = emit.mock.calls[0][0].request.id;
+    adapter.respond(answered, { confirmed: true });
+    adapter.respond(answered, { confirmed: false });
+
+    const ctrl = new AbortController();
+    void adapter.context.select('二', ['a'], { signal: ctrl.signal });
+    const withdrawn = emit.mock.calls[2][0].request.id;
+    ctrl.abort();
+
+    void adapter.context.input('三');
+    const cancelled = emit.mock.calls[4][0].request.id;
+    adapter.cancelAll();
+
+    const dismissed = emit.mock.calls.map((c) => c[0].request).filter((r) => r.method === 'dismiss').map((r) => r.id);
+    expect(dismissed).toEqual([answered, withdrawn, cancelled]);
+  });
+
   it('cancelAll 把挂起请求标为默认值', async () => {
     const { adapter } = makeAdapter();
     const a = adapter.context.select('一', ['x']);

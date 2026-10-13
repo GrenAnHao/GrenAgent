@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   clearStashedUiRequestsForTest,
+  dismissUiRequest,
   dropStashedUiRequests,
   hasStashedUiRequests,
   parkVisibleUiRequests,
@@ -17,7 +18,7 @@ const confirm = (id: string) => ({ id, method: 'confirm', title: id }) as never;
 
 afterEach(() => {
   clearStashedUiRequestsForTest();
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   useInlineQuestionStore.setState({ byWorkspace: {} });
 });
 
@@ -44,6 +45,48 @@ describe('backgroundUiRequests', () => {
     dropStashedUiRequests(B);
     restoreStashedUiRequests(WS, B);
     expect(useUiPromptStore.getState().byWorkspace[WS]).toBeUndefined();
+  });
+
+  it('切走时排队中的请求也一起收起，切回时按原顺序排回去', () => {
+    useUiPromptStore.getState().setRequest({ workspace: WS, request: confirm('a1'), sessionPath: A });
+    useUiPromptStore.getState().setRequest({ workspace: WS, request: confirm('b1'), sessionPath: B });
+    useUiPromptStore.getState().setRequest({ workspace: WS, request: confirm('a2'), sessionPath: A });
+    parkVisibleUiRequests(WS, A);
+    expect(useUiPromptStore.getState().byWorkspace[WS]?.request.id).toBe('b1');
+    expect(useUiPromptStore.getState().waiting[WS]).toBeUndefined();
+
+    useUiPromptStore.getState().clear(WS, 'b1');
+    restoreStashedUiRequests(WS, A);
+    expect(useUiPromptStore.getState().byWorkspace[WS]?.request.id).toBe('a1');
+    expect(useUiPromptStore.getState().waiting[WS]?.map((i) => i.request.id)).toEqual(['a2']);
+  });
+
+  it('父会话这一轮结束时，子代理经它发来的审批不丢（它有自己的倒计时）', () => {
+    const subagents = [{ agentId: 'sa-1', label: 'fix' }];
+    stashUiPrompt(B, { workspace: WS, request: confirm('own') });
+    stashUiPrompt(B, { workspace: WS, request: { id: 'child', method: 'select', options: ['拒绝'], subagents } as never });
+    dropStashedUiRequests(B);
+    restoreStashedUiRequests(WS, B);
+    expect(useUiPromptStore.getState().byWorkspace[WS]?.request.id).toBe('child');
+    expect(useUiPromptStore.getState().waiting[WS]).toBeUndefined();
+  });
+
+  it('会话进程退出时宿主已经不在，子代理的审批也一起丢掉', () => {
+    const subagents = [{ agentId: 'sa-1', label: 'fix' }];
+    stashUiPrompt(B, { workspace: WS, request: { id: 'child', method: 'select', options: ['拒绝'], subagents } as never });
+    dropStashedUiRequests(B, { hostGone: true });
+    expect(hasStashedUiRequests(B)).toBe(false);
+  });
+
+  it('宿主收回（dismiss）的请求从画面、队列和后台暂存里都摘掉', () => {
+    useUiPromptStore.getState().setRequest({ workspace: WS, request: confirm('v1'), sessionPath: A });
+    useUiPromptStore.getState().setRequest({ workspace: WS, request: confirm('v2'), sessionPath: A });
+    stashUiPrompt(B, { workspace: WS, request: confirm('s1') });
+
+    dismissUiRequest('v1');
+    dismissUiRequest('s1');
+    expect(useUiPromptStore.getState().byWorkspace[WS]?.request.id).toBe('v2');
+    expect(hasStashedUiRequests(B)).toBe(false);
   });
 
   it('已回答（已从画面清掉）的请求切走再切回不会复活', () => {

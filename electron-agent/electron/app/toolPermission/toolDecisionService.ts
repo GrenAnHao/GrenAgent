@@ -7,9 +7,12 @@ import { EFFECT_RANK } from './effectRank';
 import type { ToolRuleStore } from './ruleStore';
 import type { ToolCallFacts, ToolDecision, ToolEffect, ToolRule, ToolRuleInput } from './types';
 
-/** goal / subagent 没有交互 UI，ask 只能攒进队列等人处理。 */
+/**
+ * goal / subagent 没有交互 UI，ask 只能攒进队列等人处理。
+ * 例外：子代理能把审批交给父会话的界面（approvalRoute），由 sidecar 当场问人并回填结果，不进队列。
+ */
 function isHeadless(call: ToolCallFacts): boolean {
-  return call.origin !== 'main';
+  return call.origin !== 'main' && !(call.origin === 'subagent' && call.approvalRoute === true);
 }
 
 export class ToolDecisionService {
@@ -54,8 +57,9 @@ export class ToolDecisionService {
       resolution = 'rule';
     }
 
-    // 子级没有交互 UI，也没有事后放行重跑的机制：ask 钉死为 deny，审计仍留 auto 行。
-    if (decision === 'ask' && call.origin === 'subagent') {
+    // 子级问不到人（没有审批路由，或设置里关了转发），也没有事后放行重跑的机制：
+    // ask 钉死为 deny，审计仍留 auto 行。能经父会话问人的照常返回 ask。
+    if (decision === 'ask' && call.origin === 'subagent' && call.approvalRoute !== true) {
       decision = 'deny';
       ruleId = SUBAGENT_ASK_PINNED_RULE_ID;
       resolution = 'auto';

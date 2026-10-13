@@ -12,7 +12,7 @@ function startJob(over: { owner?: string; cancel?: (reason?: string) => void; ou
   const d = deferred<JobOutcome>();
   const cancel = over.cancel ?? vi.fn();
   const id = jobs.start({
-    kind: "subagent",
+    kind: "bash",
     label: "do x",
     owner: over.owner ?? "s1",
     workspace: "/ws",
@@ -45,12 +45,12 @@ beforeEach(() => {
 
 describe("JobsService", () => {
   it("ids are <kind>-N and increment", () => {
-    expect(startJob().id).toBe("subagent-1");
-    expect(startJob().id).toBe("subagent-2");
+    expect(startJob().id).toBe("bash-1");
+    expect(startJob().id).toBe("bash-2");
   });
 
   it("run() throwing registers nothing and rethrows", () => {
-    expect(() => jobs.start({ kind: "subagent", label: "x", owner: "s1", workspace: "/ws", run: () => { throw new Error("boom"); } })).toThrow("boom");
+    expect(() => jobs.start({ kind: "bash", label: "x", owner: "s1", workspace: "/ws", run: () => { throw new Error("boom"); } })).toThrow("boom");
     expect(jobs.list("s1")).toEqual([]);
   });
 
@@ -64,21 +64,19 @@ describe("JobsService", () => {
   });
 
   it("unknown id throws NOT_FOUND", async () => {
-    await expect(jobs.read("subagent-99", "s1")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(jobs.read("bash-99", "s1")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("final-output job: running → empty; wait times out leaving the job alive; settled → output + reported", async () => {
+  it("job without output: running → empty; wait times out leaving the job alive; terminal read marks reported", async () => {
     const { id, done } = startJob();
     expect(await jobs.read(id, "s1")).toMatchObject({ status: "running", text: "" });
     expect(await jobs.read(id, "s1", { wait: true, timeoutMs: 10 })).toMatchObject({ status: "running", text: "" });
     expect(jobs.hasLive("s1")).toBe(true);
-    done.resolve({ status: "completed", output: "answer" });
+    done.resolve({ status: "completed" });
     const r = await jobs.read(id, "s1", { wait: true, timeoutMs: 1000 });
-    expect(r).toMatchObject({ status: "completed", text: "answer" });
+    expect(r).toMatchObject({ status: "completed", text: "" });
     expect(jobs.snapshot(id)?.reported).toBe(true);
     expect(jobs.hasLive("s1")).toBe(false);
-    // 结果只在结算后第一次读取带出一次。
-    expect((await jobs.read(id, "s1")).text).toBe("");
   });
 
   it("stream job: the pump copies the source into the ring; reads consume, readAt does not", async () => {
@@ -86,7 +84,6 @@ describe("JobsService", () => {
     const { id, done } = startJob({ output: [src.source] });
     src.write("line-1\n");
     await vi.waitFor(() => expect(jobs.snapshot(id)?.ring.total).toBe(7));
-    expect(jobs.snapshot(id)?.stream).toBe(true);
     expect(await jobs.read(id, "s1")).toMatchObject({ status: "running", text: "line-1\n" });
     expect((await jobs.read(id, "s1")).text).toBe("");
     src.write("line-2\n");
@@ -143,17 +140,17 @@ describe("JobsService", () => {
   });
 
   it("rejected done becomes failed", async () => {
-    const id = jobs.start({ kind: "subagent", label: "x", owner: "s1", workspace: "/ws", run: () => ({ cancel: () => {}, done: Promise.reject(new Error("bad")) }) });
+    const id = jobs.start({ kind: "bash", label: "x", owner: "s1", workspace: "/ws", run: () => ({ cancel: () => {}, done: Promise.reject(new Error("bad")) }) });
     const r = await jobs.read(id, "s1", { wait: true, timeoutMs: 100 });
     expect(r.status).toBe("failed");
-    expect(jobs.snapshot(id)?.error).toBe("bad");
+    expect(jobs.snapshot(id)?.detail).toBe("bad");
   });
 
   it("onJobDone reports the cause and whether a live wait was released (awaited)", async () => {
     const seen: string[] = [];
     jobs.onJobDone((s, info) => seen.push(`${s.id}:${s.status}:${info.cause}:${info.awaited}`));
     const a = startJob();
-    a.done.resolve({ status: "completed", output: "o" });
+    a.done.resolve({ status: "completed" });
     await vi.waitFor(() => expect(seen).toEqual([`${a.id}:completed:producer:false`]));
 
     const b = startJob();

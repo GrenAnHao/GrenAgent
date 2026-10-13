@@ -3,8 +3,8 @@
 // disposing the workspace must close them or Windows cannot unlink registry.db.
 
 import { join } from "node:path";
-import { jobs } from "../jobs/service.js";
-import { disposeActivation, getActivation, getActivationBySessionPath } from "./activation.js";
+import { disposeActivation, disposeResident, disposeResidentsWhere, getActivation, getActivationBySessionPath } from "./activation.js";
+import { silenceChild } from "./child-runs.js";
 import { SubAgentRegistry } from "./registry.js";
 import { cancelSubAgent, installCancelWatcher, uninstallCancelWatcher } from "./cancel.js";
 import { killSubagentsFor } from "./subagentProcessRegistry.js";
@@ -12,7 +12,7 @@ import { killSubagentsFor } from "./subagentProcessRegistry.js";
 const registries = new Map<string, SubAgentRegistry>();
 export const inflight = new Map<string, AbortController>();
 
-/** 中止后等 one-shot 跑完的上限；超时也继续删（尽力而为）。 */
+/** 中止后等后台一次性运行跑完的上限；超时也继续删（尽力而为）。 */
 const INFLIGHT_SETTLE_MS = 5000;
 const INFLIGHT_POLL_MS = 20;
 
@@ -52,6 +52,7 @@ export function forEachRegistry(fn: (reg: SubAgentRegistry) => void): void {
 
 export function releaseSubagentControlPlane(cwd: string): { released: string[] } {
   killSubagentsFor(cwd);
+  disposeResidentsWhere((r) => normalizeCwd(r.workspace) === normalizeCwd(cwd));
   const want = normalizeCwd(cwd);
   const released: string[] = [];
   for (const key of [...registries.keys()]) {
@@ -71,7 +72,7 @@ export function releaseSubagentControlPlane(cwd: string): { released: string[] }
 
 /**
  * 删子会话 JSONL 前的收口（父会话被删时级联调用）。驻留 Activation 直接拆、不给即将删除的父会话发结算；
- * 在途 one-shot 先把 job 标记已报告（否则结算 notice 会唤醒正在删除的父会话）再中止，并等它跑完——
+ * 在途的后台一次性运行先静默（否则结算 notice 会唤醒正在删除的父会话）再中止，并等它跑完——
  * SessionManager 逐条 append，跑完前删文件会被尾部 append 重建成无头文件。
  * 必须在 releaseSubagentControlPlane 之前调用：registry 关掉后，子级收尾的 finish 会把 registry.db 懒重建回去。
  * 返回 quiescent=false 表示等超时、子级可能还在写；调用方应保留文件（隐藏）而不是删它。
@@ -83,8 +84,10 @@ export async function releaseChildForDelete(
   opts: { settleTimeoutMs?: number } = {},
 ): Promise<{ quiescent: boolean }> {
   const registry = findOpenRegistry(cwd);
-  const row = agentId ? registry?.get(agentId) : undefined;
-  if (row?.jobId) jobs.markReported(row.jobId);
+  if (agentId) {
+    silenceChild(agentId);
+    disposeResident(agentId);
+  }
 
   const act = (agentId ? getActivation(agentId) : undefined) ?? getActivationBySessionPath(sessionPath);
   if (act) {

@@ -10,6 +10,7 @@ import {
 import { manifestExtensions } from "../../extensions/index.js";
 import { getConfig } from "../../extensions/_shared/runtime-config.js";
 import { installToolRefreshBatching } from "../../extensions/_shared/tool-refresh-batch.js";
+import { attachSessionCwd } from "../../extensions/_shared/session-cwd.js";
 import { filterExtensionsByProfile, filterManagedExtensions, type ExtensionProfile } from "./extension-profile.js";
 
 function bareSkillName(name: string): string {
@@ -94,6 +95,9 @@ export function makeGrenRuntimeFactory(options: GrenRuntimeOptions = {}): Create
     const created = await deps.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent });
     // 绑定扩展（session_start 里 MCP 首次投影一批工具）之前装上，批量注册时工具表只刷新一次。
     installToolRefreshBatching(created.session);
+    // 服务仍按原始目录建：runtime.cwd 决定之后 newSession / fork 的会话头，必须是原始目录。
+    // 会话切过工作目录的，由 attachSessionCwd 按会话里的记录原地切回去。
+    attachSessionCwd(created.session);
     return {
       ...created,
       services,

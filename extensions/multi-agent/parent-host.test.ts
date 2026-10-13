@@ -92,12 +92,30 @@ describe("parent-host", () => {
     expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: false });
   });
 
-  it("missing host is a no-op", () => {
+  it("missing host is a no-op and reports false so the caller can fall back", () => {
     __resetParentHostsForTest();
-    expect(() => sendSettlementToParent("/nope", "A", formatSettlementNotice({
+    expect(sendSettlementToParent("/nope", "A", formatSettlementNotice({
       childId: "sa-1",
       stopReason: "error",
       output: "",
-    }))).not.toThrow();
+    }))).toBe(false);
+  });
+
+  it("reports true when a host took the notice", () => {
+    __resetParentHostsForTest();
+    registerParentSessionHost({
+      sessionId: "p1",
+      sessionPath: "/ws/a.jsonl",
+      workspace: "A",
+      isBusy: () => false,
+      isDraining: () => false,
+      sendMessage: vi.fn(),
+      prompt: vi.fn(),
+    });
+    expect(sendSettlementToParent("/ws/a.jsonl", "A", formatSettlementNotice({
+      childId: "sa-1",
+      stopReason: "completed",
+      output: "ok",
+    }))).toBe(true);
   });
 });

@@ -17,8 +17,6 @@ export interface CapabilityProfile {
   mcp?: boolean | string[];
   /** Allow this sub-agent to itself spawn sub-agents. Reserved (P3 enforces). */
   spawn?: boolean;
-  /** Isolation tier: process（默认）/ worktree（隔离 git worktree，返回 diff）。 */
-  isolation?: "process" | "worktree";
   /** Model: provider/id, or alias `cheap` / `strong` resolved via env. */
   model?: string;
   limits?: { timeoutMs?: number; maxConcurrency?: number; tokenBudget?: number };
@@ -28,20 +26,19 @@ export interface CapabilityProfile {
 export type ProfileInput = string | (CapabilityProfile & { extends?: string });
 
 export const PRESETS: Record<string, CapabilityProfile> = {
-  default: { name: "default", fs: "workspace", net: true, mcp: false, spawn: false, isolation: "process" },
-  explore: { name: "explore", fs: "readonly", net: true, mcp: false, spawn: false, isolation: "process", model: "cheap" },
+  default: { name: "default", fs: "workspace", net: true, mcp: false, spawn: false },
+  explore: { name: "explore", fs: "readonly", net: true, mcp: false, spawn: false, model: "cheap" },
   planner: {
     name: "planner",
     fs: { writeAllow: ["plans/", "docs/"] },
     net: true,
     mcp: false,
     spawn: false,
-    isolation: "process",
     model: "strong",
   },
-  // executor writes inside an isolated git worktree (P2); its diff is returned for review.
-  executor: { name: "executor", fs: "workspace", net: false, mcp: false, spawn: false, isolation: "worktree", model: "cheap" },
-  reviewer: { name: "reviewer", fs: "readonly", net: false, mcp: false, spawn: false, isolation: "process", model: "strong" },
+  // executor（委派时自动建 worktree）已删：worktree 改为显式工具 create_worktree，委派本身不再隐含隔离。
+  // 旧调用里的 profile: "executor" 按未知名回退到 default。
+  reviewer: { name: "reviewer", fs: "readonly", net: false, mcp: false, spawn: false, model: "strong" },
 };
 
 function mergeProfile(base: CapabilityProfile, over: CapabilityProfile): CapabilityProfile {

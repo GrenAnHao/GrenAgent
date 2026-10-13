@@ -583,6 +583,13 @@ interface UnitResult {
   stopReason?: string;
   model?: string;
   thinkingLevel?: string;
+  /** 前台 run 等待时用户发话，这一项转到后台继续跑（extensions/multi-agent/detach.ts）。 */
+  detached?: boolean;
+}
+
+/** 前台 run 转到后台、工具已经返回时还在跑的那一项：状态改跟注册表。 */
+export function isDetachedRow(row: { status?: string; detached?: boolean } | undefined): boolean {
+  return row?.detached === true && row.status === 'running';
 }
 
 interface UnitWork {
@@ -754,7 +761,8 @@ export function expandSubAgents(
       else st = 'starting';
     } else if (results) {
       const r = results[i];
-      st = r ? (r.ok ? 'done' : 'error') : 'pending';
+      // 转到后台的那一项工具返回时还在跑：先画成运行中，组卡片再按注册表更新。
+      st = r ? (isDetachedRow(r) ? 'running' : r.ok ? 'done' : 'error') : 'pending';
     } else {
       // 整条调用在产出 results 前就失败（如旧数据/抛错）：回退到调用级状态。
       st = status;
@@ -838,6 +846,20 @@ export function subAgentUnitView(
     return { task, result: undefined, status: 'running' };
   }
   const r = resultsOf(result)?.[subIndex];
+  if (r && isDetachedRow(r)) {
+    // 转到后台的那一项：形状照后台 spawn 的回执（status: running、没有 transcript），右坞按注册表跟它。
+    return {
+      task,
+      result: {
+        details: {
+          ...(r.agentId ? { agentId: r.agentId } : {}),
+          ...(r.sessionPath ? { sessionPath: r.sessionPath } : {}),
+          status: 'running',
+        },
+      },
+      status: 'done',
+    };
+  }
   if (r) return terminalUnitView(task, r, Boolean(r.ok));
   return {
     task,

@@ -1,0 +1,5 @@
+# npx tsc -p electron-agent/tsconfig.node.json --noEmit（覆盖 ../extensions 与 ../cli/src）
+第 2.5 阶段：155 条 error TS
+第 3 阶段：155 条 error TS
+去掉行列号后逐条 diff：无差异
+过程中出现过的新报错（删掉的 canUseEmbeddedSubagent / spawnPiAgent 在测试里的引用、manager 新签名、两处测试类型）都已修正

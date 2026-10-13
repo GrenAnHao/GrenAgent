@@ -107,7 +107,7 @@ beforeEach(() => {
   abortEnhancePrompt.mockReset();
   abortEnhancePrompt.mockResolvedValue(undefined);
   useInlineQuestionStore.setState({ byWorkspace: {} });
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   useGoalStore.setState({ bySession: {}, goal: undefined });
   useEnhancePromptStore.setState({ byWorkspace: {} });
 });

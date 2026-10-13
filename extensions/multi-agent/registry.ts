@@ -1,13 +1,13 @@
-// SQLite-backed registry of background sub-agents, so the main agent can later
-// query (`status`), block on (`wait`), or stop (`cancel`) a sub-agent it spawned
-// in the background — a pull model that needs no push notifications.
+// SQLite-backed registry of sub-agents, so the main agent and the UI can later
+// query (`status`), list, or stop (`cancel`) a sub-agent. Background results are
+// pushed to the parent as subagent-settled notices; this table is the record.
 // Project-scoped at <cwd>/.pi/subagents/registry.db (mirrors memory/checkpoint).
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "../_shared/sqlite.js";
-import { isContinuableLeftover } from "./reap-continuable.js";
+import { isContinuableLeftover } from "./subagent-meta.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
 
 export type SubAgentStatus = "running" | "done" | "error" | "cancelled";
@@ -38,7 +38,7 @@ export interface SubAgentRow {
   parentId: string | null;
   /** 委派深度：顶层 0。 */
   depth: number;
-  /** jobs 扩展分配的 job id（可续跑/托盘关联）。 */
+  /** 旧版后台 one-shot 用过的 jobs id；子代理已不走 jobs，只保留列给旧库读取。 */
   jobId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -177,10 +177,6 @@ export class SubAgentRegistry {
     const trimmed = level.trim();
     if (!trimmed) return;
     this.database.prepare("UPDATE subagents SET thinkingLevel=? WHERE id=?").run(trimmed, id);
-  }
-
-  setJobId(id: string, jobId: string): void {
-    this.database.prepare("UPDATE subagents SET jobId=?, updatedAt=? WHERE id=?").run(jobId, Date.now(), id);
   }
 
   finish(

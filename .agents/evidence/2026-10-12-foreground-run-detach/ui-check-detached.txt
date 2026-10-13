@@ -1,0 +1,38 @@
+
+> electron-agent@0.1.0 ui:check
+> node ui-harness/check.mjs subagent-detached
+
+构建：1 个源文件有改动（src/features/chat/SubAgentGroupInline.tsx）
+场景已构建（生产模式，3.6s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ subagent-detached
+  PASS 卡片渲染出来
+  PASS 并行组渲染出来
+  PASS 单任务：画成运行中（转圈）
+  PASS 并行：已完成的那项是已完成
+  PASS 并行：转后台的那项是运行中，不是出错
+  PASS 并行：转后台的那项在处理中
+  PASS 注册表里确实没有的那项：画「已中断」
+  PASS 组头写「3 个在后台运行」（已中断的不算）
+  PASS 组头没有失败计数（已中断的不算失败）
+  PASS 第一次读注册表时还没有的那项：不当成丢失，仍在处理
+  PASS 还没 agentId 的那项：在处理中
+  PASS 下一次轮询读到晚到的那项：仍在处理
+  PASS 晚到的那项从挂载起一次也没画成已中断
+  INFO 截图 detached-running  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-detached-detached-running.png
+  PASS 单任务：轮询到结束后不再转圈
+  PASS 并行：转后台的那项变成已完成
+  PASS 并行：晚到的那项变成已完成
+  PASS 组头写「1 个在后台运行」（只剩排队的那项）
+  PASS 排队的那项在注册表里起来后仍在处理
+  PASS 排队的那项按任务文字跟上注册表，变成已完成
+  PASS 组头的后台计数消失
+  PASS 组头仍没有失败计数
+  PASS 已中断的那项仍是已中断
+  INFO 截图 detached-finished  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-detached-detached-finished.png
+  PASS 都结束后不再轮询注册表
+  ── 23 passed, 0 failed
+
+通过：subagent-detached（14.4s）。只跑了 1/16 个场景，其余 15 个没指定，未运行

@@ -1,6 +1,7 @@
 // tts: synthesize speech from text via an OpenAI-compatible audio API.
 // Saves an audio file under <cwd>/.pi/audio/ and returns its path.
 
+import { projectCwd } from "../_shared/session-cwd.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -36,7 +37,7 @@ export default function (pi: ExtensionAPI) {
       const cfg = params.voice ? { ...config, voice: params.voice } : config;
       const bytes = await synthesizeSpeech(text, cfg, signal ?? undefined, instruct);
 
-      const dir = join(ctx.cwd, ".pi", "audio");
+      const dir = join(projectCwd(ctx), ".pi", "audio");
       mkdirSync(dir, { recursive: true });
       const path = join(dir, `speech_${Date.now()}.${config.format}`);
       writeFileSync(path, bytes);

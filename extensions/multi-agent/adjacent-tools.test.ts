@@ -8,6 +8,8 @@ const activation = vi.hoisted(() => ({
   interruptChild: vi.fn(),
   coldResumeAndDeliver: vi.fn(),
   authorizeParent: vi.fn(),
+  deliverWithoutWaking: vi.fn(),
+  activationHasLiveWork: vi.fn(),
 }));
 
 const parentHost = vi.hoisted(() => ({
@@ -28,6 +30,14 @@ vi.mock("./activation.js", () => ({
   interruptChild: (...args: unknown[]) => activation.interruptChild(...args),
   coldResumeAndDeliver: (...args: unknown[]) => activation.coldResumeAndDeliver(...args),
   authorizeParent: (...args: unknown[]) => activation.authorizeParent(...args),
+  deliverWithoutWaking: (...args: unknown[]) => activation.deliverWithoutWaking(...args),
+  activationHasLiveWork: (...args: unknown[]) => activation.activationHasLiveWork(...args),
+  agentMessage: (from: string, message: string) => ({
+    customType: "agent-message",
+    content: `Agent ${from} sent a message without waking you: ${message}`,
+    display: true,
+    details: { from },
+  }),
 }));
 
 vi.mock("./parent-host.js", () => ({
@@ -94,6 +104,7 @@ function childAct(over: Record<string, unknown> = {}) {
     childId: "sa-1",
     parentSessionId: "p1",
     parentSessionPath: "/ws/parent.jsonl",
+    sessionPath: "/ws/child.jsonl",
     workspace: "/ws",
     session: {
       isStreaming: false,
@@ -114,6 +125,10 @@ describe("adjacent-tools", () => {
     activation.interruptChild.mockReset();
     activation.coldResumeAndDeliver.mockReset();
     activation.authorizeParent.mockReset();
+    activation.deliverWithoutWaking.mockReset();
+    activation.deliverWithoutWaking.mockResolvedValue("appended");
+    activation.activationHasLiveWork.mockReset();
+    activation.activationHasLiveWork.mockReturnValue(false);
     parentHost.lookupParentHost.mockReset();
     control.getRegistry.mockReset();
     sdk.open.mockReset();
@@ -127,7 +142,7 @@ describe("adjacent-tools", () => {
 
   it("continuableReturnGuidance locks the parent return sentence", () => {
     expect(continuableReturnGuidance("p1")).toBe(
-      'Your parent agent id is "p1". Before you finish, send your result to that agent with send_message({ agent_id: "p1", message: "<self-contained result>" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn.',
+      'Your parent agent id is "p1". Before you finish, send your result to that agent with send_message({ agent_id: "p1", message: "<self-contained result>", wake: false }); you settle right after and the settlement notice wakes the parent, so waking it for the final result would make it run twice (if you still have child agents or background jobs running, the message wakes the parent anyway). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages with the default wake when a finding changes what the parent should do next; sending a message does not end your turn.',
     );
     expect(continuableReturnGuidance('foo"bar')).toContain(JSON.stringify('foo"bar'));
   });
@@ -198,6 +213,100 @@ describe("adjacent-tools", () => {
     await send("t3b", { agent_id: "p1", message: "hi" }, null, null, ctx("sa-1"));
     expect(prompt).toHaveBeenCalledWith("Agent sa-1 sent a message: hi", "followUp");
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("wake: false 父→子（活着的 Activation）：不唤醒地投递，不走 deliverToChild", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? childAct() : undefined));
+    const r = await send("w1", { agent_id: "sa-1", message: "fyi", wake: false }, null, null, ctx("p1"));
+    expect(activation.deliverToChild).not.toHaveBeenCalled();
+    expect(activation.deliverWithoutWaking).toHaveBeenCalledWith("sa-1", {
+      sessionPath: "/ws/child.jsonl",
+      message: expect.objectContaining({ customType: "agent-message", details: { from: "p1" } }),
+    });
+    expect(r.isError).toBeFalsy();
+    expect(r.content[0]?.text).toContain("without waking it");
+    expect(r.details).toEqual({ woken: false, delivery: "appended" });
+
+    activation.deliverWithoutWaking.mockResolvedValueOnce("next-step");
+    const running = await send("w2", { agent_id: "sa-1", message: "fyi", wake: false }, null, null, ctx("p1"));
+    expect(running.content[0]?.text).toContain("it is running and will see it at its next step");
+    expect(running.details).toEqual({ woken: false, delivery: "next-step" });
+  });
+
+  it("wake: false 父→已卸载 / 驻留的子：带上会话路径投递，不冷恢复", async () => {
+    const { send } = loadAdjacent();
+    control.getRegistry.mockReturnValue({
+      get: (id: string) => (id === "sa-1" ? { sessionPath: "/ws/sa-1.jsonl" } : undefined),
+    });
+    stubMeta({ "/ws/sa-1.jsonl": "p1" });
+    const r = await send("w3", { agent_id: "sa-1", message: "fyi", wake: false }, null, null, ctx("p1"));
+    expect(activation.coldResumeAndDeliver).not.toHaveBeenCalled();
+    expect(activation.deliverWithoutWaking).toHaveBeenCalledWith("sa-1", expect.objectContaining({ sessionPath: "/ws/sa-1.jsonl" }));
+    expect(r.details).toEqual({ woken: false, delivery: "appended" });
+  });
+
+  it("wake: false 子→父：不管父会话在不在跑都交给它 triggerTurn: false（在跑就排到下一步之前），不开轮", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? childAct() : undefined));
+    const prompt = vi.fn();
+    const sendMessage = vi.fn();
+    let busy = false;
+    parentHost.lookupParentHost.mockReturnValue({
+      sessionId: "p1",
+      sessionPath: "/ws/parent.jsonl",
+      workspace: "/ws",
+      isBusy: () => busy,
+      isDraining: () => false,
+      sendMessage,
+      prompt,
+    });
+
+    const idle = await send("w4", { agent_id: "p1", message: "result", wake: false }, null, null, ctx("sa-1"));
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "agent-message", details: { from: "sa-1" } }),
+      { triggerTurn: false },
+    );
+    expect(prompt).not.toHaveBeenCalled();
+    expect(idle.details).toEqual({ woken: false, delivery: "appended" });
+
+    busy = true;
+    sendMessage.mockClear();
+    const running = await send("w5", { agent_id: "p1", message: "result", wake: false }, null, null, ctx("sa-1"));
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ customType: "agent-message" }), { triggerTurn: false });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(running.details).toEqual({ woken: false, delivery: "next-step" });
+  });
+
+  it("wake: false 子→父，但子代理还有没结束的活：照常唤醒父会话并说明原因", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? childAct() : undefined));
+    activation.activationHasLiveWork.mockReturnValue(true);
+    const prompt = vi.fn();
+    const sendMessage = vi.fn();
+    parentHost.lookupParentHost.mockReturnValue({
+      sessionId: "p1",
+      sessionPath: "/ws/parent.jsonl",
+      workspace: "/ws",
+      isBusy: () => false,
+      isDraining: () => false,
+      sendMessage,
+      prompt,
+    });
+    const r = await send("w7", { agent_id: "p1", message: "result", wake: false }, null, null, ctx("sa-1"));
+    expect(prompt).toHaveBeenCalledWith("Agent sa-1 sent a message: result", "followUp");
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(r.details).toEqual({ woken: true, reason: "sender-has-live-work" });
+    expect(r.content[0]?.text).toContain("you will not settle right away");
+  });
+
+  it("wake: false 投递失败照常报未送达", async () => {
+    const { send } = loadAdjacent();
+    activation.getActivation.mockImplementation((id: string) => (id === "sa-1" ? childAct() : undefined));
+    activation.deliverWithoutWaking.mockRejectedValueOnce(new SubagentError("closing", "ACTIVATION_CLOSING"));
+    const r = await send("w6", { agent_id: "sa-1", message: "fyi", wake: false }, null, null, ctx("p1"));
+    expect(r.isError).toBe(true);
+    expect(r.details?.code).toBe("ACTIVATION_CLOSING");
   });
 
   it("子无 Activation（已 dispose）→父 → PARENT_UNAVAILABLE / 未送达", async () => {

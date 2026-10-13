@@ -23,7 +23,7 @@ import autoTitle, { __resetAutoTitleForTest, subscribeSessionTitleWritten } from
 type Handler = (event: unknown, ctx: unknown) => Promise<void> | void;
 
 function setup(
-  entries: Array<{ type?: string; name?: unknown }> = [],
+  entries: Array<{ type?: string; name?: unknown; customType?: string; data?: unknown }> = [],
   options: { sessionFile?: string } = {},
 ) {
   const handlers = new Map<string, Handler[]>();
@@ -105,6 +105,18 @@ describe("auto-title", () => {
   it("PI_IS_SUBAGENT=1 时跳过", async () => {
     process.env.PI_IS_SUBAGENT = "1";
     const { agentEnd, ctx, event, setSessionName } = setup();
+
+    await agentEnd(event, ctx);
+
+    expect(resolveSummaryModel).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(setSessionName).not.toHaveBeenCalled();
+  });
+
+  it("进程内子代理（会话里有 subagent_meta，没有 PI_IS_SUBAGENT）也跳过", async () => {
+    const { agentEnd, ctx, event, setSessionName } = setup([
+      { type: "custom", customType: "subagent_meta", data: { origin: "subagent", agentId: "sa-1" } },
+    ]);
 
     await agentEnd(event, ctx);
 

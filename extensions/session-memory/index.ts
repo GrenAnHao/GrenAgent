@@ -1,6 +1,7 @@
 // session-memory: maintain a structured working-state markdown for the session.
 // 周期写入看对话末尾；压缩时读 Pi 准备好的待丢弃消息做唯一一次抽取，结果同时写状态文件、作压缩摘要。
 // 状态文件第一行是分支锚点，不属于当前分支时不用。
+import { projectCwd } from "../_shared/session-cwd.js";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -45,7 +46,7 @@ export default function (pi: ExtensionAPI) {
     return (system, user) => askLlm(model, system, user, signal);
   };
 
-  const pathFor = (ctx: ExtensionContext) => statePath(ctx.cwd, ctx.sessionManager.getSessionId());
+  const pathFor = (ctx: ExtensionContext) => statePath(projectCwd(ctx), ctx.sessionManager.getSessionId());
   const branchOf = (ctx: ExtensionContext) => (ctx.sessionManager.getBranch?.() ?? []) as BranchEntry[];
 
   /** 周期写入：对话末尾 12000 字符 + 属于当前分支的上一份状态。结果没变就不重写。 */

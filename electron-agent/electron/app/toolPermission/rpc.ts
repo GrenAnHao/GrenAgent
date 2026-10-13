@@ -12,7 +12,7 @@ const PRESETS: readonly ApprovalPreset[] = ['readonly', 'ask', 'auto', 'workspac
 const EFFECTS: readonly ToolEffect[] = ['allow', 'deny', 'ask'];
 const SCOPES: readonly RuleScope[] = ['session', 'workspace', 'global'];
 const MATCHERS: readonly MatcherKind[] = ['any', 'command_prefix', 'path_glob', 'mcp_server'];
-const RESOLUTIONS: readonly AuditResolution[] = ['auto', 'rule', 'user_allow', 'user_deny', 'queued', 'aborted'];
+const RESOLUTIONS: readonly AuditResolution[] = ['auto', 'rule', 'user_allow', 'user_deny', 'queued', 'aborted', 'timeout'];
 
 const FLAG_KEYS: readonly (keyof ToolCallFlags)[] = [
   'dangerousCommand', 'mutatingCommand', 'protectedPath', 'outsideWorkspace', 'network', 'mcp', 'codeExec', 'write',
@@ -65,6 +65,7 @@ function readCall(value: unknown): ToolCallFacts {
     ...(optionalString(value.command, 'command') === undefined ? {} : { command: value.command as string }),
     ...(optionalString(value.path, 'path') === undefined ? {} : { path: value.path as string }),
     ...(isRecord(value.rawArgs) ? { rawArgs: value.rawArgs } : {}),
+    ...(value.approvalRoute === true ? { approvalRoute: true } : {}),
   };
 }
 

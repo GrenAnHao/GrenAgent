@@ -23,6 +23,7 @@ import mcp, { pluginManifest as mcpManifest } from "./mcp/index.js";
 import mcpPolicy from "./mcp-policy/index.js";
 import jobsExtension from "./jobs/index.js";
 import multiAgent from "./multi-agent/index.js";
+import workingDirectory from "./working-directory/index.js";
 import lsp from "./lsp/index.js";
 import agentMode from "./agent-mode/index.js";
 import debugTools from "./debug-tools/index.js";
@@ -72,6 +73,7 @@ export {
   imageGen,  diagnostics,
   jobsExtension,
   multiAgent,
+  workingDirectory,
   lsp,
   astTools,
   github,
@@ -113,6 +115,7 @@ export const allExtensions = [
   imageGen,  diagnostics,
   jobsExtension,
   multiAgent,
+  workingDirectory,
   lsp,
   astTools,
   github,
@@ -158,6 +161,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "diagnostics", factory: diagnostics },
   { name: "jobs", factory: jobsExtension },
   { name: "multi-agent", factory: multiAgent },
+  { name: "working-directory", factory: workingDirectory },
   { name: "lsp", factory: lsp },
   { name: "ast-tools", factory: astTools },
   { name: "github", factory: github },

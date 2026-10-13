@@ -1,0 +1,5 @@
+# npx tsc -p electron-agent/tsconfig.node.json --noEmit
+第 3 阶段：155 条
+第 4 阶段：154 条
+差异：只少了一条：activation.ts 冷恢复路径把 installActivation 返回的 Activation 传给 poke（要 ActivationRecord），本阶段改成按 id 取记录后消失
+新增 0 条

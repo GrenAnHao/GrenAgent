@@ -571,3 +571,35 @@ describe('finalizeSubAgentMessages', () => {
     expect(m.kind === 'tool' && m.status).toBe('done');
   });
 });
+
+describe('a foreground run moved to the background (detached rows)', () => {
+  const args = { tasks: ['fast', 'slow'] };
+  const result = {
+    content: [{ type: 'text', text: 'moved' }],
+    details: {
+      mode: 'parallel',
+      detached: true,
+      results: [
+        { task: 'fast', ok: true, output: 'fast result', agentId: 'sa-fast' },
+        { task: 'slow', status: 'running', detached: true, agentId: 'sa-slow', sessionPath: '/s/slow.jsonl' },
+      ],
+    },
+  };
+
+  it('the tool has returned, but the moved row still counts as running', () => {
+    const units = expandSubAgents('m1', args, result, 'done');
+    expect(units.map((u) => u.status)).toEqual(['done', 'running']);
+    expect(units[1]?.agentId).toBe('sa-slow');
+  });
+
+  it('the dock follows the moved row like a background spawn instead of showing it as failed', () => {
+    const view = subAgentUnitView(args, result, 'done', 1);
+    expect(isBackgroundSpawn(view.result)).toBe(true);
+    expect(view.result).toMatchObject({ details: { agentId: 'sa-slow', sessionPath: '/s/slow.jsonl', status: 'running' } });
+    expect(subAgentUnitView(args, result, 'done', 0).status).toBe('done');
+  });
+
+  it('a single moved task is already a background receipt', () => {
+    expect(isBackgroundSpawn({ content: [{ type: 'text', text: 'moved' }], details: { agentId: 'sa-1', status: 'running', detached: true } })).toBe(true);
+  });
+});

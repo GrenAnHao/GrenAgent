@@ -70,16 +70,29 @@ beforeEach(() => {
   mocks.evaluateToolCall.mockResolvedValue({ decision: 'allow', auditId: 'a1' });
 });
 
+/** 能力限制只从会话配置（getConfig）读，不再先读 process.env。 */
+function sessionConfig(values: Record<string, string>): void {
+  mocks.getConfig.mockImplementation((k: unknown) => values[k as string]);
+}
+
 describe('safety tool_call · capability hard limits still come first', () => {
-  it('blocks a denied tool without asking the host', async () => {
+  it('ignores SAFETY_* set only in process.env (session config is the single source)', async () => {
     process.env.SAFETY_DENY_TOOLS = 'bash';
+    process.env.SAFETY_READONLY = '1';
+    const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx());
+    expect(result).toBeUndefined();
+    expect(mocks.evaluateToolCall).toHaveBeenCalled();
+  });
+
+  it('blocks a denied tool without asking the host', async () => {
+    sessionConfig({ SAFETY_DENY_TOOLS: 'bash' });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx());
     expect(result).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
   });
 
   it('blocks a write tool in readonly mode without asking the host', async () => {
-    process.env.SAFETY_READONLY = '1';
+    sessionConfig({ SAFETY_READONLY: '1' });
     const result = await loadToolCall()({ toolName: 'ast_edit', input: { path: 'a.ts' } }, ctx());
     expect(result).toMatchObject({ block: true, terminate: true });
     expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
@@ -93,7 +106,7 @@ describe('safety tool_call · sub-agent refusals do not end the run', () => {
   });
 
   it('readonly mutating bash: blocks, keeps the reason, no terminate', async () => {
-    process.env.SAFETY_READONLY = '1';
+    sessionConfig({ SAFETY_READONLY: '1' });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'echo x > out.txt' } }, ctx({ hasUI: false }));
     expect(result).toMatchObject({ block: true });
     expect(result).not.toHaveProperty('terminate', true);
@@ -102,7 +115,7 @@ describe('safety tool_call · sub-agent refusals do not end the run', () => {
   });
 
   it('capability-denied tool: blocks without terminate', async () => {
-    process.env.SAFETY_DENY_TOOLS = 'bash';
+    sessionConfig({ SAFETY_DENY_TOOLS: 'bash' });
     const result = await loadToolCall()({ toolName: 'bash', input: { command: 'ls' } }, ctx({ hasUI: false }));
     expect(result).toMatchObject({ block: true });
     expect(result).not.toHaveProperty('terminate', true);
@@ -117,7 +130,7 @@ describe('safety tool_call · sub-agent refusals do not end the run', () => {
   });
 
   it('readonly lets read-only git through (merge-base, stash list, > $null)', async () => {
-    process.env.SAFETY_READONLY = '1';
+    sessionConfig({ SAFETY_READONLY: '1' });
     const command = 'git merge-base a b; git stash list | Out-Null; git show HEAD:x.ts > $null; rg foo 2>$null';
     await expect(loadToolCall()({ toolName: 'bash', input: { command } }, ctx({ hasUI: false }))).resolves.toBeUndefined();
   });

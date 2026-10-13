@@ -1,10 +1,14 @@
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
+import { projectCwd } from "../_shared/session-cwd.js";
 import {
+  agentMessage,
   authorizeParent,
   coldResumeAndDeliver,
   deliverToChild,
+  deliverWithoutWaking,
+  activationHasLiveWork,
   getActivation,
   interruptChild,
   type Activation,
@@ -53,10 +57,13 @@ function peekParentSessionId(sessionPath: string): { readable: boolean; parentSe
 
 export function continuableReturnGuidance(parentSessionId: string): string {
   const id = JSON.stringify(parentSessionId);
+  // 最终结果用 wake: false：子代理随后就结算，结算通知会唤醒父会话；这里再唤醒一次，父会话会为同一个结果跑两轮。
   return (
-    `Your parent agent id is ${id}. Before you finish, send your result to that agent with send_message({ agent_id: ${id}, message: "<self-contained result>" }). ` +
+    `Your parent agent id is ${id}. Before you finish, send your result to that agent with send_message({ agent_id: ${id}, message: "<self-contained result>", wake: false }); ` +
+    "you settle right after and the settlement notice wakes the parent, so waking it for the final result would make it run twice " +
+    "(if you still have child agents or background jobs running, the message wakes the parent anyway). " +
     "The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. " +
-    "Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn."
+    "Send earlier messages with the default wake when a finding changes what the parent should do next; sending a message does not end your turn."
   );
 }
 
@@ -81,6 +88,15 @@ function delivered(agentId: string, messageId?: string) {
     content: [{ type: "text" as const, text: `message delivered to agent ${agentId}` }],
     details: messageId ? { messageId } : {},
   };
+}
+
+/** wake: false 的回执：对方在跑就是排到它下一步之前；空闲的只追加，不开轮。 */
+function deliveredQuietly(agentId: string, how: "next-step" | "appended") {
+  const text =
+    how === "next-step"
+      ? `message delivered to agent ${agentId}; it is running and will see it at its next step`
+      : `message delivered to agent ${agentId} without waking it; it will see the message the next time it runs`;
+  return { content: [{ type: "text" as const, text }], details: { woken: false, delivery: how } };
 }
 
 function fail(error: unknown) {
@@ -115,13 +131,15 @@ function registrySessionPath(cwd: string, agentId: string): string | undefined {
 }
 
 async function executeSendMessage(
-  params: { agent_id?: string; message?: string },
+  params: { agent_id?: string; message?: string; wake?: boolean },
   ctx: { cwd: string; sessionManager?: { getSessionId?: () => string } },
 ) {
   try {
     const senderId = senderIdOf(ctx);
     const agentId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
     const message = typeof params.message === "string" ? params.message : "";
+    // 默认唤醒；只有明确传 false 才不唤醒。
+    const wake = params.wake !== false;
     if (!agentId) {
       throw new SubagentError("agent_id is required", "UNAUTHORIZED");
     }
@@ -136,16 +154,29 @@ async function executeSendMessage(
 
     if (targetAct && targetAct.parentSessionId === senderId) {
       authorizeParent(targetAct, callerWorkspace(ctx));
+      if (!wake) {
+        // 带上会话路径：这一刻它可能刚好结算并离开内存，锁里查不到会话时按已卸载追加，而不是误报不能续聊。
+        const how = await deliverWithoutWaking(agentId, {
+          sessionPath: targetAct.sessionPath,
+          message: agentMessage(senderId, message),
+        });
+        return deliveredQuietly(agentId, how);
+      }
       const delivery: Delivery = targetAct.session.isStreaming ? "steer" : "followUp";
       deliverToChild(agentId, text, delivery);
       return delivered(agentId, lastUserMessageId(targetAct.session.messages));
     }
 
     if (!targetAct) {
-      const sessionPath = registrySessionPath(ctx.cwd, agentId);
+      const sessionPath = registrySessionPath(projectCwd(ctx), agentId);
       if (sessionPath) {
         const peek = peekParentSessionId(sessionPath);
         if (peek.readable && peek.parentSessionId === senderId) {
+          if (!wake) {
+            // 驻留池里的追加进会话；已卸载的直接追加到 JSONL，不加载会话。
+            const how = await deliverWithoutWaking(agentId, { sessionPath, message: agentMessage(senderId, message) });
+            return deliveredQuietly(agentId, how);
+          }
           if (senderAct) {
             await coldResumeAndDeliver(agentId, sessionPath, text, "followUp", {
               senderActivationId: senderId,
@@ -171,7 +202,29 @@ async function executeSendMessage(
       if (!host) {
         throw new SubagentError("parent host is not available in this process", "PARENT_UNAVAILABLE");
       }
+      // 自己还有没结束的活（子代理、后台任务）时，这一轮结束后不会马上结算，父会话不会被结算通知叫醒：
+      // 交最终结果时不唤醒，父会话可能一直睡着。这种情况照常唤醒，并在回执里说明。
+      const stillWorking = !wake && activationHasLiveWork(senderId);
+      if (!wake && !stillWorking) {
+        // 父会话在跑还是空闲由持有它的那一侧当场判断：在跑就排到它下一步之前，空闲就只追加、不开轮。
+        const how = host.isBusy() ? "next-step" : "appended";
+        host.sendMessage(agentMessage(senderId, message), { triggerTurn: false });
+        return deliveredQuietly(agentId, how);
+      }
       host.prompt(text, host.isBusy() ? "steer" : "followUp");
+      if (stillWorking) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `message delivered to agent ${agentId} and woke it: you still have child agents or background jobs running, ` +
+                "so you will not settle right away and no settlement notice would wake it",
+            },
+          ],
+          details: { woken: true, reason: "sender-has-live-work" },
+        };
+      }
       return delivered(agentId);
     }
 
@@ -179,7 +232,7 @@ async function executeSendMessage(
       throw new SubagentError("sender is not the direct parent or child of the target", "UNAUTHORIZED");
     }
 
-    const senderPath = registrySessionPath(ctx.cwd, senderId);
+    const senderPath = registrySessionPath(projectCwd(ctx), senderId);
     if (senderPath) {
       const peek = peekParentSessionId(senderPath);
       if (peek.readable && peek.parentSessionId === agentId) {
@@ -243,16 +296,27 @@ export function registerAdjacentTools(pi: ExtensionAPI): void {
     description:
       "Send a message to an adjacent agent: the direct parent or a direct child. " +
       "Siblings, skip-generation relatives, and self are rejected. " +
-      "Only parent-to-child may cold-resume a continuable JSONL session.",
+      "Only parent-to-child may cold-resume a continuable JSONL session. " +
+      "By default an idle recipient starts a turn to handle the message (wake: true). " +
+      "With wake: false the recipient is never woken: a running recipient still sees it at its next step, " +
+      "an idle or unloaded one finds it in its context the next time it runs.",
     promptSnippet: "Send a message to a parent or child agent.",
     promptGuidelines: [
       "Use send_message to talk to your direct parent or a child you spawned.",
       "The recipient does not automatically see your transcript or tool output — include a self-contained message.",
       "Sending a message does not end your turn.",
+      "Use send_message with wake: false for information the recipient does not need to act on right away; it reads it the next time it runs.",
     ],
     parameters: Type.Object({
       agent_id: Type.String({ description: "Target agent id (direct parent or direct child)." }),
       message: Type.String({ description: "Self-contained message body to deliver." }),
+      wake: Type.Optional(
+        Type.Boolean({
+          description:
+            "Default true: an idle recipient starts a turn for this message. false: deliver without starting a turn " +
+            "(a running recipient still sees it at its next step).",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       return executeSendMessage(params, ctx);

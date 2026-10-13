@@ -75,9 +75,10 @@ describe('memory extension integration', () => {
   });
 
   it('routes conversation search to captured conversations within the current project', async () => {
-    const { tool, ctx } = setup();
+    const { tool, ctx, sessionManager } = setup();
     await tool('conversation_search').execute('id', { query: 'raw words' }, undefined, undefined, ctx);
-    expect(MemoryClient.prototype.request).toHaveBeenCalledWith('memory.conversations.search', expect.objectContaining({ userId: 'local', projectId: '/repo', query: 'raw words' }));
+    // 项目归属按会话头里的原始目录（切到 worktree 后也不变），不是 ctx.cwd。
+    expect(MemoryClient.prototype.request).toHaveBeenCalledWith('memory.conversations.search', expect.objectContaining({ userId: 'local', projectId: sessionManager.getCwd(), query: 'raw words' }));
     expect(vi.mocked(MemoryClient.prototype.request).mock.calls[0][1]).not.toHaveProperty('includeOtherProjects');
   });
 });

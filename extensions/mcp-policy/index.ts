@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { decide, parsePolicy, type Policy } from "./policy.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
+import { canRequestApproval, requestApproval, subagentApprovalTimeoutMs } from "../_shared/approval-route.js";
+import { resolveToolOrigin } from "../_shared/workspace-context.js";
 
 const DIR = join(homedir(), ".pi");
 const POLICY_PATH = join(DIR, "mcp-policy.json");
@@ -84,7 +86,12 @@ export default function (pi: ExtensionAPI) {
     const { server, tool } = parseToolName(toolName);
     // ask / readonly 下 safety 已统一确认 mcp__*，传入避免 mcp-policy 二次弹窗（disabled/headless 仍拦）。
     const ownerPolicy = getApprovalPolicy();
-    const d = decide(policy, toolName, args, ctx.hasUI, ownerPolicy === "ask" || ownerPolicy === "readonly");
+    // 子代理的界面是空的：只有能经父会话问人（approval-route.ts）才算有界面，否则按 headless 拦下。
+    const isSubagent = resolveToolOrigin() === "subagent";
+    const childPath = isSubagent ? ctx.sessionManager.getSessionFile() : undefined;
+    const routed = await canRequestApproval(childPath);
+    const hasUI = isSubagent ? routed : ctx.hasUI;
+    const d = decide(policy, toolName, args, hasUI, ownerPolicy === "ask" || ownerPolicy === "readonly");
 
     if (d.action === "pass") {
       audit(policy.audit.enabled, server, tool, "auto", args);
@@ -97,10 +104,28 @@ export default function (pi: ExtensionAPI) {
     }
 
     const options = d.recordable ? ["允许本次", "总是允许", "拒绝"] : ["允许本次", "拒绝"];
-    const choice = await ctx.ui.select(
-      `MCP 工具调用审批\n\n  ${server}: ${tool}\n  参数：${d.summary}\n\n是否允许？`,
-      options,
-    );
+    const title = `MCP 工具调用审批\n\n  ${server}: ${tool}\n  参数：${d.summary}\n\n是否允许？`;
+    let choice: string | undefined;
+    if (routed) {
+      const answer = await requestApproval(childPath, { title, options, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      if (answer.outcome === "timeout") {
+        audit(policy.audit.enabled, server, tool, "timeout", args);
+        const seconds = Math.round(subagentApprovalTimeoutMs() / 1000);
+        return { block: true, reason: `${seconds} 秒内没有人批准，视为被拒` };
+      }
+      // 不是用户拒绝的，不能说成「用户拒绝」：卡片被关掉 / 子代理被打断，或判定之后父会话没了。
+      if (answer.outcome === "cancelled") {
+        audit(policy.audit.enabled, server, tool, "cancelled", args);
+        return { block: true, reason: "授权请求已取消" };
+      }
+      if (answer.outcome === "unavailable") {
+        audit(policy.audit.enabled, server, tool, "blocked-headless", args);
+        return { block: true, reason: "需要审批但当前无界面（headless），已阻止" };
+      }
+      choice = answer.outcome === "answered" ? answer.choice : undefined;
+    } else {
+      choice = await ctx.ui.select(title, options);
+    }
     if (choice === "总是允许") {
       writeAlwaysAllow(toolName);
       audit(policy.audit.enabled, server, tool, "always-approved", args);

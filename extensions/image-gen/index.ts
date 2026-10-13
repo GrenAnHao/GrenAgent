@@ -1,6 +1,7 @@
 // image-gen: generate images from text prompts via an OpenAI-compatible
 // images API. Saves a PNG under <cwd>/.pi/images/ and returns the path.
 
+import { projectCwd } from "../_shared/session-cwd.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -72,7 +73,7 @@ export default function (pi: ExtensionAPI) {
         ? readReferences(ctx.cwd, params.reference_images)
         : [];
 
-      const dir = join(ctx.cwd, ".pi", "images");
+      const dir = join(projectCwd(ctx), ".pi", "images");
       mkdirSync(dir, { recursive: true });
 
       const stamp = Date.now();

@@ -35,7 +35,7 @@ import { getApprovalPolicy } from "../_shared/approval.js";
 import { claimImBinding, notifyImBoundElsewhere } from "../_shared/im-binding.js";
 import { getConfig, watchConfig } from "../_shared/runtime-config.js";
 import { CODE_EXEC_TOOLS, WRITE_TOOLS } from "../_shared/tool-groups.js";
-import { spawnPiAgent } from "../multi-agent/runner.js";
+import { spawnPiAgent } from "./pi-process.js";
 import { createImContextStore, type ImContextStore, renderPrompt } from "./context.js";
 import { acquireLock, refreshLock, releaseLock } from "./lock.js";
 import { startWeixinOc, type WeixinOcHandle } from "./wechat.js";

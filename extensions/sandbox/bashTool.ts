@@ -9,6 +9,7 @@
 // 执行模型照 DSH packages/shell/tool-bash：每次调用都先注册成 jobs 里的 bash job，前台只是等它。
 // 等到 timeout（默认 120 秒）仍在跑就原样转后台，返回已有输出和 job id，模型继续干活、结束时收通知；
 // run_in_background 直接返回 id。会话 id 缺失或准入被拒时退回 pi 原来的前台执行（timeout 到点杀进程）。
+import { projectCwd } from "../_shared/session-cwd.js";
 import { join } from "node:path";
 import {
   DEFAULT_MAX_BYTES,
@@ -23,6 +24,7 @@ import { takeEscalationGrant } from "../_shared/sandbox/escalationGrant.js";
 import { sandboxNotes } from "../_shared/sandbox/facts.js";
 import type { FileSandboxMode, SandboxRunFacts } from "../_shared/sandbox/types.js";
 import { resolveToolOrigin } from "../_shared/workspace-context.js";
+import { canRequestApproval, requestApproval } from "../_shared/approval-route.js";
 import { fitWithSuffix, renderModelDelta } from "../jobs/render.js";
 import type { JobsService } from "../jobs/service.js";
 import { BashOutput, type BashSnapshot } from "./bashOutput.js";
@@ -246,25 +248,31 @@ export function createGrenBashTool(deps: GrenBashDeps): ToolDefinition<typeof ba
       const timeoutSec = resolveTimeoutSec(params.timeout);
       const request = readEscalationArgs(params);
       const job = { jobs: deps.jobs, exec: deps.exec };
-      // 沙箱：这次调用起步的模式和审批档。审批通道 = 有界面且是主会话回合；
-      // goal 回合 hasUI 仍为 true，但宿主对所有对话框立即返回取消（electron-agent sessionUiAdapter）。
+      // 沙箱：这次调用起步的模式和审批档。审批通道 = 有界面且是主会话回合，或子代理能经父会话问人
+      // （approval-route.ts）；goal 回合 hasUI 仍为 true，但宿主对所有对话框立即返回取消（electron-agent sessionUiAdapter）。
       const gate = deps.sandboxGate?.(ctx.cwd);
-      const approvalChannel = ctx.hasUI === true && ctx.ui !== undefined && resolveToolOrigin() === "main";
+      const origin = resolveToolOrigin();
+      const childPath = origin === "subagent" ? ctx.sessionManager.getSessionFile?.() : undefined;
+      const routed = await canRequestApproval(childPath);
+      const approvalChannel = (ctx.hasUI === true && ctx.ui !== undefined && origin === "main") || routed;
       const offerEscalation = (mode: FileSandboxMode) =>
         gate !== undefined && canOfferEscalation(gate, mode, approvalChannel);
       // 升权在执行前裁决完（DSH approveEscalation），不过就抛错、什么都不起；
       // 批准的模式只给这一次调用，走下面同一条 job 路径。
       const ui = ctx.ui;
+      const select = routed
+        ? async (title: string, options: string[], opts?: { signal?: AbortSignal }) => {
+            const answer = await requestApproval(childPath, { title, options, ...(opts?.signal ? { signal: opts.signal } : {}) });
+            return answer.outcome === "answered" ? answer.choice : undefined;
+          }
+        : ui
+          ? (title: string, options: string[], opts?: { signal?: AbortSignal }) => ui.select(title, options, opts)
+          : undefined;
       if (request && signal?.aborted) throw new Error("Command aborted");
       const granted = request
         ? await approveEscalation(command, request, gate, {
             channel: approvalChannel,
-            ...(ui
-              ? {
-                  select: (title: string, options: string[], opts?: { signal?: AbortSignal }) =>
-                    ui.select(title, options, opts),
-                }
-              : {}),
+            ...(select ? { select } : {}),
             preApproved,
             ...(signal ? { signal } : {}),
           })
@@ -277,7 +285,7 @@ export function createGrenBashTool(deps: GrenBashDeps): ToolDefinition<typeof ba
         if (signal?.aborted) throw new Error("Command aborted");
         if (!owner) throw new Error("run_in_background needs a session; run the command in the foreground instead");
         const output = new BashOutput({ eagerFile: true, ...(deps.tempDir ? { tempDir: deps.tempDir } : {}) });
-        const started = startBashJob(job, { command, cwd: ctx.cwd, owner, workspace: ctx.cwd, env, output, offerEscalation });
+        const started = startBashJob(job, { command, cwd: ctx.cwd, owner, workspace: projectCwd(ctx), env, output, offerEscalation });
         return {
           content: [{ type: "text", text: renderBackgroundStart(started.id, output.fullOutputPath) }],
           details: {
@@ -405,7 +413,7 @@ export function createGrenBashTool(deps: GrenBashDeps): ToolDefinition<typeof ba
               command,
               cwd: ctx.cwd,
               owner,
-              workspace: ctx.cwd,
+              workspace: projectCwd(ctx),
               env,
               output,
               onData: scheduleOutputUpdate,

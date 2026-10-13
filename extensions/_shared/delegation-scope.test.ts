@@ -3,6 +3,7 @@ import {
   DELEGATION_DENY_REASON,
   DELEGATION_SCOPE_STATEMENT,
   SUBAGENT_ASK_PINNED_RULE_ID,
+  delegationScopeWithApprovals,
   withDelegationScope,
 } from "./delegation-scope.js";
 
@@ -20,6 +21,23 @@ describe("withDelegationScope", () => {
   it("does not double-append when the prompt already ends with the statement", () => {
     const once = withDelegationScope("You are scout.");
     expect(withDelegationScope(once)).toBe(once);
+  });
+});
+
+describe("delegationScopeWithApprovals", () => {
+  it("says approvals go to the user, how long they wait, and not to retry", () => {
+    const text = delegationScopeWithApprovals(60);
+    expect(text).toContain("转给用户批准");
+    expect(text).toContain("最多等 60 秒");
+    expect(text).toContain("不要重试");
+    expect(text).not.toContain("自动拒绝");
+  });
+
+  it("withDelegationScope takes either statement and still does not double-append", () => {
+    const statement = delegationScopeWithApprovals(30);
+    const once = withDelegationScope("You are scout.", statement);
+    expect(once.endsWith(statement)).toBe(true);
+    expect(withDelegationScope(once, statement)).toBe(once);
   });
 });
 

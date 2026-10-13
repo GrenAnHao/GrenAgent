@@ -1,0 +1,5 @@
+# npx tsc -p electron-agent/tsconfig.node.json --noEmit（覆盖 ../extensions）
+HEAD（不含本次改动）：155 条 error TS
+本次改动后：155 条 error TS
+去掉行列号后逐条 diff：无差异
+manager.ts / backends.ts / manager.test.ts 的报错：0 条

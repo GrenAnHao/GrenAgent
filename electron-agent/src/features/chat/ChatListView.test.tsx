@@ -67,7 +67,7 @@ afterEach(() => {
   delete mockState.waitingUiPrompt;
   useSessionStore.setState({ activeSessionPath: null });
   useCommandInputStore.setState({ bySession: {} });
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
 });
 
 function setMessages(msgs: ChatMessage[]) {

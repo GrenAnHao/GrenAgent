@@ -435,7 +435,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
       if (key && shadow) {
         shadows.set(key, { ...shadow, isStreaming: false, runActive: false, awaitingResponse: false });
       }
-      dropStashedUiRequests(eventPath);
+      dropStashedUiRequests(eventPath, { hostGone: true });
       return;
     }
     // 退出前到达的事件先落地，否则迟到的批处理会把已经结束的进程重新标成运行中。

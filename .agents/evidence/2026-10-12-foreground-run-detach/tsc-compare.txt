@@ -1,0 +1,7 @@
+# cd electron-agent && npx tsc -p tsconfig.node.json --noEmit
+子代理重新设计第 4 阶段：154 条
+本次（审查修正之后）：154 条
+按文件+报错文字（去掉行列号）逐条比对：完全一致，新增 0 条。
+过程中出过 2 条，都已改正：
+- index.ts 有 1 条 sessionPath 的联合类型报错（第一版）；
+- index.test.ts 新测试里 registry.finish 的替身把 patch 写成了 Record<string, unknown>（审查修正）。

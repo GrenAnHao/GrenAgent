@@ -1,3 +1,4 @@
+import { guardListener } from '../../../extensions/_shared/guard-listener.js';
 import { promptWasAccepted } from '../../../extensions/_shared/promptDisposition.js';
 import { runInWorkspace, type WorkspaceContext } from '../../../extensions/_shared/workspace-context.js';
 import { drainByParent } from '../../../extensions/multi-agent/activation.js';
@@ -353,7 +354,9 @@ export class WorkspaceHandle {
     });
     this.deltas.flush();
     this.unsubscribe?.();
-    this.unsubscribe = this.session.subscribe((event: AgentSessionEvent) => {
+    // 推给界面这一步（合并、广播；agent-host 和主进程断开时发送会抛）出错不能抛回 SDK，
+    // 否则这一轮的工具调用会失败（extensions/_shared/guard-listener.ts）。
+    const onEvent = guardListener('main session events', (event: AgentSessionEvent) => {
       if (this.disposed) return;
       let downgraded: Record<string, unknown>;
       try {
@@ -364,6 +367,11 @@ export class WorkspaceHandle {
       this.deltas.push(downgraded);
       if (downgraded.type === 'agent_end' && downgraded.willRetry !== true) this.turnOrigin = 'main';
     });
+    const off = this.session.subscribe(onEvent);
+    this.unsubscribe = () => {
+      off();
+      onEvent.report();
+    };
   }
 
   private forward(event: Record<string, unknown>): void {

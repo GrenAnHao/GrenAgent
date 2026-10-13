@@ -1,0 +1,27 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:35264) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:30660) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+'this_binary_does_not_exist_zzz' 不是内部或外部命令，也不是可运行的程序
+或批处理文件。
+(node:80716) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26340) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34324) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:74204) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57896) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52948) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  56 passed | 1 skipped (57)
+      Tests  706 passed | 2 skipped (708)
+   Start at  19:09:54
+   Duration  11.92s (transform 18.64s, setup 0ms, import 82.06s, tests 13.96s, environment 10ms)
+

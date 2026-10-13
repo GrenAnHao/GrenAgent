@@ -1,0 +1,5 @@
+# npx tsc -p electron-agent/tsconfig.node.json --noEmit（覆盖 ../extensions 与 ../cli/src）
+第 2 阶段：155 条 error TS
+第 2.5 阶段：155 条 error TS
+去掉行列号后逐条 diff：无差异
+过程中出现过 7 条新报错：projectCwd 参数类型与只声明了 getSessionId 的 ctx 不兼容（weak type）6 条，embedded-runner.run.test.ts 的 vi.fn 无参类型 1 条；均已修正

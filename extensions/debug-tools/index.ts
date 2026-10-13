@@ -11,6 +11,7 @@
 // 仅监听回环地址；日志同时落盘到 <cwd>/.pi/debug/debug.log，便于 read/grep 复查。
 // ask 模式不在白名单内（写文件 + 起 server），自动被 agent-mode 拦截；debug/agent 模式可用。
 
+import { projectCwd } from "../_shared/session-cwd.js";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -81,7 +82,7 @@ export default function (pi: ExtensionAPI) {
         const port = await server.start({
           onLog: (entry) => appendToFile(JSON.stringify(store.push(entry))),
         });
-        logFile = ensureLogFile(ctx.cwd);
+        logFile = ensureLogFile(projectCwd(ctx));
         // 开新一轮：清内存计数 + 截断文件。
         store.clear();
         truncateFile();

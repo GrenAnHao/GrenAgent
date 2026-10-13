@@ -1,22 +1,33 @@
-// multi-agent: delegate work to isolated pi sub-agents (separate processes,
-// each with its own context window). Single task or several in parallel.
+// multi-agent: delegate work to pi sub-agents, each with its own context window.
+// Single task, several in parallel, or a chain. Execution goes through manager.ts,
+// which picks the in-process or worker backend.
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { parentModelSpec, resolveSubagentModel, spawnPiAgent, type AgentResult } from "./runner.js";
-import { canUseEmbeddedSubagent, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
+import { parentModelSpec, resolveSubagentModel } from "./runner.js";
+import {
+  preferredBackend,
+  runSubagent,
+  selectSubagentBackend,
+  startBackgroundRun,
+  startContinuableSubagent,
+  type SubagentResult,
+} from "./manager.js";
+import { sendSettlementToParent, settlementMessage } from "./parent-host.js";
+import type { SettlementNotice } from "./settlement-notice.js";
+import { registerWaitAgent } from "./wait-agent.js";
+import { registerListAgents } from "./list-agents.js";
+import { registerTopApprovalLifecycle } from "./approval-top.js";
+import { detachableSignal, ForegroundRun, SteerWatch, waitOrDetach } from "./detach.js";
 import { assertRouteAllowed, assertThinkingLevel, isThinkingLevel, readModelSelectionPolicy, resolveRouteAlias, routeOf, THINKING_LEVELS } from "./model-selection.js";
 import { availableModels, registerListSubagentModels } from "./list-models-tool.js";
 import type { SubagentStopReason } from "./assistant-output.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
-import { jobs } from "../jobs/service.js";
-import type { JobOutcome } from "../jobs/types.js";
+import { projectCwd } from "../_shared/session-cwd.js";
 import { closedStringField, normalizeTasks, spawnHasWork } from "./tasks.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { resolveProfile, profileToModel, profileToEnv, profileLimits, type ProfileInput } from "./capability.js";
 import { discoverAgents, inferNamedAgentProfile, resolveAgent, suggestAgent, withBuiltinDefaults, type AgentScope } from "./agents.js";
-import { createWorktree, worktreeDiff } from "./worktree.js";
 import { SubAgentRegistry, type SubAgentRow } from "./registry.js";
 import { cancelSubAgent } from "./cancel.js";
 import { withoutSubagentDeadline } from "./codemode-deadline.js";
@@ -25,6 +36,7 @@ import { getConfig } from "../_shared/runtime-config.js";
 import { tailLines, LIVE_TRANSCRIPT_TAIL, TRANSCRIPT_CAP } from "./transcript-tail.js";
 import { registerWorkflows } from "./workflows.js";
 import { registerAdjacentTools } from "./adjacent-tools.js";
+import { currentChild, outsideChild, runAsChild } from "../_shared/leak-owner.js";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -32,11 +44,8 @@ import { disposeActivation, getActivation } from "./activation.js";
 import { establishCatalogChild, foldCatalogFromEntries } from "./catalog.js";
 import { emitCatalogChanged } from "./catalog-events.js";
 import { completedPrefix } from "./fork-seed.js";
-import { withDelegationScope } from "../_shared/delegation-scope.js";
 import { assertDepthAllowed, childDepthOf } from "./depth.js";
 import { adoptSpawnBatch, appendSpawnDelta, rekeySpawnTool, rememberSpawnTool, type EarlyBatch, type EarlySlot } from "./parallel-early.js";
-
-type SubagentRunResult = AgentResult & { sessionPath?: string; stopReason?: SubagentStopReason; structured?: unknown };
 
 function parentSessionPath(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {
   try {
@@ -53,12 +62,48 @@ function catalogLabel(task: string): string {
   return line.length <= 80 ? line : line.slice(0, 80);
 }
 
-function mapStop(r: SubagentRunResult, aborted: boolean): JobOutcome {
-  // killed 只留给外部取消（job_kill / 界面取消 / 会话关闭）。子代理自己超时被 abort 算 failed，
-  // 否则父代理和界面都以为是有人把它停了。
-  const timedOut = /\b(idle|startup|hard) timeout\b/.test(r.error ?? "");
-  const status = aborted || (r.stopReason === "aborted" && !timedOut) ? "killed" : r.ok ? "completed" : "failed";
-  return { status, output: r.output, ...(r.error ? { error: r.error } : {}) };
+/**
+ * 后台子代理的结算通知：先交父会话宿主（agent-host 里的会话，按忙闲决定 steer / followUp）；
+ * 没有宿主（CLI、worker 进程里的父会话）就用扩展 API 发给发起 spawn 的这个会话。
+ */
+function deliverSettlement(
+  pi: ExtensionAPI,
+  ctx: Pick<ExtensionContext, "isIdle">,
+  parentPath: string | undefined,
+  workspace: string,
+  notice: SettlementNotice,
+  spawner: string | undefined,
+): void {
+  if (parentPath && sendSettlementToParent(parentPath, workspace, notice)) return;
+  sendSettlementViaExtension(pi, ctx, notice, spawner);
+}
+
+/** 用发起 spawn 的会话自己的扩展 API 投递结算通知：忙时 steer，闲时 followUp 并触发一轮。 */
+function sendSettlementViaExtension(
+  pi: ExtensionAPI,
+  ctx: Pick<ExtensionContext, "isIdle">,
+  notice: SettlementNotice,
+  spawner: string | undefined,
+): void {
+  let idle = true;
+  try {
+    idle = ctx.isIdle();
+  } catch {
+    /* 上下文已失效：按空闲投递，由会话自己排队 */
+  }
+  try {
+    // 类型上是 void，运行时可能返回 promise：两种失败都吞掉（父会话已经不在）。
+    const send = (): void =>
+      void Promise.resolve(
+        pi.sendMessage(settlementMessage(notice), idle ? { triggerTurn: true, deliverAs: "followUp" } : { deliverAs: "steer" }),
+      ).catch(() => {});
+    // 唤起的是发起 spawn 的那个会话的一轮：它自己是子代理（spawn 时记下的身份）就算它的，
+    // 否则不算任何子代理的；不能带着结算的那个子代理的身份（_shared/leak-owner.ts）。
+    if (spawner) runAsChild(spawner, send);
+    else outsideChild(send);
+  } catch {
+    /* 父会话已经不在 */
+  }
 }
 
 function writeParentCatalog(
@@ -139,43 +184,9 @@ function parentSessionId(ctx: { sessionManager?: { getSessionId?: () => string }
   }
 }
 
-/** Embedded session child (Electron sidecar) or subprocess fallback (CLI / worktree / Tauri). */
-async function executeSubagent(
-  cwd: string,
-  task: string,
-  agentId: string,
-  profile: ReturnType<typeof resolveProfile>,
-  opts: Parameters<typeof spawnPiAgent>[2] & { parentSessionPath?: string; seedMessages?: unknown[] },
-): Promise<SubagentRunResult> {
-  const systemPrompt = withDelegationScope(opts.systemPrompt);
-  if (canUseEmbeddedSubagent(profile)) {
-    return runEmbeddedSubagent({
-      cwd,
-      task,
-      agentId,
-      parentSessionPath: opts.parentSessionPath,
-      model: opts.model,
-      systemPrompt,
-      tools: opts.tools,
-      env: opts.env,
-      mcp: opts.mcp,
-      timeoutMs: opts.timeoutMs,
-      signal: opts.signal,
-      onUpdate: opts.onUpdate,
-      seedMessages: opts.seedMessages,
-      thinkingLevel: opts.thinkingLevel as ThinkingLevel | undefined,
-      depth: opts.depth,
-      outputSchema: opts.outputSchema,
-    });
-  }
-  const r = await spawnPiAgent(cwd, task, { ...opts, systemPrompt });
-  const stopReason: SubagentStopReason = opts.signal?.aborted ? "aborted" : r.ok ? "completed" : "error";
-  return { ...r, stopReason };
-}
-
 function subagentDetails(
   id: string,
-  r: SubagentRunResult,
+  r: SubagentResult,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
@@ -275,6 +286,94 @@ function registerInflight(id: string, outer: AbortSignal | null | undefined): Ab
   return controller;
 }
 
+/** 写注册表终态。写失败（库被锁、行已删）不能挡住后面的收尾和结算通知。 */
+function finishQuietly(reg: SubAgentRegistry, id: string, patch: Parameters<SubAgentRegistry["finish"]>[1]): void {
+  try {
+    reg.finish(id, patch);
+  } catch {
+    /* 注册表记账失败：这一行留在 running，由卡死回收收尾 */
+  }
+}
+
+// 回执不说是谁发的：子代理里触发它的是父代理经 send_message 发来的消息。
+const DETACH_REASON = "A new message arrived while this run was waiting";
+
+/** 前台单任务转后台的回执。 */
+function detachedSingleText(agentId: string): string {
+  return (
+    `${DETACH_REASON}, so sub-agent ${agentId} moved to the background and keeps running. ` +
+    "Respond to that message now; this sub-agent's result arrives later as a subagent-settled notice " +
+    "(call wait_agent only if your next step is blocked on it)."
+  );
+}
+
+/** 并行 run 转后台的回执：已经结束的照常给结果，还在跑（或还没轮到）的写明转到后台。 */
+function detachedParallelResult(
+  slots: Array<{
+    task: string;
+    ok: boolean;
+    output: string;
+    error?: string;
+    partial?: boolean;
+    agentId?: string;
+    sessionPath?: string;
+    stopReason?: SubagentStopReason;
+    model?: string;
+    settled?: boolean;
+  }>,
+  fg: ForegroundRun,
+  thinkingOf: (id: string | undefined) => { thinkingLevel?: string },
+) {
+  const finished = (s: (typeof slots)[number]) => s.settled === true && !fg.isRunning(s.agentId);
+  const moved = slots.filter((s) => !finished(s)).length;
+  const head =
+    `${DETACH_REASON}, so ${moved} unfinished sub-agent(s) moved to the background and keep running. ` +
+    "Respond to that message now; each one reports back with its own subagent-settled notice.";
+  const body = slots
+    .map((s, i) => {
+      if (!finished(s)) {
+        const where = s.agentId ? `Still running as ${s.agentId}` : "Not started yet; it will run in the background";
+        return `## Sub-agent ${i + 1} (moved to background)\n\n${where}; its result arrives as a subagent-settled notice.`;
+      }
+      const label = `## Sub-agent ${i + 1}${s.ok ? "" : " (failed)"}`;
+      if (s.ok) return `${label}\n\n${s.output || "(no output)"}`;
+      return `${label}\n\nError: ${s.error}`;
+    })
+    .join("\n\n---\n\n");
+  return {
+    content: [{ type: "text" as const, text: `${head}\n\n${body}` }],
+    details: {
+      mode: "parallel",
+      detached: true,
+      count: slots.length,
+      failed: slots.filter((s) => finished(s) && !s.ok).length,
+      results: slots.map((s) =>
+        finished(s)
+          ? {
+              task: s.task,
+              ok: s.ok,
+              output: s.output,
+              error: s.error,
+              agentId: s.agentId,
+              sessionPath: s.sessionPath,
+              stopReason: s.stopReason,
+              ...(s.model ? { model: s.model } : {}),
+              ...thinkingOf(s.agentId),
+            }
+          : {
+              task: s.task,
+              status: "running",
+              detached: true,
+              ...(s.agentId ? { agentId: s.agentId } : {}),
+              ...(s.sessionPath ? { sessionPath: s.sessionPath } : {}),
+              ...(s.model ? { model: s.model } : {}),
+              ...thinkingOf(s.agentId),
+            },
+      ),
+    },
+  };
+}
+
 // 父代理已经拿着自己写下的任务。结果正文再贴全文，会被当成子代理的产出。
 // 主代理用 codemode 调 spawn_agent({ action: "list" }) 找回结论时，读到的也是这段正文。
 // 任务留在 details，界面跟进卡片从那里读。
@@ -292,18 +391,6 @@ function statusText(row: SubAgentRow): string {
   if (row.output) parts.push("", row.output);
   if (row.error) parts.push("", `Error: ${row.error}`);
   return parts.join("\n");
-}
-
-// Poll the registry until the row leaves "running" (a background spawn's detached
-// handler writes the terminal state) or the cap/abort fires.
-async function waitForTerminal(reg: SubAgentRegistry, id: string, signal: AbortSignal | null, capMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < capMs) {
-    const row = reg.get(id);
-    if (!row || row.status !== "running") return;
-    if (signal?.aborted) return;
-    await new Promise((res) => setTimeout(res, 250));
-  }
 }
 
 /** Abort + mark any background sub-agent that stopped emitting activity for too long. */
@@ -331,13 +418,39 @@ export default function (pi: ExtensionAPI) {
   };
   const maybeThinkingLevel = () => (modelPolicy.enabled ? thinkingLevelField : ({} as typeof thinkingLevelField));
 
+  // 子代理需要人批准时，请求转到这个会话的界面（approval-route.ts）。
+  registerTopApprovalLifecycle(pi);
+
   // Workflow slash-commands (/implement, /scout-and-plan, /implement-and-review)
   // + seed default named agents (scout/planner/reviewer/worker).
   registerWorkflows(pi);
 
+  // 前台 run 转后台（detach.ts）用到的本会话状态：
+  // - codemode 脚本里经 ctx.executeTool 发起的 spawn_agent（tool_call 事件带 parentToolCallId），它们要的就是结果，不转后台；
+  // - 这一轮来的 steer，只有它触发转后台。
+  const nestedSpawnCalls = new Set<string>();
+  const steers = new SteerWatch();
+  pi.on("input", (event) => {
+    steers.noteInput(event);
+  });
+  pi.on("turn_start", () => steers.reset());
+  // 这一轮来了 steer，而且还排着（被别的扩展的 input 钩子拦下的不会进队列）。
+  const steerWaiting = (ctx: { hasPendingMessages(): boolean }): boolean => steers.arrived && ctx.hasPendingMessages();
+  pi.on("agent_end", () => {
+    steers.reset();
+    // 被拦下、没走到 execute 的嵌套调用，id 留在这里没人删。
+    nestedSpawnCalls.clear();
+  });
+
   // codemode 脚本到 timeout_ms 会取消脚本里跑到一半的子代理。脚本调用 spawn_agent 时去掉脚本级时限，
   // 由子代理自己的空闲 / 硬超时兆底。tool_call 可以就地改 input，只影响执行，不改会话里记下的调用。
   pi.on("tool_call", (event) => {
+    // 记下 codemode 脚本里的嵌套调用：前台 run 转后台（detach.ts）不适用于它们。
+    const nested = (event as { parentToolCallId?: unknown }).parentToolCallId;
+    if (event.toolName === "spawn_agent" && typeof nested === "string" && nested && event.toolCallId) {
+      nestedSpawnCalls.add(event.toolCallId);
+      return;
+    }
     if (event.toolName !== "codemode") return;
     const input = event.input as { code?: unknown };
     if (typeof input?.code !== "string") return;
@@ -357,7 +470,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (event, ctx) => {
     if (process.env.PI_IS_SUBAGENT === "1") return;
     try {
-      getRegistry(ctx.cwd);
+      getRegistry(projectCwd(ctx));
     } catch {
       /* 回收失败不阻塞 session_start */
     }
@@ -392,6 +505,8 @@ export default function (pi: ExtensionAPI) {
     batch.abortors.push(controller);
     const id = SubAgentRegistry.genId();
     slot.agentId = id;
+    // 和其余前台路径一样登记进 inflight：转到后台以后，界面上的取消和卡死回收只能从这里够到它。
+    inflight.set(id, controller);
     const profileName = closedStringField(batch.raw, "profile");
     const profile = resolveProfile(typeof profileName === "string" ? (profileName as ProfileInput) : undefined);
     const profileEnv = profileToEnv(profile);
@@ -403,16 +518,18 @@ export default function (pi: ExtensionAPI) {
     slot.model = chosenModel;
     let systemPrompt: string | undefined;
     let tools: string[] | undefined;
+    let backend: "worker" | "in-process" | undefined;
     if (task.agent) {
       try {
         const found = resolveAgent(withBuiltinDefaults(discoverAgents(ctx.cwd, "user").agents), task.agent);
         systemPrompt = found?.systemPrompt;
         tools = found?.tools;
+        backend = found?.backend;
       } catch {
         /* 命名档案解析失败留给 execute 路径记失败 */
       }
     }
-    const registry = getRegistry(ctx.cwd);
+    const registry = getRegistry(projectCwd(ctx));
     registry.create({
       id,
       task: task.task,
@@ -421,11 +538,13 @@ export default function (pi: ExtensionAPI) {
       parentId: parentSessionId(ctx),
       depth,
     });
-    return executeSubagent(ctx.cwd, task.task, id, profile, {
+    return runSubagent(ctx.cwd, task.task, id, {
+      projectCwd: projectCwd(ctx),
       parentSessionPath: parentSessionPath(ctx),
       model: chosenModel,
       systemPrompt,
       tools,
+      backend,
       env: profileEnv,
       timeoutMs: profileLimits(profile).timeoutMs,
       depth,
@@ -446,7 +565,7 @@ export default function (pi: ExtensionAPI) {
       slot.stopReason = r.stopReason;
       slot.settled = true;
       // 父回合中止（abortEarly）记 cancelled，和其余路径一致；否则注册表里分不出是被停还是自己失败。
-      registry.finish(id, r.ok
+      finishQuietly(registry, id, r.ok
         ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
         : {
             status: controller.signal.aborted ? "cancelled" : "error",
@@ -455,13 +574,22 @@ export default function (pi: ExtensionAPI) {
             exitCode: r.exitCode,
             transcript: r.transcript,
           });
-    }).catch((e: unknown) => {
+    }, (e: unknown) => {
       const msg = String((e as Error)?.message ?? e);
       slot.ok = false;
       slot.error = msg;
       slot.settled = true;
-      registry.finish(id, { status: "error", error: msg, exitCode: -1 });
-    }).finally(() => releaseReserved(sessionKey, 1));
+      finishQuietly(registry, id, { status: "error", error: msg, exitCode: -1 });
+    }).finally(() => {
+      inflight.delete(id);
+      releaseReserved(sessionKey, 1);
+      // 转后台之后靠它发结算通知，前面记账出错也要走到。
+      try {
+        batch.onSettled?.(slot);
+      } catch {
+        /* 通知出错不能让这一项的 Promise 失败，连累整组 */
+      }
+    });
   };
 
   pi.on("message_update", (event, ctx) => {
@@ -497,14 +625,16 @@ export default function (pi: ExtensionAPI) {
     name: "spawn_agent",
     label: "Spawn Sub-agent",
     description:
-      "Delegate a task to an isolated sub-agent (a separate pi process with its own context window). " +
+      "Delegate a task to a sub-agent with its own context window. " +
       "Modes: `task` (single) | `tasks` (parallel) | `chain` (sequential, with {previous} placeholder). " +
       "`agent` picks a named agent (system prompt + tools + model) from ~/.pi/agent/agents/*.md: " +
       "scout/ask/reviewer are read-only, planner is restricted-write, worker is writable. " +
-      "`profile` (explore|planner|executor|reviewer|default) sets filesystem/MCP/isolation; omitted profile still follows the named agent. " +
+      "`profile` (explore|planner|reviewer|default) sets filesystem/MCP access; omitted profile still follows the named agent. " +
+      "The sub-agent works in your current working directory; to isolate edits on their own branch, call create_worktree yourself first. " +
       "Pass `title` as the short card name (one clause, at most 24 characters); the sub-agent still receives the full task text. " +
-      "Returns the sub-agent output(s).",
-    promptSnippet: "Delegate a task to an isolated sub-agent.",
+      "`action: \"run\"` (default) blocks and returns the sub-agent output(s); `action: \"spawn\"` starts one task in the background, returns its agentId at once, and delivers the result later as a subagent-settled notice. " +
+      "If a steering message arrives while a `run` (single task or `tasks`) is still waiting, the unfinished sub-agents move to the background and each reports back with a subagent-settled notice; calls inside codemode scripts and `chain` always wait for the result.",
+    promptSnippet: "Delegate a task to a sub-agent with its own context window.",
     promptGuidelines: [
       "Use spawn_agent 时每次都带 title：一句任务名，不超过 24 字，用用户当前语言。单任务写在顶层；并行 tasks 和链式 chain 的每一项各自带 title。title 只做卡片名，完整要求仍写在 task。",
       "Use spawn_agent to parallelize independent sub-tasks or to isolate a large exploration from the main context.",
@@ -512,7 +642,7 @@ export default function (pi: ExtensionAPI) {
       "Use `agent` for a specialized role: scout/ask (readonly recon), planner, reviewer, worker (writable). Use `chain` to pipe one step's output into the next via {previous}.",
       "Omit `profile` and the named role still selects explore/planner/reviewer/default. For an unnamed read-only child pass `profile: \"explore\"`.",
       "Prefer scout for broad fan-out; do simple single-file lookups yourself.",
-      "After a background spawn settles you will receive a notice; do not wait just to collect the conclusion.",
+      "Use spawn_agent action \"spawn\" when you have independent work to do meanwhile: its result arrives as a subagent-settled notice, so do not poll status or wait just to collect the conclusion.",
       "子任务要接着当前对话往下做时用 fork: true；要隔离探索时不要开。",
       ...(modelPolicy.enabled
         ? [
@@ -578,7 +708,7 @@ export default function (pi: ExtensionAPI) {
       profile: Type.Optional(
         Type.Union(
           [
-            Type.String({ description: "Preset profile: explore | planner | executor | reviewer | default" }),
+            Type.String({ description: "Preset profile: explore | planner | reviewer | default" }),
             Type.Object(
               {
                 extends: Type.Optional(Type.String()),
@@ -592,9 +722,6 @@ export default function (pi: ExtensionAPI) {
                 net: Type.Optional(Type.Boolean()),
                 mcp: Type.Optional(Type.Union([Type.Boolean(), Type.Array(Type.String())])),
                 spawn: Type.Optional(Type.Boolean()),
-                isolation: Type.Optional(
-                  Type.Union([Type.Literal("process"), Type.Literal("worktree")]),
-                ),
                 ...maybeModel("Model route or alias (cheap/strong) for this profile."),
               },
               { additionalProperties: false },
@@ -609,25 +736,18 @@ export default function (pi: ExtensionAPI) {
             Type.Literal("run"),
             Type.Literal("spawn"),
             Type.Literal("status"),
-            Type.Literal("wait"),
             Type.Literal("cancel"),
             Type.Literal("list"),
             Type.Literal("remove"),
           ],
           {
             description:
-              "run (default, blocking) | spawn (background, returns agentId) | status | wait | cancel | list (all sub-agents) | remove (delete a record)",
+              "run (default, blocking, returns the output) | spawn (background, returns agentId; the result arrives later as a subagent-settled notice) | status | cancel | list (all sub-agents) | remove (delete a record)",
           },
         ),
       ),
-      mode: Type.Optional(
-        Type.Union([Type.Literal("one-shot"), Type.Literal("continuable")], {
-          description:
-            'Only with action "spawn": "continuable" (default) keeps the child resident for send_message; "one-shot" runs once as a background job, collect with job_output.',
-        }),
-      ),
       agentId: Type.Optional(
-        Type.String({ description: "Sub-agent id for status/wait/cancel (from a prior background spawn)." }),
+        Type.String({ description: "Sub-agent id for status/cancel/remove (from a prior background spawn)." }),
       ),
       fork: Type.Optional(
         Type.Boolean({ description: "When true, seed the child with the parent session's completed turns." }),
@@ -635,8 +755,11 @@ export default function (pi: ExtensionAPI) {
       ...maybeThinkingLevel(),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const nestedCall = nestedSpawnCalls.delete(toolCallId);
+      // 调 spawn_agent 的会话自己是子代理时它的身份：退回扩展 API 投递结算通知时，唤起的那一轮还算它的。
+      const spawner = currentChild();
       const action = params.action ?? "run";
-      const registry = getRegistry(ctx.cwd);
+      const registry = getRegistry(projectCwd(ctx));
 
       // 模型策略「禁用子代理」：直接拒绝 run/spawn（status/list/cancel/remove 仍可用于善后历史任务）。
       if ((action === "run" || action === "spawn") && getConfig("SUBAGENT_MODE")?.trim() === "disabled") {
@@ -645,7 +768,7 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      if (action === "status" || action === "wait" || action === "cancel" || action === "list" || action === "remove") {
+      if (action === "status" || action === "cancel" || action === "list" || action === "remove") {
         // Lazy stuck reaping so status/list reflect reality even without the timer.
         reapStuck(registry);
 
@@ -673,34 +796,6 @@ export default function (pi: ExtensionAPI) {
         const row = registry.get(id);
         if (!row) throw new Error(`unknown agentId: ${id}`);
 
-        if ((action === "wait" || action === "status") && row?.jobId) {
-          const caller = parentSessionId(ctx) ?? ctx.cwd;
-          const capMs = action === "wait"
-            ? (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000) + 30000
-            : 0;
-          const r = await jobs.read(row.jobId, caller, { wait: action === "wait", timeoutMs: capMs });
-          const fresh = registry.get(id) ?? row;
-          const head = `agent ${fresh.id}: ${fresh.status}`;
-          return {
-            content: [{ type: "text", text: r.text ? `${head}\n\n${r.text}` : head }],
-            details: {
-              agentId: fresh.id,
-              jobId: row.jobId,
-              status: fresh.status,
-              exitCode: fresh.exitCode,
-              task: fresh.task,
-              ...(fresh.error ? { error: fresh.error } : {}),
-            },
-          };
-        }
-        if (action === "cancel" && row?.jobId) {
-          try {
-            jobs.kill(row.jobId, parentSessionId(ctx) ?? ctx.cwd, "spawn_agent cancel");
-          } catch {
-            /* 非 owner / 已终：仍走下面的 registry cancel */
-          }
-        }
-
         if (action === "remove") {
           if (row.status === "running") cancelSubAgent(id, registry, inflight);
           registry.remove(id);
@@ -713,10 +808,6 @@ export default function (pi: ExtensionAPI) {
             content: [{ type: "text", text: statusText(out) }],
             details: { agentId: out.id, status: out.status, task: out.task, ...(out.error ? { error: out.error } : {}) },
           };
-        }
-        if (action === "wait" && row.status === "running") {
-          const capMs = (Number(getConfig("SUBAGENT_TIMEOUT_MS") ?? "300000") || 300000) + 30000;
-          await waitForTerminal(registry, id, signal ?? null, capMs);
         }
         const out = registry.get(id) ?? row;
         return {
@@ -795,6 +886,8 @@ export default function (pi: ExtensionAPI) {
       const maxPerSession = sessionCap();
       const requested = Math.max(0, (hasChain ? params.chain?.length ?? 0 : list.length) - earlyStarted);
       let slotsLeft = 0;
+      // 前台 run 转后台后（detach.ts），还在跑的子代理各自结束时归还名额，这里不能提前一把还掉。
+      let keepReservations = false;
       const releaseOne = () => {
         if (slotsLeft <= 0) return;
         slotsLeft -= 1;
@@ -831,7 +924,9 @@ export default function (pi: ExtensionAPI) {
       // (e.g. agentScope:"project" with no repo .pi/agents, cold start before seeding,
       // or a relocated/cleared agent dir). Disk agents still win on name clash.
       const discovered = withBuiltinDefaults(discoverAgents(ctx.cwd, agentScope).agents);
-      const agentLayer = (name: string | undefined): { systemPrompt?: string; tools?: string[]; model?: string } => {
+      const agentLayer = (
+        name: string | undefined,
+      ): { systemPrompt?: string; tools?: string[]; model?: string; backend?: "worker" | "in-process" } => {
         const n = name?.trim();
         if (!n) return {};
         const a = resolveAgent(discovered, n);
@@ -855,7 +950,7 @@ export default function (pi: ExtensionAPI) {
           const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
           throw new Error(`unknown agent "${n}".${hint} Available agents: ${avail}`);
         }
-        return { systemPrompt: a.systemPrompt, tools: a.tools, model: a.model };
+        return { systemPrompt: a.systemPrompt, tools: a.tools, model: a.model, ...(a.backend ? { backend: a.backend } : {}) };
       };
 
       const chainHead = Array.isArray(params.chain)
@@ -878,14 +973,8 @@ export default function (pi: ExtensionAPI) {
       );
       if (params.fork) {
         if (hasChain || list.length !== 1) throw new Error("fork 仅支持单任务");
-        if (!canUseEmbeddedSubagent(profile)) throw new Error("fork 需要 Electron 进程内子会话");
       }
       const seedMessages = params.fork ? completedPrefix(parentLeafMessages(ctx), toolCallId) : [];
-      const wantWorktree = profile.isolation === "worktree";
-      // chain has its own worktree guard below; only the single/parallel path is gated here.
-      if (wantWorktree && !hasChain && list.length !== 1) {
-        throw new Error("worktree 隔离仅支持单任务（不支持并行 tasks）");
-      }
       const profileModel = profileToModel(profile, getConfig);
       // 显式 profile 与按命名角色推断的 profile 都要落到 env + registry，否则 UI 一律显示「工作」、
       // 只读档的 SAFETY_READONLY / deny 也不会生效。
@@ -904,7 +993,6 @@ export default function (pi: ExtensionAPI) {
       // the prior step's output. Stops at the first failing step.
       if (params.chain && params.chain.length > 0) {
         if (action === "spawn") throw new Error("chain 暂不支持后台 spawn（请用 action:run）");
-        if (wantWorktree) throw new Error("worktree 隔离暂不支持 chain（请用非隔离档案）");
         const steps = params.chain;
         type ChainSlot = {
           step: number;
@@ -1001,10 +1089,12 @@ export default function (pi: ExtensionAPI) {
           };
           publishChain();
           const controller = registerInflight(id, signal);
-          const r = await executeSubagent(ctx.cwd, taskText, id, profile, {
+          const r = await runSubagent(ctx.cwd, taskText, id, {
+            projectCwd: projectCwd(ctx),
             parentSessionPath: parentSessionPath(ctx),
             model: chosenModel,
             systemPrompt: layer.systemPrompt,
+            backend: layer.backend,
             tools: layer.tools,
             env: profileEnv,
             mcp: profile.mcp,
@@ -1068,75 +1158,61 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "spawn") {
         if (list.length !== 1) throw new Error("background spawn 仅支持单任务");
-        if (wantWorktree) throw new Error("background spawn 暂不支持 worktree 隔离（请用 action:run）");
         const { task, model, agent } = list[0];
         const layer = agentLayer(agent);
         const id = SubAgentRegistry.genId();
         const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
         const parentPath = parentSessionPath(ctx);
         const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
-        const spawnedText = `Background sub-agent started. agentId: ${id}\nUse spawn_agent({ action: "wait", agentId: "${id}" }) to await, or "status" / "cancel".`;
-        const spawnMode = params.mode === "one-shot" ? "one-shot" : "continuable";
-        const startOneShotJob = (): { jobId: string } => {
+        const spawnedText =
+          `Background sub-agent started. agentId: ${id}\n` +
+          "You will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it.";
+        // 不能续聊的后端（CLI、worker 进程里的父会话）：后台跑一次，结束时由管理器发结算通知。
+        const startBackground = (): void => {
           registry.create({ id, task, profile: profileJson, model: chosenModel ?? null, parentId: parentSid ?? null, depth: childDepth });
           const controller = new AbortController();
           inflight.set(id, controller);
-          const jobId = jobs.start({
-            kind: "subagent",
-            label: catalogLabel(task),
-            owner: parentSid ?? ctx.cwd,
-            workspace,
-            run: () => {
-              const done = executeSubagent(ctx.cwd, task, id, profile, {
-                parentSessionPath: parentPath,
-                model: chosenModel,
-                systemPrompt: layer.systemPrompt,
-                tools: layer.tools,
-                env: profileEnv,
-                mcp: profile.mcp,
-                timeoutMs: limits.timeoutMs,
-                seedMessages,
-                depth: childDepth,
-                thinkingLevel: thinkingLevel || undefined,
-                signal: controller.signal,
-                onUpdate: (u) => {
-                  if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
-                  registry.progress(id, u.transcript);
-                },
-              })
-                .then((r) => {
-                  const aborted = controller.signal.aborted;
-                  registry.finish(id, r.ok
-                    ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
-                    : { status: aborted ? "cancelled" : "error", output: r.output, error: r.error, exitCode: r.exitCode, transcript: r.transcript });
-                  if (r.ok) writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
-                  return mapStop(r, aborted);
-                })
-                .catch((e): JobOutcome => {
-                  registry.finish(id, { status: "error", error: String((e as Error)?.message ?? e), exitCode: -1 });
-                  return { status: "failed", error: String((e as Error)?.message ?? e) };
-                })
-                .finally(() => {
-                  inflight.delete(id);
-                  releaseReserved(sessionKey, 1);
-                });
-              return { cancel: () => controller.abort(), done };
+          startBackgroundRun(ctx.cwd, task, id, {
+            projectCwd: projectCwd(ctx),
+            parentSessionId: parentSid ?? "",
+            parentSessionPath: parentPath,
+            model: chosenModel,
+            systemPrompt: layer.systemPrompt,
+            backend: layer.backend,
+            tools: layer.tools,
+            env: profileEnv,
+            mcp: profile.mcp,
+            timeoutMs: limits.timeoutMs,
+            depth: childDepth,
+            thinkingLevel: thinkingLevel || undefined,
+            signal: controller.signal,
+            onUpdate: (u) => {
+              if (u.sessionPath) registry.setSessionPath(id, u.sessionPath, u.thinkingLevel);
+              registry.progress(id, u.transcript);
             },
+            onSettled: (r) => {
+              // 记账失败也要归还名额（释放边界，teardown.ts）。
+              try {
+                finishQuietly(registry, id, r.ok
+                  ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+                  : {
+                      status: controller.signal.aborted ? "cancelled" : "error",
+                      output: r.output,
+                      error: r.error,
+                      exitCode: r.exitCode,
+                      transcript: r.transcript,
+                    });
+                if (r.ok) writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
+              } finally {
+                inflight.delete(id);
+                releaseReserved(sessionKey, 1);
+              }
+            },
+            deliver: (notice) => deliverSettlement(pi, ctx, parentPath, workspace, notice, spawner),
           });
-          registry.setJobId(id, jobId);
-          return { jobId };
         };
 
-        if (spawnMode === "one-shot") {
-          const { jobId } = startOneShotJob();
-          transferOne();
-          return {
-            content: [{ type: "text", text: `Background one-shot sub-agent started as job ${jobId}. Collect with job_output({ job_id: "${jobId}" }).` }],
-            details: { agentId: id, jobId, mode: "one-shot", status: "running", ...(chosenModel ? { model: chosenModel } : {}), ...thinkingOf(id) },
-          };
-        }
-
-        if (canUseEmbeddedSubagent(profile)) {
+        if (selectSubagentBackend(layer.backend).capabilities.continuable) {
           registry.create({
             id,
             task,
@@ -1147,14 +1223,17 @@ export default function (pi: ExtensionAPI) {
           const controller = new AbortController();
           inflight.set(id, controller);
           try {
-            const started = await startContinuableEmbedded({
+            const started = await startContinuableSubagent({
               cwd: ctx.cwd,
+              projectCwd: projectCwd(ctx),
               task,
               agentId: id,
               parentSessionPath: parentPath,
               parentSessionId: parentSid,
               model: chosenModel,
-              systemPrompt: withDelegationScope(layer.systemPrompt),
+              systemPrompt: layer.systemPrompt,
+              backend: preferredBackend(layer.backend),
+              deliverFallback: (notice) => sendSettlementViaExtension(pi, ctx, notice, spawner),
               tools: layer.tools,
               env: profileEnv,
               mcp: profile.mcp,
@@ -1171,10 +1250,12 @@ export default function (pi: ExtensionAPI) {
               onSettled: (info) => {
                 const status =
                   info.stopReason === "aborted" ? "cancelled" : info.stopReason === "error" ? "error" : "done";
-                registry.finish(id, {
+                // 记账失败也要归还名额（释放边界，teardown.ts）。
+                finishQuietly(registry, id, {
                   status,
                   output: info.output,
                   exitCode: status === "done" ? 0 : -1,
+                  ...(info.diagnostic ? { error: info.diagnostic } : {}),
                 });
                 inflight.delete(id);
                 releaseReserved(sessionKey, 1);
@@ -1216,11 +1297,11 @@ export default function (pi: ExtensionAPI) {
           }
         }
 
-        const { jobId } = startOneShotJob();
+        startBackground();
         transferOne();
         return {
-          content: [{ type: "text", text: `${spawnedText}\nAlso tracked as job ${jobId} (job_output / job_kill).` }],
-          details: { agentId: id, jobId, status: "running", ...(chosenModel ? { model: chosenModel } : {}), ...thinkingOf(id) },
+          content: [{ type: "text", text: spawnedText }],
+          details: { agentId: id, status: "running", ...(chosenModel ? { model: chosenModel } : {}), ...thinkingOf(id) },
         };
       }
 
@@ -1228,13 +1309,6 @@ export default function (pi: ExtensionAPI) {
         const { task, model, agent } = list[0];
         const layer = agentLayer(agent);
         const chosenModel = pickSubagentModel(model, layer.model, profileModel, ctx.model);
-        const wt = wantWorktree ? await createWorktree(ctx.cwd) : null;
-        if (wantWorktree && !wt && getConfig("ISOLATE_FALLBACK") !== "1") {
-          throw new Error(
-            "无法隔离：当前目录非 git 仓库或无提交。请改用非隔离档案、先 git init + 初始提交，或设 ISOLATE_FALLBACK=1 降级。",
-          );
-        }
-        const runCwd = wt?.dir ?? ctx.cwd;
         const id = SubAgentRegistry.genId();
         registry.create({
           id,
@@ -1243,13 +1317,27 @@ export default function (pi: ExtensionAPI) {
           model: chosenModel ?? null,
           parentId: parentSid ?? null, depth: childDepth,
         });
-        const controller = registerInflight(id, signal);
+        // 用户在等待期间发话就把它转到后台（detach.ts）；转后台之后这一轮被打断不再连带取消它。
+        const linked = detachableSignal(signal);
+        const controller = registerInflight(id, linked.signal);
+        const parentPath = parentSessionPath(ctx);
+        const workspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
+        const fg = new ForegroundRun({
+          parentSessionId: parentSid ?? "",
+          deliver: (notice) => deliverSettlement(pi, ctx, parentPath, workspace, notice, spawner),
+          unlinkAbort: linked.unlink,
+        });
         let seenThinkingLevel: string | undefined;
+        let seenSessionPath: string | undefined;
+        let detached = false;
         try {
-          const r = await executeSubagent(runCwd, task, id, profile, {
+          fg.started(id);
+          const running = runSubagent(ctx.cwd, task, id, {
+            projectCwd: projectCwd(ctx),
             parentSessionPath: parentSessionPath(ctx),
             model: chosenModel,
             systemPrompt: layer.systemPrompt,
+            backend: layer.backend,
             tools: layer.tools,
             env: profileEnv,
             mcp: profile.mcp,
@@ -1266,7 +1354,9 @@ export default function (pi: ExtensionAPI) {
                 seenThinkingLevel = u.thinkingLevel;
                 registry.setThinkingLevel(id, u.thinkingLevel);
               }
-              if (onUpdate) {
+              if (u.sessionPath) seenSessionPath = u.sessionPath;
+              // 转后台之后这次工具调用已经返回，不再往它身上推进度；界面改跟注册表。
+              if (onUpdate && !fg.detached) {
                 onUpdate({
                   content: [{ type: "text", text: u.text }],
                   details: u.sessionPath
@@ -1279,6 +1369,63 @@ export default function (pi: ExtensionAPI) {
               }
             },
           });
+          const outcome = await waitOrDetach(running, {
+            enabled: !nestedCall,
+            hasPendingInput: () => steerWaiting(ctx),
+          });
+          if (outcome.detached) {
+            detached = true;
+            keepReservations = true;
+            fg.detach();
+            // 结束时照前台的规矩记账，再由 ForegroundRun 发结算通知；名额占到它结束为止。
+            void running
+              .catch((e: unknown) => ({
+                ok: false,
+                output: "",
+                exitCode: -1,
+                error: String((e as Error)?.message ?? e),
+                transcript: "",
+                sessionPath: undefined as string | undefined,
+                stopReason: controller.signal.aborted ? ("aborted" as const) : ("error" as const),
+                diagnostic: String((e as Error)?.message ?? e),
+              }))
+              .then((r) => {
+                try {
+                  registry.finish(
+                    id,
+                    r.ok
+                      ? { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript }
+                      : {
+                          status: controller.signal.aborted ? "cancelled" : "error",
+                          output: r.output,
+                          error: r.error,
+                          exitCode: r.exitCode,
+                          transcript: r.transcript,
+                        },
+                  );
+                  if (r.ok) writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
+                } catch {
+                  /* 记账出错不能挡住通知 */
+                } finally {
+                  inflight.delete(id);
+                  releaseOne();
+                }
+                fg.finished(id, r);
+              });
+            return {
+              content: [{ type: "text", text: detachedSingleText(id) }],
+              details: {
+                agentId: id,
+                ...(seenSessionPath ? { sessionPath: seenSessionPath } : {}),
+                status: "running",
+                detached: true,
+                ...(chosenModel ? { model: chosenModel } : {}),
+                ...thinkingOf(id),
+              },
+            };
+          }
+          const r = outcome.value;
+          fg.finished(id, r);
           if (!r.ok) {
             const aborted = controller.signal.aborted;
             registry.finish(id, {
@@ -1304,27 +1451,24 @@ export default function (pi: ExtensionAPI) {
             }
             throw new Error(`sub-agent failed (exit ${r.exitCode}): ${r.error ?? "unknown error"}`);
           }
-          const diff = wt ? await worktreeDiff(wt.dir) : undefined;
           registry.finish(id, { status: "done", output: r.output, exitCode: r.exitCode, transcript: r.transcript });
           writeOneShotCatalog(pi, ctx, { childId: id, sessionPath: r.sessionPath, label: catalogLabel(task) });
-          const text = wt
-            ? `${r.output || "(no output)"}\n\n---\n### Diff (isolated worktree)\n\n${diff?.trim() ? "```diff\n" + diff + "\n```" : "(no file changes)"}`
-            : r.output || "(no output)";
           return {
-            content: [{ type: "text", text }],
+            content: [{ type: "text", text: r.output || "(no output)" }],
             details: subagentDetails(id, r, {
               transcript: r.sessionPath ? undefined : tailLines(r.transcript, TRANSCRIPT_CAP),
-              isolated: !!wt,
-              diff,
               ...(chosenModel ? { model: chosenModel } : {}),
               ...thinkingOf(id),
               ...forkDetails(params.fork, seedMessages),
             }),
           };
         } finally {
-          inflight.delete(id);
-          releaseOne();
-          if (wt) await wt.cleanup();
+          // 转后台的那份由它结束时自己收尾。
+          if (!detached) {
+            inflight.delete(id);
+            releaseOne();
+            linked.unlink();
+          }
         }
       }
 
@@ -1343,7 +1487,18 @@ export default function (pi: ExtensionAPI) {
       // 档案显式 limits.maxConcurrency 仍可收紧。默认一次把本次 tasks 全部拉起来：
       // 固定 4 路会让第 5 个一直排在队列里，会话列表却已经按参数画出 5 行。
       const concurrency = Math.max(1, limits.maxConcurrency ?? list.length);
+      // 用户在等待期间发话：已经结束的照常返回，还在跑的转到后台（detach.ts）。
+      const linkedAll = detachableSignal(signal);
+      const groupParentPath = parentSessionPath(ctx);
+      const groupWorkspace = currentWorkspaceContext()?.workspace ?? ctx.cwd;
+      const fgAll = new ForegroundRun({
+        parentSessionId: parentSid ?? "",
+        deliver: (notice) => deliverSettlement(pi, ctx, groupParentPath, groupWorkspace, notice, spawner),
+        unlinkAbort: linkedAll.unlink,
+      });
       const publishLive = () => {
+        // 转后台之后这次工具调用已经返回，不再往它身上推进度。
+        if (fgAll.detached) return;
         onUpdate?.({
           content: [{ type: "text", text: "并行子代理运行中" }],
           details: {
@@ -1371,6 +1526,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         let id: string | undefined;
+        let settledAs: Pick<SubagentResult, "stopReason" | "output" | "sessionPath" | "diagnostic"> | undefined;
         try {
           const layer = agentLayer(t.agent);
           const subId = SubAgentRegistry.genId();
@@ -1385,11 +1541,14 @@ export default function (pi: ExtensionAPI) {
           });
           slots[i] = { ...slots[i], task: t.task, agentId: subId, model: chosenModel };
           publishLive();
-          const controller = registerInflight(subId, signal);
-          const r = await executeSubagent(ctx.cwd, t.task, subId, profile, {
+          fgAll.started(subId);
+          const controller = registerInflight(subId, linkedAll.signal);
+          const r = await runSubagent(ctx.cwd, t.task, subId, {
+            projectCwd: projectCwd(ctx),
             parentSessionPath: parentSessionPath(ctx),
             model: chosenModel,
             systemPrompt: layer.systemPrompt,
+            backend: layer.backend,
             tools: layer.tools,
             env: profileEnv,
             mcp: profile.mcp,
@@ -1433,25 +1592,43 @@ export default function (pi: ExtensionAPI) {
           if (r.ok) {
             writeOneShotCatalog(pi, ctx, { childId: subId, sessionPath: r.sessionPath, label: catalogLabel(t.task) });
           }
+          settledAs = r;
         } catch (e) {
           // 单个任务异常（如未知 agent、registry 写入失败）不应 reject 整个 Promise.all 而遗弃其它
           // 正在运行的兄弟任务：就地记为该任务的失败结果，其余 worker 照常跑完。
           const msg = String((e as Error)?.message ?? e);
-          if (id) registry.finish(id, { status: "error", error: msg, exitCode: -1 });
+          if (id) finishQuietly(registry, id, { status: "error", error: msg, exitCode: -1 });
           slots[i] = { task: t.task, ok: false, output: "", error: msg, agentId: id, settled: true };
           publishLive();
+          settledAs = { stopReason: "error", output: "", diagnostic: msg };
         } finally {
           if (i >= earlyStarted) releaseOne();
+          // 转后台之后靠它发结算通知，上面哪一步出错都要走到。
+          if (id && fgAll.isRunning(id)) {
+            fgAll.finished(id, settledAs ?? { stopReason: "error", output: "", diagnostic: "sub-agent ended without a result" });
+          }
         }
       };
       // 滑动窗口并发：concurrency 个 worker 各自从队列取下一个任务，单个卡住只占一个槽位——不再像
       // 「分批 + Promise.all」那样被批内最慢/卡住的一个拖住，导致后续任务永远不开始。
-      if (signal && earlyBatch) {
+      if (earlyBatch) {
         const abortEarly = () => {
           for (const controller of earlyBatch.abortors) controller.abort();
         };
-        if (signal.aborted) abortEarly();
-        else signal.addEventListener("abort", abortEarly, { once: true });
+        if (linkedAll.signal.aborted) abortEarly();
+        else linkedAll.signal.addEventListener("abort", abortEarly, { once: true });
+        // 流式阶段已经开工的那几个：还在跑的记进这次前台 run，结束时经它（转后台后发通知）。
+        for (const slot of earlyBatch.slots) if (slot?.agentId && !slot.settled) fgAll.started(slot.agentId);
+        earlyBatch.onSettled = (slot) => {
+          if (slot.agentId && fgAll.isRunning(slot.agentId)) {
+            fgAll.finished(slot.agentId, {
+              stopReason: (slot.stopReason as SubagentStopReason | undefined) ?? (slot.ok ? "completed" : "error"),
+              output: slot.output,
+              sessionPath: slot.sessionPath,
+              diagnostic: slot.ok ? undefined : slot.error,
+            });
+          }
+        };
       }
       publishLive();
       let nextIndex = earlyStarted;
@@ -1461,7 +1638,23 @@ export default function (pi: ExtensionAPI) {
         }
       };
       const workers = Array.from({ length: Math.min(concurrency, Math.max(0, list.length - earlyStarted)) }, () => worker());
-      await Promise.all([...(earlyBatch?.runs ?? []), ...workers]);
+      const all = Promise.all([...(earlyBatch?.runs ?? []), ...workers]);
+      const outcome = await waitOrDetach(all, { enabled: !nestedCall, hasPendingInput: () => steerWaiting(ctx) });
+      // 那一刻其实都已经结束、只差收尾的，照常等完返回。
+      const moving = outcome.detached && slots.some((s) => !s.settled || fgAll.isRunning(s.agentId));
+      if (moving) {
+        keepReservations = true;
+        fgAll.detach();
+        // 还没轮到的任务由 worker 在后台接着起；全部结束后把没用上的预占名额还掉。
+        const releaseLeft = () => {
+          if (slotsLeft > 0) releaseReserved(sessionKey, slotsLeft);
+          slotsLeft = 0;
+        };
+        void all.then(releaseLeft, releaseLeft);
+        return detachedParallelResult(slots, fgAll, thinkingOf);
+      }
+      if (outcome.detached) await all;
+      linkedAll.unlink();
 
       const body = slots
         .map((r, i) => {
@@ -1495,12 +1688,25 @@ export default function (pi: ExtensionAPI) {
         },
       };
       } finally {
-        if (slotsLeft > 0) releaseReserved(sessionKey, slotsLeft);
+        if (!keepReservations && slotsLeft > 0) releaseReserved(sessionKey, slotsLeft);
       }
     },
   });
 
   registerAdjacentTools(pi);
+  registerListAgents(pi);
+  // 直接父会话 id 与 spawn 时登记的 parentSessionId 一致（拿不到会话 id 时都是空串）。
+  registerWaitAgent(pi, {
+    parentKey: (ctx) => parentSessionId(ctx) ?? "",
+    labelOf: (cwd, childId) => {
+      try {
+        const task = getRegistry(cwd).get(childId)?.task;
+        return task ? catalogLabel(task) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  });
 
   // Periodic stuck reaping across all open registries (unref'd so it never keeps
   // the process alive). Lazy reaping on list/status covers on-demand cases.

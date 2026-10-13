@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const appendMessage = vi.fn();
 const appendCustomEntry = vi.fn();
 const appendModelChange = vi.fn();
+const sessionCreate = vi.fn((..._args: unknown[]) => undefined);
 const createAgentSessionFromServices = vi.fn();
 const createAgentSessionServicesMock = vi.fn(async () => ({ modelRuntime: { id: "runtime" } }));
 const resolveCliModel = vi.fn();
@@ -12,7 +13,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSessionFromServices: (...args: unknown[]) => createAgentSessionFromServices(...args),
   resolveCliModel: (...args: unknown[]) => resolveCliModel(...args),
   SessionManager: {
-    create: () => ({
+    create: (...args: unknown[]) => (sessionCreate(...args), {
       appendMessage,
       appendCustomEntry,
       appendModelChange,
@@ -45,6 +46,8 @@ import { getActivation, __resetActivationsForTest } from "./activation.js";
 import * as activation from "./activation.js";
 import * as parentHost from "./parent-host.js";
 import { createEmbeddedChildSession, runEmbeddedSubagent, startContinuableEmbedded } from "./embedded-runner.js";
+import { reportLeakedError } from "../_shared/leak-owner.js";
+import { __resetApprovalRoutesForTest, canRequestApproval, registerTopApprovalRoute, requestApproval } from "../_shared/approval-route.js";
 
 function fakeSession(
   model: { provider: string; id: string },
@@ -119,6 +122,21 @@ describe("runEmbeddedSubagent", () => {
     expect(excludeTools).not.toContain("spawn_agent");
     expect(excludeTools).not.toContain("send_message");
     expect(session.dispose).toHaveBeenCalled();
+  });
+
+  it("parent moved into a worktree: child header stays on the original directory, tools use the current one, the move is recorded", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws/.agents/worktrees/x", projectCwd: "/ws", task: "t", agentId: "sa-wt" });
+    expect(sessionCreate.mock.calls[0]?.[0]).toBe("/ws");
+    expect((createAgentSessionServicesMock.mock.calls[0] as unknown[] | undefined)?.[0]).toMatchObject({ cwd: "/ws/.agents/worktrees/x" });
+    expect(appendCustomEntry).toHaveBeenCalledWith("working_directory", { cwd: "/ws/.agents/worktrees/x" });
+  });
+
+  it("without a move the child header uses cwd and no working_directory entry is written", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", projectCwd: "/ws", task: "t", agentId: "sa-same" });
+    expect(sessionCreate.mock.calls[0]?.[0]).toBe("/ws");
+    expect(appendCustomEntry.mock.calls.some((c) => c[0] === "working_directory")).toBe(false);
   });
 
   it("passes thinkingLevel into createAgentSessionFromServices and records it in subagent_meta", async () => {
@@ -285,6 +303,124 @@ describe("runEmbeddedSubagent", () => {
     expect(r2.partial).toBe(true);
   });
 
+  it("an error leaked inside one run (found by its async context) ends that run as an error; a run beside it is unaffected", async () => {
+    const leaking = fakeSession({ provider: "a", id: "b" });
+    let leakIdle!: () => void;
+    leaking.waitForIdle = vi.fn(() => new Promise<void>((resolve) => { leakIdle = resolve; }));
+    leaking.prompt = vi.fn(async (_t: string, o?: { preflightResult?: (d: unknown) => void }) => {
+      o?.preflightResult?.("started");
+      // 不被 await 的工作里出错：没有显式的子代理 id，靠这次运行的异步上下文归属。
+      setTimeout(() => reportLeakedError(new Error("boom")), 5);
+    }) as never;
+    leaking.abort = vi.fn(async () => {
+      leaking.messages = [{ role: "assistant", content: [{ type: "text", text: "半截" }], stopReason: "aborted" }] as never;
+      leakIdle?.();
+    });
+    const fine = fakeSession({ provider: "a", id: "b" });
+    fine.waitForIdle = vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, 40)));
+    createAgentSessionFromServices.mockImplementation(async () => {
+      const next = createAgentSessionFromServices.mock.calls.length === 1 ? leaking : fine;
+      return { session: next };
+    });
+
+    const [bad, good] = await Promise.all([
+      runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-leak" }),
+      new Promise((resolve) => setTimeout(resolve, 1)).then(() => runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-fine" })),
+    ]);
+    expect(bad).toMatchObject({ ok: false, stopReason: "error", error: "uncaught error: boom", exitCode: 1, output: "半截", partial: true });
+    expect(good).toMatchObject({ ok: true, output: "child answer", stopReason: "completed" });
+    // 结束后这个子代理不再登记：之后的漏网错误只记日志。
+    expect(reportLeakedError(new Error("late"), "sa-leak")).toEqual({ childId: "sa-leak", handled: false });
+  });
+
+  it("an error leaked while the child session is being created ends the run without starting it", async () => {
+    const session = fakeSession({ provider: "a", id: "b" });
+    createAgentSessionFromServices.mockImplementationOnce(async () => {
+      // 扩展初始化时漏出来的：这时还没有会话，靠这次运行的异步上下文归属。
+      reportLeakedError(new Error("init boom"));
+      return { session };
+    });
+    const r = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-init" });
+    expect(r).toMatchObject({ ok: false, stopReason: "error", error: "uncaught error: init boom" });
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(reportLeakedError(new Error("late"), "sa-init")).toEqual({ childId: "sa-init", handled: false });
+  });
+
+  it("an error during prompt preflight aborts the run again once it has started", async () => {
+    const session = fakeSession({ provider: "a", id: "b" });
+    let abortsBeforeWaiting = -1;
+    session.prompt = vi.fn(async (_t: string, o?: { preflightResult?: (d: unknown) => void }) => {
+      reportLeakedError(new Error("preflight boom"));
+      o?.preflightResult?.("started");
+    }) as never;
+    session.waitForIdle = vi.fn(async () => {
+      abortsBeforeWaiting = session.abort.mock.calls.length;
+    });
+    createAgentSessionFromServices.mockResolvedValueOnce({ session });
+    const r = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-preflight" });
+    // 一次在 preflight 里（会被起跑重置），一次在起跑之后。
+    expect(abortsBeforeWaiting).toBe(2);
+    expect(r).toMatchObject({ ok: false, stopReason: "error", error: "uncaught error: preflight boom" });
+  });
+
+  it("a throwing dispose does not replace the child's result; the failed step is logged", async () => {
+    const session = fakeSession({ provider: "a", id: "b" });
+    session.dispose = vi.fn(() => {
+      throw new Error("dispose exploded");
+    });
+    createAgentSessionFromServices.mockResolvedValueOnce({ session });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const r = await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-dispose" });
+      expect(r).toMatchObject({ ok: true, output: "child answer" });
+      expect(log).toHaveBeenCalledWith("[multi-agent] sub-agent sa-dispose teardown failed: dispose session: dispose exploded");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("a throwing progress callback neither escapes the child's session listeners nor changes the result", async () => {
+    const listeners: Array<(event: unknown) => void> = [];
+    const session = fakeSession({ provider: "a", id: "b" });
+    session.subscribe = vi.fn((fn: (event: unknown) => void) => {
+      listeners.push(fn);
+      return () => {};
+    }) as never;
+    const escaped: unknown[] = [];
+    session.prompt = vi.fn(async (_t: string, o?: { preflightResult?: (d: unknown) => void }) => {
+      o?.preflightResult?.("started");
+      // SDK 同步调用监听方：这里抛出去就会让子代理这次工具调用 / 这一轮失败。
+      for (const listener of listeners) {
+        for (const event of [{ type: "turn_start" }, { type: "tool_execution_update", toolCallId: "c1" }]) {
+          try {
+            listener(event);
+          } catch (error) {
+            escaped.push(error);
+          }
+        }
+      }
+    }) as never;
+    createAgentSessionFromServices.mockResolvedValueOnce({ session });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const r = await runEmbeddedSubagent({
+        cwd: "/ws",
+        task: "t",
+        agentId: "sa-progress",
+        onUpdate: () => {
+          throw new Error("registry write failed");
+        },
+      });
+      expect(escaped).toEqual([]);
+      expect(r).toMatchObject({ ok: true, output: "child answer" });
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      expect(lines[0]).toBe("[session-listener] sub-agent sa-progress progress failed; swallowed so the session keeps going");
+      expect(lines.filter((line) => line.includes("sub-agent sa-progress progress failed"))).toHaveLength(1);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("omits thinkingLevel when not given", async () => {
     createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
     await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-y" });
@@ -350,6 +486,38 @@ describe("createEmbeddedChildSession", () => {
     expect(excludeTools).toEqual(expect.arrayContaining(["explore_context"]));
     expect(excludeTools).not.toContain("spawn_agent");
     expect(excludeTools).not.toContain("send_message");
+  });
+});
+
+describe("createEmbeddedChildSession · approvals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetActivationsForTest();
+    __resetApprovalRoutesForTest();
+    resolveCliModel.mockImplementation(({ cliModel }: { cliModel: string }) => {
+      const [provider, id] = cliModel.split("/");
+      return { model: { provider, id }, error: undefined };
+    });
+  });
+
+  it("the child's approvals go to its parent session until it is unsubscribed", async () => {
+    const select = vi.fn<(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>>(async () => "拒绝");
+    registerTopApprovalRoute("/ws/.pi/sessions/parent.jsonl", { select });
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "p", id: "m" }) });
+    const child = await createEmbeddedChildSession({
+      cwd: "/ws",
+      task: "check the build\nthen report",
+      agentId: "sa-child",
+      parentSessionPath: "/ws/.pi/sessions/parent.jsonl",
+      model: "p/m",
+    });
+
+    expect(await canRequestApproval(child.sessionPath)).toBe(true);
+    await requestApproval(child.sessionPath, { title: "x", options: ["拒绝"] });
+    expect(select.mock.calls[0]?.[0]).toBe("子代理 check the build（sa-child） x");
+    child.unsub();
+    expect(await canRequestApproval(child.sessionPath)).toBe(false);
+    __resetApprovalRoutesForTest();
   });
 });
 

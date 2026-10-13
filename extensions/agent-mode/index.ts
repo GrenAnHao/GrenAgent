@@ -13,6 +13,7 @@
 // 桌面切换走宿主 agent_set_mode：先写 live 再落盘。门闩现读 live；
 // 工具集在下一轮 before_agent_start 对齐。不再注册 /mode、/plan。
 // /plan-build 与 /brainstorm-deliver 仍由卡片 / 模型触发，经 applyMode 写 live。
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -96,7 +97,7 @@ export default function (pi: ExtensionAPI) {
   const pushStatus = (ctx: ExtensionContext) => {
     ctx.ui.setStatus("agent-mode", currentMode);
     // 项目默认模式：草稿输入栏显示用（新会话将继承它）。
-    ctx.ui.setStatus("agent-mode-default", getDefaultAgentMode(ctx.cwd));
+    ctx.ui.setStatus("agent-mode-default", getDefaultAgentMode(projectCwd(ctx)));
     if (executionMode && todoItems.length > 0) {
       const done = todoItems.filter((t) => t.completed).length;
       ctx.ui.setStatus("plan-mode", `执行中 ${done}/${todoItems.length}`);
@@ -116,7 +117,7 @@ export default function (pi: ExtensionAPI) {
     if (willRestrict && !wasRestricted) savedTools = pi.getActiveTools();
 
     currentMode = next;
-    setAgentMode(next, ctx.cwd, sessionId);
+    setAgentMode(next, projectCwd(ctx), sessionId);
 
     if (willRestrict) {
       pi.setActiveTools(activeToolsFor(next, savedTools ?? pi.getActiveTools()) ?? []);
@@ -143,14 +144,14 @@ export default function (pi: ExtensionAPI) {
   // 每个会话（含子代理）各订一份，会话结束退订。
   const unwatch = watchConfig((next) => {
     if (!sessionCtx) return;
-    const parsed = parseModeArg(next[agentModeConfigKey(sessionCtx.cwd)] ?? "");
+    const parsed = parseModeArg(next[agentModeConfigKey(projectCwd(sessionCtx))] ?? "");
     if (!sessionId) {
       // 无会话身份时只有项目级模式可用：沿用旧行为，直接切。
-      if (parsed && parsed !== getAgentMode(sessionCtx.cwd)) switchMode(parsed, sessionCtx);
+      if (parsed && parsed !== getAgentMode(projectCwd(sessionCtx))) switchMode(parsed, sessionCtx);
       return;
     }
-    if (!parsed || parsed === getDefaultAgentMode(sessionCtx.cwd)) return;
-    setAgentMode(parsed, sessionCtx.cwd);
+    if (!parsed || parsed === getDefaultAgentMode(projectCwd(sessionCtx))) return;
+    setAgentMode(parsed, projectCwd(sessionCtx));
   });
   pi.on("session_shutdown", () => { unwatch(); });
 
@@ -159,7 +160,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("brainstorm-deliver", {
     description: "从头脑风暴切换到 Agent 模式并开始实施（由 AI 在交付阶段调用）",
     handler: async (args, ctx) => {
-      if (liveMode(ctx.cwd) !== "brainstorm") {
+      if (liveMode(projectCwd(ctx)) !== "brainstorm") {
         ctx.ui.notify("当前不在头脑风暴模式，无需切换。", "info");
         return;
       }
@@ -412,8 +413,8 @@ export default function (pi: ExtensionAPI) {
     }
     if (!sessionId) {
       // 无会话身份（旧 worker / 测试桩）：沿用项目级行为，已写入的 live 优先，其次盘上，再会话条目。
-      if (!hasAgentMode(ctx.cwd)) {
-        const fromFile = parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "");
+      if (!hasAgentMode(projectCwd(ctx))) {
+        const fromFile = parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "");
         const next = fromFile ?? persistedMode(entries) ?? DEFAULT_MODE;
         if (fromFile && fromFile !== currentMode && fromFile !== "plan") {
           todoItems = [];
@@ -422,18 +423,18 @@ export default function (pi: ExtensionAPI) {
         applyMode(next, ctx, { silent: true, persist: false });
         return;
       }
-    } else if (!hasAgentMode(ctx.cwd)) {
-      setAgentMode(parseModeArg(getConfig(agentModeConfigKey(ctx.cwd)) ?? "") ?? DEFAULT_MODE, ctx.cwd);
+    } else if (!hasAgentMode(projectCwd(ctx))) {
+      setAgentMode(parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "") ?? DEFAULT_MODE, projectCwd(ctx));
     }
-    if (sessionId && !hasAgentMode(ctx.cwd, sessionId)) {
+    if (sessionId && !hasAgentMode(projectCwd(ctx), sessionId)) {
       // 会话自己记的模式优先（宿主切换写的 session-controls 与本扩展的 agent-mode 取最近一条）；
       // 没有时继承 ALS 里的父会话（子代理），再退项目默认。
       const own = persistedMode(entries);
       const parent = currentSessionId();
-      const inherited = parent && parent !== sessionId && hasAgentMode(ctx.cwd, parent)
-        ? getAgentMode(ctx.cwd, parent)
+      const inherited = parent && parent !== sessionId && hasAgentMode(projectCwd(ctx), parent)
+        ? getAgentMode(projectCwd(ctx), parent)
         : undefined;
-      const next = own ?? inherited ?? getDefaultAgentMode(ctx.cwd);
+      const next = own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx));
       if (next !== currentMode && next !== "plan") {
         todoItems = [];
         executionMode = false;
@@ -442,7 +443,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const live = liveMode(ctx.cwd);
+    const live = liveMode(projectCwd(ctx));
     if (live !== currentMode) {
       applyMode(live, ctx, { silent: true });
       return;

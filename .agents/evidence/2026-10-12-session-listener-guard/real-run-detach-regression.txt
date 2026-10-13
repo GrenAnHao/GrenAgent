@@ -1,0 +1,73 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5
+
+=== 并行 run：快的结束后用户发话 ===
+   用户发话到 spawn_agent 返回：118 ms
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"tasks\":[{\"title\":\"fast\",\"task\":\"Reply with exactly the word FAST and nothing else. Do not use any tools.\"},{\"title\":\"slow\",\"task\":\"Write the number"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"A new message arrived while this run was waiting, so 1 unfinished sub-agent(s) moved to the background and keep running. Respond to that message now; each one reports back with its own subagent-settled notice.\n\n## Sub-ag"}
+   {"role":"user","text":"Quick check-in: reply with exactly the word HERE and nothing else, and do not call any tools."}
+   {"role":"assistant","text":"HERE","toolCalls":[]}
+PASS  并行：spawn_agent 的结果标明转到后台
+PASS  并行：用户发话后很快返回（118 ms）
+PASS  并行：已结束的快任务带回了 FAST
+PASS  并行：慢任务写明转到后台，带 agentId
+PASS  并行：父会话先回复了用户（HERE），没有等慢任务
+   结算通知： Background subagent sa-3106c335 finished. It cannot receive further messages.
+Its closing message:
+one
+two
+three
+four
+five
+six
+seven
+eight
+nine
+ten
+eleven
+twelv
+PASS  并行：慢任务结束时父会话收到它的结算通知（带回 SLOW_DONE）
+
+=== 单任务 run：转后台后打断父会话这一轮 ===
+PASS  单任务：回执是 status: running / detached
+   已打断父会话这一轮（agent_abort）
+   结算通知： Background subagent sa-c96130bf finished. It cannot receive further messages.
+Its closing message:
+one
+two
+three
+four
+five
+six
+seven
+eight
+nine
+ten
+eleven
+twelv
+PASS  单任务：打断父会话没有取消它，照样跑完并发来 completed 的通知
+
+=== 单任务 run：等待时来了一条跟进（followUp） ===
+   跟进发出后 run 又等了 7175 ms
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"title\":\"medium single\",\"task\":\"Write the numbers from 1 to 200 in English words, one per line, then on a final line write exactly MEDIUM_DONE. Do n"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\nthirteen\nfourteen\nfifteen\nsixteen\nseventeen\neighteen\nnineteen\ntwenty\ntwenty-one\ntwenty-two\ntwenty-three\ntwenty-four\ntwenty-five\ntwenty-six\ntwenty-seven\ntwent"}
+   {"role":"assistant","text":"GOT","toolCalls":[]}
+   {"role":"user","text":"After you are done, reply with exactly the word LATER and nothing else."}
+   {"role":"assistant","text":"LATER","toolCalls":[]}
+PASS  跟进：发出后 run 又等了 7175 ms（超过 1 s，足够看出没有转后台；转后台在 200 ms 内）
+PASS  跟进：run 没有转后台，等到了完整结果（MEDIUM_DONE）
+PASS  跟进：没有转后台的结算通知
+PASS  跟进：在这一轮结束后才处理（LATER 在工具结果之后）
+
+=== codemode 脚本里的 spawn_agent（对照） ===
+   模型没有调 codemode，这一项只记录、不判定
+   {"role":"user","text":"This is an automated test. Use the codemode tool exactly once. In the script, call spawn_agent with {\"task\":\"Write the numbers from 1 to 1000 in English words, one per line, then on a final line write exactly SLOW_DONE. "}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"I can't run this test as specified. There is no codemode tool in my available tools, and you asked me not to call spawn_agent outside a codemode script, so I have not called anything.\n\nIf you want the same work done anot","toolCalls":[]}
+
+临时目录已删除：true
+全部通过

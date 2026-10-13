@@ -19,6 +19,8 @@ export interface EarlyBatch {
   slots: EarlySlot[];
   runs: Array<Promise<void>>;
   abortors: AbortController[];
+  /** 某一项结束（slot 已写好终态）时调用；execute 接手这批之后设上，用于前台 run 转后台后的结算通知。 */
+  onSettled?: (slot: EarlySlot) => void;
 }
 
 const byId = new Map<string, EarlyBatch>();

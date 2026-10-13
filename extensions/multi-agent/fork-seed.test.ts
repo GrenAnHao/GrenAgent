@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { completedPrefix, wipeSessionFile, writeSeed } from "./fork-seed.js";
+import { completedPrefix, FORK_INHERITANCE_NOTE, wipeSessionFile, withForkNote, writeSeed } from "./fork-seed.js";
 
 const user = (text: string) => ({ role: "user", content: text });
 const assistant = (text: string, toolCallId?: string) => ({
@@ -85,5 +85,15 @@ describe("writeSeed", () => {
     expect(existsSync(path)).toBe(false);
     expect(() => wipeSessionFile(undefined)).not.toThrow();
     expect(() => wipeSessionFile(path)).not.toThrow();
+  });
+});
+
+describe("withForkNote", () => {
+  it("puts the inherited-context note before the task only when there is inherited context", () => {
+    expect(withForkNote("do x", 0)).toBe("do x");
+    const forked = withForkNote("do x", 3);
+    expect(forked.startsWith(FORK_INHERITANCE_NOTE)).toBe(true);
+    expect(forked.endsWith("\n\ndo x")).toBe(true);
+    expect(FORK_INHERITANCE_NOTE).toContain("Inherited tool calls are historical records");
   });
 });

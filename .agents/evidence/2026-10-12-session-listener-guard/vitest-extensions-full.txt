@@ -1,0 +1,61 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+(node:53200) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ resource-manager/mcp-store.test.ts (3 tests | 1 failed) 1999ms
+     × mcp.json 连续几次写入合并成一次重读 711ms
+'this_binary_does_not_exist_zzz' �����ڲ����ⲿ���Ҳ���ǿ����еĳ���
+���������ļ���
+(node:64428) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9404) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ _shared/sandbox/windows/deleteSemantics.test.ts (1 test | 1 failed) 7478ms
+     × splits until the directory allows FindFirstFile 7475ms
+(node:2336) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46776) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39248) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:47936) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34196) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  resource-manager/mcp-store.test.ts > watchMcpConfigFiles > mcp.json 连续几次写入合并成一次重读
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ resource-manager/mcp-store.test.ts:47:22
+     45|     writeFileSync(join(cwd, ".pi", "mcp.json"), '{"mcpServers":{}}');
+     46|     await settle();
+     47|     expect(onChange).toHaveBeenCalledTimes(1);
+       |                      ^
+     48|   });
+     49|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  _shared/sandbox/windows/deleteSemantics.test.ts > windows delete without list > splits until the directory allows FindFirstFile
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ _shared/sandbox/windows/deleteSemantics.test.ts:24:3
+     22| // the four paths agree. This recreates that ACL on a private director…
+     23| describe.skipIf(pwsh === undefined)("windows delete without list", () …
+     24|   it("splits until the directory allows FindFirstFile", () => {
+       |   ^
+     25|     const dir = mkdtempSync(join(tmpdir(), "pi-del-"));
+     26|     const user = process.env.USERNAME || "";
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 226 passed | 2 skipped (230)
+      Tests  2 failed | 1975 passed | 4 skipped (1981)
+   Start at  19:15:32
+   Duration  36.52s (transform 46.83s, setup 0ms, import 273.95s, tests 105.65s, environment 46ms)
+

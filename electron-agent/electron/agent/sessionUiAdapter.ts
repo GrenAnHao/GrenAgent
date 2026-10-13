@@ -28,7 +28,12 @@ interface Pending {
   onAbort?: () => void;
 }
 
-interface DialogOpts { signal?: AbortSignal; timeout?: number }
+/** subagents：子代理经父会话问人时带上（extensions/_shared/approval-route.ts），顶层在前，原样转给渲染层。 */
+interface DialogOpts { signal?: AbortSignal; timeout?: number; subagents?: unknown[] }
+
+function subagentFields(opts: DialogOpts | undefined): Record<string, unknown> {
+  return Array.isArray(opts?.subagents) && opts.subagents.length > 0 ? { subagents: opts.subagents } : {};
+}
 
 export interface SessionUiAdapterOptions {
   workspace: string;
@@ -50,7 +55,7 @@ export class SessionUiAdapter {
 
   readonly context: ExtensionUIContext = {
     select: (title: string, options: string[], opts?: DialogOpts) =>
-      this.dialog('select', { title, options, timeout: opts?.timeout }, undefined, opts) as Promise<string | undefined>,
+      this.dialog('select', { title, options, timeout: opts?.timeout, ...subagentFields(opts) }, undefined, opts) as Promise<string | undefined>,
     confirm: (title: string, message: string, opts?: DialogOpts) =>
       this.dialog('confirm', { title, message, timeout: opts?.timeout }, false, opts) as Promise<boolean>,
     input: (title: string, placeholder?: string, opts?: DialogOpts) =>
@@ -177,10 +182,16 @@ export class SessionUiAdapter {
     };
   }
 
+  /**
+   * 请求结束了（答复、超时、调用方撤回、整体取消）就告诉渲染层把卡片收掉：dismiss 只带原请求 id，
+   * 是新增的方法，不改已有字段。渲染层的卡片按队列排（同一工作区一次显示一条），没人收的卡会一直挡在前面：
+   * 超时 / 撤回的卡点了也没人收；答复过的卡在别的窗口里也要收掉。答复的那个窗口自己已经清了，再收一次无妨。
+   */
   private settle(id: string, entry: Pending, value: unknown): void {
     if (!this.pending.delete(id)) return;
     if (entry.timer) clearTimeout(entry.timer);
     if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
     entry.resolve(value);
+    this.options.emit({ ...this.identity(), request: { type: 'extension_ui_request', id, method: 'dismiss' } });
   }
 }

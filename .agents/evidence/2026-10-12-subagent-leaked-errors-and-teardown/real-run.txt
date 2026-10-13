@@ -1,0 +1,84 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5
+
+=== 1. 进程内一次性并行 run：一个漏网出错，一个正常 ===
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"tasks\":[{\"title\":\"leaky\",\"task\":\"Call the leak_probe tool exactly once with {\\\"label\\\": \\\"A1\\\"}. After it returns, write a numbered list of 150 dif"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"## Sub-agent 1 (failed)\n\nError: uncaught error: LEAK_PROBE A1\n\n---\n\n## Sub-agent 2\n\nFINE"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   结果： [{"ok":false,"agentId":"sa-0e66de25","stopReason":"error","error":"uncaught error: LEAK_PROBE A1","output":""},{"ok":true,"agentId":"sa-562edb65","stopReason":"completed","output":"FINE"}]
+PASS  1：调了 leak_probe 的子代理按 error 结束，原因是 uncaught error: LEAK_PROBE A1
+PASS  1：旁边那个子代理不受影响，照常带回 FINE
+   agent-host 日志： [agent-host] unhandledRejection (sub-agent sa-0e66de25) Error: LEAK_PROBE A1
+PASS  1：agent-host 日志里这条漏网错误标着出错子代理的 id
+PASS  1：agent-host 还在，照常答话
+
+=== 2. 进程内可续聊（action: spawn）：漏网出错按 error 结算 ===
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"spawn\",\"title\":\"leaky spawn\",\"task\":\"Call the leak_probe tool exactly once with {\\\"label\\\": \\\"B1\\\"}. After it returns, write a numbered li"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-08f1571c\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+   spawn 回执： {"agentId":"sa-08f1571c","mode":"continuable"}
+   结算通知： Background subagent sa-08f1571c finished and will do no further work unless you send it more.
+Its closing message:
+I could not call leak_probe with {"label": "B1"}. It is not in my available tool set, so no call was made. The result has bee
+   2：第 1 次子代理没有调测试工具（不算，重试）
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"spawn\",\"title\":\"leaky spawn\",\"task\":\"Call the leak_probe tool exactly once with {\\\"label\\\": \\\"B2\\\"}. After it returns, write a numbered li"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-e01a74fd\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+   spawn 回执： {"agentId":"sa-e01a74fd","mode":"continuable"}
+   结算通知： Background subagent sa-e01a74fd failed before it finished.
+It left no closing message.
+Diagnostic: uncaught error: LEAK_PROBE B2
+   2：第 2 次子代理才调了测试工具
+PASS  2：走的是进程内可续聊
+PASS  2：结算通知 stopReason 是 error
+PASS  2：通知里的诊断是 uncaught error: LEAK_PROBE B2
+   agent-host 日志： [agent-host] unhandledRejection (sub-agent sa-e01a74fd) Error: LEAK_PROBE B2
+PASS  2：agent-host 日志里标着这个子代理的 id
+PASS  2：agent-host 还在，照常答话
+
+=== 3. worker 后端的一次性 run：worker 里的漏网错误转给 agent-host ===
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"title\":\"leaky worker\",\"task\":\"Call the leak_probe tool exactly once with {\\\"label\\\": \\\"C1\\\"}. After it returns, write a numbered list of 150 differ"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","isError":true,"text":"sub-agent failed (exit 1): uncaught error: LEAK_PROBE C1"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   结果： {"isError":true,"text":"sub-agent failed (exit 1): uncaught error: LEAK_PROBE C1"}
+PASS  3：这次 run 按 error 结束，原因是 uncaught error: LEAK_PROBE C1
+   agent-host 日志： [multi-agent] sub-agent sa-6c122ba9 (worker): unhandledRejection: LEAK_PROBE C1
+PASS  3：错误出在 worker 进程里，经 RPC 交给 agent-host（日志里标着 worker 和子代理 id）
+PASS  3：agent-host 还在，照常答话
+
+=== 4. 迟一点才接住的 rejection：子代理照常完成 ===
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"title\":\"late catch\",\"task\":\"Call the late_catch_probe tool exactly once with {\\\"marker\\\": \\\"late_catch_probe ran 1\\\"}. After it returns, reply with"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"SURVIVED"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   结果： {"isError":false,"text":"SURVIVED"}
+PASS  4：子代理照常完成（只回了 SURVIVED），没有被当成漏网错误中断
+PASS  4：agent-host 日志里没有这条（它在等待期内被接住了）
+PASS  4：agent-host 还在，照常答话
+
+agent-host 输出里与错误相关的行（最多 40 行）：
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+   [agent-host] unhandledRejection (sub-agent sa-0e66de25) Error: LEAK_PROBE A1
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+   [agent-host] unhandledRejection (sub-agent sa-e01a74fd) Error: LEAK_PROBE B2
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [multi-agent] sub-agent sa-6c122ba9 (worker): unhandledRejection: LEAK_PROBE C1
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+
+临时目录已删除：true
+全部通过

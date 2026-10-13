@@ -1,5 +1,5 @@
-// In-process one-shot sub-agent: real SessionManager + JSONL in the Electron sidecar.
-// High-risk profiles (worktree) and non-Electron hosts fall back to spawnPiAgent in index.ts.
+// Child sub-agent sessions: a real SessionManager + JSONL. The same runner drives both backends —
+// in this process (openEmbeddedChildSession) or in a worker process over RPC (worker-session.ts).
 
 import { type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
@@ -17,6 +17,8 @@ import { installToolRefreshBatching } from "../_shared/tool-refresh-batch.js";
 import { sharedModelRuntime } from "../_shared/shared-model-runtime.js";
 import { getConfig, withoutSensitiveProcessConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext, runInWorkspace } from "../_shared/workspace-context.js";
+import { attachSessionCwd, sameDirectory, WORKING_DIRECTORY_ENTRY } from "../_shared/session-cwd.js";
+import { registerChildApprovalRoute } from "../_shared/approval-route.js";
 import { continuableReturnGuidance } from "./adjacent-tools.js";
 import {
   disposeActivation,
@@ -26,9 +28,12 @@ import {
   type AgentSessionLike,
 } from "./activation.js";
 import { describeUnfinishedRun, extractAssistantOutput, type SubagentStopReason } from "./assistant-output.js";
-import { type CapabilityProfile } from "./capability.js";
+import type { SettlementNotice } from "./settlement-notice.js";
 import { emitEmbeddedSubagentEvent } from "./embedded-events.js";
-import { wipeSessionFile, writeSeed } from "./fork-seed.js";
+import { leakedErrorText, onLeakedError, reportLeakedError, runAsChild } from "../_shared/leak-owner.js";
+import { abortQuietly, Teardown } from "./teardown.js";
+import { guardListener } from "../_shared/guard-listener.js";
+import { wipeSessionFile, withForkNote, writeSeed } from "./fork-seed.js";
 import { readMaxDepth } from "./depth.js";
 import { buildSubagentRuntimeConfig, type AgentResult, type AgentUpdate } from "./runner.js";
 import { appendTranscriptTail, transcriptLineFromEvent } from "./transcript-tail.js";
@@ -40,7 +45,10 @@ import {
 } from "./structured-output.js";
 
 export interface EmbeddedSubagentOpts {
+  /** 子会话的工作目录（父会话的当前目录）：工具与项目说明都从这里读。 */
   cwd: string;
+  /** 父会话的原始目录：子会话头用它，会话目录与归属不跟着工作目录走。省略时等于 cwd。 */
+  projectCwd?: string;
   task: string;
   agentId: string;
   parentSessionPath?: string;
@@ -60,10 +68,14 @@ export interface EmbeddedSubagentOpts {
   depth?: number;
   parentActivationId?: string;
   outputSchema?: object;
+  /** 子会话跑在哪：记进 subagent_meta，冷恢复时按它选后端。 */
+  backend?: "in-process" | "worker";
 }
 
 export interface ContinuableEmbeddedOpts extends EmbeddedSubagentOpts {
   onSettled?: (info: ActivationSettledInfo) => void;
+  /** 父会话没有登记宿主时，结算通知的退路（见 activation.ts notifyParent）。 */
+  deliverFallback?: (notice: SettlementNotice) => void;
 }
 
 export interface EmbeddedChildHandle {
@@ -141,6 +153,7 @@ const CORE_ALWAYS_ON = new Set([
   "image-gen",
   "jobs",
   "multi-agent",
+  "working-directory",
   "github",
   "batch-tools",
   "tts",
@@ -181,12 +194,6 @@ function buildExcludeTools(env: Record<string, string>, depth: number | undefine
     if (s) deny.add(s);
   }
   return [...deny];
-}
-
-/** Electron in-process sidecar; not subprocess sub-agent; not worktree (handled in index). */
-export function canUseEmbeddedSubagent(profile: CapabilityProfile): boolean {
-  if (profile.isolation === "worktree") return false;
-  return typeof process.versions.electron === "string" && process.env.PI_IS_SUBAGENT !== "1";
 }
 
 const noopUi: ExtensionUIContext = {
@@ -239,7 +246,7 @@ function streamingDeltaFromEvent(event: AgentSessionEvent, prev: string): string
   return prev;
 }
 
-type PreparedEmbedded = {
+export type PreparedEmbedded = {
   childConfig: Record<string, string>;
   parentPath: string | undefined;
   workspace: string;
@@ -272,7 +279,9 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
     ctx: {
       origin: "subagent",
       workspace,
-      cwd: opts.cwd,
+      // ALS 的 cwd 是会话的原始目录（宿主主会话也是这样）：审批档、模式按它查，不跟着 worktree 走。
+      // 子会话实际干活的目录在 SDK 会话里（services cwd = opts.cwd）。
+      cwd: opts.projectCwd ?? opts.cwd,
       config: childConfig,
       ...(parentSessionId ? { sessionId: parentSessionId } : {}),
     },
@@ -280,7 +289,7 @@ function prepareEmbeddedConfig(opts: EmbeddedSubagentOpts): PreparedEmbedded {
   };
 }
 
-type OpenedEmbedded = EmbeddedChildHandle & {
+export type OpenedEmbedded = EmbeddedChildHandle & {
   getTranscript: () => string;
   getStreamingDelta: () => string;
   /** 把当前进度再发一次 onUpdate（注册表据此刷新 updatedAt）。 */
@@ -290,8 +299,12 @@ type OpenedEmbedded = EmbeddedChildHandle & {
   structured?: StructuredCapture;
 };
 
-async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
-  const sessionManager = SessionManager.create(opts.cwd, undefined, {
+/** 打开子会话的方式：本进程（openEmbeddedChildSession）或 worker 进程（worker-session.ts 的代理）。 */
+export type ChildSessionOpener = (opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded) => Promise<OpenedEmbedded>;
+
+/** 在本进程里建子会话；worker 进程里的 worker-host.ts 也用它。 */
+export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded): Promise<OpenedEmbedded> {
+  const sessionManager = SessionManager.create(opts.projectCwd ?? opts.cwd, undefined, {
     id: opts.agentId,
     ...(prepared.parentPath ? { parentSession: prepared.parentPath } : {}),
   });
@@ -311,8 +324,13 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
       label: firstLine(opts.task).slice(0, 80),
       inheritedEventCount,
       depth: opts.depth ?? 0,
+      backend: opts.backend ?? "in-process",
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
+    // 父会话切过工作目录：子会话头仍是原始目录，当前目录记成一条 working_directory，冷恢复时据此切回。
+    if (opts.projectCwd && !sameDirectory(opts.projectCwd, opts.cwd)) {
+      sessionManager.appendCustomEntry(WORKING_DIRECTORY_ENTRY, { cwd: opts.cwd });
+    }
   } catch (e) {
     wipeSessionFile(sessionManager.getSessionFile());
     throw e;
@@ -366,6 +384,8 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
   });
   // 子会话也加载 MCP 扩展；绑定扩展前装上，首次投影的一批工具只刷新一次工具表。
   installToolRefreshBatching(session);
+  // 子代理自己也能 working_directory / create_worktree，只换它自己的目录。
+  const detachCwd = attachSessionCwd(session);
 
   const sessionPath = sessionManager.getSessionFile();
   if (!sessionPath) throw new Error("embedded sub-agent: session file not created");
@@ -376,7 +396,12 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
   const workspace = currentWorkspaceContext()?.workspace ?? prepared.workspace;
   // 子会话真实生效的档位（已按模型能力收窄），不是调用参数里请求的那个。
   const runningThinkingLevel: string | undefined = session.thinkingLevel;
-  opts.onUpdate?.({ text: "", transcript: "", sessionPath, thinkingLevel: runningThinkingLevel });
+  // 进度回调（spawn_agent 记注册表、推给父会话）出错不能打断子代理：它在子会话的监听方里、或节流定时器里被调，
+  // 抛出去要么让子代理这次工具调用 / 这一轮失败，要么成了漏网错误（_shared/guard-listener.ts）。吞掉、记日志，后面的进度照常推。
+  const deliverProgress = guardListener(`sub-agent ${opts.agentId} progress`, (build: () => AgentUpdate) => {
+    if (opts.onUpdate) opts.onUpdate(build());
+  });
+  deliverProgress(() => ({ text: "", transcript: "", sessionPath, thinkingLevel: runningThinkingLevel }));
 
   let transcript = "";
   let streamingDelta = "";
@@ -389,8 +414,10 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     const elapsed = Date.now() - lastEmitAt;
     const emit = (): void => {
       lastEmitAt = Date.now();
-      const { output } = extractAssistantOutput(session.messages, { streamingDelta, skipPrefix: inheritedEventCount });
-      opts.onUpdate!({ text: output, transcript, sessionPath, thinkingLevel: session.thinkingLevel });
+      deliverProgress(() => {
+        const { output } = extractAssistantOutput(session.messages, { streamingDelta, skipPrefix: inheritedEventCount });
+        return { text: output, transcript, sessionPath, thinkingLevel: session.thinkingLevel };
+      });
     };
     if (elapsed >= streamThrottleMs) {
       if (emitTimer) {
@@ -430,7 +457,8 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
     setActive([...new Set(allow)]);
   }
 
-  const unsub = session.subscribe((event: AgentSessionEvent) => {
+  // 监听方出错不能抛回 SDK（_shared/guard-listener.ts）。
+  const onEvent = guardListener(`sub-agent ${opts.agentId} events`, (event: AgentSessionEvent) => {
     // 原始事件仍交给界面；这里只留剥掉快照后的 64KB 尾部，避免 partial 按输出长度平方留在堆上。
     transcript = appendTranscriptTail(transcript, transcriptLineFromEvent(event));
     streamingDelta = streamingDeltaFromEvent(event, streamingDelta);
@@ -441,6 +469,23 @@ async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepared: Pr
       workspace,
     });
   });
+  const unsubEvents = session.subscribe(onEvent);
+
+  // 子会话需要人批准时经父会话问（approval-route.ts）。可续聊的由 Activation 再登记一份，管到结算为止。
+  const detachApproval = registerChildApprovalRoute({
+    sessionPath,
+    parentSessionPath: prepared.parentPath,
+    agentId: opts.agentId,
+    label: firstLine(opts.task).slice(0, 80),
+  });
+
+  const unsub = () => {
+    unsubEvents();
+    detachCwd();
+    detachApproval();
+    onEvent.report();
+    deliverProgress.report();
+  };
 
   return {
     session: session as OpenedEmbedded["session"],
@@ -470,15 +515,28 @@ export async function createEmbeddedChildSession(opts: EmbeddedSubagentOpts): Pr
   }
 }
 
-export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<EmbeddedSubagentResult> {
+export async function runEmbeddedSubagent(
+  opts: EmbeddedSubagentOpts,
+  open: ChildSessionOpener = openEmbeddedChildSession,
+): Promise<EmbeddedSubagentResult> {
   const prepared = prepareEmbeddedConfig({ ...opts, mode: "one-shot" });
   let transcript = "";
   let aborted = false;
+  /** 这次运行里漏出来的错误（_shared/leak-owner.ts）：中断运行，按 error 结算。 */
+  let leaked: string | undefined;
+  let liveSession: { abort: () => unknown } | undefined;
+  // 建会话之前就登记：扩展初始化时漏出来的也算这次运行的。
+  const offLeak = onLeakedError(opts.agentId, (error) => {
+    if (leaked) return;
+    leaked = leakedErrorText(error);
+    if (liveSession) abortQuietly(liveSession);
+  });
 
   try {
-    return await runInWorkspace(prepared.ctx, async () => {
-      const child = await openEmbeddedChildSession({ ...opts, mode: "one-shot" }, prepared);
+    return await runAsChild(opts.agentId, () => runInWorkspace(prepared.ctx, async () => {
+      const child = await open({ ...opts, mode: "one-shot" }, prepared);
       const { session, sessionPath, unsub, clearEmitTimer } = child;
+      liveSession = session;
       transcript = child.getTranscript();
 
       // 空闲超时只管「卡死」：子会话每来一个事件就算有活动，计时从头算。原先只在开头 arm 一次，
@@ -494,7 +552,7 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         if (aborted) return;
         timedOut = reason;
         aborted = true;
-        void session.abort();
+        abortQuietly(session);
       };
       // 在跑的工具（含嵌套调用）。工具有自己的 timeout，安静不等于卡死：`cargo build *> log` 这类命令
       // 整段没有输出，跑 6 分钟就会被当成空闲杀掉。工具在跑时空闲计时不到期，硬上限照管。
@@ -525,7 +583,7 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         stallCuts += 1;
         stallCutSilentMs = silentMs;
         awaitingModel = false;
-        void session.abort();
+        abortQuietly(session);
       }, STALL_CHECK_MS);
       stallTimer.unref?.();
       // 每个事件只记时间戳，不重建定时器：流式 delta 很密，到点时再按最后一次活动顺延。
@@ -552,7 +610,8 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         if (toolsInFlight.size > 0 || awaitingModel) child.heartbeat();
       }, TOOL_HEARTBEAT_MS);
       heartbeatTimer.unref?.();
-      const unsubActivity = session.subscribe((event: AgentSessionEvent) => {
+      // 监听方出错不能抛回 SDK（_shared/guard-listener.ts）。
+      const onActivity = guardListener(`sub-agent ${opts.agentId} activity watch`, (event: AgentSessionEvent) => {
         lastActivity = Date.now();
         const type = (event as { type?: string }).type;
         const toolCallId = (event as { toolCallId?: unknown }).toolCallId;
@@ -581,20 +640,26 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           armIdle(idleMs);
         }
       });
+      const unsubActivity = session.subscribe(onActivity);
 
       const onAbort = (): void => {
         aborted = true;
-        void session.abort();
+        abortQuietly(session);
       };
       opts.signal?.addEventListener("abort", onAbort, { once: true });
 
       let result: EmbeddedSubagentResult;
       try {
-        await acceptPrompt(session, opts.task);
-        await session.waitForIdle();
+        // 建会话时就漏了错：不再开跑，直接按 error 结束。
+        if (!leaked) {
+          await acceptPrompt(session, withForkNote(opts.task, child.inheritedEventCount));
+          // preflight 期间到的错误：那时的中断会被起跑重置，跑起来了再中断一次。
+          if (leaked) abortQuietly(session);
+          await session.waitForIdle();
+        }
         // 卡顿看门狗刚中断了一次请求：子会话停在那条被中断的 assistant 上，补一句继续接着跑。
         // 中断和回复恰好同时完成时最后一条不是 aborted，不续。
-        while (stallCutSilentMs !== undefined && !aborted) {
+        while (stallCutSilentMs !== undefined && !aborted && !leaked) {
           const silentMs = stallCutSilentMs;
           stallCutSilentMs = undefined;
           if (!endedOnAbortedReply(session.messages as Parameters<typeof endedOnAbortedReply>[0])) break;
@@ -608,10 +673,11 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           session.messages as Parameters<typeof extractAssistantOutput>[0],
           { streamingDelta, aborted, skipPrefix: child.inheritedEventCount },
         );
-        const interrupted = aborted || stopReason === "aborted";
-        const ok = !interrupted && stopReason === "completed" && output.trim().length > 0;
+        // 漏网错误中断的：按出错结算，不算用户停下的。
+        const interrupted = !leaked && (aborted || stopReason === "aborted");
+        const ok = !leaked && !interrupted && stopReason === "completed" && output.trim().length > 0;
         // 没有最终答复时把停下的原因交给父代理（模型报错原文 / 停在哪个工具上），而不是光秃秃的 "(no output)"。
-        const unfinished = ok || interrupted
+        const unfinished = ok || interrupted || leaked
           ? undefined
           : describeUnfinishedRun(session.messages as Parameters<typeof describeUnfinishedRun>[0], child.inheritedEventCount);
         result = {
@@ -620,12 +686,14 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
           exitCode: ok ? 0 : interrupted ? -1 : 1,
           error: ok
             ? undefined
-            : interrupted
-              ? (timedOut ?? "aborted")
-              : (unfinished ?? (output.trim() ? undefined : "(no output)")),
+            : leaked
+              ? leaked
+              : interrupted
+                ? (timedOut ?? "aborted")
+                : (unfinished ?? (output.trim() ? undefined : "(no output)")),
           transcript,
           sessionPath,
-          stopReason,
+          stopReason: leaked ? "error" : stopReason,
           partial: !ok && output.trim().length > 0,
           ...(child.structured?.captured() ? { structured: child.structured.captured()!.value } : {}),
         };
@@ -639,44 +707,55 @@ export async function runEmbeddedSubagent(opts: EmbeddedSubagentOpts): Promise<E
         result = {
           ok: false,
           output,
-          exitCode: aborted ? -1 : 1,
-          error: aborted ? (timedOut ?? "aborted") : String((e as Error)?.message ?? e),
+          exitCode: aborted && !leaked ? -1 : 1,
+          error: leaked ?? (aborted ? (timedOut ?? "aborted") : String((e as Error)?.message ?? e)),
           transcript,
           sessionPath,
-          stopReason,
+          stopReason: leaked ? "error" : stopReason,
           partial: output.trim().length > 0,
           ...(child.structured?.captured() ? { structured: child.structured.captured()!.value } : {}),
         };
       } finally {
-        unsub();
-        unsubActivity();
-        if (idleTimer) clearTimeout(idleTimer);
-        clearTimeout(hardTimer);
-        clearInterval(heartbeatTimer);
-        clearInterval(stallTimer);
-        clearEmitTimer();
-        opts.signal?.removeEventListener("abort", onAbort);
+        // 释放边界逐步收尾：哪一步抛错都不能把上面算好的结果换成一条错误（teardown.ts）。
+        const teardown = new Teardown(opts.agentId);
+        teardown.step("stop leak attribution", offLeak);
+        teardown.step("stop event forwarding", unsub);
+        teardown.step("stop activity watch", unsubActivity);
+        onActivity.report();
+        teardown.step("clear timers", () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          clearTimeout(hardTimer);
+          clearInterval(heartbeatTimer);
+          clearInterval(stallTimer);
+        });
+        teardown.step("clear emit timer", clearEmitTimer);
+        teardown.step("detach abort signal", () => opts.signal?.removeEventListener("abort", onAbort));
         try {
           await session.abort();
         } catch {
           /* idle */
         }
-        session.dispose();
+        teardown.step("dispose session", () => session.dispose());
+        teardown.report();
       }
       return result;
-    });
+    }));
   } catch (e) {
     return {
       ok: false,
       output: "",
       exitCode: -1,
-      error: String((e as Error)?.message ?? e),
+      error: leaked ?? String((e as Error)?.message ?? e),
       transcript,
       sessionPath: "",
-      stopReason: aborted ? "aborted" : "error",
+      stopReason: aborted && !leaked ? "aborted" : "error",
     };
   } finally {
-    prepared.cleanup();
+    const teardown = new Teardown(opts.agentId);
+    // 建会话就失败时上面的收尾没走到；重复撤是空操作。
+    teardown.step("stop leak attribution", offLeak);
+    teardown.step("remove derived config", prepared.cleanup);
+    teardown.report();
   }
 }
 
@@ -727,12 +806,29 @@ function acceptPrompt(session: EmbeddedChildHandle["session"], text: string): Pr
 }
 
 /** Continuable embedded spawn: install Activation, accept the first prompt, return immediately. */
-export async function startContinuableEmbedded(opts: ContinuableEmbeddedOpts): Promise<ContinuableEmbeddedStart> {
+export async function startContinuableEmbedded(
+  opts: ContinuableEmbeddedOpts,
+  open: ChildSessionOpener = openEmbeddedChildSession,
+): Promise<ContinuableEmbeddedStart> {
   const prepared = prepareEmbeddedConfig({ ...opts, mode: "continuable" });
   let child: OpenedEmbedded | undefined;
+  // 收尾的几步逐个做，一步出错不挡后面的（teardown.ts）。
+  const release = (opened: OpenedEmbedded, dispose: boolean): Teardown => {
+    const teardown = new Teardown(opts.agentId);
+    teardown.step("stop event forwarding", opened.unsub);
+    teardown.step("clear emit timer", opened.clearEmitTimer);
+    if (dispose) teardown.step("dispose session", () => opened.session.dispose());
+    teardown.step("remove derived config", prepared.cleanup);
+    return teardown;
+  };
+  // 建会话之前就登记：扩展初始化时漏出来的错误先记着，装上 Activation（它登记自己的处理器）后交给它。
+  let earlyLeak: { error: unknown } | undefined;
+  const offEarly = onLeakedError(opts.agentId, (error) => {
+    earlyLeak ??= { error };
+  });
   try {
-    return await runInWorkspace(prepared.ctx, async () => {
-      child = await openEmbeddedChildSession({ ...opts, mode: "continuable" }, prepared);
+    return await runAsChild(opts.agentId, () => runInWorkspace(prepared.ctx, async () => {
+      child = await open({ ...opts, mode: "continuable" }, prepared);
       const parentSessionId = opts.parentSessionId ?? "";
       try {
         installActivation({
@@ -746,40 +842,48 @@ export async function startContinuableEmbedded(opts: ContinuableEmbeddedOpts): P
           announced: false,
           depth: opts.depth ?? 0,
           ...(opts.parentActivationId ? { parentActivationId: opts.parentActivationId } : {}),
+          ...(opts.deliverFallback ? { deliverFallback: opts.deliverFallback } : {}),
+          // 进程内的会话结算后留在驻留池；worker 会话结算即退出，不占 worker 名额。
+          keepResident: open === openEmbeddedChildSession,
           onSettled: (info) => {
-            child?.unsub();
-            child?.clearEmitTimer();
-            prepared.cleanup();
-            opts.onSettled?.(info);
+            // 记账（注册表、名额）放在最后一步，前面哪一步出错都要走到。
+            const teardown = child ? release(child, false) : new Teardown(opts.agentId);
+            teardown.step("record result", () => opts.onSettled?.(info));
+            teardown.report();
           },
         });
       } catch (e) {
-        child.unsub();
-        child.clearEmitTimer();
-        try {
-          child.session.dispose();
-        } catch {
-          /* create-only rollback */
-        }
-        prepared.cleanup();
+        release(child, true).report();
         throw e;
       }
-      const text = `${opts.task}\n\n${continuableReturnGuidance(parentSessionId)}`;
+      // Activation 已经接管归属；之前记下的交给它（它会在第一轮跑起来后中断、按 error 结算）。
+      offEarly();
+      if (earlyLeak) reportLeakedError(earlyLeak.error, opts.agentId);
+      const text = `${withForkNote(opts.task, child.inheritedEventCount)}\n\n${continuableReturnGuidance(parentSessionId)}`;
       try {
         await acceptPrompt(child.session, text);
       } catch (e) {
-        await disposeActivation(opts.agentId, "rollback");
-        child.unsub();
-        child.clearEmitTimer();
-        prepared.cleanup();
+        try {
+          await disposeActivation(opts.agentId, "rollback");
+        } catch (rollbackError) {
+          console.error(`[multi-agent] sub-agent ${opts.agentId}: rollback failed`, rollbackError);
+        }
+        release(child, false).report();
         throw e;
       }
       markAnnounced(opts.agentId);
       // spec 3: establishCatalogChild after first accept
       return { agentId: opts.agentId, sessionPath: child.sessionPath };
-    });
+    }));
   } catch (e) {
-    if (child === undefined) prepared.cleanup();
+    if (child === undefined) {
+      const teardown = new Teardown(opts.agentId);
+      teardown.step("remove derived config", prepared.cleanup);
+      teardown.report();
+    }
     throw e;
+  } finally {
+    // 启动失败的路径上没走到上面的撤销；重复撤是空操作。
+    offEarly();
   }
 }

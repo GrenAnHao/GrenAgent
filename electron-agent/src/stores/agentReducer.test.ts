@@ -878,6 +878,19 @@ describe('custom injection messages -> notice', () => {
     expect(notices[0]).toMatchObject({ kind: 'notice', customType: 'extension-context', content: '# Context\n\nsnippet' });
   });
 
+  it('agent-message: the same message (start + end) shows once, but two sends with the same text both show', () => {
+    const at = (timestamp: number) =>
+      ({ role: 'custom', customType: 'agent-message', content: 'Agent sa-1 sent a message without waking you:\nstill testing', display: true, timestamp }) as const;
+    let state = initialAgentState();
+    for (const msg of [at(1), at(2)]) {
+      state = applyEvent(state, { type: 'message_start', message: msg } as never);
+      state = applyEvent(state, { type: 'message_end', message: msg } as never);
+    }
+    const notices = state.messages.filter((m) => m.kind === 'notice');
+    expect(notices).toHaveLength(2);
+    expect(notices.map((m) => m.kind === 'notice' && m.sourceTimestamp)).toEqual([1, 2]);
+  });
+
   it('ignores custom messages without display:true', () => {
     const msg = { role: 'custom', customType: 'extension-context', content: 'x', display: false } as const;
     const state = applyEvent(initialAgentState(), { type: 'message_start', message: msg } as never);

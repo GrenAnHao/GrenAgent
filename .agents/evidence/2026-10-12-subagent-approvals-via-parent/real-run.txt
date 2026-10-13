@@ -1,0 +1,79 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5；SUBAGENT_APPROVAL_TIMEOUT_MS=8000
+
+=== 进程内子代理请求批准，答「允许本次」 ===
+  用时 13216ms，新消息 6 条
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"run\",\"task\":\"Use the write tool exactly once to create the file approval-one.txt containing exactly APPROVAL-ONE. Then reply with only the word WRITTEN, or with the word BLOCKED if the write was not allowed. Do not ret"}
+   {"role":"custom","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"WRITTEN"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"select","title":"子代理 Use the write tool exact…（sa-bdcdefc0） 请求批准：\n\n  approval-one.txt","options":["允许本次","总是允许","拒绝"],"timeout":8000,"subagents":[{"agentId":"sa-bdcdefc0","label":"Use the write tool exactly once to create the file approval-one.txt containing e"}]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"dismiss"}
+PASS  进程内：父会话收到一张审批卡
+PASS  进程内：卡片落在父会话上（信封 sessionPath 是父会话）
+PASS  进程内：标题写出是哪个子代理（sa-bdcdefc0）
+PASS  进程内：标题带上要写的文件
+PASS  进程内：信封带 timeout=8000，渲染层据此倒计时
+PASS  进程内：选项和主会话一样
+PASS  进程内：答复后宿主发 dismiss 收回这张卡
+PASS  进程内：授权判定收到 origin=subagent、approvalRoute=true，判成 ask
+PASS  进程内：审计回填 user_allow
+   子代理的 write 结果： [{"text":"Successfully wrote to approval-one.txt","isError":false}]
+PASS  进程内：批准后文件真的写出来了
+PASS  进程内：子代理的回复交回父会话
+
+=== 进程内子代理请求批准，没人答 ===
+  用时 21190ms，新消息 5 条
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"run\",\"task\":\"Use the write tool exactly once to create the file approval-two.txt containing exactly APPROVAL-TWO. Then reply with only the word WRITTEN, or with the word BLOCKED if the write was not allowed. Do not ret"}
+   {"role":"custom","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"BLOCKED"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"select","title":"子代理 Use the write tool exact…（sa-8194b5f4） 请求批准：\n\n  approval-two.txt","options":["允许本次","总是允许","拒绝"],"timeout":8000,"subagents":[{"agentId":"sa-8194b5f4","label":"Use the write tool exactly once to create the file approval-two.txt containing e"}]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"dismiss"}
+PASS  超时：父会话收到审批卡
+PASS  超时：约 8000 ms 后宿主发 dismiss 收回卡片（实际 8009 ms）
+PASS  超时：审计回填 timeout
+   子代理的 write 结果： [{"text":"8 秒内没有人批准 write，视为被拒。这一步没有执行。不要原样重试，换不受限的办法继续；做不到就在最终答复里说明这一步没做。","isError":true}]
+PASS  超时：子代理收到「8 秒内没有人批准 write，视为被拒」
+PASS  超时：文件没有写出来
+
+=== worker 子代理请求批准，答「允许本次」 ===
+  用时 11616ms，新消息 5 条
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"run\",\"task\":\"Use the write tool exactly once to create the file approval-three.txt containing exactly APPROVAL-THREE. Then reply with only the word WRITTEN, or with the word BLOCKED if the write was not allowed. Do not"}
+   {"role":"custom","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"WRITTEN"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"select","title":"子代理 Use the write tool exact…（sa-503365a4） 请求批准：\n\n  approval-three.txt","options":["允许本次","总是允许","拒绝"],"timeout":8000,"subagents":[{"agentId":"sa-503365a4","label":"Use the write tool exactly once to create the file approval-three.txt containing"}]}
+   信封： {"sessionPath":"<home>\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-approval-real-zTWLYw-project--\\2026-10-12T11-41-18-011Z_01a12fea-c739-74df-9637-5a39265daf2e.jsonl","method":"dismiss"}
+PASS  worker：子会话 meta 是 backend: worker
+PASS  worker：审批卡同样落在父会话上，带子代理身份
+PASS  worker：worker 里的 safety 也知道能问人（approvalRoute=true）
+PASS  worker：审计回填 user_allow
+   子代理的 write 结果： [{"text":"Successfully wrote to approval-three.txt","isError":false}]
+PASS  worker：批准后文件真的写出来了
+
+=== SUBAGENT_APPROVAL_TIMEOUT_MS=0 ===
+  用时 10250ms，新消息 5 条
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"action\":\"run\",\"task\":\"Use the write tool exactly once to create the file approval-four.txt containing exactly APPROVAL-FOUR. Then reply with only the word WRITTEN, or with the word BLOCKED if the write was not allowed. Do not r"}
+   {"role":"custom","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"BLOCKED"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+PASS  关闭：父会话没有收到审批卡
+PASS  关闭：授权判定没有 approvalRoute，固定拒绝
+   子代理的 write 结果： [{"text":"子代理的权限范围在启动时已固定，此操作需要审批，已被自动拒绝。不要重试；在回复中说明这一限制，交由委派方处理。","isError":true}]
+PASS  关闭：子代理收到委派范围的拒绝
+PASS  关闭：文件没有写出来
+
+授权判定（只列带 approval- 的）：
+   {"origin":"subagent","tool":"write","target":"approval-one.txt","approvalRoute":true,"decision":"ask","auditId":"a2","ruleId":"builtin.dangerous-command"}
+   {"origin":"subagent","tool":"write","target":"approval-two.txt","approvalRoute":true,"decision":"ask","auditId":"a4","ruleId":"builtin.dangerous-command"}
+   {"origin":"subagent","tool":"write","target":"approval-three.txt","approvalRoute":true,"decision":"ask","auditId":"a6","ruleId":"builtin.dangerous-command"}
+   {"origin":"subagent","tool":"write","target":"approval-four.txt","decision":"deny","auditId":"a8","ruleId":"builtin.subagent-ask-pinned"}
+审计回填： [{"auditId":"a2","resolution":"user_allow"},{"auditId":"a4","resolution":"timeout"},{"auditId":"a6","resolution":"user_allow"}]
+
+临时目录已删除：true
+全部通过

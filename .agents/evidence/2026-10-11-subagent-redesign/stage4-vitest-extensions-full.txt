@@ -1,0 +1,7 @@
+     × splits until the directory allows FindFirstFile 5312ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  _shared/sandbox/windows/deleteSemantics.test.ts > windows delete without list > splits until the directory allows FindFirstFile
+ Test Files  1 failed | 221 passed | 2 skipped (224)
+      Tests  1 failed | 1872 passed | 4 skipped (1877)
+   Start at  02:22:34
+   Duration  27.19s (transform 71.13s, setup 0ms, import 228.56s, tests 74.96s, environment 38ms)

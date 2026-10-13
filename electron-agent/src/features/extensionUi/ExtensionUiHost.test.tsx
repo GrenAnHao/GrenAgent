@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, setWaitingUiPrompt } = vi.hoisted(() => ({
+const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, setWaitingUiPrompt, dismiss } = vi.hoisted(() => ({
   setStatus: vi.fn(),
   goalSetGoal: vi.fn(),
   goalSetSnapshot: vi.fn(),
@@ -10,6 +10,7 @@ const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, se
   msg: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   setRequest: vi.fn(),
   setWaitingUiPrompt: vi.fn(),
+  dismiss: vi.fn(),
 }));
 let emit: (e: unknown) => void = () => {};
 let loadedPath: string | null | undefined;
@@ -33,7 +34,7 @@ vi.mock('../../stores/mcpStatusStore', () => ({
   useMcpStatusStore: { getState: () => ({ setServers }) },
 }));
 vi.mock('../../stores/uiPromptStore', () => ({
-  useUiPromptStore: { getState: () => ({ setRequest }) },
+  useUiPromptStore: { getState: () => ({ setRequest, dismiss }) },
 }));
 vi.mock('../../stores/agentStoreRegistry', () => ({
   agentStoreRegistry: {
@@ -60,6 +61,7 @@ afterEach(() => {
   setServers.mockClear();
   setRequest.mockClear();
   setWaitingUiPrompt.mockClear();
+  dismiss.mockClear();
   emit = () => {};
   msg.info.mockClear();
   msg.warning.mockClear();
@@ -386,5 +388,17 @@ describe('ExtensionUiHost', () => {
     const request = { id: 'fg1', method: 'confirm', title: '当前会话要确认' };
     emit({ workspace: '/ws', sessionPath: '/ws/a.jsonl', request });
     expect(setRequest).toHaveBeenCalledWith({ workspace: '/ws', request, sessionPath: '/ws/a.jsonl' });
+  });
+
+  it('dismiss 收回卡片：不当成新请求，后台暂存的也摘掉', () => {
+    loadedPath = '/ws/a.jsonl';
+    render(<ExtensionUiHost />);
+    emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: { id: 'bg', method: 'select', options: ['拒绝'] } });
+    expect(hasStashedUiRequests('/ws/b.jsonl')).toBe(true);
+
+    emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: { id: 'bg', method: 'dismiss' } });
+    expect(hasStashedUiRequests('/ws/b.jsonl')).toBe(false);
+    expect(dismiss).toHaveBeenCalledWith('bg');
+    expect(setRequest).not.toHaveBeenCalled();
   });
 });

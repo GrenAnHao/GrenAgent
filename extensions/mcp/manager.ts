@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getAllConfig, getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentWorkspaceContext } from "../_shared/workspace-context.js";
+import { outsideChild } from "../_shared/leak-owner.js";
 import { expandServerVars, injectDefaultServers, type McpLayerEntry, type McpServerConfig, parseMcpLayerEntries, parseMcpServers, sanitize } from "./config.js";
 import { mergeMcpLayers, type McpMergeServer } from "./merge.js";
 import { authProviderName } from "./oauthRules.js";
@@ -185,6 +186,12 @@ function callWithProgressTimeout<T>(run: (onProgress: () => void) => Promise<T>,
 }
 
 async function realConnect(s: McpServerConfig, hooks?: OAuthConnectHooks): Promise<McpClient> {
+  // 连接是整个工作区共用的。子代理的轮次里第一次连上时，传输层以后的回调不能一直带着那个子代理的身份，
+  // 否则别的会话用它时漏出来的错误会算到那个子代理头上（_shared/leak-owner.ts）。
+  return outsideChild(() => connectClient(s, hooks));
+}
+
+async function connectClient(s: McpServerConfig, hooks?: OAuthConnectHooks): Promise<McpClient> {
   return establishMcpConnection(s, hooks, async (transport) => {
     const client = new Client({ name: "grenagent", version: "0.1.0" });
     try {
@@ -628,16 +635,18 @@ export function createManager(deps: ManagerDeps = {}): McpManager {
     void reconcile();
   };
 
-  const start = (): void => {
-    if (started) return;
-    started = true;
-    fileList = readServers();
-    const filtered = filterExtensionServers(fileList, extensionRequested);
-    extensionErrors = filtered.errors;
-    current = [...fileList, ...filtered.accepted];
-    for (const server of current) void runConnect(server);
-    unwatch = watch(onConfigChange);
-  };
+  // 整个工作区共用：子代理的会话先启动时，配置监听和连接也不能带着它的身份（_shared/leak-owner.ts）。
+  const start = (): void =>
+    outsideChild(() => {
+      if (started) return;
+      started = true;
+      fileList = readServers();
+      const filtered = filterExtensionServers(fileList, extensionRequested);
+      extensionErrors = filtered.errors;
+      current = [...fileList, ...filtered.accepted];
+      for (const server of current) void runConnect(server);
+      unwatch = watch(onConfigChange);
+    });
 
   const resourceTargets = (args: Record<string, unknown>): { names: string[]; missing?: string } => {
     const serverName = typeof args.server === "string" && args.server.trim() ? args.server.trim() : undefined;

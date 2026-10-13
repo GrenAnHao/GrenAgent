@@ -1,0 +1,5 @@
+# cd electron-agent && npx tsc -p tsconfig.node.json --noEmit
+子代理重新设计第 4 阶段：154 条
+本次：154 条
+按文件+报错文字（去掉行列号）逐条比对：与第 4 阶段完全一致，新增 0 条
+（过程中出现过的新报错：测试里没写参数类型的 vi.fn 取 mock.calls 下标 9 条、mcp-policy 里 ApprovalOutcome 没收窄 1 条，都已改正）

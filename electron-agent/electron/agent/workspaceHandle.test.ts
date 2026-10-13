@@ -133,6 +133,26 @@ describe('WorkspaceHandle', () => {
     expect(seen).toEqual(['D:/resolved']);
   });
 
+  it('推给界面这一步抛错（例如 agent-host 和主进程断开）不抛回 SDK，只记一次日志', async () => {
+    const { runtime, first } = makeRuntime();
+    const onEvent = vi.fn(() => {
+      throw new Error('AGENT_HOST_DISCONNECTED');
+    });
+    const { handle } = makeHandle(runtime, { onEvent });
+    await handle.start();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const update = { type: 'message_update', message: { role: 'assistant', content: [{ type: 'text', text: '文' }] }, assistantMessageEvent: { type: 'text_delta', delta: '文' } };
+      expect(() => first.emit(update)).not.toThrow();
+      expect(() => first.emit({ type: 'agent_end', messages: [] })).not.toThrow();
+      expect(onEvent).toHaveBeenCalled();
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(log.mock.calls[0]?.[0])).toBe('[session-listener] main session events failed; swallowed so the session keeps going');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('message_update 经降级层剥掉 message', async () => {
     const { runtime, first } = makeRuntime();
     const { handle, onEvent } = makeHandle(runtime);

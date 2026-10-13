@@ -33,7 +33,7 @@ if (!('ResizeObserver' in globalThis)) {
 afterEach(() => {
   cleanup();
   useInlineQuestionStore.setState({ byWorkspace: {} });
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
 });
 
 function renderOverlay() {
@@ -213,6 +213,7 @@ describe('ComposerPromptOverlay', () => {
     expect(screen.getByTestId('prompt-request-select').getAttribute('data-full-width')).toBe('true');
 
     cleanup();
+    useUiPromptStore.getState().clear('/ws', 's1');
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',
       request: { id: 'a1', method: 'select', options: ['允许', '拒绝'] },

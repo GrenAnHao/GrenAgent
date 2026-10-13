@@ -28,7 +28,7 @@ afterEach(() => {
   deleteAskUserDraft.mockClear();
   resolvePermission.mockClear();
   useInlineQuestionStore.setState({ byWorkspace: {} });
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
 });
 
 describe('shouldRenderUiPromptInOverlay', () => {
@@ -111,6 +111,8 @@ describe('cancelPendingOverlay', () => {
       request: { id: 'a1', method: 'select', options: ['允许', '拒绝'] },
     });
     expect(await cancelPendingOverlay('/ws')).toBe('idle');
+    // 审批卡不归 overlay 取消；答完它，排在后面的请求才顶上来。
+    useUiPromptStore.getState().clear('/ws', 'a1');
 
     useUiPromptStore.getState().setRequest({
       workspace: '/ws',

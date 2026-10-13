@@ -12,8 +12,8 @@ import {
   releaseSubagentControlPlane,
 } from "./controlPlane.js";
 import { __resetParentHostsForTest, registerParentSessionHost } from "./parent-host.js";
-import { __resetJobsForTest, jobs } from "../jobs/service.js";
-import type { JobOutcome } from "../jobs/types.js";
+import { __resetJobsForTest } from "../jobs/service.js";
+import { markChildRunning, takeSilenced } from "./child-runs.js";
 
 const dirs: string[] = [];
 
@@ -115,29 +115,23 @@ describe("releaseChildForDelete", () => {
     expect(registry.get("sa-1")?.status).toBe("cancelled");
   });
 
-  it("aborts an in-flight one-shot, silences its job notice, and waits until the run has cleared", async () => {
+  it("aborts an in-flight background run, silences its settlement notice, and waits until the run has cleared", async () => {
     const cwd = tmpCwd();
     const childPath = join(cwd, "child.jsonl");
     const controller = new AbortController();
-    const cancel = vi.fn(() => controller.abort());
-    let finish!: (outcome: JobOutcome) => void;
-    const done = new Promise<JobOutcome>((resolve) => {
-      finish = resolve;
-    });
-    const jobId = jobs.start({ kind: "subagent", label: "scout", owner: "p1", workspace: cwd, run: () => ({ cancel, done }) });
     const registry = getRegistry(cwd);
-    registry.create({ id: "sa-2", task: "t", sessionPath: childPath, jobId });
+    registry.create({ id: "sa-2", task: "t", sessionPath: childPath });
+    markChildRunning("sa-2", "p1");
     inflight.set("sa-2", controller);
     controller.signal.addEventListener("abort", () => {
       setTimeout(() => {
         registry.finish("sa-2", { status: "cancelled", exitCode: -1 });
         inflight.delete("sa-2");
-        finish({ status: "killed" });
       }, 30);
     });
 
     const released = releaseChildForDelete(cwd, "sa-2", childPath);
-    expect(jobs.snapshot(jobId)?.reported).toBe(true);
+    expect(takeSilenced("sa-2")).toBe(true);
     expect(controller.signal.aborted).toBe(true);
     expect(inflight.has("sa-2")).toBe(true);
 

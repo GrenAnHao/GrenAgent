@@ -5,7 +5,7 @@ Use `spawn_agent` when a task splits into several independent subtasks you can r
 Do it yourself for known paths/symbols or a few-file lookup.
 
 When delegating:
-- Sub-agents are stateless — give full context in the task (brevity rules do not apply).
+- Sub-agents start without your context — give full context in the task (brevity rules do not apply). Its settlement notice tells you whether it can still take a follow-up via `send_message`.
 - Tell them to execute, not advise; parallelize independent spawns in one turn.
 - Prefer `scout`/`planner`/`reviewer`/`worker` when they fit; take over if a sub-agent fails repeatedly.
 - Prefer conclusions over file dumps in handoff output.

@@ -1,0 +1,4 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  _shared/sandbox/windows/deleteSemantics.test.ts > windows delete without list > splits until the directory allows FindFirstFile
+ Test Files  1 failed | 214 passed | 2 skipped (217)
+      Tests  1 failed | 1801 passed | 4 skipped (1806)

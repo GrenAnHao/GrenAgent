@@ -1,0 +1,5 @@
+# npx tsc -p electron-agent/tsconfig.node.json --noEmit（覆盖 ../extensions）
+第 1 阶段：155 条 error TS
+第 2 阶段：155 条 error TS
+去掉行列号后逐条 diff：无差异
+第一次跑出 10 条新报错（jobs/index.test.ts 的 helper 类型 6 条、multi-agent/index.ts 的 sendMessage().catch 1 条、manager.test.ts 的 vi.fn 类型 3 条），修正后为 0

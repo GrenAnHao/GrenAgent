@@ -1,0 +1,15 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ _shared/guard-listener.test.ts > guardListener > passes the arguments through 2ms
+ ✓ _shared/guard-listener.test.ts > guardListener > swallows a throw: the first one is logged with the error, later ones only counted and summed up in report() 2ms
+ ✓ _shared/guard-listener.test.ts > guardListener > report() is silent when nothing or only one error was swallowed 0ms
+ ✓ _shared/guard-listener.test.ts > guardListener > an async listener's rejection is swallowed too 54ms
+ ✓ _shared/guard-listener.real.test.ts > a session listener that throws on a progress update (real SDK, faux model) > unguarded: execute succeeded, yet its result is lost and the turn ends in an error (the SDK behaviour this guards against) 100ms
+ ✓ _shared/guard-listener.real.test.ts > a session listener that throws on a progress update (real SDK, faux model) > guarded: the tool result is the tool's own 84ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  19:19:25
+   Duration  2.02s (transform 64ms, setup 0ms, import 1.53s, tests 263ms, environment 0ms)
+

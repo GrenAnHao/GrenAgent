@@ -47,6 +47,8 @@ export interface ToolCallFacts {
   path?: string;
   /** 未经裁剪的原始参数，由 argsDigest 处理后才落库 */
   rawArgs?: Record<string, unknown>;
+  /** 子代理能把审批交给父会话的界面（extensions/_shared/approval-route.ts）。没有时子代理的 ask 固定为拒绝。 */
+  approvalRoute?: boolean;
 }
 
 export interface ToolRule {

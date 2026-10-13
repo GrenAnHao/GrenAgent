@@ -133,7 +133,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useGoalStore.setState({ bySession: {}, goal: undefined });
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   addPastedText.mockClear();
   send.mockClear();
   getState.mockReset();

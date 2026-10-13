@@ -1,0 +1,12 @@
+$ pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts && pnpm exec tsx .agents/scripts/verify-note-evidence.ts
+ok: 35 note(s) tree and relative links verified
+ok: 35 note(s) verified
+ok: 0 archived note(s) verified, 0 seal(s) in manifest
+verify-note-evidence 警告：
+  - .agents/notes/implemented/architecture/2026-10-09-agent-host-child-process.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+  - .agents/notes/implemented/architecture/2026-10-10-agent-host-job-guard.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+  - .agents/notes/implemented/architecture/2026-10-10-subagent-parallel-startup-cost.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+  - .agents/notes/implemented/bug-fix/2026-10-10-mcp-tool-registration-batch.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+  - .agents/notes/implemented/bug-fix/2026-10-10-subagent-detail-running-status.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+  - .agents/notes/implemented/process/2026-09-20-registered-tools-require-prompt-snippet.md: 记了测试命令/文件但没写结果（通过 / 失败 / 部分通过）
+verify-note-evidence 通过

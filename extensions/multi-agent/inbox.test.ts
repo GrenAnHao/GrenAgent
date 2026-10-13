@@ -47,11 +47,23 @@ describe("SubagentInbox", () => {
     expect(prompt).toHaveBeenCalledWith("go", { streamingBehavior: "steer" });
   });
 
-  it("followUp omits streamingBehavior when idle", () => {
+  it("followUp always says followUp, even when idle (the SDK only uses it while streaming)", () => {
     const prompt = vi.fn(async () => {});
     const session = fakeSession({ isStreaming: false, prompt });
     const inbox = new SubagentInbox(session as never);
     inbox.deliver("next", "followUp");
-    expect(prompt).toHaveBeenCalledWith("next", {});
+    expect(prompt).toHaveBeenCalledWith("next", { streamingBehavior: "followUp" });
+  });
+
+  it("a rejected prompt goes to onDeliveryError and leaves no prompt in flight", async () => {
+    let fail!: (error: unknown) => void;
+    const prompt = vi.fn(() => new Promise((_, reject) => { fail = reject; }));
+    const onDeliveryError = vi.fn();
+    const inbox = new SubagentInbox(fakeSession({ prompt }) as never, onDeliveryError);
+    inbox.deliver("next", "followUp");
+    expect(inbox.inFlight).toBe(1);
+    fail(new Error("worker exited"));
+    await vi.waitFor(() => expect(inbox.inFlight).toBe(0));
+    expect(onDeliveryError).toHaveBeenCalledWith(new Error("worker exited"));
   });
 });

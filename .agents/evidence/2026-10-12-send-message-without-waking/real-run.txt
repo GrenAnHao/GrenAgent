@@ -1,0 +1,112 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5
+
+=== 进程内：后台派一个可续聊子代理 ===
+   {"role":"system","text":""}
+   {"role":"user","text":"Call the spawn_agent tool exactly once with these arguments: {\"action\":\"spawn\",\"task\":\"Reply with exactly the word READY and nothing else. Do not use any tools.\"}. After it returns, reply with just the word STARTED and do not call any other"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-15242bfb\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+PASS  进程内：结算后在驻留池里（诊断采样 resident ≥ 1）
+
+=== 驻留：wake: false ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-15242bfb\",\"message\":\"Remember the code word BANANA. Do not reply to this message.\",\"wake\":false}. Then reply with just the word SENT and do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-15242bfb without waking it; it will see the message the next time it runs","details":{"woken":false,"delivery":"appended"}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+PASS  驻留：回执说没唤醒、只追加（{"woken":false,"delivery":"appended"}）
+PASS  驻留：20 秒内没有新的结算通知（子代理没被唤醒）
+PASS  驻留：子会话 JSONL 多了一条 agent-message
+PASS  驻留：子会话没有新的助手回复
+
+=== 驻留：唤醒问暗号 ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-15242bfb\",\"message\":\"What is the current code word? Reply with only the code word. Do not use any tools.\"}. Then reply with just the word SENT."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-15242bfb","details":{}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+   {"role":"custom","customType":"subagent-settled","text":"Background subagent sa-15242bfb finished and will do no further work unless you send it more.\nIts closing message:\nBANANA"}
+   {"role":"assistant","text":"The sub-agent sa-15242bfb replied with the code word BANANA.","toolCalls":[]}
+   结算通知： Background subagent sa-15242bfb finished and will do no further work unless you send it more.
+Its closing message:
+BANANA
+PASS  驻留：唤醒后带回 BANANA
+
+=== 重启 agent-host ===
+PASS  重启后切回了原父会话
+
+=== 已卸载（进程内）：wake: false ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-15242bfb\",\"message\":\"The code word is now CHERRY. Do not reply to this message.\",\"wake\":false}. Then reply with just the word SENT and do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-15242bfb without waking it; it will see the message the next time it runs","details":{"woken":false,"delivery":"appended"}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+PASS  已卸载（进程内）：回执说没唤醒、只追加（{"woken":false,"delivery":"appended"}）
+PASS  已卸载（进程内）：没有加载子会话（诊断采样 active=0 resident=0）
+PASS  已卸载（进程内）：20 秒内没有新的结算通知（子代理没被唤醒）
+PASS  已卸载（进程内）：子会话 JSONL 多了一条 agent-message
+PASS  已卸载（进程内）：子会话没有新的助手回复
+
+=== 已卸载（进程内）：唤醒问暗号 ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-15242bfb\",\"message\":\"What is the current code word? Reply with only the code word. Do not use any tools.\"}. Then reply with just the word SENT."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-15242bfb","details":{}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+   结算通知： Background subagent sa-15242bfb finished and will do no further work unless you send it more.
+Its closing message:
+CHERRY
+PASS  已卸载（进程内）：唤醒后带回 CHERRY
+
+=== worker：后台派一个可续聊子代理 ===
+   {"role":"user","text":"Call the spawn_agent tool exactly once with these arguments: {\"action\":\"spawn\",\"task\":\"Reply with exactly the word READY and nothing else. Do not use any tools.\"}. After it returns, reply with just the word STARTED and do not call any other"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-8e318b6d\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+PASS  worker：子会话 meta 是 backend: worker
+
+=== 已卸载（worker）：wake: false ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-8e318b6d\",\"message\":\"The code word is DATE. Do not reply to this message.\",\"wake\":false}. Then reply with just the word SENT and do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-8e318b6d without waking it; it will see the message the next time it runs","details":{"woken":false,"delivery":"appended"}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+PASS  已卸载（worker）：回执说没唤醒、只追加（{"woken":false,"delivery":"appended"}）
+PASS  已卸载（worker）：投递没有起 worker 进程
+PASS  已卸载（worker）：20 秒内没有新的结算通知（子代理没被唤醒）
+PASS  已卸载（worker）：子会话 JSONL 多了一条 agent-message
+PASS  已卸载（worker）：子会话没有新的助手回复
+
+=== 已卸载（worker）：唤醒问暗号 ===
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-8e318b6d\",\"message\":\"What is the current code word? Reply with only the code word. Do not use any tools.\"}. Then reply with just the word SENT."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-8e318b6d","details":{}}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+   {"role":"custom","customType":"subagent-settled","text":"Background subagent sa-8e318b6d finished and will do no further work unless you send it more.\nIts closing message:\nDATE"}
+   结算通知： Background subagent sa-8e318b6d finished and will do no further work unless you send it more.
+Its closing message:
+DATE
+PASS  已卸载（worker）：唤醒后带回 DATE
+
+=== 子代理交最终结果（只记录） ===
+   {"role":"user","text":"Call the spawn_agent tool exactly once with these arguments: {\"action\":\"spawn\",\"task\":\"What is 17 + 25? Follow your instructions about returning your result to the parent.\"}. After it returns, reply with just the word STARTED and do not cal"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-f8a2a591\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+   {"role":"custom","customType":"agent-message","text":"Agent sa-f8a2a591 sent a message without waking you:\n17 + 25 = 42."}
+   {"role":"user","text":"Call the spawn_agent tool exactly once with these arguments: {\"action\":\"spawn\",\"task\":\"What is 17 + 25? Follow your instructions about returning your result to the parent.\"}. After it returns, reply with just the word STARTED and do not cal"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 lab"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-f8a2a591\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+   {"role":"custom","customType":"agent-message","text":"Agent sa-f8a2a591 sent a message without waking you:\n17 + 25 = 42."}
+   {"role":"custom","customType":"subagent-settled","text":"Background subagent sa-f8a2a591 finished and will do no further work unless you send it more.\nIts closing message:\n17 + 25 = 42. I sent this to the parent agent without waking it."}
+   {"role":"assistant","text":"Sub-agent sa-f8a2a591 reports 17 + 25 = 42.","toolCalls":[]}
+   记录：父会话收到 1 条 agent-message（未唤醒），结算通知在第 6 条；spawn 之后父会话的助手回复 2 条（STARTED + 处理结算 = 2 表示只为结果跑了一轮）
+
+临时目录已删除：true
+全部通过

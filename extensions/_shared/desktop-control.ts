@@ -29,7 +29,7 @@ export type ToolEffect = 'allow' | 'deny' | 'ask';
 export type ApprovalPreset = 'readonly' | 'ask' | 'auto' | 'workspace' | 'full';
 export type RuleScope = 'session' | 'workspace' | 'global';
 export type MatcherKind = 'any' | 'command_prefix' | 'path_glob' | 'mcp_server';
-export type AuditResolution = 'auto' | 'rule' | 'user_allow' | 'user_deny' | 'queued' | 'aborted';
+export type AuditResolution = 'auto' | 'rule' | 'user_allow' | 'user_deny' | 'queued' | 'aborted' | 'timeout';
 
 export interface ToolCallFlags {
   dangerousCommand: boolean;
@@ -53,6 +53,8 @@ export interface ToolCallFacts {
   command?: string;
   path?: string;
   rawArgs?: Record<string, unknown>;
+  /** 子代理能把审批交给父会话的界面（_shared/approval-route.ts）。没有时主进程把子代理的 ask 固定为拒绝。 */
+  approvalRoute?: boolean;
 }
 
 export interface ToolRuleDraft {

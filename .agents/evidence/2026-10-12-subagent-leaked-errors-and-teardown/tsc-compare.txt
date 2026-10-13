@@ -1,0 +1,5 @@
+# cd electron-agent && npx tsc -p tsconfig.node.json --noEmit
+基线（子代理重新设计第 4 阶段）：154 条
+本次（审查修正之后）：154 条
+按文件+报错文字（去掉行列号）逐条比对：完全一致，新增 0 条。
+过程中出过 2 条，都在新测试里（console.error 替身的类型、onSettled 替身的类型），已改正。

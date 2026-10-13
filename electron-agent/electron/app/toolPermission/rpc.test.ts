@@ -121,6 +121,18 @@ describe('toolPermissionMethods', () => {
       .resolves.toEqual({ updated: true });
   });
 
+  it('carries approvalRoute only when it is literally true, and accepts a timeout settlement', async () => {
+    const { methods, audit } = await fixture();
+    const dangerous = { ...CALL, origin: 'subagent', flags: { ...CALL.flags, dangerousCommand: true } };
+    const routed = await methods['permission.tool.evaluate']({ call: { ...dangerous, approvalRoute: true } }) as { decision: string; auditId: string };
+    expect(routed.decision).toBe('ask');
+    const pinned = await methods['permission.tool.evaluate']({ call: { ...dangerous, approvalRoute: 'yes' } }) as { decision: string };
+    expect(pinned.decision).toBe('deny');
+    await expect(methods['permission.tool.settle']({ auditId: routed.auditId, resolution: 'timeout' }))
+      .resolves.toEqual({ updated: true });
+    expect(audit.get(routed.auditId)).toMatchObject({ resolution: 'timeout' });
+  });
+
   it('rejects an unknown resolution', async () => {
     const { methods } = await fixture();
     await expect(methods['permission.tool.settle']({ auditId: 'x', resolution: 'whatever' }))

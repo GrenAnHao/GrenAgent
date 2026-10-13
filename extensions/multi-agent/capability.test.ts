@@ -5,14 +5,14 @@ import { NET_TOOLS } from "../_shared/tool-groups.js";
 describe("resolveProfile", () => {
   it("undefined → default preset", () => {
     expect(resolveProfile(undefined).fs).toBe("workspace");
-    expect(resolveProfile(undefined).isolation).toBe("process");
   });
   it("preset name → that preset", () => {
     expect(resolveProfile("explore").fs).toBe("readonly");
     expect(resolveProfile("explore").model).toBe("cheap");
   });
-  it("executor preset uses worktree isolation", () => {
-    expect(resolveProfile("executor").isolation).toBe("worktree");
+  it("executor preset is gone (worktrees are an explicit tool now) and falls back to default", () => {
+    expect(PRESETS.executor).toBeUndefined();
+    expect(resolveProfile("executor")).toEqual(PRESETS.default);
   });
   it("unknown name → falls back to default", () => {
     expect(resolveProfile("nope").fs).toBe("workspace");
@@ -27,15 +27,14 @@ describe("resolveProfile", () => {
     const p = resolveProfile({ fs: "readonly", net: false });
     expect(p.fs).toBe("readonly");
     expect(p.net).toBe(false);
-    expect(p.isolation).toBe("process"); // from default base
     expect(p.spawn).toBe(false); // from default base
   });
   it("inline tools deny is carried through", () => {
     expect(resolveProfile({ tools: { deny: ["bash"] } }).tools).toEqual({ deny: ["bash"] });
   });
-  it("every preset is self-consistent (process isolation by default in P0)", () => {
+  it("no preset carries the removed isolation field", () => {
     for (const name of Object.keys(PRESETS)) {
-      expect(["process", "worktree"]).toContain(PRESETS[name].isolation);
+      expect(PRESETS[name]).not.toHaveProperty("isolation");
     }
   });
 });

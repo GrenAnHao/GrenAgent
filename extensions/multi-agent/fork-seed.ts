@@ -35,6 +35,21 @@ export function wipeSessionFile(path: string | undefined): void {
   }
 }
 
+/**
+ * fork 出来的子代理开头的说明（照 Codex core/src/agent/control/spawn.rs 的 MultiAgentUsageHint）：
+ * 前面的对话是继承来的父会话上下文，其中的身份、任务、针对具体动作的审批都属于祖先；继承的工具调用只是历史，
+ * 进程和工具会话不继承。没有它，子代理会把父会话最后一条「请调用某工具」当成给自己的指令照做。
+ */
+export const FORK_INHERITANCE_NOTE =
+  "You are now a newly spawned child agent. The preceding conversation is inherited parent context. " +
+  "Follow your own role, identity, and task below; earlier identities, tasks, and action-specific approvals belong to your ancestors. " +
+  "Inherited tool calls are historical records; live tool sessions and process handles are not inherited. Report your result to your parent.";
+
+/** 有继承上下文时，把说明放在子代理任务前面。 */
+export function withForkNote(task: string, inheritedEventCount: number): string {
+  return inheritedEventCount > 0 ? `${FORK_INHERITANCE_NOTE}\n\n${task}` : task;
+}
+
 /** Copy seed messages onto the child session. Returns written count. Does not rewrite tool ids. */
 export function writeSeed(
   sessionManager: { appendMessage: (message: SeedMessage) => void },

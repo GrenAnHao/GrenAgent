@@ -1,0 +1,63 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5；worker 入口 D:\OneDrive\Project Files\Pi\electron-agent\out\subagent-p25\main\pi-worker.js
+父会话模型 {"provider":"custom-muqywnc8","id":"claude-haiku-5-5"}
+
+=== create_worktree + write ===
+  用时 6773ms，新消息 8 条
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated smoke test. Step 1: call the create_worktree tool with {\"name\":\"p25-feature\"}. Step 2: call the write tool to create the file note.txt (use exactly this relative path) with the content from-worktree. Step 3: reply with the word CREATED. Do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \"第3层=结果\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\"是/否\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（"}
+   {"role":"assistant","text":"I'll start with the worktree creation.","toolCalls":[{"name":"create_worktree","arguments":{"name":"p25-feature"}}]}
+   {"role":"toolResult","toolName":"create_worktree","text":"{\"path\":\"C:\\\\Users\\\\rxstudio\\\\AppData\\\\Local\\\\Temp\\\\subagent-p25-real-9yVsaC\\\\project\\\\.agents\\\\worktrees\\\\p25-feature\",\"branch\":\"p25-feature\",\"baseCommit\":\"7846329beb864bc864f97cebe3b99bdb4e6b4082\",\"repositoryRoot\":\"C:\\\\Users\\\\rxstudio\\\\AppData\\\\Local\\\\Temp\\\\subagent-p25-real-9yVsaC\\\\project\"}\nThis session now works in \"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents","details":{"path":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature","branch":"p25-feature","baseCommit":"7846329beb864bc864f97cebe3b99bdb4e6b4082","repositoryRoot":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project","previous":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project"}}
+   {"role":"assistant","text":"The worktree was created. Now I'll write the file.","toolCalls":[{"name":"write","arguments":{"path":"note.txt","content":"from-worktree"}}]}
+   {"role":"toolResult","toolName":"write","text":"Successfully wrote to note.txt"}
+   {"role":"assistant","text":"CREATED","toolCalls":[]}
+PASS  create_worktree：工具结果不是错误
+PASS  create_worktree：checkout 在 <工作区>/.agents/worktrees/p25-feature，分支 p25-feature
+PASS  切换后 write 的相对路径落在 worktree，不在原工作区
+PASS  worktrees 目录带自忽略的 .gitignore（*）
+PASS  原仓库里有 p25-feature 分支
+PASS  父会话 JSONL 记下了 working_directory 切换
+PASS  父会话头的 cwd 仍是原工作区
+
+=== 子代理继承当前目录 ===
+  用时 8720ms，新消息 6 条
+   {"role":"system","text":""}
+   {"role":"user","text":"Call spawn_agent once with {\"action\":\"run\",\"task\":\"Use the write tool to create the file child.txt (use exactly this relative path) containing the word child, then reply DONE.\"}. After it returns, reply with the word SPAWNED."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \"第3层=结果\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\"是/否\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent","arguments":{"action":"run","task":"Use the write tool to create the file child.txt (use exactly this relative path) containing the word child, then reply DONE."}}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"DONE","details":{"agentId":"sa-037affa2","exitCode":0,"sessionPath":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\.pi\\agent\\sessions\\--C--Users-rxstudio-AppData-Local-Temp-subagent-p25-real-9yVsaC-project--\\2026-10-12T08-06-58-379Z_sa-037affa2.jsonl","stopReason":"completed","model":"custom-muqywnc8/claude-haiku-5-5","thinkingLevel":"medium"}}
+   {"role":"assistant","text":"SPAWNED","toolCalls":[]}
+PASS  spawn_agent：工具结果不是错误
+PASS  子代理的相对路径写在父会话当前的 worktree 里
+PASS  子会话头的 cwd 是原工作区（会话归属不跟着 worktree 走）
+PASS  子会话文件和父会话在同一个会话目录
+
+=== 新会话与切回 ===
+PASS  新建了一个会话
+  新会话还没落盘，跳过头部检查
+PASS  切回了原会话
+
+=== 切回后的目录 ===
+  用时 4491ms，新消息 5 条
+   {"role":"user","text":"Call the working_directory tool with no arguments, then reply with exactly the path it returned and nothing else."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \"第3层=结果\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\"是/否\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（"}
+   {"role":"assistant","text":"The `working_directory` tool isn't in my available function set, so I'll use `resolve_worktree`'s equivalent, `resolve_wor19`, which reads the current directory with no arguments.","toolCalls":[{"name":"working_directory","arguments":{}}]}
+   {"role":"toolResult","toolName":"working_directory","text":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature","details":{"cwd":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature","original":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project"}}
+   {"role":"assistant","text":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature","toolCalls":[]}
+PASS  切回原会话后工作目录按记录恢复为 worktree
+
+=== 离开 worktree ===
+  用时 4533ms，新消息 5 条
+   {"role":"user","text":"Call the working_directory tool with {\"cd\":\"C:\\\\Users\\\\rxstudio\\\\AppData\\\\Local\\\\Temp\\\\subagent-p25-real-9yVsaC\\\\project\"}. Then reply with the word LEFT and do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 subgraph \"第3层=结果\"、别写 subgraph 第3层=结果）、连线标签（写 A -->|\"是/否\"| B）。漏引号会触发 mermaid 解析报错、整图渲染失败。2) 数学公式用 $...$（"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"working_directory","arguments":{"cd":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project"}}]}
+   {"role":"toolResult","toolName":"working_directory","text":"Working directory changed from \"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature\" to \"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\". Running processes, terminals and MCP servers keep their own directories.","details":{"cwd":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project","previous":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project\\.agents\\worktrees\\p25-feature","changed":true,"original":"C:\\Users\\rxstudio\\AppData\\Local\\Temp\\subagent-p25-real-9yVsaC\\project"}}
+   {"role":"assistant","text":"LEFT","toolCalls":[]}
+PASS  working_directory cd 回原工作区
+PASS  离开后 worktree checkout 仍在
+PASS  离开后分支仍在
+
+AgentData 桩收到的方法： {"permission.tool.evaluate":6,"mcp.state.publish":1}
+
+临时目录已删除：true
+全部通过

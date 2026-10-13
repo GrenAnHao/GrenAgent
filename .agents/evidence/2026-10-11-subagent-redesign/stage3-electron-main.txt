@@ -1,0 +1,29 @@
+# electron-agent: npx vitest run electron
+ FAIL  |main| electron/tencentdb/runtime.test.ts [ electron/tencentdb/runtime.test.ts ]
+⎯⎯⎯⎯⎯⎯ Failed Tests 17 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  |main| electron/tencentdbRemoval.test.ts > TencentDB removal gate > production sources and manifests contain no TencentDB runtime remnants
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > applies combined action, resource and inclusive time filters before limiting
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > preserves resource name snapshots after deletion and does not invent legacy names
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains normal model slugs, Unicode resource labels and absolute project paths
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains safe legacy page paths with spaces and Unicode without relaxing other IDs
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > removes only terminal records and preserves Wiki, memory and audit data
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > requires explicit valid IDs instead of interpreting missing input as clear-all
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > dispatches a created job to its registered runner
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > does not record a runner rejection as failure after the job is already terminal
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > defers the cancelled state to the runner so no work happens after it lands
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > exposes module overview and code retrieval status contracts
+ FAIL  |main| electron/app/gitService.test.ts > GitService > pages log history across all branches, children before parents
+ FAIL  |main| electron/app/gitService.test.ts > GitService > pages log history across all branches, children before parents
+ FAIL  |main| electron/app/subagentService.test.ts > SubagentService > reads registry rows newest first without including transcript in the list
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > derives capabilities from a live executor and current target, keeping all system actions read-only
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > passes only still-pending original source IDs to retry and never incorporates newer sources
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > never resolves a model or starts a worker while listing or reading task capabilities
+ Test Files  8 failed | 130 passed (138)
+      Tests  17 failed | 1299 passed (1316)
+
+## 与 HEAD 对照：HEAD 失败的 6 个文件 / 15 个用例照旧；多出的两个文件是负载下超时：
+##   electron/tencentdbRemoval.test.ts（扫全源码树，5s 超时）、electron/app/gitService.test.ts（临时目录 EBUSY）
+## 单独复跑：
+      Tests  5 passed (5)
+      Tests  5 passed (5)

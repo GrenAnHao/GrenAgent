@@ -63,7 +63,7 @@ export type ChatMessage =
       /** 助手消息中止 / 出错时按「已中断」收掉的卡片。随后到的工具结果消息会把它换成真实结果。 */
       interrupted?: boolean;
     }
-  | { kind: 'notice'; id: string; customType: string; content: string }
+  | { kind: 'notice'; id: string; customType: string; content: string; /** 原消息的 timestamp：同一条的 message_start / message_end 靠它认出来。 */ sourceTimestamp?: number }
   /** 一次成功的上下文压缩留在会话里的分隔。进行中只显示「正在压缩」，结束后写成这一条。 */
   | { kind: 'compaction'; id: string };
 
@@ -682,12 +682,26 @@ function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
   if ((msg as { display?: unknown }).display !== true) return state;
   const content = typeof msg.content === 'string' ? msg.content : '';
   if (!content.trim()) return state;
-  if (state.messages.some((m) => m.kind === 'notice' && m.content === content)) return state;
   const rawCustomType = (msg as { customType?: unknown }).customType;
   const customType = typeof rawCustomType === 'string' ? rawCustomType : '';
+  // 同一条消息的 message_start / message_end 会各来一次，要去重。agent-message（send_message wake: false）
+  // 可能真的连发两条一样的（「还在跑测试」）：按原消息的 timestamp 认同一条，正文相同不算重复。其余通知照旧按正文去重。
+  const rawTimestamp = (msg as { timestamp?: unknown }).timestamp;
+  const sourceTimestamp = typeof rawTimestamp === 'number' ? rawTimestamp : undefined;
+  if (customType === 'agent-message' && sourceTimestamp !== undefined) {
+    const same = state.messages.some(
+      (m) => m.kind === 'notice' && m.customType === customType && m.sourceTimestamp === sourceTimestamp && m.content === content,
+    );
+    if (same) return state;
+  } else if (state.messages.some((m) => m.kind === 'notice' && m.content === content)) {
+    return state;
+  }
   return {
     ...state,
-    messages: [...state.messages, { kind: 'notice', id: nextId(), customType, content }],
+    messages: [
+      ...state.messages,
+      { kind: 'notice', id: nextId(), customType, content, ...(sourceTimestamp !== undefined ? { sourceTimestamp } : {}) },
+    ],
   };
 }
 

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+
+ Test Files  31 passed | 1 skipped (32)
+      Tests  424 passed | 2 skipped (426)
+   Start at  23:42:35
+   Duration  6.50s (transform 8.81s, setup 0ms, import 51.97s, tests 4.09s, environment 5ms)
+

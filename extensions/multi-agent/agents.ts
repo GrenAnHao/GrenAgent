@@ -16,9 +16,16 @@ export interface AgentConfig {
   description: string;
   tools?: string[];
   model?: string;
+  /** frontmatter `backend: worker`：这个角色的子代理跑在独立 worker 进程里（崩溃隔离、重 CPU / 原生模块）。 */
+  backend?: "worker" | "in-process";
   systemPrompt: string;
   source: "user" | "project";
   filePath: string;
+}
+
+function backendOf(value: string | undefined): { backend?: "worker" | "in-process" } {
+  const v = value?.trim().toLowerCase();
+  return v === "worker" || v === "in-process" ? { backend: v } : {};
 }
 
 export interface AgentDiscoveryResult {
@@ -56,6 +63,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
       description: frontmatter.description,
       tools: tools && tools.length > 0 ? tools : undefined,
       model: frontmatter.model,
+      ...backendOf(frontmatter.backend),
       systemPrompt: body,
       source,
       filePath,
@@ -135,6 +143,7 @@ export function builtinDefaultAgents(): AgentConfig[] {
       description: frontmatter.description,
       tools: tools && tools.length > 0 ? tools : undefined,
       model: frontmatter.model,
+      ...backendOf(frontmatter.backend),
       systemPrompt: body,
       source: "user",
       filePath: `<builtin:${name}>`,

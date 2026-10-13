@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch } from "node
 import { dirname, join } from "node:path";
 import { disposeActivation, getActivation, writeTornDown } from "./activation.js";
 import type { SubAgentRegistry } from "./registry.js";
+import { Teardown } from "./teardown.js";
 
 export function cancelRequestDir(cwd: string): string {
   return join(cwd, ".pi", "subagents");
@@ -38,10 +39,15 @@ export function cancelSubAgent(
   };
   tornDownDescendants(agentId);
   writeTornDown(agentId, row.sessionPath);
-  inflight.get(agentId)?.abort();
-  registry.finish(agentId, { status: "cancelled", exitCode: -1 });
+  // 每一步单独收：记账失败也要摘掉 inflight、释放 Activation（teardown.ts）。
+  const teardown = new Teardown(agentId);
+  teardown.step("abort run", () => inflight.get(agentId)?.abort());
+  teardown.step("record cancelled", () => registry.finish(agentId, { status: "cancelled", exitCode: -1 }));
   inflight.delete(agentId);
-  void disposeActivation(agentId, "cancel");
+  teardown.report();
+  disposeActivation(agentId, "cancel").catch((error: unknown) =>
+    console.error(`[multi-agent] sub-agent ${agentId}: dispose after cancel failed`, error),
+  );
 }
 
 const watchers = new Map<string, () => void>();

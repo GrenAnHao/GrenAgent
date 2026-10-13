@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ProjectTrustEventResult } from "@earendil-works/pi-coding-agent";
 import { extractPath, isDangerousBash, isMutatingBash, isUnderCwd, matchProtectedPath, matchWriteAllowed } from "./rules.js";
 import { getApprovalPolicy } from "../_shared/approval.js";
@@ -12,6 +14,7 @@ import {
   type ApprovalPreset, type ToolCallFacts, type ToolRuleDraft,
 } from "../_shared/desktop-control.js";
 import { DELEGATION_DENY_REASON, SUBAGENT_ASK_PINNED_RULE_ID } from "../_shared/delegation-scope.js";
+import { canRequestApproval, requestApproval, subagentApprovalTimeoutMs } from "../_shared/approval-route.js";
 import { grantEscalation } from "../_shared/sandbox/escalationGrant.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
@@ -29,7 +32,7 @@ const CODE_EXEC = new Set<string>(CODE_EXEC_TOOLS);
  */
 function collectFacts(
   event: { toolName: string; toolCallId?: string; input?: unknown },
-  ctx: { cwd: string; sessionManager?: { getSessionId?: () => string | undefined } },
+  ctx: { cwd: string; sessionManager?: { getSessionId?: () => string | undefined; getCwd?: () => string } },
   preset: ApprovalPreset,
 ): ToolCallFacts {
   const input = (event.input ?? {}) as Record<string, unknown>;
@@ -43,14 +46,15 @@ function collectFacts(
   const guardPaths = !off(getConfig("SAFETY_PROTECT_PATHS"));
   return {
     tool: event.toolName,
-    workspace: ctx.cwd,
+    workspace: projectCwd(ctx),
     origin: resolveToolOrigin(),
     preset,
     flags: {
       dangerousCommand: guardBash && command !== undefined && isDangerousBash(command),
       mutatingCommand: command !== undefined && isMutatingBash(command),
       protectedPath: guardPaths && path !== undefined && matchProtectedPath(path),
-      outsideWorkspace: path !== undefined && !isUnderCwd(path, ctx.cwd),
+      // 相对路径按当前目录解析，是否越界按原始工作区判断（切到 worktree 后写回原工作区不算越界）。
+      outsideWorkspace: path !== undefined && !isUnderCwd(resolve(ctx.cwd, path), projectCwd(ctx)),
       network: NET_TOOLS.has(event.toolName),
       mcp: event.toolName.startsWith("mcp__"),
       codeExec: CODE_EXEC.has(event.toolName),
@@ -110,17 +114,18 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     const on = (v: string | undefined) => v === "1" || v?.toLowerCase() === "true";
 
-    // ① 子代理能力硬限（env 注入的 deny/readonly）——任何审批策略（含 full）都不得越过。
-    //    优先 process.env（子代理收紧）而非全局 config，防被主 agent 放宽或泄漏。
-    const denyTools = (process.env.SAFETY_DENY_TOOLS ?? getConfig("SAFETY_DENY_TOOLS") ?? "")
+    // ① 子代理能力硬限（deny/readonly）——任何审批策略（含 full）都不得越过。
+    //    只读会话配置（getConfig：ALS → 运行时配置文件 → process.env）。原来先读 process.env，
+    //    agent-host 进程里一旦设了 SAFETY_* 就会压过所有会话；worker 子代理的限制改由派生配置文件带过去。
+    const denyTools = (getConfig("SAFETY_DENY_TOOLS") ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
     if (denyTools.includes(event.toolName)) {
       return refuse(`能力档案禁用工具：${event.toolName}`);
     }
-    const readonly = on(process.env.SAFETY_READONLY ?? getConfig("SAFETY_READONLY"));
-    const writeAllow = (process.env.SAFETY_WRITE_ALLOW ?? getConfig("SAFETY_WRITE_ALLOW") ?? "")
+    const readonly = on(getConfig("SAFETY_READONLY"));
+    const writeAllow = (getConfig("SAFETY_WRITE_ALLOW") ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
@@ -145,7 +150,10 @@ export default function (pi: ExtensionAPI) {
     // 这里只负责提取事实与执行结果。第 ① 层的能力硬限已在上方强制，不受此影响。
     const preset = getApprovalPolicy();
     const control = desktopControl();
-    const facts = collectFacts(event, ctx, preset);
+    // 子代理没有自己的界面：能经父会话问人时（approval-route.ts）告诉主进程，ask 不再固定为拒绝。
+    const childPath = resolveToolOrigin() === "subagent" ? ctx.sessionManager?.getSessionFile?.() : undefined;
+    const routed = await canRequestApproval(childPath);
+    const facts = { ...collectFacts(event, ctx, preset), ...(routed ? { approvalRoute: true } : {}) };
     const verdict = await evaluateToolCall(control, facts);
 
     if (verdict.decision === "allow") return undefined;
@@ -160,7 +168,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ask：无 UI 时不能就地询问，审计行保持 queued 等人处理。
-    if (!ctx.hasUI) {
+    if (!routed && !ctx.hasUI) {
       return { block: true, reason: `已攒起等待授权：${event.toolName}` };
     }
 
@@ -170,15 +178,32 @@ export default function (pi: ExtensionAPI) {
     const question = escalation
       ? `${detail}\n\n  沙箱升权 → ${escalation.mode}\n  理由：${escalation.justification}`
       : detail;
+    // 带升权的询问不给「总是允许」：它只会记命令规则，用户却会以为是对升权的长期授权。
+    const options = escalation ? ["允许本次", "拒绝"] : ["允许本次", "总是允许", "拒绝"];
+    const title = `请求批准：\n\n  ${question}`;
     let choice: string | undefined;
-    try {
-      // 0.85+：用户取消 select 返回 undefined，不再保证抛错。
-      // 带升权的询问不给「总是允许」：它只会记命令规则，用户却会以为是对升权的长期授权。
-      const options = escalation ? ["允许本次", "拒绝"] : ["允许本次", "总是允许", "拒绝"];
-      choice = await ctx.ui.select(`请求批准：\n\n  ${question}`, options);
-    } catch {
-      await settleToolCall(control, verdict.auditId, "aborted");
-      return refuse("授权请求已取消");
+    if (routed) {
+      // 子代理：经父会话的界面问人，最多等 SUBAGENT_APPROVAL_TIMEOUT_MS，从发出请求算起。
+      const answer = await requestApproval(childPath, { title, options, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      if (answer.outcome === "timeout") {
+        await settleToolCall(control, verdict.auditId, "timeout");
+        const seconds = Math.round(subagentApprovalTimeoutMs() / 1000);
+        return refuse(`${seconds} 秒内没有人批准 ${event.toolName}，视为被拒`);
+      }
+      if (answer.outcome === "unavailable") {
+        // 判定之后父会话没了：和没有路由一样，按委派范围拒绝。
+        await settleToolCall(control, verdict.auditId, "aborted");
+        return { block: true, reason: DELEGATION_DENY_REASON };
+      }
+      choice = answer.outcome === "answered" ? answer.choice : undefined;
+    } else {
+      try {
+        // 0.85+：用户取消 select 返回 undefined，不再保证抛错。
+        choice = await ctx.ui.select(title, options);
+      } catch {
+        await settleToolCall(control, verdict.auditId, "aborted");
+        return refuse("授权请求已取消");
+      }
     }
     if (choice == null) {
       await settleToolCall(control, verdict.auditId, "aborted");

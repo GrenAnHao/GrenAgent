@@ -1,0 +1,31 @@
+
+> electron-agent@0.1.0 ui:check
+> node ui-harness/check.mjs agent-message
+
+构建：2 个源文件有改动（ui-harness/scenarios/agent-message.tsx、src/stores/agentReducer.ts）
+场景已构建（生产模式，7.3s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ agent-message
+  PASS 对话渲染出来
+  PASS 历史里的消息显示成提示条
+  PASS 历史里只有一条 agent-message 提示条
+  PASS 标题写出发送方（来自 parent-1 的消息（未唤醒））
+  PASS 标题不是通用的「已注入上下文」
+  PASS 默认收起：正文不露出来
+  PASS 普通注入通知仍是「已注入上下文」
+  INFO 截图 collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-collapsed.png
+  PASS 点开后看到正文
+  PASS 正文按 markdown 渲染（行内代码）
+  INFO 截图 expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-expanded.png
+  PASS 再点收起
+  PASS 实时推来的一条也显示成提示条
+  PASS 实时那条的发送方是子代理（来自 sa-7 的消息（未唤醒））
+  INFO 实时正文  最终结果：三个失败用例都是时区问题，已在 `date.ts` 修好，测试全绿。
+  PASS 同样正文再发一次（另一条消息）也显示，不被当成重复
+  PASS 浅色：三条提示条都在
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\agent-message-light.png
+  ── 14 passed, 0 failed
+
+通过：agent-message（9.5s）。只跑了 1/15 个场景，其余 14 个没指定，未运行

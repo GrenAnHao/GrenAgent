@@ -7,6 +7,7 @@
 //     回合还没结束时，压完用隐藏消息续跑；模型已经说完则停住。手动压缩不走这里。
 // 纯扩展。删段由宿主 agent_exclude_entry / agent_restore_entry 写 runtime pulse，
 // watchConfig 应用；会话内 appendEntry 持久 + 分支安全。不再注册 TUI slash。
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getConfig, refreshConfig, watchConfig } from "../_shared/runtime-config.js";
 import { currentCwd } from "../_shared/workspace-context.js";
@@ -72,7 +73,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", () => { unwatch(); });
 
   pi.on("session_start", async (_event, ctx) => {
-    workspaceCwd = ctx.cwd;
+    workspaceCwd = projectCwd(ctx);
     pruneState = emptyPruneState();
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const ops = entries

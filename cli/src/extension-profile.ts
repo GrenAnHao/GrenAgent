@@ -39,6 +39,7 @@ export const CORE_ALWAYS_ON = new Set<string>([
   "image-gen",
   "jobs",
   "multi-agent",
+  "working-directory",
   "github",
   "batch-tools",
   "tts",

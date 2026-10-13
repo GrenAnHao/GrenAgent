@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Icon } from '@lobehub/ui';
 import { ShieldAlert, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
@@ -65,6 +65,15 @@ const styles = createStaticStyles(({ css }) => ({
       background: ${cssVar.colorFillTertiary};
     }
   `,
+  meta: css`
+    flex: none;
+    font-size: 12px;
+    color: ${cssVar.colorTextTertiary};
+    font-variant-numeric: tabular-nums;
+  `,
+  urgent: css`
+    color: ${cssVar.colorWarning};
+  `,
   body: css`
     margin-block-start: 6px;
     font-size: 13px;
@@ -80,17 +89,49 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
+const URGENT_SECONDS = 10;
+/** 换卡之后多久内不认点击。 */
+const SWAP_GUARD_MS = 400;
+
+/** 带 timeout 的请求（子代理审批）还剩几秒；到 0 之后宿主会发 dismiss 收走卡片。 */
+function useSecondsLeft(deadline: number | undefined): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === undefined) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
+  return deadline === undefined ? undefined : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
 /**
  * ChatInput 上方的内联审批卡：permission 与审批类 select。
  * 其余 select / confirm / input 由 OverlayUiPromptCard 渲染。
+ * 子代理经父会话发来的审批（extensions/_shared/approval-route.ts）标明来源并倒计时；
+ * 同时排着的请求只显示第一条，标出还有几条。
  */
 export const PromptRequestCard = memo(function PromptRequestCard() {
   const { workspace } = useAgentStoreContext();
   const item = useUiPromptStore((s) => s.byWorkspace[workspace]);
+  const waitingCount = useUiPromptStore((s) => s.waiting[workspace]?.length ?? 0);
+  const timeout = item?.request.timeout;
+  const deadline =
+    typeof timeout === 'number' && timeout > 0 && item?.receivedAt !== undefined ? item.receivedAt + timeout : undefined;
+  const secondsLeft = useSecondsLeft(deadline);
+
+  // 答完一条，排着的下一条马上顶到同一个位置、按钮也在同一处：双击，或者在上一条到点前一刻点下去，
+  // 第二下会落在新卡上（可能是「总是允许」）。换卡后的一小段时间里不认点击。第一次出现的卡不受影响。
+  const shown = useRef<{ id?: string; swappedAt: number }>({ swappedAt: 0 });
+  const requestId = item?.request.id;
+  if (shown.current.id !== requestId) {
+    shown.current = { id: requestId, swappedAt: shown.current.id && requestId ? Date.now() : 0 };
+  }
 
   const respond = useCallback(
     (payload: Record<string, unknown>) => {
       if (!item) return;
+      if (Date.now() - shown.current.swappedAt < SWAP_GUARD_MS) return;
       if (item.request.source === 'permission') {
         void pi.resolvePermission(item.request.id, payload.confirmed === true ? 'allow' : 'deny');
       } else {
@@ -111,11 +152,25 @@ export const PromptRequestCard = memo(function PromptRequestCard() {
   const { request } = item;
   const dismiss = () => respond({ cancelled: true });
   const options = sortApprovalOptions(request.options ?? []);
+  const fromSubagent = Array.isArray(request.subagents) && request.subagents.length > 0;
   return (
     <div className={styles.card} data-testid="prompt-request-approval">
       <div className={styles.head}>
         <Icon icon={ShieldAlert} size={13} />
-        <span className={styles.headTitle}>需要批准</span>
+        <span className={styles.headTitle}>{fromSubagent ? '子代理请求批准' : '需要批准'}</span>
+        {secondsLeft !== undefined ? (
+          <span
+            className={secondsLeft <= URGENT_SECONDS ? `${styles.meta} ${styles.urgent}` : styles.meta}
+            data-testid="prompt-request-countdown"
+          >
+            {secondsLeft} 秒后视为拒绝
+          </span>
+        ) : null}
+        {waitingCount > 0 ? (
+          <span className={styles.meta} data-testid="prompt-request-waiting">
+            还有 {waitingCount} 条
+          </span>
+        ) : null}
         <button
           className={styles.close}
           data-testid="prompt-request-dismiss"

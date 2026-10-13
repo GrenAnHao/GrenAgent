@@ -75,6 +75,10 @@ export interface ExtensionUiRequest {
   placeholder?: string;
   prefill?: string;
   source?: 'extension' | 'permission';
+  /** 宿主最多等多少毫秒；到点它会发 dismiss 收回这条请求。 */
+  timeout?: number;
+  /** 子代理经父会话问人时带上（extensions/_shared/approval-route.ts），顶层在前。 */
+  subagents?: Array<{ agentId: string; label: string }>;
   [k: string]: unknown;
 }
 

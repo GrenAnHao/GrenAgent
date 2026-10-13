@@ -2,7 +2,11 @@
 
 import { assistantTextFromContent } from "./runner.js";
 
-export type SubagentStopReason = "completed" | "aborted" | "error";
+/**
+ * 子代理结束原因，采用 DSH 词表（SubagentStopReasonMap）。目前只产出 completed / aborted / error；
+ * max-tokens / refusal 先占类型，产出它们会改变父会话看到的结果，留到交付方式统一时再接。
+ */
+export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens" | "refusal";
 
 export interface AssistantOutputResult {
   output: string;

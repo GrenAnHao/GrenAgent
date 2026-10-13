@@ -1,3 +1,4 @@
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getConfig } from "../_shared/runtime-config.js";
@@ -82,7 +83,7 @@ export default function resourceManager(pi: ExtensionAPI) {
           ctx.ui.notify("MCP 探测失败: " + error, "error");
           return result("MCP 探测失败: " + error, { status: "error", resource: "mcp", error, parsed, response: "MCP 探测失败: " + error });
         }
-        const path = await writeMcpServer(input, ctx.cwd, undefined, getConfig("MCP_SERVERS") ?? "");
+        const path = await writeMcpServer(input, projectCwd(ctx), undefined, getConfig("MCP_SERVERS") ?? "");
         reconcileMcpManager(currentWorkspaceContext()?.workspace ?? ctx.cwd);
         ctx.ui.notify("MCP " + input.name + " 已添加");
         const response = "已添加 MCP " + input.name;

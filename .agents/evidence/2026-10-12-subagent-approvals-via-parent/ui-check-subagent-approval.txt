@@ -1,0 +1,49 @@
+
+> electron-agent@0.1.0 ui:check
+> node ui-harness/check.mjs subagent-approval
+
+构建：3 个源文件有改动（src/stores/agent.ts、src/stores/backgroundUiRequests.ts 等）
+场景已构建（生产模式，4.7s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ subagent-approval
+  PASS 输入框占位渲染出来
+  PASS 没有请求时没有审批卡
+  PASS 子代理请求：卡片出现
+  PASS 卡头写「子代理请求批准」
+  PASS 正文写出是哪个子代理
+  PASS 正文带上命令
+  PASS 倒计时从 60 秒起（60）
+  PASS 只有一条时没有「还有 N 条」
+  INFO 截图 single  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-approval-single.png
+  PASS 倒计时每秒往下走（60 → 58）
+  PASS 排队：显示「还有 2 条」
+  PASS 排队：显示的仍是第一条
+  PASS 排队：同一时间只有一张审批卡
+  INFO 截图 queued  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-approval-queued.png
+  PASS 答复回传给宿主
+  PASS 双击的第二下没有答到顶上来的那条
+  PASS 第二条顶上来：孙代理带上父链
+  PASS 还剩 1 条在排队
+  PASS 第二条也有倒计时
+  PASS dismiss 后主会话的审批顶上来
+  PASS 主会话的卡头仍是「需要批准」
+  PASS 主会话的审批没有倒计时
+  PASS 队列空了：没有「还有 N 条」
+  PASS 收回的那条没有回传答复
+  PASS 排队：还有 1 条
+  PASS 收回排队中的那条后队列空了
+  PASS 显示中的主会话审批不动
+  PASS 全部答完卡片消失
+  PASS 短超时的请求出现
+  PASS 后面再排一条
+  PASS 剩 10 秒以内倒计时换成警示色（rgb(255, 178, 36) ≠ rgb(110, 118, 129)）
+  INFO 截图 urgent  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-approval-urgent.png
+  PASS 浅色：审批卡仍在
+  PASS 浅色：倒计时仍在
+  PASS 浅色：警示色跟着主题变（rgb(255, 178, 36) → rgb(238, 158, 11)）
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\subagent-approval-light.png
+  ── 32 passed, 0 failed
+
+通过：subagent-approval（13.4s）。只跑了 1/14 个场景，其余 13 个没指定，未运行

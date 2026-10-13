@@ -26,6 +26,8 @@ import { getApprovalPolicy } from "../_shared/approval.js";
 import { getConfig } from "../_shared/runtime-config.js";
 import { __resetEscalationGrantsForTest, takeEscalationGrant } from "../_shared/sandbox/escalationGrant.js";
 import safety from "./index.js";
+import { __resetApprovalRoutesForTest, registerChildApprovalRoute, registerTopApprovalRoute } from "../_shared/approval-route.js";
+import { runInWorkspace } from "../_shared/workspace-context.js";
 
 type ToolCall = (event: unknown, ctx: unknown) => Promise<{ block?: boolean; reason?: string } | undefined>;
 
@@ -243,5 +245,90 @@ describe("safety · bash sandbox escalation", () => {
     );
     expect(ui.select.mock.calls[0]?.[0]).toBe("请求批准：\n\n  npm run build");
     expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
+  });
+});
+
+describe("safety · subagent approvals through the parent window", () => {
+  const TOP = "/s/top.jsonl";
+  const CHILD = "/s/child.jsonl";
+  const childCtx = (extra: Record<string, unknown> = {}) => ({
+    hasUI: true,
+    cwd,
+    ui: { select: vi.fn() },
+    sessionManager: { getSessionId: () => "child", getSessionFile: () => CHILD },
+    ...extra,
+  });
+  const asChild = <T>(fn: () => Promise<T>) =>
+    runInWorkspace({ origin: "subagent", workspace: cwd, cwd, config: {} }, fn);
+
+  beforeEach(() => {
+    __resetApprovalRoutesForTest();
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+  });
+
+  function routeTo(answer: (opts: { signal?: AbortSignal }) => Promise<string | undefined>) {
+    const select = vi.fn((_t: string, _o: string[], opts?: { signal?: AbortSignal }) => answer(opts ?? {}));
+    registerTopApprovalRoute(TOP, { select });
+    registerChildApprovalRoute({ sessionPath: CHILD, parentSessionPath: TOP, agentId: "sa-1", label: "fix build" });
+    return select;
+  }
+
+  it("tells the main process it can ask, then asks the parent window with the child named in the title", async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: "ask", auditId: "a1" });
+    const select = routeTo(async () => "允许本次");
+    const ctx = childCtx();
+    const r = await asChild(() => setup()({ toolName: "bash", input: { command: "rm -rf build" } }, ctx));
+
+    expect(r).toBeUndefined();
+    expect((mocks.evaluateToolCall.mock.calls[0] as unknown[] | undefined)?.[1]).toMatchObject({ origin: "subagent", approvalRoute: true });
+    expect(select.mock.calls[0]?.[0]).toBe("子代理 fix build（sa-1） 请求批准：\n\n  rm -rf build");
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), "a1", "user_allow");
+  });
+
+  it("without a route the facts say nothing and the pinned deny keeps its delegation reason", async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: "deny", auditId: "a1", ruleId: "builtin.subagent-ask-pinned" } as never);
+    const r = await asChild(() => setup()({ toolName: "bash", input: { command: "rm -rf build" } }, childCtx()));
+    expect((mocks.evaluateToolCall.mock.calls[0] as unknown[] | undefined)?.[1]).not.toHaveProperty("approvalRoute");
+    expect(r?.reason).toContain("已被自动拒绝");
+  });
+
+  it("nobody answers within the timeout: blocked as a refusal (no terminate), audited as timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.evaluateToolCall.mockResolvedValue({ decision: "ask", auditId: "a1" });
+      routeTo(({ signal }) => new Promise((resolve) => signal?.addEventListener("abort", () => resolve(undefined))));
+      const pending = asChild(() => setup()({ toolName: "bash", input: { command: "rm -rf build" } }, childCtx()));
+      await vi.advanceTimersByTimeAsync(60_000);
+      const r = await pending;
+      expect(r).toMatchObject({ block: true });
+      expect(r).not.toHaveProperty("terminate");
+      expect(r?.reason).toContain("60 秒内没有人批准 bash，视为被拒");
+      expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), "a1", "timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a refusal from the parent window comes back to the child without terminating it", async () => {
+    mocks.evaluateToolCall.mockResolvedValue({ decision: "ask", auditId: "a1" });
+    routeTo(async () => "拒绝");
+    const r = await asChild(() => setup()({ toolName: "bash", input: { command: "rm -rf build" } }, childCtx()));
+    expect(r).toMatchObject({ block: true });
+    expect(r).not.toHaveProperty("terminate");
+    expect(r?.reason).toContain("用户拒绝：bash");
+    expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), "a1", "user_deny");
+  });
+
+  it("the parent goes away between the verdict and the question: delegation deny, audited as aborted", async () => {
+    routeTo(async () => "允许本次");
+    mocks.evaluateToolCall.mockImplementation(async () => {
+      __resetApprovalRoutesForTest();
+      registerChildApprovalRoute({ sessionPath: CHILD, parentSessionPath: TOP, agentId: "sa-1", label: "fix build" });
+      return { decision: "ask", auditId: "a1" };
+    });
+    const r = await asChild(() => setup()({ toolName: "bash", input: { command: "rm -rf build" } }, childCtx()));
+    expect(r?.reason).toContain("已被自动拒绝");
+    expect(mocks.settleToolCall).toHaveBeenCalledWith(expect.anything(), "a1", "aborted");
   });
 });

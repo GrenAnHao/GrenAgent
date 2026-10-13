@@ -92,6 +92,8 @@ export const ASK_TOOLS: readonly string[] = [
   "hl_read",
   "ask_user",
   "present",
+  // 只换本会话的工作目录，不写文件；离开 worktree 也靠它。
+  "working_directory",
 ];
 
 // plan：与 ask 共用白名单（含 bash）；bash 再由 isSafeCommand 限定为只读命令，带不带 sandbox_permissions 都一样。

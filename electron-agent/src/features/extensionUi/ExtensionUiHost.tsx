@@ -15,7 +15,7 @@ import { useVisualStore } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 import { isGoalReceiptNotify } from './goalReceiptNotify';
-import { stashInlineQuestion, stashUiPrompt } from '../../stores/backgroundUiRequests';
+import { dismissUiRequest, stashInlineQuestion, stashUiPrompt } from '../../stores/backgroundUiRequests';
 import { pathsEquivalent } from '../../lib/pathUtils';
 import type { PiUiRequestEnvelope } from '../../lib/pi';
 
@@ -165,6 +165,11 @@ export function ExtensionUiHost() {
       // interactive session's prompt cards or modal flow.
       if (e.source === 'goal') return;
       const method = e.request.method;
+      // 宿主不再等这条请求（超时、撤回、已答复）：卡片不管在画面上、排队还是后台暂存都收掉。
+      if (method === 'dismiss') {
+        dismissUiRequest(e.request.id);
+        return;
+      }
       if (method === 'setStatus') {
         const r = e.request as { statusKey?: unknown; statusText?: unknown };
         const text = typeof r.statusText === 'string' ? r.statusText : undefined;

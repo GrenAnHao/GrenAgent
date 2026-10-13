@@ -8,6 +8,9 @@
 2. 先搜 .agents/notes/ 同主题旧笔记：能原地更新就更新；新想法放 proposed/，落地随代码转 implemented/；彻底取代旧决策时同批归档并标明被谁取代。
 3. 被放弃的方案先写最强理由，再写为什么不用。
 4. 提交前跑 npm run verify-notes，红了先修再交。
+5. 「非平凡」的补充判定（沿用原 docs/decisions 触发清单）：改了对外契约、接口签名或数据格式；新增、移除或替换依赖；在多个可行方案之间做了选择；修了「光看代码看不出原因」的 bug；推翻了以前的决定。
+6. 开工前先搜 .agents/notes/（需要考古时再 grep 冻结的 docs/decisions/），确认该模块没有已否决的方案。
+7. pre-commit 钩子会跑根目录 `pnpm run verify-notes`。
 
 
 ## 注册工具必须带官方提示词字段
@@ -58,27 +61,10 @@ npx vitest run prompt-metadata.test.ts
 
 该测试要求所有静态注册工具都有非空 `promptSnippet`，并检查 AgentData 工具的 guidelines 点了名。
 
-## 决策记录（docs/decisions/）
+## 决策记录（docs/decisions/ 已冻结）
 
-`docs/architecture.md` 只写事实：系统当前如何运转。改动背后的「为什么」写进 `docs/decisions/`，两者不混写。
+`docs/decisions/` 自 2026-10-11 起冻结为只读历史，不再新增或修改；仍有效的决定已迁入 `.agents/notes/implemented/`，源文件顶部有「已迁移」墓碑。决策只写 `.agents/notes/`，规则见上文「重要改动必须留笔记」和 [单一决策记录](.agents/notes/implemented/process/2026-10-11-single-decision-record-system.md)。`docs/architecture.md` 仍只写系统现状事实，不写「为什么」。
 
-- 完成**非平凡改动**后，新增一篇笔记，与代码在同一次提交。非平凡 = 命中下列任意一条；未命中就不写，不要写流水账。
-  1. 改了对外契约、接口签名或数据格式。
-  2. 新增、移除或替换了依赖。
-  3. 在多个可行方案之间做了选择。
-  4. 修了一个「光看代码看不出原因」的 bug。
-  5. 推翻了以前的决定。
-- 笔记必须含「放弃的方案」一节；确实没有备选时写明为什么显而易见。
-- 正文永不修改。要推翻结论：新笔记 frontmatter 用 `supersedes` 指向旧的，并在旧笔记顶部加一行墓碑 `> 已过时 → 见 <新笔记相对路径>`。
-- 禁止维护总索引；检索靠 `scope` 目录 + grep。文件名为 `YYYY-MM-DD-<短语>.md`。
-- 开工前先 grep `docs/decisions/` 确认该模块没有已否决的方案。
-- 模板见 `docs/decisions/_template.md`，约定详见 `docs/decisions/README.md`。
-
-提交前跑（已挂 `.git/hooks/pre-commit`）：
-
-```bash
-node scripts/check-notes.mjs
-```
 
 ## UI 检查（ui-harness）
 
@@ -101,7 +87,7 @@ node scripts/check-notes.mjs
 
 ### 跑哪些场景
 
-原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer`、`panel-resize` 十三个场景，全量就是它们。
+原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer`、`panel-resize`、`subagent-approval`、`agent-message`、`subagent-detached` 十六个场景，全量就是它们。
 
 - 改了某个工具卡 / 时间线组件的 UI：点名对应的场景（查下面「现有场景」），可以是几个，但都属于本次需求。
 - 新增组件 / 面板：先写新场景 + probe，只跑这个新场景。其他场景一个不跑。
@@ -147,6 +133,9 @@ node scripts/check-notes.mjs
 - 文件浏览器：`file-explorer`（真实 FileTreeBody → FileExplorer，内存文件树做桩，`files://changed` 由 `act('externalEdit' / 'addFile')` 按主进程形状推；只列根、展开才列、展开的目录交给主进程监听；2000 个文件只渲染可视区、滚到底见最后一个；.md 默认预览、只看不挂编辑器，Ctrl+E 进编辑、宽屏左右分栏、窄屏只有编辑器，Ctrl+S 写盘，Esc 回预览；.ts 默认只读敲字不进文档，切编辑后可改可存；未保存切文件弹「保存 / 放弃 / 取消」；切主题编辑器 DOM 不换、颜色跟着变，预览也变；二进制不支持预览可用系统打开，超大文件标已截断且进不了编辑，svg 显示；外部改动无本地修改静默换新、有本地修改出冲突提示可保留；CRLF 保存后原有行仍是 CRLF；新文件出现在树里；筛选只留命中项和祖先；文件树在内容右边，可以收起再展开；分隔条往左拖文件树变宽。CodeMirror 的文档读 `.cm-line`，往编辑器里敲字先 `t.click('.cm-content', 40)` 再 Ctrl+End）
 - 对话列表贴底：`chat-follow`（真实 VirtualizedMessageList，条目是定高文字块、其中一条带内部滚动区；流式增长一路贴底；在内部滚动区上滚轮、会话不满一屏时上滚都不停止贴底；一次追加大段内容不因测高超前丢掉贴底；真的把列表往上滚（滚轮或键盘 PageUp，含远小于旧阈值的小幅上滚）才停止贴底，流式增长时阅读位置不动并露出「回到底部」；发出新消息、点「回到底部」、滚回底部都恢复贴底；真实对话模式走真实 reducer → ChatMessageItems（Markdown、代码块、表格、bash 工具卡），每 10~100ms 一段快速输出时持续贴底、没有被往上推离底部的帧（document capture 阶段读 scroll 事件，抓「推上去再拉回」的抖动；内容缩短时浏览器钳制 + virtua 跳变补偿会把视图推离底部），快速输出中读者上滚照样离开底部、停在原处并露出「回到底部」）
 - 面板分隔条：`panel-resize`（真实 ResizeHandle，左边长对话、右边文件浏览器打开长 markdown；拖动宽度跟手，拖动中面板没有宽度过渡，松手恢复 0.2s，双击回到初始尺寸，往两边拖停在最小 / 最大宽度；折叠有中间帧并收到 0，展开回到原宽度；对话列表滚动时 virtua 仍写 inline pointer-events: none，但计算值保持 auto）
+- 子代理审批卡：`subagent-approval`（真实 ExtensionUiHost → uiPromptStore → PromptRequestCard，pi://ui-request 信封由 probe 经 act 推、形状照 sessionUiAdapter，`extension_ui_respond` 记成事件；子代理的请求卡头写「子代理请求批准」、标题写出子代理（孙代理带父链）、按收到的时刻倒计时；几条同时来只显示第一条并写「还有 N 条」，答完下一条顶上来，双击不会顺手答掉顶上来的那条；`dismiss` 收回显示中的那条后下一条顶上来，收回排队中的那条不动显示中的；主会话自己的审批没有倒计时；剩 10 秒以内倒计时变警示色；浅色主题）
+- 不唤醒的消息：`agent-message`（真实 reducer → renderMessageBody；`send_message` wake: false 写进对话的自定义消息显示成「来自 X 的消息（未唤醒）」提示条，不是通用的「已注入上下文」；默认收起、展开看 markdown 正文、再点收起；普通注入通知不受影响；probe 经 act 推一条实时的（message_start / message_end）同样显示；浅色主题。只放通知，用户 / 助手气泡要订阅真实会话 store）
+- 前台 run 转后台：`subagent-detached`（真实 messagesFromAgent → renderMessageBody，`subagent_list` 用桩，probe 经 act 在注册表里把转后台的子代理改成已完成；单任务回执 status: running / detached 时卡片按后台子代理画运行中；并行组里已完成的那项是已完成、转后台的那几项是运行中而不是出错，组头写「N 个在后台运行」且没有失败计数；卡片第一次读注册表时还没建出来的那一行从挂载起一次也不画成已中断（工具返回后再读一次确认），注册表里确实没有的那一行画「已中断」、不算失败也不算在后台，转后台时没有 agentId 的那一行按任务文字跟上注册表；注册表结束后经轮询变成已完成、后台计数消失；都结束后不再轮询（轮询停掉、store 清空时不能退回运行中再把轮询拉起来））
 
 harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness 本身坏了（所有场景都「页面没就绪」、输入全部失效、升级 Electron / Vite 之后），用 electron-ui-harness skill 的 `scripts/smoke.mjs --app electron-agent` 跑一次，它跑完会自动删掉临时场景。在 `scenarios/` 里看到 `harness-smoke` 就是漏删的，直接删掉。
 

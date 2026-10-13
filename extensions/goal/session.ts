@@ -1,3 +1,4 @@
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readAutoContinueOnOpen } from "./config.js";
 import { foldGoal } from "./fold.js";
@@ -58,7 +59,7 @@ export function pushStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus("goal", JSON.stringify({
     schemaVersion: 1,
     sessionId: sessionIdOf(ctx),
-    workspace: ctx.cwd,
+    workspace: projectCwd(ctx),
     snapshot: currentStatusSnapshot(ctx),
     history: listGoalHistory(sessionManager(ctx).getEntries?.() ?? []),
   }));

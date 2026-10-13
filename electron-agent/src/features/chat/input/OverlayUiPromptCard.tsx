@@ -33,6 +33,11 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
+  waiting: css`
+    flex: none;
+    font-size: 12px;
+    color: ${cssVar.colorTextTertiary};
+  `,
   close: css`
     display: inline-flex;
     flex: none;
@@ -87,6 +92,9 @@ export const OverlayUiPromptCard = memo(function OverlayUiPromptCard() {
   const { workspace } = useAgentStoreContext();
   const { useStore } = useAgentStore();
   const item = useUiPromptStore((s) => s.byWorkspace[workspace]);
+  // 后面还排着的请求（例如子代理的审批，各自在倒计时）：答完这条才会顶上来，这里写出来免得被忽略。
+  const waitingCount = useUiPromptStore((s) => s.waiting[workspace]?.length ?? 0);
+  const waitingNote = waitingCount > 0 ? `还有 ${waitingCount} 条待处理` : undefined;
   const [text, setText] = useState('');
   const [selected, setSelected] = useState<Record<string, string[]>>({});
 
@@ -135,7 +143,7 @@ export const OverlayUiPromptCard = memo(function OverlayUiPromptCard() {
         continueLabel="确定"
         data-testid="prompt-request-select"
         fullWidth
-        headerTitle="请选择"
+        headerTitle={waitingNote ? `请选择（${waitingNote}）` : '请选择'}
         onContinue={() => {
           if (chosenLabel) {
             respond(
@@ -160,6 +168,11 @@ export const OverlayUiPromptCard = memo(function OverlayUiPromptCard() {
       <div className={styles.head}>
         <Icon icon={MessageCircleQuestion} size={13} />
         <span className={styles.headTitle}>{displayHeading}</span>
+        {waitingNote ? (
+          <span className={styles.waiting} data-testid="prompt-request-waiting">
+            {waitingNote}
+          </span>
+        ) : null}
         <button
           className={styles.close}
           data-testid="prompt-request-dismiss"

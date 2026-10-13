@@ -1,0 +1,21 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5
+
+=== 4. 迟一点才接住的 rejection：子代理照常完成 ===
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated test. Call the spawn_agent tool exactly once with {\"title\":\"late catch\",\"task\":\"Call the late_catch_probe tool exactly once with {}. After it returns, reply with exactly the word SURVIVED and nothing"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","isError":true,"text":"sub-agent failed (exit 1): uncaught error: CAUGHT_LATER"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+   结果： {"isError":true,"text":"sub-agent failed (exit 1): uncaught error: CAUGHT_LATER"}
+FAIL  4：子代理照常完成（带回 SURVIVED），没有被当成漏网错误中断
+FAIL  4：agent-host 日志里没有这条（它在等待期内被接住了）
+PASS  4：agent-host 还在，照常答话
+
+agent-host 输出里与错误相关的行（最多 40 行）：
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=30
+   [leak-probe-ext] active: leak_probe=true late_catch_probe=true total=68
+   [agent-host] unhandledRejection (sub-agent sa-90217930) Error: CAUGHT_LATER
+
+临时目录已删除：true
+2 项失败

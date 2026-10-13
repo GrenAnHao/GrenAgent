@@ -1,0 +1,39 @@
+      拉起到就绪: 2031ms，主进程事件循环最长 17ms，子进程最长 0ms 没响应
+[agent-host] (node:73236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+[agent-host] [loop-guard] extension loaded
+[agent-host] [rulebook] extension loaded
+[agent-host] [agent-mode] extension loaded
+[agent-host] [diagram-hint] extension loaded
+[agent-host] [fable-behavior] extension loaded
+[agent-host] [github] extension loaded
+      打开工作区 + MCP 连上 80 个工具: 1332ms，主进程事件循环最长 21ms，子进程最长 1973ms 没响应
+PASS  open_workspace 返回 sessionFile 字段
+PASS  工具缓存记下 80 个工具
+PASS  打开工作区、加载 MCP 期间主进程事件循环最长不到 200ms
+PASS  MCP 桩服务器在跑
+      关掉 MCP: 1114ms，主进程事件循环最长 17ms，子进程最长 1ms 没响应
+PASS  关 MCP 期间主进程事件循环最长不到 200ms
+      重新打开 MCP: 1241ms，主进程事件循环最长 17ms，子进程最长 1ms 没响应
+PASS  开 MCP 期间主进程事件循环最长不到 200ms
+PASS  agent_get_state 跨进程返回会话状态
+PASS  agent_get_commands 跨进程返回命令表
+PASS  审批档经主进程合并写进 runtime-settings.json
+PASS  extensions.catalog 返回内置扩展清单
+PASS  不支持的命令带着原错误信息失败
+      关停: 33ms
+PASS  关停后子进程以 0 退出
+PASS  关停后 MCP 桩服务器也退出
+[agent-host] (node:45136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+[agent-host] [loop-guard] extension loaded
+[agent-host] [rulebook] extension loaded
+[agent-host] [agent-mode] extension loaded
+[agent-host] [diagram-hint] extension loaded
+[agent-host] [fable-behavior] extension loaded
+[agent-host] [github] extension loaded
+PASS  崩溃后（清理前）cmd 包着的 MCP 服务器成了孤儿——要清理的就是它
+      守卫：swept 2 kept 0
+PASS  守卫清掉了崩溃后残留的 MCP 服务器
+
+总耗时 10291ms，全部通过

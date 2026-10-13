@@ -206,7 +206,7 @@ describe("SubAgentRegistry", () => {
     r.close();
   });
 
-  it("migrates jobId column and stores it", () => {
+  it("migrates jobId column and still reads legacy values", () => {
     const dir = mkdtempSync(join(tmpdir(), "sa-reg-job-"));
     dirs.push(dir);
     const file = join(dir, "r3.db");
@@ -219,8 +219,6 @@ describe("SubAgentRegistry", () => {
     reg.load();
     expect(reg.create({ id: "sa-j", task: "t", jobId: "subagent-1" })).toMatchObject({ jobId: "subagent-1" });
     expect(reg.get("sa-j")?.jobId).toBe("subagent-1");
-    reg.setJobId("sa-j", "subagent-2");
-    expect(reg.get("sa-j")?.jobId).toBe("subagent-2");
     reg.close();
   });
 });

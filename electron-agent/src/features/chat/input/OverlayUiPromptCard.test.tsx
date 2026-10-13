@@ -26,7 +26,7 @@ afterEach(() => {
   cleanup();
   respond.mockClear();
   messages.splice(0, messages.length);
-  useUiPromptStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
 });
 
 function receiptOutcome(index = 0): string | undefined {
@@ -56,6 +56,19 @@ describe('OverlayUiPromptCard', () => {
     expect(screen.getByText('信任此工作区？')).toBeTruthy();
     fireEvent.click(screen.getByTestId('prompt-request-confirm'));
     expect(respond).toHaveBeenCalledWith('/ws', { type: 'extension_ui_response', id: 'u2', confirmed: true });
+  });
+
+  it('says how many requests wait behind it (e.g. subagent approvals counting down)', () => {
+    useUiPromptStore.getState().setRequest({
+      workspace: '/ws',
+      request: { id: 'q1', method: 'confirm', title: '确认', message: '继续？' },
+    });
+    useUiPromptStore.getState().setRequest({
+      workspace: '/ws',
+      request: { id: 'c1', method: 'select', options: ['允许本次', '拒绝'], timeout: 60_000, subagents: [{ agentId: 'sa-1', label: 'x' }] },
+    });
+    render(<OverlayUiPromptCard />);
+    expect(screen.getByTestId('prompt-request-waiting').textContent).toBe('还有 1 条待处理');
   });
 
   it('responds to input with { value } from the textarea', () => {

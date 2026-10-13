@@ -1,0 +1,72 @@
+agent-host 就绪；模型 custom-muqywnc8/claude-haiku-5-5
+
+=== 8 个进程内子代理并发 ===
+  用时 55499ms，新消息 6 条
+   {"role":"system","text":""}
+   {"role":"user","text":"This is an automated smoke test. Call the spawn_agent tool exactly once with these arguments: {\"action\":\"run\",\"tasks\":[\"Write the numbers from 1 to 400 in English words, one per line, then on a final line write exactly OK. Do not use any tools.\",\"Write the numbers from 1 to 400 in English words, one"}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"## Sub-agent 1\n\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\nthirteen\nfourteen\nfifteen\nsixteen\nseventeen\neighteen\nnineteen\ntwenty\ntwenty-one\ntwenty-two\ntwenty-three\ntwenty-four\ntwenty-five\ntwenty-six\ntwenty-seven\ntwenty-eight\ntwenty-nine\nthirty\nthirty-one\nthirty-two\nthirty-three\nth"}
+   {"role":"assistant","text":"DONE","toolCalls":[]}
+PASS  并发：spawn_agent tasks × 8 返回 8 个结果（8）
+PASS  并发：8 个子代理都完成
+   诊断采样： {"lag":{"maxMs":281,"p99Ms":148,"meanMs":34},"subagents":{"active":8,"inProcess":8,"worker":0,"ids":["sa-75f27b96","sa-903a607e","sa-7f7d38e9","sa-ce7988e7","sa-027cddaf","sa-61c384b1","sa-848cdd60","sa-310e907e"],"resident":0,"workerProcesses":0}}
+   诊断采样： {"lag":{"maxMs":69,"p99Ms":34,"meanMs":25},"subagents":{"active":7,"inProcess":7,"worker":0,"ids":["sa-903a607e","sa-7f7d38e9","sa-ce7988e7","sa-027cddaf","sa-61c384b1","sa-848cdd60","sa-310e907e"],"resident":0,"workerProcesses":0}}
+   诊断采样： {"lag":{"maxMs":37,"p99Ms":35,"meanMs":24},"subagents":{"active":4,"inProcess":4,"worker":0,"ids":["sa-903a607e","sa-61c384b1","sa-848cdd60","sa-310e907e"],"resident":0,"workerProcesses":0}}
+   诊断采样： {"lag":{"maxMs":37,"p99Ms":34,"meanMs":25},"subagents":{"active":2,"inProcess":2,"worker":0,"ids":["sa-903a607e","sa-848cdd60"],"resident":0,"workerProcesses":0}}
+   诊断采样： {"lag":{"maxMs":35,"p99Ms":35,"meanMs":26},"subagents":{"active":1,"inProcess":1,"worker":0,"ids":["sa-848cdd60"],"resident":0,"workerProcesses":0}}
+   诊断采样： {"lag":{"maxMs":41,"p99Ms":34,"meanMs":30},"subagents":{"active":0,"inProcess":0,"worker":0,"ids":[],"resident":0,"workerProcesses":0}}
+PASS  诊断采样里有 8 个进程内子代理同时在跑的窗口（1 个）
+PASS  诊断采样记下了在跑的子代理 id
+PASS  8 个并发时 agent-host 事件循环 p99 ≤ 200 ms（最坏 148 ms）
+
+=== 后台 spawn（可续聊） ===
+  用时 4769ms，新消息 5 条
+   {"role":"user","text":"Call the spawn_agent tool exactly once with these arguments: {\"action\":\"spawn\",\"task\":\"Reply with exactly the word OK and nothing else. Do not use any tools.\"}. After it returns, reply with just the word STARTED and do not call any other tool."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"spawn_agent"}]}
+   {"role":"toolResult","toolName":"spawn_agent","text":"Background sub-agent started. agentId: sa-30599d61\nYou will get a subagent-settled notice when it finishes; call wait_agent only if your next step is blocked on it."}
+   {"role":"assistant","text":"STARTED","toolCalls":[]}
+   结算后的诊断采样： {"subagents":{"active":0,"inProcess":0,"worker":0,"ids":[],"resident":1,"workerProcesses":0}}
+PASS  结算后子会话留在驻留池（采样 resident ≥ 1）
+
+=== send_message 续聊（驻留会话） ===
+  用时 9749ms，新消息 7 条
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-30599d61\",\"message\":\"Now reply with exactly the word AGAIN and nothing else. Do not use any tools.\"}. Then reply with just the word SENT."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-30599d61"}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+   {"role":"custom","customType":"subagent-settled","text":"Background subagent sa-30599d61 finished and will do no further work unless you send it more.\nIts closing message:\nAGAIN"}
+   {"role":"assistant","text":"The sub-agent sa-30599d61 replied AGAIN, as requested.","toolCalls":[]}
+PASS  续聊：第二条结算通知带回 AGAIN
+
+=== 重启 agent-host ===
+PASS  重启后切回了原父会话
+
+=== 重启后 list_agents ===
+  用时 4593ms，新消息 5 条
+   {"role":"user","text":"Call the list_agents tool exactly once with no arguments. Then reply with just the word LISTED."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"list_agents"}]}
+   {"role":"toolResult","toolName":"list_agents","text":"sa-75f27b96  [inactive]  Write the numbers from 1 to 400 in English words, one per line, then on a final  (one-shot: cannot receive messages)\nsa-7f7d38e9  [inactive]  Write the numbers from 1 to 400 in English words, one per line, then on a final  (one-shot: cannot receive messages)\nsa-027cddaf  [in"}
+   {"role":"assistant","text":"LISTED","toolCalls":[]}
+   list_agents： ["sa-75f27b96:inactive:one-shot","sa-7f7d38e9:inactive:one-shot","sa-027cddaf:inactive:one-shot","sa-ce7988e7:inactive:one-shot","sa-61c384b1:inactive:one-shot","sa-310e907e:inactive:one-shot","sa-903a607e:inactive:one-shot","sa-848cdd60:inactive:one-shot","sa-30599d61:inactive:continuable"]
+PASS  list_agents：工具结果不是错误
+PASS  list_agents：重启后从目录列出那个可续聊子代理（inactive）
+PASS  list_agents：8 个一次性子代理也在目录里
+
+=== 重启后 send_message 冷恢复 ===
+  用时 7416ms，新消息 7 条
+   {"role":"user","text":"Call the send_message tool exactly once with {\"agent_id\":\"sa-30599d61\",\"message\":\"Reply with exactly the word RESUMED and nothing else. Do not use any tools.\"}. Then reply with just the word SENT."}
+   {"role":"custom","customType":"diagram-hint","text":"渲染约定（客户端 Markdown 会直接渲染，按需使用；本来不需要图/公式就正常作答）：1) 图表用 ```mermaid 代码块（flowchart / sequenceDiagram / stateDiagram-v2 / classDiagram / erDiagram / gantt / pie 等），不要用 ASCII 或方框字符画。mermaid 里凡是「显示文字」含 []、()、{}、=、引号、冒号、% 或空格等特殊字符，都必须用双引号包住——包括节点 label（写 A[\"规约到 [0, π/2]\"]、别写 A[规约到 [0, π/2]]）、subgraph 标题（写 sub"}
+   {"role":"assistant","text":"","toolCalls":[{"name":"send_message"}]}
+   {"role":"toolResult","toolName":"send_message","text":"message delivered to agent sa-30599d61"}
+   {"role":"assistant","text":"SENT","toolCalls":[]}
+   {"role":"custom","customType":"subagent-settled","text":"Background subagent sa-30599d61 finished and will do no further work unless you send it more.\nIts closing message:\nRESUMED"}
+   {"role":"assistant","text":"The sub-agent sa-30599d61 replied RESUMED, as requested.","toolCalls":[]}
+PASS  send_message：重启后送达（按 JSONL 冷恢复）
+PASS  冷恢复：结算通知带回 RESUMED
+
+临时目录已删除：true
+全部通过

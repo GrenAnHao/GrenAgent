@@ -1,4 +1,5 @@
-// 通用后台 job：job_output / job_list / job_kill + 结算 notice。生产者（bash run_in_background、subagent）调 jobs.start。
+// 通用后台 job：job_output / job_list / job_kill + 结算 notice。生产者（bash run_in_background）调 jobs.start。
+// 后台子代理不走这里：结果经 subagent-settled 通知交回（extensions/multi-agent）。
 // 语义移植自 DSH packages/jobs/tool-jobs：模型已经收走的结算不再通知——等待释放的（awaited）、
 // 模型自己 job_kill 的、所有者销毁导致的（teardown）都跳过。
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -96,12 +97,12 @@ export default function (pi: ExtensionAPI) {
     name: "job_output",
     label: "Job Output",
     description:
-      "Read a background job: output since the previous read for stream jobs (bash run_in_background), or the result of a finished final-output job (one-shot sub-agent). " +
+      "Read a background job (bash run_in_background): output since the previous read. " +
       "The response ends with `[status: ...]` (plus the exit code once a command finished). " +
       "Set `wait: true` to block until the job settles or `timeout_ms` expires (a timed-out wait returns [status: running] and leaves the job alive).",
     promptSnippet: "Read a background job by id.",
     promptGuidelines: [
-      "Track every background job id you start (bash run_in_background, one-shot spawn_agent). You are notified in-session when one finishes — do not busy-poll job_output or sleep on it; keep working on independent steps and do not duplicate a running job's work.",
+      "Track every background job id you start (bash run_in_background) and read it with job_output. You are notified in-session when one finishes — do not busy-poll job_output or sleep on it; keep working on independent steps and do not duplicate a running job's work.",
       "Before giving a final answer, collect every still-relevant job with job_output (wait: true only when genuinely blocked), and job_kill jobs that stopped mattering.",
     ],
     parameters: Type.Object({

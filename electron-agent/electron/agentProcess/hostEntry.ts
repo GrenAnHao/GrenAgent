@@ -8,6 +8,12 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { getHeapStatistics } from 'node:v8';
 import { installFastRealpath } from '../fastRealpath';
 import { restartRuntimeConfig } from '../../../extensions/_shared/runtime-config.js';
+import {
+  currentChild,
+  rejectionWasHandled,
+  reportLeakedError,
+  trackUnhandledRejection,
+} from '../../../extensions/_shared/leak-owner.js';
 import { BROADCAST_CHANNEL, DIAG_CHANNEL, type BroadcastPayload } from './contract';
 import { hostApiOverRequest } from './hostApi';
 import { RpcPeer, toWireError, type WireMessage } from './rpcPeer';
@@ -60,8 +66,19 @@ process.on('disconnect', () => {
 });
 
 // 原来跑在 Electron 主进程里时，扩展抛出的未捕获异常不会让进程退出。这里保持一样：记下来，继续服务。
-process.on('uncaughtException', (error) => console.error('[agent-host] uncaughtException', error));
-process.on('unhandledRejection', (reason) => console.error('[agent-host] unhandledRejection', reason));
+// 出在某个子代理里的（按 AsyncLocalStorage 归属，extensions/_shared/leak-owner.ts）：交给那个子代理，
+// 它正在跑就中断这一轮、按 error 结算；已经结算的只记日志。主会话和不在任何子代理里的错误照旧只记日志。
+// unhandledRejection 等一会儿再算：期间被接住（rejectionHandled）的不是漏网错误。
+function onLeakedError(kind: string, error: unknown, childId: string | undefined): void {
+  const owner = reportLeakedError(error, childId);
+  const where = owner ? ` (sub-agent ${owner.childId}${owner.handled ? '' : ', already settled'})` : '';
+  console.error(`[agent-host] ${kind}${where}`, error);
+}
+process.on('uncaughtException', (error) => onLeakedError('uncaughtException', error, currentChild()));
+process.on('unhandledRejection', (reason, promise) =>
+  trackUnhandledRejection(reason, promise, (late, childId) => onLeakedError('unhandledRejection', late, childId)),
+);
+process.on('rejectionHandled', (promise) => rejectionWasHandled(promise));
 
 async function main(): Promise<void> {
   if (!process.send) throw new Error('agent-host must be spawned with an IPC channel');
@@ -84,21 +101,57 @@ async function main(): Promise<void> {
 
 /**
  * 每 10 秒报一次本进程的内存和事件循环延迟，主进程写进 runtime-diag.jsonl（kind: 'agent-host-sample'）。
+ * 同时记下这 10 秒末正在跑哪些子代理（进程内 / worker）、驻留池和 worker 进程数：卡顿时能对上是谁在跑
+ * （子代理重新设计第 3 节建议 4，验收：8 个进程内子代理并发时 p99 ≤ 200 ms）。
  * 主进程的 app.getAppMetrics() 不含 child_process 子进程，不报就看不到运行时的堆和卡顿。
  */
 function startDiagSampling(): void {
+  // 动态取：这时运行时图已经加载过这些模块，不会把 SDK 拉进启动路径。
+  let subagentSnapshot: () => SubagentSnapshot | undefined = () => undefined;
+  void loadSubagentSnapshot().then((fn) => { subagentSnapshot = fn; }, () => {});
   const lag = monitorEventLoopDelay({ resolution: 20 });
   lag.enable();
   const mb = (bytes: number) => Math.round((bytes / 1048576) * 10) / 10;
   const timer = setInterval(() => {
     const memory = process.memoryUsage();
+    const subagents = subagentSnapshot();
     peer.emit(DIAG_CHANNEL, {
       memory: { rss: mb(memory.rss), heapUsed: mb(memory.heapUsed), heapTotal: mb(memory.heapTotal), heapLimit: mb(getHeapStatistics().heap_size_limit) },
       lag: { maxMs: Math.round(lag.max / 1e6), p99Ms: Math.round(lag.percentile(99) / 1e6), meanMs: Math.round(lag.mean / 1e6) },
+      ...(subagents ? { subagents } : {}),
     });
     lag.reset();
   }, DIAG_INTERVAL_MS);
   timer.unref();
+}
+
+interface SubagentSnapshot {
+  active: number;
+  inProcess: number;
+  worker: number;
+  ids: string[];
+  resident: number;
+  workerProcesses: number;
+}
+
+/** 采样那一刻在跑的子代理；名单最多 16 个，避免诊断行过长。 */
+async function loadSubagentSnapshot(): Promise<() => SubagentSnapshot> {
+  const [{ activeRuns }, { residentChildIds }, { workerSlotsInUse }] = await Promise.all([
+    import('../../../extensions/multi-agent/active-runs.js'),
+    import('../../../extensions/multi-agent/activation.js'),
+    import('../../../extensions/multi-agent/worker-session.js'),
+  ]);
+  return () => {
+    const runs = activeRuns();
+    return {
+      active: runs.length,
+      inProcess: runs.filter((r) => r.backend === 'in-process').length,
+      worker: runs.filter((r) => r.backend === 'worker').length,
+      ids: runs.slice(0, 16).map((r) => r.childId),
+      resident: residentChildIds().length,
+      workerProcesses: workerSlotsInUse(),
+    };
+  };
 }
 
 main().catch((error: unknown) => {

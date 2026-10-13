@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // index.ts pulls in the (heavy) sub-agent runner at import time; stub it so we can
 // unit-test the pure capability-floor helper in isolation.
-vi.mock("../multi-agent/runner.js", () => ({ spawnPiAgent: vi.fn() }));
+vi.mock("./pi-process.js", () => ({ spawnPiAgent: vi.fn() }));
 
 import { restrictedDenyTools } from "./index.js";
 

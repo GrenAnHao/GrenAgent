@@ -1,3 +1,4 @@
+import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getAgentMode } from "../agent-mode/modes.js";
@@ -46,7 +47,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
-    cwd = ctx.cwd;
+    // 可写根与审批 / 模式查询都按会话的原始目录，切到 worktree 后也不变（DSH：原始沙箱根不变）。
+    cwd = projectCwd(ctx);
     sessionId = ctx.sessionManager.getSessionId();
   });
 
