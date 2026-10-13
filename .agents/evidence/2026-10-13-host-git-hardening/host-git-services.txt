@@ -1,0 +1,11 @@
+== electron-agent: vitest run electron/app/gitService.test.ts electron/app/fileService.test.ts ==
+
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  10:56:31
+   Duration  6.38s (transform 70ms, setup 0ms, import 126ms, tests 6.86s, environment 0ms)
+

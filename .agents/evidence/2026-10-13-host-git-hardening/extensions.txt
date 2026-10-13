@@ -1,0 +1,52 @@
+== extensions: vitest run _shared working-directory (after the review fixes) ==
+Note: _shared/sandbox/windows/deleteSemantics.test.ts timed out at the default 5s under parallel load in this run; it passes alone (1/1) and does not touch git.
+
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: Empty last update token.
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+ ❯ _shared/sandbox/windows/deleteSemantics.test.ts (1 test | 1 failed) 5641ms
+     × splits until the directory allows FindFirstFile 5639ms
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitmodules', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitattributes', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  _shared/sandbox/windows/deleteSemantics.test.ts > windows delete without list > splits until the directory allows FindFirstFile
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ _shared/sandbox/windows/deleteSemantics.test.ts:24:3
+     22| // the four paths agree. This recreates that ACL on a private director…
+     23| describe.skipIf(pwsh === undefined)("windows delete without list", () …
+     24|   it("splits until the directory allows FindFirstFile", () => {
+       |   ^
+     25|     const dir = mkdtempSync(join(tmpdir(), "pi-del-"));
+     26|     const user = process.env.USERNAME || "";
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 52 passed | 1 skipped (54)
+      Tests  1 failed | 469 passed | 22 skipped (492)
+   Start at  10:56:07
+   Duration  21.08s (transform 11.82s, setup 0ms, import 35.10s, tests 66.02s, environment 6ms)
+

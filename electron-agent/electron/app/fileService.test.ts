@@ -1,9 +1,12 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { execFile as execFileCallback } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileService } from './fileService';
 
+const execFile = promisify(execFileCallback);
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
 
@@ -17,6 +20,30 @@ async function workspace(): Promise<string> {
   await writeFile(join(root, 'node_modules', 'hidden', 'x.js'), 'hidden');
   return root;
 }
+
+describe('FileService git status in a workspace a sandboxed command could have written', { timeout: 60_000 }, () => {
+  const exists = (path: string) => stat(path).then(() => true, () => false);
+
+  it('shows the status without running the configured file system monitor (control: plain git does)', async () => {
+    const root = await workspace();
+    await execFile('git', ['init', '-q'], { cwd: root });
+    await execFile('git', ['config', 'user.email', 't@t'], { cwd: root });
+    await execFile('git', ['config', 'user.name', 't'], { cwd: root });
+    await execFile('git', ['add', 'README.md'], { cwd: root });
+    await execFile('git', ['commit', '-q', '-m', 'first'], { cwd: root });
+    const marker = join(root, 'fsmonitor-ran.txt');
+    const posix = (path: string) => path.replaceAll('\\', '/');
+    await writeFile(join(root, 'hook.sh'), `echo ran > "${posix(marker)}"\n`);
+    await execFile('git', ['config', 'core.fsmonitor', `sh "${posix(join(root, 'hook.sh'))}"`], { cwd: root });
+    await writeFile(join(root, 'README.md'), '# Changed');
+
+    const tree = await new FileService().tree(root, true);
+    expect(tree.children?.find((node) => node.name === 'README.md')?.git_status).toBe('modified');
+    expect(await exists(marker)).toBe(false);
+    await execFile('git', ['status', '--porcelain'], { cwd: root });
+    expect(await exists(marker)).toBe(true);
+  });
+});
 
 describe('FileService', () => {
   it('builds a bounded tree with directories first and omits ignored directories', async () => {

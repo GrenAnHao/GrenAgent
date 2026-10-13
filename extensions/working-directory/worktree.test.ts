@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -35,6 +35,20 @@ afterEach(() => {
 });
 
 describe("createWorktree", { timeout: 30_000 }, () => {
+  it.skipIf(process.platform !== "win32")("never runs a git.exe that sits in the repository, even when Windows would look in the working directory first", async () => {
+    // A copy of whoami placed where a sandboxed command could put a program called git.exe.
+    copyFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"), join(repo, "git.exe"));
+    const saved = process.env.NoDefaultCurrentDirectoryInExePath;
+    delete process.env.NoDefaultCurrentDirectoryInExePath;
+    try {
+      const created = await createWorktree({ cwd: repo, writableRoot: repo, name: "unharmed" });
+      expect(created.branch).toBe("unharmed");
+      expect(existsSync(join(created.path, "README.md"))).toBe(true);
+    } finally {
+      if (saved !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = saved;
+    }
+  });
+
   it("pins HEAD, creates the branch under .agents/worktrees, ignores its new pool, and leaves the source dirty state alone", async () => {
     writeFileSync(join(repo, "README.md"), "dirty edit\n");
     writeFileSync(join(repo, "untracked.txt"), "x\n");

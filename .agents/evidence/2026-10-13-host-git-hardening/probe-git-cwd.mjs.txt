@@ -1,0 +1,25 @@
+// Does the way the host runs git (execFile('git', …, { cwd: workspace })) pick up a git.exe that sits in the workspace?
+// The fake is a copy of whoami.exe: if it runs, stdout is a user name instead of porcelain output.
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
+const workspace = mkdtempSync(join(tmpdir(), "pi-gitcwd-"));
+try {
+  execFileSync("git", ["init", "-q"], { cwd: workspace });
+  writeFileSync(join(workspace, "a.txt"), "x");
+  copyFileSync(join(process.env.SystemRoot, "System32", "whoami.exe"), join(workspace, "git.exe"));
+  const label = process.env.NoDefaultCurrentDirectoryInExePath === undefined ? "variable unset (default)" : `variable = ${process.env.NoDefaultCurrentDirectoryInExePath}`;
+  const first = async (args, options) => {
+    try { return (await run("git", args, { windowsHide: true, ...options })).stdout.trim().split(/\r?\n/)[0]; }
+    catch (e) { return `(failed; the program that ran printed) ${String(e.stderr || e.stdout || e.message).trim().split(/\r?\n/)[0]}`; }
+  };
+  console.log(`[${label}]`);
+  console.log("  host as it is today   (cwd = workspace):         ", JSON.stringify(await first(["status", "--porcelain"], { cwd: workspace })));
+  console.log("  same, -C workspace, cwd = a directory of its own: ", JSON.stringify(await first(["-C", workspace, "status", "--porcelain"], { cwd: tmpdir() })));
+} finally {
+  rmSync(workspace, { recursive: true, force: true });
+}

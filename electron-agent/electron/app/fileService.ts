@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { runSafeGit } from '../../../extensions/_shared/git-safe.js';
 
 const MAX_DEPTH = 6;
 const MAX_CHILDREN = 200;
@@ -231,12 +230,11 @@ function skipEntry(name: string, isDirectory: boolean): boolean {
   return name.startsWith('.') || (isDirectory && SKIPPED_DIRECTORIES.has(name));
 }
 
-const execFileAsync = promisify(execFile);
-
+/** 文件树每次加载都会跑，沙箱可能写过这个工作区：走 runSafeGit（挡住了哪些、没挡住哪些见 _shared/git-safe.ts 的头注释）。 */
 async function gitStatus(workspace: string): Promise<Map<string, string>> {
   try {
-    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: workspace, windowsHide: true });
-    return new Map(String(stdout).split(/\r?\n/).flatMap(parseGitStatus));
+    const { stdout } = await runSafeGit(workspace, ['status', '--porcelain']);
+    return new Map(stdout.split(/\r?\n/).flatMap(parseGitStatus));
   } catch {
     return new Map();
   }

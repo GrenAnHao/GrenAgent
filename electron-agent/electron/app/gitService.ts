@@ -1,10 +1,7 @@
-import { execFile as execFileCallback } from 'node:child_process';
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
-
-const execFile = promisify(execFileCallback);
+import { runSafeGit } from '../../../extensions/_shared/git-safe.js';
 
 export interface FileStatus { path: string; status: 'modified' | 'staged' | 'untracked'; }
 export interface BranchInfo { name: string; isCurrent: boolean; upstream: string | null; ahead: number; behind: number; }
@@ -20,13 +17,13 @@ export class GitService {
 
   async diff(workspacePath: string, filePath: string): Promise<string> {
     await this.assertRepository(workspacePath);
-    const tracked = await runGit(workspacePath, ['diff', '--', filePath]);
+    const tracked = await runGit(workspacePath, ['diff', ...NO_CONVERTERS, '--', filePath]);
     if (tracked.trim()) return tracked;
     const directory = await mkdtemp(join(tmpdir(), 'electron-agent-git-empty-'));
     const empty = join(directory, 'empty');
     await writeFile(empty, '');
     try {
-      return await runGitAllowFailure(workspacePath, ['diff', '--no-index', '--', empty, filePath]);
+      return await runGitAllowFailure(workspacePath, ['diff', '--no-index', ...NO_CONVERTERS, '--', empty, filePath]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -41,12 +38,12 @@ export class GitService {
 
   async checkout(workspacePath: string, branch: string): Promise<void> {
     await this.assertRepository(workspacePath);
-    await runGit(workspacePath, ['checkout', branch]);
+    await runGit(workspacePath, ['checkout', branch], 'user');
   }
 
   async createBranch(workspacePath: string, name: string, checkout: boolean): Promise<void> {
     await this.assertRepository(workspacePath);
-    await runGit(workspacePath, checkout ? ['checkout', '-b', name] : ['branch', name]);
+    await runGit(workspacePath, checkout ? ['checkout', '-b', name] : ['branch', name], checkout ? 'user' : 'automatic');
   }
 
   /**
@@ -71,19 +68,22 @@ async function isRepository(workspacePath: string): Promise<boolean> {
   try { await access(join(workspacePath, '.git')); return true; } catch { return false; }
 }
 
-async function runGit(cwd: string, args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFile('git', args, { cwd, windowsHide: true });
-    return stdout;
-  } catch (error) {
-    const detail = String((error as { stderr?: string }).stderr ?? '').trim();
-    throw new Error(`git ${args.join(' ')} failed: ${detail}`);
-  }
+/**
+ * 宿主在用户没点任何东西的时候就会调这里（git 面板、文件树的状态），工作区里的 `.git/config`、`.gitattributes` 沙箱里的命令写得到，
+ * 所以都走 runSafeGit：不让 Windows 在工作区里找 git.exe，关掉 fsmonitor 和 hooks，置空工作区定义的 filter 驱动
+ * （挡住了哪些、没挡住哪些见 _shared/git-safe.ts 的头注释）。
+ * 用户主动点的操作（checkout、建分支）传 'user'，保留 hooks 和 filter，那是用户自己的工作流。
+ */
+const NO_CONVERTERS = ['--no-textconv', '--no-ext-diff'];
+
+async function runGit(cwd: string, args: string[], mode: 'automatic' | 'user' = 'automatic'): Promise<string> {
+  return (await runSafeGit(cwd, args, { mode })).stdout;
 }
 
+/** `git diff --no-index` 有差异时退出码是 1，不算失败。 */
 async function runGitAllowFailure(cwd: string, args: string[]): Promise<string> {
-  try { return (await execFile('git', args, { cwd, windowsHide: true })).stdout; }
-  catch (error) { return String((error as { stdout?: string }).stdout ?? ''); }
+  try { return (await runSafeGit(cwd, args, { allowCodes: [0, 1] })).stdout; }
+  catch { return ''; }
 }
 
 function parsePorcelainLine(line: string): FileStatus[] {

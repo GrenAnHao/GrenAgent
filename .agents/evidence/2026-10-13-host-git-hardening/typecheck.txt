@@ -1,0 +1,3 @@
+== tsc (temp configs: tsconfig.host.json covers git-safe/worktree/gitService/fileService; tsconfig.check.json) ==
+tsconfig.host.json exit 0
+tsconfig.check.json exit 0

@@ -1,0 +1,9 @@
+== before the change: how the host called git (execFile('git', ..., { cwd: workspace })) with a fake git.exe in the workspace ==
+-- NoDefaultCurrentDirectoryInExePath removed from the parent process (the usual default):
+[variable unset (default)]
+  host as it is today   (cwd = workspace):          "(failed; the program that ran printed) "
+  same, -C workspace, cwd = a directory of its own:  "?? a.txt"
+-- on this machine (variable = 1):
+[variable = 1]
+  host as it is today   (cwd = workspace):          "?? a.txt"
+  same, -C workspace, cwd = a directory of its own:  "?? a.txt"

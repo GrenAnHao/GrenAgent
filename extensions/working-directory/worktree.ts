@@ -7,7 +7,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { filterOverrideEnv, parseFilterDrivers, safeGitEnv, safeGitPrefix } from "../_shared/git-safe.js";
 
 export const WORKTREE_POOL = join(".agents", "worktrees");
 export const WORKTREE_NAME_PREFIX = "worktree-";
@@ -37,21 +39,13 @@ interface GitResult {
   stderr: string;
 }
 
-/** 会把 git 指向别的仓库、索引或配置的环境变量（DSH process.ts 的清单）。 */
-const SCRUBBED_GIT_ENV =
-  /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|PREFIX|REPLACE_REF_BASE|ATTR_SOURCE|CONFIG|CONFIG_.+)$/;
-
+/** 环境清洗、fsmonitor/hooks 关闭、filter 置空都在 _shared/git-safe.ts，宿主别处调 git 也用同一份。这里只加建 worktree 特有的。 */
 function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!SCRUBBED_GIT_ENV.test(key)) env[key] = value;
-  }
-  return { ...env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1", ...extra };
+  return safeGitEnv({ GIT_LFS_SKIP_SMUDGE: "1", ...extra });
 }
 
 function gitPrefix(): string[] {
-  const nullHooks = process.platform === "win32" ? "NUL" : "/dev/null";
-  return ["--no-lazy-fetch", "-c", `core.hooksPath=${nullHooks}`, "-c", "core.fsmonitor=false", "-c", "core.longpaths=true"];
+  return ["--no-lazy-fetch", ...safeGitPrefix(), "-c", "core.longpaths=true"];
 }
 
 function runGit(
@@ -64,8 +58,9 @@ function runGit(
       reject(new Error("create_worktree was cancelled"));
       return;
     }
-    const child = spawn("git", [...gitPrefix(), ...args], {
-      cwd,
+    // 子进程的当前目录是 Temp，仓库用 -C 指：Windows 对不带路径的程序名先在子进程的当前目录里找 .exe，不能是仓库。
+    const child = spawn("git", ["-C", cwd, ...gitPrefix(), ...args], {
+      cwd: tmpdir(),
       env: gitEnv(opts.env),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -182,22 +177,7 @@ async function disabledFilterEnv(dest: string, signal?: AbortSignal): Promise<Re
     allowCodes: [0, 1],
     ...(signal ? { signal } : {}),
   });
-  const drivers = new Set<string>();
-  for (const key of r.stdout.split("\0")) {
-    const m = /^filter\.(.+)\.[^.]+$/.exec(key.trim());
-    if (m?.[1]) drivers.add(m[1]);
-  }
-  const pairs: Array<[string, string]> = [];
-  for (const d of drivers) {
-    for (const k of ["clean", "smudge", "process"]) pairs.push([`filter.${d}.${k}`, ""]);
-    pairs.push([`filter.${d}.required`, "false"]);
-  }
-  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(pairs.length) };
-  pairs.forEach(([key, value], i) => {
-    env[`GIT_CONFIG_KEY_${i}`] = key;
-    env[`GIT_CONFIG_VALUE_${i}`] = value;
-  });
-  return env;
+  return filterOverrideEnv(parseFilterDrivers(r.stdout));
 }
 
 export async function createWorktree(input: CreateWorktreeInput): Promise<CreatedWorktree> {

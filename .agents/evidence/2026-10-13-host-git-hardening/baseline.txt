@@ -1,0 +1,7 @@
+Five tests in electron/app fail with and without this change (run on the previous commit in a temporary worktree):
+  subagentService.test.ts  > reads registry rows newest first without including transcript in the list
+  taskViewService.test.ts  > derives capabilities from a live executor and current target, keeping all system actions read-only
+  taskViewService.test.ts  > requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs
+  taskViewService.test.ts  > passes only still-pending original source IDs to retry and never incorporates newer sources
+  taskViewService.test.ts  > never resolves a model or starts a worker while listing or reading task capabilities
+Result on the previous commit: Test Files 2 failed, Tests 5 failed | 25 passed. Unrelated to git; not touched here.

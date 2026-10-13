@@ -1,0 +1,206 @@
+== electron-agent: vitest run electron/app (after the review fixes); the 5 failures are the baseline ones ==
+
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:34220) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33472) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:22112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40668) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:36676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44164) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41904) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:50548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/app/taskViewService.test.ts (14 tests | 4 failed) 155ms
+     × derives capabilities from a live executor and current target, keeping all system actions read-only 11ms
+     × requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs 6ms
+     × passes only still-pending original source IDs to retry and never incorporates newer sources 4ms
+     × never resolves a model or starts a worker while listing or reading task capabilities 7ms
+(node:46584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41860) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41860) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41860) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41860) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40668) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/app/subagentService.test.ts (16 tests | 1 failed) 513ms
+     × reads registry rows newest first without including transcript in the list 88ms
+(node:48612) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34320) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:47224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:22312) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42496) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/app/subagentService.test.ts > SubagentService > reads registry rows newest first without including transcript in the list
+AssertionError: expected [ { id: 'newer', …(12) }, …(1) ] to deeply equal [ { id: 'newer', …(11) }, …(1) ]
+
+- Expected
++ Received
+
+@@ -8,10 +8,11 @@
+      "output": null,
+      "profile": "{\"fs\":\"readonly\"}",
+      "sessionPath": null,
+      "status": "running",
+      "task": "latest task",
++     "thinkingLevel": null,
+      "transcript": null,
+      "updatedAt": 6,
+    },
+    {
+      "createdAt": 1,
+@@ -22,9 +23,10 @@
+      "output": "result",
+      "profile": null,
+      "sessionPath": null,
+      "status": "done",
+      "task": "first task",
++     "thinkingLevel": null,
+      "transcript": null,
+      "updatedAt": 2,
+    },
+  ]
+
+ ❯ electron/app/subagentService.test.ts:115:37
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > derives capabilities from a live executor and current target, keeping all system actions read-only
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ electron/app/taskViewService.test.ts:50:84
+     48|     expect(rows.find((row) => row.ref.id === retryable.id)?.capabiliti…
+     49|     expect(rows.find((row) => row.ref.id === unknown.id)?.capabilities…
+     50|     expect(rows.find((row) => row.ref.id === knownActive.id)?.capabili…
+       |                                                                                    ^
+     51|     expect(rows.find((row) => row.ref.id === unknownActive.id)?.capabi…
+     52|     expect((await f.service.read({ source: 'system', id: 'system' }))?…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs
+AssertionError: promise rejected "Error: TASK_RETRY_UNAVAILABLE" instead of resolving
+ ❯ electron/app/taskViewService.test.ts:80:46
+     78|   it('requires model confirmation for both Wiki paths and rejects unav…
+     79|     const f = fixture(); const old = f.failed('wiki.ingest'); const re…
+     80|     await expect(f.service.previewRetry(ref)).resolves.toMatchObject({…
+       |                                              ^
+     81|     await expect(f.service.retry(ref)).rejects.toThrow('MODEL_CONFIRMA…
+     82|     await expect(f.service.retry(ref, { expectedModel: 'other/model' }…
+
+Caused by: Error: TASK_RETRY_UNAVAILABLE
+ ❯ TaskViewService.requireRetryable electron/app/taskViewService.ts:63:37
+ ❯ TaskViewService.previewRetry electron/app/taskViewService.ts:29:22
+ ❯ electron/app/taskViewService.test.ts:80:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > passes only still-pending original source IDs to retry and never incorporates newer sources
+Error: TASK_RETRY_UNAVAILABLE
+ ❯ TaskViewService.requireRetryable electron/app/taskViewService.ts:63:37
+     61|   private requireRetryable(ref: TaskRef): Job {
+     62|     const job = this.requireUserTask(ref);
+     63|     if (!this.retryable(job)) throw new Error('TASK_RETRY_UNAVAILABLE'…
+       |                                     ^
+     64|     if (!this.options.views.read(ref)?.capabilities.remove) throw new …
+     65|     return job;
+ ❯ TaskViewService.retry electron/app/taskViewService.ts:35:22
+ ❯ electron/app/taskViewService.test.ts:94:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > never resolves a model or starts a worker while listing or reading task capabilities
+AssertionError: expected { items: [ { …(19) } ], …(1) } to match object { items: [ ObjectContaining{…} ] }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "items": [
+      {
++       "attempts": undefined,
++       "cancellationRequested": false,
+        "capabilities": {
+-         "retry": true,
++         "cancel": false,
++         "remove": true,
++         "retry": false,
++       },
++       "createdAt": 1791914326089,
++       "error": "任务执行失败，请检查相关配置与审计",
++       "key": "user:f6541b61-bdd6-447e-b8d8-4cc9debe6a2a",
++       "kind": "wiki.ingest",
++       "label": "Wiki 资料提取",
++       "processed": undefined,
++       "progress": undefined,
++       "ref": {
++         "id": "f6541b61-bdd6-447e-b8d8-4cc9debe6a2a",
++         "source": "user",
++       },
++       "resource": {
++         "id": "kb",
++         "type": "wiki",
+        },
++       "resourceName": undefined,
++       "retryOf": undefined,
++       "stage": undefined,
++       "status": "failed",
++       "total": undefined,
++       "updatedAt": 1791914326090,
++       "workspace": "/repo",
+      },
+    ],
+  }
+
+ ❯ electron/app/taskViewService.test.ts:104:35
+    102|   it('never resolves a model or starts a worker while listing or readi…
+    103|     const f = fixture(); const old = f.failed('wiki.ingest');
+    104|     await expect(f.service.list()).resolves.toMatchObject({ items: [ex…
+       |                                   ^
+    105|     await expect(f.service.read({ source: 'user', id: old.id })).resol…
+    106|     expect(f.previewWikiRetry).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed | 63 passed (65)
+      Tests  5 failed | 670 passed (675)
+   Start at  10:58:44
+   Duration  16.96s (transform 18.54s, setup 0ms, import 68.91s, tests 82.57s, environment 9ms)
+
