@@ -1,0 +1,5 @@
+== duplicate ACE found and cleaned ==
+before the idempotency fix, re-running the ambient stamp on C:\Users\Public added a second identical ACE.
+cleanup (elevated): icacls /remove:d PiSandbox, then one /deny.
+after the fix (full-mask + (OI)(CI) check before stamping), several re-runs leave exactly one:
+  C:\Users\Public ��\PiSandbox:(OI)(CI)(DENY)(W,D,DC)

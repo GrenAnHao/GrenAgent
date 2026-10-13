@@ -1,12 +1,13 @@
-import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import {
+  ELEVATED_DONE,
+  ELEVATED_PAYLOAD_BITS,
+  psHasAce,
+  psQuote,
+  psSidOf,
+  runElevated,
+  type ElevatedRun,
+} from "./elevate.js";
 
 /**
  * Windows 自带、对所有本地账户可写的目录。PiSandbox 在 Users 组里，什么授权都没有也能往这些目录写。
@@ -32,6 +33,8 @@ const SYSTEM_ROOT_TAILS = [
 
 /** WRITE_DATA | APPEND_DATA | WRITE_EA | WRITE_ATTRIBUTES | DELETE | DELETE_CHILD。读和遍历不动。 */
 const WRITE_DENY = "(OI)(CI)(WD,AD,WEA,WA,D,DC)";
+/** WD | AD | WEA | WA | DC | D（0x10156）：读回 ACL 时这些位都要在 DENY 里，且带 (OI)(CI)。 */
+const WRITE_DENY_MASK = 0x10156;
 /** grants.json 里的值；带版本号，规则变了换成 DW2，旧记录就不算数。 */
 export const AMBIENT_RIGHTS = "DW1";
 const ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
@@ -53,80 +56,45 @@ export function ambientDenyArgs(target: string, username: string): string[] {
   return [target, "/deny", `${username}:${WRITE_DENY}`, "/C"];
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** True when an icacls dump has a DENY ACE for exactly this account (not for a group whose name starts with it). */
-export function ambientDenyPresent(dump: string, username: string): boolean {
-  const account = new RegExp(`(^|[\\\\\\s])${escapeRegExp(username)}:`, "i");
-  return dump.split(/\r?\n/).some((line) => account.test(line) && line.toUpperCase().includes("(DENY)"));
-}
-
-/** 提权脚本写的日志：每个目标一段，`### <路径>` 开头，后面是 icacls 的 ACL 转储。返回转储里看得到写拒绝的目标。 */
-export function parseAmbientLog(log: string, username: string): string[] {
-  const sections = new Map<string, string[]>();
-  let current: string | undefined;
-  for (const line of log.split(/\r?\n/)) {
-    if (line.startsWith("### ")) {
-      current = line.slice(4).trim();
-      sections.set(current, []);
-    } else if (current) {
-      sections.get(current)?.push(line);
-    }
-  }
-  return [...sections.entries()]
-    .filter(([, lines]) => ambientDenyPresent(lines.join("\n"), username))
-    .map(([path]) => path);
-}
-
-function psQuote(text: string): string {
-  return `'${text.replace(/'/g, "''")}'`;
-}
-
-function ambientScript(targets: string[], username: string, logPath: string): string {
-  const lines = ["$ErrorActionPreference = 'Continue'", `$log = ${psQuote(logPath)}`];
-  for (const target of targets) {
-    lines.push(`& icacls.exe ${ambientDenyArgs(target, username).map(psQuote).join(" ")} | Out-Null`);
-    lines.push(`Add-Content -LiteralPath $log -Value ('### ' + ${psQuote(target)})`);
-    lines.push(`& icacls.exe ${psQuote(target)} 2>&1 | Out-String | Add-Content -LiteralPath $log`);
-  }
-  return lines.join("\n");
-}
-
 export type AmbientStamp = (paths: string[], username: string, signal?: AbortSignal) => Promise<string[]>;
 
 /**
- * 一次 UAC 把名单里缺的目录都盖上。Start-Process -Verb RunAs 拿不到子进程退出码，所以成功与否只看提权脚本写出的
- * ACL 转储（和 account.ts 里 Windows\Temp 的授权同一个做法）。返回转储里确认有写拒绝的目录。
+ * 提权脚本：逐个目录盖上写拒绝，再经 .NET 按 SID 读回 ACL，确认有这条 DENY 的目录在结果里置对应的位。
+ * 不写日志、不落文件（见 elevate.ts）。
  */
-export const stampAmbientDenies: AmbientStamp = async (paths, username, signal) => {
-  const id = randomBytes(8).toString("hex");
-  const scriptPath = join(tmpdir(), `pi-sandbox-ambient-${id}.ps1`);
-  const logPath = join(tmpdir(), `pi-sandbox-ambient-${id}.log`);
-  await writeFile(scriptPath, ambientScript(paths, username, logPath), "utf8");
-  try {
-    await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        `Start-Process -FilePath powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',${psQuote(scriptPath)}`,
-      ],
-      { windowsHide: true, timeout: 120_000, signal },
-    );
-  } catch (error) {
-    if (signal?.aborted) throw new Error("aborted");
-    throw error;
-  } finally {
-    await rm(scriptPath, { force: true }).catch(() => undefined);
-  }
-  const log = await readFile(logPath, "utf8").catch(() => "");
-  await rm(logPath, { force: true }).catch(() => undefined);
-  return parseAmbientLog(log, username);
-};
+export function ambientStampScript(targets: string[], username: string): string {
+  const deny = ambientDenyArgs("", username).slice(1).map(psQuote).join(", ");
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    psSidOf(username),
+    `$targets = @(${targets.map(psQuote).join(", ")})`,
+    "$mask = 0",
+    "for ($i = 0; $i -lt $targets.Count; $i++) {",
+    "  $t = $targets[$i]",
+    `  $denyArgs = @(${deny})`,
+    // icacls /deny does not merge: running it on a directory that already has the deny adds a second identical ACE.
+    "  $has = $false",
+    `  try { $has = ${psHasAce("$t", "$sid", { type: "Deny", mask: WRITE_DENY_MASK, inheritable: true })} } catch {}`,
+    "  if (-not $has) { & icacls.exe $t @denyArgs | Out-Null }",
+    `  try { if (${psHasAce("$t", "$sid", { type: "Deny", mask: WRITE_DENY_MASK, inheritable: true })}) { $mask = $mask -bor (1 -shl $i) } } catch {}`,
+    "}",
+    `exit (${ELEVATED_DONE} -bor $mask)`,
+  ].join("\n");
+}
+
+/** 一次 UAC 把名单里缺的目录都盖上，返回确认有写拒绝的目录。脚本没走到最后（用户取消 UAC 等）时抛错。 */
+export function createStampAmbient(run: ElevatedRun): AmbientStamp {
+  return async (paths, username, signal) => {
+    if (paths.length > ELEVATED_PAYLOAD_BITS) {
+      throw new Error(`too many ambient targets for one elevation (${paths.length})`);
+    }
+    const bits = await run(ambientStampScript(paths, username), signal);
+    if (bits === null) throw new Error("the elevated ambient write-deny did not finish");
+    return paths.filter((_, index) => (bits & (1 << index)) !== 0);
+  };
+}
+
+export const stampAmbientDenies: AmbientStamp = createStampAmbient(runElevated);
 
 let lastAttemptAt = 0;
 

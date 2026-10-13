@@ -7,11 +7,12 @@ import { grantSandboxAccess, type AccountIo } from "./account.js";
 import {
   __resetAmbientAttemptForTest,
   ambientDenyArgs,
-  ambientDenyPresent,
   ambientDenyTargets,
+  ambientStampScript,
   applyAmbientDenies,
-  parseAmbientLog,
+  createStampAmbient,
 } from "./ambient.js";
+import { ELEVATED_DONE } from "./elevate.js";
 
 const ENV = { ProgramData: "C:\\ProgramData", PUBLIC: "C:\\Users\\Public", SystemRoot: "C:\\Windows" };
 
@@ -51,28 +52,43 @@ describe("ambient write-deny icacls", () => {
     ]);
   });
 
-  it("recognises the deny ACE in an icacls dump, whatever the domain prefix", () => {
-    const dump = [
-      "C:\\ProgramData HOST\\PiSandbox:(OI)(CI)(DENY)(W,D,DC)",
-      "              NT AUTHORITY\\SYSTEM:(OI)(CI)(F)",
-    ].join("\n");
-    expect(ambientDenyPresent(dump, "PiSandbox")).toBe(true);
+  it("stamps every target in one elevated script and reports each confirmed deny as a bit, with no files", () => {
+    const script = ambientStampScript(["C:\\ProgramData", "C:\\it's"], "PiSandbox");
+    expect(script).toContain("@('C:\\ProgramData', 'C:\\it''s')");
+    expect(script).toContain("'/deny', 'PiSandbox:(OI)(CI)(WD,AD,WEA,WA,D,DC)'");
+    expect(script).toContain("'Deny'");
+    expect(script).toContain("([int]$_.FileSystemRights -band 65878) -eq 65878");
+    expect(script).toContain("[int]$_.InheritanceFlags -eq 3");
+    expect(script).toContain("$mask = $mask -bor (1 -shl $i)");
+    expect(script).toContain(`exit (${ELEVATED_DONE} -bor $mask)`);
+    expect(script).not.toMatch(/\.log|\.ps1|WriteAllText|Add-Content|tmp|Temp/i);
   });
 
-  it("does not take an allow ACE or another account's deny for the sandbox deny", () => {
-    expect(ambientDenyPresent("C:\\x HOST\\PiSandbox:(OI)(CI)(M)", "PiSandbox")).toBe(false);
-    expect(ambientDenyPresent("C:\\x HOST\\Other:(OI)(CI)(DENY)(W,D,DC)", "PiSandbox")).toBe(false);
-    expect(ambientDenyPresent("", "PiSandbox")).toBe(false);
+  it("stamps a directory only when the deny is not there yet, so re-running adds no duplicate ACE", () => {
+    const script = ambientStampScript(["C:\\ProgramData"], "PiSandbox");
+    const check = script.indexOf("$has = ");
+    const stamp = script.indexOf("& icacls.exe");
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(stamp);
+    expect(script).toContain("if (-not $has) { & icacls.exe $t @denyArgs | Out-Null }");
   });
 
-  it("reads which targets an elevated log confirms", () => {
-    const log = [
-      "### C:\\ProgramData",
-      "C:\\ProgramData HOST\\PiSandbox:(OI)(CI)(DENY)(W,D,DC)",
-      "### C:\\Windows\\Tasks",
-      "C:\\Windows\\Tasks NT AUTHORITY\\SYSTEM:(OI)(CI)(F)",
-    ].join("\n");
-    expect(parseAmbientLog(log, "PiSandbox")).toEqual(["C:\\ProgramData"]);
+  it("maps the result bits back to the confirmed targets", async () => {
+    const run = vi.fn(async () => 0b101);
+    const stamp = createStampAmbient(run);
+    await expect(stamp(["a", "b", "c"], "PiSandbox")).resolves.toEqual(["a", "c"]);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when the elevated script was cancelled or did not finish", async () => {
+    const stamp = createStampAmbient(async () => null);
+    await expect(stamp(["a"], "PiSandbox")).rejects.toThrow(/did not finish/);
+  });
+
+  it("refuses more targets than the result bits can carry", async () => {
+    const stamp = createStampAmbient(async () => 0);
+    const many = Array.from({ length: 17 }, (_, i) => `C:\\t${i}`);
+    await expect(stamp(many, "PiSandbox")).rejects.toThrow(/too many/);
   });
 });
 

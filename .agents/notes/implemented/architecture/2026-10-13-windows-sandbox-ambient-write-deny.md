@@ -28,9 +28,9 @@ Status: implemented
 
 清单与 srt 的 `ambient_deny_targets` 一致，**唯独去掉了 `C:\Windows\Temp`**：沙箱有意在用它，`account.ts` 专门给它授了列目录权，好让沙箱里的 `Remove-Item`、`readdir` 正常工作（见 [PiSandbox 账户](2026-10-02-windows-sandbox-pisandbox-account.md)），写拒绝会让里面的删除失效。
 
-### 一次 UAC，只信 ACL 转储
+### 一次 UAC，读回 ACL 确认
 
-`grantSandboxAccess` 在授权循环之后调用 `applyAmbientDenies`。缺的目录合并成一个提权脚本（一次 UAC）。`Start-Process -Verb RunAs` 拿不到子进程退出码，所以成功与否只看脚本写出的 `icacls` 转储里有没有 PiSandbox 的 DENY 行，这是和 Windows\Temp 的列目录授权同一个做法。确认过的目录在 `grants.json` 里记 `ambient:<小写路径>` = `DW1`，规则变了换成 `DW2`，旧记录就不算数。
+`grantSandboxAccess` 在授权循环之后调用 `applyAmbientDenies`。缺的目录合并成一个提权脚本（一次 UAC）。脚本逐个目录先经 .NET 按 SID 读 ACL，已有 PiSandbox 的写拒绝就跳过（`icacls /deny` 重复执行会再加一条相同的 ACE），没有才盖，再读回确认；确认过的目录在退出码的结果位里置位。脚本内联传入、不写任何文件，见 [提权不落盘](../bug-fix/2026-10-13-windows-sandbox-elevation-without-temp-files.md)。确认过的目录在 `grants.json` 里记 `ambient:<小写路径>` = `DW1`，规则变了换成 `DW2`，旧记录就不算数。
 
 拒绝 UAC、提权失败、有的目录改不了（TrustedInstaller 所有的目录可能改不动）都不算错：沙箱照常用，只是那些目录仍然可写；5 分钟内不再弹窗。`abort` 照常向上抛。
 
@@ -62,7 +62,7 @@ Status: implemented
 
 | 项 | 命令 | 结果 |
 | --- | --- | --- |
-| 目标清单、icacls 参数、转储解析、冷却、拒绝/失败不致命、`grantSandboxAccess` 接线 | `cd extensions && npx vitest run _shared/sandbox` | 通过，155 项（10 项跳过） |
+| 目标清单、icacls 参数、冷却、拒绝/失败不致命、`grantSandboxAccess` 接线（提权脚本与结果位的用例见提权不落盘那篇） | `cd extensions && npx vitest run _shared/sandbox` | 通过，155 项（10 项跳过） |
 | 真机：提权盖章后，沙箱写不进 `ProgramData`、`Public`，工作区内照常可写 | `PI_SANDBOX_LIVE=1 npx vitest run _shared/sandbox/isolation.live.test.ts --testTimeout=180000` | 通过：正对照、ProgramData、Public 三项 |
 | 盖章结果 | `icacls C:\ProgramData`、`icacls C:\Users\Public` | 两处都有 `PiSandbox:(OI)(CI)(DENY)(W,D,DC)`；`grants.json` 记了 8 个目录（`Tasks`、`CRMLog`、`com\dmp`、`spool\PRINTERS`、`SysWOW64` 下的 `com\dmp` 和 `Tasks`，加 `ProgramData`、`Public`）；`tracing`、`FxsTmp`、`spool\drivers\color` 没有记录 |
 | 分盘实验（上层 DENY + 子目录显式 ALLOW） | 临时 live 测试，测完删除 | 通过：子目录可写，父目录与兄弟目录被挡，对照目录可写；没有存成文件，结果记在上面的备选项里 |

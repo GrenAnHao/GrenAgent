@@ -9,14 +9,26 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { promisify } from "node:util";
 import { SandboxUnavailableError } from "../errors.js";
 import type { SandboxPolicy } from "../types.js";
 import { applyAmbientDenies, stampAmbientDenies, type AmbientStamp } from "./ambient.js";
+import {
+  ELEVATED_DONE,
+  psHasAce,
+  psQuote,
+  psSidOf,
+  runElevated,
+  windowsPowerShellEnv,
+  windowsPowerShellPath,
+  type ElevatedRun,
+} from "./elevate.js";
 import type { SandboxLogon } from "./runner.js";
+
+export { windowsPowerShellEnv };
 
 export const SANDBOX_USERNAME = "PiSandbox";
 export const SANDBOX_GROUP = "PiSandboxUsers";
@@ -26,6 +38,8 @@ const execFileAsync = promisify(execFile);
 export type GrantRights = "M" | "RX" | "RAX" | "RD" | "RD1";
 
 const LIST_RIGHTS = new Set<GrantRights>(["RD", "RD1"]);
+/** FILE_LIST_DIRECTORY: what the Windows Temp grant must show when read back. */
+const LIST_DIRECTORY = 1;
 
 export function icaclsGrantArgs(target: string, username: string, rights: GrantRights, propagate: boolean): string[] {
   // RAX is this directory only: read attributes + traverse, so node realpath can
@@ -39,21 +53,6 @@ export function icaclsGrantArgs(target: string, username: string, rights: GrantR
   const args = [target, "/grant:r", ace, "/C"];
   if (propagate && !LIST_RIGHTS.has(rights) && rights !== "RAX") args.push("/T");
   return args;
-}
-
-/** True when an icacls dump shows `username` can list the directory. */
-export function windowsTempAllowsList(dump: string, username: string): boolean {
-  const name = username.toLowerCase();
-  return dump.split(/\r?\n/).some((line) => {
-    if (!line.toLowerCase().includes(name)) return false;
-    for (const match of line.matchAll(/\(([^)]*)\)/g)) {
-      const bits = match[1].toUpperCase().split(",").map((bit) => bit.trim());
-      if (bits.some((bit) => bit === "RD" || bit === "F" || bit === "M" || bit === "R" || bit === "RX")) {
-        return true;
-      }
-    }
-    return false;
-  });
 }
 
 /** Profile directory the sandbox account actually owns. */
@@ -164,15 +163,19 @@ async function defaultUserExists(username: string): Promise<boolean> {
   }
 }
 
-async function defaultProvision(username: string, group: string, plain: string, blobPath: string): Promise<void> {
-  const dir = dirname(blobPath);
-  await mkdir(dir, { recursive: true });
-  const plainPath = join(tmpdir(), `pi-sandbox-plain-${randomBytes(8).toString("hex")}.txt`);
-  const scriptPath = join(tmpdir(), `pi-sandbox-setup-${randomBytes(8).toString("hex")}.ps1`);
-  const script = `
+/**
+ * Creates or resets the account in one elevated script (see elevate.ts: inline, no
+ * files, result in the exit code, module path pinned). The script only ever sees the
+ * DPAPI ciphertext and decrypts it in memory: the CurrentUser key is the same elevated
+ * or not. So the password is never on a command line, in a script-block log, in an
+ * error message, or on disk in clear.
+ */
+export function provisionScript(username: string, group: string, cipherBase64: string): string {
+  return `
 $ErrorActionPreference = 'Stop'
-Import-Module Microsoft.PowerShell.LocalAccounts
-$plain = [IO.File]::ReadAllText(${psQuote(plainPath)}).Trim()
+Import-Module "$PSHOME\\Modules\\Microsoft.PowerShell.LocalAccounts"
+Add-Type -AssemblyName System.Security
+$plain = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String(${psQuote(cipherBase64)}), $null, 'CurrentUser'))
 $sec = ConvertTo-SecureString $plain -AsPlainText -Force
 if (-not (Get-LocalGroup -Name ${psQuote(group)} -ErrorAction SilentlyContinue)) {
   New-LocalGroup -Name ${psQuote(group)} -Description 'Pi sandbox accounts' | Out-Null
@@ -186,44 +189,68 @@ Add-LocalGroupMember -Group ${psQuote(group)} -Member ${psQuote(username)} -Erro
 Add-LocalGroupMember -Group 'Users' -Member ${psQuote(username)} -ErrorAction SilentlyContinue
 Remove-LocalGroupMember -Group 'Administrators' -Member ${psQuote(username)} -ErrorAction SilentlyContinue
 # Grant list-directory on the system temp so Remove-Item, cmd del, and
-# readdirSync work consistently (defect 5 + 7). This runs elevated so it
-# can modify the system directory ACL.
+# readdirSync work consistently (defect 5 + 7). Best effort: under 'Stop' a line
+# icacls writes to stderr would fail the whole setup, and this grant is confirmed
+# on its own later (confirmElevatedListGrant).
 $winTemp = Join-Path $env:SystemRoot 'Temp'
 if (Test-Path $winTemp) {
-  & icacls.exe $winTemp /grant ${psQuote(username + ':(S,RD,RA)')} /C 2>$null | Out-Null
+  try { & icacls.exe $winTemp /grant ${psQuote(username + ':(S,RD,RA)')} /C 2>&1 | Out-Null } catch {}
 }
-Add-Type -AssemblyName System.Security
-$bytes = [Text.Encoding]::UTF8.GetBytes($plain)
-$prot = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'CurrentUser')
-[IO.File]::WriteAllBytes(${psQuote(blobPath)}, $prot)
-Remove-Item -LiteralPath ${psQuote(plainPath)} -Force
+exit (${ELEVATED_DONE} -bor 1)
 `.trim();
-  await writeFile(scriptPath, script, "utf8");
-  await writeFile(plainPath, plain, "utf8");
-  try {
-    await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
-      { windowsHide: true },
-    );
-  } catch {
-    await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-Command",
-        `Start-Process -FilePath powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',${psQuote(scriptPath)}`,
-      ],
-      { windowsHide: true },
-    );
-  } finally {
-    await rm(plainPath, { force: true }).catch(() => undefined);
-    await rm(scriptPath, { force: true }).catch(() => undefined);
-  }
 }
 
-function psQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+/** DPAPI-protects the password for the current user; returns the blob as base64. The plaintext travels in the child's environment, not on its command line. */
+async function protectPassword(plain: string): Promise<string> {
+  const script = "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Security; "
+    + "$bytes = [Text.Encoding]::UTF8.GetBytes($env:PI_SANDBOX_PLAIN); Remove-Item Env:PI_SANDBOX_PLAIN; "
+    + "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'CurrentUser')))";
+  const { stdout } = await execFileAsync(windowsPowerShellPath(), ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: { ...windowsPowerShellEnv(), PI_SANDBOX_PLAIN: plain },
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  const cipher = String(stdout).trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cipher)) throw new Error("protecting the sandbox password produced no ciphertext");
+  return cipher;
+}
+
+/** Writes the blob next to its final name, then renames, so a half-written blob never sits at blobPath. */
+async function writeBlob(blobPath: string, cipherBase64: string): Promise<void> {
+  await mkdir(dirname(blobPath), { recursive: true });
+  const partial = `${blobPath}.${randomBytes(4).toString("hex")}.partial`;
+  await writeFile(partial, Buffer.from(cipherBase64, "base64"));
+  await rename(partial, blobPath);
+}
+
+async function removeBlob(blobPath: string): Promise<void> {
+  await rm(blobPath, { force: true });
+}
+
+export interface ProvisionDeps {
+  run: ElevatedRun;
+  protect(plain: string): Promise<string>;
+  writeBlob(blobPath: string, cipherBase64: string): Promise<void>;
+  removeBlob(blobPath: string): Promise<void>;
+}
+
+/**
+ * The old blob goes before the elevation: if the elevated script changes the password
+ * but this side never hears back (UAC answered after the timeout, a crash), a missing
+ * blob makes the next run set up again, while a stale one would fail every logon.
+ */
+export function createProvision(deps: ProvisionDeps): AccountIo["provision"] {
+  return async (username, group, plain, blobPath) => {
+    const cipher = await deps.protect(plain);
+    await deps.removeBlob(blobPath);
+    const result = await deps.run(provisionScript(username, group, cipher));
+    if (result !== 1) {
+      throw new Error(result === null
+        ? "the elevated account setup was cancelled or did not finish"
+        : "the elevated account setup was not confirmed");
+    }
+    await deps.writeBlob(blobPath, cipher);
+  };
 }
 
 // Timestamp of the last elevation attempt. Re-attempts are allowed after a
@@ -262,6 +289,18 @@ async function defaultGrant(
   }
 }
 
+/** Elevated: grants list on `target`, then reads the ACL back by SID. Reports through the exit code and writes no file. */
+export function listGrantScript(target: string, username: string, args: string[]): string {
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `& icacls.exe ${args.map(psQuote).join(" ")} | Out-Null`,
+    psSidOf(username),
+    "$ok = 0",
+    `try { if (${psHasAce(psQuote(target), "$sid", { type: "Allow", mask: LIST_DIRECTORY })}) { $ok = 1 } } catch {}`,
+    `exit (${ELEVATED_DONE} -bor $ok)`,
+  ].join("\n");
+}
+
 async function confirmElevatedListGrant(
   target: string,
   username: string,
@@ -272,41 +311,7 @@ async function confirmElevatedListGrant(
     throw new Error("windows temp list grant already attempted recently");
   }
   listGrantElevatedAt = Date.now();
-  const id = randomBytes(8).toString("hex");
-  const scriptPath = join(tmpdir(), `pi-sandbox-icacls-${id}.ps1`);
-  const logPath = join(tmpdir(), `pi-sandbox-icacls-${id}.log`);
-  // Start-Process -Verb RunAs leaves ExitCode null, and `exit $null` is 0.
-  // The elevated script writes the ACL dump; that dump is the only success signal.
-  const script = `
-$ErrorActionPreference = 'Continue'
-& icacls.exe ${args.map(psQuote).join(" ")}
-$code = $LASTEXITCODE
-$dump = & icacls.exe ${psQuote(target)} 2>&1 | Out-String
-[IO.File]::WriteAllText(${psQuote(logPath)}, "code=$code\`n$dump")
-if ($code -ne 0) { exit $code }
-`.trim();
-  await writeFile(scriptPath, script, "utf8");
-  try {
-    await runCommand(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        `$p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',${psQuote(scriptPath)}; if ($null -eq $p) { exit 1 }; if ($null -ne $p.ExitCode -and $p.ExitCode -ne 0) { exit $p.ExitCode }`,
-      ],
-      signal,
-      120_000,
-    );
-  } catch (error) {
-    if (error instanceof Error && error.message === "aborted") throw error;
-  } finally {
-    await rm(scriptPath, { force: true }).catch(() => undefined);
-  }
-  const log = await readFile(logPath, "utf8").catch(() => "");
-  await rm(logPath, { force: true }).catch(() => undefined);
-  if (!windowsTempAllowsList(log, username)) {
+  if (await runElevated(listGrantScript(target, username, args), signal) !== 1) {
     throw new Error("windows temp list grant was not confirmed");
   }
 }
@@ -399,19 +404,6 @@ export function unreachableAs(argv: string[], paths: string[], signal?: AbortSig
   });
 }
 
-/**
- * Environment for a Windows PowerShell 5.1 child. A PSModulePath inherited from
- * pwsh 7 (app started from a pwsh terminal) makes 5.1 autoload 7's modules and
- * fail: Get-Acl reports CouldNotAutoloadMatchingModule. Without it, 5.1 uses its own.
- */
-export function windowsPowerShellEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...source };
-  for (const key of Object.keys(env)) {
-    if (key.toLowerCase() === "psmodulepath") delete env[key];
-  }
-  return env;
-}
-
 function runCommand(command: string, args: string[], signal?: AbortSignal, timeoutMs = 5000): Promise<void> {
   if (signal?.aborted) return Promise.reject(new Error("aborted"));
   const limit = AbortSignal.timeout(timeoutMs);
@@ -444,7 +436,7 @@ export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo
   return {
     ...extra,
     userExists: defaultUserExists,
-    provision: defaultProvision,
+    provision: createProvision({ run: runElevated, protect: protectPassword, writeBlob, removeBlob }),
     async readGrants(path) {
       try {
         return JSON.parse(await readFile(path, "utf8")) as Record<string, string>;

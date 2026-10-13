@@ -1,0 +1,24 @@
+== live: whole file, PI_SANDBOX_LIVE_ELEVATE=1 (provision is the separate run in live-provision.txt) ==
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > blocks writes outside the workspace and allows inside 6832ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > throws SANDBOX_UNAVAILABLE when the runner cannot be found 1ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > still runs ordinary commands under the UI restrictions 22807ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > blocks clipboard writes from inside the sandbox 5704ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > stops the launcher and exits 163 when the job cannot be joined
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > lets the sandbox write inside its workspace (control) 5655ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into ProgramData 5595ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into Public 5608ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows write boundary on the data drive > writes inside the workspace but not into a sibling directory on the same drive 11320ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live git in the sandbox account > runs init, commit and log in a workspace owned by another user 7653ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > reads the elevated script's result bits back, and null when it fails 2794ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > stamps the ambient write-deny and confirms it from the ACL 1458ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > grants and confirms list on Windows Temp through the elevated path 377ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > re-provisions the account and the sandbox still logs on with the new blob
+
+ Test Files  1 passed (1)
+      Tests  12 passed | 2 skipped (14)
+   Start at  07:18:37
+   Duration  76.38s (transform 203ms, setup 0ms, import 261ms, tests 75.81s, environment 0ms)
+

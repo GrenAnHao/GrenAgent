@@ -1,27 +1,30 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SandboxPolicy } from "../types.js";
 import {
   __resetAncestorRetryForTest,
   ancestorDirectories,
+  createProvision,
   defaultSandboxHome,
   grantKey,
   grantSandboxAccess,
   icaclsGrantArgs,
   isGrantableAncestor,
+  listGrantScript,
   needsGrant,
   parseStatProbe,
   profilePathDirs,
+  provisionScript,
   REACHABLE,
   sandboxIdentityEnv,
   statProbeArgv,
   windowsPowerShellEnv,
-  windowsTempAllowsList,
   type AccountIo,
   type GrantRights,
 } from "./account.js";
+import { ELEVATED_DONE } from "./elevate.js";
 
 describe("windows sandbox account grants", () => {
   it("builds an inheritable icacls grant and propagates only when asked", () => {
@@ -104,11 +107,7 @@ describe("windows sandbox account grants", () => {
     expect(needsGrant({ [key]: "RD1" }, "C:/Windows/Temp", "RD1")).toBe(false);
   });
 
-  it("reads an icacls dump for list rights without treating add-file as list", () => {
-    const usersOnly = "C:\\Windows\\Temp BUILTIN\\Users:(CI)(S,WD,AD,X)";
-    const granted = "C:\\Windows\\Temp BUILTIN\\Users:(CI)(S,WD,AD,X)\n              HOST\\PiSandbox:(S,RD,RA)";
-    expect(windowsTempAllowsList(usersOnly, "PiSandbox")).toBe(false);
-    expect(windowsTempAllowsList(granted, "PiSandbox")).toBe(true);
+  it("grants list on Windows Temp for this directory only, never propagated", () => {
     expect(icaclsGrantArgs("C:/Windows/Temp", "PiSandbox", "RD1", true)).toEqual([
       "C:/Windows/Temp",
       "/grant:r",
@@ -244,5 +243,75 @@ describe("workspace ancestor traverse grants", () => {
     expect(argv.at(-1)).toContain("$env:PI_SANDBOX_STAT_PATHS");
     // Fixed length whatever the paths: the helper's command line stops near 1000 characters.
     expect(argv.join(" ").length).toBeLessThan(400);
+  });
+});
+describe("account setup and the Windows Temp list grant without temp files", () => {
+  const CIPHER = "Q0lQSEVSVEVYVA==";
+
+  it("creates the account in one elevated script that only ever sees the DPAPI ciphertext", () => {
+    const script = provisionScript("PiSandbox", "PiSandboxUsers", CIPHER);
+    expect(script).toContain(`[Convert]::FromBase64String('${CIPHER}')`);
+    expect(script).toContain("[Security.Cryptography.ProtectedData]::Unprotect(");
+    expect(script).toContain("ConvertTo-SecureString $plain -AsPlainText -Force");
+    expect(script).toContain("New-LocalUser -Name 'PiSandbox'");
+    expect(script).toContain(`exit (${ELEVATED_DONE} -bor 1)`);
+    expect(script).not.toMatch(/ReadAllText|WriteAllBytes|-File|\.ps1|\.txt/);
+  });
+
+  it("imports LocalAccounts from the system module directory, not by name", () => {
+    expect(provisionScript("PiSandbox", "PiSandboxUsers", CIPHER))
+      .toContain('Import-Module "$PSHOME\\Modules\\Microsoft.PowerShell.LocalAccounts"');
+  });
+
+  it("does not fail the whole setup when the Windows Temp list grant fails; that grant is confirmed on its own", () => {
+    expect(provisionScript("PiSandbox", "PiSandboxUsers", CIPHER)).toContain("try { & icacls.exe $winTemp");
+  });
+
+  it("encrypts first, drops the old blob, elevates with ciphertext only, then writes the new blob", async () => {
+    const order: string[] = [];
+    const provision = createProvision({
+      protect: async (plain) => {
+        order.push(`protect ${plain}`);
+        return CIPHER;
+      },
+      removeBlob: async (blobPath) => {
+        order.push(`remove ${blobPath}`);
+      },
+      run: async (script) => {
+        order.push(script.includes(CIPHER) && !script.includes("pw-plain") ? "elevated with ciphertext" : "elevated WRONG");
+        return 1;
+      },
+      writeBlob: async (blobPath, base64) => {
+        order.push(`write ${blobPath} ${base64}`);
+      },
+    });
+    await provision("PiSandbox", "PiSandboxUsers", "pw-plain", "C:/b/account.bin");
+    expect(order).toEqual([
+      "protect pw-plain",
+      "remove C:/b/account.bin",
+      "elevated with ciphertext",
+      `write C:/b/account.bin ${CIPHER}`,
+    ]);
+  });
+
+  it("leaves no blob behind when the setup was cancelled or not confirmed, so the next run sets up again", async () => {
+    for (const result of [null, 0]) {
+      const removeBlob = vi.fn(async () => {});
+      const writeBlob = vi.fn(async () => {});
+      const provision = createProvision({ protect: async () => CIPHER, removeBlob, run: async () => result, writeBlob });
+      await expect(provision("PiSandbox", "PiSandboxUsers", "pw", "b")).rejects.toThrow();
+      expect(removeBlob).toHaveBeenCalledTimes(1);
+      expect(writeBlob).not.toHaveBeenCalled();
+    }
+  });
+
+  it("grants list on Windows Temp elevated and confirms it from the ACL by SID, with no log file", () => {
+    const args = icaclsGrantArgs("C:\\Windows\\Temp", "PiSandbox", "RD1", false);
+    const script = listGrantScript("C:\\Windows\\Temp", "PiSandbox", args);
+    expect(script).toContain("& icacls.exe 'C:\\Windows\\Temp' '/grant:r' 'PiSandbox:(S,RD,RA)' '/C'");
+    expect(script).toContain("'Allow'");
+    expect(script).toContain("([int]$_.FileSystemRights -band 1) -eq 1");
+    expect(script).toContain(`exit (${ELEVATED_DONE} -bor $ok)`);
+    expect(script).not.toMatch(/\.log|\.ps1|WriteAllText|Add-Content/);
   });
 });

@@ -1,0 +1,12 @@
+== live: elevation tests incl. re-provision (PI_SANDBOX_LIVE_ELEVATE=1, PI_SANDBOX_LIVE_PROVISION=1), after the review fixes ==
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > reads the elevated script's result bits back, and null when it fails 2556ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > stamps the ambient write-deny and confirms it from the ACL 1874ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > grants and confirms list on Windows Temp through the elevated path 852ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > re-provisions the account and the sandbox still logs on with the new blob 10408ms
+ Test Files  1 passed (1)
+      Tests  4 passed | 10 skipped (14)
+   Duration  16.28s (transform 205ms, setup 0ms, import 266ms, tests 15.69s, environment 0ms)
+account.bin before: 2026-10-13 07:01:35, 246 bytes, sha256 64196312DBBA...
+account.bin after:  2026-10-13 07:17:56, 246 bytes, sha256 D5D8C9DC96FE...
+pi-sandbox-plain-* / -setup-* / -icacls-* / -ambient-* in %TEMP% afterwards: 0
+*.partial left next to account.bin: 0

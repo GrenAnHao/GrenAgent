@@ -1,0 +1,13 @@
+== module path pinning, one-off probe (temporary module PiHijackProbe in the user's Documents, removed afterwards) ==
+user modules dir: D:\System Dir\Documents\WindowsPowerShell\Modules
+non-elevated PowerShell sees PiHijackProbe: 1
+elevated result bits: 1 -> PSModulePath pinned: true, user module visible elevated: false
+probe module removed: true
+
+== Unicode quote injection, before the fix (plain powershell -Command with a U+2019 quote inside '...') ==
+input : Write-Output 'a’; Write-Output INJECTED; ’'
+output: a / INJECTED   (the U+2019 closed the string; psQuote now doubles U+2018-U+201B)
+
+== crash exit codes vs the old marker (bit 30) ==
+0xC000013A -> parsed as done, payload 314; -1 -> payload 0x3FFFFFFF; 0xC0000001 -> payload 1; 0x40010004 -> payload 65540
+new marker 0x2A5A0000 + 16-bit payload, negatives rejected: all of these -> null (unit test)

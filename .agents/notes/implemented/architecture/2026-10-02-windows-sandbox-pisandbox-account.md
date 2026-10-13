@@ -48,7 +48,7 @@ helper 用 `CreateProcessWithLogonW` 启动旁边的 `pi-sandbox-launch.exe`。�
 
 ### Windows Temp 的列出权必须看到 ACL 才算授上
 
-仍只加 `(S,RD,RA)`，不追加写权限，也不继承。提权脚本把 `icacls` 的目录 ACL 写到日志里，日志里能看到 `PiSandbox` 的列出权才把缓存写成 `RD1`。旧的 `RD` 记录不算数。祖先目录的 `(RA,X)`、工作目录和 Job 回收不变。
+仍只加 `(S,RD,RA)`，不追加写权限，也不继承。提权脚本授完后经 .NET 按 SID 读回目录 ACL，看到 `PiSandbox` 的列出权才以退出码报成功，缓存写成 `RD1`；脚本内联传入、不写日志（见 [提权不落盘](../bug-fix/2026-10-13-windows-sandbox-elevation-without-temp-files.md)）。旧的 `RD` 记录不算数。祖先目录的 `(RA,X)`、工作目录和 Job 回收不变。
 
 ### 不缓存 C:\Windows\Temp 的列出权 ACL 授予
 
@@ -109,7 +109,7 @@ b0fe7954（2026-07-01）「drop WSL/sandbox-runtime isolation path」：移除 s
 
 ### Windows Temp 的列出权必须看到 ACL 才算授上
 
-- 相信 `Start-Process -Verb RunAs -PassThru` 的 `ExitCode`：它经常是 null，null 被当成成功，授权被跳过。
+- 相信 `Start-Process -Verb RunAs -PassThru` 的 `ExitCode`：它经常是 null，null 被当成成功，授权被跳过。（后来查明是等之前没先取 `$p.Handle`；现在先取句柄、再用标记位区分“走到最后”，退出码已经可靠，见 [提权不落盘](../bug-fix/2026-10-13-windows-sandbox-elevation-without-temp-files.md)。）
 - 每次命令都重新提权：用户会反复看到 UAC，而且上次就是这样把失败记成了成功。
 - 改授修改权限：Users 本来就能建文件，多出来的写权限盖不住 `FindFirstFile` 失败。
 

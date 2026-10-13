@@ -1,10 +1,15 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createSandboxedBashOperations } from "./operations.js";
 import { createSandboxProvider } from "./provider.js";
+import { defaultIo, SANDBOX_GROUP, SANDBOX_USERNAME } from "./windows/account.js";
+import { stampAmbientDenies } from "./windows/ambient.js";
+import { ELEVATED_DONE, runElevated } from "./windows/elevate.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
 
@@ -249,6 +254,43 @@ describe.skipIf(!live || process.platform !== "win32" || !liveGit)("live git in 
     await provider.dispose?.("live-git");
     expect(chunks.join("")).not.toContain("dubious ownership");
     expect(chunks.join("")).toMatch(/[0-9a-f]{7} first/);
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+// 会静默或弹窗提权，只在 PI_SANDBOX_LIVE_ELEVATE=1 时跑。提权全程不应在临时目录留下任何 pi-sandbox-* 文件。
+const liveElevate = live && process.platform === "win32" && process.env.PI_SANDBOX_LIVE_ELEVATE === "1";
+describe.skipIf(!liveElevate)("live elevation without temp files", () => {
+  const tempEntries = () => readdirSync(tmpdir()).filter((name) => name.startsWith("pi-sandbox-") && !name.startsWith("pi-sandbox-launch"));
+
+  it("reads the elevated script's result bits back, and null when it fails", async () => {
+    const before = tempEntries();
+    await expect(runElevated(`exit (${ELEVATED_DONE} -bor 5)`)).resolves.toBe(5);
+    await expect(runElevated("$ErrorActionPreference = 'Stop'; throw 'boom'")).resolves.toBeNull();
+    expect(tempEntries()).toEqual(before);
+  });
+
+  it("stamps the ambient write-deny and confirms it from the ACL", async () => {
+    const publicDir = process.env.PUBLIC as string;
+    const before = tempEntries();
+    await expect(stampAmbientDenies([publicDir], SANDBOX_USERNAME)).resolves.toEqual([publicDir]);
+    expect(tempEntries()).toEqual(before);
+  });
+
+  it("grants and confirms list on Windows Temp through the elevated path", async () => {
+    const windowsTemp = join(process.env.SystemRoot || "C:\\Windows", "Temp");
+    const before = tempEntries();
+    await expect(defaultIo().grant(windowsTemp, SANDBOX_USERNAME, "RD1", false)).resolves.toBeUndefined();
+    expect(tempEntries()).toEqual(before);
+  });
+
+  // 会把 PiSandbox 的密码重置成新的，再用新 blob 登录一次。只在 PI_SANDBOX_LIVE_PROVISION=1 时跑。
+  it.skipIf(process.env.PI_SANDBOX_LIVE_PROVISION !== "1")("re-provisions the account and the sandbox still logs on with the new blob", async () => {
+    const io = defaultIo();
+    const before = tempEntries();
+    await io.provision(SANDBOX_USERNAME, SANDBOX_GROUP, `Aa1!${randomBytes(18).toString("base64url")}`, io.blobPath());
+    expect(tempEntries()).toEqual(before);
+    const result = await runConfinedWin(["whoami.exe"]);
     expect(result.exitCode).toBe(0);
   });
 });
