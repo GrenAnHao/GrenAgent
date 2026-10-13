@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/simplification/2026-10-07-remove-cursor-provider.md](../../../.agents/notes/implemented/simplification/2026-10-07-remove-cursor-provider.md) 维护；本文件冻结只读。
+
 ---
 title: 移除 Cursor 原生供应商，连同登录、模型勾选和 agent-loop 补丁
 status: active

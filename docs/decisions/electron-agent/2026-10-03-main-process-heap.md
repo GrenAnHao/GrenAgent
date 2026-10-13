@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md](../../../.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md) 维护；本文件冻结只读。
+
 ---
 title: 主进程 V8 老生代上限从约 1.5GB 提到 4GB
 status: superseded

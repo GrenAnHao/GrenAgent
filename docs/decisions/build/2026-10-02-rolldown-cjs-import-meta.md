@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md](../../../.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md) 维护；本文件冻结只读。
+
 ---
 title: CJS 主进程不再使用 import.meta.resolve，扩展清单用延迟再导出避开无效动态 import
 status: active

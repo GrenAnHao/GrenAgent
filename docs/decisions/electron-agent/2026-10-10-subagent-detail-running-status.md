@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/bug-fix/2026-10-10-subagent-detail-running-status.md](../../../.agents/notes/implemented/bug-fix/2026-10-10-subagent-detail-running-status.md) 维护；本文件冻结只读。
+
 ---
 title: 子代理详情的状态：链式 / 并行已结束的一步按自己的终态显示，结果未落盘的调用在补读时保持运行中
 status: active

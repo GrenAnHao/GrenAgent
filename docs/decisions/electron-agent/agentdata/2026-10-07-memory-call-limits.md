@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md](../../../../.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md) 维护；本文件冻结只读。
+
 ---
 title: 记忆任务超时对齐上游（180s / 300s），抽取与去重输出上限 4096，不传 reasoning
 status: active

@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-09-agent-host-child-process.md](../../../.agents/notes/implemented/architecture/2026-10-09-agent-host-child-process.md) 维护；本文件冻结只读。
+
 ---
 title: 交互 Agent 运行时从 Electron 主进程搬进单独的 agent-host 子进程
 status: active

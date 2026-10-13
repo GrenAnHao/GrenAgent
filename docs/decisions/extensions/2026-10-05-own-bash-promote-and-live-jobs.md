@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md](../../../.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md) 维护；本文件冻结只读。
+
 ---
 title: bash 改为自有实现：每次调用都是 job，前台超时转后台，界面跟随后台输出
 status: active

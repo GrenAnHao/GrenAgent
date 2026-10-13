@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 校验 docs/decisions/ 下的决策笔记是否符合约定。
 // 用法: node scripts/check-notes.mjs [目录]
-// 已挂到 .git/hooks/pre-commit；也可手动运行。
+// docs/decisions/ 已于 2026-10-11 冻结，本脚本不再挂 pre-commit，只供手动检查冻结目录。
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

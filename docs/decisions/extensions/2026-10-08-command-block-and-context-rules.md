@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-02-commands-rules-and-tool-surface.md](../../../.agents/notes/implemented/architecture/2026-10-02-commands-rules-and-tool-surface.md) 维护；本文件冻结只读。
+
 ---
 title: 带参数的命令展开成 <command> 块，规则走 contextFiles 注入
 status: active

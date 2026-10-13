@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md](../../../../.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md) 维护；本文件冻结只读。
+
 ---
 title: 抽取输出按上游宽松解析：剥 think、去围栏、对象里找数组、修复控制字符与 priority
 status: active

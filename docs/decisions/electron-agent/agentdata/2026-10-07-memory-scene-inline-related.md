@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md](../../../../.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md) 维护；本文件冻结只读。
+
 ---
 title: L2 只内联与新记忆相关的场景正文（最多 3 个），没给正文的已有场景不许写也不许删
 status: active

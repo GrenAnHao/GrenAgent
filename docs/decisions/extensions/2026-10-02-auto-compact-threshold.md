@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md](../../../.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md) 维护；本文件冻结只读。
+
 ---
 title: 自动压缩触发值按全局加会话覆盖
 status: active

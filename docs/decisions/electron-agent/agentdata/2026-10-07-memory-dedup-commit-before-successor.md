@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md](../../../../.agents/notes/implemented/architecture/2026-09-18-memory-pipeline-upstream-aligned.md) 维护；本文件冻结只读。
+
 ---
 title: 去重期间游标不提交的批次仍算进行中，后继抽取等 completeDedup 提交后再接续；去重 Input 不再重复 matches
 status: active

@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/bug-fix/2026-10-10-mcp-tool-registration-batch.md](../../../.agents/notes/implemented/bug-fix/2026-10-10-mcp-tool-registration-batch.md) 维护；本文件冻结只读。
+
 ---
 title: MCP 工具只登记有变化的定义，一次投影里的登记合并成一次工具表刷新
 status: active

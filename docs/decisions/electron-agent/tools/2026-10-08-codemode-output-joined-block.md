@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-04-official-codemode-no-builtin-mcp.md](../../../../.agents/notes/implemented/architecture/2026-10-04-official-codemode-no-builtin-mcp.md) 维护；本文件冻结只读。
+
 ---
 title: codemode 卡片按 pi 1.1.0 的合并文本块拆回各项，兼容 1.0.2 历史
 status: active

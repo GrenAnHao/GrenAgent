@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/testing/2026-10-05-ui-harness-offscreen-and-scoped.md](../../../../.agents/notes/implemented/testing/2026-10-05-ui-harness-offscreen-and-scoped.md) 维护；本文件冻结只读。
+
 ---
 title: ui:check 日常只点名跑当前需求的场景，构建按源文件签名复用，--changed 只用来查波及范围
 status: active

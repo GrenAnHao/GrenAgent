@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-13-subagent-activation-and-routing.md](../../../.agents/notes/implemented/architecture/2026-09-13-subagent-activation-and-routing.md) 维护；本文件冻结只读。
+
 ---
 title: 子代理自选路由：白名单每次现读，cheap / strong 别名可被发现并直接当 model 用
 status: active

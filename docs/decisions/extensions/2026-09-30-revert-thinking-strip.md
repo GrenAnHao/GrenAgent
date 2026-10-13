@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md](../../../.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md) 维护；本文件冻结只读。
+
 ---
 title: 撤回请求前裁剪思考，上下文按完整会话估算
 status: active

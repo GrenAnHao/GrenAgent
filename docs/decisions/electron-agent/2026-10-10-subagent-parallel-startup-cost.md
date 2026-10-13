@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-10-subagent-parallel-startup-cost.md](../../../.agents/notes/implemented/architecture/2026-10-10-subagent-parallel-startup-cost.md) 维护；本文件冻结只读。
+
 ---
 title: 并行子代理冷启动：子会话复用宿主 ModelRuntime，子代理增量按会话合并，逐会话订阅随会话退订
 status: active

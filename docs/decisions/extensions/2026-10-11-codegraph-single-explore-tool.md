@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-11-code-explore-single-tool.md](../../../.agents/notes/implemented/architecture/2026-10-11-code-explore-single-tool.md) 维护；本文件冻结只读。
+
 ---
 title: 内置 CodeGraph 升到 1.6.2，模型侧代码检索只留 code_explore
 status: active

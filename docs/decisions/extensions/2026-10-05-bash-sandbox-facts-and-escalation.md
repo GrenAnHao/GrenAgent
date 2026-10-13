@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-05-sandbox-denial-as-fact-and-escalation.md](../../../.agents/notes/implemented/architecture/2026-10-05-sandbox-denial-as-fact-and-escalation.md) 维护；本文件冻结只读。
+
 ---
 title: 沙箱拒绝作为事实返回，升权并进 bash 的同一次调用
 status: active

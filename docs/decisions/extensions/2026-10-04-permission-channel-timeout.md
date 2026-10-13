@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-04-permission-channel-timeout-policy.md](../../../.agents/notes/implemented/architecture/2026-10-04-permission-channel-timeout-policy.md) 维护；本文件冻结只读。
+
 ---
 title: 授权通道超时先重试一次，仍失败只拦这一次调用、不结束回合
 status: active

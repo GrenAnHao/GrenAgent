@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-02-commands-rules-and-tool-surface.md](../../../.agents/notes/implemented/architecture/2026-10-02-commands-rules-and-tool-surface.md) 维护；本文件冻结只读。
+
 ---
 title: 网页抓收取成一个 fetch_url
 status: active

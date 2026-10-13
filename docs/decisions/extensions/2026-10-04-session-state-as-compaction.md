@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md](../../../.agents/notes/implemented/architecture/2026-09-30-compaction-and-context-policy.md) 维护；本文件冻结只读。
+
 ---
 title: 旧工具结果默认按压力裁并冷时定案；压缩时一次状态抽取兼作摘要
 status: active

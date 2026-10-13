@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md](../../../.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md) 维护；本文件冻结只读。
+
 ---
 title: jobs 按 DSH 移植输出环与结算语义，bash 增加 run_in_background
 status: superseded

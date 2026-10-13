@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-10-agent-host-job-guard.md](../../../.agents/notes/implemented/architecture/2026-10-10-agent-host-job-guard.md) 维护；本文件冻结只读。
+
 ---
 title: agent-host 的子孙进程放进主进程持有的 Job，崩溃后清掉没有可见窗口的残留
 status: active

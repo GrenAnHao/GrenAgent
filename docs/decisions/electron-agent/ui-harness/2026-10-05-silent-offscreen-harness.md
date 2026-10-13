@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/testing/2026-10-05-ui-harness-offscreen-and-scoped.md](../../../../.agents/notes/implemented/testing/2026-10-05-ui-harness-offscreen-and-scoped.md) 维护；本文件冻结只读。
+
 ---
 title: ui-harness 默认离屏渲染 + CDP 焦点模拟静默运行，不再抢系统焦点
 status: active

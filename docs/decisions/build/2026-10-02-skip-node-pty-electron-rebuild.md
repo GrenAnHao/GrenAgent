@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md](../../../.agents/notes/implemented/architecture/2026-09-11-packaging-constraints.md) 维护；本文件冻结只读。
+
 ---
 title: 打包时关闭 npmRebuild，沿用 node-pty 的 Node-API 预编译二进制
 status: active

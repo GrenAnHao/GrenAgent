@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md](../../../../.agents/notes/implemented/architecture/2026-09-12-own-bash-every-call-is-job.md) 维护；本文件冻结只读。
+
 ---
 title: 后台任务跟着会话走，前台命令的匿名 job 把实时输出和停止接到卡片上
 status: active

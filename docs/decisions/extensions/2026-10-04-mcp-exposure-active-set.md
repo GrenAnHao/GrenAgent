@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-04-mcp-config-layers-and-oauth.md](../../../.agents/notes/implemented/architecture/2026-10-04-mcp-config-layers-and-oauth.md) 维护；本文件冻结只读。
+
 ---
 title: codemode 的 MCP 工具不进入激活集
 status: active

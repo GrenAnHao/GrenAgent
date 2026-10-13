@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/process/2026-10-03-local-run-and-renderer-watch.md](../../../.agents/notes/implemented/process/2026-10-03-local-run-and-renderer-watch.md) 维护；本文件冻结只读。
+
 ---
 title: 本机日常用 npm run start：生产渲染层 + ESM 主进程，不走 Vite 开发服务器
 status: active

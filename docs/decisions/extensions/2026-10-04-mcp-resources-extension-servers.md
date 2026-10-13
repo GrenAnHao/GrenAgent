@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-04-mcp-config-layers-and-oauth.md](../../../.agents/notes/implemented/architecture/2026-10-04-mcp-config-layers-and-oauth.md) 维护；本文件冻结只读。
+
 ---
 title: MCP 资源工具与扩展登记的服务器共用同一个管理器
 status: active

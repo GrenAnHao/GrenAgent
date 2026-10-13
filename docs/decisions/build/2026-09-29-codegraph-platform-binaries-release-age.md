@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-29-codegraph-platform-binaries.md](../../../.agents/notes/implemented/architecture/2026-09-29-codegraph-platform-binaries.md) 维护；本文件冻结只读。
+
 ---
 title: 用 minimumReleaseAgeExclude pattern 放行 codegraph 的外平台预编译二进制
 status: active

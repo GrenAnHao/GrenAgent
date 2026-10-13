@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-10-04-official-codemode-no-builtin-mcp.md](../../../.agents/notes/implemented/architecture/2026-10-04-official-codemode-no-builtin-mcp.md) 维护；本文件冻结只读。
+
 ---
 title: 会话挂官方 codemode，CLI 用 extensionFactories 换掉内置 MCP
 status: active

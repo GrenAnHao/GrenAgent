@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/process/2026-10-03-local-run-and-renderer-watch.md](../../../.agents/notes/implemented/process/2026-10-03-local-run-and-renderer-watch.md) 维护；本文件冻结只读。
+
 ---
 title: 开发时渲染层只侦测前端源码的热更
 status: active

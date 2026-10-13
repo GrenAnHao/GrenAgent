@@ -1,3 +1,5 @@
+> 已迁移：本决定现由 [.agents/notes/implemented/architecture/2026-09-13-subagent-activation-and-routing.md](../../../.agents/notes/implemented/architecture/2026-09-13-subagent-activation-and-routing.md) 维护；本文件冻结只读。
+
 ---
 title: 单会话子代理上限只计仍占用的名额
 status: active

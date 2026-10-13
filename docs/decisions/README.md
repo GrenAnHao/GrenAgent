@@ -1,3 +1,7 @@
+> **本目录已于 2026-10-11 冻结为只读历史。** 有效的决策记录只在 [`.agents/notes/`](../../.agents/notes/)（规则见 [单一决策记录](../../.agents/notes/implemented/process/2026-10-11-single-decision-record-system.md) 与根目录 `AGENTS.md`）。
+> 仍有效的决定已迁入 `.agents/notes/implemented/`，对应源文件顶部有「已迁移」墓碑；其余文件（界面细节、一次性修复、已被取代的）原地冻结。**不要在这里新增或修改文件。**
+> `_template.md` 已作废，新笔记模板见 `.agents/skills/write-notes-like-deepseek/templates/`；下文「约定」「使用」仅作历史参考，`scripts/check-notes.mjs` 已不再挂 pre-commit。
+
 # 决策记录
 
 这里放「代码装不下的为什么」——**不是**系统现状。
