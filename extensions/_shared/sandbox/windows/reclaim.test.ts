@@ -256,6 +256,37 @@ describe("reclaimGrants: what the review found", () => {
   });
 });
 
+describe("reclaimGrants and the workspace protection records", () => {
+  const OLD = String(NOW - 2 * GRANT_MAX_IDLE_MS);
+
+  it("drops the protection record of a workspace that no longer exists", () => {
+    const grants: Record<string, string> = {
+      [`protect:${grantKey("C:/gone")}`]: "PR2:.pi",
+      [`protect:${grantKey("C:/here")}`]: "PR2:.pi",
+    };
+    reclaimGrants(grants, opts({ keep: [], exists: (p) => grantKey(p) !== grantKey("C:/gone") }));
+    expect(grants[`protect:${grantKey("C:/gone")}`]).toBeUndefined();
+    expect(grants[`protect:${grantKey("C:/here")}`]).toBe("PR2:.pi");
+  });
+
+  it("drops it too when it revokes the workspace, so a later grant protects it again", () => {
+    const key = grantKey("C:/proj");
+    const grants: Record<string, string> = { [key]: "M", [usedKey(key)]: OLD, [`protect:${key}`]: "PR2:.pi,.git" };
+    reclaimGrants(grants, opts({ keep: [] }));
+    expect(grants[key]).toBeUndefined();
+    expect(grants[`protect:${key}`]).toBeUndefined();
+  });
+
+  it("does not treat a protection record as a directory to revoke or stamp", () => {
+    const key = grantKey("C:/proj");
+    const grants: Record<string, string> = { [`protect:${key}`]: "PR2:.pi" };
+    const o = opts({ keep: [] });
+    reclaimGrants(grants, o);
+    expect(o.revoke).not.toHaveBeenCalled();
+    expect(Object.keys(grants)).toEqual([`protect:${key}`]);
+  });
+});
+
 describe("mergeGrantChanges", () => {
   it("applies only this run's additions and removals on top of what is on disk now", () => {
     const before = { a: "M", b: "M", c: "M" };

@@ -132,30 +132,60 @@ export function psSidOf(username: string): string {
 
 export type ElevatedRun = (script: string, signal?: AbortSignal) => Promise<number | null>;
 
+/** `execFile` 的最小形状，测试里换成假的。 */
+export type ExecFileLike = (
+  file: string,
+  args: string[],
+  options: { env: NodeJS.ProcessEnv; windowsHide: boolean; timeout: number; signal?: AbortSignal },
+  callback: (error: (Error & { code?: number | string; killed?: boolean; cmd?: string }) | null, stdout: string | Buffer, stderr: string | Buffer) => void,
+) => unknown;
+
+/** 外层进程自己崩溃：退出码是 NTSTATUS 错误码（0xC0000005 访问冲突等）。普通失败、超时、被取消都不是。 */
+function crashed(error: { code?: number | string | null; killed?: boolean }): boolean {
+  return !error.killed && typeof error.code === "number" && error.code >= 0xc0000000;
+}
+
 /**
  * 提权跑 `script`，返回它的结果位；用户取消或脚本没走到最后返回 null。
  * abort 只能停掉外层：提权进程已经起来了就由它跑完。
+ *
+ * 外层 Windows PowerShell 5.1 偶尔会在几百毫秒内自己崩溃（System.AccessViolationException，退出码 0xC0000005），
+ * 什么也没报告。每个提权脚本都可以安全地跑两遍（账户创建只是再设一次同一个密码，授权和盖章都先查再做），
+ * 所以这种崩溃重试一次；超时、普通失败、用户取消不重试。
  */
-export const runElevated: ElevatedRun = (script, signal) => new Promise((resolvePromise, reject) => {
-  if (signal?.aborted) {
-    reject(new Error("aborted"));
-    return;
-  }
-  const shell = windowsPowerShellPath();
-  execFile(
-    shell,
-    ["-NoProfile", "-NonInteractive", "-Command", elevationLauncher(script, shell)],
-    { env: windowsPowerShellEnv(), windowsHide: true, timeout: ELEVATION_TIMEOUT_MS, signal },
-    (error, stdout, stderr) => {
-      if (signal?.aborted) {
-        reject(new Error("aborted"));
-        return;
-      }
-      if (error) {
-        reject(elevationFailure(error, String(stderr)));
-        return;
-      }
-      resolvePromise(parseElevationResult(String(stdout)));
-    },
-  );
-});
+export function createRunElevated(exec: ExecFileLike = execFile as unknown as ExecFileLike): ElevatedRun {
+  const attempt = (script: string, signal?: AbortSignal): Promise<{ bits: number | null } | { crash: Error }> => new Promise((resolvePromise, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
+    const shell = windowsPowerShellPath();
+    exec(
+      shell,
+      ["-NoProfile", "-NonInteractive", "-Command", elevationLauncher(script, shell)],
+      { env: windowsPowerShellEnv(), windowsHide: true, timeout: ELEVATION_TIMEOUT_MS, signal },
+      (error, stdout, stderr) => {
+        if (signal?.aborted) {
+          reject(new Error("aborted"));
+          return;
+        }
+        if (error) {
+          const failure = elevationFailure(error, String(stderr));
+          if (crashed(error)) resolvePromise({ crash: failure });
+          else reject(failure);
+          return;
+        }
+        resolvePromise({ bits: parseElevationResult(String(stdout)) });
+      },
+    );
+  });
+  return async (script, signal) => {
+    const first = await attempt(script, signal);
+    if ("bits" in first) return first.bits;
+    const second = await attempt(script, signal);
+    if ("bits" in second) return second.bits;
+    throw second.crash;
+  };
+}
+
+export const runElevated: ElevatedRun = createRunElevated();

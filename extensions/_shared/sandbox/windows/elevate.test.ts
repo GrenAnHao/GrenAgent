@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ELEVATED_DONE,
+  createRunElevated,
   ELEVATED_PRELUDE,
+  type ExecFileLike,
   elevationFailure,
   elevationLauncher,
   encodePowerShell,
@@ -128,6 +130,48 @@ describe("elevation without files", () => {
     for (const quote of ["\u2018", "\u2019", "\u201a", "\u201b"]) {
       expect(psQuote(`Bob${quote}s`)).toBe(`'Bob${quote}${quote}s'`);
     }
+  });
+
+  describe("when the outer launcher process itself crashes", () => {
+    const CRASH = 3221225477; // 0xC0000005 STATUS_ACCESS_VIOLATION: Windows PowerShell 5.1 died before it could report anything
+    const done = `PI-ELEVATE-EXIT ${ELEVATED_DONE | 1}`;
+
+    function fake(steps: Array<{ error?: { code?: number | string; killed?: boolean }; stdout?: string }>) {
+      const calls: number[] = [];
+      const exec: ExecFileLike = (_file, _args, _options, callback) => {
+        const step = steps[calls.length] ?? steps[steps.length - 1];
+        calls.push(calls.length);
+        queueMicrotask(() => callback(step.error ? Object.assign(new Error("failed"), step.error) : null, step.stdout ?? "", ""));
+        return undefined;
+      };
+      return { exec, calls };
+    }
+
+    it("runs it once more: every elevated script can be run twice, and a crash that early reports nothing", async () => {
+      const { exec, calls } = fake([{ error: { code: CRASH } }, { stdout: done }]);
+      await expect(createRunElevated(exec)("exit 1")).resolves.toBe(1);
+      expect(calls).toHaveLength(2);
+    });
+
+    it("gives up after that second try", async () => {
+      const { exec, calls } = fake([{ error: { code: CRASH } }, { error: { code: CRASH } }, { stdout: done }]);
+      await expect(createRunElevated(exec)("exit 1")).rejects.toThrow(/could not run/);
+      expect(calls).toHaveLength(2);
+    });
+
+    it("does not retry a plain failure or a timeout", async () => {
+      for (const error of [{ code: 1 }, { killed: true, code: null as unknown as number }]) {
+        const { exec, calls } = fake([{ error }, { stdout: done }]);
+        await expect(createRunElevated(exec)("exit 1")).rejects.toThrow();
+        expect(calls).toHaveLength(1);
+      }
+    });
+
+    it("does not retry a declined prompt, which is an answer and not a crash", async () => {
+      const { exec, calls } = fake([{ stdout: "PI-ELEVATE-CANCELLED" }, { stdout: done }]);
+      await expect(createRunElevated(exec)("exit 1")).resolves.toBeNull();
+      expect(calls).toHaveLength(1);
+    });
   });
 
   it("drops a pwsh 7 PSModulePath whatever its case", () => {

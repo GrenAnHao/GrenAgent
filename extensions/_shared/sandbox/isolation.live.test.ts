@@ -1,15 +1,15 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createSandboxedBashOperations } from "./operations.js";
 import { createSandboxProvider } from "./provider.js";
 import { defaultIo, grantKey, grantSandboxAccess, SANDBOX_GROUP, SANDBOX_USERNAME, type AccountIo } from "./windows/account.js";
 import { stampAmbientDenies } from "./windows/ambient.js";
-import { ELEVATED_DONE, runElevated } from "./windows/elevate.js";
+import { ELEVATED_DONE, runElevated, windowsPowerShellEnv, windowsPowerShellPath } from "./windows/elevate.js";
 import { GRANT_MAX_IDLE_MS, usedKey } from "./windows/reclaim.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
@@ -396,5 +396,155 @@ describe.skipIf(!live || process.platform !== "win32")("live windows grant recla
 
     expect(store[grantKey(parent)]).toBe("M");
     expect(aceCount(workspace)).toBeGreaterThan(0);
+  });
+});
+
+// 工作区里几个配置目录（.pi、.vscode、.idea）对沙箱账户只读：改、新建、删、改名都不行，读不受影响，
+// 沙箱自己建出来的也一样（它是所有者，不先收回所有权它能把权限加回去），而工作区里别的东西和 git 的日常操作照常。
+describe.skipIf(!live || process.platform !== "win32")("live windows protection of workspace configuration", () => {
+  const comspec = process.env.ComSpec || "cmd.exe";
+  const liveGit = process.env.PI_SANDBOX_LIVE_GIT;
+  const DENIED = /access is denied|拒绝访问|denied/i;
+
+  async function workspaceWithConfig(): Promise<string> {
+    const workspace = await scratchDir(tmpdir(), "sbx-protect-");
+    mkdirSync(join(workspace, ".pi"));
+    writeFileSync(join(workspace, ".pi", "keep.txt"), "original");
+    mkdirSync(join(workspace, "src"));
+    return workspace;
+  }
+
+  async function run(workspace: string, command: string): Promise<{ code: number | null; text: string }> {
+    const provider = createSandboxProvider();
+    const confined = await provider.confine(
+      [comspec, "/c", command],
+      { mode: "workspace-write", network: "enabled", workspaceRoot: workspace, sessionId: "live-protect" },
+    );
+    const result = await new Promise<{ code: number | null; text: string }>((resolve) => {
+      const child = spawn(confined.argv[0], confined.argv.slice(1), { stdio: "pipe", cwd: workspace });
+      const chunks: Buffer[] = [];
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      // cmd prints its messages in the console code page (GBK on a Chinese system).
+      child.on("close", (code) => resolve({ code, text: new TextDecoder("gb18030").decode(Buffer.concat(chunks)) }));
+    });
+    await provider.dispose?.("live-protect");
+    return result;
+  }
+
+  const read = (path: string) => readFile(path, "utf8");
+
+  it("blocks changing, creating, deleting and renaming the protected directories, and nothing else", async () => {
+    const workspace = await workspaceWithConfig();
+    // The first command makes the grant and the protection happen, and proves ordinary writes still work.
+    await run(workspace, "echo ok> src\\fine.txt");
+    await expect(read(join(workspace, "src", "fine.txt"))).resolves.toMatch(/ok/);
+    // Reading is untouched.
+    expect((await run(workspace, "type .pi\\keep.txt")).text).toContain("original");
+
+    expect((await run(workspace, "echo changed> .pi\\keep.txt")).text).toMatch(DENIED);
+    await expect(read(join(workspace, ".pi", "keep.txt"))).resolves.toBe("original");
+    expect((await run(workspace, "echo new> .pi\\added.txt")).text).toMatch(DENIED);
+    expect(existsSync(join(workspace, ".pi", "added.txt"))).toBe(false);
+    expect((await run(workspace, "del .pi\\keep.txt")).text).toMatch(DENIED);
+    expect(existsSync(join(workspace, ".pi", "keep.txt"))).toBe(true);
+    expect((await run(workspace, "ren .pi .pi-moved")).text).toMatch(DENIED);
+    expect(existsSync(join(workspace, ".pi", "keep.txt"))).toBe(true);
+    expect(existsSync(join(workspace, ".pi-moved"))).toBe(false);
+    // The account cannot hand itself the access back.
+    await run(workspace, "icacls .pi /grant PiSandbox:F");
+    expect((await run(workspace, "echo changed> .pi\\keep.txt")).text).toMatch(DENIED);
+    await expect(read(join(workspace, ".pi", "keep.txt"))).resolves.toBe("original");
+
+    await run(workspace, "echo more> src\\more.txt");
+    await expect(read(join(workspace, "src", "more.txt"))).resolves.toMatch(/more/);
+  });
+
+  it("takes a directory the sandbox created itself away from it, because the owner can always rewrite the access list", async () => {
+    const workspace = await workspaceWithConfig();
+    await run(workspace, "mkdir .vscode && echo {}> .vscode\\settings.json");
+    await expect(read(join(workspace, ".vscode", "settings.json"))).resolves.toMatch(/\{\}/);
+    // The next command protects what exists by now; the one after tries to undo it.
+    await run(workspace, "echo ok> src\\fine.txt");
+    await run(workspace, "icacls .vscode /grant PiSandbox:F /T");
+    await run(workspace, "echo tampered> .vscode\\settings.json");
+    await expect(read(join(workspace, ".vscode", "settings.json"))).resolves.toMatch(/\{\}/);
+    // Windows PowerShell 5.1 by its absolute path, without a PSModulePath inherited from pwsh 7 (it cannot load the security module with it).
+    const owner = execFileSync(windowsPowerShellPath(), ["-NoProfile", "-Command", `(Get-Acl -LiteralPath '${join(workspace, ".vscode")}').Owner`], { env: windowsPowerShellEnv() }).toString().trim();
+    expect(owner.toLowerCase()).not.toContain("pisandbox");
+  });
+
+  it("leaves the user's own account able to change them, and files the user adds are readable in the sandbox", async () => {
+    const workspace = await workspaceWithConfig();
+    await run(workspace, "echo ok> src\\fine.txt");
+    writeFileSync(join(workspace, ".pi", "keep.txt"), "edited by the user");
+    await expect(read(join(workspace, ".pi", "keep.txt"))).resolves.toBe("edited by the user");
+    writeFileSync(join(workspace, ".pi", "later.txt"), "added later");
+    expect((await run(workspace, "type .pi\\later.txt")).text).toContain("added later");
+  });
+
+  it("protects a directory that was deleted and created again", async () => {
+    const workspace = await workspaceWithConfig();
+    await run(workspace, "echo ok> src\\fine.txt");
+    rmSync(join(workspace, ".pi"), { recursive: true, force: true });
+    mkdirSync(join(workspace, ".pi"));
+    writeFileSync(join(workspace, ".pi", "keep.txt"), "second");
+    await run(workspace, "echo ok> src\\again.txt");
+    expect((await run(workspace, "echo changed> .pi\\keep.txt")).text).toMatch(DENIED);
+    await expect(read(join(workspace, ".pi", "keep.txt"))).resolves.toBe("second");
+  });
+
+  it("protects again after the workspace grant is applied again, which writes the account's entry on every object below", async () => {
+    const workspace = await workspaceWithConfig();
+    await run(workspace, "echo ok> src\\fine.txt");
+    const aces = (path: string) => execFileSync("icacls", [path]).toString("latin1").split(/\r?\n/).filter((line) => /PiSandbox/i.test(line)).join(" ");
+    expect(aces(join(workspace, ".pi", "keep.txt"))).toMatch(/\(RX\)/);
+
+    const grantsFile = join(homedir(), ".pi", "sandbox", "grants.json");
+    const original = readFileSync(grantsFile, "utf8");
+    try {
+      // Forget the workspace grant the way a reclaim would. The next command grants it again with /T, which sets Modify on the protected file too:
+      // the marker below proves that grant really ran before the protection was put back.
+      const grants = JSON.parse(original) as Record<string, string>;
+      delete grants[grantKey(workspace)];
+      writeFileSync(grantsFile, JSON.stringify(grants));
+      const probe = join(workspace, "src", "fine.txt");
+      execFileSync("icacls", [probe, "/grant:r", "PiSandbox:(R)"]);
+      expect(aces(probe)).toMatch(/\(R\)/);
+      await run(workspace, "echo again> src\\again.txt");
+      expect(aces(probe)).toMatch(/\(M\)/);
+      expect(aces(join(workspace, ".pi", "keep.txt"))).toMatch(/\(RX\)/);
+      expect(aces(join(workspace, ".pi", "keep.txt"))).not.toMatch(/\(M\)/);
+      expect((await run(workspace, "echo changed> .pi\\keep.txt")).text).toMatch(DENIED);
+    } finally {
+      writeFileSync(grantsFile, original);
+    }
+  });
+
+  it.skipIf(!liveGit)("keeps everyday git working with the directories protected", async () => {
+    const workspace = await workspaceWithConfig();
+    execFileSync(liveGit as string, ["init", "-q"], { cwd: workspace });
+    writeFileSync(join(workspace, "a.txt"), "hello");
+    const provider = createSandboxProvider();
+    const ops = createSandboxedBashOperations({
+      getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: workspace, sessionId: "live-protect-git" }),
+      confine: (argv, policy) => provider.confine(argv, policy),
+    });
+    const env = { ...process.env };
+    delete env.HOME;
+    const git = `& '${liveGit}'`;
+    const step = async (command: string) => {
+      const chunks: string[] = [];
+      const result = await ops.exec(command, workspace, { onData: (data) => chunks.push(data.toString()), env });
+      return { code: result.exitCode, text: chunks.join("") };
+    };
+    expect((await step(`${git} add -A`)).code).toBe(0);
+    expect((await step(`${git} -c user.name=t -c user.email=t@t commit -q -m first`)).code).toBe(0);
+    expect((await step(`${git} log --oneline`)).text).toMatch(/[0-9a-f]{7} first/);
+    expect((await step(`${git} checkout -q -b topic`)).code).toBe(0);
+    expect((await step(`${git} status --short`)).code).toBe(0);
+    // The sandbox may still write its own repository configuration: .git is deliberately not part of the protection.
+    expect((await step(`${git} config user.name someone`)).code).toBe(0);
+    await provider.dispose?.("live-protect-git");
   });
 });

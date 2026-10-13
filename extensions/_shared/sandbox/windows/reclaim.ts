@@ -23,6 +23,8 @@ export const MAX_REVOKES_PER_RUN = 3;
 
 const USED_PREFIX = "used:";
 const AMBIENT_PREFIX = "ambient:";
+/** protect.ts 的记录：`protect:<工作区键>`，值是已保护的路径集合。和工作区同生同灭。 */
+const PROTECT_PREFIX = "protect:";
 const MODIFY = "M";
 
 /** 与 account.ts 的 grantKey 同一个公式（那边导出，这里不能反过来引用，会循环依赖；测试里核对两者一致）。 */
@@ -53,7 +55,7 @@ export interface ReclaimOptions {
 }
 
 function isRecordOfADirectory(key: string): boolean {
-  return !key.startsWith(USED_PREFIX) && !key.startsWith(AMBIENT_PREFIX);
+  return !key.startsWith(USED_PREFIX) && !key.startsWith(AMBIENT_PREFIX) && !key.startsWith(PROTECT_PREFIX);
 }
 
 const DRIVE_PATH = /^[a-z]:\/.+/;
@@ -69,7 +71,7 @@ function lastUsed(grants: Record<string, string>, key: string): number | undefin
 }
 
 /** `inner` 就是 `outer`，或者在它下面（按路径段，`c:/work-old` 不在 `c:/work` 下面）。 */
-function atOrUnder(inner: string, outer: string): boolean {
+export function atOrUnder(inner: string, outer: string): boolean {
   return inner === outer || inner.startsWith(`${outer}/`);
 }
 
@@ -86,13 +88,15 @@ export function reclaimGrants(grants: Record<string, string>, options: ReclaimOp
   const keep = new Set(options.keep.flatMap((path) => [pathKey(path), real(path)]));
 
   if (options.prune ?? true) {
-    for (const key of Object.keys(grants)) {
-      if (!isRecordOfADirectory(key) || keep.has(key)) continue;
+    for (const record of Object.keys(grants)) {
+      const protectsWorkspace = record.startsWith(PROTECT_PREFIX);
+      const key = protectsWorkspace ? record.slice(PROTECT_PREFIX.length) : record;
+      if (!(protectsWorkspace || isRecordOfADirectory(record)) || keep.has(key)) continue;
       // 只对盘符路径判断：盘还在、目录不在才丢。盘不可用（拔掉的 U 盘、断开的映射盘）不当作目录被删；
       // UNC 没有盘可问，也不动。
       if (!DRIVE_PATH.test(key) || !options.exists(`${key.slice(0, 2)}/`)) continue;
       if (options.exists(key)) continue;
-      delete grants[key];
+      delete grants[record];
       delete grants[usedKey(key)];
       changed = true;
     }
@@ -133,6 +137,7 @@ export function reclaimGrants(grants: Record<string, string>, options: ReclaimOp
   idle.sort((a, b) => a.seen - b.seen);
   for (const { key } of idle.slice(0, MAX_REVOKES_PER_RUN)) {
     options.revoke(key);
+    delete grants[`${PROTECT_PREFIX}${key}`];
     for (const other of Object.keys(grants)) {
       if (atOrUnder(other.startsWith(USED_PREFIX) ? other.slice(USED_PREFIX.length) : other, key)
         && (isRecordOfADirectory(other) || other.startsWith(USED_PREFIX))) {

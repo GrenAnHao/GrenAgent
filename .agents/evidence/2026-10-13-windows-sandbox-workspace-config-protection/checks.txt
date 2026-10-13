@@ -1,0 +1,13 @@
+sbx-* in %TEMP% before/after two full live runs: 0 / 0
+
+== without the ownership step the sandbox-created-directory test fails (temporary edit, restored) ==
+x takes a directory the sandbox created itself away from it  -> expected 'tampered' to match /{}/   (the sandbox rewrote .vscode settings.json)
+with the step: passes, owner is not PiSandbox, tampering blocked.
+
+== timing of the extra propagation passes a .git protection would need (synthetic tree, 30000 files) ==
+grant PiSandbox M /T on the workspace: 18.7s ; each of four extra steps on .git: 2.4-2.7s
+
+== note ==
+Once in three full live runs the outer, non-elevated powershell.exe (5.1) crashed in about 400 ms with 0xC0000005 (System.AccessViolationException)
+before it reported anything, failing "stamps the ambient write-deny". Not tied to the shell it was started from (it happened from bash and from the
+PowerShell tool; the same test passes alone). runElevated now runs the launcher once more after such a crash (NTSTATUS exit code only), see elevate.test.ts.

@@ -10,7 +10,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { promisify } from "node:util";
 import { SandboxUnavailableError } from "../errors.js";
@@ -28,7 +28,8 @@ import {
   windowsSystemExe,
   type ElevatedRun,
 } from "./elevate.js";
-import { mergeGrantChanges, reclaimGrants, revokeArgs, USED_REFRESH_MS } from "./reclaim.js";
+import { applyWorkspaceProtection, PROTECT_PREFIX, protectSteps, type ProtectFn } from "./protect.js";
+import { atOrUnder, mergeGrantChanges, reclaimGrants, revokeArgs, USED_REFRESH_MS } from "./reclaim.js";
 import type { SandboxLogon } from "./runner.js";
 
 export { windowsPowerShellEnv };
@@ -149,6 +150,8 @@ export interface AccountIo {
   stampAmbient?: AmbientStamp;
   /** Starts revoking the account's grants under `path` in the background, without waiting for it. Without it, grants are never reclaimed. */
   revoke?(username: string, path: string): void;
+  /** Denies the account write access to the workspace's own configuration paths (.pi, .git/config, …). Without it nothing is protected. */
+  protect?: ProtectFn;
   pathEnv(): string;
   home(): string;
   blobPath(): string;
@@ -436,6 +439,27 @@ function runCommand(command: string, args: string[], signal?: AbortSignal, timeo
   });
 }
 
+// Ownership and ACLs are rewritten for the whole directory, so a big tree takes a while: give each step far more than the usual 5 seconds,
+// and a step killed half way would otherwise leave the directory in a state nobody asked for.
+const PROTECT_STEP_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** The grant reaches every object below `key`, workspaces inside it included: their protection has to be done again. */
+function forgetProtectionUnder(grants: Record<string, string>, key: string): void {
+  for (const record of Object.keys(grants)) {
+    if (record.startsWith(PROTECT_PREFIX) && atOrUnder(record.slice(PROTECT_PREFIX.length), key)) delete grants[record];
+  }
+}
+
+const protectPaths: ProtectFn = async (username, targets, signal) => {
+  const owner = userInfo().username;
+  for (const target of targets) {
+    if (signal?.aborted) throw new Error("aborted");
+    for (const step of protectSteps(target.path, username, owner)) {
+      await runCommand(windowsSystemExe("icacls.exe"), step, signal, PROTECT_STEP_TIMEOUT_MS);
+    }
+  }
+};
+
 let lastReclaimPruneAt = 0;
 
 export function __resetReclaimPruneForTest(): void {
@@ -473,6 +497,7 @@ export function defaultIo(extra: Pick<AccountIo, "unreachable"> = {}): AccountIo
     grant: defaultGrant,
     stampAmbient: stampAmbientDenies,
     revoke: revokeInBackground,
+    protect: protectPaths,
     pathEnv: () => process.env.PATH ?? "",
     home: () => homedir(),
     blobPath: () => join(root, "account.bin"),
@@ -543,6 +568,8 @@ export async function grantSandboxAccess(
       const propagate = target.rights === "M" || target.rights === "RX";
       await io.grant(target.path, username, target.rights, propagate, signal);
       grants[grantKey(target.path)] = target.rights;
+      // /T sets the account's entry on every object below, protected ones too: protect again afterwards.
+      if (target.rights === "M") forgetProtectionUnder(grants, grantKey(target.path));
       changed = true;
     } catch (error) {
       if (error instanceof Error && error.message === "aborted") throw error;
@@ -553,6 +580,8 @@ export async function grantSandboxAccess(
   }
   if (await grantWorkspaceAncestors(username, policy.workspaceRoot, grants, io, signal)) changed = true;
   if (io.stampAmbient && await applyAmbientDenies(username, grants, io.stampAmbient, { signal })) changed = true;
+  if (policy.mode === "workspace-write" && io.protect
+    && await applyWorkspaceProtection(username, policy.workspaceRoot, grants, io.protect, { signal })) changed = true;
   const revoke = io.revoke;
   if (revoke) {
     const now = Date.now();
