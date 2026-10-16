@@ -103,6 +103,27 @@ describe('AgentDataClient', () => {
     } finally { await client.close(); await server.close(); }
   });
 
+  it('fails only the request whose response exceeds 1 MiB and keeps concurrent requests on the shared connection', async () => {
+    const server = await serve((socket, request) => {
+      if (request.method === 'huge.test') {
+        // 服务端一次 write 一整条应答；1.2 MB 会分成多个 chunk 到达客户端
+        setTimeout(() => socket.write(`${JSON.stringify({ id: request.id, ok: true, result: 'y'.repeat(1_200_000) })}\n`), 5);
+      } else setTimeout(() => socket.write(`${JSON.stringify({ id: request.id, ok: true, result: request.method })}\n`), request.method === 'after.test' ? 40 : 0);
+    });
+    const client = new AgentDataClient(server.endpoint, { timeoutMs: 2000, closeOnTimeout: false });
+    try {
+      const [huge, before, after] = await Promise.allSettled([client.request('huge.test'), client.request('before.test'), client.request('after.test')]);
+      expect(huge).toMatchObject({ status: 'rejected', reason: { code: 'FRAME_TOO_LARGE' } });
+      expect(before).toEqual({ status: 'fulfilled', value: 'before.test' });
+      expect(after).toEqual({ status: 'fulfilled', value: 'after.test' });
+      expect(server.sockets.size).toBe(1);
+      // 一次性整行到达的超大应答同样只影响它自己
+      await expect(client.request('huge.test')).rejects.toMatchObject({ code: 'FRAME_TOO_LARGE' });
+      await expect(client.request('next.test')).resolves.toBe('next.test');
+      expect(server.sockets.size).toBe(1);
+    } finally { await client.close(); await server.close(); }
+  });
+
   it('rejects over-limit requests before opening a connection', async () => {
     const server = await serve(() => {});
     const client = new AgentDataClient(server.endpoint, { timeoutMs: 100 });

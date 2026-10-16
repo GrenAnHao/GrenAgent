@@ -12,6 +12,8 @@ const mainInput = {
   "pi-worker": resolve(__dirname, "electron/pi-worker-entry.ts"),
   // 交互运行时所在的子进程（ELECTRON_RUN_AS_NODE）。主进程只经 IPC 和它对话。
   "agent-host": resolve(__dirname, "electron/agentProcess/hostEntry.ts"),
+  // AgentData 运行时所在的子进程（ELECTRON_RUN_AS_NODE）：agent-data.db 的唯一持有者。
+  "agentdata-host": resolve(__dirname, "electron/agentDataProcess/hostEntry.ts"),
   // CodeGraph SDK 的索引与查询所在的子进程（ELECTRON_RUN_AS_NODE）。
   "codegraph-host": resolve(__dirname, "electron/app/codeGraph/hostEntry.ts"),
   // codegraph-host 里的 SDK 工作线程（worker_threads）。

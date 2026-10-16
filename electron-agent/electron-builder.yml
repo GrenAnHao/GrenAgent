@@ -29,7 +29,9 @@ asarUnpack:
   # agent-host 子进程和 pi-worker 一样以 RunAsNode 加载，入口要在 asar 外面。
   - out/main/agent-host.js
   - out/main/agent-host.jsc
-  # CodeGraph 的子进程同理。
+  # AgentData 与 CodeGraph 的子进程同理。
+  - out/main/agentdata-host.js
+  - out/main/agentdata-host.jsc
   - out/main/codegraph-host.js
   - out/main/codegraph-host.jsc
   - out/main/codegraph-worker.js

@@ -11,7 +11,8 @@ Status: implemented
 CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不再执行任何 SDK 调用。
 
 - 子进程入口 `electron/app/codeGraph/hostEntry.ts`（构建产物 `out/main/codegraph-host.js`）：同一份 Electron 可执行文件加 `ELECTRON_RUN_AS_NODE=1`，Node IPC（`serialization: 'advanced'`），`RpcPeer`。进程里是原来那一个 `CodeGraphService`，读写互斥、取消、空闲回收、错误文案都没有改。不带任何 V8 参数（字节码入口，见 [agent-host 子进程](./2026-10-09-agent-host-child-process.md)）。
-- 主进程门面 `CodeGraphHostClient`：方法与返回结构与原 `CodeGraphService` 相同（`projects / status / call / search / runSync / cancelSync / close`），`main.ts` 的注入点与 `CodeGraphJobs` 不变。`projects()` 只是 stat 探测，仍在主进程。
+- 持有者：默认由 agentdata-host 子进程持有 `CodeGraphHostClient`（codegraph-host 是它的子进程），`GREN_AGENTDATA_PROCESS=inproc` 时由主进程持有；两边都用 `agentDataProcess/codeGraphClient.ts` 创建，见 [AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md)。
+- 门面 `CodeGraphHostClient`：方法与返回结构与原 `CodeGraphService` 相同（`projects / status / call / search / runSync / cancelSync / close`），`main.ts` 的注入点与 `CodeGraphJobs` 不变。`projects()` 只是 stat 探测，仍在主进程。
 - 进程管理复用 `AgentProcessClient`：按需拉起（第一次查询或同步时）、`host.ready` 握手、60 秒内 3 次崩溃后冷却 30 秒、关停超时整树杀掉、Windows 进程树守卫。
 - 线协议只从 `hostContract.ts` 取名字：方法 `codegraph.status / call / search / runSync / cancelSync`；事件 `codegraph.progress`（同步进度，按 jobId 回到 `CodeGraphJobs` 的 stage 回调）与 `codegraph.diag`（每 10 秒内存、事件循环延迟、在跑同步数，写进 `runtime-diag.jsonl` 的 `codegraph-host-sample`）；退出记 `codegraph-host-exit`。
 
@@ -53,7 +54,7 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
 - 代价：多一个常驻（按需拉起后不退出）的子进程，冷启动约一秒；每次查询多一次 IPC 往返（8 路并发检索 25 ms → 34 ms）。
 - 一次长同步期间，其它工作区的查询在读线程上并行，不再排在同步后面；同一工作区仍互斥（`busy indexing`）。两个工作区同时同步时共用一个写线程，彼此仍会交替占用。
 - 内存：每个已启动的线程各加载一份 SDK 与自己的连接；读线程按需启动、不自动退出。
-- 未验证：生产字节码产物里的 `codegraph-worker.js` 能否在 worker 线程里加载（字节码加载器在线程里的行为没在打包产物上跑过）。起不来时表现为查询与同步报 `CODEGRAPH_WORKER_EXITED`，退路是 `GREN_CODEGRAPH_THREADS=off`。
+- 生产字节码产物里的 worker 线程入口已验证可加载（见 [AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md) 的验证）；仍留退路 `GREN_CODEGRAPH_THREADS=off`。
 - `--liftoff-only` 仍未传给 SDK（字节码入口不能带 V8 参数），与改动前相同；大仓库的 WASM Zone-OOM 现在只会让子进程退出、job 记为失败，不再带走主进程。
 
 ## 验证

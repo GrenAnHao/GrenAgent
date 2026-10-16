@@ -49,9 +49,9 @@ describe('AgentDataService', () => {
     await service.start(); let oldClient: AgentDataClient | undefined; let nextClient: AgentDataClient | undefined;
     try {
       expect(service).toHaveProperty('agentEndpoint', expect.any(Function));
-      const previous = service.agentEndpoint('D:/a');
+      const previous = await service.agentEndpoint('D:/a');
       await service.stop(); await service.start();
-      const next = service.agentEndpoint('D:/a');
+      const next = await service.agentEndpoint('D:/a');
       expect(next.token === previous.token).toBe(false);
       oldClient = new AgentDataClient({ ...next, token: previous.token }); nextClient = new AgentDataClient(next);
       await expect(oldClient.request('wiki.list')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });

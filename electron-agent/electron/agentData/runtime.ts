@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { createServer, type Server, type Socket } from 'node:net';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -23,6 +23,7 @@ import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type 
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from './codeRetrievalProtocol';
 import { RequestFrameDecoder } from './requestFrames';
 import { agentDataTiming, timeSync } from './methodTiming';
+import { PluginStateStore } from '../app/plugin/pluginStateStore';
 import { ToolAuditStore } from '../app/toolPermission/auditStore';
 import { ToolRuleStore } from '../app/toolPermission/ruleStore';
 import { ToolDecisionService } from '../app/toolPermission/toolDecisionService';
@@ -31,6 +32,7 @@ import { toolPermissionMethods } from '../app/toolPermission/rpc';
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
 
 const SYSTEM_METHODS = new Set(['system.hello', 'system.status', 'system.shutdown']);
+const JOB_ADMIN_METHODS = new Set(['admin.jobs.start', 'admin.jobs.complete', 'admin.jobs.fail', 'admin.jobs.markCancelled']);
 
 export interface AgentDataJobRunner {
   run(jobId: string, workspace: string, expectedModel?: string): Promise<void>;
@@ -60,6 +62,15 @@ export interface AgentDataRuntimeOptions {
   /** Resolves whether a session is currently owned by the endpoint workspace. */
   resolveSession?: (workspace: string, sessionId: string) => boolean | Promise<boolean>;
   layerSchedule?: LayerScheduleOptions;
+  /**
+   * 监听命名管道（Windows `\\.\pipe\…`）或 Unix socket 路径，而不是环回 TCP 的随机端口。
+   * 运行在子进程里时由主进程指定：崩溃重拉后路径不变，扩展缓存的端点仍然有效。
+   */
+  listenPath?: string;
+  /** 由宿主生成的 host 令牌（同上，重拉后不变）。不传时自己生成。 */
+  hostToken?: string;
+  /** 重拉时带回的工作区令牌：规范化后的工作区 → 令牌。 */
+  workspaceTokens?: Record<string, string>;
 }
 
 export class AgentDataRuntime {
@@ -69,7 +80,7 @@ export class AgentDataRuntime {
   private closed = false;
   private readonly sockets = new Set<Socket>();
   private inFlight = 0;
-  private readonly token = randomBytes(32).toString('hex');
+  private readonly token: string;
   private memory?: MemoryStore;
   private wiki?: WikiService;
   private taskViews?: TaskViewStore;
@@ -87,7 +98,10 @@ export class AgentDataRuntime {
   private temporaryWikiRoot?: string;
   private toolPermission?: ToolDecisionService;
 
-  constructor(private readonly options: AgentDataRuntimeOptions) {}
+  constructor(private readonly options: AgentDataRuntimeOptions) {
+    this.token = options.hostToken ?? randomBytes(32).toString('hex');
+    for (const [workspace, token] of Object.entries(options.workspaceTokens ?? {})) this.adoptWorkspaceToken(workspace, token);
+  }
 
   async start(): Promise<AgentDataEndpoint> {
     if (this.endpoint) return this.endpoint;
@@ -168,6 +182,13 @@ export class AgentDataRuntime {
     });
     this.threads = new ThreadStore(this.storage);
     this.server = createServer((socket) => this.handleSocket(socket));
+    const listenPath = this.options.listenPath;
+    if (listenPath) {
+      await listenWithRetry(this.server, listenPath);
+      this.options.stdin?.once('end', () => this.handleStdinEnd());
+      this.endpoint = { host: '', port: 0, path: listenPath, token: this.token };
+      return this.endpoint;
+    }
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
       this.server!.listen(0, '127.0.0.1', () => { this.server!.off('error', reject); resolve(); });
@@ -205,7 +226,23 @@ export class AgentDataRuntime {
       this.workspaceTokens.set(key, token);
       this.projectTokens.set(token, key);
     }
-    return { host: this.endpoint.host, port: this.endpoint.port, token };
+    return { ...this.endpoint, token };
+  }
+
+  /**
+   * 采用宿主签发的工作区令牌（子进程模式）。同一工作区已有不同令牌时拒绝：令牌发出去就不能换。
+   * 返回规范化后的工作区。
+   */
+  adoptWorkspaceToken(workspace: string, token: string): string {
+    if (typeof token !== 'string' || !/^[0-9a-f]{32,128}$/.test(token)) throw new Error('invalid workspace token');
+    const key = normalizeWorkspace(workspace);
+    const existing = this.workspaceTokens.get(key);
+    if (existing && existing !== token) throw new Error('workspace token already issued');
+    const owner = this.projectTokens.get(token);
+    if ((owner && owner !== key) || token === this.token) throw new Error('workspace token collides');
+    this.workspaceTokens.set(key, token);
+    this.projectTokens.set(token, key);
+    return key;
   }
 
   /** Trusted main-process entry. No socket method can select this context. */
@@ -238,6 +275,24 @@ export class AgentDataRuntime {
   async resolveDiagnosticPath(id: string): Promise<string> {
     if (!this.diagnostics || this.closed) throw new Error('runtime is not started');
     return this.diagnostics.resolveOpenPath(id);
+  }
+
+  /**
+   * 同进程执行器（CodeGraphJobs）回写任务状态的入口，等价于经 socket 调用同名的 admin.jobs.* 方法，不绕 TCP。
+   * 只放行任务生命周期的几个方法。
+   */
+  async requestJobAdmin<T = unknown>(name: string, params: Record<string, unknown>): Promise<T> {
+    if (!JOB_ADMIN_METHODS.has(name)) throw new Error(`not a job lifecycle method: ${name}`);
+    if (!this.endpoint || this.closed || !this.jobs) throw new Error('agent data runtime is not started');
+    const method = this.adminMethod(name);
+    if (!method) throw new Error(`not a job lifecycle method: ${name}`);
+    return await method(params) as T;
+  }
+
+  /** plugin_state 表的读写（子进程模式下主进程的 PluginManager 经 RPC 用它）。 */
+  pluginStateStore(): PluginStateStore {
+    if (!this.storage || this.closed) throw new Error('agent data runtime is not started');
+    return new PluginStateStore(this.storage.db);
   }
 
   recordJobStage(id: string, stage: string, processed?: number, total?: number): void {
@@ -629,6 +684,35 @@ export class AgentDataRuntime {
   private requestId(line: string): string {
     try { const value = JSON.parse(line) as { id?: unknown }; return typeof value.id === 'string' ? value.id : randomUUID(); } catch { return randomUUID(); }
   }
+}
+
+/**
+ * 崩溃重拉时上一个进程的管道句柄可能还没释放（EADDRINUSE）；短暂重试。
+ * POSIX 的 socket 文件不会自己消失：先试连，连不上说明是残留文件，删掉再监听。
+ */
+async function listenWithRetry(server: Server, path: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await new Promise<void>((resolveListen, rejectListen) => {
+        server.once('error', rejectListen);
+        server.listen(path, () => { server.off('error', rejectListen); resolveListen(); });
+      });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EADDRINUSE' || attempt >= 20) throw error;
+      if (process.platform !== 'win32' && !(await socketAlive(path))) rmSync(path, { force: true });
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+}
+
+function socketAlive(path: string): Promise<boolean> {
+  return new Promise((resolveAlive) => {
+    const probe = createConnection(path);
+    probe.once('connect', () => { probe.destroy(); resolveAlive(true); });
+    probe.once('error', () => resolveAlive(false));
+  });
 }
 
 function readTaskRef(value: Record<string, unknown>): TaskRef {

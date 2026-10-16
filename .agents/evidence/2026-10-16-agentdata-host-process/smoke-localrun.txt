@@ -1,0 +1,162 @@
+(node:63592) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+{
+  "mode": "child",
+  "startupMs": 282,
+  "fixture": {
+    "items": 49059,
+    "memories": 630,
+    "tool_audit": 56607,
+    "service_tasks": 398,
+    "threads": 410,
+    "agent_jobs": 0
+  },
+  "mainLoop": {
+    "p99Ms": 25,
+    "maxMs": 36,
+    "maxHeartbeatGapMs": 36
+  },
+  "ops": {
+    "item.upsert": {
+      "n": 399,
+      "p50": 6,
+      "p95": 45,
+      "max": 542
+    },
+    "permission.tool.evaluate": {
+      "n": 99,
+      "p50": 4,
+      "p95": 241,
+      "max": 542
+    },
+    "memory.conversations.search": {
+      "n": 19,
+      "p50": 74,
+      "p95": 382,
+      "max": 382
+    },
+    "thread.read(mid)": {
+      "n": 13,
+      "p50": 162,
+      "p95": 542,
+      "max": 542
+    },
+    "audit.query": {
+      "n": 9,
+      "p50": 257,
+      "p95": 376,
+      "max": 376
+    },
+    "memory.conversations.list": {
+      "n": 9,
+      "p50": 241,
+      "p95": 559,
+      "max": 559
+    },
+    "tasks.list": {
+      "n": 9,
+      "p50": 241,
+      "p95": 542,
+      "max": 542
+    },
+    "thread.read(largest)": {
+      "n": 4,
+      "p50": 310,
+      "p95": 314,
+      "max": 314
+    }
+  },
+  "errors": {},
+  "errorSamples": {},
+  "restart": {
+    "requestAfterKill": "ok",
+    "relaunchMs": 206,
+    "newPid": 7012,
+    "oldPid": 14496,
+    "extensionAfterRestart": "ok"
+  },
+  "shutdownMs": 11,
+  "integrity": "ok"
+}
+{
+  "mode": "inproc",
+  "startupMs": 30,
+  "fixture": {
+    "items": 49059,
+    "memories": 630,
+    "tool_audit": 56607,
+    "service_tasks": 398,
+    "threads": 410,
+    "agent_jobs": 0
+  },
+  "mainLoop": {
+    "p99Ms": 162,
+    "maxMs": 482,
+    "maxHeartbeatGapMs": 540
+  },
+  "ops": {
+    "item.upsert": {
+      "n": 399,
+      "p50": 6,
+      "p95": 46,
+      "max": 570
+    },
+    "permission.tool.evaluate": {
+      "n": 99,
+      "p50": 9,
+      "p95": 218,
+      "max": 504
+    },
+    "memory.conversations.search": {
+      "n": 19,
+      "p50": 50,
+      "p95": 504,
+      "max": 504
+    },
+    "thread.read(mid)": {
+      "n": 13,
+      "p50": 196,
+      "p95": 570,
+      "max": 570
+    },
+    "audit.query": {
+      "n": 9,
+      "p50": 33,
+      "p95": 35,
+      "max": 35
+    },
+    "memory.conversations.list": {
+      "n": 9,
+      "p50": 20,
+      "p95": 25,
+      "max": 25
+    },
+    "tasks.list": {
+      "n": 9,
+      "p50": 5,
+      "p95": 5,
+      "max": 5
+    },
+    "thread.read(largest)": {
+      "n": 4,
+      "p50": 497,
+      "p95": 614,
+      "max": 614
+    }
+  },
+  "errors": {},
+  "errorSamples": {},
+  "shutdownMs": 3,
+  "integrity": "ok"
+}
+PASS  child: 负载期间主进程事件循环 p99 25ms < 50ms
+PASS  child: 主进程最长卡顿 36ms / 心跳间隔 36ms < 200ms
+PASS  child: 负载中请求错误 {}
+PASS  child: item.upsert 完成 399 次
+PASS  child: kill 子进程后主进程请求自动重拉（{"requestAfterKill":"ok","relaunchMs":206,"newPid":7012,"oldPid":14496,"extensionAfterRestart":"ok"}）
+PASS  child: 重拉后扩展手里原来的端点（同一管道、令牌）仍可用
+PASS  child: 关停后库 integrity_check = ok
+对照 inproc：主进程事件循环 p99 162ms，最长卡顿 482ms，心跳最大间隔 540ms
+
+全部通过
+exit 0

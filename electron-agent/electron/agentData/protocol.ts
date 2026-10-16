@@ -15,7 +15,13 @@ export type RpcResponse =
 export interface AgentDataEndpoint {
   host: string;
   port: number;
+  /** 命名管道 / Unix socket 路径。有它时连它，host/port 不用（agentdata-host 子进程模式）。 */
+  path?: string;
   token: string;
+}
+
+export function connectOptions(endpoint: AgentDataEndpoint): { path: string } | { host: string; port: number } {
+  return endpoint.path ? { path: endpoint.path } : { host: endpoint.host, port: endpoint.port };
 }
 
 export class RpcError extends Error {

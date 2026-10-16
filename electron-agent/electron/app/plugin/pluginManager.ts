@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentDataStorage } from '../../agentData/storage';
+import { PluginStateStore } from './pluginStateStore';
 import type { PermissionProfile } from '../appServer/types';
 
 export const PLUGIN_CAPABILITIES = ['agent', 'tool', 'mcp', 'provider', 'ui', 'event-subscriber'] as const;
@@ -46,11 +47,24 @@ export interface PluginStateRecord {
   error?: string;
 }
 
-export interface PluginManagerOptions {
+/** 插件状态的持久化。save 发后不管：失败不影响内存状态（持久化只服务于下次启动）。 */
+export interface PluginStatePort {
+  /** 构造前已读好的全部记录。 */
+  initial: PluginStateRecord[];
+  save(record: PluginStateRecord): void;
+}
+
+export type PluginManagerOptions = ({
   storage: Pick<AgentDataStorage, 'db'>;
+  state?: never;
+} | {
+  /** 不直接碰库（agentdata-host 模式：库在子进程里）。 */
+  state: PluginStatePort;
+  storage?: never;
+}) & {
   apiVersion: string;
   now?: () => number;
-}
+};
 
 const permissionValues: { [K in keyof PermissionProfile]: readonly PermissionProfile[K][] } = {
   filesystem: ['none', 'workspace-read', 'workspace-write', 'unrestricted'],
@@ -66,10 +80,17 @@ export class PluginManager {
   private readonly instances = new Map<string, PluginInstance>();
   private readonly states = new Map<string, PluginStateRecord>();
   private readonly now: () => number;
+  private readonly persistence: PluginStatePort;
 
   constructor(private readonly options: PluginManagerOptions) {
     this.now = options.now ?? Date.now;
-    this.restore();
+    if (options.state) {
+      this.persistence = options.state;
+    } else {
+      const store = new PluginStateStore(options.storage.db as never);
+      this.persistence = { initial: store.load(), save: (record) => store.save(record) };
+    }
+    for (const record of this.persistence.initial) this.states.set(record.id, record);
   }
 
   discover(definitions: PluginDefinition[]): PluginStateRecord[] {
@@ -154,22 +175,8 @@ export class PluginManager {
       ...(error === undefined ? {} : { error }),
     };
     this.states.set(record.id, record);
-    this.options.storage.db.prepare(`INSERT INTO plugin_state(id, state, payload, updated_at) VALUES(?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at`)
-      .run(record.id, record.state, JSON.stringify(record), record.updatedAt);
+    this.persistence.save(record);
     return copyState(record);
-  }
-
-  private restore(): void {
-    const rows = this.options.storage.db.prepare('SELECT payload FROM plugin_state ORDER BY updated_at ASC').all() as Array<{ payload: string }>;
-    for (const row of rows) {
-      try {
-        const record = JSON.parse(row.payload) as PluginStateRecord;
-        if (record && typeof record.id === 'string' && typeof record.state === 'string') this.states.set(record.id, record);
-      } catch {
-        // A corrupt plugin record is isolated from all other plugin state.
-      }
-    }
   }
 
   private requireDefinition(id: string): PluginDefinition {

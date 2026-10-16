@@ -36,7 +36,8 @@ export interface AgentProcessExit {
 export interface AgentProcessClientOptions {
   entry: string;
   execPath: string;
-  env: NodeJS.ProcessEnv;
+  /** 函数形式每次拉起（含崩溃重拉）时调用，带上当时的状态（agentdata-host 的令牌表）。 */
+  env: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
   /**
    * 放在入口脚本前面的 Node 参数（调试用）。生产构建的入口是字节码，缓存里记着编译时的 V8 参数指纹：
    * 带上 --max-old-space-size 这类 V8 参数会让整份缓存被拒，子进程起不来。
@@ -136,6 +137,11 @@ export class AgentProcessClient {
     return running.peer.request<T>(method, params);
   }
 
+  /** 向子进程发单向事件（尽力投递）。子进程不在时丢弃，不为此拉起。 */
+  emit(channel: string, payload: unknown): void {
+    this.running?.peer.emit(channel, payload);
+  }
+
   /** 先请子进程自己收尾，超时再整树杀掉。之后不再拉起。 */
   async shutdown(): Promise<void> {
     this.stopping = true;
@@ -160,7 +166,7 @@ export class AgentProcessClient {
     let fatal: string | undefined;
     const spawn = this.options.spawn ?? (nodeSpawn as unknown as SpawnAgentChild);
     const child = spawn(this.options.execPath, [...(this.options.nodeArgs ?? []), this.options.entry], {
-      env: this.options.env,
+      env: typeof this.options.env === 'function' ? this.options.env() : this.options.env,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       serialization: 'advanced',
       windowsHide: true,

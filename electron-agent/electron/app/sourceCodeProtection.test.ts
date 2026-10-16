@@ -91,6 +91,11 @@ describe('source code protection: electron-builder', () => {
     }
   });
 
+  it('unpacks the agentdata-host entry', () => {
+    expect(config.asarUnpack).toContain('out/main/agentdata-host.js');
+    expect(config.asarUnpack).toContain('out/main/agentdata-host.jsc');
+  });
+
   it('unpacks the codegraph-host entry and its worker thread entry', () => {
     expect(config.asarUnpack).toContain('out/main/codegraph-host.js');
     expect(config.asarUnpack).toContain('out/main/codegraph-host.jsc');

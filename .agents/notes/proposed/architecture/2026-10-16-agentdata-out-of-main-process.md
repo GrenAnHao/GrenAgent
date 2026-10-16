@@ -2,7 +2,7 @@
 
 Status: proposed
 
-进度（2026-10-16）：Q1–Q8 已由实施方拍板，见下文「0. 决策」；M0 已落地，见 [runtime-diag 记录 AgentData 同步耗时](../../implemented/process/2026-10-16-agentdata-sync-timing-diag.md)，闸门结论等线上数据。
+进度（2026-10-16）：Q1–Q8 已由实施方拍板，见下文「0. 决策」；M0 已落地，见 [runtime-diag 记录 AgentData 同步耗时](../../implemented/process/2026-10-16-agentdata-sync-timing-diag.md)。M1–M4 已在 worktree 分支 `agentdata-host` 上落地（用户决定不等闸门数据），实际做法与验证见 [AgentData 运行在 agentdata-host 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md)。本篇保留现状证据、任务归类与备选方案，合并后按审计规则归入该篇或归档。
 
 ## Problem
 

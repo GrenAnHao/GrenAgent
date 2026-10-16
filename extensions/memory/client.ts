@@ -3,9 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { getConfig } from '../_shared/runtime-config.js';
 import { encodeRequestFrames } from '../_shared/request-frames.js';
 
-interface Endpoint { host: string; port: number; token: string }
+// path：AgentData 跑在 agentdata-host 子进程里时的命名管道 / Unix socket；没有时是环回 TCP。
+interface Endpoint { host?: string; port?: number; path?: string; token: string }
 function endpoint(): Endpoint | undefined {
-  try { const value = JSON.parse(getConfig('AGENT_DATA_ENDPOINT') ?? '') as Endpoint; return value.host && value.port && value.token ? value : undefined; } catch { return undefined; }
+  try {
+    const value = JSON.parse(getConfig('AGENT_DATA_ENDPOINT') ?? '') as Endpoint;
+    return value.token && (value.path || (value.host && value.port)) ? value : undefined;
+  } catch { return undefined; }
 }
 
 export class MemoryClient {
@@ -14,7 +18,8 @@ export class MemoryClient {
     const ep = endpoint(); if (!ep) throw new Error('agent data runtime is not configured');
     const id = randomUUID();
     const frames = encodeRequestFrames({ id, version: 1, method, params, token: ep.token });
-    const socket = createConnection({ host: ep.host, port: ep.port }); socket.setEncoding('utf8');
+    const socket = ep.path ? createConnection({ path: ep.path }) : createConnection({ host: ep.host!, port: ep.port! });
+    socket.setEncoding('utf8');
     return new Promise<T>((resolve, reject) => {
       let buffer = ''; let settled = false;
       // 连接层的失败带上 errno 风格的 code，调用方靠它和主进程回的错误帧区分开（见 desktop-control）。

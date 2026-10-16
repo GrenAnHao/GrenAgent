@@ -1,0 +1,67 @@
+
+== child: 619 个文件（D:\OneDrive\Project Files\Pi\.agents\worktrees\agentdata-host\extensions）
+{
+  "mode": "child",
+  "files": 619,
+  "fullIndex": {
+    "ms": 6603,
+    "loop": {
+      "p99Ms": 23,
+      "maxMs": 25,
+      "maxHeartbeatGapMs": 25
+    },
+    "otherWorkspaceQueries": {
+      "n": 32,
+      "errors": 0,
+      "p50Ms": 13,
+      "p95Ms": 28,
+      "maxMs": 38
+    }
+  },
+  "incrementalSync": {
+    "ms": 668,
+    "loop": {
+      "p99Ms": 20,
+      "maxMs": 20,
+      "maxHeartbeatGapMs": 20
+    }
+  },
+  "incrementalVisible": true,
+  "concurrentSearch": {
+    "ms": 561,
+    "loop": {
+      "p99Ms": 25,
+      "maxMs": 25,
+      "maxHeartbeatGapMs": 25
+    }
+  },
+  "status": {
+    "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-BCSIpV\\src",
+    "connected": true,
+    "indexed": true,
+    "sdkAvailable": true,
+    "sdkVersion": "1.6.2",
+    "state": "indexed",
+    "files": 545,
+    "nodes": 7714,
+    "edges": 23566,
+    "lastIndexedAt": 1792160670358
+  },
+  "progressEvents": 1371,
+  "exit": {
+    "code": 0,
+    "signal": null
+  }
+}
+PASS  child: 全量索引期间主进程事件循环 p99 23ms < 50ms
+PASS  child: 全量索引期间主进程最长卡顿 25ms / 心跳间隔 25ms < 200ms
+PASS  child: 增量同步期间主进程最长卡顿 20ms < 200ms
+PASS  child: 8 路并发检索期间主进程最长卡顿 25ms < 200ms
+PASS  child: A 全量索引期间查 B 32 次，失败 0 次
+PASS  child: A 全量索引期间查 B p50 13ms / p95 28ms / 最长 38ms（最长 < 500ms）
+PASS  child: 增量同步后新符号可查
+PASS  child: 状态 indexed，545 个文件
+PASS  child: 收到 1371 条进度事件
+PASS  child: 关停后子进程以 0 退出（{"code":0,"signal":null}）
+
+全部通过

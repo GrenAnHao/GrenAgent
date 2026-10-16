@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/.agents/worktrees/agentdata-host/extensions
+
+
+ Test Files  16 passed (16)
+      Tests  102 passed (102)
+   Start at  22:25:41
+   Duration  3.47s (transform 3.50s, setup 0ms, import 9.45s, tests 855ms, environment 3ms)
+

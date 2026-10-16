@@ -1,0 +1,29 @@
+
+> electron-agent@0.1.0 test:codegraph
+> node scripts/test-codegraph.mjs
+
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/.agents/worktrees/agentdata-host/electron-agent
+
+(node:36112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:54488) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:39444) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:41812) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:54488) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:41812) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:39444) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:36112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+
+ Test Files  10 passed (10)
+      Tests  66 passed (66)
+   Start at  22:25:46
+   Duration  5.17s (transform 1.49s, setup 0ms, import 2.68s, tests 17.62s, environment 1ms)
+

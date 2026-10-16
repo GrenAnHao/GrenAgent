@@ -1,0 +1,89 @@
+(node:60552) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+{
+  "mode": "child",
+  "startupMs": 329,
+  "fixture": {
+    "items": 49059,
+    "memories": 630,
+    "tool_audit": 56607,
+    "service_tasks": 398,
+    "threads": 410,
+    "agent_jobs": 0
+  },
+  "mainLoop": {
+    "p99Ms": 25,
+    "maxMs": 62,
+    "maxHeartbeatGapMs": 62
+  },
+  "ops": {
+    "item.upsert": {
+      "n": 199,
+      "p50": 10,
+      "p95": 83,
+      "max": 1181
+    },
+    "permission.tool.evaluate": {
+      "n": 49,
+      "p50": 6,
+      "p95": 503,
+      "max": 1226
+    },
+    "memory.conversations.search": {
+      "n": 9,
+      "p50": 284,
+      "p95": 839,
+      "max": 839
+    },
+    "thread.read(mid)": {
+      "n": 6,
+      "p50": 286,
+      "p95": 705,
+      "max": 705
+    },
+    "audit.query": {
+      "n": 5,
+      "p50": 73,
+      "p95": 750,
+      "max": 750
+    },
+    "memory.conversations.list": {
+      "n": 4,
+      "p50": 679,
+      "p95": 1226,
+      "max": 1226
+    },
+    "tasks.list": {
+      "n": 4,
+      "p50": 711,
+      "p95": 1314,
+      "max": 1314
+    },
+    "thread.read(largest)": {
+      "n": 2,
+      "p50": 726,
+      "p95": 726,
+      "max": 726
+    }
+  },
+  "errors": {},
+  "errorSamples": {},
+  "restart": {
+    "requestAfterKill": "ok",
+    "relaunchMs": 330,
+    "newPid": 10700,
+    "oldPid": 63136,
+    "extensionAfterRestart": "ok"
+  },
+  "shutdownMs": 24,
+  "integrity": "ok"
+}
+PASS  child: 负载期间主进程事件循环 p99 25ms < 50ms
+PASS  child: 主进程最长卡顿 62ms / 心跳间隔 62ms < 200ms
+PASS  child: 负载中请求错误 {}
+PASS  child: item.upsert 完成 199 次
+PASS  child: kill 子进程后主进程请求自动重拉（{"requestAfterKill":"ok","relaunchMs":330,"newPid":10700,"oldPid":63136,"extensionAfterRestart":"ok"}）
+PASS  child: 重拉后扩展手里原来的端点（同一管道、令牌）仍可用
+PASS  child: 关停后库 integrity_check = ok
+
+全部通过

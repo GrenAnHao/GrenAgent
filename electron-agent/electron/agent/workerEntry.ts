@@ -18,6 +18,11 @@ export function resolveAgentHostEntry(input: EntryInput): string {
   return resolveMainScript('agent-host.js', input);
 }
 
+/** agentdata-host 子进程：AgentData 运行时（agent-data.db 的唯一持有者）。 */
+export function resolveAgentDataHostEntry(input: EntryInput): string {
+  return resolveMainScript('agentdata-host.js', input);
+}
+
 /** codegraph-host 子进程：CodeGraph SDK 的索引与查询都在这里跑，不占主线程。 */
 export function resolveCodeGraphHostEntry(input: EntryInput): string {
   return resolveMainScript('codegraph-host.js', input);

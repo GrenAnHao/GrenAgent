@@ -28,15 +28,15 @@ import { IPC_CHANNELS } from "./ipc/contracts";
 import { attachEmbeddedWebview } from "./browser/attachEmbeddedWebview";
 import { attachDevToolsShortcut } from "./devtoolsShortcut";
 import { SandboxManager } from "./app/sandbox/sandboxManager";
-import { AgentDataStorage } from "./agentData/storage";
 import { PluginManager } from "./app/plugin/pluginManager";
 import { builtinPluginDefinitions } from "./app/plugin/builtinPlugins";
-import { SystemWorkerManager } from "./pi/systemWorkerManager";
-import { CodeGraphHostClient } from "./app/codeGraph/codeGraphHostClient";
-import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
-import { validateProject } from "./app/validateProject";
+import { assembleAgentData, type AgentDataMainMethods } from "./agentDataProcess/assemble";
+import { createCodeGraphClient } from "./agentDataProcess/codeGraphClient";
+import { AGENTDATA_DIAG_CHANNEL, AGENTDATA_MODEL_USAGE_CHANNEL, type AgentDataHostConfig, type AgentDataHostMethod } from "./agentDataProcess/contract";
+import type { MethodHandler } from "./agentProcess/rpcPeer";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
-import { resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
+import { resolveAgentDataHostEntry, resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
+import { agentDataPipePath } from "./agentDataProcess/pipePath";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
 import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
@@ -127,98 +127,134 @@ if (!process.env.VITEST) {
     };
     const completeAgentData = (input: { user: string; systemPrompt?: string; maxTokens?: number; signal?: AbortSignal; onUsage?: (report: { model: string; usage: unknown }) => void }) =>
       modelRuntimeHost.completeSimple(applyAgentDataModel(input, agentDataModelRaw()));
-    const systemWorker = new SystemWorkerManager({
-      describeModel: async () => {
-        const model = agentDataModelOverride(agentDataModelRaw());
-        return model ? `${model.provider}/${model.modelId}` : modelRuntimeHost.describeModel();
-      },
-      complete: (input) => completeAgentData(input),
-    });
-    const knownWorkspaces = new Set<string>();
+    const describeAgentDataModel = async () => {
+      const model = agentDataModelOverride(agentDataModelRaw());
+      return model ? `${model.provider}/${model.modelId}` : modelRuntimeHost.describeModel();
+    };
     const entryInput = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname };
     const jobGuardExe = resolveJobGuardExe(entryInput);
-    // CodeGraph 的索引与查询在 codegraph-host 子进程里跑：SDK 的写库与引用解析是同步的，放在主进程会把窗口卡住几十秒。
-    // 按需拉起（第一次查询或同步时），崩了下一条请求再拉起，连续崩溃时冷却；不带 V8 参数（字节码入口）。
-    const codeGraph = new CodeGraphHostClient({
-      listWorkspaces: () => [...knownWorkspaces],
-      createProcess: (onEvent) => new AgentProcessClient({
-        entry: resolveCodeGraphHostEntry(entryInput),
-        guard: (pid) => startJobGuard(pid, { exePath: jobGuardExe }),
-        execPath: process.execPath,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', CODEGRAPH_WORKER_ENTRY: resolveCodeGraphWorkerEntry(entryInput) },
-        hostMethods: {},
-        onEvent,
-        onExit: (exit) => recordDiagEvent({ kind: 'codegraph-host-exit', code: exit.code, signal: exit.signal, expected: exit.expected, stderrTail: exit.stderrTail.slice(-4_000) }),
-        log: (stream, line) => (stream === 'stderr' ? console.error : console.log)(`[codegraph-host] ${line}`),
-        readyTimeoutMs: 30_000,
-        shutdownTimeoutMs: 10_000,
-      }),
-      onDiag: (sample) => recordDiagEvent({ kind: 'codegraph-host-sample', ...sample }),
-    });
-    const codeGraphJobs = new CodeGraphJobs(codeGraph, {
-      start: (id) => agentData.request('admin.jobs.start', { id }),
-      complete: (id) => agentData.request('admin.jobs.complete', { id }),
-      fail: (id, error) => agentData.request('admin.jobs.fail', { id, error }),
-      cancelled: (id) => agentData.request('admin.jobs.markCancelled', { id }),
-      stage: (id, stage, processed, total) => agentData.recordJobStage(id, stage, processed, total),
-    });
-    agentData = new AgentDataService({
-      dataPath,
-      validateProject: (project) => validateProject(project, worksDir),
-      resolveSession: (project, sessionId) => agent.pi.ownsSession(project, sessionId).catch(() => false),
-      completeSimple: (input) => completeAgentData(input),
-      executeServiceTask: (task, hooks) => systemWorker.run({ id: task.id, kind: task.kind, input: task.input }, hooks),
-      jobRunners: {
-        'codegraph.sync': codeGraphJobs,
+    const codeGraphEntries = {
+      hostEntry: resolveCodeGraphHostEntry(entryInput),
+      workerEntry: resolveCodeGraphWorkerEntry(entryInput),
+      jobGuardExe,
+      execPath: process.execPath,
+    };
+    // 必须留在主进程的 socket 方法（审批 UI、渲染层广播、问 agent-host）。child 模式下由 agentdata-host 经反向 RPC 调回来。
+    const mainMethods: AgentDataMainMethods = {
+      'turn.start': (params) => agent.pi.enqueueTurn(
+        readRpcString(params, 'workspace'),
+        readRpcString(params, 'input'),
+        typeof params.permissionProfile === 'string' ? params.permissionProfile : 'workspace',
+        {
+          ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+          ...(typeof params.sessionPath === 'string' ? { sessionPath: params.sessionPath } : {}),
+          ...(params.source === 'goal' ? { source: 'goal' as const } : { source: 'interactive' as const }),
+        },
+      ),
+      'permission.authorize': (params) => {
+        const operation = isRecord(params.operation) ? params.operation : {};
+        return permissions.authorize(
+          { ...operation, kind: typeof operation.kind === 'string' ? operation.kind : 'unknown' },
+          typeof params.profile === 'string' ? params.profile : 'workspace',
+        );
       },
-      codeRetrieval: {
-        projects: () => codeGraph.projects(),
-        status: async (workspace) => ({ ...await codeGraph.status(workspace) }),
-        search: async (workspace, query, limit) => ({ ...await codeGraph.search(workspace, query, limit) }),
-        call: (workspace, tool, args) => codeGraph.call(workspace, tool, args),
-      },
-      methods: {
-        'turn.start': (params) => agent.pi.enqueueTurn(
-          readRpcString(params, 'workspace'),
-          readRpcString(params, 'input'),
-          typeof params.permissionProfile === 'string' ? params.permissionProfile : 'workspace',
-          {
-            ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
-            ...(typeof params.sessionPath === 'string' ? { sessionPath: params.sessionPath } : {}),
-            ...(params.source === 'goal' ? { source: 'goal' as const } : { source: 'interactive' as const }),
+      // agent-host 子进程里的 MCP 扩展推送连接状态。转成 setStatus('mcp')，面板才能看到 exposure、auth 和 loginUrl。
+      // 扩展发的是 ctx.cwd；面板按 AgentStore workspace 读。对上活 handle 就改成 handle.workspace（向子进程查）。
+      'mcp.state.publish': async (params) => {
+        const published = typeof params.workspace === 'string' ? params.workspace : '';
+        const workspace = published ? await agent.mcp.workspaceForCwd(published).catch(() => published) : published;
+        const servers = Array.isArray(params.servers) ? params.servers : [];
+        broadcastPiEvent('pi://ui-request', {
+          workspace,
+          source: 'interactive',
+          request: {
+            id: 'mcp-state',
+            method: 'setStatus',
+            statusKey: 'mcp',
+            statusText: JSON.stringify(servers),
           },
-        ),
-        'permission.authorize': (params) => {
-          const operation = isRecord(params.operation) ? params.operation : {};
-          return permissions.authorize(
-            { ...operation, kind: typeof operation.kind === 'string' ? operation.kind : 'unknown' },
-            typeof params.profile === 'string' ? params.profile : 'workspace',
-          );
-        },
-        // agent-host 子进程里的 MCP 扩展推送连接状态。转成 setStatus('mcp')，面板才能看到 exposure、auth 和 loginUrl。
-        // 扩展发的是 ctx.cwd；面板按 AgentStore workspace 读。对上活 handle 就改成 handle.workspace（向子进程查）。
-        'mcp.state.publish': async (params) => {
-          const published = typeof params.workspace === 'string' ? params.workspace : '';
-          const workspace = published ? await agent.mcp.workspaceForCwd(published).catch(() => published) : published;
-          const servers = Array.isArray(params.servers) ? params.servers : [];
-          broadcastPiEvent('pi://ui-request', {
-            workspace,
-            source: 'interactive',
-            request: {
-              id: 'mcp-state',
-              method: 'setStatus',
-              statusKey: 'mcp',
-              statusText: JSON.stringify(servers),
-            },
-          });
-          return null;
-        },
+        });
+        return null;
       },
-    });
+    };
+    // AgentData 运行在哪里：child（默认）= agentdata-host 子进程，agent-data.db 、记忆 / Wiki 任务、CodeGraph 都在那里；
+    // inproc = 原来的主进程内，只作退路（GREN_AGENTDATA_PROCESS=inproc）。
+    let inprocAgentData: ReturnType<typeof assembleAgentData> | undefined;
+    if (process.env.GREN_AGENTDATA_PROCESS === 'inproc') {
+      const knownWorkspaces = new Set<string>();
+      inprocAgentData = assembleAgentData({
+        dataPath,
+        worksDir,
+        model: { describe: describeAgentDataModel, complete: (input) => completeAgentData(input) },
+        codeGraph: createCodeGraphClient({ ...codeGraphEntries, listWorkspaces: () => [...knownWorkspaces], diag: recordDiagEvent }),
+        resolveSession: (project, sessionId) => agent.pi.ownsSession(project, sessionId),
+        methods: mainMethods,
+      });
+      const assembled = inprocAgentData;
+      agentData = new AgentDataService({ runtime: assembled.runtime, onKnownWorkspace: (path) => knownWorkspaces.add(path) });
+    } else {
+      // 模型短调用留在主进程（auth.json / OAuth 在这里）。子进程的 abort 按 requestId 找到对应的 AbortController。
+      const modelCalls = new Map<string, AbortController>();
+      let agentDataProcess: AgentProcessClient | undefined;
+      const hostMethods: Record<AgentDataHostMethod, MethodHandler> = {
+        'main.model.describe': () => describeAgentDataModel(),
+        'main.model.complete': async (p) => {
+          const requestId = readRpcString(p, 'requestId');
+          const controller = new AbortController();
+          modelCalls.set(requestId, controller);
+          try {
+            const input = isRecord(p.input) ? p.input as { user: string; systemPrompt?: string; maxTokens?: number } : { user: '' };
+            return await completeAgentData({
+              ...input,
+              signal: controller.signal,
+              ...(p.withUsage === true ? { onUsage: (report: { model: string; usage: unknown }) => agentDataProcess?.emit(AGENTDATA_MODEL_USAGE_CHANNEL, { requestId, report }) } : {}),
+            });
+          } finally {
+            modelCalls.delete(requestId);
+          }
+        },
+        'main.model.abort': (p) => { modelCalls.get(readRpcString(p, 'requestId'))?.abort(); return null; },
+        'main.resolveSession': (p) => agent.pi.ownsSession(readRpcString(p, 'workspace'), readRpcString(p, 'sessionId')),
+        'main.method': (p) => {
+          const name = readRpcString(p, 'name') as keyof AgentDataMainMethods;
+          const method = mainMethods[name];
+          if (!method) throw new Error(`unknown main method: ${name}`);
+          return method(isRecord(p.params) ? p.params : {});
+        },
+      };
+      agentData = new AgentDataService({
+        mode: 'child',
+        listenPath: agentDataPipePath(),
+        createProcess: (launchState) => (agentDataProcess = new AgentProcessClient({
+          entry: resolveAgentDataHostEntry(entryInput),
+          guard: (pid) => startJobGuard(pid, { exePath: jobGuardExe }),
+          onSweep: (summary, exit) => recordDiagEvent({ kind: 'agentdata-host-sweep', summary, expected: exit.expected }),
+          execPath: process.execPath,
+          env: () => ({
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
+            AGENTDATA_HOST_CONFIG: JSON.stringify({ ...launchState(), dataPath, worksDir, codeGraph: codeGraphEntries } satisfies AgentDataHostConfig),
+          }),
+          hostMethods,
+          onEvent: (channel, payload) => {
+            if (channel === AGENTDATA_DIAG_CHANNEL && isRecord(payload) && typeof payload.kind === 'string') recordDiagEvent(payload as { kind: string });
+          },
+          onExit: (exit) => {
+            recordDiagEvent({ kind: 'agentdata-host-exit', code: exit.code, signal: exit.signal, expected: exit.expected, ...(exit.fatal ? { fatal: exit.fatal } : {}), stderrTail: exit.stderrTail.slice(-4_000) });
+            for (const controller of modelCalls.values()) controller.abort();
+            modelCalls.clear();
+          },
+          log: (stream, line) => (stream === 'stderr' ? console.error : console.log)(`[agentdata-host] ${line}`),
+          readyTimeoutMs: 60_000,
+          shutdownTimeoutMs: 15_000,
+        })),
+      });
+    }
     await agentData.start();
-    const pluginStorage = new AgentDataStorage(dataPath);
-    pluginStorage.migrate();
-    const plugins = new PluginManager({ storage: pluginStorage, apiVersion: '1' });
+    const plugins = new PluginManager({
+      state: { initial: await agentData.loadPluginStates(), save: (record) => agentData.savePluginState(record) },
+      apiVersion: '1',
+    });
     plugins.discover(builtinPluginDefinitions());
     await plugins.startAll();
     const piPackages = new PiPackageService({
@@ -239,10 +275,10 @@ if (!process.env.VITEST) {
       hostMethods: createHostMethods({
         resolveWorkspace: async (path) => {
           const resolved = await workspace.ensureWorkspace(path);
-          knownWorkspaces.add(resolved);
+          agentData.registerKnownWorkspace(resolved);
           return resolved;
         },
-        agentDataEndpoint: (cwd) => JSON.stringify(agentData.agentEndpoint(cwd)),
+        agentDataEndpoint: async (cwd) => JSON.stringify(await agentData.agentEndpoint(cwd)),
         mcpRuntime: (target) => mcpConfig.runtime(target),
         allowedPluginIds: () => plugins.allowedPluginIds(),
         authorize: (operation, profile) => permissions.authorize(operation, profile),
@@ -358,12 +394,11 @@ if (!process.env.VITEST) {
       if (shutdownStarted) return;
       shutdownStarted = true;
       void (async () => {
-        await Promise.allSettled([codeGraphJobs.close()]);
-        systemWorker.close();
-        // 子进程收尾时扩展还会经 AgentData 记账（记忆、回合状态），必须先于 agentData.stop。
+        // agent-host 收尾时扩展还会经 AgentData 记账（记忆、回合状态），必须先于 agentData.stop。
         await agentProcess?.shutdown();
+        // child 模式：agentdata-host 自己先停 CodeGraph 同步与模型任务、再关库；inproc 模式在这里做同样的事。
         await agentData.stop();
-        pluginStorage.close();
+        await inprocAgentData?.close();
       })().catch((error) => console.error('Application shutdown failed', error)).finally(() => {
         shutdownDone = true;
         app.quit();

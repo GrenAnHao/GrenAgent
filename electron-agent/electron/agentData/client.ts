@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { RpcError, PROTOCOL_VERSION, type AgentDataEndpoint, type RpcResponse } from './protocol';
+import { RpcError, PROTOCOL_VERSION, connectOptions, type AgentDataEndpoint, type RpcResponse } from './protocol';
 import { encodeRequestFrames } from './requestFrames';
 
 export class AgentDataClient {
@@ -40,20 +40,38 @@ export class AgentDataClient {
     if (this.connecting) return this.connecting;
     if (this.socket && !this.socket.destroyed) return Promise.resolve(this.socket);
     const connecting = new Promise<Socket>((resolve, reject) => {
-      const socket = createConnection({ host: this.endpoint.host, port: this.endpoint.port });
+      const socket = createConnection(connectOptions(this.endpoint));
       this.socket = socket;
       let buffer = '';
+      // 超过 1 MiB 的应答只让它自己那条请求失败，连接照常用：主进程所有 AgentData 请求共用这一条连接，
+      // 以前一条超大的 thread.read 会让同时在途的 item.upsert 等一起失败。服务端的应答以 {"id":"…" 开头。
+      let oversized: string | undefined;
+      const failOversized = (head: string) => {
+        const id = /^\{"id":"([^"]{1,200})"/.exec(head)?.[1];
+        if (id) this.fail(id, new RpcError('FRAME_TOO_LARGE', 'RPC response exceeds 1 MiB'));
+        else { this.failAll(new RpcError('FRAME_TOO_LARGE', 'RPC response exceeds 1 MiB')); socket.destroy(); }
+      };
       socket.setEncoding('utf8');
       socket.on('data', (chunk: string) => {
+        if (oversized !== undefined) {
+          const end = chunk.indexOf('\n');
+          if (end < 0) return;
+          failOversized(oversized);
+          oversized = undefined;
+          chunk = chunk.slice(end + 1);
+        }
         buffer += chunk;
         let i = buffer.indexOf('\n');
         while (i >= 0) {
           const line = buffer.slice(0, i); buffer = buffer.slice(i + 1);
-          if (Buffer.byteLength(line) + 1 > 1_048_576) { socket.destroy(new RpcError('FRAME_TOO_LARGE', 'RPC response exceeds 1 MiB')); return; }
-          try { this.resolve(JSON.parse(line) as RpcResponse); } catch (error) { this.failAll(error); socket.destroy(); return; }
+          if (Buffer.byteLength(line) + 1 > 1_048_576) failOversized(line.slice(0, 256));
+          else {
+            try { this.resolve(JSON.parse(line) as RpcResponse); } catch (error) { this.failAll(error); socket.destroy(); return; }
+          }
+          if (socket.destroyed) return;
           i = buffer.indexOf('\n');
         }
-        if (Buffer.byteLength(buffer) > 1_048_576) socket.destroy(new RpcError('FRAME_TOO_LARGE', 'RPC response exceeds 1 MiB'));
+        if (Buffer.byteLength(buffer) > 1_048_576) { oversized = buffer.slice(0, 256); buffer = ''; }
       });
       socket.on('error', (error) => { if (this.socket === socket) this.failAll(error); reject(error); });
       socket.on('close', () => {

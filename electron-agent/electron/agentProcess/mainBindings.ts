@@ -17,8 +17,8 @@ import type { MethodHandler } from './rpcPeer';
 
 export interface HostDeps {
   resolveWorkspace(path: string): Promise<string>;
-  /** AgentData 端点的 JSON 字符串。 */
-  agentDataEndpoint(cwd: string): string | undefined;
+  /** AgentData 端点的 JSON 字符串。agentdata-host 模式下要先把令牌登记到子进程，所以可以是异步的。 */
+  agentDataEndpoint(cwd: string): string | undefined | Promise<string | undefined>;
   mcpRuntime(workspace: string): Promise<McpServerEntry[]>;
   allowedPluginIds(): string[];
   authorize(operation: PermissionOperation, profile: string): Promise<PermissionAuthorization>;
@@ -29,7 +29,7 @@ export interface HostDeps {
 export function createHostMethods(deps: HostDeps): Record<HostMethod, MethodHandler> {
   return {
     'host.resolveWorkspace': (p) => deps.resolveWorkspace(str(p, 'path')),
-    'host.agentDataEndpoint': (p) => deps.agentDataEndpoint(str(p, 'cwd')) ?? null,
+    'host.agentDataEndpoint': async (p) => (await deps.agentDataEndpoint(str(p, 'cwd'))) ?? null,
     'host.mcpRuntime': (p) => deps.mcpRuntime(str(p, 'workspace')),
     'host.allowedPluginIds': () => deps.allowedPluginIds(),
     'host.authorize': (p) => {
