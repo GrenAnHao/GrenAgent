@@ -1,0 +1,3 @@
+
+# C:\Users\rxstudio\AppData\Roaming\electron-agent\logs
+结论: NO_DATA — 日志里还没有带 agentData 字段的采样（埋点版本尚未运行过）

@@ -5,6 +5,7 @@ import { stripTrailingNewlines } from '../agent/memoryPrompts';
 import type { MemoryRecord, MemoryScope, MemoryStore } from '../agentData/memoryStore';
 import type { ManagedMemoryRecord, MemoryConversation, MemoryConversationDetail, MemoryCreateInput, MemoryDraft, MemoryListInput, MemoryPage, MemoryReadInput, MemoryUpdateInput } from '../agentData/memoryContracts';
 import { RpcError } from '../agentData/protocol';
+import { timeSync } from '../agentData/methodTiming';
 
 import { memoryDedupOutput } from './appServer/serviceTaskRegistry';
 import type { ServiceTask } from './appServer/types';
@@ -176,7 +177,7 @@ export class MemoryService {
     try {
       const next = this.options.store.pendingCapture(source, source.source);
       if (!next) return undefined;
-      const result = await this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true });
+      const result = await timeSync('memory.timer.flush', () => this.capture({ ...source, transcript: next.transcript, fingerprint: next.fingerprint }, { force: true }));
       return result.extraction === 'queued' ? result.taskId : undefined;
     } catch (error) {
       // 不重试：pending 保留到下一轮对话或下次启动。
@@ -567,7 +568,7 @@ export class MemoryService {
       const handle = setTimeout(callback, ms);
       return { cancel: () => clearTimeout(handle) };
     });
-    this.timers.set(userId, setTimer(() => { this.fireScene(userId); }, wait));
+    this.timers.set(userId, setTimer(() => { timeSync('memory.timer.scene', () => this.fireScene(userId)); }, wait));
   }
 
   private fireScene(userId: string): void {

@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-- 主进程 `CodeGraphService` / `CodeGraphEngine` 内置 CodeGraph SDK，不启动 CLI / MCP，不读 `GREN_CODEGRAPH_COMMAND`。
+- `CodeGraphService` / `CodeGraphEngine` 内置 CodeGraph SDK，不启动 CLI / MCP，不读 `GREN_CODEGRAPH_COMMAND`。自 2026-10-16 起它们跑在 codegraph-host 子进程里，主进程只留 `CodeGraphHostClient`，见 [CodeGraph 运行在 codegraph-host 子进程](./2026-10-16-codegraph-host-process.md)。
 - 实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。
 - 只有用户显式建立 / 同步才写索引，不启用 SDK watcher；缺索引不自动创建。
 - SDK 是固定版本的应用依赖；`asarUnpack` 解出，`scripts/package-codegraph.cjs` 补齐平台包；没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
@@ -33,7 +33,7 @@ Status: implemented
 
 - **codebase-memory CLI（d90d4d12 / 24f694ea）**：单文件二进制、checksums 校验。已放弃：候选都体验过，CodeGraph 技术栈融合更好（用户说明）。
 - **CodeGraph MCP 实例池（a15920c5）**：复用上游 MCP，惰性加载。被内嵌 SDK 取代：为了方便统一管理（用户说明）。
-- **启用 SDK watcher 自动增量索引**：暂未启用：还没来得及做，已列入计划（用户说明）。后续跟进：接入 SDK watcher 做自动增量索引。
+- **启用 SDK watcher 自动增量索引**：暂未启用：还没来得及做，已列入计划（用户说明）。后续跟进：接入 SDK watcher 做自动增量索引。方案见 [CodeGraph 移出主进程并自动同步](../../proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md)（proposed，落地后本篇「只有用户显式建立 / 同步才写索引」一条被它取代）。
 
 ## Consequences
 

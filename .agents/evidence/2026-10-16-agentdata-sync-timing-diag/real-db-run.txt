@@ -1,0 +1,71 @@
+{
+  "largestThread": {
+    "items": 57,
+    "payloadBytes": 14974807
+  },
+  "threadReadOverTcp": "FRAME_TOO_LARGE: RPC response exceeds 1 MiB",
+  "sample": {
+    "syncMs": 969.9,
+    "n": 36,
+    "methods": [
+      {
+        "method": "thread.read",
+        "n": 1,
+        "syncMs": 440.1,
+        "syncMaxMs": 440.1,
+        "totalMs": 440.1,
+        "totalMaxMs": 440.1
+      },
+      {
+        "method": "item.upsert",
+        "n": 30,
+        "syncMs": 300.9,
+        "syncMaxMs": 18.1,
+        "totalMs": 304.1,
+        "totalMaxMs": 18.5
+      },
+      {
+        "method": "memory.conversations.search",
+        "n": 3,
+        "syncMs": 148.9,
+        "syncMaxMs": 52.4,
+        "totalMs": 149.1,
+        "totalMaxMs": 52.5
+      },
+      {
+        "method": "admin.audit.query",
+        "n": 1,
+        "syncMs": 48.8,
+        "syncMaxMs": 48.8,
+        "totalMs": 48.9,
+        "totalMaxMs": 48.9
+      },
+      {
+        "method": "memory.conversations.list",
+        "n": 1,
+        "syncMs": 31.1,
+        "syncMaxMs": 31.1,
+        "totalMs": 31.1,
+        "totalMaxMs": 31.1
+      }
+    ],
+    "slow": [
+      {
+        "method": "thread.read",
+        "syncMs": 440.1,
+        "at": 1792134504960
+      },
+      {
+        "method": "memory.conversations.search",
+        "syncMs": 52.4,
+        "at": 1792134504340
+      }
+    ]
+  }
+}
+
+--- 说明（2026-10-16，人工追加） ---
+命令：pnpm exec tsx --no-warnings .agents/evidence/2026-10-16-agentdata-sync-timing-diag/real-db-run.mts <真实 agent-data.db 的临时副本>
+上面的 JSON 已完整输出；退出码 124 是外层 `timeout 115` 杀掉了未退出的进程：副本里有一条 memory_layer_schedules，
+recoverLayerSchedules 挂上的场景定时器没有 unref，脚本结束后仍挂住事件循环。与埋点无关，是现有行为。
+threadReadOverTcp = FRAME_TOO_LARGE：最大线程 14.9 MB，应答超过客户端 1 MiB 上限被丢弃，但服务端 440 ms 的同步耗时已经发生并被记录。

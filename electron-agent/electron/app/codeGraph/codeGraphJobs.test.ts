@@ -8,6 +8,13 @@ function setup(runSync = vi.fn(async (_id: string, _workspace: string, _progress
 }
 
 describe('CodeGraph SDK jobs', () => {
+  it('settles a cancel for a job this process is not running instead of leaving it waiting forever', async () => {
+    const { engine, callbacks, jobs } = setup();
+    await jobs.cancel('orphan-from-previous-process');
+    expect(callbacks.cancelled).toHaveBeenCalledWith('orphan-from-previous-process');
+    expect(engine.cancelSync).not.toHaveBeenCalled();
+  });
+
   it('reports unknown or inconsistent SDK totals as a stage without fabricated counts', async () => {
     const { engine, callbacks, jobs } = setup();
     engine.runSync.mockImplementationOnce(async (_id, _workspace, progress) => {

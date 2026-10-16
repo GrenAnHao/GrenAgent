@@ -7,6 +7,16 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 function fixture() { const f = taskFixture(); cleanups.push(f.cleanup); return { ...f, views: new TaskViewStore(f.db) }; }
 
 describe('TaskViewStore', () => {
+  it('shows "cancelling" only while the job is still active; a settled cancel is removable', () => {
+    const f = fixture(); const job = f.jobs.create({ kind: 'codegraph.sync', workspace: '/repo' });
+    f.jobs.start(job.id); f.jobs.requestCancellation(job.id);
+    expect(f.views.read({ source: 'user', id: job.id })).toMatchObject({ status: 'running', cancellationRequested: true, capabilities: { remove: false } });
+    f.jobs.cancel(job.id);
+    // 库里的标记还在，但任务已经落定：不能再显示「正在取消，等待确认」，也要能删。
+    expect(f.jobs.get(job.id)?.metadata?.cancellationRequested).toBe(true);
+    expect(f.views.read({ source: 'user', id: job.id })).toMatchObject({ status: 'cancelled', cancellationRequested: false, capabilities: { remove: true } });
+  });
+
   it('lists memory tasks without parsing their payload, while Wiki tasks still resolve kbId', () => {
     const f = fixture();
     f.system('wiki', 'completed', 10, { kbId: 'kb-1' });

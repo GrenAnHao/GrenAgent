@@ -32,11 +32,11 @@ import { AgentDataStorage } from "./agentData/storage";
 import { PluginManager } from "./app/plugin/pluginManager";
 import { builtinPluginDefinitions } from "./app/plugin/builtinPlugins";
 import { SystemWorkerManager } from "./pi/systemWorkerManager";
-import { CodeGraphService } from "./app/codeGraph/codeGraphService";
+import { CodeGraphHostClient } from "./app/codeGraph/codeGraphHostClient";
 import { CodeGraphJobs } from "./app/codeGraph/codeGraphJobs";
 import { validateProject } from "./app/validateProject";
 import { bootstrapRuntimeConfig } from "./agent/runtimeConfigBootstrap";
-import { resolveAgentHostEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
+import { resolveAgentHostEntry, resolveCodeGraphHostEntry, resolveCodeGraphWorkerEntry, resolveJobGuardExe, resolveWorkerEntry } from "./agent/workerEntry";
 import { ModelRuntimeHost } from "./agent/modelRuntimeHost";
 import { agentDataModelOverride, applyAgentDataModel } from "./agentData/agentDataSettings";
 import { getConfig, refreshConfig } from "../../extensions/_shared/runtime-config.js";
@@ -135,7 +135,26 @@ if (!process.env.VITEST) {
       complete: (input) => completeAgentData(input),
     });
     const knownWorkspaces = new Set<string>();
-    const codeGraph = new CodeGraphService({ listWorkspaces: () => [...knownWorkspaces] });
+    const entryInput = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname };
+    const jobGuardExe = resolveJobGuardExe(entryInput);
+    // CodeGraph 的索引与查询在 codegraph-host 子进程里跑：SDK 的写库与引用解析是同步的，放在主进程会把窗口卡住几十秒。
+    // 按需拉起（第一次查询或同步时），崩了下一条请求再拉起，连续崩溃时冷却；不带 V8 参数（字节码入口）。
+    const codeGraph = new CodeGraphHostClient({
+      listWorkspaces: () => [...knownWorkspaces],
+      createProcess: (onEvent) => new AgentProcessClient({
+        entry: resolveCodeGraphHostEntry(entryInput),
+        guard: (pid) => startJobGuard(pid, { exePath: jobGuardExe }),
+        execPath: process.execPath,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', CODEGRAPH_WORKER_ENTRY: resolveCodeGraphWorkerEntry(entryInput) },
+        hostMethods: {},
+        onEvent,
+        onExit: (exit) => recordDiagEvent({ kind: 'codegraph-host-exit', code: exit.code, signal: exit.signal, expected: exit.expected, stderrTail: exit.stderrTail.slice(-4_000) }),
+        log: (stream, line) => (stream === 'stderr' ? console.error : console.log)(`[codegraph-host] ${line}`),
+        readyTimeoutMs: 30_000,
+        shutdownTimeoutMs: 10_000,
+      }),
+      onDiag: (sample) => recordDiagEvent({ kind: 'codegraph-host-sample', ...sample }),
+    });
     const codeGraphJobs = new CodeGraphJobs(codeGraph, {
       start: (id) => agentData.request('admin.jobs.start', { id }),
       complete: (id) => agentData.request('admin.jobs.complete', { id }),
@@ -208,8 +227,6 @@ if (!process.env.VITEST) {
       extensions: () => agent.extensions.catalog(),
       requestReload: () => agent.resources.reload(),
     });
-    const entryInput = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname };
-    const jobGuardExe = resolveJobGuardExe(entryInput);
     agentProcess = new AgentProcessClient({
       entry: resolveAgentHostEntry(entryInput),
       // 子进程崩溃（或主进程崩溃）时，它拉起的 MCP 服务器、bash、子代理留下的子孙进程由守卫清掉。

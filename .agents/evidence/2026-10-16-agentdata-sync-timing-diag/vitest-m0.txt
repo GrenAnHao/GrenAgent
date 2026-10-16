@@ -1,0 +1,11 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:60004) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  4 passed (4)
+      Tests  17 passed (17)
+   Start at  15:10:36
+   Duration  983ms (transform 644ms, setup 0ms, import 893ms, tests 147ms, environment 0ms)
+

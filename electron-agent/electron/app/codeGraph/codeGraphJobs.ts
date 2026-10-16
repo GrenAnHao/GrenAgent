@@ -27,7 +27,9 @@ export class CodeGraphJobs {
   }
 
   async cancel(id: string): Promise<void> {
-    if (!this.active.has(id)) return;
+    // 本进程没在跑这个任务（上一个进程留下的孤儿）：没有执行者会来确认取消，在这里直接落定。
+    // 不落定的话任务永远停在「正在取消，等待确认」，重试和删除也一直不可用。
+    if (!this.active.has(id)) { await this.callbacks.cancelled(id); return; }
     this.cancelling.add(id);
     try { await this.engine.cancelSync(id); }
     catch (error) { this.cancelling.delete(id); throw error; }

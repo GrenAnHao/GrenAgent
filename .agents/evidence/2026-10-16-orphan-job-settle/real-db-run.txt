@@ -1,0 +1,12 @@
+{
+  "activeCount": 0,
+  "stuck": {
+    "status": "cancelled",
+    "cancellationRequested": false,
+    "capabilities": {
+      "cancel": false,
+      "retry": true,
+      "remove": true
+    }
+  }
+}

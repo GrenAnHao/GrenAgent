@@ -160,7 +160,8 @@ export class TaskViewStore {
       stage: safeStage(metadata?.stage) ?? (source === 'user' && kind === 'codegraph.sync' && status === 'running' ? '正在构建' : undefined) ?? systemStage(source, status),
       progress: measurable ? Math.round(metadata.processed! / metadata.total! * 100) : source === 'system' && status === 'completed' ? 100 : undefined,
       processed: source === 'user' ? metadata?.processed : undefined, total: source === 'user' ? metadata?.total : undefined,
-      cancellationRequested: source === 'user' && metadata?.cancellationRequested === true, retryOf: operationText(metadata?.retryOf, 'identifier'),
+      // 「已请求取消、等执行器确认」只对还在跑的任务有意义：落定后库里的标记不清，这里不再当成正在取消。
+      cancellationRequested: source === 'user' && active.has(status) && metadata?.cancellationRequested === true, retryOf: operationText(metadata?.retryOf, 'identifier'),
       attempts: source === 'system' ? Number(row.attempts) : undefined,
       error,
       createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
@@ -218,7 +219,7 @@ function memoryProcessed(kind: string, summary: Record<string, unknown>): number
 }
 function safeStage(value: unknown): string | undefined { return typeof value === 'string' && stages.has(value) ? value : undefined; }
 function safeError(value: unknown): string {
-  const code = typeof value === 'string' ? value.match(/^(MODEL_UNAVAILABLE|MODEL_CHANGED|WIKI_INGEST_INTERRUPTED|SOURCE_CHANGED|VERSION_CONFLICT)\b/)?.[1] : undefined;
+  const code = typeof value === 'string' ? value.match(/^(MODEL_UNAVAILABLE|MODEL_CHANGED|WIKI_INGEST_INTERRUPTED|JOB_INTERRUPTED|SOURCE_CHANGED|VERSION_CONFLICT)\b/)?.[1] : undefined;
   return code ? `${code}：任务执行未完成` : '任务执行失败，请检查相关配置与审计';
 }
 function safeSummary(value: unknown, strings: string[], counts: string[]): Record<string, unknown> {

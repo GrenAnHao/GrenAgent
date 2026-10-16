@@ -1,0 +1,149 @@
+{
+  "child": {
+    "mode": "child",
+    "files": 617,
+    "fullIndex": {
+      "ms": 7207,
+      "loop": {
+        "p99Ms": 27,
+        "maxMs": 29,
+        "maxHeartbeatGapMs": 29
+      },
+      "otherWorkspaceQueries": {
+        "n": 35,
+        "errors": 0,
+        "p50Ms": 14,
+        "p95Ms": 25,
+        "maxMs": 36
+      }
+    },
+    "incrementalSync": {
+      "ms": 563,
+      "loop": {
+        "p99Ms": 24,
+        "maxMs": 24,
+        "maxHeartbeatGapMs": 24
+      }
+    },
+    "incrementalVisible": true,
+    "concurrentSearch": {
+      "ms": 346,
+      "loop": {
+        "p99Ms": 23,
+        "maxMs": 23,
+        "maxHeartbeatGapMs": 23
+      }
+    },
+    "status": {
+      "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-jGjpQi\\src",
+      "connected": true,
+      "indexed": true,
+      "sdkAvailable": true,
+      "sdkVersion": "1.6.2",
+      "state": "indexed",
+      "files": 543,
+      "nodes": 7707,
+      "edges": 23641,
+      "lastIndexedAt": 1792153138950
+    },
+    "progressEvents": 1367,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "child-single": {
+    "mode": "child-single",
+    "files": 617,
+    "fullIndex": {
+      "ms": 6609,
+      "loop": {
+        "p99Ms": 26,
+        "maxMs": 27,
+        "maxHeartbeatGapMs": 27
+      },
+      "otherWorkspaceQueries": {
+        "n": 32,
+        "errors": 0,
+        "p50Ms": 19,
+        "p95Ms": 320,
+        "maxMs": 354
+      }
+    },
+    "incrementalSync": {
+      "ms": 536,
+      "loop": {
+        "p99Ms": 22,
+        "maxMs": 22,
+        "maxHeartbeatGapMs": 22
+      }
+    },
+    "incrementalVisible": true,
+    "concurrentSearch": {
+      "ms": 29,
+      "loop": {
+        "p99Ms": 11,
+        "maxMs": 11,
+        "maxHeartbeatGapMs": 11
+      }
+    },
+    "status": {
+      "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-LBxk7D\\src",
+      "connected": true,
+      "indexed": true,
+      "sdkAvailable": true,
+      "sdkVersion": "1.6.2",
+      "state": "indexed",
+      "files": 543,
+      "nodes": 7707,
+      "edges": 23641,
+      "lastIndexedAt": 1792153152026
+    },
+    "progressEvents": 1367,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "inproc": {
+    "mode": "inproc",
+    "files": 617,
+    "fullIndex": {
+      "ms": 7000,
+      "loop": {
+        "p99Ms": 207,
+        "maxMs": 310,
+        "maxHeartbeatGapMs": 352
+      },
+      "otherWorkspaceQueries": {
+        "n": 34,
+        "errors": 0,
+        "p50Ms": 16,
+        "p95Ms": 208,
+        "maxMs": 280
+      }
+    },
+    "incrementalSync": {
+      "ms": 520,
+      "loop": {
+        "p99Ms": 18,
+        "maxMs": 18,
+        "maxHeartbeatGapMs": 297
+      }
+    },
+    "incrementalVisible": true,
+    "concurrentSearch": {
+      "ms": 25,
+      "loop": {
+        "p99Ms": 0,
+        "maxMs": 0,
+        "maxHeartbeatGapMs": 0
+      }
+    },
+    "status": {
+      "files": 543,
+      "nodes": 7707,
+      "state": "indexed"
+    }
+  }
+}

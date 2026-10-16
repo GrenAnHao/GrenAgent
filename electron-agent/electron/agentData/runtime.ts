@@ -22,12 +22,15 @@ import type { ServiceTask, ServiceTaskHooks } from '../app/appServer/types';
 import { isRpcRequest, PROTOCOL_VERSION, RpcError, type AgentDataEndpoint, type RpcResponse } from './protocol';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from './codeRetrievalProtocol';
 import { RequestFrameDecoder } from './requestFrames';
+import { agentDataTiming, timeSync } from './methodTiming';
 import { ToolAuditStore } from '../app/toolPermission/auditStore';
 import { ToolRuleStore } from '../app/toolPermission/ruleStore';
 import { ToolDecisionService } from '../app/toolPermission/toolDecisionService';
 import { toolPermissionMethods } from '../app/toolPermission/rpc';
 
 export type AgentDataMethod = (params: Record<string, unknown>) => unknown | Promise<unknown>;
+
+const SYSTEM_METHODS = new Set(['system.hello', 'system.status', 'system.shutdown']);
 
 export interface AgentDataJobRunner {
   run(jobId: string, workspace: string, expectedModel?: string): Promise<void>;
@@ -122,10 +125,12 @@ export class AgentDataRuntime {
         registry,
         execute: async (task, hooks) => {
           const output = await this.options.executeServiceTask!(task, hooks);
-          if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
-          if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
-          if (task.kind === 'memory_scene') this.memoryService!.completeScene(task.id, output);
-          if (task.kind === 'memory_persona') this.memoryService!.completePersona(task.id, output);
+          timeSync(`task.${task.kind}.complete`, () => {
+            if (task.kind === 'memory_extract') this.memoryService!.completeExtraction(task.id, output);
+            if (task.kind === 'memory_deduplicate') this.memoryService!.completeDedup(task.id, output);
+            if (task.kind === 'memory_scene') this.memoryService!.completeScene(task.id, output);
+            if (task.kind === 'memory_persona') this.memoryService!.completePersona(task.id, output);
+          });
           return output;
         },
         onSettled: (task) => this.memoryService!.taskSettled(task),
@@ -143,6 +148,7 @@ export class AgentDataRuntime {
       ? (this.temporaryWikiRoot = mkdtempSync(join(tmpdir(), 'agent-data-wiki-')))
       : join(dirname(resolve(this.options.dataPath)), 'wiki'));
     this.jobs = new JobStore(this.storage.db);
+    this.settleOrphanJobs();
     this.wiki = new WikiService({
       root: wikiRoot,
       db: this.storage.db,
@@ -173,6 +179,19 @@ export class AgentDataRuntime {
     return this.endpoint;
   }
 
+  /**
+   * 执行器（jobRunners）都在本进程里：启动时还是 pending / running 的这类任务，执行它的是上一个进程，已经没有人在跑。
+   * 请求过取消的记为已取消，其余记为失败（可重试）。不收尾的话它们永远占着「运行中」：新的同类任务报
+   * JOB_ALREADY_RUNNING，取消永远等不到确认，删除和重试也不可用。没有执行器的种类只落库、不归本进程管，不动。
+   */
+  private settleOrphanJobs(): void {
+    for (const job of [...this.jobs!.list('pending'), ...this.jobs!.list('running')]) {
+      if (!this.options.jobRunners?.[job.kind]) continue;
+      if (job.metadata?.cancellationRequested) this.jobs!.cancel(job.id);
+      else this.jobs!.fail(job.id, 'JOB_INTERRUPTED: 应用重启时任务仍在运行，已中断');
+    }
+  }
+
   handleStdinEnd(): void { this.close(); }
   isClosed(): boolean { return this.closed; }
   getEndpoint(): AgentDataEndpoint | undefined { return this.endpoint; }
@@ -193,14 +212,25 @@ export class AgentDataRuntime {
   async requestAdmin<T>(name: string, params: Record<string, unknown> = {}): Promise<T> {
     if (!this.endpoint || this.closed) throw new Error('agent data runtime is not started');
     this.inFlight += 1;
+    const begun = performance.now();
+    let label = 'admin.unknown';
+    let syncMs = 0;
+    let stop = agentDataTiming.start();
     try {
       const method = this.operationsMethod(name) ?? this.memoryManagementMethod(name) ?? this.wikiMethod(name, 'admin');
       if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown management method: ${name}`);
-      return await method(params) as T;
+      label = name;
+      const pending = method(params);
+      syncMs += stop();
+      try { return await pending as T; } finally { stop = agentDataTiming.start(); }
     } catch (error) {
       if (error instanceof RpcError) throw new Error(`${error.code}: ${error.message}`);
       throw error;
-    } finally { this.inFlight -= 1; this.finishClose(); }
+    } finally {
+      syncMs += stop();
+      agentDataTiming.record(label, syncMs, { totalMs: performance.now() - begun, nested: agentDataTiming.nested });
+      this.inFlight -= 1; this.finishClose();
+    }
   }
 
   private authorized(token: string): boolean { return token === this.token || this.projectTokens.has(token); }
@@ -336,12 +366,19 @@ export class AgentDataRuntime {
 
   private async handleLine(socket: Socket, line: string): Promise<void> {
     this.inFlight += 1;
+    // 只记同步段（解析 + 调用到返回 + 应答序列化与写出），不含 await 的等待。见 methodTiming.ts。
+    const begun = performance.now();
+    let label = 'invalid';
+    let syncMs = 0;
+    let stop = agentDataTiming.start();
     let response: RpcResponse;
     let shutdown = false;
     try {
       const value = JSON.parse(line) as unknown;
       if (!isRpcRequest(value)) throw new RpcError('INVALID_REQUEST', 'invalid RPC request');
       if (!this.authorized(value.token)) throw new RpcError('UNAUTHORIZED', 'invalid token');
+      // 未解析出处理函数的请求统一记作 rejected：方法名来自 socket，不能让它撑大统计表。
+      label = SYSTEM_METHODS.has(value.method) ? value.method : 'rejected';
       if (value.method === 'system.hello') response = { id: value.id, ok: true, result: { version: PROTOCOL_VERSION } };
       else if (value.method === 'system.status') response = { id: value.id, ok: true, result: { state: this.closed ? 'closed' : 'ready', version: PROTOCOL_VERSION } };
       else if (value.method === 'system.shutdown') {
@@ -357,13 +394,20 @@ export class AgentDataRuntime {
         const method = value.method.startsWith('wiki.') ? this.wikiMethod(value.method, 'project')
           : projectJobs ?? this.options.methods?.[value.method] ?? this.memoryMethod(value.method) ?? this.adminMethod(value.method) ?? this.toolPermissionMethod(value.method, workspace) ?? this.threadMethod(value.method);
         if (!method) throw new RpcError('METHOD_NOT_FOUND', `unknown method: ${value.method}`);
-        response = { id: value.id, ok: true, result: await method(value.params) };
+        label = value.method;
+        const pending = method(value.params);
+        syncMs += stop();
+        let result: unknown;
+        try { result = await pending; } finally { stop = agentDataTiming.start(); }
+        response = { id: value.id, ok: true, result };
       }
     } catch (error) {
       const e = wikiRpcError(error);
       response = { id: this.requestId(line), ok: false, error: { code: e.code, message: e.message } };
     }
     if (!socket.destroyed) socket.write(`${JSON.stringify(response)}\n`, () => { if (shutdown) this.close(); });
+    syncMs += stop();
+    agentDataTiming.record(label, syncMs, { totalMs: performance.now() - begun, nested: agentDataTiming.nested });
     this.inFlight -= 1;
     this.finishClose();
   }

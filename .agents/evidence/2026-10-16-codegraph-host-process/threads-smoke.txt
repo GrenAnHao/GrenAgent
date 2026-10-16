@@ -1,0 +1,186 @@
+
+== child: 617 个文件（D:\OneDrive\Project Files\Pi\extensions）
+{
+  "mode": "child",
+  "files": 617,
+  "fullIndex": {
+    "ms": 7207,
+    "loop": {
+      "p99Ms": 27,
+      "maxMs": 29,
+      "maxHeartbeatGapMs": 29
+    },
+    "otherWorkspaceQueries": {
+      "n": 35,
+      "errors": 0,
+      "p50Ms": 14,
+      "p95Ms": 25,
+      "maxMs": 36
+    }
+  },
+  "incrementalSync": {
+    "ms": 563,
+    "loop": {
+      "p99Ms": 24,
+      "maxMs": 24,
+      "maxHeartbeatGapMs": 24
+    }
+  },
+  "incrementalVisible": true,
+  "concurrentSearch": {
+    "ms": 346,
+    "loop": {
+      "p99Ms": 23,
+      "maxMs": 23,
+      "maxHeartbeatGapMs": 23
+    }
+  },
+  "status": {
+    "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-jGjpQi\\src",
+    "connected": true,
+    "indexed": true,
+    "sdkAvailable": true,
+    "sdkVersion": "1.6.2",
+    "state": "indexed",
+    "files": 543,
+    "nodes": 7707,
+    "edges": 23641,
+    "lastIndexedAt": 1792153138950
+  },
+  "progressEvents": 1367,
+  "exit": {
+    "code": 0,
+    "signal": null
+  }
+}
+
+== child-single: 617 个文件（D:\OneDrive\Project Files\Pi\extensions）
+{
+  "mode": "child-single",
+  "files": 617,
+  "fullIndex": {
+    "ms": 6609,
+    "loop": {
+      "p99Ms": 26,
+      "maxMs": 27,
+      "maxHeartbeatGapMs": 27
+    },
+    "otherWorkspaceQueries": {
+      "n": 32,
+      "errors": 0,
+      "p50Ms": 19,
+      "p95Ms": 320,
+      "maxMs": 354
+    }
+  },
+  "incrementalSync": {
+    "ms": 536,
+    "loop": {
+      "p99Ms": 22,
+      "maxMs": 22,
+      "maxHeartbeatGapMs": 22
+    }
+  },
+  "incrementalVisible": true,
+  "concurrentSearch": {
+    "ms": 29,
+    "loop": {
+      "p99Ms": 11,
+      "maxMs": 11,
+      "maxHeartbeatGapMs": 11
+    }
+  },
+  "status": {
+    "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-LBxk7D\\src",
+    "connected": true,
+    "indexed": true,
+    "sdkAvailable": true,
+    "sdkVersion": "1.6.2",
+    "state": "indexed",
+    "files": 543,
+    "nodes": 7707,
+    "edges": 23641,
+    "lastIndexedAt": 1792153152026
+  },
+  "progressEvents": 1367,
+  "exit": {
+    "code": 0,
+    "signal": null
+  }
+}
+
+== inproc: 617 个文件（D:\OneDrive\Project Files\Pi\extensions）
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+{
+  "mode": "inproc",
+  "files": 617,
+  "fullIndex": {
+    "ms": 7000,
+    "loop": {
+      "p99Ms": 207,
+      "maxMs": 310,
+      "maxHeartbeatGapMs": 352
+    },
+    "otherWorkspaceQueries": {
+      "n": 34,
+      "errors": 0,
+      "p50Ms": 16,
+      "p95Ms": 208,
+      "maxMs": 280
+    }
+  },
+  "incrementalSync": {
+    "ms": 520,
+    "loop": {
+      "p99Ms": 18,
+      "maxMs": 18,
+      "maxHeartbeatGapMs": 297
+    }
+  },
+  "incrementalVisible": true,
+  "concurrentSearch": {
+    "ms": 25,
+    "loop": {
+      "p99Ms": 0,
+      "maxMs": 0,
+      "maxHeartbeatGapMs": 0
+    }
+  },
+  "status": {
+    "files": 543,
+    "nodes": 7707,
+    "state": "indexed"
+  }
+}
+PASS  child: 全量索引期间主进程事件循环 p99 27ms < 50ms
+PASS  child: 全量索引期间主进程最长卡顿 29ms / 心跳间隔 29ms < 200ms
+PASS  child: 增量同步期间主进程最长卡顿 24ms < 200ms
+PASS  child: 8 路并发检索期间主进程最长卡顿 23ms < 200ms
+PASS  child: A 全量索引期间查 B 35 次，失败 0 次
+PASS  child: A 全量索引期间查 B p50 14ms / p95 25ms / 最长 36ms（最长 < 500ms）
+PASS  child: 增量同步后新符号可查
+PASS  child: 状态 indexed，543 个文件
+PASS  child: 收到 1367 条进度事件
+PASS  child: 关停后子进程以 0 退出（{"code":0,"signal":null}）
+对照 child-single（上一版单线程子进程）：全量索引期间主进程最长卡顿 27ms；查 B 32 次，p50 19ms / p95 320ms / 最长 354ms
+对照 inproc（单线程）：全量索引期间主进程 p99 207ms，最长卡顿 310ms；查 B 34 次，p50 16ms / p95 208ms / 最长 280ms
+
+全部通过
+exit 0

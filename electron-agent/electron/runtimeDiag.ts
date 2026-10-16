@@ -3,6 +3,7 @@ import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { getHeapStatistics } from 'node:v8';
+import { agentDataTiming } from './agentData/methodTiming';
 
 /**
  * 主进程运行诊断：每 10 秒往 <logs>/runtime-diag.jsonl 写一行。
@@ -11,6 +12,8 @@ import { getHeapStatistics } from 'node:v8';
  * 这里记的是定位要用的最小集合：各进程内存、主进程 V8 堆、事件循环延迟、渲染层 JS 堆、
  * 这段时间里最耗主线程的 IPC 命令、推给渲染层的事件数和因帧已销毁被丢掉的推送数，
  * 以及渲染/子进程退出的原因（agent-host 退出记为 kind: 'agent-host-exit'）。
+ * sample.agentData 是 AgentData 各方法在主线程上的同步耗时（见 agentData/methodTiming.ts），
+ * scripts/diag-agentdata-report.mjs 用它算卡顿里 AgentData 的占比。
  */
 
 const INTERVAL_MS = 10_000;
@@ -174,6 +177,8 @@ export function startRuntimeDiag(dir: string = app.getPath('logs')): () => void 
     eventCounts.clear();
     const dropped = droppedSends;
     droppedSends = 0;
+    // AgentData 在本进程事件循环上的同步耗时；窗口里没有调用时不写这个字段。
+    const agentData = agentDataTiming.drain();
     const processes = app.getAppMetrics().map((p) => ({
       pid: p.pid,
       type: p.type,
@@ -182,7 +187,7 @@ export function startRuntimeDiag(dir: string = app.getPath('logs')): () => void 
     }));
     void Promise.all(BrowserWindow.getAllWindows().map((w) => rendererHeap(w.webContents)))
       .then((rendererJsHeapMB) => {
-        write({ kind: 'sample', main: memory(), lag: lagStats, processes, rendererJsHeapMB, events, droppedSends: dropped, ipc });
+        write({ kind: 'sample', main: memory(), lag: lagStats, processes, rendererJsHeapMB, events, droppedSends: dropped, ipc, ...(agentData ? { agentData } : {}) });
       })
       .finally(() => {
         sampling = false;

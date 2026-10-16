@@ -31,6 +31,7 @@ import {
 } from './indexDb';
 import { createLlmClient, type CompleteFn } from './llm';
 import { createLogger } from './logger';
+import { timeSync } from '../methodTiming';
 
 const log = createLogger('wiki-service');
 const DEFAULT_PURPOSE = `This knowledge base accumulates and organizes engineering knowledge of software systems,
@@ -888,9 +889,12 @@ CREATE TABLE IF NOT EXISTS wiki_assets (
   }
 
   private rebuildPageIndex(asset: WikiAsset): void {
-    const pages = this.scanWikiPages(asset);
-    writeIndex(asset.dir, pages);
-    evictWikiDb(asset.wikiId);
+    // 每次写页都全量重建，耗时随页数线性增长；ingest 的续体里也会调到，单独计时。
+    timeSync('wiki.rebuildPageIndex', () => {
+      const pages = this.scanWikiPages(asset);
+      writeIndex(asset.dir, pages);
+      evictWikiDb(asset.wikiId);
+    });
   }
 
   /**

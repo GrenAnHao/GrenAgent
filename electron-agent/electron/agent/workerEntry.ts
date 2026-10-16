@@ -18,6 +18,16 @@ export function resolveAgentHostEntry(input: EntryInput): string {
   return resolveMainScript('agent-host.js', input);
 }
 
+/** codegraph-host 子进程：CodeGraph SDK 的索引与查询都在这里跑，不占主线程。 */
+export function resolveCodeGraphHostEntry(input: EntryInput): string {
+  return resolveMainScript('codegraph-host.js', input);
+}
+
+/** codegraph-host 里的 SDK 工作线程（一个写线程、若干读线程共用这个入口）。 */
+export function resolveCodeGraphWorkerEntry(input: EntryInput): string {
+  return resolveMainScript('codegraph-worker.js', input);
+}
+
 /** agent-host 的进程树守卫（Windows）。构建时由 copyPiAdjacentAssets 拷到 out/main。 */
 export function resolveJobGuardExe(input: EntryInput): string {
   return resolveMainScript('pi-job-guard.exe', input);

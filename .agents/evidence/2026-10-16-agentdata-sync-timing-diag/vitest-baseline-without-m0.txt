@@ -1,0 +1,268 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:33016) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60884) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57608) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:43428) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/agentData/auditViewStore.test.ts (12 tests | 4 failed) 73ms
+     × applies combined action, resource and inclusive time filters before limiting 12ms
+     × preserves resource name snapshots after deletion and does not invent legacy names 4ms
+     × retains normal model slugs, Unicode resource labels and absolute project paths 3ms
+     × retains safe legacy page paths with spaces and Unicode without relaxing other IDs 3ms
+ ❯ |main| electron/app/taskViewService.test.ts (14 tests | 4 failed) 147ms
+     × derives capabilities from a live executor and current target, keeping all system actions read-only 11ms
+     × requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs 4ms
+     × passes only still-pending original source IDs to retry and never incorporates newer sources 3ms
+     × never resolves a model or starts a worker while listing or reading task capabilities 9ms
+ ❯ |main| electron/agentData/jobCleanup.test.ts (2 tests | 2 failed) 55ms
+     × removes only terminal records and preserves Wiki, memory and audit data 42ms
+     × requires explicit valid IDs instead of interpreting missing input as clear-all 12ms
+ ❯ |main| electron/agentData/runtime.test.ts (15 tests | 4 failed) 2041ms
+     × exposes module overview and code retrieval status contracts 128ms
+     × dispatches a created job to its registered runner 132ms
+     × does not record a runner rejection as failure after the job is already terminal 139ms
+     × defers the cancelled state to the runner so no work happens after it lands 152ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > applies combined action, resource and inclusive time filters before limiting
+AssertionError: expected [ 'match-new' ] to deeply equal [ 'match-old' ]
+
+- Expected
++ Received
+
+  [
+-   "match-old",
++   "match-new",
+  ]
+
+ ❯ electron/agentData/auditViewStore.test.ts:35:171
+     33|     const first = store.query({ action: 'wiki.ingest.publish', resourc…
+     34|     expect(first.items.map((item) => item.id)).toEqual(['match-new']);
+     35|     expect(store.query({ action: 'wiki.ingest.publish', resource: { ty…
+       |                                                                                                                                                                           ^
+     36|   });
+     37|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > preserves resource name snapshots after deletion and does not invent legacy names
+AssertionError: expected undefined to be '资源已移除（gone-kb）' // Object.is equality
+
+- Expected:
+"资源已移除（gone-kb）"
+
++ Received:
+undefined
+
+ ❯ electron/agentData/auditViewStore.test.ts:72:72
+     70|     const entries = store.query({ resource: { type: 'wiki', id: 'gone-…
+     71|     expect(entries.find((item) => item.id === 'named')?.resourceName).…
+     72|     expect(entries.find((item) => item.id === 'legacy')?.resourceName)…
+       |                                                                        ^
+     73|   });
+     74|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains normal model slugs, Unicode resource labels and absolute project paths
+AssertionError: expected undefined to match object { resourceName: '知识库：研发 / 资料', …(1) }
+
+- Expected:
+{
+  "detail": {
+    "error": "MODEL_CHANGED: provider/model-v1:latest",
+    "model": "provider/model-v1:latest",
+  },
+  "resourceName": "知识库：研发 / 资料",
+}
+
++ Received:
+undefined
+
+ ❯ electron/agentData/auditViewStore.test.ts:91:75
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains safe legacy page paths with spaces and Unicode without relaxing other IDs
+AssertionError: expected {} to match object { page: 'docs/Design Notes.md' }
+
+- Expected
++ Received
+
+- {
+-   "page": "docs/Design Notes.md",
+- }
++ {}
+
+ ❯ electron/agentData/auditViewStore.test.ts:102:64
+    100|     add('page', 'wiki.ingest.publish', { kbId: 'k', pageId: '设计 文档/入门 …
+    101|     const items = store.query().items;
+    102|     expect(items.find((item) => item.id === 'legacy')?.detail).toMatch…
+       |                                                                ^
+    103|     expect(items.find((item) => item.id === 'page')?.detail).toMatchOb…
+    104|     expect(items.find((item) => item.id === 'page')?.detail).not.toHav…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > removes only terminal records and preserves Wiki, memory and audit data
+Error: METHOD_NOT_FOUND: unknown management method: wiki.replace
+ ❯ AgentDataRuntime.requestAdmin electron/agentData/runtime.ts:201:44
+    199|       return await method(params) as T;
+    200|     } catch (error) {
+    201|       if (error instanceof RpcError) throw new Error(`${error.code}: $…
+       |                                            ^
+    202|       throw error;
+    203|     } finally { this.inFlight -= 1; this.finishClose(); }
+ ❯ electron/agentData/jobCleanup.test.ts:15:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > requires explicit valid IDs instead of interpreting missing input as clear-all
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > dispatches a created job to its registered runner
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > does not record a runner rejection as failure after the job is already terminal
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > defers the cancelled state to the runner so no work happens after it lands
+RpcError: Wiki jobs are no longer created through the job queue
+ ❯ AgentDataClient.resolve electron/agentData/client.ts:72:70
+     70|   private resolve(response: RpcResponse): void {
+     71|     const item = this.pending.get(response.id); if (!item) return; thi…
+     72|     if (response.ok) item.resolve(response.result); else item.reject(n…
+       |                                                                      ^
+     73|   }
+     74|   private fail(id: string, error: unknown): void { const item = this.p…
+ ❯ Socket.<anonymous> electron/agentData/client.ts:53:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > exposes module overview and code retrieval status contracts
+AssertionError: promise rejected "Error: METHOD_NOT_FOUND: unknown manageme…" instead of resolving
+ ❯ electron/agentData/runtime.test.ts:93:91
+     91|     });
+     92|
+     93|     await expect(runtime.requestAdmin('wiki.admin.overview', { workspa…
+       |                                                                                           ^
+     94|       pages: 0,
+     95|       latestUpdatedAt: null,
+
+Caused by: Error: METHOD_NOT_FOUND: unknown management method: wiki.admin.overview
+ ❯ AgentDataRuntime.requestAdmin electron/agentData/runtime.ts:201:44
+ ❯ electron/agentData/runtime.test.ts:93:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > derives capabilities from a live executor and current target, keeping all system actions read-only
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ electron/app/taskViewService.test.ts:50:84
+     48|     expect(rows.find((row) => row.ref.id === retryable.id)?.capabiliti…
+     49|     expect(rows.find((row) => row.ref.id === unknown.id)?.capabilities…
+     50|     expect(rows.find((row) => row.ref.id === knownActive.id)?.capabili…
+       |                                                                                    ^
+     51|     expect(rows.find((row) => row.ref.id === unknownActive.id)?.capabi…
+     52|     expect((await f.service.read({ source: 'system', id: 'system' }))?…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs
+AssertionError: promise rejected "Error: TASK_RETRY_UNAVAILABLE" instead of resolving
+ ❯ electron/app/taskViewService.test.ts:80:46
+     78|   it('requires model confirmation for both Wiki paths and rejects unav…
+     79|     const f = fixture(); const old = f.failed('wiki.ingest'); const re…
+     80|     await expect(f.service.previewRetry(ref)).resolves.toMatchObject({…
+       |                                              ^
+     81|     await expect(f.service.retry(ref)).rejects.toThrow('MODEL_CONFIRMA…
+     82|     await expect(f.service.retry(ref, { expectedModel: 'other/model' }…
+
+Caused by: Error: TASK_RETRY_UNAVAILABLE
+ ❯ TaskViewService.requireRetryable electron/app/taskViewService.ts:63:37
+ ❯ TaskViewService.previewRetry electron/app/taskViewService.ts:29:22
+ ❯ electron/app/taskViewService.test.ts:80:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > passes only still-pending original source IDs to retry and never incorporates newer sources
+Error: TASK_RETRY_UNAVAILABLE
+ ❯ TaskViewService.requireRetryable electron/app/taskViewService.ts:63:37
+     61|   private requireRetryable(ref: TaskRef): Job {
+     62|     const job = this.requireUserTask(ref);
+     63|     if (!this.retryable(job)) throw new Error('TASK_RETRY_UNAVAILABLE'…
+       |                                     ^
+     64|     if (!this.options.views.read(ref)?.capabilities.remove) throw new …
+     65|     return job;
+ ❯ TaskViewService.retry electron/app/taskViewService.ts:35:22
+ ❯ electron/app/taskViewService.test.ts:94:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  |main| electron/app/taskViewService.test.ts > TaskViewService > never resolves a model or starts a worker while listing or reading task capabilities
+AssertionError: expected { items: [ { …(19) } ], …(1) } to match object { items: [ ObjectContaining{…} ] }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "items": [
+      {
++       "attempts": undefined,
++       "cancellationRequested": false,
+        "capabilities": {
+-         "retry": true,
++         "cancel": false,
++         "remove": true,
++         "retry": false,
++       },
++       "createdAt": 1792134431388,
++       "error": "任务执行失败，请检查相关配置与审计",
++       "key": "user:3be6b161-4b7b-44eb-b5ef-90046819f53c",
++       "kind": "wiki.ingest",
++       "label": "Wiki 资料提取",
++       "processed": undefined,
++       "progress": undefined,
++       "ref": {
++         "id": "3be6b161-4b7b-44eb-b5ef-90046819f53c",
++         "source": "user",
++       },
++       "resource": {
++         "id": "kb",
++         "type": "wiki",
+        },
++       "resourceName": undefined,
++       "retryOf": undefined,
++       "stage": undefined,
++       "status": "failed",
++       "total": undefined,
++       "updatedAt": 1792134431388,
++       "workspace": "/repo",
+      },
+    ],
+  }
+
+ ❯ electron/app/taskViewService.test.ts:104:35
+    102|   it('never resolves a model or starts a worker while listing or readi…
+    103|     const f = fixture(); const old = f.failed('wiki.ingest');
+    104|     await expect(f.service.list()).resolves.toMatchObject({ items: [ex…
+       |                                   ^
+    105|     await expect(f.service.read({ source: 'user', id: old.id })).resol…
+    106|     expect(f.previewWikiRetry).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  14 failed | 29 passed (43)
+   Start at  15:07:10
+   Duration  3.00s (transform 1.03s, setup 0ms, import 1.47s, tests 2.32s, environment 0ms)
+

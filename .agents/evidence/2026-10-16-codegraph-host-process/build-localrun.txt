@@ -1,0 +1,50 @@
+vite v8.3.0 building ssr environment for localrun...
+transforming...
+✓ 1073 modules transformed.
+
+(!) outDir C:\Users\rxstudio\AppData\Local\Temp\cgbuild\main is not inside project root and will not be emptied.
+Use --emptyOutDir to override.
+
+rendering chunks...
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/deferred-manifest-6fF-e1-t.js            0.09 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/embedded-events-C1EZ07J5.js              0.44 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/resource-reload-CpaUX8JR.js              0.73 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/subagentProcessRegistry-B4XobV8s.js      1.19 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/grep-Gn7671HK.js                         1.39 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/contract-BBuQrN0Q.js                     1.90 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/rolldown-runtime-BMI-E3GI.js             1.92 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/active-runs-v2cFBqJ4.js                  2.04 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/toolsCache-ClumG9nH.js                   2.33 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/edit-C6-fyxXM.js                         2.94 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/leak-owner-DJa_cs01.js                   3.07 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/runtime-config-6QvA3AU0.js               3.19 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/pi-worker.js                                    3.30 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/rpc-peer-DtWHudsE.js                     3.95 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/worker-host-BAXIBjoP.js                  6.70 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/agent-host.js                                   6.88 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/worker-session-buw-I3ED.js              13.94 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/indexProbe-FB5YlR2A.js                  15.38 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/controlPlane-BK9mFSLz.js                16.43 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/modelRuntimeHost-Bk3GkY-d.js            17.18 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/subagent-meta-Dk3Ccycl.js               18.47 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/probe-B11AKaB6.js                       31.60 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/codegraph-host.js                              32.84 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/session-BUr1iwlC.js                     34.82 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/activation-RGjwzg3b.js                  60.18 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/lang-qs1BJMTb.js                        86.21 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/runtimeGraph-B49usfRt.js               128.51 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/embedded-runner-Dtv0X0CU.js            184.98 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/main.js                                       615.79 kB
+C:/Users/rxstudio/AppData/Local/Temp/cgbuild/main/chunks/extensions-D2Aup4dn.js               2,561.30 kB
+
+✓ built in 447ms
+error during build:
+Error: EBUSY: resource busy or locked, copyfile 'D:\OneDrive\Project Files\Pi\electron-agent\native\bin\pi-job-guard.exe' -> 'D:\OneDrive\Project Files\Pi\electron-agent\out\main\pi-job-guard.exe'
+    at copyFileSync (node:fs:3088:11)
+    at copyAssetsTo (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/electron.vite.config.1792151636818.mjs:23:10)
+    at copyPiAdjacentAssets (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/electron.vite.config.1792151636818.mjs:27:3)
+    at PluginContextImpl.closeBundle (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/electron.vite.config.1792151636818.mjs:148:13)
+    at PluginContextImpl.handler (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/node_modules/.pnpm/vite@8.3.0_@types+node@22.2_d2adbb2f3ade9852378f7a40a4052fb6/node_modules/vite/dist/node/chunks/node.js:34341:13)
+    at plugin (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/node_modules/.pnpm/rolldown@1.2.6/node_modules/rolldown/dist/shared/bindingify-input-options-4JJxbZl2.mjs:1723:17)
+    at file:///D:/OneDrive/Project%20Files/Pi/electron-agent/node_modules/.pnpm/rolldown@1.2.6/node_modules/rolldown/dist/shared/bindingify-input-options-4JJxbZl2.mjs:1930:21
+    at plugin.<computed> (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/node_modules/.pnpm/rolldown@1.2.6/node_modules/rolldown/dist/shared/bindingify-input-options-4JJxbZl2.mjs:2127:18)

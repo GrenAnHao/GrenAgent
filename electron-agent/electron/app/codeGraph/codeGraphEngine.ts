@@ -4,6 +4,7 @@ import type { CodeGraph, IndexProgress } from '@colbymchenry/codegraph';
 import { readCodeRetrievalTool, validateCodeRetrievalArgs, type CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import { executeCodeGraphTool } from './codeGraphQuery';
+import { timeSync } from '../../agentData/methodTiming';
 import { isIndexed } from './indexProbe';
 
 export const CODEGRAPH_SDK_VERSION = '1.6.2';
@@ -65,7 +66,8 @@ export class CodeGraphEngine {
     this.assertOpen();
     const name = readCodeRetrievalTool(tool);
     const validated = validateCodeRetrievalArgs(workspace, name, args);
-    return this.read(workspace, (graph) => executeCodeGraphTool(graph, workspace, name, validated));
+    // 只计到它第一次 await 为止；explore / context 内部还有 await，后半段不在统计里。
+    return this.read(workspace, (graph) => timeSync(`codegraph.${name}`, () => executeCodeGraphTool(graph, workspace, name, validated)));
   }
 
   async runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<void> {
@@ -112,6 +114,22 @@ export class CodeGraphEngine {
 
   async cancelSync(jobId: string): Promise<void> {
     this.jobs.get(jobId)?.controller.abort();
+  }
+
+  /**
+   * 等本引擎里该工作区的在途读结束，再关掉缓存的图。另一个线程要写这个库之前由调度方调用：
+   * 写完以后读方重新打开，不会拿着写之前的连接和读缓存。调用方负责在此期间不再发新的读。
+   */
+  async evict(workspace: string): Promise<void> {
+    const key = this.key(workspace);
+    await Promise.allSettled([...(this.reads.get(key) ?? [])]);
+    const entry = this.entries.get(key);
+    if (!entry || this.writers.has(key)) return;
+    if (entry.opening) await entry.opening.catch(() => undefined);
+    if (this.reads.has(key)) return;
+    this.clearTimer(key);
+    entry.graph?.close();
+    this.entries.delete(key);
   }
 
   close(): Promise<void> {

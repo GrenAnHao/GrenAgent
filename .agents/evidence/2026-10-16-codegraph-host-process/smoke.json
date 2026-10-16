@@ -1,0 +1,85 @@
+{
+  "child": {
+    "mode": "child",
+    "files": 617,
+    "fullIndex": {
+      "ms": 7304,
+      "loop": {
+        "p99Ms": 23,
+        "maxMs": 25,
+        "maxHeartbeatGapMs": 25
+      },
+      "searchesDuring": 20,
+      "searchErrorsDuring": 0
+    },
+    "incrementalSync": {
+      "ms": 615,
+      "loop": {
+        "p99Ms": 22,
+        "maxMs": 22,
+        "maxHeartbeatGapMs": 22
+      }
+    },
+    "incrementalVisible": true,
+    "concurrentSearch": {
+      "ms": 34,
+      "loop": {
+        "p99Ms": 11,
+        "maxMs": 11,
+        "maxHeartbeatGapMs": 13
+      }
+    },
+    "status": {
+      "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-smoke-Hl4BNd\\src",
+      "connected": true,
+      "indexed": true,
+      "sdkAvailable": true,
+      "sdkVersion": "1.6.2",
+      "state": "indexed",
+      "files": 543,
+      "nodes": 7707,
+      "edges": 23641,
+      "lastIndexedAt": 1792152305157
+    },
+    "progressEvents": 1153,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "inproc": {
+    "mode": "inproc",
+    "files": 617,
+    "fullIndex": {
+      "ms": 6459,
+      "loop": {
+        "p99Ms": 251,
+        "maxMs": 452,
+        "maxHeartbeatGapMs": 454
+      },
+      "searchesDuring": 18,
+      "searchErrorsDuring": 0
+    },
+    "incrementalSync": {
+      "ms": 550,
+      "loop": {
+        "p99Ms": 24,
+        "maxMs": 24,
+        "maxHeartbeatGapMs": 326
+      }
+    },
+    "incrementalVisible": true,
+    "concurrentSearch": {
+      "ms": 25,
+      "loop": {
+        "p99Ms": 0,
+        "maxMs": 0,
+        "maxHeartbeatGapMs": 0
+      }
+    },
+    "status": {
+      "files": 543,
+      "nodes": 7707
+    }
+  }
+}

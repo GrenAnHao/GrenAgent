@@ -91,6 +91,13 @@ describe('source code protection: electron-builder', () => {
     }
   });
 
+  it('unpacks the codegraph-host entry and its worker thread entry', () => {
+    expect(config.asarUnpack).toContain('out/main/codegraph-host.js');
+    expect(config.asarUnpack).toContain('out/main/codegraph-host.jsc');
+    expect(config.asarUnpack).toContain('out/main/codegraph-worker.js');
+    expect(config.asarUnpack).toContain('out/main/codegraph-worker.jsc');
+  });
+
   it('unpacks the worker stub, bytecode and loader, not main.jsc', () => {
     expect(config.asarUnpack).toContain('out/main/pi-worker.js');
     expect(config.asarUnpack).toContain('out/main/pi-worker.jsc');

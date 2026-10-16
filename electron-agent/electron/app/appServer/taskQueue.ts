@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ServiceTask, ServiceTaskCapability, ServiceTaskHooks, ServiceTaskStatus, ServiceTaskUsageReport } from './types';
 import type { AgentDataStorage } from '../../agentData/storage';
+import { agentDataTiming, timeSync } from '../../agentData/methodTiming';
 import { ServiceTaskRegistry } from './serviceTaskRegistry';
 
 export interface QueueTaskInput {
@@ -88,7 +89,7 @@ export class TaskQueue {
   private pump(): void {
     if (this.pumping || this.stopped) return;
     this.pumping = true;
-    queueMicrotask(() => { this.pumping = false; if (!this.stopped) this.startAvailable(); });
+    queueMicrotask(() => { this.pumping = false; if (!this.stopped) timeSync('taskQueue.pump', () => this.startAvailable()); });
   }
 
   private startAvailable(): void {
@@ -108,20 +109,25 @@ export class TaskQueue {
   private async run(task: ServiceTask, threadId: string | undefined, system: boolean): Promise<void> {
     const started = this.writeStatus(task, 'running', { attempts: task.attempts + 1 });
     let rawOutput: string | undefined;
+    // 结算段（校验输出、写终态、通知）在 await 之后同步执行，单独计时。
+    let settling: (() => number) | undefined;
     try {
       const definition = this.options.registry.get(task.kind);
-      const output = this.options.registry.validateOutput(task.kind, await withTimeout(
+      const executed = await withTimeout(
         this.options.execute({ ...started, threadId, system }, {
           onUsage: (report) => this.recordUsage(task.id, report),
           onRawOutput: (text) => { rawOutput = text; },
         }),
         definition?.timeoutMs ?? 30_000,
-      ));
+      );
+      settling = agentDataTiming.start();
+      const output = this.options.registry.validateOutput(task.kind, executed);
       this.recordRawOutput(task.id, null);
       const completed = this.writeStatus(started, 'completed', { output });
       this.notifySettled(completed);
       this.waiters.get(task.id)?.resolve(completed); this.waiters.delete(task.id);
     } catch (error) {
+      settling ??= agentDataTiming.start();
       const message = error instanceof Error ? error.message : String(error);
       if (rawOutput !== undefined) this.recordRawOutput(task.id, rawOutput.slice(0, RAW_OUTPUT_LIMIT));
       if (!this.stopped && isRetryableError(message) && started.attempts < (this.options.registry.get(task.kind)?.maxAttempts ?? 1)) {
@@ -134,6 +140,7 @@ export class TaskQueue {
     } finally {
       this.running.delete(task.id); this.pump();
       if (this.isIdle()) for (const resolve of this.idleWaiters.splice(0)) resolve();
+      if (settling) agentDataTiming.record('taskQueue.settle', settling(), { nested: agentDataTiming.nested });
     }
   }
 
