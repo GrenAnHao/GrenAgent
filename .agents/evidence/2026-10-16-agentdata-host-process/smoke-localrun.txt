@@ -1,162 +1,168 @@
-(node:63592) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:44384) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `electron --trace-warnings ...` to show where the warning was created)
 {
   "mode": "child",
-  "startupMs": 282,
+  "startupMs": 314,
   "fixture": {
-    "items": 49059,
+    "items": 49230,
     "memories": 630,
-    "tool_audit": 56607,
+    "tool_audit": 56742,
     "service_tasks": 398,
-    "threads": 410,
+    "threads": 411,
     "agent_jobs": 0
   },
   "mainLoop": {
     "p99Ms": 25,
-    "maxMs": 36,
-    "maxHeartbeatGapMs": 36
+    "maxMs": 51,
+    "maxHeartbeatGapMs": 51
   },
   "ops": {
     "item.upsert": {
       "n": 399,
-      "p50": 6,
-      "p95": 45,
-      "max": 542
+      "p50": 8,
+      "p95": 84,
+      "max": 506
     },
     "permission.tool.evaluate": {
       "n": 99,
-      "p50": 4,
-      "p95": 241,
-      "max": 542
+      "p50": 6,
+      "p95": 292,
+      "max": 731
     },
     "memory.conversations.search": {
       "n": 19,
-      "p50": 74,
-      "p95": 382,
-      "max": 382
+      "p50": 90,
+      "p95": 595,
+      "max": 595
     },
     "thread.read(mid)": {
       "n": 13,
-      "p50": 162,
-      "p95": 542,
-      "max": 542
+      "p50": 222,
+      "p95": 731,
+      "max": 731
     },
     "audit.query": {
       "n": 9,
-      "p50": 257,
-      "p95": 376,
-      "max": 376
+      "p50": 375,
+      "p95": 640,
+      "max": 640
     },
     "memory.conversations.list": {
       "n": 9,
-      "p50": 241,
-      "p95": 559,
-      "max": 559
+      "p50": 292,
+      "p95": 461,
+      "max": 461
     },
     "tasks.list": {
       "n": 9,
-      "p50": 241,
-      "p95": 542,
-      "max": 542
+      "p50": 145,
+      "p95": 731,
+      "max": 731
     },
     "thread.read(largest)": {
       "n": 4,
-      "p50": 310,
-      "p95": 314,
-      "max": 314
+      "p50": 501,
+      "p95": 718,
+      "max": 718
     }
   },
   "errors": {},
   "errorSamples": {},
   "restart": {
-    "requestAfterKill": "ok",
-    "relaunchMs": 206,
-    "newPid": 7012,
-    "oldPid": 14496,
-    "extensionAfterRestart": "ok"
+    "relaunchedWithoutMainRequest": true,
+    "relaunchMs": 798,
+    "authorizeBefore": "allow",
+    "authorizeDuringRelaunch": "allow",
+    "authorizeMs": 798,
+    "newPid": 29884,
+    "oldPid": 59156,
+    "extensionAfterRestart": "ok",
+    "mainSocketAfterRestart": "ok",
+    "adminAfterRestart": "ok"
   },
-  "shutdownMs": 11,
+  "shutdownMs": 14,
   "integrity": "ok"
 }
 {
   "mode": "inproc",
-  "startupMs": 30,
+  "startupMs": 41,
   "fixture": {
-    "items": 49059,
+    "items": 49230,
     "memories": 630,
-    "tool_audit": 56607,
+    "tool_audit": 56742,
     "service_tasks": 398,
-    "threads": 410,
+    "threads": 411,
     "agent_jobs": 0
   },
   "mainLoop": {
-    "p99Ms": 162,
-    "maxMs": 482,
-    "maxHeartbeatGapMs": 540
+    "p99Ms": 235,
+    "maxMs": 631,
+    "maxHeartbeatGapMs": 713
   },
   "ops": {
     "item.upsert": {
       "n": 399,
-      "p50": 6,
-      "p95": 46,
-      "max": 570
+      "p50": 8,
+      "p95": 54,
+      "max": 797
     },
     "permission.tool.evaluate": {
       "n": 99,
-      "p50": 9,
-      "p95": 218,
-      "max": 504
+      "p50": 13,
+      "p95": 310,
+      "max": 661
     },
     "memory.conversations.search": {
       "n": 19,
-      "p50": 50,
-      "p95": 504,
-      "max": 504
+      "p50": 61,
+      "p95": 662,
+      "max": 662
     },
     "thread.read(mid)": {
       "n": 13,
-      "p50": 196,
-      "p95": 570,
-      "max": 570
+      "p50": 276,
+      "p95": 750,
+      "max": 750
     },
     "audit.query": {
       "n": 9,
-      "p50": 33,
-      "p95": 35,
-      "max": 35
+      "p50": 39,
+      "p95": 53,
+      "max": 53
     },
     "memory.conversations.list": {
       "n": 9,
-      "p50": 20,
-      "p95": 25,
-      "max": 25
+      "p50": 26,
+      "p95": 30,
+      "max": 30
     },
     "tasks.list": {
       "n": 9,
-      "p50": 5,
-      "p95": 5,
-      "max": 5
+      "p50": 4,
+      "p95": 10,
+      "max": 10
     },
     "thread.read(largest)": {
       "n": 4,
-      "p50": 497,
-      "p95": 614,
-      "max": 614
+      "p50": 811,
+      "p95": 820,
+      "max": 820
     }
   },
   "errors": {},
   "errorSamples": {},
-  "shutdownMs": 3,
+  "shutdownMs": 4,
   "integrity": "ok"
 }
 PASS  child: 负载期间主进程事件循环 p99 25ms < 50ms
-PASS  child: 主进程最长卡顿 36ms / 心跳间隔 36ms < 200ms
+PASS  child: 主进程最长卡顿 51ms / 心跳间隔 51ms < 200ms
 PASS  child: 负载中请求错误 {}
 PASS  child: item.upsert 完成 399 次
-PASS  child: kill 子进程后主进程请求自动重拉（{"requestAfterKill":"ok","relaunchMs":206,"newPid":7012,"oldPid":14496,"extensionAfterRestart":"ok"}）
+PASS  child: kill 子进程后不等主进程请求就自动重拉（{"relaunchedWithoutMainRequest":true,"relaunchMs":798,"authorizeBefore":"allow","authorizeDuringRelaunch":"allow","authorizeMs":798,"newPid":29884,"oldPid":59156,"extensionAfterRestart":"ok","mainSocketAfterRestart":"ok","adminAfterRestart":"ok"}）
+PASS  child: 重拉空档里的工具授权等到新进程给出与崩溃前相同的判定（前 allow / 空档里 allow）
 PASS  child: 重拉后扩展手里原来的端点（同一管道、令牌）仍可用
+PASS  child: 重拉后主进程的管道请求与管理请求都可用
 PASS  child: 关停后库 integrity_check = ok
-对照 inproc：主进程事件循环 p99 162ms，最长卡顿 482ms，心跳最大间隔 540ms
+对照 inproc：主进程事件循环 p99 235ms，最长卡顿 631ms，心跳最大间隔 713ms
 
 全部通过
-exit 0

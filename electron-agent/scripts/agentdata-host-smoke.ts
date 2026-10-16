@@ -5,7 +5,8 @@
 //   inproc：AgentDataRuntime 直接在本进程里（改动前的做法），作对照。
 // 两种模式在同一份真实 agent-data.db 的副本上跑同一份负载，全程记本进程的事件循环延迟与 10ms 心跳间隔。
 // 负载：回合持久化（每 50ms 一条 7 KB item.upsert）、每 200ms 一次工具授权评估、最大线程 thread.read、
-// 审计查询、记忆对话列表与检索、任务列表；另验证崩溃重拉（kill 子进程）后扩展端点仍可用，以及关停后库完好。
+// 审计查询、记忆对话列表与检索、任务列表；另验证崩溃重拉（kill 子进程、主进程不发请求）：
+// 门面自己拉回来、空档里的工具授权等到判定、扩展端点与主进程请求仍可用，以及关停后库完好。
 //
 //   electron-vite build --mode localrun，然后：
 //   ELECTRON_RUN_AS_NODE=1 <electron> node_modules/tsx/dist/cli.mjs scripts/agentdata-host-smoke.ts --db <真实库副本> [--seconds 20]
@@ -22,6 +23,7 @@ import { AgentProcessClient } from '../electron/agentProcess/agentProcessClient'
 import { AgentDataService } from '../electron/app/agentDataService';
 import type { AgentDataHostConfig } from '../electron/agentDataProcess/contract';
 import { agentDataPipePath } from '../electron/agentDataProcess/pipePath';
+import { desktopControl, evaluateToolCall, type ToolCallFacts } from '../../extensions/_shared/desktop-control';
 
 const argv = process.argv.slice(2);
 const option = (name: string, fallback?: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : fallback; };
@@ -66,7 +68,7 @@ async function scenario(mode: string) {
     service = new AgentDataService({
       mode: 'child',
       listenPath: agentDataPipePath(),
-      createProcess: (launchState) => (proc = new AgentProcessClient({
+      createProcess: (launchState, hooks) => (proc = new AgentProcessClient({
         entry,
         execPath: process.execPath,
         env: () => ({ ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTDATA_HOST_CONFIG: JSON.stringify({ ...launchState(), dataPath: dbPath, worksDir: join(dir, 'works'),
@@ -79,6 +81,7 @@ async function scenario(mode: string) {
           'main.method': () => ({ status: 'allowed', decision: 'allow' }),
         },
         onEvent: () => {},
+        onExit: (exit) => hooks.onExit(exit),
         log: (stream, line) => { if (stream === 'stderr' && !/ExperimentalWarning|trace-warnings/.test(line)) console.error(`[agentdata-host] ${line}`); },
         readyTimeoutMs: 60_000,
       })),
@@ -137,15 +140,36 @@ async function scenario(mode: string) {
     errorSamples: Object.fromEntries(Object.entries(errorSamples).map(([k, v]) => [k, [...v].slice(0, 5)])) };
 
   if (mode === 'child' && proc) {
-    // 崩溃重拉：直接杀子进程。之后主进程的下一条请求把它拉回来；扩展手里旧的端点（同一管道、同一令牌）继续可用。
+    // 崩溃重拉：直接杀子进程，主进程不发任何请求。门面应当自己把它拉回来；扩展的工具授权在空档里等它，
+    // 不是立刻拒绝；扩展手里旧的端点（同一管道、同一令牌）继续可用；主进程经管道的线程持久化也接得上。
     const pid = proc.pid!;
-    process.kill(pid, 'SIGKILL');
-    await new Promise((r) => setTimeout(r, 300));
-    const t0 = performance.now();
-    const after = await service.requestAdmin<{ items: unknown[] }>('admin.tasks.list', { limit: 5 }).then(() => 'ok', (e: Error) => e.message);
-    result.restart = { requestAfterKill: after, relaunchMs: Math.round(performance.now() - t0), newPid: proc.pid, oldPid: pid };
     const ext2 = new AgentDataClient(endpoint, { timeoutMs: 10_000 });
-    result.restart = { ...(result.restart as object), extensionAfterRestart: await ext2.request('permission.tool.evaluate', { call }).then(() => 'ok', (e: Error) => e.message) };
+    // 工具授权用扩展里真实的客户端（safety 扩展用的就是它），端点经 env 给它
+    process.env.AGENT_DATA_ENDPOINT = JSON.stringify(endpoint);
+    const port = desktopControl();
+    const before = await evaluateToolCall(port, call as ToolCallFacts);
+    const t0 = performance.now();
+    process.kill(pid, 'SIGKILL');
+    const verdict = await evaluateToolCall(port, call as ToolCallFacts);
+    const authorizeMs = Math.round(performance.now() - t0);
+    const deadline = performance.now() + 5_000;
+    while (proc.pid === pid || !proc.isRunning) {
+      if (performance.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const relaunchedWithoutMainRequest = proc.isRunning && proc.pid !== pid;
+    await proc.start().catch(() => undefined); // 已在跑时只是等它就绪，不会另拉一个
+    result.restart = {
+      relaunchedWithoutMainRequest,
+      relaunchMs: Math.round(performance.now() - t0),
+      authorizeBefore: before.unavailable ? 'unavailable' : before.decision,
+      authorizeDuringRelaunch: verdict.unavailable ? 'unavailable' : verdict.decision,
+      authorizeMs,
+      newPid: proc.pid, oldPid: pid,
+      extensionAfterRestart: await ext2.request('memory.conversations.search', { userId: fixture.user, workspace, query: 'agent', limit: 1, includeOtherProjects: true }).then(() => 'ok', (e: Error) => e.message),
+      mainSocketAfterRestart: await service.upsertItem({ id: randomUUID(), threadId: fixture.bigThread, turnId: fixture.turn, type: 'tool_result', status: 'completed', payload }).then(() => 'ok', (e: Error) => e.message),
+      adminAfterRestart: await service.requestAdmin('admin.tasks.list', { limit: 5 }).then(() => 'ok', (e: Error) => e.message),
+    };
     await ext2.close();
   }
   await extension.close();
@@ -158,7 +182,7 @@ async function scenario(mode: string) {
   check2.close();
   rmSync(dir, { recursive: true, force: true });
   console.log(JSON.stringify(result, null, 2));
-  return result as { mainLoop: { p99Ms: number; maxMs: number; maxHeartbeatGapMs: number }; errors: Record<string, number>; ops: Record<string, { n: number }>; restart?: { requestAfterKill: string; extensionAfterRestart: string; newPid?: number; oldPid: number }; integrity: string };
+  return result as { mainLoop: { p99Ms: number; maxMs: number; maxHeartbeatGapMs: number }; errors: Record<string, number>; ops: Record<string, { n: number }>; restart?: { relaunchedWithoutMainRequest: boolean; authorizeBefore: string; authorizeDuringRelaunch: string; extensionAfterRestart: string; mainSocketAfterRestart: string; adminAfterRestart: string }; integrity: string };
 }
 
 async function main() {
@@ -170,8 +194,10 @@ async function main() {
     check(c.mainLoop.maxMs < 200 && c.mainLoop.maxHeartbeatGapMs < 200, `child: 主进程最长卡顿 ${c.mainLoop.maxMs}ms / 心跳间隔 ${c.mainLoop.maxHeartbeatGapMs}ms < 200ms`);
     check(Object.keys(c.errors).length === 0, `child: 负载中请求错误 ${JSON.stringify(c.errors)}`);
     check((c.ops['item.upsert']?.n ?? 0) > seconds * 10, `child: item.upsert 完成 ${c.ops['item.upsert']?.n} 次`);
-    check(c.restart?.requestAfterKill === 'ok' && c.restart.newPid !== c.restart.oldPid, `child: kill 子进程后主进程请求自动重拉（${JSON.stringify(c.restart)}）`);
+    check(c.restart?.relaunchedWithoutMainRequest === true, `child: kill 子进程后不等主进程请求就自动重拉（${JSON.stringify(c.restart)}）`);
+    check(c.restart?.authorizeDuringRelaunch !== 'unavailable' && c.restart?.authorizeDuringRelaunch === c.restart?.authorizeBefore, `child: 重拉空档里的工具授权等到新进程给出与崩溃前相同的判定（前 ${c.restart?.authorizeBefore} / 空档里 ${c.restart?.authorizeDuringRelaunch}）`);
     check(c.restart?.extensionAfterRestart === 'ok', 'child: 重拉后扩展手里原来的端点（同一管道、令牌）仍可用');
+    check(c.restart?.mainSocketAfterRestart === 'ok' && c.restart?.adminAfterRestart === 'ok', 'child: 重拉后主进程的管道请求与管理请求都可用');
     check(c.integrity === 'ok', `child: 关停后库 integrity_check = ${c.integrity}`);
   }
   if (results.inproc) {

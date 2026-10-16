@@ -225,7 +225,7 @@ if (!process.env.VITEST) {
       agentData = new AgentDataService({
         mode: 'child',
         listenPath: agentDataPipePath(),
-        createProcess: (launchState) => (agentDataProcess = new AgentProcessClient({
+        createProcess: (launchState, hooks) => (agentDataProcess = new AgentProcessClient({
           entry: resolveAgentDataHostEntry(entryInput),
           guard: (pid) => startJobGuard(pid, { exePath: jobGuardExe }),
           onSweep: (summary, exit) => recordDiagEvent({ kind: 'agentdata-host-sweep', summary, expected: exit.expected }),
@@ -243,6 +243,7 @@ if (!process.env.VITEST) {
             recordDiagEvent({ kind: 'agentdata-host-exit', code: exit.code, signal: exit.signal, expected: exit.expected, ...(exit.fatal ? { fatal: exit.fatal } : {}), stderrTail: exit.stderrTail.slice(-4_000) });
             for (const controller of modelCalls.values()) controller.abort();
             modelCalls.clear();
+            hooks.onExit(exit);
           },
           log: (stream, line) => (stream === 'stderr' ? console.error : console.log)(`[agentdata-host] ${line}`),
           readyTimeoutMs: 60_000,

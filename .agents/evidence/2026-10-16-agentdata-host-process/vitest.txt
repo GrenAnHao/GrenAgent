@@ -1,168 +1,168 @@
 
  RUN  v4.1.11 D:/OneDrive/Project Files/Pi/.agents/worktrees/agentdata-host/electron-agent
 
-(node:56232) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:16048) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:58752) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:35928) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:49832) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:58776) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:41576) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:59676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:16404) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:43400) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:11880) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:49796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:45844) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:8220) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:47040) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:44620) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:51372) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:40728) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:35364) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:28448) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:62396) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:46384) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:46680) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:31992) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:29800) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:38500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:43168) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ❯ |main| electron/agentData/auditViewStore.test.ts (12 tests | 4 failed) 123ms
-     × applies combined action, resource and inclusive time filters before limiting 13ms
+ ❯ |main| electron/agentData/auditViewStore.test.ts (12 tests | 4 failed) 97ms
+     × applies combined action, resource and inclusive time filters before limiting 9ms
      × preserves resource name snapshots after deletion and does not invent legacy names 5ms
-     × retains normal model slugs, Unicode resource labels and absolute project paths 6ms
-     × retains safe legacy page paths with spaces and Unicode without relaxing other IDs 5ms
- ❯ |main| electron/app/taskViewService.test.ts (14 tests | 4 failed) 248ms
-     × derives capabilities from a live executor and current target, keeping all system actions read-only 14ms
-     × requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs 9ms
-     × passes only still-pending original source IDs to retry and never incorporates newer sources 7ms
-     × never resolves a model or starts a worker while listing or reading task capabilities 16ms
-(node:58392) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+     × retains normal model slugs, Unicode resource labels and absolute project paths 5ms
+     × retains safe legacy page paths with spaces and Unicode without relaxing other IDs 4ms
+(node:42900) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:40232) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ ❯ |main| electron/app/taskViewService.test.ts (14 tests | 4 failed) 220ms
+     × derives capabilities from a live executor and current target, keeping all system actions read-only 18ms
+     × requires model confirmation for both Wiki paths and rejects unavailable or changed models without new jobs 14ms
+     × passes only still-pending original source IDs to retry and never incorporates newer sources 5ms
+     × never resolves a model or starts a worker while listing or reading task capabilities 12ms
+(node:20324) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
- ❯ |main| electron/agentData/jobCleanup.test.ts (2 tests | 2 failed) 140ms
-     × removes only terminal records and preserves Wiki, memory and audit data 110ms
-     × requires explicit valid IDs instead of interpreting missing input as clear-all 27ms
-(node:40232) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:24140) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:51788) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ ❯ |main| electron/agentData/jobCleanup.test.ts (2 tests | 2 failed) 121ms
+     × removes only terminal records and preserves Wiki, memory and audit data 89ms
+     × requires explicit valid IDs instead of interpreting missing input as clear-all 30ms
+(node:21000) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:63544) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:21000) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:63544) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:51864) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:63544) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:63524) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:21000) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:64208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:61352) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:21000) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:35804) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:55884) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42088) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:11880) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:17660) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:4484) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:58208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56844) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:8220) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59224) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:57164) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:23892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:10588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:22320) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:49848) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:28960) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:36512) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:4808) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:41948) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:20968) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:63476) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:55784) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:11928) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:25268) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:61024) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:42536) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:27892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:11664) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:62692) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:25040) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:54664) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:62980) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
- ❯ |main| electron/agentData/runtime.test.ts (15 tests | 4 failed) 5990ms
-     × exposes module overview and code retrieval status contracts 438ms
-     × dispatches a created job to its registered runner 310ms
-     × does not record a runner rejection as failure after the job is already terminal 252ms
-     × defers the cancelled state to the runner so no work happens after it lands 253ms
-(node:43288) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ ❯ |main| electron/agentData/runtime.test.ts (15 tests | 4 failed) 4511ms
+     × exposes module overview and code retrieval status contracts 334ms
+     × dispatches a created job to its registered runner 261ms
+     × does not record a runner rejection as failure after the job is already terminal 268ms
+     × defers the cancelled state to the runner so no work happens after it lands 270ms
+(node:54660) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:21584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:47756) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:63156) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:16332) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:23880) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:19780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:46744) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:41036) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:56268) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:15960) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:52304) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:33380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:13180) Warning: `--localstorage-file` was provided without a valid path
+(node:62132) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:9316) Warning: `--localstorage-file` was provided without a valid path
+(node:59320) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:55500) Warning: `--localstorage-file` was provided without a valid path
+(node:63048) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:34964) Warning: `--localstorage-file` was provided without a valid path
+(node:37112) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:62880) Warning: `--localstorage-file` was provided without a valid path
+(node:39760) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:62876) Warning: `--localstorage-file` was provided without a valid path
+(node:26888) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:58088) Warning: `--localstorage-file` was provided without a valid path
+(node:37124) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59148) Warning: `--localstorage-file` was provided without a valid path
+(node:55556) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:27620) Warning: `--localstorage-file` was provided without a valid path
+(node:13356) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:45624) Warning: `--localstorage-file` was provided without a valid path
+(node:9188) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:63940) Warning: `--localstorage-file` was provided without a valid path
+(node:57876) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:51360) Warning: `--localstorage-file` was provided without a valid path
+(node:62252) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:46800) Warning: `--localstorage-file` was provided without a valid path
+(node:28656) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:64196) Warning: `--localstorage-file` was provided without a valid path
+(node:13880) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:15264) Warning: `--localstorage-file` was provided without a valid path
+(node:40616) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:53432) Warning: `--localstorage-file` was provided without a valid path
+(node:22324) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:42216) Warning: `--localstorage-file` was provided without a valid path
+(node:51120) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:30368) Warning: `--localstorage-file` was provided without a valid path
+(node:51804) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:34960) Warning: `--localstorage-file` was provided without a valid path
+(node:17124) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
@@ -186,32 +186,30 @@ Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
-Not implemented: Window's getComputedStyle() method: with pseudo-elements
-Not implemented: Window's getComputedStyle() method: with pseudo-elements
-(node:23892) Warning: `--localstorage-file` was provided without a valid path
+(node:45304) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
-(node:63352) Warning: `--localstorage-file` was provided without a valid path
+(node:44844) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:59692) Warning: `--localstorage-file` was provided without a valid path
+(node:62872) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:11052) Warning: `--localstorage-file` was provided without a valid path
-(Use `node --trace-warnings ...` to show where the warning was created)
-Not implemented: Window's getComputedStyle() method: with pseudo-elements
-Not implemented: Window's getComputedStyle() method: with pseudo-elements
-(node:32660) Warning: `--localstorage-file` was provided without a valid path
-(Use `node --trace-warnings ...` to show where the warning was created)
-(node:39460) Warning: `--localstorage-file` was provided without a valid path
+(node:24300) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
 Not implemented: Window's getComputedStyle() method: with pseudo-elements
-(node:62568) Warning: `--localstorage-file` was provided without a valid path
+(node:37848) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:41628) Warning: `--localstorage-file` was provided without a valid path
+(node:48584) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:40336) Warning: `--localstorage-file` was provided without a valid path
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+(node:64068) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:15608) Warning: `--localstorage-file` was provided without a valid path
+(node:36456) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18736) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+Not implemented: Window's getComputedStyle() method: with pseudo-elements
+(node:17976) Warning: `--localstorage-file` was provided without a valid path
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 ⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
@@ -410,15 +408,15 @@ AssertionError: expected { items: [ { …(19) } ], …(1) } to match object { it
 +         "remove": true,
 +         "retry": false,
 +       },
-+       "createdAt": 1792160683084,
++       "createdAt": 1792162125910,
 +       "error": "任务执行失败，请检查相关配置与审计",
-+       "key": "user:ab7af2c2-0480-4f71-8647-7197d009cf71",
++       "key": "user:df50b76b-dc84-4e8b-af2c-6b5416f48437",
 +       "kind": "wiki.ingest",
 +       "label": "Wiki 资料提取",
 +       "processed": undefined,
 +       "progress": undefined,
 +       "ref": {
-+         "id": "ab7af2c2-0480-4f71-8647-7197d009cf71",
++         "id": "df50b76b-dc84-4e8b-af2c-6b5416f48437",
 +         "source": "user",
 +       },
 +       "resource": {
@@ -430,7 +428,7 @@ AssertionError: expected { items: [ { …(19) } ], …(1) } to match object { it
 +       "stage": undefined,
 +       "status": "failed",
 +       "total": undefined,
-+       "updatedAt": 1792160683085,
++       "updatedAt": 1792162125910,
 +       "workspace": "/repo",
       },
     ],
@@ -448,7 +446,7 @@ AssertionError: expected { items: [ { …(19) } ], …(1) } to match object { it
 
 
  Test Files  4 failed | 97 passed (101)
-      Tests  14 failed | 994 passed (1008)
-   Start at  22:24:41
-   Duration  57.64s (transform 55.67s, setup 293.44s, import 108.37s, tests 281.81s, environment 112.61s)
+      Tests  14 failed | 997 passed (1011)
+   Start at  22:48:44
+   Duration  54.08s (transform 47.90s, setup 214.70s, import 101.32s, tests 270.07s, environment 121.24s)
 

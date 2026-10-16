@@ -75,13 +75,26 @@ export interface ToolDecisionResult {
   unavailable?: true;
 }
 
-/** 连接层的失败（超时、拒连、半路断开）。主进程回了错误帧不算，那是它的判定。 */
-const TRANSPORT_CODES = new Set(['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE']);
+/**
+ * 连接层的失败（超时、拒连、半路断开）。主进程回了错误帧不算，那是它的判定。
+ * ENOENT：命名管道 / Unix socket 不存在，即 agentdata-host 不在（崩溃后重拉的空档）。
+ */
+const TRANSPORT_CODES = new Set(['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'ENOENT']);
+/** 没人在监听：AgentData 子进程正在重拉（约几百毫秒），等一等再问，而不是立刻拒绝。 */
+const NOT_LISTENING_CODES = new Set(['ENOENT', 'ECONNREFUSED']);
+const RELAUNCH_WAITS_MS = [250, 500, 1000];
+
+function errorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 function isTransportFailure(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && TRANSPORT_CODES.has(code);
+  const code = errorCode(error);
+  return code !== undefined && TRANSPORT_CODES.has(code);
 }
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** 判定本进程 / 本回合身份。ALS 优先；无 ALS 时回退子进程 env（fork 与尚未删除的 sidecar）。 */
 export function resolveToolOrigin(): ToolOrigin {
@@ -97,24 +110,31 @@ export function resolveToolOrigin(): ToolOrigin {
  * 通道不可用或回包不合法时返回 deny：此时既无法确认规则也无法写审计，
  * 放行等于无记录地执行。不要改成 allow。
  *
- * 主进程和嵌入式 sidecar 共用一个事件循环：它卡住几秒后，到期的客户端计时器会先于
- * 已经能处理的响应触发。所以连接层失败先重试一次，仍失败才 deny，并标上 unavailable。
+ * 服务端卡住几秒后，到期的客户端计时器会先于已经能处理的响应触发，所以连接层失败先立即重试一次。
+ * 没人监听（AgentData 子进程崩溃后正在重拉）时另外等几轮（共约 1.75 秒）再问。
+ * 仍失败才 deny，并标上 unavailable。
  */
 export async function evaluateToolCall(
   client: DesktopControlPort,
   call: ToolCallFacts,
+  options: { sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<ToolDecisionResult> {
   let result: unknown;
-  try {
-    result = await client.request<unknown>('permission.tool.evaluate', { call });
-  } catch (error) {
-    if (!isTransportFailure(error)) return { decision: 'deny', auditId: undefined };
+  let immediateRetry = true;
+  let waits = 0;
+  for (;;) {
     try {
       result = await client.request<unknown>('permission.tool.evaluate', { call });
-    } catch (retryError) {
-      return isTransportFailure(retryError)
-        ? { decision: 'deny', auditId: undefined, unavailable: true }
-        : { decision: 'deny', auditId: undefined };
+      break;
+    } catch (error) {
+      if (!isTransportFailure(error)) return { decision: 'deny', auditId: undefined };
+      if (NOT_LISTENING_CODES.has(errorCode(error)!) && waits < RELAUNCH_WAITS_MS.length) {
+        await (options.sleep ?? sleep)(RELAUNCH_WAITS_MS[waits++]!);
+      } else if (immediateRetry) {
+        immediateRetry = false;
+      } else {
+        return { decision: 'deny', auditId: undefined, unavailable: true };
+      }
     }
   }
   try {

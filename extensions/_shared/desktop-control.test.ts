@@ -42,6 +42,23 @@ describe('evaluateToolCall', () => {
     expect(client.request).toHaveBeenCalledTimes(2);
   });
 
+  it('waits for a relaunching AgentData process instead of denying at once', async () => {
+    const gone = Object.assign(new Error('connect ENOENT \\\\.\\pipe\\x'), { code: 'ENOENT' });
+    const client = { request: vi.fn().mockRejectedValueOnce(gone).mockRejectedValueOnce(gone).mockResolvedValueOnce({ decision: 'allow', auditId: 'a3' }) };
+    const sleep = vi.fn(async () => {});
+    await expect(evaluateToolCall(client, CALL, { sleep })).resolves.toEqual({ decision: 'allow', auditId: 'a3' });
+    expect(sleep.mock.calls).toEqual([[250], [500]]);
+  });
+
+  it('gives up as unavailable when nobody comes back to listen', async () => {
+    const refused = Object.assign(new Error('refused'), { code: 'ECONNREFUSED' });
+    const client = { request: vi.fn(async () => { throw refused; }) };
+    const sleep = vi.fn(async () => {});
+    await expect(evaluateToolCall(client, CALL, { sleep })).resolves.toEqual({ decision: 'deny', auditId: undefined, unavailable: true });
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(client.request).toHaveBeenCalledTimes(5);
+  });
+
   it('does not retry an error frame from the host', async () => {
     const rejected = Object.assign(new Error('invalid tool call: flags'), { code: 'INVALID_REQUEST' });
     const client = { request: vi.fn(async () => { throw rejected; }) };

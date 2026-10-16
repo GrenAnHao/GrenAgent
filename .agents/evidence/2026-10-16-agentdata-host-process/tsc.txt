@@ -48,9 +48,9 @@ electron/agentData/wikiEngine/ingest/runIncremental.ts(124,16): error TS2554: Ex
 electron/agentData/wikiEngine/ingest/runIncremental.ts(165,16): error TS2554: Expected 0 arguments, but got 2.
 electron/agentData/wikiEngine/runtime.test.ts(26,66): error TS2554: Expected 0 arguments, but got 1.
 electron/agentData/wikiEngine/service.ts(1397,16): error TS2554: Expected 0 arguments, but got 2.
-electron/app/agentDataService.ts(173,98): error TS2345: Argument of type 'CreateThreadInput' is not assignable to parameter of type 'Record<string, unknown>'.
+electron/app/agentDataService.ts(211,98): error TS2345: Argument of type 'CreateThreadInput' is not assignable to parameter of type 'Record<string, unknown>'.
   Index signature for type 'string' is missing in type 'CreateThreadInput'.
-electron/app/agentDataService.ts(176,90): error TS2345: Argument of type 'CreateTurnInput' is not assignable to parameter of type 'Record<string, unknown>'.
+electron/app/agentDataService.ts(214,90): error TS2345: Argument of type 'CreateTurnInput' is not assignable to parameter of type 'Record<string, unknown>'.
   Index signature for type 'string' is missing in type 'CreateTurnInput'.
 electron/app/codeGraph/codeGraphQuery.ts(91,40): error TS2339: Property 'nodeId' does not exist on type 'SegmentMatch'.
 electron/app/devinAccount.ts(59,29): error TS2367: This comparison appears to be unintentional because the types '"closed"' and '"timeout"' have no overlap.

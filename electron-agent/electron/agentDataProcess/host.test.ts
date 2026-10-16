@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentDataClient } from '../agentData/client';
 import { RpcPeer } from '../agentProcess/rpcPeer';
-import { AgentDataService, type AgentDataProcessPort } from '../app/agentDataService';
+import { AgentDataService, type AgentDataProcessHooks, type AgentDataProcessPort } from '../app/agentDataService';
 import { PluginManager } from '../app/plugin/pluginManager';
 import { AGENTDATA_MODEL_USAGE_CHANNEL, type AgentDataHostConfig } from './contract';
 import { createAgentDataHost } from './host';
@@ -16,16 +16,19 @@ import { agentDataPipePath } from './pipePath';
  */
 type MainSide = { describe: () => Promise<string>; complete: (input: Record<string, unknown>, emitUsage: (report: unknown) => void, signal: AbortSignal) => Promise<string>; ownsSession?: () => boolean; method?: (name: string, params: Record<string, unknown>) => unknown };
 
-function harness(main: MainSide) {
+function harness(main: MainSide, relaunch: { relaunchDelayMs?: number; relaunchRetryMs?: number } = { relaunchDelayMs: 60_000 }) {
   const dir = mkdtempSync(join(tmpdir(), 'agentdata-host-'));
   const listenPath = agentDataPipePath();
   const launches: Array<{ host: ReturnType<typeof createAgentDataHost>; mainPeer: RpcPeer; childPeer: RpcPeer }> = [];
   const codeGraph = { projects: vi.fn((list: string[]) => list.map((workspace) => ({ workspace, indexed: false }))) };
   let current: (typeof launches)[number] | undefined;
   let launchState!: () => { hostToken: string; listenPath: string; workspaceTokens: Record<string, string>; knownWorkspaces: string[] };
+  let hooks!: AgentDataProcessHooks;
   const aborts = new Map<string, AbortController>();
 
+  let failLaunches = 0;
   const launch = async () => {
+    if (failLaunches > 0) { failLaunches -= 1; throw new Error('AGENT_HOST_CRASH_LOOP: test'); }
     const state = launchState();
     let childPeer!: RpcPeer;
     const mainPeer = new RpcPeer({ send: (message) => queueMicrotask(() => childPeer.receive(structuredClone(message))) });
@@ -74,11 +77,17 @@ function harness(main: MainSide) {
     shutdown: async () => { if (current) { await current.host.shutdown(); current = undefined; } },
     get isRunning() { return current !== undefined; },
   };
-  const service = new AgentDataService({ mode: 'child', listenPath, createProcess: (state) => { launchState = state; return port; } });
+  const service = new AgentDataService({ mode: 'child', listenPath, ...relaunch, createProcess: (state, h) => { launchState = state; hooks = h; return port; } });
   return {
     service, dir, listenPath, launches, codeGraph,
-    /** 模拟子进程崩溃：运行时直接关掉（不走 shutdown），下一条请求重新拉起。 */
-    crash: async () => { const victim = current!; current = undefined; victim.mainPeer.close(new Error('AGENTDATA_HOST_EXITED')); await victim.host.assembled.close(); },
+    /** 模拟子进程崩溃：运行时直接关掉（不走 shutdown），再像 AgentProcessClient 的 onExit 一样回报门面。 */
+    crash: async () => {
+      const victim = current!; current = undefined;
+      victim.mainPeer.close(new Error('AGENTDATA_HOST_EXITED')); await victim.host.assembled.close();
+      hooks.onExit({ expected: false });
+    },
+    /** 下一次拉起失败（模拟连续崩溃被冷却）。 */
+    failNextLaunches: (n: number) => { failLaunches = n; },
     cleanup: async () => { await service.stop().catch(() => undefined); rmSync(dir, { recursive: true, force: true }); },
   };
 }
@@ -126,6 +135,38 @@ describe('agentdata-host (child mode, in-process wire)', () => {
     const extension = new AgentDataClient(endpoint);
     await expect(extension.request('memory.search', { userId: 'u', workspace: ws, query: 'remember', limit: 5 })).resolves.toEqual([expect.objectContaining({ content: 'remember me' })]);
     await extension.close();
+  });
+
+  it('relaunches on its own after a crash, without waiting for a main-process request', async () => {
+    h = harness({ describe: async () => 'p/m', complete: async () => '' }, { relaunchDelayMs: 5, relaunchRetryMs: 5 });
+    await h.service.start();
+    const ws = join(h.dir, 'ws');
+    const endpoint = await h.service.agentEndpoint(ws);
+    h.failNextLaunches(2);
+    await h.crash();
+    // 两次拉起失败后第三次成功；全程没有主进程请求
+    await vi.waitFor(() => expect(h!.launches).toHaveLength(2), { timeout: 2000 });
+    const extension = new AgentDataClient(endpoint);
+    await expect(extension.request('memory.search', { userId: 'u', workspace: ws, query: 'x', limit: 1 })).resolves.toEqual([]);
+    await extension.close();
+  });
+
+  it('brings the child back before a pipe request from the main process (thread persistence)', async () => {
+    h = harness({ describe: async () => 'p/m', complete: async () => '' });
+    await h.service.start();
+    await h.crash();
+    // 主动重拉还没到时间（默认设成 60 秒），管道请求自己先拉起子进程，而不是报 ENOENT
+    await expect(h.service.request('thread.list')).resolves.toEqual([]);
+    expect(h.launches).toHaveLength(2);
+  });
+
+  it('does not relaunch after stop', async () => {
+    h = harness({ describe: async () => 'p/m', complete: async () => '' }, { relaunchDelayMs: 5 });
+    await h.service.start();
+    await h.crash();
+    await h.service.stop();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(h.launches).toHaveLength(1);
   });
 
   it('routes model calls back to the main process with usage delivered before the reply, even when the call fails', async () => {
@@ -202,8 +243,7 @@ describe('agentdata-host (child mode, in-process wire)', () => {
     h.service.registerKnownWorkspace(join(h.dir, 'ws'));
     await vi.waitFor(async () => expect(await h!.service.request('codeRetrieval.admin.projects')).toEqual([{ workspace: join(h!.dir, 'ws'), indexed: false }]));
     await h.crash();
-    await expect(h.service.request('codeRetrieval.admin.projects')).rejects.toBeTruthy(); // 管道上的连接随旧运行时断开
-    await h.service.requestAdmin('admin.tasks.list', {});
+    // 管道请求自己把子进程拉回来，新进程带着主进程记下的工作区
     await expect(h.service.request('codeRetrieval.admin.projects')).resolves.toEqual([{ workspace: join(h.dir, 'ws'), indexed: false }]);
   });
 });

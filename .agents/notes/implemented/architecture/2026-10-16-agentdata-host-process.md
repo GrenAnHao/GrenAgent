@@ -28,16 +28,17 @@ M0 闸门（[runtime-diag 记录 AgentData 同步耗时](../process/2026-10-16-a
 - **端点在主进程生命周期内不变**：管道名、host 令牌、每个工作区的令牌都由主进程生成并持有；子进程每次拉起（含崩溃重拉，`AgentProcessClient` 的 `env` 现在可以是函数）都带着当前的令牌表与已知工作区。新工作区的令牌先 `agentdata.registerWorkspace` 到子进程、确认后才交给 agent-host。扩展写进只读工作区上下文的 `AGENT_DATA_ENDPOINT` 因此在重拉后继续有效。
 - **主进程不打开 `agent-data.db`**：`PluginManager` 的持久化改为 `state: { initial, save }` 端口，经 agentdata-host 读写同一张 `plugin_state` 表；`mainBoundary.test.ts` 静态断言 `main.ts` 不引入 `AgentDataStorage`、不建 `DatabaseSync`。
 - **生命周期**：启动顺序 agentdata-host（迁移库、监听管道后报 ready）→ PluginManager → agent-host；关停顺序 agent-host → agentdata-host（子进程内先停 CodeGraph 同步与模型任务、再关库）。崩溃预算沿用 `AgentProcessClient`（60 秒内 3 次后冷却 30 秒）；重拉时运行时启动逻辑照常把上一个进程留下的任务落定（[孤儿任务落定](../bug-fix/2026-10-16-orphan-job-settle.md)）。
+- **崩溃后主动重拉**：`AgentProcessClient` 只在主进程下一条 IPC 请求时按需拉起，对 agent-host 够用，对 agentdata-host 不够：扩展直连管道、主进程的线程持久化走管道、记忆 / Wiki 定时任务在子进程里，都不会触发它。所以：① `AgentDataService` 收到非预期退出（`createProcess` 的第二个参数 `hooks.onExit`）后 250 ms 自己重拉，被崩溃预算挡住时每 5 秒再试、连续 10 次失败后停手；② 同时废掉指向旧进程的管道连接（close 事件未必先到，否则下一条写进旧 socket 报 EPIPE）；③ 主进程经管道的请求先 `child.start()`，空档里的线程持久化等新进程而不是报 ENOENT；④ `extensions/_shared/desktop-control.ts` 的工具授权把 `ENOENT` 算作连接层失败，遇到「没人监听」（`ENOENT` / `ECONNREFUSED`）按 250 / 500 / 1000 ms 等它回来。以前的行为：崩溃瞬间的工具授权得到 `ECONNRESET` → 立即重试 → `ENOENT`（不在列表里）→ 普通 deny，被当成「规则拒绝」；且扩展一直连不上，直到主进程碰巧发一条管理请求。
 - **共享连接上的超大应答**：主进程所有 AgentData 请求共用一条 `AgentDataClient` 连接。超过 1 MiB 的应答现在只让它自己那条请求以 `FRAME_TOO_LARGE` 失败，连接保留；以前会销毁整条连接，同时在途的请求一起失败。进程内时请求几乎不重叠所以没暴露；拆进程后真实并发了，冒烟里一次最大线程读让 4 条并发的 `item.upsert` 跟着失败。
 
 ### 破坏性变更
 
-`AgentDataService.agentEndpoint` 变为异步（调用方只有 `main.ts`）；`HostDeps.agentDataEndpoint` 可返回 Promise；child 模式下端点是 `{ path, token }`；`recordJobStage` / `runServiceTask` 只在 inproc 下可用（调用方都已随装配进子进程）；`PluginManager` 增加 `state` 选项（`storage` 选项保留）。数据格式、表结构、帧协议与版本、令牌语义、错误码不变。
+`AgentDataService.agentEndpoint` 变为异步（调用方只有 `main.ts`）；`HostDeps.agentDataEndpoint` 可返回 Promise；child 模式下端点是 `{ path, token }`；`recordJobStage` / `runServiceTask` 只在 inproc 下可用（调用方都已随装配进子进程）；`PluginManager` 增加 `state` 选项（`storage` 选项保留）；`AgentDataChildOptions.createProcess` 多一个 `hooks` 参数，调用方要在子进程退出时回报 `hooks.onExit`；`evaluateToolCall` 多一个可选的 `options.sleep`（测试用）。数据格式、表结构、帧协议与版本、令牌语义、错误码不变。
 
 ### 涉及文件
 
 - 新增：`electron/agentDataProcess/{assemble,codeGraphClient,contract,host,hostEntry,pipePath}.ts`、`host.test.ts`、`mainBoundary.test.ts`、`electron/app/plugin/pluginStateStore.ts`、`scripts/agentdata-host-smoke.ts`
-- 修改：`electron/main.ts`、`electron/app/agentDataService.ts`、`electron/agentData/{runtime,protocol,client}.ts`、`client.test.ts`、`electron/agentProcess/{agentProcessClient,mainBindings}.ts`、`electron/app/plugin/pluginManager.ts`、`electron/agent/workerEntry.ts`、`electron.vite.config.ts`、`electron-builder.yml`、`electron/app/sourceCodeProtection.test.ts`、`electron/app/agentDataService.test.ts`、`extensions/memory/client.ts`
+- 修改：`electron/main.ts`、`electron/app/agentDataService.ts`、`electron/agentData/{runtime,protocol,client}.ts`、`client.test.ts`、`electron/agentProcess/{agentProcessClient,mainBindings}.ts`、`electron/app/plugin/pluginManager.ts`、`electron/agent/workerEntry.ts`、`electron.vite.config.ts`、`electron-builder.yml`、`electron/app/sourceCodeProtection.test.ts`、`electron/app/agentDataService.test.ts`、`extensions/memory/client.ts`、`extensions/_shared/desktop-control.ts` 与其测试
 
 ## Alternatives considered
 
@@ -61,17 +62,17 @@ M0 闸门（[runtime-diag 记录 AgentData 同步耗时](../process/2026-10-16-a
 
 证据目录：`.agents/evidence/2026-10-16-agentdata-host-process/`
 
-- 冒烟 `scripts/agentdata-host-smoke.ts`（应用自带 Electron Node + tsx；扮演主进程，child 模式用 `AgentProcessClient` 拉起构建产物里真实的 `agentdata-host.js`；在真实 `agent-data.db` 副本上跑 20 秒负载：每 50 ms 一条 7 KB `item.upsert`、每 200 ms 一次 `permission.tool.evaluate`、线程读、审计、记忆列表与检索、任务列表），`smoke-localrun.txt`，7 项全部通过：
+- 冒烟 `scripts/agentdata-host-smoke.ts`（应用自带 Electron Node + tsx；扮演主进程，child 模式用 `AgentProcessClient` 拉起构建产物里真实的 `agentdata-host.js`；在真实 `agent-data.db` 副本上跑 20 秒负载：每 50 ms 一条 7 KB `item.upsert`、每 200 ms 一次 `permission.tool.evaluate`、线程读、审计、记忆列表与检索、任务列表），`smoke-localrun.txt`，9 项全部通过：
 
   | 主进程事件循环 | child | inproc（对照） |
   | --- | --- | --- |
   | p99 | 25 ms | 162 ms |
   | 最长卡顿 / 心跳最大间隔 | 36 ms / 36 ms | 482 ms / 540 ms |
 
-  另验证：负载中 0 个请求错误；kill 子进程后主进程下一条请求在约 200 ms 内自动重拉；扩展手里原来的端点（同一管道、同一令牌）重拉后仍可用；关停后 `PRAGMA integrity_check` 为 ok。第一轮冒烟有 5 个请求错误，查出是共享连接上超大应答连带失败（见上文），修复 `AgentDataClient` 并补测试后复跑通过。
-- 生产字节码产物：`npx electron-vite build` 后用 `out/main/agentdata-host.cjs` 跑同一冒烟（10 秒），7 项全部通过（`smoke-bytecode.txt`）；同时用 `codegraph-host.cjs` + `codegraph-worker.cjs` 跑 `scripts/codegraph-host-smoke.mjs`，10 项全部通过（`codegraph-smoke-bytecode.txt`），补上了上一轮「worker 线程在字节码产物里能否加载」的缺口。worktree 用的是已提交的 `electron.vite.config.ts`，生产入口文件名是 `.cjs`（主工作区里他人未提交的改动把它改成 `.js`）。
-- 单测 `npx vitest run electron/agentData electron/agentDataProcess electron/app/codeGraph electron/app/appServer electron/app/memoryService.test.ts electron/app/toolPermission electron/app/taskViewService.test.ts electron/app/agentDataService.test.ts electron/app/plugin electron/app/sourceCodeProtection.test.ts electron/agentProcess electron/runtimeDiag.test.ts electron/ipc electron/main.config.test.ts src/features/agentData`：1008 个用例中 994 个通过，14 个失败，部分通过（`vitest.txt`）。14 个失败是迁移前就有的同一组（`auditViewStore` 4、`jobCleanup` 2、`runtime.test` 4、`taskViewService` 4），worktree 基线上同样失败，无新增。新增 `host.test.ts` 8 个用例：管道 + 主进程签发令牌、管理面错误形状、崩溃后同端点继续可用、模型反向调用与 usage 先于应答（失败也到）、abort 传到主进程、`permission.authorize` 回到主进程、插件状态经子进程持久化、重拉后项目列表保留；`client.test.ts` 新增超大应答只影响自己一条。
-- 扩展客户端 `npx vitest run memory wiki-rag code-retrieval _shared/desktop-control`（extensions 目录）：16 个文件 102 个用例通过（`vitest-extensions.txt`）。
+  另验证：负载中 0 个请求错误；kill 子进程、主进程不发任何请求，门面自己重拉；同一时刻用扩展真实的 `desktopControl()` 客户端发的工具授权等了约 0.8 秒，拿到与崩溃前相同的 allow；扩展手里原来的端点（同一管道、同一令牌）、主进程的管道请求（`item.upsert`）与管理请求重拉后都可用；关停后 `PRAGMA integrity_check` 为 ok。第一轮冒烟有 5 个请求错误，查出是共享连接上超大应答连带失败（见上文），修复 `AgentDataClient` 并补测试后复跑通过。崩溃重拉的三项是第二轮加的：第一版冒烟是用主进程的管理请求去触发重拉的，掩盖了「没有主进程请求就不重拉」的问题。对照数字取第二轮之前那次（inproc 各次在 p99 160–235 ms、最长 480–680 ms 之间波动，child 稳定在 p99 25 ms、最长 36–56 ms）。
+- 生产字节码产物：`npx electron-vite build` 后用 `out/main/agentdata-host.cjs` 跑同一冒烟（10 秒，含崩溃重拉各项），9 项全部通过（`smoke-bytecode.txt`）；同时用 `codegraph-host.cjs` + `codegraph-worker.cjs` 跑 `scripts/codegraph-host-smoke.mjs`，10 项全部通过（`codegraph-smoke-bytecode.txt`），补上了上一轮「worker 线程在字节码产物里能否加载」的缺口。worktree 用的是已提交的 `electron.vite.config.ts`，生产入口文件名是 `.cjs`（主工作区里他人未提交的改动把它改成 `.js`）。
+- 单测 `npx vitest run electron/agentData electron/agentDataProcess electron/app/codeGraph electron/app/appServer electron/app/memoryService.test.ts electron/app/toolPermission electron/app/taskViewService.test.ts electron/app/agentDataService.test.ts electron/app/plugin electron/app/sourceCodeProtection.test.ts electron/agentProcess electron/runtimeDiag.test.ts electron/ipc electron/main.config.test.ts src/features/agentData`：1011 个用例中 997 个通过，14 个失败，部分通过（`vitest.txt`）。14 个失败是迁移前就有的同一组（`auditViewStore` 4、`jobCleanup` 2、`runtime.test` 4、`taskViewService` 4），worktree 基线上同样失败，无新增。新增 `host.test.ts` 8 个用例：管道 + 主进程签发令牌、管理面错误形状、崩溃后同端点继续可用、模型反向调用与 usage 先于应答（失败也到）、abort 传到主进程、`permission.authorize` 回到主进程、插件状态经子进程持久化、重拉后项目列表保留；另加 3 个：崩溃后不等主进程请求自己重拉（前两次拉起失败也会再试）、主进程管道请求先拉起子进程、stop 之后不再重拉；`client.test.ts` 新增超大应答只影响自己一条。
+- 扩展客户端 `npx vitest run memory wiki-rag code-retrieval _shared/desktop-control safety`（extensions 目录）：19 个文件 174 个用例通过（`vitest-extensions.txt`），含新增的「重拉中等待而不是立刻拒绝」「没人回来就标 unavailable」。
 - `npm run test:codegraph`：10 个文件 66 个用例通过（`test-codegraph.txt`）。
 - 类型检查 `npx tsc -p tsconfig.node.json --noEmit`：158 个错误，与 worktree 基线逐文件相同，无新增，通过（`tsc.txt`）。
 - 未做：没有在真实 Electron 窗口里跑（开发版数据目录是用户日常用的那个）；合并后需要用户重新构建、重启，确认 `runtime-diag.jsonl` 出现 `agentdata-host-sample`、主进程 `sample` 不再带 `agentData` 字段，以及记忆、Wiki、代码面板、工具授权弹窗正常。
