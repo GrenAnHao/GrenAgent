@@ -43,6 +43,17 @@ describe("fable-behavior extension", () => {
     expect(res?.message?.customType).toBe("fable-behavior");
   });
 
+  it("skips runs started by a triggerTurn custom message (pi 1.2+)", async () => {
+    const { pi, handlers } = makePi();
+    fableBehavior(pi);
+    const custom = { messageType: "custom", message: { role: "custom", customType: "job-done", content: "x" } };
+    expect(await handlers["before_agent_start"](custom, ctxWithMode("agent"))).toBeUndefined();
+    const user = (await handlers["before_agent_start"]({ messageType: "user", prompt: "hi" }, ctxWithMode("agent"))) as
+      | { message?: { customType?: string } }
+      | undefined;
+    expect(user?.message?.customType).toBe("fable-behavior");
+  });
+
   it("applies plan mode slice from session agent-mode entry", async () => {
     const { pi, handlers } = makePi();
     fableBehavior(pi);

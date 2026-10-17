@@ -290,9 +290,12 @@ function registerProjectedTools(
     const serverExposure = normalizeExposure(entry.exposure) ?? "codemode";
     if (serverExposure === "codemode") hasCodemodeServer = true;
     if (serverExposure === "deferred") hasDeferred = true;
+    // aliases (pi 1.2): codemode describeNamespace("antd") and the namespace option of searchTools
+    // accept the bare server name, matching pi built-in MCP.
     const namespace = {
       name: `mcp__${server.replace(/-/g, "_")}`,
       description: entry.description,
+      aliases: [server],
     };
     for (const t of entry.tools) {
       const { name, originalToolName } = registerToolName(server, t.name, taken);
@@ -301,7 +304,7 @@ function registerProjectedTools(
       if (exposure === "codemode") hasCodemodeServer = true;
       if (exposure === "deferred") hasDeferred = true;
       if (exposure === "direct") direct.push(name);
-      const fingerprint = JSON.stringify([server, t.name, t.description ?? null, t.inputSchema ?? null, exposure, namespace.name, namespace.description ?? null]);
+      const fingerprint = JSON.stringify([server, t.name, t.description ?? null, t.inputSchema ?? null, exposure, namespace.name, namespace.description ?? null, namespace.aliases]);
       registerChanged(name, fingerprint, () => pi.registerTool({
         name,
         originalToolName,

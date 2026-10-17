@@ -20,6 +20,8 @@ export default function memory(pi: ExtensionAPI) {
   const capture = new LayeredMemoryCapture(client);
   pi.on('before_agent_start', async (event, ctx) => {
     if (!automaticMemoryEnabled() || getConfig('MEMORY_AUTO_INJECT') === '0') return undefined;
+    // pi 1.2 起 triggerTurn 的自定义消息也会触发本事件，那种事件没有 prompt，按用户输入检索无从谈起。
+    if (event.messageType === 'custom') return undefined;
     const query = event.prompt.trim(); if (!query) return undefined;
     try {
       const result = await client.request<Array<{ level: number; content: string }>>('memory.search', { ...scopeFromContext(ctx), query, limit: 8 });

@@ -82,7 +82,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 新的用户消息换了任务上下文，跨消息的重复不算循环。压缩不重置。
-  pi.on("before_agent_start", async (_event, ctx) => {
+  // triggerTurn 的自定义消息（goal 续跑、后台任务唤醒）还是同一个任务，不清计数，否则续跑里的循环永远数不到阈值。
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (event.messageType === "custom") return;
     clear(ctx);
   });
 

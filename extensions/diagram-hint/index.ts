@@ -26,8 +26,10 @@ const enabled = () => (getConfig("DIAGRAM_HINT") ?? "1") !== "0";
 export default function (pi: ExtensionAPI) {
   console.error("[diagram-hint] extension loaded");
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event) => {
     if (!enabled()) return undefined;
+    // 只在用户输入开的一轮注入；triggerTurn 的自定义消息开的一轮不重复注入。
+    if (event.messageType === "custom") return undefined;
     return {
       message: {
         customType: "diagram-hint",

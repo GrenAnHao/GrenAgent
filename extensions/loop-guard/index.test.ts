@@ -153,6 +153,15 @@ describe("repeat reminders", () => {
     expect(await repeat(handlers, 2, event, "s1")).toBeUndefined();
   });
 
+  it("keeps the chain across a run started by a triggerTurn custom message", async () => {
+    const handlers = setup();
+    const event = result("bash", { command: "rg foo" });
+    await repeat(handlers, 2, event, "s1");
+    await handlers.get("before_agent_start")!({ messageType: "custom" }, ctx("s1"));
+    const third = await repeat(handlers, 1, event, "s1");
+    expect(reminderText(third)).toContain("完全相同的参数");
+  });
+
   it("does not stop a long run of different searches", async () => {
     const handlers = setup();
     const onResult = handlers.get("tool_result")!;

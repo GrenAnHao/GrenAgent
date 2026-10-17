@@ -87,6 +87,8 @@ describe('AgentData extension integration', () => {
     const conversation = await tools.conversation_search.execute('search', { query: 'prefer dark' }, undefined, undefined, ctx);
     expect(conversation.details).toEqual([expect.objectContaining({ sessionId: 's1', workspace, snippet: expect.stringContaining('prefer dark theme') })]);
     expect(await events.before_agent_start({ prompt: 'dark' }, ctx)).toMatchObject({ message: { customType: 'memory', display: false, content: expect.stringContaining('dark') } });
+    // pi 1.2+: runs started by a triggerTurn custom message carry no prompt and get no memory.
+    await expect(events.before_agent_start({ messageType: 'custom', message: { role: 'custom', customType: 'job-done', content: 'x' } }, ctx)).resolves.toBeUndefined();
     await expect(client.request('memory.conversations.search', { userId: 'local', workspace: '/other', query: 'dark' })).resolves.toEqual([]);
   });
 });

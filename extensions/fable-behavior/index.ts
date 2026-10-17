@@ -53,8 +53,10 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     if (!enabled()) return undefined;
+    // 只在用户输入开的一轮注入；triggerTurn 的自定义消息（后台任务唤醒、goal 续跑、子代理回报）不重复注入。
+    if (event.messageType === "custom") return undefined;
 
     const entries = ctx.sessionManager.getEntries() as Array<{
       type?: string;

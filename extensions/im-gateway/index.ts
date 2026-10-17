@@ -75,16 +75,14 @@ function reconcile(): void {
     token: token || undefined,
     onMessage: ({ text, replyUrl }) => {
       let delivered = false;
+      // pi.sendUserMessage reports failures asynchronously, so a try/catch retry never fired.
+      // Always pass deliverAs: pi ignores it while idle, and since pi 1.2 a busy session
+      // (including a run that is still starting) requires it.
       try {
-        st.sendUserMessage?.(text);
+        st.sendUserMessage?.(text, { deliverAs: "followUp" });
         delivered = true;
       } catch {
-        try {
-          st.sendUserMessage?.(text, { deliverAs: "followUp" });
-          delivered = true;
-        } catch {
-          /* drop */
-        }
+        /* drop */
       }
       // Correlate replies FIFO instead of a single overwrite var, so concurrent
       // requests don't clobber each other's replyUrl. Only queue when the message

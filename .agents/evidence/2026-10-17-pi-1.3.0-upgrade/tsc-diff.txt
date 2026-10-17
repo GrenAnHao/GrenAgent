@@ -1,0 +1,16 @@
+# tsc -p electron-agent/tsconfig.node.json: errors only in pi 1.3.0 vs 1.1.0 baseline (same worktree)
+baseline=164 after=158
+## introduced:
+## cleared:
+../cli/src/gren-runtime.ts(72,9): error TS2322: Type '(ExtensionFactory | ((pi: ExtensionAPI, control?: DesktopControlPort) => void))[]' is not assignable to type 'InlineExtension[]'.
+../cli/src/pi-worker.ts(40,50): error TS2322: Type '(pi: ExtensionAPI, control?: DesktopControlPort) => void' is not assignable to type 'InlineExtension'.
+../cli/src/pi-worker.ts(40,68): error TS2322: Type '((pi: ExtensionAPI, control?: DesktopControlPort) => void) | { name: string; builtin: true; factory(): void; }' is not assignable to type 'InlineExtension'.
+../cli/src/runtime.ts(12,5): error TS2322: Type '(pi: ExtensionAPI, control?: DesktopControlPort) => void' is not assignable to type 'InlineExtension'.
+../cli/src/runtime.ts(13,5): error TS2322: Type '((pi: ExtensionAPI, control?: DesktopControlPort) => void) | { name: string; builtin: true; factory(): void; }' is not assignable to type 'InlineExtension'.
+electron/agentProcess/runtimeGraph.ts(49,29): error TS2345: Argument of type 'import("D:/OneDrive/Project Files/Pi/.agents/worktrees/upgrade-pi-1.3.0/cli/node_modules/.pnpm/@earendil-works+pi-coding-a_0f2bff78d52818cffdd01879cc3cd5de/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime").ModelRuntime' is not assignable to parameter of type 'import("D:/OneDrive/Project Files/Pi/.agents/worktrees/upgrade-pi-1.3.0/extensions/node_modules/.pnpm/@earendil-works+pi-coding-a_9c97405258177124891b86780b635ca2/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime").ModelRuntime'.
+
+# cli tsc --noEmit
+baseline=89 after=84
+## introduced:
+## first-pass before memory fix:
+../extensions/memory/index.ts(23,25): error TS2339: Property 'prompt' does not exist on type 'BeforeAgentStartEvent'.

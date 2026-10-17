@@ -80,6 +80,7 @@ describe('code retrieval extension', () => {
     expect(injected).toMatchObject({ message: { customType: 'codegraph', display: false } });
     expect(String((injected as { message: { content: string } }).message.content)).toMatch(/no CodeGraph index/i);
     expect(String((injected as { message: { content: string } }).message.content)).toMatch(/grep/);
+    expect(await start?.({ messageType: 'custom' }, { cwd })).toBeUndefined();
   });
 
   it.each([
