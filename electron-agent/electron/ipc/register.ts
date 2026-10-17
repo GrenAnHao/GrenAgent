@@ -642,7 +642,7 @@ function registerPiCommands(service: PiCommandsPort): void {
     'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
     'agent_set_approval', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',
-    'agent_get_messages', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
+    'agent_get_messages', 'agent_get_goal', 'agent_get_commands', 'agent_new_session', 'agent_switch_session', 'agent_fork',
     'agent_clone', 'agent_get_fork_messages', 'agent_set_session_name',
     'ask_user_draft_read', 'ask_user_draft_write', 'ask_user_draft_delete',
     'agent_complete_ask_user',

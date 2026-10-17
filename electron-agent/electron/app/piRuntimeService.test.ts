@@ -1247,6 +1247,48 @@ describe('进程内宿主交互路径', () => {
       }
     });
 
+    const goalEntry = (kind: string, revision: number, payload: Record<string, unknown> = {}) => ({
+      type: 'custom', customType: 'goal',
+      data: { kind, goalId: 'g1', revision, at: `2026-10-18T00:00:0${revision}.000Z`, payload },
+    });
+
+    it('agent_get_goal 会话在 handle 上时读内存条目，跑着也立刻返回，不发 prompt', async () => {
+      const { parked, front, host } = twoHandles();
+      parked.session.sessionManager = { getEntries: () => [goalEntry('create', 1, { condition: '写完' })] };
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      const result = await service.send('C:/work', 'agent_get_goal', { targetSessionPath: 'C:\\sessions\\parked.jsonl' }) as Record<string, any>;
+      expect(result).toMatchObject({ schemaVersion: 1, sessionId: 'parked', snapshot: { goalId: 'g1', status: 'active', condition: '写完', activation: 'disarmed' } });
+      expect(parked.prompt).not.toHaveBeenCalled();
+      expect(front.prompt).not.toHaveBeenCalled();
+      expect(host.focus).not.toHaveBeenCalled();
+    });
+
+    it('agent_get_goal 会话不在任何 handle 上时读它自己的文件（重启后首次打开）', async () => {
+      const { front, host } = twoHandles();
+      const dir = await mkdtemp(join(tmpdir(), 'pi-goal-detached-'));
+      try {
+        const sm = SessionManager.create('C:/work', dir);
+        sm.appendMessage({ role: 'user', content: 'go', timestamp: 1 } as never);
+        sm.appendCustomEntry('goal', goalEntry('create', 1, { condition: '重启后还在' }).data);
+        const path = sm.getSessionFile()!;
+        await writeFile(path, [sm.getHeader(), ...sm.getEntries()].map((item) => JSON.stringify(item)).join('\n') + '\n');
+        const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+        const result = await service.send('C:/work', 'agent_get_goal', { targetSessionPath: path }) as Record<string, any>;
+        expect(result).toMatchObject({ sessionId: sm.getSessionId(), snapshot: { condition: '重启后还在', status: 'active', activation: 'disarmed' } });
+        expect(result.history).toHaveLength(1);
+        expect(front.prompt).not.toHaveBeenCalled();
+        await expect(service.send('C:/other', 'agent_get_goal', { targetSessionPath: path })).rejects.toThrow('SESSION_WORKSPACE_MISMATCH');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('agent_get_goal 没有会话路径时返回 null', async () => {
+      const { host } = twoHandles();
+      const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+      await expect(service.send('C:/work', 'agent_get_goal', {})).resolves.toBeNull();
+    });
+
     it('respondUi 按挂起的请求 id 回到对应 handle', async () => {
       const { parked, front, host } = twoHandles();
       parked.ui = { respond: vi.fn(), hasPending: vi.fn((id: string) => id === 'req-parked') };

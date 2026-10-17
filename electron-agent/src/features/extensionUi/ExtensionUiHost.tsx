@@ -2,7 +2,7 @@ import { App } from 'antd';
 import { useEffect } from 'react';
 import { onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
-import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../stores/goalStore';
+import { applyGoalStatus } from './goalStatus';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { isAgentMode, useModeStore } from '../../stores/modeStore';
 import { useUiPromptStore } from '../../stores/uiPromptStore';
@@ -31,89 +31,6 @@ export function backgroundSessionPathOf(e: PiUiRequestEnvelope): string | undefi
 }
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
-
-interface ParsedGoalStatus {
-  sessionId: string;
-  snapshot?: GoalSnapshot;
-}
-
-const GOAL_STATUS_SCHEMA_VERSION = 1;
-
-/**
- * Goal setStatus 是会话投影刷新。只接受 v1 信封：顶层 sessionId / history，
- * 嵌套 snapshot（折叠字段，不含 sessionId）。旧版 {condition, paused, react} 忽略。
- */
-function parseGoalStatus(statusText: unknown, envelopeSessionId?: unknown): ParsedGoalStatus | undefined {
-  try {
-    const parsed = typeof statusText === 'string'
-      ? (statusText ? JSON.parse(statusText) : undefined)
-      : statusText;
-    if (!isRecord(parsed) || parsed.schemaVersion !== GOAL_STATUS_SCHEMA_VERSION) return undefined;
-    const sessionId = readNonEmptyString(parsed.sessionId ?? envelopeSessionId);
-    if (!sessionId) return undefined;
-    if (parsed.snapshot === null) return { sessionId };
-    if (!isRecord(parsed.snapshot)) return undefined;
-
-    const candidate = parsed.snapshot;
-    const goalId = readNonEmptyString(candidate.goalId);
-    const condition = readNonEmptyString(candidate.condition);
-    const status = readGoalStatus(candidate.status);
-    const revision = readPositiveInteger(candidate.revision);
-    if (!goalId || !condition || !status || revision === undefined) return undefined;
-
-    const now = new Date().toISOString();
-    const blockedReason = readBlockedReason(candidate.blockedReason);
-    const snapshot: GoalSnapshot = {
-      goalId,
-      sessionId,
-      revision,
-      condition,
-      status,
-      roundsStarted: readNonnegativeInteger(candidate.roundsStarted) ?? 0,
-      maxRounds: readPositiveInteger(candidate.maxRounds) ?? 256,
-      createdAt: readNonEmptyString(candidate.createdAt) ?? now,
-      updatedAt: readNonEmptyString(candidate.updatedAt) ?? now,
-      ranMs: readNonnegativeInteger(candidate.ranMs) ?? 0,
-      ...(readNonEmptyString(candidate.runStartedAt) ? { runStartedAt: readNonEmptyString(candidate.runStartedAt) } : {}),
-      activation: candidate.activation === 'armed' ? 'armed' : 'disarmed',
-      ...(blockedReason ? { blockedReason } : {}),
-      ...(Array.isArray(parsed.history) ? { history: parsed.history as GoalHistoryItem[] } : {}),
-    };
-    return { sessionId, snapshot };
-  } catch {
-    return undefined;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function readPositiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
-}
-
-function readNonnegativeInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
-function readGoalStatus(value: unknown): GoalSnapshot['status'] | undefined {
-  return value === 'active' || value === 'paused' || value === 'blocked' || value === 'complete'
-    ? value
-    : undefined;
-}
-
-function readBlockedReason(value: unknown): GoalSnapshot['blockedReason'] | undefined {
-  if (!isRecord(value)) return undefined;
-  const code = readNonEmptyString(value.code);
-  const message = readNonEmptyString(value.message);
-  if (!code || !message) return undefined;
-  return { code, message };
-}
 
 /** notify 文本字段名因 sidecar 而异，按优先级取第一个非空字符串。 */
 function notifyText(request: Record<string, unknown>): string | undefined {
@@ -155,10 +72,6 @@ export function ExtensionUiHost() {
         else unsubs.push(un);
       });
     };
-    const routeGoalStatus = (statusText: unknown, sessionId?: unknown) => {
-      const parsed = parseGoalStatus(statusText, sessionId);
-      if (parsed) useGoalStore.getState().setSnapshot(parsed.sessionId, parsed.snapshot);
-    };
 
     register(onPiUiRequest((e) => {
       // Goal workers are headless; their UI requests must never surface in the
@@ -184,7 +97,7 @@ export function ExtensionUiHost() {
         } else if (r.statusKey === 'plan-mode') {
           usePlanModeStore.getState().setStatus(text);
         } else if (r.statusKey === 'goal') {
-          routeGoalStatus(r.statusText, e.sessionId);
+          applyGoalStatus(r.statusText, e.sessionId, e.sessionPath);
         } else if (r.statusKey === 'mcp') {
           let servers: McpServerStatus[] = [];
           try {

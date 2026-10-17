@@ -2,10 +2,10 @@ import { projectCwd } from "../_shared/session-cwd.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readAutoContinueOnOpen } from "./config.js";
 import { foldGoal } from "./fold.js";
-import { listGoalHistory } from "./history.js";
+import { buildGoalStatus, getActivation, setActivation } from "./status.js";
 import type { GoalActivation, GoalEvent, GoalSnapshot } from "./types.js";
 
-const activations = new Map<string, GoalActivation>();
+export { getActivation, setActivation };
 
 type SessionManager = {
   getEntries?: () => unknown[];
@@ -24,14 +24,6 @@ export function sessionIdOf(ctx: ExtensionContext): string {
 
 export function readSnapshot(ctx: ExtensionContext): GoalSnapshot | undefined {
   return foldGoal(sessionManager(ctx).getEntries?.() ?? []);
-}
-
-export function getActivation(sessionId: string): GoalActivation {
-  return activations.get(sessionId) ?? "disarmed";
-}
-
-export function setActivation(sessionId: string, activation: GoalActivation): void {
-  activations.set(sessionId, activation);
 }
 
 export function nextRevision(snapshot: GoalSnapshot | undefined): number {
@@ -56,13 +48,11 @@ export function currentStatusSnapshot(ctx: ExtensionContext): StatusSnapshot {
 }
 
 export function pushStatus(ctx: ExtensionContext): void {
-  ctx.ui.setStatus("goal", JSON.stringify({
-    schemaVersion: 1,
+  ctx.ui.setStatus("goal", JSON.stringify(buildGoalStatus({
+    entries: sessionManager(ctx).getEntries?.() ?? [],
     sessionId: sessionIdOf(ctx),
     workspace: projectCwd(ctx),
-    snapshot: currentStatusSnapshot(ctx),
-    history: listGoalHistory(sessionManager(ctx).getEntries?.() ?? []),
-  }));
+  })));
 }
 
 function eventAt(): string {

@@ -34,6 +34,7 @@ Goal 原设计（`docs/superpowers/specs/2026-09-06-session-goal-design.md`，af
 ## Consequences
 
 - Goal 状态随会话文件走：fork / 回退天然带上；跨会话的 live Goal 页面不存在。
+- 渲染层的 Goal 条按会话路径补拉（主进程 `agent_get_goal`），推送只是增量，见 [Goal 条按会话路径补拉](../bug-fix/2026-10-18-goal-bar-pull-hydration.md)；续跑轮次在对话里的卡片见 [续跑卡片](../feature/2026-10-18-goal-round-cards-and-silent-create.md)。
 - 两进程并发写同一会话的 Goal 事件不受支持（规格 §8）。
 
 ## Verification

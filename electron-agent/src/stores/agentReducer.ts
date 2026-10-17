@@ -677,9 +677,21 @@ function toolResultPayload(msg: AgentMessage): unknown {
   };
 }
 
-/** 把 pi 的 CustomMessage（role:'custom', display:true）转成一条去重的 notice。 */
+/**
+ * display:false 的自定义消息照样画卡片的类型。goal-round 是 Goal 每一轮续跑发给模型的正文：
+ * 扩展按 display:false 发（TUI 里不刷屏），桌面端要在对话里看见「第 N 轮开始了」。
+ */
+const SHOWN_HIDDEN_CUSTOM_TYPES = new Set(['goal-round']);
+
+function showsCustomMessage(msg: AgentMessage): boolean {
+  if ((msg as { display?: unknown }).display === true) return true;
+  const customType = (msg as { customType?: unknown }).customType;
+  return typeof customType === 'string' && SHOWN_HIDDEN_CUSTOM_TYPES.has(customType);
+}
+
+/** 把 pi 的 CustomMessage（role:'custom', display:true，或上面列出的类型）转成一条去重的 notice。 */
 function applyCustomMessage(state: AgentState, msg: AgentMessage): AgentState {
-  if ((msg as { display?: unknown }).display !== true) return state;
+  if (!showsCustomMessage(msg)) return state;
   const content = typeof msg.content === 'string' ? msg.content : '';
   if (!content.trim()) return state;
   const rawCustomType = (msg as { customType?: unknown }).customType;
@@ -1209,7 +1221,7 @@ export function messagesFromAgent(
   for (const msg of msgs) {
     if (msg.role === 'custom') {
       const content = typeof msg.content === 'string' ? msg.content : '';
-      if ((msg as { display?: unknown }).display === true && content.trim()) {
+      if (showsCustomMessage(msg) && content.trim()) {
         const rawCustomType = (msg as { customType?: unknown }).customType;
         const customType = typeof rawCustomType === 'string' ? rawCustomType : '';
         out.push({ kind: 'notice', id: nextId(), customType, content });

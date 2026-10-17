@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   piOpenWorkspace: vi.fn(),
   piNewSession: vi.fn(),
   piGetState: vi.fn(),
+  piGetGoal: vi.fn(async () => null),
   piSetModel: vi.fn(),
   piSetThinkingLevel: vi.fn(),
   composerModel: { provider: 'openai', id: 'g' } as { provider: string; id: string } | null,
@@ -54,6 +55,7 @@ vi.mock('../../lib/pi', () => ({
     openWorkspace: state.piOpenWorkspace,
     newSession: state.piNewSession,
     getState: state.piGetState,
+    getGoal: state.piGetGoal,
     setModel: state.piSetModel,
     setThinkingLevel: state.piSetThinkingLevel,
     setSessionDisplayName: vi.fn(),
@@ -157,6 +159,7 @@ state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => f
 
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { ChatView, laneKey } from './ChatView';
+import { useCommandInputStore } from '../../stores/commandInputStore';
 
 afterEach(() => {
   cleanup();
@@ -644,6 +647,24 @@ describe('ChatView 发送失败自动重试', () => {
     expect(state.pushUserMessage).not.toHaveBeenCalled();
     expect(state.piPrompt).not.toHaveBeenCalled();
     expect(state.storeState.composerQueue).toEqual([expect.objectContaining({ text: '先别再测了' })]);
+  });
+
+  it('执行中设 /goal 立刻发给 Pi，不排进跟进、不进对话、不留命令行，回来就按会话路径补拉 Goal', async () => {
+    state.storeState.isStreaming = true;
+    state.pendingSend = '/goal 写完测试';
+    state.pendingBehavior = 'followUp';
+    state.piPrompt.mockResolvedValue(undefined);
+
+    render(<ChatView />);
+    fireEvent.click(screen.getByTestId('chat-input'));
+    await act(async () => {});
+
+    const S = '/home/.pi/agent/works/u1/s.jsonl';
+    expect(state.piPrompt).toHaveBeenCalledWith('/home/.pi/agent/works/u1', '/goal 写完测试', undefined, undefined, S);
+    expect(state.pushUserMessage).not.toHaveBeenCalled();
+    expect(state.storeState.composerQueue).toEqual([]);
+    expect(useCommandInputStore.getState().list(S)).toEqual([]);
+    expect(state.piGetGoal).toHaveBeenCalledWith('/home/.pi/agent/works/u1', S);
   });
 
   it('空闲时若已有跟进条则自动作为新一轮发出', async () => {

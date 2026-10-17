@@ -8,6 +8,7 @@ import { NoticePill } from './NoticePill';
 import { SubagentSettledPill } from './SubagentSettledPill';
 import { JobDonePill } from './JobDonePill';
 import { AgentMessagePill } from './AgentMessagePill';
+import { GoalRoundPill } from './GoalRoundPill';
 import { UiPromptReceipt } from './UiPromptReceipt';
 import { AnswerCard } from './AnswerCard';
 import { PlanCard } from './PlanCard';
@@ -169,6 +170,7 @@ export function renderMessageBody(
       if (msg.customType === 'subagent-settled') return <SubagentSettledPill content={msg.content} />;
       if (msg.customType === 'job-done') return <JobDonePill content={msg.content} />;
       if (msg.customType === 'agent-message') return <AgentMessagePill content={msg.content} />;
+      if (msg.customType === 'goal-round') return <GoalRoundPill content={msg.content} />;
       if (msg.customType === 'ui-prompt-receipt') return <UiPromptReceipt content={msg.content} />;
       return <NoticePill customType={msg.customType} content={msg.content} />;
     case 'command-input':

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useSessionStore } from '../../../../store/session';
 import { useGoalStore, type GoalSnapshot } from '../../../../stores/goalStore';
 
 const { addPastedText, send, getState, prompt } = vi.hoisted(() => ({
@@ -31,7 +32,7 @@ vi.mock('../../../../stores/AgentStoreContext', () => ({
     }),
   }),
 }));
-vi.mock('../../../../lib/pi', () => ({ pi: { getState, prompt } }));
+vi.mock('../../../../lib/pi', () => ({ pi: { getState, prompt, getGoal: vi.fn(async () => null) } }));
 vi.mock('../ChatInputContext', () => ({
   useChatInput: () => ({
     editor: {
@@ -132,7 +133,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useGoalStore.setState({ bySession: {}, goal: undefined });
+  useGoalStore.setState({ bySession: {}, sessionIdByPath: { '/sessions/a.jsonl': 'session-a' }, goal: undefined });
+  useSessionStore.setState({ activeSessionPath: '/sessions/a.jsonl' });
   useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   addPastedText.mockClear();
   send.mockClear();

@@ -3,13 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
 
-const { getState, prompt } = vi.hoisted(() => ({
-  getState: vi.fn(),
+const { getGoal, prompt } = vi.hoisted(() => ({
+  getGoal: vi.fn(),
   prompt: vi.fn(),
 }));
 let activeSessionPath: string | null = '/sessions/a.jsonl';
 
-vi.mock('../../../lib/pi', () => ({ pi: { getState, prompt } }));
+vi.mock('../../../lib/pi', () => ({ pi: { getGoal, prompt } }));
 vi.mock('../../../store/session', () => ({
   useSessionStore: (selector: (state: { activeSessionPath: string | null }) => unknown) =>
     selector({ activeSessionPath }),
@@ -23,6 +23,7 @@ vi.mock('../../../stores/AgentStoreContext', () => ({
 }));
 
 import { GoalPill } from './GoalPill';
+import { applyGoalStatus } from '../../extensionUi/goalStatus';
 
 if (!('ResizeObserver' in globalThis)) {
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
@@ -48,7 +49,15 @@ const makeSnapshot = (overrides: Partial<GoalSnapshot> = {}): GoalSnapshot => ({
   ...overrides,
 });
 
+const envelope = (sessionId: string, snapshot: Partial<GoalSnapshot> | null) => ({
+  schemaVersion: 1,
+  sessionId,
+  snapshot: snapshot === null ? null : { ...makeSnapshot(), ...snapshot },
+  history: [],
+});
+
 async function renderGoal(overrides: Partial<GoalSnapshot> = {}, props: { onOpenDetails?: (snapshot: GoalSnapshot) => void } = {}) {
+  useGoalStore.getState().bindSessionPath('/sessions/a.jsonl', 'session-a');
   useGoalStore.getState().setSnapshot('session-a', makeSnapshot(overrides));
   render(<GoalPill {...props} />);
   return screen.findByTestId('goal-pill');
@@ -59,15 +68,15 @@ function lampStyle(): string {
 }
 
 beforeEach(() => {
-  useGoalStore.setState({ bySession: {}, goal: undefined });
+  useGoalStore.setState({ bySession: {}, sessionIdByPath: {}, goal: undefined });
   activeSessionPath = '/sessions/a.jsonl';
-  getState.mockResolvedValue({ sessionId: 'session-a' });
+  getGoal.mockResolvedValue(null);
   prompt.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   cleanup();
-  getState.mockReset();
+  getGoal.mockReset();
   prompt.mockReset();
 });
 
@@ -130,27 +139,42 @@ describe('GoalPill', () => {
     expect(screen.getByRole('button', { name: '展开目标详情' })).toBeTruthy();
   });
 
-  it('does not render a pill when the session has no snapshot', async () => {
+  it('pulls the goal by the active session path on mount (first open after restart)', async () => {
+    getGoal.mockResolvedValue(envelope('session-a', { activation: 'disarmed' }));
     render(<GoalPill />);
-    await waitFor(() => expect(getState).toHaveBeenCalledWith('/repo'));
-    expect(screen.queryByTestId('goal-pill')).toBeNull();
+
+    expect(await screen.findByTestId('goal-pill')).toBeTruthy();
+    expect(getGoal).toHaveBeenCalledWith('/repo', '/sessions/a.jsonl');
+    expect(screen.getByText('未运行的目标')).toBeTruthy();
   });
 
-  it('does not bind a goal when Pi state still points at another session file', async () => {
-    activeSessionPath = '/new.json';
-    getState.mockResolvedValue({ sessionId: 'old-session', sessionFile: '/old.json' });
-    useGoalStore.getState().setSnapshot(
-      'old-session',
-      makeSnapshot({ sessionId: 'old-session', goalId: 'goal-old', condition: '旧会话目标' }),
-    );
-
+  it('shows a goal pushed for the active path while the turn is running, without switching sessions', async () => {
     render(<GoalPill />);
-    await waitFor(() => expect(getState).toHaveBeenCalledWith('/repo'));
-    await act(async () => {
-      await Promise.resolve();
+    await waitFor(() => expect(getGoal).toHaveBeenCalled());
+    expect(screen.queryByTestId('goal-pill')).toBeNull();
+
+    // 推送信封带会话路径（大小写、分隔符可以不同），sessionId 由它绑定。
+    act(() => {
+      applyGoalStatus(JSON.stringify(envelope('session-a', {})), 'session-a', '\\SESSIONS\\A.jsonl');
+    });
+    expect(await screen.findByText('执行中的目标')).toBeTruthy();
+  });
+
+  it('never shows a goal pushed for another session', async () => {
+    render(<GoalPill />);
+    await waitFor(() => expect(getGoal).toHaveBeenCalled());
+    act(() => {
+      applyGoalStatus(JSON.stringify(envelope('session-b', { condition: '别的会话' })), 'session-b', '/sessions/b.jsonl');
     });
     expect(screen.queryByTestId('goal-pill')).toBeNull();
-    expect(screen.queryByText('旧会话目标')).toBeNull();
+    expect(screen.queryByText('· 别的会话')).toBeNull();
+  });
+
+  it('does not render a pill when the pulled session has no goal', async () => {
+    getGoal.mockResolvedValue(envelope('session-a', null));
+    render(<GoalPill />);
+    await waitFor(() => expect(useGoalStore.getState().sessionIdByPath['/sessions/a.jsonl']).toBe('session-a'));
+    expect(screen.queryByTestId('goal-pill')).toBeNull();
   });
 
   it('edits the condition with Enter and ignores Escape', async () => {
@@ -211,6 +235,8 @@ describe('GoalPill', () => {
     await renderGoal();
     fireEvent.click(screen.getByRole('button', { name: '暂停目标' }));
     await waitFor(() => expect(prompt).toHaveBeenCalledWith('/repo', '/goal pause', undefined, undefined, '/repo/s.jsonl'));
+    // 命令返回后按那份会话的路径再补拉一次。
+    await waitFor(() => expect(getGoal).toHaveBeenCalledWith('/repo', '/repo/s.jsonl'));
 
     cleanup();
     prompt.mockClear();

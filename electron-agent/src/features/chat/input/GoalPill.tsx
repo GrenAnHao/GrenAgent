@@ -2,8 +2,9 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Icon } from '@lobehub/ui';
 import { Check, Maximize2, Pause, PencilLine, Play, Trash2, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
-import { pathsEquivalent } from '../../../lib/pathUtils';
 import { pi } from '../../../lib/pi';
+import { refreshGoalStatus } from '../../extensionUi/goalStatus';
+import { sessionControlKey } from '../../../stores/modeStore';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useSessionStore } from '../../../store/session';
 import { useGoalStore, type GoalSnapshot } from '../../../stores/goalStore';
@@ -83,12 +84,6 @@ export function readSessionId(state: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function readSessionFile(state: unknown): string | undefined {
-  if (!state || typeof state !== 'object') return undefined;
-  const value = (state as { sessionFile?: unknown }).sessionFile;
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
 function statusSentence(snapshot: GoalSnapshot): string {
   if (snapshot.status === 'active') {
     return snapshot.activation === 'armed' ? '执行中的目标' : '未运行的目标';
@@ -134,35 +129,21 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
   const ask = useAskConfirm();
   const { workspace, store } = useAgentStoreContext();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
-  const [sessionId, setSessionId] = useState<string>();
+  // 会话身份按路径取：推送信封和补拉结果都会记「路径 → sessionId」。
+  // 不再靠 getState：它只在切换会话时读一次，回合跑着时读不对就要等下次切换。
+  const sessionId = useGoalStore((s) => (activeSessionPath ? s.sessionIdByPath[sessionControlKey(activeSessionPath)] : undefined));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
-  const epoch = useRef(0);
   const inflight = useRef(false);
   const snapshot = useGoalStore((s) => (sessionId ? s.bySession[sessionId] : undefined));
 
+  // 打开 / 切到一份会话就补拉一次。重启后首次打开时 session_start 的推送可能早于窗口就绪，
+  // 会话也可能根本不在 handle 上（只读了文件），都靠这一次补上。
   useEffect(() => {
-    const request = ++epoch.current;
-    setSessionId(undefined);
-    if (!workspace) return;
-    void pi
-      .getState(workspace)
-      .then((state) => {
-        if (request !== epoch.current) return;
-        const stateSessionFile = readSessionFile(state);
-        if (stateSessionFile && (!activeSessionPath || !pathsEquivalent(stateSessionFile, activeSessionPath))) return;
-        const nextSessionId = readSessionId(state);
-        if (nextSessionId) setSessionId(nextSessionId);
-      })
-      .catch(() => {
-        // 会话状态暂不可读时保持无 Goal；下次切换会话会再次拉取。
-      });
-    return () => {
-      epoch.current++;
-    };
+    void refreshGoalStatus(workspace, activeSessionPath);
   }, [workspace, activeSessionPath]);
 
   useEffect(() => {
@@ -181,7 +162,9 @@ export const GoalPill = memo(function GoalPill({ onOpenDetails }: GoalPillProps)
     inflight.current = true;
     setBusy(true);
     try {
-      await pi.prompt(workspace, message, undefined, undefined, store.getLoadedSessionPath());
+      const path = store.getLoadedSessionPath();
+      await pi.prompt(workspace, message, undefined, undefined, path);
+      void refreshGoalStatus(workspace, path);
     } catch {
       // 动作失败不藏条；扩展回执会说明原因。
     } finally {

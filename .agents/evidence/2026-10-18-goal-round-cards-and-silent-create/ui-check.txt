@@ -1,0 +1,32 @@
+
+> electron-agent@0.1.0 ui:check
+> node ui-harness/check.mjs goal-round-card
+
+构建：还没有构建产物
+场景已构建（生产模式，6.5s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[42712:1018/050410.917:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ goal-round-card
+  PASS 对话渲染出来
+  PASS 历史里的续跑轮次显示成卡片
+  PASS 历史两轮各一张卡片
+  PASS 别的 display:false 消息不显示
+  PASS 第一张写第 4 轮（目标续跑 · 第 4 轮）
+  PASS 第二张写第 5 轮（目标续跑 · 第 5 轮）
+  PASS 标题不写轮次预算
+  PASS 默认收起：完成条件不露出来
+  INFO 截图 collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\goal-round-card-collapsed.png
+  PASS 点开后看到这一轮的完成条件
+  INFO 截图 expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\goal-round-card-expanded.png
+  PASS 再点收起
+  PASS 实时推来的第 6 轮也有卡片，且只出一张
+  PASS 实时那张写第 6 轮
+  INFO 完成条件  按用户给的 M1→M4 流程推进客服模块：每期切分支 feat/kefu-m<N>、写计划、实现、单测、笔记、验收证据，然后进入下一期。
+  PASS 浅色：三张卡片都可见
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\goal-round-card-light.png
+  ── 13 passed, 0 failed
+
+通过：goal-round-card（4.1s）。只跑了 1/17 个场景，其余 16 个没指定，未运行

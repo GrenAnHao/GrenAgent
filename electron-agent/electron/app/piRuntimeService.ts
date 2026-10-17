@@ -11,6 +11,7 @@ import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { isSessionWorkspaceMismatch, readSessionIdentity } from './sessionIdentity';
 import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
 import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
+import { buildGoalStatus, type GoalStatusEnvelope } from '../../../extensions/goal/status.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
 import { messagesWithEntryIds, type SessionProjectionLike } from './messagesWithEntryIds.js';
@@ -44,6 +45,7 @@ const commandTypes = {
   agent_get_session_stats: 'get_session_stats',
   agent_get_state: 'get_state',
   agent_get_messages: 'get_messages',
+  agent_get_goal: 'get_state',
   agent_get_commands: 'get_commands',
   agent_new_session: 'new_session',
   agent_switch_session: 'switch_session',
@@ -303,6 +305,9 @@ export class PiRuntimeService {
     if (command === 'agent_exclude_entry' || command === 'agent_restore_entry') {
       return this.writeContextExclusion(workspace, command === 'agent_exclude_entry' ? 'add' : 'remove', args.timestamp);
     }
+    if (command === 'agent_get_goal') {
+      return this.readGoalStatus(workspace, targetPath);
+    }
     if (targetPath && ROUTED_COMMANDS.has(command)) {
       const owner = this.handleOwningPath(workspace, targetPath);
       if (owner && owner !== this.options.agentHost.get(workspace)) {
@@ -483,6 +488,25 @@ export class PiRuntimeService {
       }
       throw error;
     }
+  }
+
+  /**
+   * 按会话路径读 Goal 投影，和扩展 setStatus("goal") 推的是同一种信封。
+   * 会话在 handle 上就读内存里的条目（含还没落盘的那几条）；不在就读会话文件。
+   * 不起 handle、不触发 session_start，也不进回合队列：会话跑着也能立刻读。
+   */
+  private async readGoalStatus(workspace: string, sessionPath: string | undefined): Promise<GoalStatusEnvelope | null> {
+    if (!sessionPath) return null;
+    const owner = this.handleOwningPath(workspace, sessionPath);
+    if (owner) {
+      const sessionId = owner.session.sessionId;
+      if (typeof sessionId !== 'string' || !sessionId) return null;
+      return buildGoalStatus({ entries: owner.session.sessionManager.getEntries(), sessionId });
+    }
+    const identity = await readSessionIdentity(sessionPath, workspace);
+    if (!existsSync(identity.sessionPath)) return null;
+    const manager = SessionManager.open(identity.sessionPath);
+    return buildGoalStatus({ entries: manager.getEntries(), sessionId: manager.getSessionId() || identity.sessionId });
   }
 
   /** 只读地投影一份不在任何 handle 上的会话。路径必须属于这个项目。 */

@@ -36,6 +36,7 @@ import { useSessionStore } from '../../store/session';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useModuleStore } from '../../stores/moduleStore';
 import { commandLanes } from '../../lib/commandLanes';
+import { refreshGoalStatus } from '../extensionUi/goalStatus';
 import { awaitStreamingEnd } from '../../lib/streamingGate';
 
 const COMPOSE_COLUMN: CSSProperties = {
@@ -275,7 +276,14 @@ export function ChatView() {
     if (text && isExecutiveCommandMessage(text)) {
       const cmd = text.split(/\s/, 1)[0];
       try {
-        await pi.prompt(workspace, text, undefined, images, store.getLoadedSessionPath());
+        const commandPath = store.getLoadedSessionPath();
+        await pi.prompt(workspace, text, undefined, images, commandPath);
+        // /goal 只在输入栏上方出 Goal 条，对话里不留命令行、也不弹「已执行」：条本身就是回执。
+        // 回合跑着时也立刻生效；推送之外再按路径补拉一次，Goal 条不用等切换会话。
+        if (cmd.toLowerCase() === '/goal') {
+          void refreshGoalStatus(workspace, commandPath);
+          return;
+        }
         messageApi.info(`已执行 ${cmd}`);
         const sessionPath = useSessionStore.getState().activeSessionPath;
         if (sessionPath) {

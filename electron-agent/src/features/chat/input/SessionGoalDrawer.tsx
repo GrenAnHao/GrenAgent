@@ -4,6 +4,7 @@ import { createStaticStyles, cssVar } from 'antd-style';
 import { Icon } from '@lobehub/ui';
 import { Save, Trash2 } from 'lucide-react';
 import { pi } from '../../../lib/pi';
+import { refreshGoalStatus } from '../../extensionUi/goalStatus';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useGoalStore, type GoalHistoryItem, type GoalSnapshot } from '../../../stores/goalStore';
 import { useAskConfirm } from '../../../components/askConfirm';
@@ -140,7 +141,9 @@ export function SessionGoalDrawer({ open, sessionId, snapshot, onClose }: Sessio
     if (!workspace || inflight.current) return;
     inflight.current = true;
     try {
-      await pi.prompt(workspace, message, undefined, undefined, store.getLoadedSessionPath());
+      const path = store.getLoadedSessionPath();
+      await pi.prompt(workspace, message, undefined, undefined, path);
+      void refreshGoalStatus(workspace, path);
     } finally {
       inflight.current = false;
     }

@@ -144,7 +144,7 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
 }
 
 /**
- * 把本地 `/goal` 行按发送时的会话位置插回列表。
+ * 把本地执行性命令行（/compact 等；/goal 不留行，只出 Goal 条）按发送时的会话位置插回列表。
  * DSH 用 command/run.seq 做 anchor，续跑消息排在后面；我们没有这条事件，用发送当下的 grouped 长度。
  */
 export function mergeCommandInputs(

@@ -87,7 +87,7 @@ npx vitest run prompt-metadata.test.ts
 
 ### 跑哪些场景
 
-原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer`、`panel-resize`、`subagent-approval`、`agent-message`、`subagent-detached` 十六个场景，全量就是它们。
+原则：只验证当前需求。已经定档、不在本次需求里的场景，收尾时不要顺带拉出来重跑，也不要自己把范围升级成全量。目前有 `codemode-card`、`bash-job-card`、`visual-panel`、`subagent-conversation`、`subagent-history`、`session-row`、`command-pill`、`prompt-library-panel`、`chat-follow`、`provider-diagnostics`、`provider-model-list`、`file-explorer`、`panel-resize`、`subagent-approval`、`agent-message`、`subagent-detached`、`goal-round-card` 十七个场景，全量就是它们。
 
 - 改了某个工具卡 / 时间线组件的 UI：点名对应的场景（查下面「现有场景」），可以是几个，但都属于本次需求。
 - 新增组件 / 面板：先写新场景 + probe，只跑这个新场景。其他场景一个不跑。
@@ -135,6 +135,7 @@ npx vitest run prompt-metadata.test.ts
 - 面板分隔条：`panel-resize`（真实 ResizeHandle，左边长对话、右边文件浏览器打开长 markdown；拖动宽度跟手，拖动中面板没有宽度过渡，松手恢复 0.2s，双击回到初始尺寸，往两边拖停在最小 / 最大宽度；折叠有中间帧并收到 0，展开回到原宽度；对话列表滚动时 virtua 仍写 inline pointer-events: none，但计算值保持 auto）
 - 子代理审批卡：`subagent-approval`（真实 ExtensionUiHost → uiPromptStore → PromptRequestCard，pi://ui-request 信封由 probe 经 act 推、形状照 sessionUiAdapter，`extension_ui_respond` 记成事件；子代理的请求卡头写「子代理请求批准」、标题写出子代理（孙代理带父链）、按收到的时刻倒计时；几条同时来只显示第一条并写「还有 N 条」，答完下一条顶上来，双击不会顺手答掉顶上来的那条；`dismiss` 收回显示中的那条后下一条顶上来，收回排队中的那条不动显示中的；主会话自己的审批没有倒计时；剩 10 秒以内倒计时变警示色；浅色主题）
 - 不唤醒的消息：`agent-message`（真实 reducer → renderMessageBody；`send_message` wake: false 写进对话的自定义消息显示成「来自 X 的消息（未唤醒）」提示条，不是通用的「已注入上下文」；默认收起、展开看 markdown 正文、再点收起；普通注入通知不受影响；probe 经 act 推一条实时的（message_start / message_end）同样显示；浅色主题。只放通知，用户 / 助手气泡要订阅真实会话 store）
+- Goal 续跑卡片：`goal-round-card`（真实 reducer → renderMessageBody；Goal 每一轮续跑的 `goal-round` 自定义消息是 display: false，仍画成「目标续跑 · 第 N 轮」卡片，正文用真实 `buildGoalRoundPrompt` 造；标题不写轮次预算；默认收起、展开看这一轮的完成条件、再点收起；别的 display: false 消息照旧不显示；probe 经 act 推一轮实时的（message_start / message_end）只出一张；浅色主题）
 - 前台 run 转后台：`subagent-detached`（真实 messagesFromAgent → renderMessageBody，`subagent_list` 用桩，probe 经 act 在注册表里把转后台的子代理改成已完成；单任务回执 status: running / detached 时卡片按后台子代理画运行中；并行组里已完成的那项是已完成、转后台的那几项是运行中而不是出错，组头写「N 个在后台运行」且没有失败计数；卡片第一次读注册表时还没建出来的那一行从挂载起一次也不画成已中断（工具返回后再读一次确认），注册表里确实没有的那一行画「已中断」、不算失败也不算在后台，转后台时没有 agentId 的那一行按任务文字跟上注册表；注册表结束后经轮询变成已完成、后台计数消失；都结束后不再轮询（轮询停掉、store 清空时不能退回运行中再把轮询拉起来））
 
 harness 自检不在这个清单里，也不常驻 `scenarios/`。怀疑 harness 本身坏了（所有场景都「页面没就绪」、输入全部失效、升级 Electron / Vite 之后），用 electron-ui-harness skill 的 `scripts/smoke.mjs --app electron-agent` 跑一次，它跑完会自动删掉临时场景。在 `scenarios/` 里看到 `harness-smoke` 就是漏删的，直接删掉。

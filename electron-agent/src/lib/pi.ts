@@ -301,6 +301,9 @@ export const pi = {
     invoke<Array<{ workspace: string; sessionId?: string; sessionPath?: string }>>('agent_list_running_turns'),
   getMessages: (workspace: string, targetSessionPath?: string | null) =>
     invoke<{ messages: AgentMessage[] }>('agent_get_messages', { workspace, ...target(targetSessionPath) }),
+  /** 按会话路径补拉 Goal 投影（和 setStatus("goal") 同一种信封）。会话跑着也立刻返回；没有返回 null。 */
+  getGoal: (workspace: string, sessionPath: string) =>
+    invoke<unknown>('agent_get_goal', { workspace, targetSessionPath: sessionPath }),
   newSession: (workspace: string) => invoke<unknown>('agent_new_session', { workspace }),
   switchSession: (workspace: string, sessionPath: string) =>
     invoke<unknown>('agent_switch_session', { workspace, sessionPath }),

@@ -905,6 +905,24 @@ describe('custom injection messages -> notice', () => {
     expect(out[0]).toMatchObject({ kind: 'notice', customType: 'extension-context', content: '# Context' });
     expect(out[1]).toMatchObject({ kind: 'user', text: 'hi' });
   });
+
+  const goalRound = (round: number) =>
+    ({ role: 'custom', customType: 'goal-round', content: `Goal Round ${round}/256。\n当前完成条件：写完`, display: false, timestamp: round }) as const;
+
+  it('goal-round is display:false for the model log, but every round still gets one card (live)', () => {
+    let state = initialAgentState();
+    for (const msg of [goalRound(1), goalRound(2)]) {
+      state = applyEvent(state, { type: 'message_start', message: msg } as never);
+      state = applyEvent(state, { type: 'message_end', message: msg } as never);
+    }
+    const notices = state.messages.filter((m) => m.kind === 'notice');
+    expect(notices.map((m) => m.kind === 'notice' && m.customType)).toEqual(['goal-round', 'goal-round']);
+  });
+
+  it('messagesFromAgent restores goal-round cards from history', () => {
+    const out = messagesFromAgent([goalRound(3) as never, { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } as never]);
+    expect(out[0]).toMatchObject({ kind: 'notice', customType: 'goal-round' });
+  });
 });
 
 describe('messagesFromTranscript (子代理 JSONL 还原)', () => {

@@ -46,7 +46,7 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
   // streaming 中 100ms 节流，避免每 token 触发整列重算（详见 useThrottledValue 契约）。
   const throttledMessages = useThrottledValue(messages, 100, { enabled: isStreaming });
   // command-input 不进 groupMessages（输入仍是 ChatMessage[]），按当前会话 path 拼在分组后。
-  // 准备态只看 grouped 末项：本地 /goal 行永远在 display 末尾，不能据此判断「有没有助手 turn」。
+  // 准备态只看 grouped 末项：本地命令行永远在 display 末尾，不能据此判断「有没有助手 turn」。
   const grouped = useMemo(() => groupMessages(throttledMessages), [throttledMessages]);
   const display = useMemo(
     () => (sessionPath ? [...grouped, ...commandInputs] : grouped),

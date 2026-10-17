@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { sessionControlKey } from './modeStore';
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
 
@@ -46,18 +47,22 @@ export interface GoalInfo {
 export interface GoalStoreState {
   /** 当前会话 Goal 投影；sessionId 来自信封，是唯一索引。 */
   bySession: Record<string, GoalSnapshot>;
+  /** 会话路径（sessionControlKey）→ sessionId。推送信封和补拉结果都会记，输入栏按当前会话路径找 Goal。 */
+  sessionIdByPath: Record<string, string>;
   /** @deprecated 旧扩展状态兼容字段，禁止作为当前会话 Goal 的权威来源。 */
   goal?: GoalInfo;
   setSnapshot: (sessionId: string, snapshot?: GoalSnapshot) => void;
   getSnapshot: (sessionId: string) => GoalSnapshot | undefined;
   clearSnapshot: (sessionId: string, revision: number) => void;
   dropSession: (sessionId: string) => void;
+  bindSessionPath: (sessionPath: string, sessionId: string) => void;
   /** @deprecated 仅供旧扩展状态兼容，不写入 bySession。 */
   setGoal: (goal?: GoalInfo) => void;
 }
 
 export const useGoalStore = create<GoalStoreState>((set, get) => ({
   bySession: {},
+  sessionIdByPath: {},
   goal: undefined,
 
   setSnapshot: (sessionId, snapshot) => {
@@ -67,7 +72,8 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
       // Goal revisions 是单调递增的 CAS 版本。迟到事件不能回写较新的 UI 投影。
       if (snapshot && snapshot.sessionId !== sessionId) return state;
       if (snapshot && current) {
-        if (snapshot.goalId === current.goalId && snapshot.revision <= current.revision) return state;
+        // 同版本号仍然接受：武装 / 解除武装不写事件、不涨 revision，只有这样 activation 才跟得上。
+        if (snapshot.goalId === current.goalId && snapshot.revision < current.revision) return state;
         // A cleared Goal may be followed by a new generation whose revision
         // starts at 1. Prefer the newer generation, while rejecting a late
         // event from an older generation when its creation time is known.
@@ -107,6 +113,14 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
       delete bySession[sessionId];
       return { bySession };
     });
+  },
+
+  bindSessionPath: (sessionPath, sessionId) => {
+    if (!sessionPath.trim() || !sessionId.trim()) return;
+    const key = sessionControlKey(sessionPath);
+    set((state) => (state.sessionIdByPath[key] === sessionId
+      ? state
+      : { sessionIdByPath: { ...state.sessionIdByPath, [key]: sessionId } }));
   },
 
   setGoal: (goal) => set({ goal }),
