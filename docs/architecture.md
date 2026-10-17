@@ -17,7 +17,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 │  └───────┬────────┘   gren:event:   └────────┬───────┘  │
 │          │                                   │          │
 │  ┌───────▼───────────────────────────────────▼───────┐  │
-│  │ Agent Data Runtime（127.0.0.1 随机端口 JSONL RPC）   │  │
+│  │ agentdata-host 子进程：Agent Data（命名管道 JSONL）  │  │
 │  │ 记忆 L0-L3 / Wiki FTS5 / 任务与审计（node:sqlite）    │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                          │
@@ -109,7 +109,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **主进程（`electron-agent/electron`）：**
 
-- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `ModelRuntimeHost`（短调用）、启动 Agent Data Runtime、拉起 agent-host 子进程（`AgentProcessClient`），`before-quit` 先关子进程、再停 Agent Data。主进程不静态引入 `extensions/**` 的运行时模块。
+- `main.ts` / `mainConfig.ts`：窗口创建与生命周期。`whenReady` 内构造 `ModelRuntimeHost`（短调用）、拉起 agentdata-host 子进程（Agent Data Runtime）、拉起 agent-host 子进程（`AgentProcessClient`），`before-quit` 先关 agent-host、再停 agentdata-host。主进程不打开 `agent-data.db`。主进程不静态引入 `extensions/**` 的运行时模块。
 - `agentProcess/`：主进程与 agent-host 子进程之间的一层。`rpcPeer.ts` 是对称 RPC（请求 / 响应两个方向 + 单向事件），`contract.ts` 列出两个方向的方法名（`AGENT_METHODS` / `HOST_METHODS`）。`agentProcessClient.ts` 负责拉起（同一份 Electron 可执行文件 + `ELECTRON_RUN_AS_NODE`，不带 V8 参数：生产入口是字节码，参数不同缓存会被拒）、`host.ready` 握手、意外退出时拒绝在途请求并对打开过的工作区广播 `pi://exit`、下一条运行时命令再拉起（60 秒内崩 3 次暂停 30 秒）、关停（`host.shutdown`，10 秒不退就整树杀掉）。`mainBindings.ts` 是主进程这一侧的接线：子进程回调主进程的处理表（解析工作区、AgentData 令牌、MCP 运行配置、`pi.*` 授权、回合入库、带锁合并 `runtime-settings.json`），以及给 IPC 命令和各服务用的转发端口；释放 / 查询类端口只在子进程在跑时转发，不在就给兜底值。子进程每 10 秒报一次内存与事件循环延迟（`runtime-diag.jsonl` 里的 `agent-host-sample`）。`jobGuard.ts` 在 Windows 上为每个 agent-host 启动 `pi-job-guard.exe`（源码 `electron-agent/native/job-guard.c`，预编译入仓，构建时拷到 `out/main`）：把 agent-host 放进一个不允许静默脱离的 Job，agent-host 退出（崩溃、关停或主进程崩溃）后结束 Job 里残留的、没有可见窗口的子孙进程（`agent-host-sweep`）。`hostEntry.ts` 是子进程入口；进程级 `uncaughtException` / `unhandledRejection` 不让进程退出，按 AsyncLocalStorage 归到某个在跑的子代理的交给它按 error 结算（`extensions/_shared/leak-owner.ts`；`unhandledRejection` 等 1 秒，期间被接住的不算），其余只记日志。`runtimeGraph.ts` 在子进程里装配 `AgentHost` / `PiRuntimeService` / `SubagentService` / jobs 桥 / MCP 操作。冒烟脚本 `scripts/agent-host-smoke.mjs` 在临时 HOME 里跑真实子进程。
 - `app/`：服务层——`piRuntimeService`（在 agent-host 子进程里运行：`agent_*` 到 `WorkspaceHandle`；模式 / 审批 / 删段经主进程带锁写 runtime config，另含 `rewindTo`）、`workspaceService`、`settingsService`、`mcpConfigService`、`mcpPolicyService`、`usageService`、`gitService`、`fileService`（工作区内的读写与按层列目录，路径一律 realpath 后校验不越界）、`fileWatchService`（文件浏览器展开的目录各开一个非递归 `fs.watch`，合并后经 `files://changed` 推回发起的窗口）、`skillService`、`subagentService`、`uiHistoryService`、`createService`、`providerService` 等；`terminalService`（命令白名单 spawn）与 `shellService`（node-pty 真 PTY）提供终端能力。`jobsBridge` 在 agent-host 子进程里订阅同进程的 jobs 注册表，把后台 job 的状态与输出增量经 `pi://jobs` 广播（100ms 合并，经主进程转发到窗口），另有 `job_snapshot` / `job_kill` 命令；渲染层 `jobLiveStore` 按字节偏移接帧，bash 卡片凭结果 details 里的 `jobId` + `jobStartedAt` 跟随后台输出并可停止。后台任务归启动它的会话（owner = sessionId），没有全局入口；名下有存活任务的会话被切走时 `piRuntimeService` 把它的 handle 停靠在后台（`hasLiveJobs`），任务跑完才释放，否则 `session_shutdown` 会把任务一并取消。前台 bash 也是匿名 job（模型拿不到 id），运行中的 partial 更新把 `details.foregroundJob` 带给界面，卡片据此跟随输出并可单独停止这一条命令。
 - `pi/`：事件投影（`eventAdapter`）与短调用壳（`systemWorkerManager`）。
@@ -117,16 +117,17 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 - `ipc/`：`contracts.ts` 定义命令与事件通道（`gren:invoke`、`gren:event:`），`register.ts` 注册全量命令（含 `agent_*` 透传与流式 Channel）。
 - `preload.ts`：向渲染层暴露 `window.gren`（`invoke` / `subscribe` / 目录选择 / 打开外部 / 窗口控制 / webview 拖放）。
 - `webviewSecurity.ts` / `webviewPreload.ts`：对 webview 二次强制 `contextIsolation`、`sandbox`、关闭 `nodeIntegration`，并限制导航与 `window.open`。
-- `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY` 与 agent-host 入口（打包后都从 `app.asar.unpacked/out/main/` 加载）。
+- `workerEntry.ts`：解析打包 / 开发态的 `PI_WORKER_ENTRY` 与 agent-host、agentdata-host、codegraph-host、codegraph-worker 入口（打包后都从 `app.asar.unpacked/out/main/` 加载）。
+- `agentDataProcess/`：主进程与 agentdata-host 子进程之间的一层。`contract.ts` 列出两个方向的方法名（管理面 `agentdata.*`、反向端口 `main.model.*` / `main.resolveSession` / `main.method`），`hostEntry.ts` 是子进程入口，`assemble.ts` 是进程内与子进程共用的装配，`pipePath.ts` 定命名管道名。管道名与全部令牌由主进程签发持有，子进程崩溃后由 `AgentDataService` 主动重拉、端点不变。子进程每 10 秒报内存、事件循环延迟与 AgentData 方法耗时（`agentdata-host-sample`）。`GREN_AGENTDATA_PROCESS=inproc` 退回主进程内。
 
 **Agent Data Runtime（`electron-agent/electron/agentData`）：**
 
-自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。启动后在 `127.0.0.1` 随机端口提供 JSONL RPC（`randomBytes(32)` token 鉴权），数据落在 `<应用数据目录>/agent-data.db`（`node:sqlite`）：
+自研的本地数据运行时，取代历史版本随包分发的 TencentDB 托管服务。跑在 agentdata-host 子进程里，经命名管道（Windows `\\.\pipe\grenagent-agentdata-*`，POSIX 为 0700 临时目录里的 socket）提供 JSONL RPC（token 鉴权，令牌由主进程签发）；inproc 模式下在主进程里监听 `127.0.0.1` 随机端口。数据落在 `<应用数据目录>/agent-data.db`（`node:sqlite`），只有 agentdata-host 打开它：
 
 - `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
 - `wikiEngine`：每个知识库为 `<应用数据目录>/wiki/<wikiId>/`（原文 `raw/sources/`、生成页 `wiki/`、库内 `index.db`）；库状态在 `wiki_assets`（`draft` / `pending` / `processing` / `ready` / `failed`）。只有 `processing` 拒绝写入；工作台可 `resetDraft`。抽取在进程内队列完成，不建 `wiki.*` 系统任务。Agent 仅 `wiki_list` / `wiki_search` / `wiki_read`。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
-- 代码检索通过主进程 `CodeGraphService` / `CodeGraphEngine` 内置的 CodeGraph 1.6.0 SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。实例按工作区共享，空闲 15 分钟关闭；查询与同工作区索引写入互斥。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
+- 代码检索通过内置的 CodeGraph SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。SDK 只在 codegraph-host 子进程里加载（由 agentdata-host 拉起，`CodeGraphHostClient` 门面），子进程内一个写线程、N 个读线程（`GREN_CODEGRAPH_READ_WORKERS`；`GREN_CODEGRAPH_THREADS=off` 退回单线程）。实例按工作区共享，空闲 15 分钟关闭；查询只与同工作区的索引写入互斥，其它工作区照常并行。子进程每 10 秒报 `codegraph-host-sample`。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
 - `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立/同步才写索引，不启用 SDK watcher；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
 - SDK 是固定版本的应用依赖，保留 Rust 内核与 WASM 语法。`asarUnpack` 解出 SDK，`scripts/package-codegraph.cjs` 补齐平台包自带且被 builder 过滤的 `lib/node_modules`；加载器使用物理解包路径保证 worker、WASM 和原生模块可访问。没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
 
@@ -175,7 +176,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 ## 记忆与知识运行时
 
-当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随主进程启动，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 L0-L3 分级记忆与 Wiki FTS5 检索；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS 与子代理环境，扩展可反向调用。
+当前桌面端（Electron）使用自研 **Agent Data Runtime**（见上文 `electron-agent/electron/agentData`）：随应用启动、跑在 agentdata-host 子进程里，数据在 `<应用数据目录>/agent-data.db` 本地落盘（`node:sqlite`），提供 L0-L3 分级记忆与 Wiki FTS5 检索；运行时 endpoint 以 `AGENT_DATA_ENDPOINT` 注入 ALS 与子代理环境，扩展可反向调用。
 
 > **历史（Tauri 版，已过时）**：桌面端通过 Tauri 生命周期托管随安装包分发的 Node.js、MemoryCore 和 MemoryKnowledge。`local` 模式在应用启动时启动两个回环服务并等待 `/health`，自动初始化固定的单用户身份 `local / personal-local / pi-personal`，退出时由进程守卫回收；`remote` 模式不创建本机子进程，只连接配置的 HTTPS Gateway，并允许使用服务端已有 Team、Agent 和 User 身份。远程 Gateway API Key 与 User Key 分别保存在系统凭据库。Pi sidecar 启动后立即把两项 TencentDB 密钥移入模块私有内存并从工具子进程环境删除；知识工具通过仅获得专用 token 的 MemoryKnowledge MCP 注入。
 
@@ -184,7 +185,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 | 数据 | 位置 |
 | --- | --- |
 | 会话记录 | `~/.pi/agent/sessions/*.jsonl` |
-| Agent Data（记忆 / Wiki / 任务与审计） | `<应用数据目录>/agent-data.db`（Electron 主进程托管） |
+| Agent Data（记忆 / Wiki / 任务与审计） | `<应用数据目录>/agent-data.db`（agentdata-host 子进程独占） |
 | Wiki 正文与库内索引 | `<应用数据目录>/wiki/<wikiId>/`（`wiki/`、`raw/sources/`、`index.db`），参见 [Wiki 使用说明](./agent-data-wiki.md) |
 | 生成的图片 | `<工作区>/.pi/images/` |
 | 合成的音频 | `<工作区>/.pi/audio/` |

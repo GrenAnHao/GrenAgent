@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-[AgentData 移出主进程](../../proposed/architecture/2026-10-16-agentdata-out-of-main-process.md)的前提是「AgentData 的同步重活造成了主进程卡顿」。`runtime-diag.jsonl` 只记渲染层 IPC 命令的耗时；agent-host 里的扩展经环回 TCP 调 AgentData（记忆、Wiki、工具授权、线程持久化、代码检索），这些请求、AgentData 自己的定时器和任务队列在主线程上花了多少时间，日志里完全没有。拆 agent-host 之后仍有 0.94% 的窗口事件循环卡顿超过 200 ms，但没有办法算出其中有多少来自 AgentData。
+[AgentData 移出主进程](../architecture/2026-10-16-agentdata-host-process.md)的前提是「AgentData 的同步重活造成了主进程卡顿」。`runtime-diag.jsonl` 只记渲染层 IPC 命令的耗时；agent-host 里的扩展经环回 TCP 调 AgentData（记忆、Wiki、工具授权、线程持久化、代码检索），这些请求、AgentData 自己的定时器和任务队列在主线程上花了多少时间，日志里完全没有。拆 agent-host 之后仍有 0.94% 的窗口事件循环卡顿超过 200 ms，但没有办法算出其中有多少来自 AgentData。
 
 ## Decision
 
@@ -56,10 +56,10 @@ Status: implemented
 
 ## Consequences
 
-- 收益：可以按窗口回答「这次卡顿里有没有 AgentData 的长同步段、是哪个方法」，迁移与否有了可机械判定的依据。M2 之后 AgentData 跑到子进程里，同一个单例在子进程里计数，由子进程上报，字段形状不变。
+- 收益：可以按窗口回答「这次卡顿里有没有 AgentData 的长同步段、是哪个方法」，迁移与否有了可机械判定的依据。AgentData 已迁到 agentdata-host 子进程（默认 child）：同一个单例在子进程里计数，字段形状不变，但写在 `agentdata-host-sample` 上，衡量的是子进程自己的事件循环；主进程 `sample` 只有 `GREN_AGENTDATA_PROCESS=inproc` 时才带这个字段。闸门脚本只读主进程 `sample`，对迁移后的日志不再适用；闸门本身因用户决定直接迁移而没有用上，见 [AgentData 运行在 agentdata-host 子进程](../architecture/2026-10-16-agentdata-host-process.md)。
 - 代价：每次请求多两次 `performance.now()` 和一次 Map 更新；有调用的窗口每行日志多约 1~2 KB（文件 20 MB 轮转不变）。
 - 计时是同步段，不是 CPU 时间；`codegraph.*` 与 async 方法的续体只覆盖到已埋点的位置，结论里偏低的方向是已知的。
-- 实跑时附带发现：最大线程（14.9 MB）的 `thread.read` 在主线程上同步 440 ms，然后因应答超过客户端 1 MiB 上限被 `FRAME_TOO_LARGE` 丢弃——代价付了，结果没拿到。这是已有问题，不在本篇修复范围，记录在迁移方案的现状证据里。
+- 实跑时附带发现：最大线程（14.9 MB）的 `thread.read` 在主线程上同步 440 ms，然后因应答超过客户端 1 MiB 上限被 `FRAME_TOO_LARGE` 丢弃——代价付了，结果没拿到。这是已有问题，不在本篇修复范围，记录在迁移笔记的现状证据里。
 
 ## 验证
 
@@ -71,4 +71,4 @@ Status: implemented
 - 实跑：在真实 `agent-data.db`（468 MB）的临时副本上启动真实 `AgentDataRuntime`，经 TCP 客户端发 30 次 `item.upsert`、3 次 `memory.conversations.search`、`admin.audit.query`、`memory.conversations.list`、最大线程的 `thread.read`，取到的样本见 `real-db-run.txt`：`thread.read` 440 ms 进入 `slow`，`item.upsert` 单次最大 18 ms、30 次合计 301 ms，结果通过。脚本 `real-db-run.mts` 在同目录。
 - 类型检查 `npx tsc -p tsconfig.node.json --noEmit`：全工程 156 个已有错误，本次涉及文件里只有 `wikiEngine/service.ts` 一处，是 HEAD 已有的 `log.info` 参数个数错误（行号因新增 4 行后移），新增文件零错误，通过（`tsc-node.txt`）。
 - `node scripts/diag-agentdata-report.mjs` 对本机现有日志：`NO_DATA`（埋点版本尚未在应用里运行），符合预期（`report-dry-run.txt`）。
-- 未做：没有在真实 Electron 应用里跑出带 `agentData` 字段的日志。开发版 userData 就是日常使用的数据目录，不在这里启动应用；闸门所需的线上数据要正常使用 1 小时以上的 Agent 活动后再跑报告脚本。
+- 未做：没有在真实 Electron 应用里跑出主进程 `sample` 带 `agentData` 字段的日志，闸门报告也没有跑出结论：数据攒够之前 AgentData 就迁进了子进程。迁移后用户在真实应用里确认 `agentdata-host-sample` 正常出现（2026-10-17，口头确认，见迁移笔记的验证）。

@@ -1,20 +1,28 @@
-# Agent Note: CodeGraph 移出主进程，并加自动索引与自动同步
+# Agent Note: CodeGraph 自动索引、自动同步与同步期间给旧结果
 
 Status: proposed
 
+> 范围（2026-10-17 收窄）：本篇原名「CodeGraph 移出主进程，并加自动索引与自动同步」。前半已经落地，不再属于本篇：
+>
+> - SDK 只在 codegraph-host 子进程里跑，子进程内一个写线程、N 个读线程、写前 evict，见 [CodeGraph 运行在 codegraph-host 子进程](../../implemented/architecture/2026-10-16-codegraph-host-process.md)。主进程在同步期间最长卡顿 452 ms → 25 ms，下文 S0 基线与 E1 响应性冒烟已在那篇做完；S1（只读连接与写者并发）、S6（`node:sqlite` 在 RunAsNode 的 worker 里可用）由 `codeGraphThreads.sdk.test.ts` 覆盖了一部分。
+> - `CodeGraphHostClient` 由 agentdata-host 持有（codegraph-host 是它的子进程），不在主进程，见 [AgentData 运行在 agentdata-host 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md)。下文所有「主进程」一侧（状态表、`touch`、广播、关停顺序）落地时都改在 agentdata-host 里做，状态推送经它的诊断 / 事件通道回到主进程再广播。
+> - `codegraph.sync` 残留 job 的收尾已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
+>
+> 仍是提案、未动工的：增量同步期间给同一工作区的旧结果（现在仍返回 busy）、读队列上限与读超时、写调度（合并、优先级、退避、熔断、附着）、自动同步触发器、状态模型与 `codegraph_state` 表、资源守卫、配置项与面板。下文保留原提案的完整设计，其中「总体结构」「1. 执行隔离与响应性」里读池 / 写线程的部分以 implemented 那篇为准。
+
 ## Problem
 
-AgentData 的代码检索（`code_explore` 与代码索引面板）经 `CodeGraphService` / `CodeGraphEngine` 直接在 Electron 主进程里调用内嵌 SDK（`electron/app/codeGraph/`，`main.ts` 里 `new CodeGraphService(...)`）。两个问题：
+代码检索（`code_explore` 与代码索引面板）已经不占主线程（见上）。剩下的问题：
 
-1. **长检索与索引占主线程。** SDK 用 `node:sqlite`，所有查询是同步调用。`codegraph_explore`、`codegraph_context`、`findRelevantContext` 这类要做 FTS、图遍历和排序，一次可以连续占住事件循环；`indexAll` / `sync` 的写库、解析结果落库、引用解析也在宿主线程。主进程一卡，窗口、IPC、权限弹窗一起停，和 [agent-host 子进程](../../implemented/architecture/2026-10-09-agent-host-child-process.md)要解决的是同一类问题。注意：这一条是由代码推断的，尚未在本仓库里实测基线（见「验证」S0）。
+1. ~~**长检索与索引占主线程。**~~ 已由 codegraph-host 解决；当时实测主进程在一次同步里卡 19.8 秒。
 2. **索引靠人点。** [内嵌 SDK 的决定](../../implemented/architecture/2026-09-07-embedded-codegraph-sdk.md)明确「不启用 SDK watcher，缺索引不自动创建」，同步只有面板上的按钮（`jobs.create('codegraph.sync')`）。官方 CodeGraph 有 watcher 自动增量同步；这里索引与代码的差距要人工对齐，`code_explore` 在模型改完代码后立刻查，拿到的是旧结果。
 
 现状里还有几处会在引入后台同步后被放大的缺陷：
 
-- 读与写互斥：`CodeGraphEngine.read()` 在同工作区有写者时直接抛 `CodeGraph workspace is busy indexing`。手动同步偶发，自动同步每次保存都发生就不可接受。
-- 超时只在传输层：`AgentDataClient` 65 秒超时、`closeOnTimeout: false`，客户端放弃后主进程里的计算继续跑完，没有取消，也没有排队上限。
-- 同步 job 崩溃后不收尾：`runtime.ts` 启动时只把 `wiki_page_generate` 的未结束任务置为失败，没有处理 `codegraph.sync`。主进程崩溃时留在 `running` 的 job 会让之后的 `createUserJob` 一直报 `JOB_ALREADY_RUNNING`。
-- 主进程没有给 SDK 传 `--liftoff-only`（SDK 的 WASM Zone-OOM 防护，`wasm-runtime-flags`）；`scripts/test-codegraph.mjs` 跑测试时传了，生产主进程没传。
+- 读与写互斥（仍在；读写线程分离后只剩同一工作区互斥，其它工作区的查询已不再排在同步后面）：同工作区有写者时读直接返回 `CodeGraph workspace is busy indexing`。手动同步偶发，自动同步每次保存都发生就不可接受。
+- 超时只在传输层（仍在）：`AgentDataClient` 65 秒超时、`closeOnTimeout: false`，客户端放弃后读线程里的计算继续跑完，没有取消，也没有排队上限。
+- ~~同步 job 崩溃后不收尾~~：已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
+- 生产环境没有给 SDK 传 `--liftoff-only`（仍在；SDK 的 WASM Zone-OOM 防护，`wasm-runtime-flags`）：`scripts/test-codegraph.mjs` 跑测试时传了，codegraph-host 的字节码入口不能带 V8 参数；现在 OOM 只会带走子进程。
 - `status().state === 'stale'` 在 SDK 里的含义是「索引由旧版抽取器建成」（`isIndexStale()`），不是「文件已变」。现在没有任何地方回答「磁盘上有多少文件还没进索引」。
 
 ## Proposal
@@ -52,9 +60,7 @@ flowchart LR
   CL --> ST
 ```
 
-> 进度（2026-10-16）：第一步「整个 SDK 移到子进程、行为不变」已单独落地，见 [CodeGraph 运行在 codegraph-host 子进程](../../implemented/architecture/2026-10-16-codegraph-host-process.md)。子进程内的读写线程分离（一个写线程、N 个读线程、写前 evict）也已落地，但保留了「写期间同一工作区的读返回 busy」；本篇的「增量同步期间给旧结果」、队列上限与超时、写调度、自动同步、状态模型仍是提案。假设 S1（只读连接与写者并发）和 S6（`node:sqlite` 在 RunAsNode 的 worker 里可用）已由 `codeGraphThreads.sdk.test.ts` 与冷烟覆盖一部分。
->
-> 宿主归属调整：AgentData 整体移出主进程的方案见 [AgentData 整体移出主进程](./2026-10-16-agentdata-out-of-main-process.md)。若该方案采纳，下文的 `CodeGraphHostClient` 由 agentdata-host 持有而不是主进程，`jobRunners`/`codeRetrieval` 不再由 `main.ts` 注入；codegraph-host 的内部设计、状态模型、配置与验证不变。采纳前以本篇原样为准。
+> 上图是原提案的结构。已落地部分与图不同的地方：「主进程」那一侧（`CodeGraphHostClient`、`CodeGraphJobs`、AgentData 的 `codeRetrieval.*`）现在都在 agentdata-host 里；写在子进程的一个写线程里跑，不在子进程主线程。`WriteScheduler`、触发器、`codegraph_state` 表都还没有。
 
 ### 1. 执行隔离与响应性
 
@@ -164,7 +170,7 @@ interface CodeGraphStatusView {
 | 读 worker 崩溃/超时 | 重建 worker；该请求返回错误，不重放（读可重放但会放大雪崩，交给调用方） |
 | 子进程崩溃 | 在途请求以 `CODEGRAPH_HOST_EXITED`（可重试）拒绝；在途**写任务**对应的 job 标记失败并带原因；主进程按 `AgentProcessClient` 同样的预算重拉（60 秒内 3 次后冷却 30 秒），冷却期间读返回 `CODEGRAPH_BUSY`，状态显示 `host_restarting`；重拉后按状态表和 `getIndexState()` 重新规划（被打断的全量会是 `partial`，计划为全量；被打断的增量重新比对即可，幂等） |
 | 主进程退出 | 关停顺序：先 `codegraphHost.shutdown()`（停触发器 → 软取消写任务 → 等 `shutdownGraceMs` 默认 5 秒 → 关连接），再 `agentData.stop()`，因为进度回调还要写 AgentData；超时由进程树守卫清理。子进程在 IPC 断开时自行退出 |
-| 主进程崩溃后残留 job | runtime 启动时把 `codegraph.sync` 里 `pending`/`running` 的 job 置为失败（`CODEGRAPH_SYNC_INTERRUPTED: runtime restarted`），与 wiki 任务的现有处理对齐。这同时修掉现有的 `JOB_ALREADY_RUNNING` 卡死 |
+| 主进程崩溃后残留 job | 已落地（做法不同）：运行时启动时把未结束的 job 落定，已请求取消的记 cancelled，其余记 `JOB_INTERRUPTED` 失败，见 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) |
 | 心跳丢失 | 子进程每 2 秒发心跳；主进程 15 秒没收到就判无响应，杀掉重拉，同样计入崩溃预算 |
 
 ### 6. 资源约束

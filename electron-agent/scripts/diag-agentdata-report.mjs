@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 读 runtime-diag.jsonl，回答「主进程卡顿里 AgentData 占多少」，并按 M0 闸门给出结论。
-// 见 .agents/notes/proposed/architecture/2026-10-16-agentdata-out-of-main-process.md「决策」与 M0。
+// 见 .agents/notes/implemented/process/2026-10-16-agentdata-sync-timing-diag.md。
+// 只读主进程的 sample：AgentData 默认跑在 agentdata-host 子进程里之后，只有 GREN_AGENTDATA_PROCESS=inproc 的日志才有可比数据，
+// 见 .agents/notes/implemented/architecture/2026-10-16-agentdata-host-process.md。
 //
 //   node scripts/diag-agentdata-report.mjs [--dir <logs 目录>] [--since <ISO 时间>] [--json]
 //

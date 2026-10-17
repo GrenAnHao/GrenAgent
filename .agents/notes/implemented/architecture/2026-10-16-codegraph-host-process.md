@@ -42,7 +42,7 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
 
 ## Alternatives considered
 
-- **等 [AgentData 整体移出主进程](../../proposed/architecture/2026-10-16-agentdata-out-of-main-process.md) 再把 CodeGraph 放进 agentdata-host。** 最强理由：该篇 Q6 原定先迁 AgentData，避免先在主进程接一个 CodeGraph 客户端、之后再搬一次。没选：用户已经在日常操作里遇到 19.8 秒的窗口卡死，而 AgentData 迁移还卡在 M0 闸门等数据；CodeGraph 单独拆出只动 CodeGraph 自己的文件，之后如果 agentdata-host 落地，`CodeGraphHostClient` 换个持有者即可，返工很小。
+- **等 AgentData 整体移出主进程再把 CodeGraph 放进 agentdata-host。** 最强理由：AgentData 迁移方案的排序原定先迁 AgentData，避免先在主进程接一个 CodeGraph 客户端、之后再搬一次。没选：用户已经在日常操作里遇到 19.8 秒的窗口卡死，而 AgentData 迁移还卡在 M0 闸门等数据；CodeGraph 单独拆出只动 CodeGraph 自己的文件，之后如果 agentdata-host 落地，`CodeGraphHostClient` 换个持有者即可，返工很小。后来确实如此：[AgentData 运行在 agentdata-host 子进程](./2026-10-16-agentdata-host-process.md) 落地时只换了持有者。
 - **主进程里的 `worker_threads`。** 最强理由：少一个进程。没选：SDK 自己记录了 Windows 上结束 worker 线程可能让整个进程崩溃，宿主是主进程时风险落在窗口上；单个线程也不能单独限内存和降优先级。
 - **一次做完 [CodeGraph 自动同步方案](../../proposed/architecture/2026-10-16-codegraph-host-process-auto-sync.md)**（写调度、FileWatcher、状态模型、增量同步期间给旧结果）。最强理由：线程化是那篇的一部分，一起做只改一轮。没选：那篇大部分假设没验证，范围也大；用户要解决的是「同步时卡」，这两步（子进程 + 读写线程分离）就解决了，而且同一工作区的读写语义与原来完全一致。「同步期间仍给同一工作区的旧结果」会改变 `busy indexing` 语义和面板呈现，留给那篇。
 - **用 SDK 自带的 `QueryPool`（`mcp/query-pool`）作读池。** 最强理由：上游实现，带崩溃重试和忙碌兜底。没选：它不在 SDK 的公开导出里，要深引 `dist` 路径；它跑的是 SDK 的 MCP 工具处理器，不是本仓库的 `executeCodeGraphTool`，结果形状不同。
@@ -87,4 +87,5 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
   - `npm run test:codegraph`：10 个文件 70 个用例通过（`threads-test-codegraph.txt`），含新的 `codeGraphThreads.sdk.test.ts`：真实 SDK 上两条连接，读方 evict 后写方增量同步（修改文件 + 新文件），读方重开能看到；写方持连接时读方可并发读；evict 等在途读。
   - `npx vitest run electron/app/codeGraph electron/app/sourceCodeProtection.test.ts electron/agentProcess electron/main.config.test.ts`：16 个文件 133 个用例通过（`threads-vitest.txt`）。`codeGraphThreads.test.ts` 的 12 个用例用假线程覆盖：同步与他工作区查询并行且分到不同读线程、写期间 busy 与 indexing 快照、参数校验先于 busy、写前等在途读并只对已启动的线程 evict、失败合并进 status 与成功后清除、派发前取消不碰写线程、派发后取消转发、读线程崩溃与重拉、连续崩溃冷却、写线程崩溃 job 失败且工作区释放、进度路由、关停顺序与不 terminate、线程数配置。
   - 类型检查：156 个已有错误，其中 `codeGraphQuery.ts(91)` 是工作区里他人未提交改动引入的，本轮文件零错误，通过（`threads-tsc.txt`）。
-- 未做：没有在打包产物上跑（字节码路径只能打包后验证），也没有在正在运行的应用里实测；需要用户重新构建、重启应用后再点一次同步，`runtime-diag.jsonl` 里应出现 `codegraph-host-sample`，且同步期间 `sample.lag.maxMs` 不再出现秒级值。
+- 字节码产物：之后在 AgentData 迁移那一轮补上，`codegraph-host.cjs` + `codegraph-worker.cjs` 冒烟 10 项全部通过（证据在 `.agents/evidence/2026-10-16-agentdata-host-process/codegraph-smoke-bytecode.txt`）。没有跑完整的安装包。
+- 真实应用：用户 2026-10-17 重新构建、重启后确认代码面板与同步正常（口头确认，日志未收进证据目录）。
