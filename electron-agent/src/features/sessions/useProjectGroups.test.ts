@@ -10,6 +10,39 @@ const s = (cwd: string, ts: string): SessionInfo => ({
   name: null,
 });
 
+describe('buildProjectGroups isolated workspaces', () => {
+  const params = {
+    current: '', pinnedProjects: [] as string[], hiddenProjects: [] as string[], aliases: {} as Record<string, string>,
+    keyword: '', worksDir: '', registeredProjects: [] as string[],
+  };
+
+  it('glues each isolated workspace right under its parent, named by branch, without moving the parent', () => {
+    const sessions = [
+      s('D:/repo/.gren/worktrees/aaa11111', '2026-10-05'),
+      s('D:/other', '2026-10-04'),
+      s('D:/repo', '2026-10-01'),
+      s('D:/repo/.gren/worktrees/bbb22222', '2026-10-03'),
+    ];
+    const groups = buildProjectGroups(sessions, params);
+    expect(groups.map((g) => g.name)).toEqual(['other', 'repo', 'gren/aaa11111', 'gren/bbb22222']);
+    expect(groups[2]?.isolated).toEqual({ parentCwd: 'D:/repo', id: 'aaa11111', branch: 'gren/aaa11111', parentListed: true });
+    expect(groups[1]?.isolated).toBeUndefined();
+  });
+
+  it('without the parent in the list, keeps its own place and prefixes the parent name', () => {
+    const groups = buildProjectGroups([s('D:/repo/.gren/worktrees/aaa11111', '2026-10-05')], params);
+    expect(groups[0]).toMatchObject({ name: 'repo · gren/aaa11111', isolated: { parentListed: false, parentCwd: 'D:/repo' } });
+  });
+
+  it('an alias wins over the branch name', () => {
+    const groups = buildProjectGroups([s('D:/repo', '1'), s('D:/repo/.gren/worktrees/aaa11111', '2')], {
+      ...params,
+      aliases: { 'D:/repo/.gren/worktrees/aaa11111': '修登录' },
+    });
+    expect(groups.map((g) => g.name)).toEqual(['repo', '修登录']);
+  });
+});
+
 describe('buildProjectGroups worksDir filter', () => {
   it('excludes sessions under worksDir', () => {
     const sessions = [s('/home/.pi/agent/works/u1', 't1'), s('/proj/a', 't2')];

@@ -1,0 +1,2303 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:59788) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:37512) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:59692) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58612) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |renderer| src/features/agentData/codeResult.test.ts (22 tests | 3 failed) 26ms
+     × reads where a page starts and how many results match in total 13ms
+     × appends the next page behind the rows already loaded and takes the newest total 1ms
+     × keeps the raw payload of the newest page only 1ms
+ ❯ |renderer| src/features/agentData/CodeRetrievalPanel.test.tsx (14 tests | 1 failed) 3631ms
+     × does not let an unmounted status response query or replace a new instance 243ms
+ ❯ |renderer| src/features/agentData/CodeRelations.test.tsx (19 tests | 2 failed) 16847ms
+       × shows every loaded row and asks the caller for the next page instead of slicing locally 169ms
+       × disables the button and says so while the next page is loading 112ms
+ ❯ |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx (25 tests | 8 failed) 58338ms
+     × accepts equivalent real initial and status paths 5115ms
+     × uses files for empty query, search for symbols and explore for related context 5107ms
+       × asks for one page, shows the real total, and fetches the next page only when asked 383ms
+       × does not start a second fetch while the next page is still on its way 7137ms
+       × drops a late page once the query has changed, so it never lands in the search results 7493ms
+       × keeps the loaded rows and offers a retry when the next page fails 7150ms
+       × shows an MCP error from the next page instead of appending it 7100ms
+       × goes back to the first page when the index refreshes 7945ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRelations.test.tsx > CodeRelations > CodeResultContent server paging > shows every loaded row and asks the caller for the next page instead of slicing locally
+AssertionError: expected 100 to be 250 // Object.is equality
+
+- Expected
++ Received
+
+- 250
++ 100
+
+ ❯ src/features/agentData/CodeRelations.test.tsx:151:24
+    149|       const onLoad = vi.fn();
+    150|       render(<CodeResultContent result={rowsResult(250)} tool="codegra…
+    151|       expect(listed()).toBe(250);
+       |                        ^
+    152|       fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 750 …
+    153|       expect(onLoad).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRelations.test.tsx > CodeRelations > CodeResultContent server paging > disables the button and says so while the next page is loading
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "正在加载…"
+
+Here are the accessible roles:
+
+  button:
+
+  Name "src/file-0.ts未提供行号":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "src/file-1.ts未提供行号":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "src/file-2.ts未提供行号":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "src/file-3.ts未提供行号":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "src/file-4.ts未提供行号":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  [36m<strong />[39m
+
+  Name "":
+  [36m<strong />[39m
+
+  Name "":
+  [36m<strong />[39m
+
+  Name "":
+  [36m<strong />[39m
+
+  Name "":
+  [36m<strong />[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  [36m<details[39m
+    [33mclass[39m=[32m"acss-1g49954"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-label[39m=[32m"代码文件列表"[39m
+      [33mclass[39m=[32m"acss-j58m6f"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-listy css-dev-only-do-not-override-19u5a7b css-var-root ant-listy-css-var"[39m
+        [33mstyle[39m=[32m"overflow-anchor: none;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-listy-item"[39m
+          [33mdata-key[39m=[32m"item:src/file-0.ts:::0"[39m
+          [33mstyle[39m=[32m"padding: 0px;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0msrc/file-0.ts[0m
+              [36m</strong>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mstyle[39m=[32m"font-size: 12px;"[39m
+            [36m>[39m
+              [0m未提供行号[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-listy-item"[39m
+          [33mdata-key[39m=[32m"item:src/file-1.ts:::1"[39m
+          [33mstyle[39m=[32m"padding: 0px;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0msrc/file-1.ts[0m
+              [36m</strong>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mstyle[39m=[32m"font-size: 12px;"[39m
+            [36m>[39m
+              [0m未提供行号[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-listy-item"[39m
+          [33mdata-key[39m=[32m"item:src/file-2.ts:::2"[39m
+          [33mstyle[39m=[32m"padding: 0px;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0msrc/file-2.ts[0m
+              [36m</strong>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mstyle[39m=[32m"font-size: 12px;"[39m
+            [36m>[39m
+              [0m未提供行号[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-listy-item"[39m
+          [33mdata-key[39m=[32m"item:src/file-3.ts:::3"[39m
+          [33mstyle[39m=[32m"padding: 0px;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0msrc/file-3.ts[0m
+              [36m</strong>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mstyle[39m=[32m"font-size: 12px;"[39m
+            [36m>[39m
+              [0m未提供行号[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-listy-item"[39m
+          [33mdata-key[39m=[32m"item:src/file-4.ts:::4"[39m
+          [33mstyle[39m=[32m"padding: 0px;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-block acss-fea5ym acss-gvcgn4"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0msrc/file-4.ts[0m
+              [36m</strong>[39m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mstyle[39m=[32m"font-size: 12px;"[39m
+            [36m>[39m
+              [0m未提供行号[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+    [36m<details[39m
+      [33mclass[39m=[32m"acss-1g49954"[39m
+    [36m>[39m
+      [36m<summary>[39m
+        [0m原始结果[0m
+      [36m</summary>[39m
+    [36m</details>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/agentData/CodeRelations.test.tsx:159:29
+    157|       const onLoad = vi.fn();
+    158|       render(<CodeResultContent result={rowsResult(5)} tool="codegraph…
+    159|       const button = screen.getByRole('button', { name: '正在加载…' }) as …
+       |                             ^
+    160|       expect(button.disabled).toBe(true);
+    161|       fireEvent.click(button);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  |renderer| src/features/agentData/codeResult.test.ts > codeResult paging > reads where a page starts and how many results match in total
+AssertionError: expected undefined to deeply equal { offset: +0, total: 5 }
+
+- Expected:
+{
+  "offset": 0,
+  "total": 5,
+}
+
++ Received:
+undefined
+
+ ❯ src/features/agentData/codeResult.test.ts:11:49
+      9| describe('codeResult paging', () => {
+     10|   it('reads where a page starts and how many results match in total', …
+     11|     expect(pageOf(['a.ts', 'b.ts'], 0, 5).page).toEqual({ offset: 0, t…
+       |                                                 ^
+     12|   });
+     13|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  |renderer| src/features/agentData/codeResult.test.ts > codeResult paging > appends the next page behind the rows already loaded and takes the newest total
+TypeError: appendCodeResultPage is not a function
+ ❯ src/features/agentData/codeResult.test.ts:24:20
+     22|
+     23|   it('appends the next page behind the rows already loaded and takes t…
+     24|     const merged = appendCodeResultPage(pageOf(['a.ts', 'b.ts'], 0, 5)…
+       |                    ^
+     25|     expect(merged.rows.map((row) => row.file)).toEqual(['a.ts', 'b.ts'…
+     26|     expect(merged.page).toEqual({ offset: 2, total: 5 });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  |renderer| src/features/agentData/codeResult.test.ts > codeResult paging > keeps the raw payload of the newest page only
+TypeError: appendCodeResultPage is not a function
+ ❯ src/features/agentData/codeResult.test.ts:32:12
+     30|   it('keeps the raw payload of the newest page only', () => {
+     31|     const next = pageOf(['c.ts'], 1, 2);
+     32|     expect(appendCodeResultPage(pageOf(['a.ts'], 0, 2), next).raw).toB…
+       |            ^
+     33|   });
+     34| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.test.tsx > CodeRetrievalPanel project and status > does not let an unmounted status response query or replace a new instance
+AssertionError: expected "vi.fn()" to be called with arguments: [ { workspace: 'D:/proj/beta', …(2) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+      "args": {
+        "format": "flat",
+-       "limit": 100,
+      },
+      "tool": "codegraph_files",
+      "workspace": "D:/proj/beta",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/features/agentData/CodeRetrievalPanel.test.tsx:134:36
+    132|     expect(screen.queryByText(/^99 文件/)).toBeNull();
+    133|     expect(agentDataApi.code.call).toHaveBeenCalledTimes(1);
+    134|     expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: '…
+       |                                    ^
+    135|   });
+    136|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > accepts equivalent real initial and status paths
+AssertionError: expected "vi.fn()" to be called with arguments: [ { workspace: 'D:/a', …(2) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+      "args": {
+        "format": "flat",
+-       "limit": 100,
+      },
+      "tool": "codegraph_files",
+      "workspace": "D:/a",
+    },
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"acss-i2i4w5"[39m
+        [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+      [36m>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"acss-145gxdo"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m代码索引[0m
+          [36m</h2>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+            [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+              [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+            [36m>[39m
+              [0mA · D:/a（已索引）[0m
+              [36m<input[39m
+                [33maria-autocomplete[39m=[32m"list"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"listbox"[39m
+                [33maria-label[39m=[32m"项目"[39m
+                [33mautocomplete[39m=[32m"new-password"[39m
+                [33mclass[39m=[32m"ant-select-input"[39m
+                [33mid[39m=[32m"test-id"[39m
+                [33mreadonly[39m=[32m""[39m
+                [33mrole[39m=[32m"combobox"[39m
+                [33mtype[39m=[32m"text"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-suffix"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"down"[39m
+                [33mclass[39m=[32m"anticon anticon-down"[39m
+                [33mrole[39m=[32m"img"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mdata-icon[39m=[32m"down"[39m
+                  [33mfill[39m=[32m"currentColor"[39m
+                  [33mfocusable[39m=[32m"false"[39m
+                  [33mheight[39m=[32m"1em"[39m
+                  [33mviewBox[39m=[32m"64 64 896 896"[39m
+                  [33mwidth[39m=[32m"1em"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+          [36m>[39m
+            [0m已索引[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"acss-1kjhzv0"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 文件[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 节点[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 边[0m
+            [36m</span>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-oc5scw"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m同步索引[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"代码索引更多操作"[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+              [33mtitle[39m=[32m"代码索引更多操作"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-btn-icon"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"19"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"5"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</header>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-smkbgp"[39m
+          [36m>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"搜索代码"[39m
+              [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+              [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+              [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"segmented control"[39m
+              [33maria-orientation[39m=[32m"horizontal"[39m
+              [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mrole[39m=[32m"radiogroup"[39m
+    ...
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:74:56
+     72|     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace:…
+     73|     render(<CodeRetrievalPanel initialProject={'d:\\a\\'} />);
+     74|     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalle…
+       |                                                        ^
+     75|   });
+     76|
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > uses files for empty query, search for symbols and explore for related context
+AssertionError: expected "vi.fn()" to be called with arguments: [ { workspace: 'D:/a', …(2) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+      "args": {
+        "format": "flat",
+-       "limit": 100,
+      },
+      "tool": "codegraph_files",
+      "workspace": "D:/a",
+    },
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"acss-i2i4w5"[39m
+        [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+      [36m>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"acss-145gxdo"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m代码索引[0m
+          [36m</h2>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+            [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+              [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+            [36m>[39m
+              [0mA · D:/a（已索引）[0m
+              [36m<input[39m
+                [33maria-autocomplete[39m=[32m"list"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"listbox"[39m
+                [33maria-label[39m=[32m"项目"[39m
+                [33mautocomplete[39m=[32m"new-password"[39m
+                [33mclass[39m=[32m"ant-select-input"[39m
+                [33mid[39m=[32m"test-id"[39m
+                [33mreadonly[39m=[32m""[39m
+                [33mrole[39m=[32m"combobox"[39m
+                [33mtype[39m=[32m"text"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-suffix"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"down"[39m
+                [33mclass[39m=[32m"anticon anticon-down"[39m
+                [33mrole[39m=[32m"img"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mdata-icon[39m=[32m"down"[39m
+                  [33mfill[39m=[32m"currentColor"[39m
+                  [33mfocusable[39m=[32m"false"[39m
+                  [33mheight[39m=[32m"1em"[39m
+                  [33mviewBox[39m=[32m"64 64 896 896"[39m
+                  [33mwidth[39m=[32m"1em"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+          [36m>[39m
+            [0m已索引[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"acss-1kjhzv0"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 文件[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 节点[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 边[0m
+            [36m</span>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-oc5scw"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m同步索引[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"代码索引更多操作"[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+              [33mtitle[39m=[32m"代码索引更多操作"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-btn-icon"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"19"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"5"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</header>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-smkbgp"[39m
+          [36m>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"搜索代码"[39m
+              [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+              [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+              [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"segmented control"[39m
+              [33maria-orientation[39m=[32m"horizontal"[39m
+              [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mrole[39m=[32m"radiogroup"[39m
+    ...
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:79:56
+     77|   it('uses files for empty query, search for symbols and explore for r…
+     78|     render(<CodeRetrievalPanel initialProject="D:/a" />);
+     79|     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalle…
+       |                                                        ^
+     80|     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value:…
+     81|     await screen.findByText('src/a.ts');
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > asks for one page, shows the real total, and fetches the next page only when asked
+AssertionError: expected [ { format: 'flat' } ] to deeply equal [ { format: 'flat', limit: 100 } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "format": "flat",
+-     "limit": 100,
+    },
+  ]
+
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:123:28
+    121|       render(<CodeRetrievalPanel initialProject="D:/a" />);
+    122|       await screen.findByText('src/file-0.ts');
+    123|       expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }]);
+       |                            ^
+    124|       expect(listed()).toBe(100);
+    125|       expect(screen.getByText('250 个结果')).toBeTruthy();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > does not start a second fetch while the next page is still on its way
+TestingLibraryElementError: Unable to find role="button" and name "正在加载…"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:144:36
+    142|       vi.mocked(agentDataApi.code.call).mockReturnValueOnce(pending.pr…
+    143|       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+    144|       const waiting = await screen.findByRole('button', { name: '正在加载……
+       |                                    ^
+    145|       fireEvent.click(waiting);
+    146|       expect(filesCalls()).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > drops a late page once the query has changed, so it never lands in the search results
+TestingLibraryElementError: Unable to find an element with the text: parse. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m"parse"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+      ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m"parse"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+      ...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:159:20
+    157|       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+    158|       fireEvent.change(screen.getByLabelText('搜索代码'), { target: { valu…
+    159|       await screen.findByText('parse');
+       |                    ^
+    160|       await act(async () => { late.resolve(filePage(100, 100)); });
+    161|       expect(screen.queryByText('src/file-100.ts')).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > keeps the loaded rows and offers a retry when the next page fails
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:171:28
+    169|       vi.mocked(agentDataApi.code.call).mockRejectedValueOnce(new Erro…
+    170|       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+    171|       expect((await screen.findByRole('alert')).textContent).toContain…
+       |                            ^
+    172|       expect(listed()).toBe(100);
+    173|       fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 150 …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > shows an MCP error from the next page instead of appending it
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"acss-i2i4w5"[39m
+      [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"acss-145gxdo"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m代码索引[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+          [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+            [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+          [36m>[39m
+            [0mA · D:/a（已索引）[0m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33maria-label[39m=[32m"项目"[39m
+              [33mautocomplete[39m=[32m"new-password"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+        [36m>[39m
+          [0m已索引[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"acss-1kjhzv0"[39m
+        [36m>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 文件[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 节点[0m
+          [36m</span>[39m
+          [36m<span>[39m
+            [0m未提供[0m
+            [0m 边[0m
+          [36m</span>[39m
+        [36m</span>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-oc5scw"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m同步索引[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"代码索引更多操作"[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+            [33mtitle[39m=[32m"代码索引更多操作"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"12"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"19"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+                [36m<circle[39m
+                  [33mcx[39m=[32m"5"[39m
+                  [33mcy[39m=[32m"12"[39m
+                  [33mr[39m=[32m"1"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-smkbgp"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"搜索代码"[39m
+            [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+            [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+            [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+            [33mtype[39m=[32m"text"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"segmented control"[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+            [33mrole[39m=[32m"radiogroup"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-segmented-group"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected ant-segmented-item-selected-text"[39m
+           ...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:185:28
+    183|       vi.mocked(agentDataApi.code.call).mockResolvedValueOnce({ isErro…
+    184|       fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+    185|       expect((await screen.findByRole('alert')).textContent).toContain…
+       |                            ^
+    186|       expect(listed()).toBe(100);
+    187|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+ FAIL  |renderer| src/features/agentData/CodeRetrievalPanel.workbench.test.tsx > CodeRetrievalPanel workbench isolation > server-paged file listing > goes back to the first page when the index refreshes
+AssertionError: expected <strong></strong> to be null
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33mclass[39m=[32m"acss-i2i4w5"[39m
+        [33mdata-testid[39m=[32m"code-retrieval-panel"[39m
+      [36m>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"acss-145gxdo"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0m代码索引[0m
+          [36m</h2>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select ant-select-outlined css-var-root ant-select-css-var css-dev-only-do-not-override-19u5a7b ant-select-single ant-select-show-arrow"[39m
+            [33mstyle[39m=[32m"width: 100%; max-width: 360px;"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content ant-select-content-has-value"[39m
+              [33mtitle[39m=[32m"A · D:/a（已索引）"[39m
+            [36m>[39m
+              [0mA · D:/a（已索引）[0m
+              [36m<input[39m
+                [33maria-autocomplete[39m=[32m"list"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"listbox"[39m
+                [33maria-label[39m=[32m"项目"[39m
+                [33mautocomplete[39m=[32m"new-password"[39m
+                [33mclass[39m=[32m"ant-select-input"[39m
+                [33mid[39m=[32m"test-id"[39m
+                [33mreadonly[39m=[32m""[39m
+                [33mrole[39m=[32m"combobox"[39m
+                [33mtype[39m=[32m"text"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-suffix"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"down"[39m
+                [33mclass[39m=[32m"anticon anticon-down"[39m
+                [33mrole[39m=[32m"img"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mdata-icon[39m=[32m"down"[39m
+                  [33mfill[39m=[32m"currentColor"[39m
+                  [33mfocusable[39m=[32m"false"[39m
+                  [33mheight[39m=[32m"1em"[39m
+                  [33mviewBox[39m=[32m"64 64 896 896"[39m
+                  [33mwidth[39m=[32m"1em"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ant-tag ant-tag-filled ant-tag-success css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+          [36m>[39m
+            [0m已索引[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"acss-1kjhzv0"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 文件[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 节点[0m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0m未提供[0m
+              [0m 边[0m
+            [36m</span>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-oc5scw"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m同步索引[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"代码索引更多操作"[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-19u5a7b css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-icon-only ant-dropdown-trigger"[39m
+              [33mtitle[39m=[32m"代码索引更多操作"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-btn-icon"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-ellipsis lucide-more-horizontal"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"19"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"5"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</header>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"acss-txbzeu acss-194e6mu"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"acss-smkbgp"[39m
+          [36m>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"搜索代码"[39m
+              [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-19u5a7b ant-input-outlined css-var-root ant-input-css-var"[39m
+              [33mplaceholder[39m=[32m"搜索符号或文件名；留空浏览文件"[39m
+              [33mstyle[39m=[32m"flex: 1 1 0%;"[39m
+              [33mtype[39m=[32m"text"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"segmented control"[39m
+              [33maria-orientation[39m=[32m"horizontal"[39m
+              [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-19u5a7b css-var-root"[39m
+              [33mrole[39m=[32m"radiogroup"[39m
+    ...
+
+- Expected:
+null
+
++ Received:
+<strong>
+  src/file-199.ts
+</strong>
+
+ ❯ src/features/agentData/CodeRetrievalPanel.workbench.test.tsx:197:73
+    195|       monitor.watchedTaskVersion++;
+    196|       rerender(<CodeRetrievalPanel initialProject="D:/a" />);
+    197|       await waitFor(() => expect(screen.queryByText('src/file-199.ts')…
+       |                                                                         ^
+    198|       expect(listed()).toBe(100);
+    199|     });
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@10.4.2/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/14]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  14 failed | 66 passed (80)
+   Start at  18:16:45
+   Duration  65.81s (transform 1.09s, setup 16.55s, import 2.65s, tests 78.84s, environment 7.46s)
+

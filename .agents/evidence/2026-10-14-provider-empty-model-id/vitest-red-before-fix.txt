@@ -1,0 +1,5 @@
+     × blocks saving a model card with an empty ID and marks it red 5454ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  |renderer| src/features/settings/ProvidersSettings.test.tsx > ProvidersSettings > blocks saving a model card with an empty ID and marks it red
+TestingLibraryElementError: Unable to find an element with the text: /有模型 ID 为空/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+      Tests  1 failed | 9 skipped (10)

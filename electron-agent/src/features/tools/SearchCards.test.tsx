@@ -84,6 +84,17 @@ describe('CodeSearchCard', { timeout: 30_000 }, () => {
     expect(container.textContent).toContain('search: no valid patterns.');
     expect(container.textContent).not.toContain('未找到结果');
   });
+
+  it('参数校验失败时展示 pi 的报错，不显示未找到匹配', () => {
+    const msg =
+      'Validation failed for tool "search":\n  - patterns: must have required properties patterns\n\nReceived arguments:\n{}';
+    const { container } = wrap(
+      <CodeSearchCard result={{ content: [{ type: 'text', text: msg }] }} isError />,
+    );
+    expect(container.textContent).toContain('Validation failed');
+    expect(container.textContent).toContain('patterns');
+    expect(container.textContent).not.toContain('未找到匹配');
+  });
 });
 
 describe('GlobCard', { timeout: 30_000 }, () => {

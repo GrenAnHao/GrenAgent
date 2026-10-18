@@ -48,7 +48,10 @@ const SNAPSHOT = `(() => {
   const barStyle = bar ? getComputedStyle(bar) : null
   const cssNode = document.getElementById('visual-confirm-style')
   const btn = document.getElementById('visual-confirm-btn')
+  const noteBtn = document.getElementById('visual-note-btn')
+  const notePanel = document.getElementById('visual-note-panel')
   return {
+    note: { btn: noteBtn ? { rect: rectOf(noteBtn), text: noteBtn.textContent } : null, panelHidden: notePanel ? notePanel.hidden : null },
     innerHeight: window.innerHeight,
     scrollY: Math.round(window.scrollY),
     maxScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
@@ -116,7 +119,9 @@ export default async function (t) {
 
   // —— 点 B 只选中，再点确认才提交 ——
   t.check('点之前没有任何提交', (await responds(t)).length, 0)
-  t.check('点之前确认按钮是禁用的', bottom.btn?.disabled, true)
+  t.check('选项可选：没选任何方案时确认按钮也可点', bottom.btn?.disabled, false)
+  t.ok('确认条上有「补充」入口，补充面板默认收起', bottom.note.btn?.text === '补充' && bottom.note.panelHidden === true)
+  t.ok('「补充」按钮和确认按钮在同一行（没把确认条撑成两行）', Math.abs(bottom.note.btn.rect.y - bottom.btn.rect.y) < 8)
   t.check('点 B 的位置，最上层是 B 自己', await tapAt(t, bottom.change.rect), 'change')
   const picked = await snapshot(t)
   t.ok('点 B：B 被选中', picked.change.selected)
@@ -131,6 +136,7 @@ export default async function (t) {
   t.check('点确认：只回传一次', sent.length, 1)
   const answer = JSON.parse(sent[0]?.slice('respond:'.length) || '{}')
   t.check('点确认：回传的是 B', [answer.choice, answer.text], ['change', '要改'])
+  t.check('点确认：回写到发起会话的工作区，而不是当前画面的工作区', (await t.events()).filter((e) => e.startsWith('respond-ws:')), ['respond-ws:D:/proj-a'])
 
   // —— 内容比面板矮：比较区仍然撑满中间的剩余空间，选项贴在确认条上方 ——
   await t.act('showShort')
@@ -142,4 +148,21 @@ export default async function (t) {
   t.checkNear('矮页面：选项贴在确认条预留区上方（比较区撑满了中间）', short.change.rect.bottom, short.innerHeight - BAR_RESERVE, 20)
   t.ok('矮页面：比较区比内容高（吃掉了剩余空间）', short.split.h > 200)
   t.ok('矮页面：选项 B 没被确认条遮住', short.change.rect.bottom <= short.bar.rect.top + GAP && short.change.reachable)
+
+  // —— 补充是可选的：不选方案，只写一句补充也能提交；回传 choice 为空串 + supplement ——
+  t.check('提交前这一页还没有回答', (await responds(t)).length, 1)
+  t.check('点「补充」的位置，最上层是确认条上的按钮', await tapAt(t, short.note.btn.rect), 'bar')
+  const opened = await inFrame(t, `document.getElementById('visual-note-panel').hidden`)
+  t.check('点「补充」：补充面板展开', opened, false)
+  await inFrame(
+    t,
+    `(() => { const n = document.getElementById('visual-note'); n.value = '标题再大一点'; n.dispatchEvent(new Event('input', { bubbles: true })) })()`
+  )
+  const withNote = await snapshot(t)
+  t.check('填了补充：按钮提示已填', withNote.note.btn?.text, '补充（已填）')
+  t.check('没选方案：确认按钮仍可点', withNote.btn?.disabled, false)
+  await tapAt(t, withNote.btn.rect)
+  await t.waitUntil(`(window.__uiEvents ?? []).filter((e) => e.startsWith('respond:')).length >= 2`, 3000)
+  const second = JSON.parse((await responds(t))[1]?.slice('respond:'.length) || '{}')
+  t.check('跳过选项只写补充：choice 为空串、带 supplement', [second.choice, second.supplement], ['', '标题再大一点'])
 }

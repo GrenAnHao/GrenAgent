@@ -51,6 +51,7 @@ vi.mock('../../stores/agentStoreRegistry', () => ({
 
 import { ExtensionUiHost } from './ExtensionUiHost';
 import { useImMessagesStore } from '../../stores/imMessagesStore';
+import { useVisualStore, visualKeyOf } from '../../stores/visualStore';
 import { clearStashedUiRequestsForTest, hasStashedUiRequests } from '../../stores/backgroundUiRequests';
 
 afterEach(() => {
@@ -400,5 +401,46 @@ describe('ExtensionUiHost', () => {
     expect(hasStashedUiRequests('/ws/b.jsonl')).toBe(false);
     expect(dismiss).toHaveBeenCalledWith('bg');
     expect(setRequest).not.toHaveBeenCalled();
+  });
+
+  describe('视觉设计按发起会话记录', () => {
+    const showStatus = (id: string, html: string) => ({
+      id,
+      method: 'setStatus',
+      statusKey: 'visual',
+      statusText: JSON.stringify({ action: 'show', html, mode: 'panel' }),
+    });
+    const sentinel = (id: string) => ({ id, method: 'input', title: JSON.stringify({ __visualChoice: 1 }) });
+
+    afterEach(() => {
+      useVisualStore.setState({ entries: {}, seq: 0, submittedIds: new Set() });
+    });
+
+    it('后台会话的页面和等待请求记到它自己名下，不覆盖当前会话的', () => {
+      loadedPath = '/ws/b.jsonl'; // 画面上是 B
+      render(<ExtensionUiHost />);
+      emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: showStatus('v-b', '<p>B</p>') });
+      emit({ workspace: '/ws', sessionPath: '/ws/b.jsonl', request: sentinel('wait-b') });
+      // A 在后台发起视觉设计
+      emit({ workspace: '/ws', sessionPath: '/ws/a.jsonl', request: showStatus('v-a', '<p>A</p>') });
+      emit({ workspace: '/ws', sessionPath: '/ws/a.jsonl', request: sentinel('wait-a') });
+
+      const { entries } = useVisualStore.getState();
+      const a = entries[visualKeyOf({ sessionPath: '/ws/a.jsonl', workspace: '/ws' })];
+      const b = entries[visualKeyOf({ sessionPath: '/ws/b.jsonl', workspace: '/ws' })];
+      expect(a).toMatchObject({ html: '<p>A</p>', pending: true, requestId: 'wait-a', sessionPath: '/ws/a.jsonl' });
+      expect(b).toMatchObject({ html: '<p>B</p>', pending: true, requestId: 'wait-b' });
+      // 哨兵不当成普通输入卡显示
+      expect(setRequest).not.toHaveBeenCalled();
+    });
+
+    it('信封没带 sessionPath 时归到该工作区画面上的会话', () => {
+      loadedPath = '/ws/a.jsonl';
+      render(<ExtensionUiHost />);
+      emit({ workspace: '/ws', request: showStatus('v', '<p>A</p>') });
+      expect(
+        useVisualStore.getState().entries[visualKeyOf({ sessionPath: '/ws/a.jsonl', workspace: '/ws' })]?.html,
+      ).toBe('<p>A</p>');
+    });
   });
 });

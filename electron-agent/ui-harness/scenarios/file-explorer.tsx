@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { App } from 'antd'
 import { FileTreeBody } from '../../src/features/dock/FileTreeBody'
+import { useFileOpenRequests } from '../../src/stores/fileOpenRequests'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
 /**
@@ -114,6 +115,7 @@ installBridge({
         const target = resolve(String(args.path))
         const node = fs.get(target)!
         if (node.dir) throw new Error('EISDIR')
+        track(`view:${target}`)
         if (node.binary) return { kind: 'binary', size: node.size ?? 0 }
         const size = node.size ?? new TextEncoder().encode(node.content).length
         return { kind: 'text', content: node.content, size, truncated: size > 5 * 1024 * 1024 }
@@ -159,6 +161,10 @@ exposeActions({
   addFile: (path: string, content: string) => {
     file(path, content)
     emitChange(path)
+  },
+  /** 交付卡 / 审查标签的「打开」：向「文件」标签发一条打开请求（真实 store）。 */
+  requestOpen: (path: string) => {
+    useFileOpenRequests.getState().request(TAB_ID, path)
   },
 })
 exposeData({ root: ROOT, tabId: TAB_ID, bigCount: BIG_DIR_COUNT, writes: [], watched: [] })

@@ -12,6 +12,7 @@ function fakeSession(messages: Array<Record<string, unknown>>) {
       state: { messages: [...messages] },
       continue: vi.fn(async () => {}),
     },
+    prompt: vi.fn(async (_text: string, _options?: { images?: unknown[] }) => {}),
   };
 }
 
@@ -59,6 +60,50 @@ describe('completeAskUser', () => {
     ]);
     await expect(completeAskUser(session, { toolCallId: 'other', cancelled: true })).rejects.toThrow(/pending/);
   });
+
+  // 中断 / 出错的回合被 pi-ai 整条丢掉，再补 toolResult 就是孤儿 tool_result，会话从此 400。
+  it('relays the answer as a user message when the owning turn was aborted', async () => {
+    const session = fakeSession([
+      {
+        role: 'assistant',
+        stopReason: 'aborted',
+        content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: { questions: [{ question: '选哪个' }] } }],
+      },
+    ]);
+    await expect(completeAskUser(session, { toolCallId: 'q1', value: '[我的选择]\n1. 选哪个：甲' })).resolves.toBe('ok');
+    expect(session.appended).toHaveLength(0);
+    expect(session.agent.continue).not.toHaveBeenCalled();
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    const [text] = session.prompt.mock.calls[0]!;
+    expect(text).toContain('上一轮已中断');
+    expect(text).toContain('[我的选择]');
+  });
+
+  it('writes nothing when a card from an errored turn is cancelled', async () => {
+    const session = fakeSession([
+      {
+        role: 'assistant',
+        stopReason: 'error',
+        content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: {} }],
+      },
+    ]);
+    await expect(completeAskUser(session, { toolCallId: 'q1', cancelled: true })).resolves.toBe('ok');
+    expect(session.appended).toHaveLength(0);
+    expect(session.agent.continue).not.toHaveBeenCalled();
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it('still answers a live turn with a tool result even when an older turn died', async () => {
+    const session = fakeSession([
+      { role: 'assistant', stopReason: 'aborted', content: [{ type: 'toolCall', id: 'q0', name: 'ask_user', arguments: {} }] },
+      { role: 'user', content: [{ type: 'text', text: '重问' }] },
+      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', id: 'q1', name: 'ask_user', arguments: {} }] },
+    ]);
+    await expect(completeAskUser(session, { toolCallId: 'q1', cancelled: true })).resolves.toBe('ok');
+    expect(session.appended).toHaveLength(1);
+    expect(session.appended[0]).toMatchObject({ role: 'toolResult', toolCallId: 'q1' });
+    expect(session.agent.continue).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('finishCompleteAskUser', () => {
@@ -79,7 +124,7 @@ describe('finishCompleteAskUser', () => {
     expect(logError).toHaveBeenCalledTimes(2);
   });
 
-  it('still returns the result when draft delete succeeds', async () => {
+  it('still returns the result when draft delete s쳮ds', async () => {
     const deleteDraft = vi.fn(async () => {});
     await expect(finishCompleteAskUser('ok', deleteDraft)).resolves.toBe('ok');
     expect(deleteDraft).toHaveBeenCalledTimes(1);

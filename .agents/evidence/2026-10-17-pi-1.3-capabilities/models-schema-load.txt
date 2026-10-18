@@ -1,0 +1,5 @@
+# pi 1.3.0 ModelRuntime.create on a models.json written with $schema
+{"$schema":"https://pi.dev/schemas/models.schema.json","providers":{"my":{"name":"My","api":"openai-completions","baseUrl":"https://x.example/v1","apiKey":"k","models":[{"id":"m1","name":"M1"}]}}}
+## result (file, getError(), custom model ids)
+models.json undefined m1
+models-bad.json undefined 

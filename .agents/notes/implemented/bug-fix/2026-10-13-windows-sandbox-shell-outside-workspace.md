@@ -26,9 +26,9 @@ Status: implemented
 
 ### 进不了工作目录就不跑命令
 
-受限的 Windows PowerShell 运行在用户命令前执行一段守卫：PowerShell 的位置和进程当前目录不一致时，先 `Set-Location` 过去；切不过去，就往 stderr 写 `pi-sandbox-win: the sandbox account cannot open the working directory <dir>; the command did not run`，以 163 退出。这条输出命中 Windows runner 的失败规则（退出码 163 + `pi-sandbox-win:`），bash 工具按「沙箱 runner 失败、命令没执行」报给模型，而不是让命令在 `C:\` 跑出一个看似正常的结果。
+受限运行在用户命令前执行一段守卫。2026-10-14 起 bash 工具在 Windows 上照 pi 用 Git Bash（见 [Git Bash](../architecture/2026-10-14-windows-bash-git-bash-like-pi.md)），守卫是固定的 bash 引导脚本：`cd` 进期望的工作目录；进不去，就往 stderr 写 `pi-sandbox-win: the sandbox account cannot open the working directory <dir>; the command did not run`，以 163 退出。这条输出命中 Windows runner 的失败规则（退出码 163 + `pi-sandbox-win:`），bash 工具按「沙箱 runner 失败、命令没执行」报给模型，而不是让命令在 `C:\` 跑出一个看似正常的结果。
 
-守卫代码放在环境变量 `PI_SANDBOX_CWD_GUARD` 里（helper 照抄调用方环境），命令行上只多一行 `iex $env:PI_SANDBOX_CWD_GUARD`。守卫进来先删掉这个变量，用户命令和它的子进程看不到。约束语言模式不能碰 `[Environment]`，跳过检查。不受限的运行不加守卫。
+期望的工作目录和命令正文经环境变量 `PI_SANDBOX_CWD`、`PI_BASH_COMMAND` 带进去（helper 照抄调用方环境），命令行上只有那段固定的引导，长度和命令无关。引导进来先删掉这两个变量，用户命令和它的子进程看不到。不受限的运行不加守卫。原先 PowerShell 时代的守卫（`PI_SANDBOX_CWD_GUARD` + `iex`）已经删掉。
 
 涉及文件：
 

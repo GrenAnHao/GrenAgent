@@ -1,11 +1,11 @@
 ## Grep and glob strategy
 
-`grep` and `search` search file contents with ripgrep. `find` matches paths by glob. `ls` lists one directory. Prefer these over bash, including Windows `Get-ChildItem`, `Select-String`, and `Get-Content`. They respect `.gitignore` and return structured output.
+`grep` and `search` search file contents with ripgrep. `find` matches paths by glob. `ls` lists one directory. Prefer these over bash `ls`, `find`, `grep`, and `cat`. They respect `.gitignore` and return structured output.
 
 ### Parameters
 
 - `grep`: `pattern`, optional `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit` (default 100).
-- `search`: `patterns` (OR), optional `globs`, `path`, `literal`, `contextLines`, `maxResults`.
+- `search`: required `pattern`, optional extra `patterns` (OR-ed with `pattern`), `globs`, `path`, `literal`, `contextLines`, `maxResults`.
 - `find`: glob `pattern` (for example `*.sql` or `**/*.spec.ts`), optional `path`, `limit`.
 - `ls`: optional `path`, `limit`. Results are alphabetical; `limit` keeps the first entries.
 

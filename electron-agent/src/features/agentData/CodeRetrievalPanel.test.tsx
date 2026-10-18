@@ -131,7 +131,7 @@ describe('CodeRetrievalPanel project and status', () => {
     await act(async () => { oldStatus.resolve({ workspace: 'D:/proj/alpha', connected: true, indexed: true, files: 99 }); });
     expect(screen.queryByText(/^99 文件/)).toBeNull();
     expect(agentDataApi.code.call).toHaveBeenCalledTimes(1);
-    expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/proj/beta', tool: 'codegraph_files', args: { format: 'flat' } });
+    expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/proj/beta', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } });
   });
 
   it('retains previous readable results when an MCP refresh returns an explicit error and no rows', async () => {

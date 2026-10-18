@@ -73,7 +73,10 @@ export interface ReviewPayload {
 }
 
 export interface VisualPayload {
+  /** 视觉设计的 rev（换页面时递增）。 */
   sessionId: number;
+  /** visualStore 里这条视觉设计的 key：面板只读它，不读「当前会话」。 */
+  visualKey: string;
 }
 
 export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload | VisualPayload;
@@ -90,7 +93,8 @@ export interface DockTab {
   /** 最近一次打开或激活，标签列表用相对时间。 */
   touchedAt?: number;
   /**
-   * 会话归属（仅 subagent / subagentLog / visual）：打开时所在的聊天会话。
+   * 会话归属：打开时所在的聊天会话。右区的标签一律有归属（右侧边栏跟着会话走）；
+   * 底部区只有 subagent / subagentLog / visual 带归属，其余（终端）全局共享。
    * undefined = 全局 tab；null = 当前工作区的草稿会话。只在归属会话里显示。
    */
   ownerSessionPath?: string | null;
@@ -148,6 +152,11 @@ function ownerMatches(tab: DockTab, view: DockSessionView): boolean {
   return Boolean(view.sessionPath) && pathsEquivalent(tab.ownerSessionPath, view.sessionPath as string);
 }
 
+/** 归属 owner 的会话是不是正在画面上。后台会话打开 tab 时不能抢占当前画面。 */
+export function isDockOwnerViewed(owner: Required<DockTabOwner>, view: DockSessionView = currentDockView()): boolean {
+  return ownerMatches({ ownerSessionPath: owner.ownerSessionPath, ownerWorkspace: owner.ownerWorkspace } as DockTab, view);
+}
+
 /** 全局 tab 总可见；会话归属 tab 只在归属会话里可见。 */
 export function isDockTabVisible(tab: DockTab, view: DockSessionView): boolean {
   if (tab.ownerSessionPath === undefined) return true;
@@ -157,6 +166,16 @@ export function isDockTabVisible(tab: DockTab, view: DockSessionView): boolean {
 /** 某 region 在给定会话下可见的 tab（按 order 排序）。 */
 export function visibleRegionTabs(tabs: DockTab[], region: DockRegion, view: DockSessionView): DockTab[] {
   return tabs.filter((t) => t.region === region && isDockTabVisible(t, view)).sort((a, b) => a.order - b.order);
+}
+
+/**
+ * 某 region 要挂载 body 的 tab：当前会话可见的，加上别的会话里不该卸载的（终端 shell、浏览器页面、
+ * 文件里没保存的修改）。后者只藏起来，切回归属会话时原样还在。子代理 / 视觉设计照旧随会话卸载。
+ */
+export function mountedRegionTabs(tabs: DockTab[], region: DockRegion, view: DockSessionView): DockTab[] {
+  return tabs
+    .filter((t) => t.region === region && (isDockTabVisible(t, view) || !isSessionOwnedKind(t.kind)))
+    .sort((a, b) => a.order - b.order);
 }
 
 /** 可见的激活 tab：activeByRegion 被隐藏时退回该会话上次激活的，再退回最后一个可见 tab。 */
@@ -183,6 +202,9 @@ export interface ClosedDockTab {
   closable: boolean;
   payload: DockTabPayload;
   closedAt: number;
+  /** 会话归属 tab 恢复时要回到原来的会话，不能变成全局 tab。 */
+  ownerSessionPath?: string | null;
+  ownerWorkspace?: string;
 }
 
 export const MAX_CLOSED_TABS = 20;
@@ -195,6 +217,8 @@ interface DockState {
   activeBySession: Record<string, Partial<Record<DockRegion, string>>>;
   /** 每个会话离开时右面板是否展开（不持久化）。 */
   rightOpenBySession: Record<string, boolean>;
+  /** 每个会话离开时右面板是否占满（不持久化）。 */
+  rightFillBySession: Record<string, boolean>;
 
   addTab: (input: Omit<DockTab, 'order'> & { order?: number }) => void;
   updateTab: (
@@ -214,6 +238,11 @@ interface DockState {
   resetWorkspaceTabs: () => void;
   /** 聊天会话切换：保存/恢复每会话的激活 tab 与右面板展开态。 */
   switchSessionView: (prev: DockSessionView, next: DockSessionView) => void;
+  /**
+   * 草稿首发落盘成会话：草稿名下的标签和右面板状态过户给新会话。必须在 setActiveSession(新路径) 之前调，
+   * 随后那次「草稿 → 新会话」的切换不再当成换会话处理。
+   */
+  adoptDraftView: (workspace: string, sessionPath: string) => void;
   /** 删除会话时丢弃它名下的 tab。 */
   dropSessionTabs: (sessionPath: string, wasViewed?: boolean) => void;
 }
@@ -235,6 +264,34 @@ function ownerOf(input: DockTabOwner): Required<DockTabOwner> {
   }
   return currentDockOwner();
 }
+
+/**
+ * 右侧边栏跟着会话走：落到右区、还没有归属的 tab 记到当前会话名下。
+ * 不在这里补的话，任何新入口直接 addTab 都会造出一个所有会话共用的右栏标签。
+ */
+function withRightOwner<T extends DockTabOwner & { region: DockRegion }>(tab: T): T {
+  if (tab.region !== 'right' || tab.ownerSessionPath !== undefined) return tab;
+  return { ...tab, ...currentDockOwner() };
+}
+
+/** 回到底部区的非会话类 tab（终端等）重新全局共享，和底部区原来的语义一致。 */
+function withoutOwner(tab: DockTab): DockTab {
+  const { ownerSessionPath: _p, ownerWorkspace: _w, ...rest } = tab;
+  void _p;
+  void _w;
+  return rest;
+}
+
+/** 同一个规范 id 被别的会话的 tab 占着时，给当前会话另起一个。 */
+function freeTabId(tabs: DockTab[], canonical: string): string {
+  if (!tabs.some((t) => t.id === canonical)) return canonical;
+  let n = 2;
+  while (tabs.some((t) => t.id === `${canonical}#${n}`)) n += 1;
+  return `${canonical}#${n}`;
+}
+
+/** 草稿首发落盘的那一次切换（adoptDraftView 记下，switchSessionView 消费）。 */
+let pendingDraftAdoption: { from: string; to: string } | null = null;
 
 /** 子代理 tab 的稳定 id：单任务用 messageId，多任务用 `${messageId}#${subIndex}`。 */
 export function subAgentTabId(messageId: string, subIndex: number | null): string {
@@ -286,6 +343,9 @@ function snapshotClosedTab(tab: DockTab): ClosedDockTab | null {
     closable: tab.closable,
     payload: tab.kind === 'terminal' ? { status: 'idle' } : tab.payload,
     closedAt: Date.now(),
+    ...(tab.ownerSessionPath !== undefined
+      ? { ownerSessionPath: tab.ownerSessionPath, ownerWorkspace: tab.ownerWorkspace }
+      : {}),
   };
 }
 
@@ -312,6 +372,11 @@ function isSessionOnlyDockKind(kind: DockTabKind): boolean {
   return kind === 'subagent' || kind === 'subagentLog' || kind === 'browser' || kind === 'visual';
 }
 
+/** 右区没有归属的 tab 是旧版本留下的全局右栏标签：不再存、读回来也丢掉，否则它会出现在每个会话里。 */
+function isOwnerlessRight(t: { region: DockRegion; ownerSessionPath?: string | null }): boolean {
+  return t.region === 'right' && t.ownerSessionPath === undefined;
+}
+
 function sanitizePersistedActive(
   active: Record<DockRegion, string | null>,
   tabs: DockTab[],
@@ -328,10 +393,10 @@ function persistDockSnapshot(s: Pick<DockState, 'tabs' | 'closedTabs' | 'activeB
   'tabs' | 'closedTabs' | 'activeByRegion'
 > {
   const tabs = s.tabs
-    .filter((t) => !isSessionOnlyDockKind(t.kind))
+    .filter((t) => !isSessionOnlyDockKind(t.kind) && !isOwnerlessRight(t))
     .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
   const closedTabs = (s.closedTabs ?? [])
-    .filter((t) => !isSessionOnlyDockKind(t.kind))
+    .filter((t) => !isSessionOnlyDockKind(t.kind) && !isOwnerlessRight(t))
     .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
   return {
     tabs,
@@ -348,11 +413,12 @@ export const useDockStore = create<DockState>()(
       activeByRegion: { right: null, bottom: null },
       activeBySession: {},
       rightOpenBySession: {},
+      rightFillBySession: {},
 
       addTab: (input) => {
         set((s) => {
           const order = input.order ?? nextOrder(s.tabs, input.region);
-          const tab: DockTab = { ...input, order, touchedAt: input.touchedAt ?? Date.now() };
+          const tab: DockTab = withRightOwner({ ...input, order, touchedAt: input.touchedAt ?? Date.now() });
           return {
             tabs: [...s.tabs, tab],
             activeByRegion: { ...s.activeByRegion, [input.region]: tab.id },
@@ -396,19 +462,24 @@ export const useDockStore = create<DockState>()(
         set((s) => ({
           closedTabs: s.closedTabs.filter((c) => !(c.id === id && c.closedAt === closedAt)),
         }));
-        const live = findLiveForRestore(get().tabs, entry);
+        // 只复用当前会话看得见的同类 tab；别的会话里的同 id 标签不能被拉过来。
+        const view = currentDockView();
+        const live = findLiveForRestore(get().tabs.filter((t) => isDockTabVisible(t, view)), entry);
         if (live) {
           get().setActive(live.region, live.id);
           revealRegion(live.region);
           return;
         }
         get().addTab({
-          id: entry.id,
+          id: freeTabId(get().tabs, entry.id),
           kind: entry.kind,
           region: entry.region,
           title: entry.title,
           closable: entry.closable,
           payload: entry.kind === 'terminal' ? { status: 'idle' } : entry.payload,
+          ...(entry.ownerSessionPath !== undefined
+            ? { ownerSessionPath: entry.ownerSessionPath, ownerWorkspace: entry.ownerWorkspace }
+            : {}),
         });
       },
 
@@ -447,7 +518,13 @@ export const useDockStore = create<DockState>()(
           sourceRegion = fromRegion;
           const targetTabs = s.tabs.filter((t) => t.region === targetRegion).sort((a, b) => a.order - b.order);
           const at = insertIndex == null ? targetTabs.length : Math.max(0, Math.min(insertIndex, targetTabs.length));
-          const movedTab: DockTab = { ...tab, region: targetRegion };
+          const relocated: DockTab = { ...tab, region: targetRegion };
+          const movedTab: DockTab =
+            targetRegion === 'right'
+              ? withRightOwner(relocated)
+              : isSessionOwnedKind(tab.kind)
+                ? relocated
+                : withoutOwner(relocated);
           const nextTarget = [...targetTabs.slice(0, at), movedTab, ...targetTabs.slice(at)].map((t, i) => ({ ...t, order: i }));
           const activeByRegion = { ...s.activeByRegion, [targetRegion]: id };
           if (activeByRegion[fromRegion] === id) {
@@ -470,11 +547,15 @@ export const useDockStore = create<DockState>()(
       },
 
       openPage: (page) => {
-        const id = `page:${page.url}`;
         const title = page.title || page.url;
+        const view = currentDockView();
         set((s) => {
-          const exists = s.tabs.some((t) => t.id === id);
-          const tabs = exists
+          // 同一网址只在当前会话里复用；别的会话打开的同一页是那个会话自己的标签。
+          const existing = s.tabs.find(
+            (t) => t.kind === 'page' && (t.payload as PagePayload).url === page.url && isDockTabVisible(t, view),
+          );
+          const id = existing?.id ?? freeTabId(s.tabs, `page:${page.url}`);
+          const tabs = existing
             ? s.tabs.map((t) => (t.id === id ? { ...t, title, payload: { ...page }, touchedAt: Date.now() } : t))
             : [
                 ...s.tabs,
@@ -487,6 +568,7 @@ export const useDockStore = create<DockState>()(
                   order: nextOrder(s.tabs, 'right'),
                   payload: { ...page },
                   touchedAt: Date.now(),
+                  ...ownerOf({}),
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
@@ -495,10 +577,12 @@ export const useDockStore = create<DockState>()(
       },
 
       openProjectContext: (workspace) => {
-        const id = 'project-context';
+        const view = currentDockView();
         set((s) => {
-          const exists = s.tabs.some((tab) => tab.id === id);
-          const tabs = exists
+          // 每个会话各有一个「项目上下文」标签。
+          const existing = s.tabs.find((tab) => tab.kind === 'projectContext' && isDockTabVisible(tab, view));
+          const id = existing?.id ?? freeTabId(s.tabs, 'project-context');
+          const tabs = existing
             ? s.tabs.map((tab) => (
                 tab.id === id
                   ? { ...tab, title: '项目上下文', payload: { workspace } }
@@ -514,6 +598,7 @@ export const useDockStore = create<DockState>()(
                   closable: true,
                   order: nextOrder(s.tabs, 'right'),
                   payload: { workspace },
+                  ...ownerOf({}),
                 },
               ];
           return { tabs, activeByRegion: { ...s.activeByRegion, right: id } };
@@ -598,32 +683,55 @@ export const useDockStore = create<DockState>()(
         const prevKey = dockSessionKey(prev);
         const nextKey = dockSessionKey(next);
         if (prevKey === nextKey) return;
+        const adopted = pendingDraftAdoption?.from === prevKey && pendingDraftAdoption.to === nextKey;
+        pendingDraftAdoption = null;
+        // 草稿首发落盘：画面还是这一份对话，标签已经过户，右面板原样保留，草稿也不再单独记状态。
+        if (adopted) return;
         const s = get();
         const layout = useLayoutStore.getState();
-        const prevRight = visibleRegionTabs(s.tabs, 'right', prev);
         const prevActive: Partial<Record<DockRegion, string>> = {};
         for (const region of ['right', 'bottom'] as const) {
           const id = resolveVisibleActive(s, region, prev, visibleRegionTabs(s.tabs, region, prev));
           if (id) prevActive[region] = id;
         }
         const nextRight = visibleRegionTabs(s.tabs, 'right', next);
-        // 激活优先级：本会话上次激活 → 当前激活（全局 tab 跨会话保持）→ 最后一个可见。
+        // 激活优先级：本会话上次激活 → 最后一个可见。
         const has = (id: string | null | undefined): id is string => Boolean(id) && nextRight.some((t) => t.id === id);
         const remembered = s.activeBySession[nextKey]?.right;
-        const right = has(remembered) ? remembered : has(s.activeByRegion.right) ? s.activeByRegion.right : nextRight.at(-1)?.id ?? null;
+        const right = has(remembered) ? remembered : nextRight.at(-1)?.id ?? null;
         set({
           activeBySession: { ...s.activeBySession, [prevKey]: prevActive },
           rightOpenBySession: { ...s.rightOpenBySession, [prevKey]: layout.rightPanelOpen },
+          rightFillBySession: { ...s.rightFillBySession, [prevKey]: layout.rightPanelFill },
           activeByRegion: { ...s.activeByRegion, right },
         });
-        if (nextRight.length === 0) {
-          // 右面板只装着上一会话的会话归属 tab：本会话没内容就收起（全局 tab 在两边都可见，不会走到这里）。
-          if (layout.rightPanelOpen && prevRight.length > 0) layout.setRightPanelOpen(false);
-          return;
-        }
-        // 回到有自己 tab 的会话：离开时是展开的就重新展开；其余情况保持现状。
-        const nextHasOwned = nextRight.some((t) => t.ownerSessionPath !== undefined);
-        if (nextHasOwned && s.rightOpenBySession[nextKey] && !layout.rightPanelOpen) layout.setRightPanelOpen(true);
+        // 右面板的展开 / 占满按会话记：目标会话离开时什么样就恢复成什么样，没去过的会话默认收起。
+        // 不看上一个会话开没开、有没有标签——否则在 A 打开的面板（哪怕是空的启动页）会原样带进 B。
+        const open = Boolean(s.rightOpenBySession[nextKey]);
+        if (open !== layout.rightPanelOpen) layout.setRightPanelOpen(open);
+        const fill = open && Boolean(s.rightFillBySession[nextKey]);
+        if (fill !== useLayoutStore.getState().rightPanelFill) useLayoutStore.setState({ rightPanelFill: fill });
+      },
+
+      adoptDraftView: (workspace, sessionPath) => {
+        if (!workspace || !sessionPath) return;
+        const from = dockSessionKey({ sessionPath: null, workspace });
+        const to = dockSessionKey({ sessionPath, workspace });
+        const draftOwned = (o: DockTabOwner) =>
+          o.ownerSessionPath === null && pathsEquivalent(o.ownerWorkspace ?? '', workspace);
+        set((s) => {
+          const { [from]: draftActive, ...activeBySession } = s.activeBySession;
+          const { [from]: draftOpen, ...rightOpenBySession } = s.rightOpenBySession;
+          const { [from]: draftFill, ...rightFillBySession } = s.rightFillBySession;
+          return {
+            tabs: s.tabs.map((t) => (draftOwned(t) ? { ...t, ownerSessionPath: sessionPath } : t)),
+            closedTabs: s.closedTabs.map((c) => (draftOwned(c) ? { ...c, ownerSessionPath: sessionPath } : c)),
+            activeBySession: draftActive ? { ...activeBySession, [to]: draftActive } : activeBySession,
+            rightOpenBySession: draftOpen === undefined ? rightOpenBySession : { ...rightOpenBySession, [to]: draftOpen },
+            rightFillBySession: draftFill === undefined ? rightFillBySession : { ...rightFillBySession, [to]: draftFill },
+          };
+        });
+        pendingDraftAdoption = { from, to };
       },
 
       dropSessionTabs: (sessionPath, wasViewed = false) => {
@@ -637,13 +745,25 @@ export const useDockStore = create<DockState>()(
         const key = dockSessionKey({ sessionPath, workspace: '' });
         const { [key]: _a, ...activeBySession } = s.activeBySession;
         const { [key]: _o, ...rightOpenBySession } = s.rightOpenBySession;
+        const { [key]: _f, ...rightFillBySession } = s.rightFillBySession;
         void _a;
         void _o;
+        void _f;
         const activeByRegion = { ...s.activeByRegion };
         for (const region of ['right', 'bottom'] as const) {
           if (activeByRegion[region] && doomed.has(activeByRegion[region] as string)) activeByRegion[region] = null;
         }
-        set({ tabs: s.tabs.filter((t) => !doomed.has(t.id)), activeBySession, rightOpenBySession, activeByRegion });
+        set({
+          tabs: s.tabs.filter((t) => !doomed.has(t.id)),
+          // 最近关闭里属于这个会话的项一起丢掉：会话没了，它们在哪儿都列不出来。
+          closedTabs: (s.closedTabs ?? []).filter(
+            (c) => !(c.ownerSessionPath && pathsEquivalent(c.ownerSessionPath, sessionPath)),
+          ),
+          activeBySession,
+          rightOpenBySession,
+          rightFillBySession,
+          activeByRegion,
+        });
         // 删的是正在看的会话且右坞里有它的 tab：当前视图若已无可见 tab 就收起右面板。
         if (wasViewed && s.tabs.some((t) => doomed.has(t.id) && t.region === 'right')) {
           collapseEmptyRegion('right', get().tabs);

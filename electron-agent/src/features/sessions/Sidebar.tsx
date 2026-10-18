@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
 import { Dropdown, Input, Modal } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
@@ -16,6 +16,7 @@ import { ConversationRow } from './ConversationRow';
 import { GroupSessionRow } from './GroupSessionRow';
 import { ProjectHeaderRow } from './ProjectHeaderRow';
 import { useSidebarItems, type SidebarItem } from './useSidebarItems';
+import { useIsolatedWorkspaceStore } from '../../stores/isolatedWorkspaceStore';
 
 /** 取某侧栏条目对应的工作区 cwd（用于 hover 预热）；分区/标题无 cwd。 */
 function cwdOfItem(item: SidebarItem): string | undefined {
@@ -107,6 +108,17 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
 
   const items = useSidebarItems(showAllCwds);
   const { appBooted } = useAgentStoreContext();
+
+  // 独立工作区的组问一次主进程：还在 / 已删除。创建、删除、回传后 revision 变，重问。
+  const isolatedCwds = useMemo(
+    () => items.flatMap((item) => (item.type === 'project' && item.group.isolated ? [item.group.cwd] : [])).join('\n'),
+    [items],
+  );
+  const isolatedRevision = useIsolatedWorkspaceStore((s) => s.revision);
+  useEffect(() => {
+    if (!isolatedCwds) return;
+    void useIsolatedWorkspaceStore.getState().refreshKinds(isolatedCwds.split('\n'));
+  }, [isolatedCwds, isolatedRevision]);
 
   // 等主界面出来再预热其它项目。冷启动时和当前工作区一起建运行时，会把扩展工厂挤在加载页上。
   const didPrewarmRef = useRef(false);

@@ -402,13 +402,15 @@ export interface ProviderModelCardProps {
   index: number;
   api: string | undefined;
   expanded: boolean;
+  /** ID 为空时标红（保存被拦下之后才传 true）。 */
+  markEmptyId?: boolean;
   onToggle: () => void;
   onChange: (patch: Partial<UiModel>) => void;
   onRemove: () => void;
   dragHandle?: ModelCardDragHandle;
 }
 
-export function ProviderModelCard({ model, index, api, expanded, onToggle, onChange, onRemove, dragHandle }: ProviderModelCardProps) {
+export function ProviderModelCard({ model, index, api, expanded, markEmptyId = false, onToggle, onChange, onRemove, dragHandle }: ProviderModelCardProps) {
   const formatChip = thinkingFormatChip(model.thinkingFormat);
   const groups = groupsForEditor(api);
   const showFormat = showsThinkingFormat(api);
@@ -460,6 +462,7 @@ export function ProviderModelCard({ model, index, api, expanded, onToggle, onCha
           data-testid={`prov-model-id-${index}`}
           value={model.id}
           placeholder="模型 ID"
+          status={markEmptyId && !model.id.trim() ? 'error' : undefined}
           variant="filled"
           onChange={(e) => onChange({ id: e.target.value })}
         />

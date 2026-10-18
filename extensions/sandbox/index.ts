@@ -1,17 +1,26 @@
 import { projectCwd } from "../_shared/session-cwd.js";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getApprovalPolicy } from "../_shared/approval.js";
 import { getAgentMode } from "../agent-mode/modes.js";
 import { clearEscalationGrants } from "../_shared/sandbox/escalationGrant.js";
 import { createSandboxedBashOperations } from "../_shared/sandbox/operations.js";
 import { createSandboxProvider } from "../_shared/sandbox/provider.js";
 import { resolvePreset } from "../_shared/sandbox/resolvePreset.js";
+import { isolatedWorkspaceOf } from "../_shared/isolated-workspace.js";
 import { withTextMarkers } from "../_shared/sandbox/userBash.js";
 import { jobs } from "../jobs/service.js";
 import { createGrenBashTool } from "./bashTool.js";
 import { withBashUiDescription } from "./bashUiDescription.js";
 import type { SandboxGate } from "./escalation.js";
-import { annotateWindowsBashTool } from "./windowsBashPrompt.js";
+
+/** pi 在会话建工具时读一次 shellPath（SettingsManager.getShellPath），这里跟着会话开始读。读不到按 pi 的默认顺序找 bash。 */
+function readShellPath(cwd: string): string | undefined {
+  try {
+    return SettingsManager.create(cwd || process.cwd(), getAgentDir()).getShellPath() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   const provider = createSandboxProvider();
@@ -20,15 +29,25 @@ export default function (pi: ExtensionAPI) {
   // 不要退化到 process.cwd() 当可写根——多工作区会绑错 workspaceRoot。
   let cwd = "";
   let sessionId: string | undefined;
+  let shellPath: string | undefined;
+  let shellPathRead = false;
 
   const getPolicy = (override?: string) => {
     const root = override ?? cwd;
-    return resolvePreset({
+    const policy = resolvePreset({
       approval: getApprovalPolicy(root),
       agentMode: getAgentMode(root),
       workspaceRoot: root,
       ...(sessionId ? { sessionId } : {}),
     });
+    // 独立工作区（A 轨）：沙箱根就是 W，主仓在根外。full 档钳到 workspace-write，单次放宽也到不了 full-access，
+    // 否则一次升权就能写回主仓。
+    if (!isolatedWorkspaceOf(root)) return policy;
+    return {
+      ...policy,
+      mode: policy.mode === "danger-full-access" ? ("workspace-write" as const) : policy.mode,
+      fullAccessBlocked: true,
+    };
   };
 
   /**
@@ -37,26 +56,40 @@ export default function (pi: ExtensionAPI) {
    * 两边看的不是同一个根，用户批准的放宽可能在执行时被静默忽略。
    */
   const sandboxGate = (): SandboxGate => {
-    const mode = getPolicy().mode;
-    return { mode, presetBlocksEscalation: mode === "workspace-write" && getApprovalPolicy(cwd) === "workspace" };
+    const policy = getPolicy();
+    const mode = policy.mode;
+    return {
+      mode,
+      presetBlocksEscalation: mode === "workspace-write" && getApprovalPolicy(cwd) === "workspace",
+      ...(policy.fullAccessBlocked ? { fullAccessBlocked: true } : {}),
+    };
   };
 
   const operations = createSandboxedBashOperations({
     getPolicy: () => getPolicy(),
     confine: (argv, policy) => provider.confine(argv, policy),
+    shellPath: () => {
+      if (!shellPathRead) {
+        shellPath = readShellPath(cwd);
+        shellPathRead = true;
+      }
+      return shellPath;
+    },
   });
 
   pi.on("session_start", (_event, ctx) => {
     // 可写根与审批 / 模式查询都按会话的原始目录，切到 worktree 后也不变（DSH：原始沙箱根不变）。
     cwd = projectCwd(ctx);
     sessionId = ctx.sessionManager.getSessionId();
+    shellPath = readShellPath(cwd);
+    shellPathRead = true;
   });
 
   // 自有 bash（不再用 pi 的 createBashToolDefinition）：契约照 pi 1.0.2，执行照 DSH——每次调用都是 jobs 里的 bash job，
-  // 前台等到 timeout 仍在跑就转后台。进程走同一套沙箱 operations。
+  // 前台等到 timeout 仍在跑就转后台。进程走同一套沙箱 operations。壳照 pi：Windows 上是 Git Bash，不走 PowerShell。
   // 升权并进 bash 的 sandbox_permissions + justification（DSH），没有单独的升权工具。
   pi.registerTool(
-    withBashUiDescription(annotateWindowsBashTool(createGrenBashTool({ jobs, exec: operations.exec, sandboxGate }))),
+    withBashUiDescription(createGrenBashTool({ jobs, exec: operations.exec, sandboxGate })),
   );
 
   // user_bash 由 pi 显示输出：沙箱事实经适配器写回文字。

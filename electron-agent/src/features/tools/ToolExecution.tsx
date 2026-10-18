@@ -1,5 +1,5 @@
 import { cssVar } from 'antd-style';
-import { Braces, FilePlus, Globe, ListChecks, Plug, Search, Sparkles, type LucideIcon } from 'lucide-react';
+import { Braces, FilePlus, Globe, ListChecks, Plug, Search, Sparkles, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { normalizeTodos, todoSummary } from '@extensions/_shared/todo-model';
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
@@ -50,6 +50,7 @@ import {
   type CodemodeCallItem,
 } from './codemodeModel';
 import { renderExtensionCard } from './extensionCards';
+import { parseInvalidArguments, type InvalidArguments } from './invalidArgumentsModel';
 import type { ToolSegment } from '../chat/groupMessages';
 import {
   argSummary,
@@ -84,9 +85,10 @@ interface ToolExecutionProps {
 
 function codeSearchPatterns(args: unknown): string {
   if (!args || typeof args !== 'object') return '';
-  const raw = (args as { patterns?: unknown }).patterns;
-  if (!Array.isArray(raw)) return '';
-  return raw.filter((item): item is string => typeof item === 'string' && item.length > 0).join(' | ');
+  // 新 schema 是必填 pattern + 可选 patterns；旧会话只有 patterns 数组。两种都要能显示。
+  const { pattern, patterns } = args as { pattern?: unknown; patterns?: unknown };
+  const list = [pattern, ...(Array.isArray(patterns) ? patterns : [patterns])];
+  return [...new Set(list.filter((item): item is string => typeof item === 'string' && item.length > 0))].join(' | ');
 }
 
 function codeSearchTotal(result: unknown): number | undefined {
@@ -319,6 +321,15 @@ function toolTitle(
               : label,
     };
   }
+  // B 轨：只切换会话目录，权限根还是原始工作区。不要让它看起来像「独立工作区」。
+  if (lname === 'create_worktree') {
+    const name = getArgString(args, 'name');
+    return { icon, name: '切到新 worktree', args: `${name ? `${name} · ` : ''}仍可写原工作区` };
+  }
+  if (lname === 'working_directory') {
+    const cd = getArgString(args, 'cd');
+    return { icon, name: cd ? '切换目录' : '当前目录', args: cd || undefined };
+  }
   return { icon, name: toolName, args: argSummary(args) || undefined };
 }
 
@@ -423,7 +434,7 @@ function ToolDetail({
     const details = getDetails(result);
     const hasHits = Array.isArray(details?.matches) && details.matches.length > 0;
     if (status === 'running' && !text && !hasHits) return <CodeSurface>搜索中…</CodeSurface>;
-    return <CodeSearchCard result={result} />;
+    return <CodeSearchCard result={result} isError={isError} />;
   }
   if (name === 'grep' || name === 'ripgrep') {
     if (status === 'running' && !text) return <CodeSurface>搜索中…</CodeSurface>;
@@ -534,8 +545,40 @@ function opensWhileRunning(toolName: string): boolean {
 }
 
 function ToolExecutionInner(props: ToolExecutionProps) {
+  // Before the per-tool cards: their args are `{}` here, so they would show an empty command or path.
+  const invalid = props.status === 'error' ? parseInvalidArguments(props.result) : undefined;
+  if (invalid) return <InvalidArgumentsExecution toolName={props.toolName} invalid={invalid} />;
   if (isCodemodeTool(props.toolName)) return <CodemodeExecution {...props} />;
   return <PlainToolExecution {...props} />;
+}
+
+/** The model sent arguments that are not a JSON object; the tool never ran (pi 1.3.0). */
+function InvalidArgumentsExecution({ toolName, invalid }: { toolName: string; invalid: InvalidArguments }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={cardStyles.toolRow} data-testid="invalid-arguments-card">
+      <ConvRow
+        data-testid="tool-execution"
+        status="error"
+        icon={TriangleAlert}
+        name={
+          <>
+            <ToolNameLabel name={toolName} /> 参数无法解析
+          </>
+        }
+        args={<span data-testid="invalid-arguments-reason">{invalid.reason.split('\n', 1)[0]}</span>}
+        meta={<span data-testid="invalid-arguments-meta">未执行</span>}
+        open={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        body={
+          <ErrorBoundary>
+            <CodeSurface isError testId="invalid-arguments-reason-full">{invalid.reason}</CodeSurface>
+            <CodeSurface testId="invalid-arguments-received">{invalid.received || '（空）'}</CodeSurface>
+          </ErrorBoundary>
+        }
+      />
+    </div>
+  );
 }
 
 function PlainToolExecution({ toolName, args, result, status, argsComplete, startedAt, durationMs }: ToolExecutionProps) {

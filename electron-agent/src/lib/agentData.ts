@@ -26,7 +26,7 @@ export interface CodeArgsByTool {
   codegraph_explore:{query:string;maxFiles?:number;limit?:number;searchLimit?:number;traversalDepth?:number;maxNodes?:number;minScore?:number;edgeKinds?:string[];nodeKinds?:CodeKind[];seedNames?:string[]};
   codegraph_callers:CodeSymbolArgs; codegraph_callees:CodeSymbolArgs;
   codegraph_impact:CodeSymbolArgs; codegraph_node:CodeNodeArgs;
-  codegraph_files:{path?:string;pattern?:string;format?:'tree'|'flat'|'grouped';includeMetadata?:boolean;maxDepth?:number};
+  codegraph_files:{path?:string;pattern?:string;format?:'tree'|'flat'|'grouped';includeMetadata?:boolean;maxDepth?:number;limit?:number;offset?:number};
   codegraph_status:Record<string, never>;
   codegraph_usages:CodeSymbolArgs;
   codegraph_path:{from:string;to:string;fromFile?:string;toFile?:string;edgeKinds?:string[];limit?:number};

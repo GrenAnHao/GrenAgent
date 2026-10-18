@@ -1,3 +1,4 @@
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +15,9 @@ import { GRANT_MAX_IDLE_MS, usedKey } from "./windows/reclaim.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
 
+/** 跟 bash 工具一样照 pi 解析壳：settings.json 的 shellPath，没有就按 pi 的默认顺序。 */
+const liveShellPath = () => SettingsManager.create(process.cwd(), getAgentDir()).getShellPath();
+
 // 每个测试建的目录都登记下来，整个文件跑完统一删掉：工作区会被授 PiSandbox 的修改权，留下来就是永久的授权。
 const createdDirs: string[] = [];
 async function scratchDir(parent: string, prefix: string): Promise<string> {
@@ -26,10 +30,8 @@ afterAll(async () => {
 });
 
 function writeProbeArgv(inside: string, outside: string): string[] {
-  // Git bash / WSL bash cannot start under a WRITE_RESTRICTED token
-  // (MSYS signal pipe / WSL CreateInstance → Win32 error 5). That is not
-  // a probe failure and must not fall back to an unwrapped spawn. Use
-  // cmd.exe as the Windows payload so the ACL check is what we measure.
+  // cmd.exe as the Windows payload so the ACL check is what we measure, independent of
+  // which bash is installed (Git Bash runs under the current token: see the Git Bash cases below).
   if (process.platform === "win32") {
     const comspec = process.env.ComSpec || "cmd.exe";
     return [comspec, "/c", `echo in>${inside}& echo out>${outside}`];
@@ -253,11 +255,12 @@ describe.skipIf(!live || process.platform !== "win32" || !liveGit)("live git in 
     const ops = createSandboxedBashOperations({
       getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: root, sessionId: "live-git" }),
       confine: (argv, policy) => provider.confine(argv, policy),
+      shellPath: liveShellPath,
     });
     const env = { ...process.env };
     delete env.HOME;
     const chunks: string[] = [];
-    const git = `& '${liveGit}'`;
+    const git = `'${liveGit}'`;
     const result = await ops.exec(
       `${git} init -q; ${git} -c user.name=t -c user.email=t@t commit -q --allow-empty -m first; ${git} log --oneline`,
       root,
@@ -268,6 +271,82 @@ describe.skipIf(!live || process.platform !== "win32" || !liveGit)("live git in 
     expect(chunks.join("")).toMatch(/[0-9a-f]{7} first/);
     expect(result.exitCode).toBe(0);
   });
+});
+
+// bash 工具在 Windows 上照 pi 用 Git Bash：经真实的沙箱 operations 跑，和工具里走的是同一条路。
+describe.skipIf(!live || process.platform !== "win32")("live Git Bash through the sandboxed bash operations", () => {
+  const sleepProcesses = () => {
+    const out = execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tasklist.exe"), ["/FI", "IMAGENAME eq sleep.exe", "/FO", "CSV", "/NH"], { encoding: "utf8" });
+    return out.split(/\r?\n/).filter((line) => line.toLowerCase().includes("sleep.exe")).length;
+  };
+  async function sandboxed(sessionId: string) {
+    const root = await scratchDir(tmpdir(), "sbx-gitbash-");
+    const outsideDir = await scratchDir(tmpdir(), "sbx-gitbash-out-");
+    const provider = createSandboxProvider();
+    const ops = createSandboxedBashOperations({
+      getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: root, sessionId }),
+      confine: (argv, policy) => provider.confine(argv, policy),
+      shellPath: liveShellPath,
+    });
+    const exec = async (command: string, signal?: AbortSignal) => {
+      const chunks: string[] = [];
+      const result = await ops.exec(command, root, { onData: (data) => chunks.push(data.toString()), env: { ...process.env }, ...(signal ? { signal } : {}) });
+      return { ...result, text: chunks.join("") };
+    };
+    return { root, outsideDir, exec, dispose: () => provider.dispose?.(sessionId) };
+  }
+
+  it("runs a long command in the workspace with UTF-8, the sandbox account's HOME and the exit code", async () => {
+    const box = await sandboxed("live-gitbash-run");
+    // 3000 多字符的命令：命令经环境变量带进去，命令行长度和它无关，不会再撞 CreateProcessWithLogonW 的上限。
+    const padding = `: '${"x".repeat(3000)}'`;
+    const result = await box.exec(`${padding}\necho 中文; pwd -W; echo "HOME=$HOME"; echo in > ok.txt && echo inside_ok; git --version; exit 7`);
+    await box.dispose();
+    expect(result.exitCode).toBe(7);
+    expect(result.sandbox).toMatchObject({ mode: "workspace-write", denied: false });
+    expect(result.sandbox.runnerFailed).toBeUndefined();
+    expect(result.text).toContain("中文");
+    expect(result.text).toContain(box.root.replace(/\\/g, "/"));
+    expect(result.text).toContain("inside_ok");
+    expect(result.text).toMatch(/git version \d/);
+    // 登录用户的家目录不带进沙箱：msys 按令牌的账户取家目录（/c/Users/PiSandbox）。
+    const userHome = homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_m, d: string) => `/${d.toLowerCase()}`);
+    expect(result.text).not.toContain(`HOME=${userHome}\n`);
+    expect(result.text).toMatch(/HOME=\S+/);
+    expect(result.text).not.toContain("command line too long");
+    await expect(readFile(join(box.root, "ok.txt"), "utf8")).resolves.toMatch(/in/);
+  }, 120_000);
+
+  it("reports a write outside the workspace as a sandbox denial and creates nothing", async () => {
+    const box = await sandboxed("live-gitbash-deny");
+    const outside = join(box.outsideDir, "no.txt").replace(/\\/g, "/");
+    const result = await box.exec(`echo out > '${outside}'`);
+    await box.dispose();
+    expect(result.exitCode).not.toBe(0);
+    expect(result.sandbox).toMatchObject({ mode: "workspace-write", denied: true });
+    expect(result.text).toMatch(/Permission denied/i);
+    await expect(readFile(join(box.outsideDir, "no.txt"), "utf8")).rejects.toThrow();
+  }, 120_000);
+
+  it("stops the shell and its children when aborted", async () => {
+    const box = await sandboxed("live-gitbash-abort");
+    const before = sleepProcesses();
+    const controller = new AbortController();
+    const running = box.exec("sleep 300 & sleep 300; wait", controller.signal);
+    running.catch(() => undefined);
+    // 沙箱准备（授权、登录）要几秒，等 sleep 真的起来再停。
+    const started = Date.now() + 60_000;
+    while (Date.now() < started && sleepProcesses() <= before) await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sleepProcesses()).toBeGreaterThan(before);
+    const startedAbort = Date.now();
+    controller.abort();
+    await expect(running).rejects.toThrow("aborted");
+    const end = Date.now() + 10_000;
+    while (Date.now() < end && sleepProcesses() > before) await new Promise((resolve) => setTimeout(resolve, 200));
+    await box.dispose();
+    expect(sleepProcesses()).toBe(before);
+    expect(Date.now() - startedAbort).toBeLessThan(10_000);
+  }, 120_000);
 });
 
 // 会静默或弹窗提权，只在 PI_SANDBOX_LIVE_ELEVATE=1 时跑。提权全程不应在临时目录留下任何 pi-sandbox-* 文件。
@@ -529,10 +608,11 @@ describe.skipIf(!live || process.platform !== "win32")("live windows protection 
     const ops = createSandboxedBashOperations({
       getPolicy: () => ({ mode: "workspace-write", network: "enabled", workspaceRoot: workspace, sessionId: "live-protect-git" }),
       confine: (argv, policy) => provider.confine(argv, policy),
+      shellPath: liveShellPath,
     });
     const env = { ...process.env };
     delete env.HOME;
-    const git = `& '${liveGit}'`;
+    const git = `'${liveGit}'`;
     const step = async (command: string) => {
       const chunks: string[] = [];
       const result = await ops.exec(command, workspace, { onData: (data) => chunks.push(data.toString()), env });

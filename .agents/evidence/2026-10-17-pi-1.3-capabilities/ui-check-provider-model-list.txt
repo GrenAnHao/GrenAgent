@@ -1,0 +1,38 @@
+构建产物和源码一致，跳过构建（--rebuild 强制重建）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[25128:1017/202609.909:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ provider-model-list
+  PASS 供应商列表渲染
+  PASS 三张模型卡片
+  PASS 初始顺序
+  PASS 测活层默认收起
+  INFO 第一张卡片  {"card":{"x":815,"y":596,"w":1101,"h":57,"left":265,"right":1365,"top":568,"bottom":624},"handle":{"x":281,"y":596,"w":20,"h":35,"left":271,"right":291,"top":578,"bottom":614},"input":{"x":466,"y":596,"w":332,"h":35,"left":299,"right":632,"top":578,"bottom":614}}
+  PASS 手柄在卡片左侧、id 输入框前面
+  PASS 手柄可被指针命中
+  PASS 手柄是 grab 光标
+  PASS 从输入框开始拖不改顺序
+  PASS 拖手柄：alpha 挪到最后
+  PASS 拖完没有残留位移
+  PASS 键盘排序：beta 下移一位
+  INFO 截图 handles  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\provider-model-list-handles.png
+  PASS 展开后有缓存读价
+  PASS 有缓存写价
+  PASS 加了一档分段
+  PASS 新档默认阈值 100,000
+  INFO 分段行  {"removeRight":1355,"cardRight":1365,"aboveW":225,"cwW":168,"sameRow":true}
+  PASS 分段行在卡片里
+  PASS 分段行是一行、输入框不被挤没
+  INFO 截图 tiers  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\provider-model-list-tiers.png
+  INFO 窄视口分段行  {"removeRight":935,"cardRight":945,"aboveW":122,"cwW":88,"sameRow":true}
+  PASS 窄视口：分段行仍在卡片里
+  PASS 保存写盘
+  PASS 保存：models.json 带 pi 发布的 $schema
+  PASS 落盘顺序跟着拖动
+  PASS 落盘带分段（四价抄基础价）
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\provider-model-list-light.png
+  ── 22 passed, 0 failed
+
+通过：provider-model-list（9.8s）。只跑了 1/20 个场景，其余 19 个没指定，未运行

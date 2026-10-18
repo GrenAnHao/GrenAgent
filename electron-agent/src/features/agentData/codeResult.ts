@@ -1,6 +1,9 @@
 import type { CodeTool } from '../../lib/agentData';
 import type { CodeRetrievalRow } from '../../../electron/agentData/codeRetrievalResult';
 
+/** 结果列表一页的大小：文件列表向主进程要这么多，其余结果在前端按这个切页。 */
+export const CODE_PAGE_SIZE = 100;
+
 export type CodeResultRow = CodeRetrievalRow;
 export interface CodeResultView {
   rows: CodeResultRow[];
@@ -9,6 +12,13 @@ export interface CodeResultView {
   isError: boolean;
   recognition: 'rows' | 'text' | 'unknown';
   message?: string;
+  /** 分页结果才有：本页从第几项开始、过滤后一共多少项。 */
+  page?: { offset: number; total: number };
+}
+
+/** 把下一页并到已加载的行后面；总数和原始结果取最新一页的。 */
+export function appendCodeResultPage(base: CodeResultView, next: CodeResultView): CodeResultView {
+  return { ...base, rows: [...base.rows, ...next.rows], raw: next.raw, page: next.page, message: next.message ?? base.message };
 }
 
 /** A failed MCP response is still rendered in full, alongside the last successful content. */
@@ -32,7 +42,8 @@ export function decodeCodeResult(_tool: CodeTool, raw: unknown): CodeResultView 
   const sdk = asObject(structured);
   if (sdk?.schemaVersion === 1 && Array.isArray(sdk.rows)) {
     const decoded = decodeRows(sdk.rows);
-    if (decoded) return { ...base, ...decoded, recognition: 'rows' };
+    const page = readPage(sdk.extra);
+    if (decoded) return { ...base, ...decoded, ...(page ? { page } : {}), recognition: 'rows' };
   }
   if (Array.isArray(structured)) {
     const decoded = decodeRows(structured);
@@ -71,6 +82,14 @@ function decodeRows(values: unknown[]): Pick<CodeResultView, 'rows' | 'message'>
   });
   if (values.length && !rows.length) return undefined;
   return { rows, ...(rows.length !== values.length ? { message: '部分条目未识别，完整内容见原始结果。' } : {}) };
+}
+
+function readPage(extra: unknown): CodeResultView['page'] {
+  const page = asObject(asObject(extra)?.page);
+  const offset = page?.offset;
+  const total = page?.total;
+  if (typeof offset !== 'number' || typeof total !== 'number') return undefined;
+  return Number.isSafeInteger(offset) && Number.isSafeInteger(total) && offset >= 0 && total >= 0 ? { offset, total } : undefined;
 }
 
 function stringValue(value: unknown): string | undefined {

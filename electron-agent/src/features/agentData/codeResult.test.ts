@@ -1,5 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { decodeCodeResult } from './codeResult';
+import { appendCodeResultPage, decodeCodeResult } from './codeResult';
+
+const pageOf = (files: string[], offset: number, total: number) => decodeCodeResult('codegraph_files', {
+  content: [{ type: 'text', text: 'files' }], isError: false,
+  structuredContent: { schemaVersion: 1, rows: files.map((file) => ({ file })), nodes: [], edges: [], extra: { page: { offset, total } } },
+});
+
+describe('codeResult paging', () => {
+  it('reads where a page starts and how many results match in total', () => {
+    expect(pageOf(['a.ts', 'b.ts'], 0, 5).page).toEqual({ offset: 0, total: 5 });
+  });
+
+  it.each([
+    ['no extra at all', { schemaVersion: 1, rows: [{ file: 'a.ts' }] }],
+    ['a non-integer offset', { schemaVersion: 1, rows: [{ file: 'a.ts' }], extra: { page: { offset: 1.5, total: 5 } } }],
+    ['a negative total', { schemaVersion: 1, rows: [{ file: 'a.ts' }], extra: { page: { offset: 0, total: -1 } } }],
+    ['a string total', { schemaVersion: 1, rows: [{ file: 'a.ts' }], extra: { page: { offset: 0, total: '5' } } }],
+  ])('does not invent a page from %s', (_label, structuredContent) => {
+    expect(decodeCodeResult('codegraph_files', { structuredContent }).page).toBeUndefined();
+  });
+
+  it('appends the next page behind the rows already loaded and takes the newest total', () => {
+    const merged = appendCodeResultPage(pageOf(['a.ts', 'b.ts'], 0, 5), pageOf(['c.ts', 'd.ts'], 2, 5));
+    expect(merged.rows.map((row) => row.file)).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+    expect(merged.page).toEqual({ offset: 2, total: 5 });
+    expect(merged.recognition).toBe('rows');
+  });
+
+  it('keeps the raw payload of the newest page only', () => {
+    const next = pageOf(['c.ts'], 1, 2);
+    expect(appendCodeResultPage(pageOf(['a.ts'], 0, 2), next).raw).toBe(next.raw);
+  });
+});
 
 describe('decodeCodeResult', () => {
   it('reads SDK schema rows without losing node identity or symbols', () => {

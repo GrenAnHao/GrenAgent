@@ -244,6 +244,27 @@ export default async function (t) {
   t.ok('展开：文件树回来', await t.waitFor('[data-testid="file-explorer-tree"]'))
   t.ok('展开：文件还在', await t.waitUntil(`${treeTitles}.includes('README.md')`))
 
+  // —— 外部请求打开（交付卡 / 审查标签走 openWorkspaceFile，最后发到这里）——
+  const explorerWidth = () => t.js(`Math.round(document.querySelector('[data-testid="file-explorer"]').getBoundingClientRect().width)`)
+  const treeWBefore = await treeWidthOf()
+  const panelWBefore = await explorerWidth()
+  t.ok('请求前 docs 没展开', !(await t.js(treeTitles)).includes('guide.md'))
+  await t.act('requestOpen', '/repo/docs/guide.md')
+  t.ok('外部请求：预览里是 guide.md 的内容', await t.waitUntil(`document.querySelector('${PREVIEW}')?.textContent.includes('Read me.')`))
+  t.ok('外部请求：docs 自动展开、选中 guide.md', await t.waitUntil(`document.querySelector('${TREE} [data-tree-row][data-selected="true"]')?.textContent.includes('guide.md')`))
+  t.check('外部请求：文件树宽度不变', await treeWidthOf(), treeWBefore)
+  t.check('外部请求：文件标签宽度不变', await explorerWidth(), panelWBefore)
+  t.ok('外部请求：文件树没收起', await t.js(isVisible('[data-testid="file-explorer-tree"]')))
+  const viewsBefore = (await t.events()).filter((e) => e === 'view:/repo/docs/guide.md').length
+  await t.act('requestOpen', '/repo/docs/guide.md')
+  await t.act('requestOpen', '/repo/docs/guide.md')
+  await t.sleep(400)
+  t.check('同一文件重复请求：不重新读盘、不重复视图', [(await t.events()).filter((e) => e === 'view:/repo/docs/guide.md').length, await t.count('[data-testid="file-viewer"]')], [viewsBefore, 1])
+  await t.act('requestOpen', '/repo/src/missing.ts')
+  t.ok('请求不存在的文件：内容区显示打不开和重试', await t.waitFor('[data-testid="file-viewer-error"]'))
+  await t.act('requestOpen', '/repo/README.md')
+  t.ok('出错后再请求其他文件：恢复正常', await t.waitUntil(`document.querySelector('${PREVIEW}')?.textContent.includes('Hello Pi')`))
+
   await t.shot('dark')
   await t.setTheme('light')
   await t.mouse(2, 2)

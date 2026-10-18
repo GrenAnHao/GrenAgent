@@ -70,6 +70,40 @@ describe('SDK structured queries', () => {
     expect(missing.structuredContent.rows).toEqual([]);
   });
 
+  describe('paged file listing', () => {
+    const files = async (args: Record<string, unknown>) => {
+      const result = await executeCodeGraphTool(graph, workspace, 'codegraph_files', { format: 'flat', ...args });
+      return { files: result.structuredContent.rows.map((row) => row.file), page: result.structuredContent.extra?.page };
+    };
+
+    it('returns one page and reports where it starts and how many files match in total', async () => {
+      expect(await files({ limit: 2 })).toEqual({ files: ['src/main.ts', 'src/other.ts'], page: { offset: 0, total: 3 } });
+      expect(await files({ limit: 2, offset: 2 })).toEqual({ files: ['src/parser.ts'], page: { offset: 2, total: 3 } });
+    });
+
+    it('returns an empty page, not an error, past the end', async () => {
+      expect(await files({ limit: 2, offset: 10 })).toEqual({ files: [], page: { offset: 10, total: 3 } });
+    });
+
+    it('keeps returning every file when no limit is given, and still reports the total', async () => {
+      expect(await files({})).toEqual({ files: ['src/main.ts', 'src/other.ts', 'src/parser.ts'], page: { offset: 0, total: 3 } });
+    });
+
+    it('applies path and glob filters before paging, so the total counts only the matches', async () => {
+      expect(await files({ pattern: '**/p*.ts', limit: 1 })).toEqual({ files: ['src/parser.ts'], page: { offset: 0, total: 1 } });
+    });
+
+    it('caps one page at 500 files however large a limit is asked for', async () => {
+      const many = Array.from({ length: 700 }, (_, index) => ({ path: `src/f${String(index).padStart(4, '0')}.ts`, language: 'typescript', nodeCount: 1, size: 10, generated: false }));
+      const fake = { getFiles: () => many } as unknown as Graph;
+      const result = await executeCodeGraphTool(fake, workspace, 'codegraph_files', { limit: 200 });
+      expect(result.structuredContent.rows).toHaveLength(200);
+      const capped = await executeCodeGraphTool(fake, workspace, 'codegraph_files', { limit: 9999 });
+      expect(capped.structuredContent.rows).toHaveLength(500);
+      expect(capped.structuredContent.extra).toEqual({ page: { offset: 0, total: 700 } });
+    });
+  });
+
   it('serializes impact and context subgraphs rather than losing Maps', async () => {
     const impact = await executeCodeGraphTool(graph, workspace, 'codegraph_impact', { symbol: 'parse', file: 'src/parser.ts' });
     expect(impact.structuredContent.nodes.some((node) => node.name === 'main')).toBe(true);

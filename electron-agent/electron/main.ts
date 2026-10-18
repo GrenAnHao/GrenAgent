@@ -15,6 +15,8 @@ import { WorkspaceService } from "./app/workspaceService";
 import { UiHistoryService } from "./app/uiHistoryService";
 import { WorkspaceApprovalService } from "./app/workspaceApprovalService";
 import { GitService } from "./app/gitService";
+import { DEFAULT_ISOLATED_LIMIT, DEFAULT_ISOLATED_RECLAIM_DAYS, IsolatedWorkspaceService } from "./app/isolatedWorkspaceService";
+import { isolatedPathParts } from "../../extensions/_shared/isolated-workspace.js";
 import { TerminalService } from "./app/terminalService";
 import { CreateService } from "./app/createService";
 import { TempHtmlService } from "./app/tempHtmlService";
@@ -105,6 +107,10 @@ if (!process.env.VITEST) {
       reload: (workspace, name) => agent.mcp.reload(workspace, name),
     });
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
+    // 独立工作区上限由设置页决定，每次创建现读。
+    const isolatedWorkspace = new IsolatedWorkspaceService({
+      limit: async () => Number((await settings.getAll()).isolatedWorkspaceLimit ?? DEFAULT_ISOLATED_LIMIT),
+    });
     const worksDir = await workspace.getWorksDir();
     const runtimeConfigPath = join(app.getPath('userData'), 'runtime-settings.json');
     bootstrapRuntimeConfig(runtimeConfigPath);
@@ -363,6 +369,7 @@ if (!process.env.VITEST) {
       uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
       workspaceApproval: new WorkspaceApprovalService(app.getPath('userData')),
       git: new GitService(),
+      isolatedWorkspace,
       terminal: new TerminalService((event, payload) => broadcastPiEvent(event, payload), sandbox),
       create: new CreateService(),
       tempHtml: new TempHtmlService(app.getPath('temp')),
@@ -405,11 +412,28 @@ if (!process.env.VITEST) {
         app.quit();
       });
     });
+    // 启动时回收久未使用、已回传且干净的独立工作区。此刻还没有任何会话打开，所以在开窗口之前跑完；
+    // 未到期的只看文件时间、不跑 git，通常是毫秒级。
+    await reclaimIsolatedWorkspaces(settings, workspace, isolatedWorkspace)
+      .catch((error) => console.error('Isolated workspace reclaim failed', error));
     // 子进程加载 pi SDK 和全部扩展要一两秒，和窗口加载并行。
     void agentProcess.start().catch((error) => console.error('agent-host failed to start', error));
     createWindow(windowBackground.read());
   });
   app.on("window-all-closed", () => app.quit());
+}
+
+async function reclaimIsolatedWorkspaces(
+  settings: SettingsService,
+  workspace: WorkspaceService,
+  isolated: IsolatedWorkspaceService,
+): Promise<void> {
+  const raw = (await settings.getAll()).isolatedWorkspaceReclaimDays;
+  const days = raw === undefined || raw === '' ? DEFAULT_ISOLATED_RECLAIM_DAYS : Number(raw);
+  if (!(days > 0)) return;
+  const projects = (await workspace.listProjects()).filter((project) => !isolatedPathParts(project));
+  const removed = await isolated.reclaim(projects, { maxAgeDays: days });
+  if (removed.length) console.info('Reclaimed isolated workspaces', removed);
 }
 
 function broadcastPiEvent(event: string, payload: unknown): void {

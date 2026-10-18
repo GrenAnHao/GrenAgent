@@ -1,0 +1,40 @@
+构建产物和源码一致，跳过构建（--rebuild 强制重建）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[1092:1017/202514.396:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ invalid-arguments-card
+  INFO 截图 collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\invalid-arguments-card-collapsed.png
+  PASS live-bash：画成参数无法解析的卡
+  PASS live-bash：没有空的终端块
+  PASS live-bash：标题写出工具名
+  PASS live-bash：折叠行给出解析错误
+  PASS live-bash：标明未执行
+  PASS live-bash：行状态是失败
+  PASS live-bash：默认收起
+  PASS live-bash：展开后是模型原样发来的参数
+  PASS live-bash：展开后有完整错误
+  PASS live-bash：错误在上、原参数在下
+  PASS history-bash：画成参数无法解析的卡
+  PASS history-bash：没有空的终端块
+  PASS history-bash：标题写出工具名
+  PASS history-bash：折叠行给出解析错误
+  PASS history-bash：标明未执行
+  PASS history-bash：行状态是失败
+  PASS history-bash：默认收起
+  PASS history-bash：展开后是模型原样发来的参数
+  PASS history-bash：展开后有完整错误
+  PASS history-bash：错误在上、原参数在下
+  INFO 截图 bash-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\invalid-arguments-card-bash-expanded.png
+  PASS MCP：同样画成参数无法解析的卡
+  PASS MCP：服务器标签
+  PASS MCP：标题不出现 mcp__ 原名
+  PASS MCP：原参数
+  PASS 对照：普通失败不是参数卡
+  PASS 对照：普通失败仍是 bash 卡
+  PASS 浅色：错误块底色随主题变化
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\invalid-arguments-card-light.png
+  ── 27 passed, 0 failed
+
+通过：invalid-arguments-card（4.4s）。只跑了 1/20 个场景，其余 19 个没指定，未运行

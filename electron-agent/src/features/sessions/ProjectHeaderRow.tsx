@@ -1,6 +1,9 @@
 import { memo, useCallback } from 'react';
+import { App } from 'antd';
 import { ProjectItem } from './ProjectItem';
 import type { ProjectGroup } from './useProjectGroups';
+import { useIsolatedWorkspaceStore } from '../../stores/isolatedWorkspaceStore';
+import { syncBackIsolated } from '../isolatedWorkspace/actions';
 
 interface ProjectHeaderRowProps {
   group: ProjectGroup;
@@ -28,6 +31,9 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
   onRemoveProject,
 }: ProjectHeaderRowProps) {
   const cwd = group.cwd;
+  const iso = group.isolated;
+  const kind = useIsolatedWorkspaceStore((s) => s.kinds[cwd]);
+  const { message } = App.useApp();
   const handleToggle = useCallback(() => onToggleExpand(cwd, !group.isCurrent), [onToggleExpand, cwd, group.isCurrent]);
   const handleNew = useCallback(() => onNewInProject(cwd), [onNewInProject, cwd]);
   const handlePin = useCallback(() => onPinProject(cwd), [onPinProject, cwd]);
@@ -36,6 +42,22 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
   const handleHide = useCallback(() => onHideProject(cwd), [onHideProject, cwd]);
   const handleClearSessions = useCallback(() => onClearProjectSessions(cwd), [onClearProjectSessions, cwd]);
   const handleRemove = useCallback(() => onRemoveProject(cwd), [onRemoveProject, cwd]);
+  const handleNewIsolated = useCallback(() => useIsolatedWorkspaceStore.getState().openCreate(cwd), [cwd]);
+  const handleManage = useCallback(
+    () => useIsolatedWorkspaceStore.getState().openManage(iso ? iso.parentCwd : cwd, iso?.id),
+    [cwd, iso],
+  );
+  const handleSyncBack = useCallback(() => {
+    if (iso) void syncBackIsolated(iso.parentCwd, iso.id, message);
+  }, [iso, message]);
+
+  const missing = Boolean(iso) && kind === 'missing';
+  // 普通项目才能建独立工作区（独立工作区里不能再建）；独立工作区本身给回传和删除，已删除的只剩管理。
+  const isolatedActions = !iso
+    ? { onNewIsolated: handleNewIsolated, onManageIsolated: handleManage }
+    : missing
+      ? { onManageIsolated: handleManage }
+      : { onSyncBack: handleSyncBack, onDeleteIsolated: handleManage };
 
   return (
     <ProjectItem
@@ -50,6 +72,8 @@ export const ProjectHeaderRow = memo(function ProjectHeaderRow({
       onHide={handleHide}
       onClearSessions={handleClearSessions}
       onRemove={handleRemove}
+      {...(iso ? { isolated: { nested: iso.parentListed, missing } } : {})}
+      {...isolatedActions}
     />
   );
 });

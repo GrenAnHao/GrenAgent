@@ -239,6 +239,34 @@ describe('ProvidersSettings', () => {
     expect(provider?.models?.[0].thinkingLevelMap).toEqual(defaultThinkingLevelMap('google-generative-ai', 'claude-x'));
   }, 30000);
 
+  it('blocks saving a model card with an empty ID and marks it red', async () => {
+    render(<ProvidersSettings />);
+    await waitFor(() => expect(getProviderConfig).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('prov-add-provider'));
+    fireEvent.click(await screen.findByTestId('prov-add-model', undefined, { timeout: 10000 }));
+    fireEvent.change(await screen.findByTestId('prov-model-id-0'), { target: { value: 'kept-model' } });
+    // 第二张卡片不填 ID：落盘后 pi 会拒绝整份 models.json，所有自定义供应商都会从模型列表消失。
+    fireEvent.click(screen.getByTestId('prov-add-model'));
+    const blank = (await screen.findByTestId('prov-model-id-1')).closest('.ant-input-affix-wrapper, .ant-input')!;
+    expect(blank.className).not.toContain('status-error');
+
+    fireEvent.click(screen.getByTestId('prov-save'));
+    expect(await screen.findByText(/有模型 ID 为空/)).toBeTruthy();
+    expect(setProviderConfig).not.toHaveBeenCalled();
+    expect(screen.getByTestId('prov-model-id-1').closest('.ant-input-affix-wrapper, .ant-input')!.className).toContain('status-error');
+    expect(screen.getByTestId('prov-model-id-0').closest('.ant-input-affix-wrapper, .ant-input')!.className).not.toContain('status-error');
+
+    // 删掉空卡片后能正常保存。
+    fireEvent.click(screen.getByTestId('prov-model-del-1'));
+    fireEvent.click(screen.getByTestId('prov-save'));
+    await waitFor(() => expect(setProviderConfig).toHaveBeenCalledTimes(1));
+    const raw = JSON.parse((setProviderConfig.mock.calls.at(-1) as unknown as [string, string])[0]);
+    const ids = Object.values(raw.providers as Record<string, { models?: Array<{ id: string }> }>)
+      .flatMap((p) => p.models ?? [])
+      .map((m) => m.id);
+    expect(ids).toEqual(['kept-model']);
+  }, 30000);
+
   it('deletes a custom provider and scrubs linked model settings', async () => {
     getProviderConfig.mockResolvedValue({
       modelsJson: JSON.stringify({

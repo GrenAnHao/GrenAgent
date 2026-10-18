@@ -1,5 +1,7 @@
 // 自有 bash 的契约测试：对外格式钉在 pi 1.0.2（dist/core/tools/bash.js），执行模型按 DSH tool-bash。
 // 升级 pi 后这里红了，说明官方改了对外格式，要决定是否跟进。
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -780,17 +782,17 @@ describe("bash on a real shell", () => {
     confine: async () => {
       throw new Error("unconfined policy must not confine");
     },
-    resolveShell: () => (win ? "powershell.exe" : "/bin/sh"),
+    // Windows 上照 pi 解析 Git Bash（settings.json 的 shellPath，或默认位置）。
+    shellPath: () => (win ? SettingsManager.create(process.cwd(), getAgentDir()).getShellPath() : undefined),
+    ...(win ? {} : { resolveShell: () => "/bin/sh" }),
   });
   const real = () => createGrenBashTool({ jobs, exec: ops.exec, tempDir });
 
   it("a slow command moves to the background with its first line, then finishes there", async () => {
-    const command = win
-      ? "Write-Output first; Start-Sleep -Milliseconds 2500; Write-Output second"
-      : "printf 'first\\n'; sleep 2.5; printf 'second\\n'";
+    const command = "printf 'first\\n'; sleep 2.5; printf 'second\\n'";
     const r = await run(real(), { command, timeout: 1.2 });
     const handed = r.content[0]?.text ?? "";
-    // 负载高时 PowerShell 启动就可能超过 1.2s，转后台时未必已有 first：只断言交接不重不漏。
+    // 负载高时壳启动就可能超过 1.2s，转后台时未必已有 first：只断言交接不重不漏。
     expect(handed).toMatch(/(^|\n)\[still running after 1\.2s; moved to background job bash-1\]\n/);
     const before = handed.slice(0, handed.indexOf("[still running"));
     const read = await jobs.read("bash-1", "s1", { wait: true, timeoutMs: 15_000 });
@@ -803,7 +805,7 @@ describe("bash on a real shell", () => {
   }, 30_000);
 
   it("a fast command returns in the foreground with exit code and output", async () => {
-    const command = win ? "Write-Output hello; exit 3" : "printf 'hello\\n'; exit 3";
+    const command = "printf 'hello\\n'; exit 3";
     const r = await run(real(), { command });
     expect(r.isError).toBe(true);
     expect(r.content[0]?.text).toMatch(/^hello\r?\n\n\nCommand exited with code 3$|^hello\r?\n\nCommand exited with code 3$/);
@@ -811,11 +813,21 @@ describe("bash on a real shell", () => {
   }, 30_000);
 
   it("job_kill stops a background command", async () => {
-    const command = win ? "Start-Sleep -Seconds 60" : "sleep 60";
+    const command = "echo started; sleep 60";
     await run(real(), { command, run_in_background: true });
-    await new Promise((r) => setTimeout(r, 500));
+    // 等命令真的跑起来再停：停得太早时 Git Bash 的包装还没拉起 bash，进程要靠停止后几秒的补刀收掉，测试进程等不到那时。
+    await vi.waitFor(async () => {
+      expect((await jobs.read("bash-1", "s1", {})).text).toContain("started");
+    }, { timeout: 15_000, interval: 100 });
     jobs.kill("bash-1", "s1", "test cleanup");
     const settled = await jobs.wait("bash-1", 15_000, "s1");
     expect(settled).toMatchObject({ status: "killed", detail: "killed before exit; test cleanup" });
+    if (win) {
+      // Git Bash 的子进程不在 Windows 父进程链上，要靠 msys 进程组 kill 收掉：等它们真的没了（测试进程退出会带走还在路上的 kill）。
+      const ps = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const alive = () => Number(execFileSync(ps, ["-NoProfile", "-NonInteractive", "-Command",
+        "@(Get-CimInstance Win32_Process -Filter \"Name='sleep.exe' or Name='bash.exe'\" | Where-Object { $_.CommandLine -like '*echo started; sleep 60*' -or $_.CommandLine -match 'sleep(\\.exe)?\"?\\s+60\\s*$' }).Count"], { encoding: "utf8" }).trim()) || 0;
+      await vi.waitFor(() => expect(alive()).toBe(0), { timeout: 10_000, interval: 300 });
+    }
   }, 30_000);
 });

@@ -28,7 +28,7 @@ const toolArguments = {
   codegraph_callees: ['symbol', 'file', 'limit', 'depth'],
   codegraph_impact: ['symbol', 'file', 'depth', 'limit'],
   codegraph_node: ['symbol', 'file', 'includeCode', 'offset', 'limit', 'symbolsOnly', 'line', 'depth', 'includeMetrics'],
-  codegraph_files: ['path', 'pattern', 'format', 'includeMetadata', 'maxDepth'],
+  codegraph_files: ['path', 'pattern', 'format', 'includeMetadata', 'maxDepth', 'limit', 'offset'],
   codegraph_status: [],
   codegraph_usages: ['symbol', 'file', 'limit', 'line'],
   codegraph_path: ['from', 'to', 'fromFile', 'toFile', 'edgeKinds', 'limit'],

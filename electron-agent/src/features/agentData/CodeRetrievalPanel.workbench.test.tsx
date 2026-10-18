@@ -71,18 +71,190 @@ describe('CodeRetrievalPanel workbench isolation', () => {
   it('accepts equivalent real initial and status paths', async () => {
     vi.mocked(agentDataApi.code.status).mockResolvedValue({ workspace: 'd:\\A\\', indexed: true, connected: true });
     render(<CodeRetrievalPanel initialProject={'d:\\a\\'} />);
-    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat' } }));
+    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } }));
   });
 
   it('uses files for empty query, search for symbols and explore for related context', async () => {
     render(<CodeRetrievalPanel initialProject="D:/a" />);
-    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat' } }));
+    await waitFor(() => expect(agentDataApi.code.call).toHaveBeenCalledWith({ workspace: 'D:/a', tool: 'codegraph_files', args: { format: 'flat', limit: 100 } }));
     fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
     await screen.findByText('src/a.ts');
     expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_search', args: { query: 'parse', limit: 20 } });
     fireEvent.click(screen.getByRole('radio', { name: '相关上下文' }));
     await waitFor(() => expect(agentDataApi.code.call).toHaveBeenLastCalledWith({ workspace: 'D:/a', tool: 'codegraph_explore', args: { query: 'parse', limit: 20 } }));
     expect(agentDataApi.code.search).not.toHaveBeenCalled();
+  });
+
+  it('pages a long project file listing instead of rendering every file, and starts over on a new query', async () => {
+    const manyFiles = Array.from({ length: 250 }, (_, index) => ({ file: `src/file-${index}.ts` }));
+    vi.mocked(agentDataApi.code.call).mockImplementation(async (request) => request.tool === 'codegraph_files'
+      ? { structuredContent: manyFiles }
+      : { structuredContent: manyFiles.slice(0, 150).map((row) => ({ ...row, symbol: 'parse' })) });
+    render(<CodeRetrievalPanel initialProject="D:/a" />);
+    await screen.findByText('src/file-0.ts');
+    const rendered = () => document.querySelectorAll('[data-code-list] [aria-pressed]').length;
+    expect(rendered()).toBe(100);
+    expect(screen.getByText('250 个结果')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 150 项）' }));
+    expect(rendered()).toBe(200);
+    fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
+    await waitFor(() => expect(screen.getByText('150 个结果')).toBeTruthy());
+    expect(rendered()).toBe(100);
+    expect(screen.getByRole('button', { name: '显示更多（还有 50 项）' })).toBeTruthy();
+  });
+
+  describe('server-paged file listing', () => {
+    const everyFile = Array.from({ length: 250 }, (_, index) => ({ file: `src/file-${index}.ts` }));
+    // 主进程报告的总数；测试里改它来模拟两次取页之间索引变了。
+    const reported = { total: everyFile.length };
+    beforeEach(() => { reported.total = everyFile.length; });
+    const filePage = (offset: number, limit: number) => ({
+      structuredContent: { schemaVersion: 1, rows: everyFile.slice(offset, offset + limit), nodes: [], edges: [], extra: { page: { offset, total: reported.total } } },
+    });
+    const filesCalls = () => vi.mocked(agentDataApi.code.call).mock.calls.filter(([request]) => request.tool === 'codegraph_files').map(([request]) => request.args);
+    const listed = () => document.querySelectorAll('[data-code-list] [aria-pressed]').length;
+    const servePages = () => vi.mocked(agentDataApi.code.call).mockImplementation(async (request) => {
+      if (request.tool !== 'codegraph_files') return rows('src/a.ts', 'parse');
+      const { offset = 0, limit = everyFile.length } = request.args as { offset?: number; limit?: number };
+      return filePage(offset, limit);
+    });
+
+    it('asks for one page, shows the real total, and fetches the next page only when asked', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }]);
+      expect(listed()).toBe(100);
+      expect(screen.getByText('250 个结果')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 150 项）' }));
+      await screen.findByText('src/file-199.ts');
+      expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }, { format: 'flat', limit: 100, offset: 100 }]);
+      expect(listed()).toBe(200);
+      fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 50 项）' }));
+      await screen.findByText('src/file-249.ts');
+      expect(listed()).toBe(250);
+      expect(screen.queryByRole('button', { name: /显示更多/ })).toBeNull();
+      expect(screen.getByText('250 个结果')).toBeTruthy();
+    });
+
+    it('does not start a second fetch while the next page is still on its way', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      const pending = deferred<unknown>();
+      vi.mocked(agentDataApi.code.call).mockReturnValueOnce(pending.promise);
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      const waiting = await screen.findByRole('button', { name: '正在加载…' });
+      fireEvent.click(waiting);
+      expect(filesCalls()).toHaveLength(2);
+      await act(async () => { pending.resolve(filePage(100, 100)); });
+      await screen.findByText('src/file-100.ts');
+    });
+
+    it('drops a late page once the query has changed, so it never lands in the search results', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      const late = deferred<unknown>();
+      vi.mocked(agentDataApi.code.call).mockReturnValueOnce(late.promise);
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
+      await screen.findByText('parse');
+      await act(async () => { late.resolve(filePage(100, 100)); });
+      expect(screen.queryByText('src/file-100.ts')).toBeNull();
+      expect(listed()).toBe(1);
+    });
+
+    it('keeps the loaded rows and offers a retry when the next page fails', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      vi.mocked(agentDataApi.code.call).mockRejectedValueOnce(new Error('index is busy'));
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      expect((await screen.findByRole('alert')).textContent).toContain('index is busy');
+      expect(listed()).toBe(100);
+      fireEvent.click(screen.getByRole('button', { name: '显示更多（还有 150 项）' }));
+      await screen.findByText('src/file-100.ts');
+      expect(listed()).toBe(200);
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('shows an MCP error from the next page instead of appending it', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      vi.mocked(agentDataApi.code.call).mockResolvedValueOnce({ isError: true, content: [{ type: 'text', text: 'page unavailable' }] });
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      expect((await screen.findByRole('alert')).textContent).toContain('page unavailable');
+      expect(listed()).toBe(100);
+    });
+
+    it('starts over from the first page when the total changed between two pages, instead of mixing two index states', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      reported.total = 251;
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      await waitFor(() => expect(filesCalls()).toEqual([{ format: 'flat', limit: 100 }, { format: 'flat', limit: 100, offset: 100 }, { format: 'flat', limit: 100 }]));
+      await screen.findByText('251 个结果');
+      expect(listed()).toBe(100);
+      expect(screen.getByRole('button', { name: '显示更多（还有 151 项）' })).toBeTruthy();
+    });
+
+    it('does not refetch, or lose the pages already loaded, when only whitespace is typed', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      await screen.findByText('src/file-199.ts');
+      const before = filesCalls().length;
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: '  ' } });
+      await act(async () => { await Promise.resolve(); });
+      expect(filesCalls()).toHaveLength(before);
+      expect(listed()).toBe(200);
+    });
+
+    it('keeps a pending search alive when a trailing space is typed after it', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      const pending = deferred<unknown>();
+      vi.mocked(agentDataApi.code.call).mockReturnValueOnce(pending.promise);
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse ' } });
+      await act(async () => { pending.resolve(rows('src/a.ts', 'parse')); });
+      await screen.findByText('src/a.ts');
+      expect(vi.mocked(agentDataApi.code.call).mock.calls.filter(([request]) => request.tool === 'codegraph_search')).toHaveLength(1);
+    });
+
+    it('does not leave the list loading forever when the mode is flipped while the empty-query listing is in flight', async () => {
+      servePages();
+      render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: 'parse' } });
+      await screen.findByText('src/a.ts');
+      fireEvent.click(screen.getByRole('radio', { name: '相关上下文' }));
+      await waitFor(() => expect(vi.mocked(agentDataApi.code.call).mock.lastCall![0].tool).toBe('codegraph_explore'));
+      const pending = deferred<unknown>();
+      vi.mocked(agentDataApi.code.call).mockReturnValueOnce(pending.promise);
+      fireEvent.change(screen.getByLabelText('搜索代码'), { target: { value: '' } });
+      fireEvent.click(screen.getByRole('radio', { name: '符号' }));
+      await act(async () => { pending.resolve(filePage(0, 100)); });
+      await screen.findByText('src/file-0.ts');
+      expect(screen.queryByText('正在查询代码…')).toBeNull();
+    });
+
+    it('goes back to the first page when the index refreshes', async () => {
+      servePages();
+      const { rerender } = render(<CodeRetrievalPanel initialProject="D:/a" />);
+      await screen.findByText('src/file-0.ts');
+      fireEvent.click(screen.getByRole('button', { name: /显示更多/ }));
+      await screen.findByText('src/file-199.ts');
+      monitor.watchedTaskVersion++;
+      rerender(<CodeRetrievalPanel initialProject="D:/a" />);
+      await waitFor(() => expect(screen.queryByText('src/file-199.ts')).toBeNull());
+      expect(listed()).toBe(100);
+    });
   });
 
   it('stores queries per project and clears old results immediately on project switch', async () => {

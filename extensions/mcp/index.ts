@@ -14,6 +14,24 @@ import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } fr
 import { currentCwd } from "../_shared/workspace-context.js";
 import { batchToolRefresh } from "../_shared/tool-refresh-batch.js";
 import { waitForDirect } from "./wait.js";
+import { serversToWait, type ToolReach } from "./reach.js";
+
+/** How long a call that reaches a still-connecting server waits before running without it. */
+const REACH_WAIT_MS = 30_000;
+
+type ReachingTool = { name: string; reachesTools?: (input: Record<string, unknown>) => ToolReach };
+
+function reachOf(pi: ExtensionAPI, toolName: string, input: unknown): ToolReach | undefined {
+  const read = (pi as { getAllTools?: () => ReachingTool[] }).getAllTools;
+  if (typeof read !== "function") return undefined;
+  const tool = read().find((candidate) => candidate.name === toolName);
+  if (typeof tool?.reachesTools !== "function") return undefined;
+  try {
+    return tool.reachesTools((input ?? {}) as Record<string, unknown>);
+  } catch {
+    return "all";
+  }
+}
 
 export const pluginManifest = {
   id: "mcp",
@@ -548,6 +566,27 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
       sessionManager.appendMessage({ role: "custom", ...message, timestamp: Date.now() });
     }
     return { message };
+  });
+
+  // A call that reaches other tools (codemode, tool_search: pi `reachesTools`) waits for the servers
+  // it may reach that are still connecting, so their tools are registered before it runs; a direct
+  // MCP call waits for its own server. before_agent_start above only waits for direct servers, which
+  // must be in the active set before the request; codemode / deferred servers are waited for here.
+  pi.on("tool_call", async (event, ctx) => {
+    const connecting = [...mgr.snapshot().servers.keys()].filter((name) => mgr.connectPromise(name) !== undefined);
+    if (connecting.length === 0) return undefined;
+    const waiting = serversToWait({
+      toolName: event.toolName,
+      reach: reachOf(pi, event.toolName, event.input),
+      connecting,
+      resourceTools: RESOURCE_TOOL_NAMES,
+    });
+    const pendings = waiting.flatMap((name) => {
+      const pending = mgr.connectPromise(name);
+      return pending ? [pending] : [];
+    });
+    await waitForDirect(pendings, REACH_WAIT_MS, ctx?.signal);
+    return undefined;
   });
 }
 

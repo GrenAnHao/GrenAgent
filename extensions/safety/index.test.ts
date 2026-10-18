@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   evaluateToolCall: vi.fn(async (): Promise<{ decision: "allow" | "ask" | "deny"; auditId: string }> => ({
@@ -28,6 +28,10 @@ import { __resetEscalationGrantsForTest, takeEscalationGrant } from "../_shared/
 import safety from "./index.js";
 import { __resetApprovalRoutesForTest, registerChildApprovalRoute, registerTopApprovalRoute } from "../_shared/approval-route.js";
 import { runInWorkspace } from "../_shared/workspace-context.js";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { __resetIsolatedWorkspaceCacheForTest, isolatedMarkerPath } from "../_shared/isolated-workspace.js";
 
 type ToolCall = (event: unknown, ctx: unknown) => Promise<{ block?: boolean; reason?: string } | undefined>;
 
@@ -245,6 +249,85 @@ describe("safety · bash sandbox escalation", () => {
     );
     expect(ui.select.mock.calls[0]?.[0]).toBe("请求批准：\n\n  npm run build");
     expect(takeEscalationGrant("s1", "call-1", "workspace-write")).toBe(false);
+  });
+});
+
+describe("safety · isolated workspace (A track) write gate", () => {
+  let tmp: string;
+  let parent: string;
+  let w: string;
+  const ctxIn = (cwdNow: string, extra: Record<string, unknown> = {}) => ({
+    hasUI: true,
+    cwd: cwdNow,
+    ui: { select: vi.fn() },
+    sessionManager: { getSessionId: () => "s-iso", getCwd: () => w },
+    ...extra,
+  });
+
+  beforeEach(() => {
+    __resetIsolatedWorkspaceCacheForTest();
+    tmp = realpathSync.native(mkdtempSync(join(tmpdir(), "gren-safety-iso-")));
+    parent = join(tmp, "repo");
+    w = join(parent, ".gren", "worktrees", "abc12345");
+    mkdirSync(w, { recursive: true });
+    mkdirSync(join(parent, "src"));
+    writeFileSync(isolatedMarkerPath(parent, "abc12345"), JSON.stringify({
+      version: 1, id: "abc12345", path: w, parentRoot: parent, branch: "gren/abc12345",
+      base: { kind: "fresh", ref: "origin/main", commit: "deadbeef" }, createdAt: "2026-10-18T00:00:00.000Z", createdBy: "grenagent",
+    }));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it("full preset still hard-refuses a write into the parent repo, without asking the main process", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("full");
+    const r = await setup()({ toolName: "write", input: { path: "../../../src/a.ts" } }, ctxIn(w));
+    expect(r).toMatchObject({ block: true, terminate: true });
+    expect(r?.reason).toContain("独立工作区不能写主仓");
+    expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
+  });
+
+  it("edits inside W go through the normal flow", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("full");
+    const r = await setup()({ toolName: "edit", input: { path: "src/a.ts" } }, ctxIn(w));
+    expect(r).toBeUndefined();
+    expect(mocks.evaluateToolCall).toHaveBeenCalled();
+  });
+
+  it("after working_directory moves into the parent, relative writes resolve there and are refused", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("auto");
+    const r = await setup()({ toolName: "write", input: { path: "src/a.ts" } }, ctxIn(parent));
+    expect(r?.block).toBe(true);
+  });
+
+  it("a junction inside W that points into the parent does not get past the gate", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("full");
+    symlinkSync(join(parent, "src"), join(w, "escape"), "junction");
+    const r = await setup()({ toolName: "write", input: { path: "escape/a.ts" } }, ctxIn(w));
+    expect(r?.block).toBe(true);
+  });
+
+  it("bash escalation to danger-full-access is refused without a prompt; workspace-write escalation is not touched", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("ask");
+    const full = await setup()(
+      { toolName: "bash", input: { command: "git push", sandbox_permissions: "danger-full-access", justification: "推到主仓" } },
+      ctxIn(w),
+    );
+    expect(full?.reason).toContain("danger-full-access");
+    expect(mocks.evaluateToolCall).not.toHaveBeenCalled();
+    const ww = await setup()(
+      { toolName: "bash", input: { command: "npm run build", sandbox_permissions: "workspace-write", justification: "写产物" } },
+      ctxIn(w),
+    );
+    expect(ww).toBeUndefined();
+  });
+
+  it("an ordinary project keeps today's behaviour (full preset: outside writes allowed)", async () => {
+    vi.mocked(getApprovalPolicy).mockReturnValue("full");
+    const r = await setup()(
+      { toolName: "write", input: { path: "src/a.ts" } },
+      { hasUI: true, cwd: parent, ui: {}, sessionManager: { getSessionId: () => "s", getCwd: () => parent } },
+    );
+    expect(r).toBeUndefined();
   });
 });
 

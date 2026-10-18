@@ -191,7 +191,7 @@ describe('ModelThinkingAction', () => {
     });
     render(<ModelThinkingAction />);
     expect(await screen.findByText('关闭')).toBeTruthy();
-    expect(screen.queryByText('最高')).toBeNull();
+    expect(screen.queryByText('极致')).toBeNull();
   });
 
   it('选模型后立刻用该模型 settings 里的 thinkingLevelMap 渲染档位', async () => {
@@ -217,7 +217,7 @@ describe('ModelThinkingAction', () => {
     expect(screen.getByText('高')).toBeTruthy();
     expect(screen.queryByText('最低')).toBeNull();
     expect(screen.queryByText('很高')).toBeNull();
-    expect(screen.queryByText('最高')).toBeNull();
+    expect(screen.queryByText('极致')).toBeNull();
   });
 
   it('当前会话模型已不在目录时回退到可用列表并写回 setModel', async () => {

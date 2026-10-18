@@ -7,6 +7,8 @@ export interface SandboxExecutionPolicy {
   network: NetworkSandboxPolicy
   workspaceRoot: string
   sessionId?: string
+  /** 独立工作区（A 轨）：任何途径都不放宽到 danger-full-access。 */
+  fullAccessBlocked?: boolean
 }
 
 /**

@@ -1,0 +1,19 @@
+2026-10-14 打包后的 release/win-unpacked/GrenAgent.exe（--user-data-dir 临时目录，--remote-debugging-port），
+在渲染页里调用 window.gren.invoke('list_models_global')；models.json 读的是真实 ~/.pi/agent/models.json（只读）。
+
+修 models.json 之前：
+  count 1563，provider 全是内置（amazon-bedrock 193、openrouter 401、vercel-ai-gateway 252 …），
+  custom-muqywnc8 / custom-muwrfv43 / newapi-local 一个都没有。
+
+主进程 --inspect 里对同一份 models.json 的副本调用 ModelRuntime.create(...).getError()：
+  Invalid models.json schema:
+    - providers.custom-muqywnc8.models.6.id: must not have fewer than 1 characters
+
+models.json 第 7 个模型（2026-10-14 02:36 由设置页保存写入）：
+  {"id":"","reasoning":true,"thinkingLevelMap":{...},"compat":{"forceAdaptiveThinking":true}}
+
+备份成 models.json.bak-20261014、只删掉这一条之后：
+  total 1572
+  custom-muqywnc8: claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-opus-4-8, claude-opus-4-6
+  custom-muwrfv43: grok-4.7, mistral-large-4
+  newapi-local: deepseek-v4.1-flash

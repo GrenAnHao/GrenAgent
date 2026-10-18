@@ -154,6 +154,54 @@ export async function searchWorkspace(opts: SearchWorkspaceOpts): Promise<{
   return searchViaJs(opts);
 }
 
+type RawArgs = Record<string, unknown>;
+
+/** 取字符串或字符串数组，统一成非空字符串数组。 */
+function stringList(value: unknown): string[] {
+  if (typeof value === "string") return value ? [value] : [];
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+  return [];
+}
+
+/** 模型常写错的字段名（来自会话日志里的真实误用）→ 正式字段。 */
+const PATTERN_ALIASES = ["pattern", "patterns", "query", "regex", "regexp"] as const;
+const GLOB_ALIASES = ["globs", "glob", "include", "includes", "includePatterns", "filePattern", "filePatterns"] as const;
+
+/**
+ * search 的 prepareArguments：在 schema 校验前把常见误用归一。
+ * - pattern / patterns / query / regex 可以是字符串或数组，合并去重后第一个进 pattern，其余进 patterns
+ * - paths（数组）/ path（数组）取第一个；glob / include / includePatterns 归到 globs
+ * 一个 pattern 都没有（例如模型发了 `{}`）就原样返回，由 schema 报「缺 pattern」。
+ */
+export function prepareSearchArguments(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const args = input as RawArgs;
+  const found = [...new Set(PATTERN_ALIASES.flatMap((k) => stringList(args[k])))];
+  if (!found.length) return input;
+
+  const out: RawArgs = {};
+  for (const [k, v] of Object.entries(args)) {
+    if ((PATTERN_ALIASES as readonly string[]).includes(k) || (GLOB_ALIASES as readonly string[]).includes(k)) continue;
+    if (k === "paths") continue;
+    out[k] = v;
+  }
+  out.pattern = found[0];
+  if (found.length > 1) out.patterns = found.slice(1);
+
+  const globs = [...new Set(GLOB_ALIASES.flatMap((k) => stringList(args[k])))];
+  if (globs.length) out.globs = globs;
+
+  const path = stringList(args.path)[0] ?? stringList(args.paths)[0];
+  if (path) out.path = path;
+  else delete out.path;
+  return out;
+}
+
+/** pattern + patterns 合并成执行用的列表。 */
+export function searchPatternList(params: { pattern?: unknown; patterns?: unknown }): string[] {
+  return [...new Set([...stringList(params.pattern), ...stringList(params.patterns)])];
+}
+
 function toToolResult(
   groups: { file: string; hits: Hit[] }[],
   matchCount: number,
@@ -190,16 +238,20 @@ export function registerSearch(pi: ExtensionAPI): void {
     name: "search",
     label: "Search",
     description:
-      "Search the codebase with one or more regex patterns (OR) and optional glob filters, in one call. " +
+      "Search the codebase with a regex `pattern` (plus optional extra `patterns`, OR-ed) and optional glob filters, in one call. " +
       "Uses packaged ripgrep (respects .gitignore). Returns matches grouped by file (file:line). " +
-      "Use this instead of bash grep, rg, or Windows Select-String.",
+      "Use this instead of bash grep or rg.",
     promptSnippet: "Search the codebase with regex and optional globs.",
     promptGuidelines: [
-      "To search file contents by keyword or regex, call search instead of bash, including Windows Select-String and Get-Content. search runs ripgrep.",
-      "Pass multiple patterns (OR) and multiple globs at once; results come back merged.",
+      "To search file contents by keyword or regex, call search instead of bash grep or rg. search runs ripgrep.",
+      "search always needs pattern (a regex string); put extra alternatives in patterns and file filters in globs, all in one call.",
     ],
+    // 必填参数用字符串而不是数组：会话日志里必填数组参数的工具更常收到 `{}`。
+    // Note: 见 .agents/notes/implemented/bug-fix/2026-10-15-search-required-string-pattern.md
+    prepareArguments: prepareSearchArguments as (args: unknown) => never,
     parameters: Type.Object({
-      patterns: Type.Array(Type.String(), { description: "One or more regex patterns; a line matching ANY is a hit." }),
+      pattern: Type.String({ description: "Regex to search for (required)." }),
+      patterns: Type.Optional(Type.Array(Type.String(), { description: "Extra regex patterns OR-ed with pattern; a line matching ANY is a hit." })),
       globs: Type.Optional(Type.Array(Type.String(), { description: "Limit to files matching these globs, e.g. src/**/*.ts" })),
       path: Type.Optional(Type.String({ description: "Sub-directory to search (default: cwd)." })),
       ignoreCase: Type.Optional(Type.Boolean()),
@@ -218,11 +270,12 @@ export function registerSearch(pi: ExtensionAPI): void {
       const maxFiles = Number(getConfig("SEARCH_MAX_FILES") ?? "5000") || 5000;
       const maxFileBytes = Number(getConfig("SEARCH_MAX_FILE_BYTES") ?? "1048576") || 1048576;
       const ctxLines = params.contextLines && params.contextLines > 0 ? params.contextLines : 0;
-      if (!params.patterns?.length) {
+      const patterns = searchPatternList(params);
+      if (!patterns.length) {
         return toToolResult([], 0, false, maxResults, [], "search: no valid patterns.");
       }
       const out = await searchWorkspace({
-        dir, cwd: ctx.cwd, patterns: params.patterns, globs: params.globs,
+        dir, cwd: ctx.cwd, patterns, globs: params.globs,
         ignoreCase: params.ignoreCase, literal: params.literal, contextLines: ctxLines,
         maxResults, maxFiles, maxFileBytes, signal,
       });

@@ -41,10 +41,22 @@ function argNumber(args: unknown, key: string): number | undefined {
   return Number.isFinite(number) ? number : undefined;
 }
 
-/** 读取带 offset/limit 时的行号范围。offset 为 1-based 起始行，limit 为行数。全文读取返回空。 */
+function argPresent(args: unknown, key: string): boolean {
+  if (!args || typeof args !== 'object') return false;
+  return (args as Record<string, unknown>)[key] != null;
+}
+
+/**
+ * 读取带 offset/limit 时的行号范围。offset 为 1-based 起始行，limit 为行数。全文读取返回空。
+ * Same rules as pi's `formatReadLineRange` (1.3.0, pi #9887; the renderer cannot import it because
+ * it pulls node:os): null means omitted, numeric strings count, and a malformed offset or limit
+ * drops the whole range instead of guessing. Only the text differs (`12-31` / `8-` vs `:12-31` / `:8`).
+ */
 export function readLineRange(args: unknown): string | undefined {
   const offset = argNumber(args, 'offset');
   const limit = argNumber(args, 'limit');
+  if (argPresent(args, 'offset') && offset == null) return undefined;
+  if (argPresent(args, 'limit') && limit == null) return undefined;
   if (offset == null && limit == null) return undefined;
   const start = offset != null && offset >= 1 ? Math.floor(offset) : 1;
   if (limit != null && limit >= 1) {

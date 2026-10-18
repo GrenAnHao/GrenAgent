@@ -13,6 +13,7 @@ import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
 import type { WorkspaceApprovalService } from '../app/workspaceApprovalService';
 import type { GitService } from '../app/gitService';
+import type { IsolatedWorkspaceService } from '../app/isolatedWorkspaceService';
 import type { TerminalService } from '../app/terminalService';
 import type { CreateService } from '../app/createService';
 import type { TempHtmlService } from '../app/tempHtmlService';
@@ -78,6 +79,7 @@ export interface IpcServices {
   uiHistory?: UiHistoryService;
   workspaceApproval?: WorkspaceApprovalService;
   git?: GitService;
+  isolatedWorkspace?: Pick<IsolatedWorkspaceService, 'create' | 'list' | 'syncBack' | 'state' | 'remove' | 'probe'>;
   terminal?: TerminalService;
   create?: CreateService;
   tempHtml?: TempHtmlService;
@@ -176,6 +178,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
   if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);
   if (services.git) registerGitCommands(services.git);
+  if (services.isolatedWorkspace) registerIsolatedWorkspaceCommands(services.isolatedWorkspace, services.pi, services.workspace);
   if (services.terminal) registerTerminalCommands(services.terminal);
   if (services.create) registerCreateCommands(services.create);
   if (services.tempHtml) registerCommand('write_temp_html', (_event, args) => services.tempHtml!.write(readText(args, 'content')));
@@ -603,6 +606,63 @@ function registerGitCommands(service: GitService): void {
     if (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0) throw new Error('skip must be a non-negative integer');
     return service.logGraph(readString(args, 'workspacePath'), limit as number | null | undefined, skip);
   });
+}
+
+/** 独立工作区（A 轨）。create 返回的 marker.path 由渲染层当作新 workspace 打开。 */
+function registerIsolatedWorkspaceCommands(
+  service: Pick<IsolatedWorkspaceService, 'create' | 'list' | 'syncBack' | 'state' | 'remove' | 'probe'>,
+  pi?: Pick<PiCommandsPort, 'listRunningTurns'>,
+  workspace?: Pick<WorkspaceService, 'releaseWorkspace'>,
+): void {
+  const optionalBoolean = (args: Record<string, unknown>, key: string): boolean | undefined => {
+    const value = args[key];
+    if (value !== undefined && typeof value !== 'boolean') throw new Error(`${key} must be a boolean`);
+    return value as boolean | undefined;
+  };
+  const samePath = (a: string, b: string) => {
+    const norm = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+    return norm(a) === norm(b);
+  };
+  registerCommand('isolated_workspace_create', (_event, args) => {
+    const base = args.base;
+    if (base !== undefined && base !== 'fresh' && base !== 'head') throw new Error('base must be "fresh" or "head"');
+    const fetch = optionalBoolean(args, 'fetch');
+    const carryChanges = optionalBoolean(args, 'carryChanges');
+    return service.create({
+      project: readString(args, 'workspace'),
+      ...(base === undefined ? {} : { base }),
+      ...(fetch === undefined ? {} : { fetch }),
+      ...(carryChanges === undefined ? {} : { carryChanges }),
+    });
+  });
+  registerCommand('isolated_workspace_state', (_event, args) => service.state(readString(args, 'workspace'), readString(args, 'id')));
+  registerCommand('isolated_workspace_probe', (_event, args) => service.probe(readStringArray(args, 'paths')));
+  // 删除：有会话在跑就拒；没回传 / 有未提交改动且没 force 就拒（先判，免得关了 handle 才拒）；再关 handle、删目录。
+  registerCommand('isolated_workspace_remove', async (_event, args) => {
+    const project = readString(args, 'workspace');
+    const id = readString(args, 'id');
+    const force = optionalBoolean(args, 'force') === true;
+    const entry = service.list(project).find((item) => item.id === id);
+    if (!entry) throw new Error(`没有这个独立工作区：${id}`);
+    if (entry.exists) {
+      const running = ((await pi?.listRunningTurns()) ?? []) as Array<{ workspace?: unknown }>;
+      if (running.some((row) => typeof row.workspace === 'string' && samePath(row.workspace, entry.path))) {
+        throw new Error(`ISOLATED_BUSY: 独立工作区 ${id} 里还有会话在运行，先停止再删除`);
+      }
+      if (!force) {
+        const state = await service.state(project, id);
+        if (state.dirty || !state.synced) {
+          throw new Error(`ISOLATED_UNSAVED: 独立工作区 ${id} 有未提交的改动或分支还没回传`);
+        }
+      }
+      await workspace?.releaseWorkspace(entry.path);
+    }
+    return service.remove(project, id, { force });
+  });
+  registerCommand('isolated_workspace_list', (_event, args) => service.list(readString(args, 'workspace')));
+  registerCommand('isolated_workspace_sync_back', (_event, args) =>
+    service.syncBack(readString(args, 'workspace'), readString(args, 'id')),
+  );
 }
 
 function registerTerminalCommands(service: TerminalService): void {

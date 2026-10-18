@@ -6,12 +6,14 @@ interface TabBodyStackProps {
   tabs: DockTab[];
   activeId: string | null;
   emptyHint: string;
+  /** 当前会话没有可见标签时整块藏起，里面别的会话的 body 仍然挂着。 */
+  hidden?: boolean;
 }
 
 /** keep-alive：所有 body 常驻挂载，仅切换显隐（终端 xterm 实例昂贵，不可卸载）。 */
-export function TabBodyStack({ tabs, activeId, emptyHint }: TabBodyStackProps) {
+export function TabBodyStack({ tabs, activeId, emptyHint, hidden = false }: TabBodyStackProps) {
   return (
-    <div className={dockTabStyles.body}>
+    <div className={dockTabStyles.body} style={hidden ? { display: 'none' } : undefined}>
       {tabs.length === 0 ? <div className={dockTabStyles.empty}>{emptyHint}</div> : null}
       {tabs.map((tab) => (
         <div

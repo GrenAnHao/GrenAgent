@@ -16,6 +16,20 @@ Status: implemented
 
 主进程老生代默认约 1.5GB。上一则笔记用 `app.relaunch` 在参数缺失时重启进程，把 4GB 补进去。那不是固定配置，打包进程和开发进程的启动方式也不一样。
 
+### 主进程生产产物的文件名钉成 .js / .jsc，不吃构建工具的 .cjs 默认值
+
+`package.json` 是 `"type": "module"`。2026-10-14 实测：`electron.vite.config.ts` 的 main 生产构建只写了 `output.format: "cjs"`，产物是 `main.cjs` / `main.cjsc`，chunk 也是 `.cjsc`。electron-vite 6.0.0-beta.1 的 main 配置只给 `es` 格式显式设扩展名（`.mjs`），`cjs` 没设，应是 Vite / rolldown 按 package 的 `type` 取默认值（推断）。
+
+而其余几处都按 `.js` / `.jsc` 约定：`package.json` 的 `main` 是 `out/main/main.js`（`dev` 和 `localrun` 的 ESM 产物也叫 `main.js`），`electron-builder.yml` 的 `asarUnpack` 列的是 `pi-worker.js/.jsc`、`agent-host.js/.jsc`，`sourceCodeProtection.test.ts` 断言这些名字，`out/main/package.json` 的 `{"type":"commonjs"}` 就是为了让 `.js` 按 CJS 加载。结果 `npm run package` 在入口检查处退出：`Application entry file "out\main\main.js" ... was not found in this archive`，asar 里只有 `main.cjs`。main 的 `output` 段自 2026-09-20（1606768c）没改过，09-27 的 0.1.0 安装包和 10-02 的打包都过了入口检查，所以此前产物应该还是 `.js`；推断是之后装的依赖（electron-vite / Vite / rolldown）把 cjs 的默认扩展名换了，没有逐版本核对。
+
+### 生产主进程不外置依赖，解包的 .js 桩旁边带 package.json
+
+文件名对上后，2026-10-14 启动打包出来的 `GrenAgent.exe` 连着撞了三个问题：
+
+1. 弹出 `A JavaScript error occurred in the main process`：`ERR_PACKAGE_PATH_NOT_EXPORTED`，指向 asar 里的 `@earendil-works/pi-coding-agent`。electron-vite 6.0.0-beta.1 的 `build.externalizeDeps` 默认是 `true`（`config.build?.externalizeDeps ?? true`），配置里没写过，`package.json` 的 `dependencies` 全被外置成运行时 `require`，而 Pi SDK 的 exports 只有 `import` 条件。09-11 的决定本来是把 Pi SDK 打进主进程，旧版本没有这个默认值所以成立。
+2. 只把三个 Pi 包排除外置后，主进程能起来，`agent-host` 子进程报 `Cannot find module 'yaml'`。`agent-host` 和 `pi-worker` 的 chunk 在 `app.asar.unpacked/out/main/chunks/` 里按真实路径加载，往上找 `node_modules` 只能找到被 unpack 的那几个包，asar 里的 `yaml` 等外置依赖找不到。
+3. 再往前，`agent-host.js` 报 `require is not defined in ES module scope`。Node 按真实文件系统给解包出来的 `.js` 找 `package.json`，`out/main/package.json`（`{"type":"commonjs"}`）只在 asar 里，找不到就一路找到外层 `type: module` 的那份。这次是在仓库里的 `release/win-unpacked` 复现的，外层是仓库自己的 `package.json`；装到普通目录会不会撞上取决于上层有没有 `package.json`，没有验证。
+
 ## Decision
 
 38fd0163（2026-09-11）起，打包把 Pi SDK 去重、原生模块走 asarUnpack、拷贝 `import.meta.url` 引用的资源；下面三条是在此基础上逐步定下的硬约束。
@@ -33,6 +47,14 @@ Status: implemented
 ### 主进程堆上限固定为 4GB，写在启动配置里
 
 上限固定为 4096MB。`electron.vite.config.ts` 在 `electron-vite` 拉起 Electron 之前把 `--js-flags=--max-old-space-size=4096` 写入 `ELECTRON_CLI_ARGS`。已经带有 `max-old-space-size` 时不追加。主进程不再因为堆上限重启。
+
+### 主进程生产产物的文件名钉成 .js / .jsc，不吃构建工具的 .cjs 默认值
+
+生产构建的 `output` 显式写 `entryFileNames: "[name].js"` 和 `chunkFileNames: "chunks/[name]-[hash].js"`。字节码插件据此产出 `main.js`（几十字节的加载桩）+ `main.jsc`，chunk 在 `out/main/chunks/*.jsc`。preload 段早就用同样的办法钉了 `[name].js`（97f06825）。格式仍是 CJS，字节码保护不变；`dev` / `localrun` 不走这个分支，照旧输出 ESM `main.js`。
+
+### 生产主进程不外置依赖，解包的 .js 桩旁边带 package.json
+
+生产构建在 main 的 `build` 里设 `externalizeDeps: false`：除 `mainExternal` 里列的原生模块（node-pty、codegraph、ast-grep、ripgrep，都已 asarUnpack）之外，依赖一律打进主进程和 chunk，Pi SDK 也在其中。`dev` / `localrun` 不走这个分支，仍沿用 electron-vite 的默认外置，ESM 下 `import` 条件能解析。`electron-builder.yml` 的 `asarUnpack` 加 `out/main/package.json`，解包出来的 `agent-host.js`、`pi-worker.js` 旁边有 `{"type":"commonjs"}`，按 CJS 加载，不依赖外层目录有没有 `package.json`。
 
 ### 涉及文件
 
@@ -78,6 +100,19 @@ Status: implemented
 - 缺参数就 `app.relaunch`：多一次进程启动，而且上限不是启动配置的一部分。
 - `app.commandLine.appendSwitch('js-flags', ...)`：主进程的 V8 堆在 JS 执行前已经建好，这个开关改不到它。
 
+### 主进程生产产物的文件名钉成 .js / .jsc，不吃构建工具的 .cjs 默认值
+
+- `package.json` 的 `main` 改成 `out/main/main.cjs`，`asarUnpack` 和测试跟着改成 `.cjs` / `.cjsc`：最顺工具链默认值，不用在配置里写文件名。但 `dev`、`localrun` 的 ESM 产物叫 `main.js`，共用同一个 `package.json`，`main` 只能写一个值，改成 `main.cjs` 本机开发就找不到入口。
+- 只改 `electron-builder.yml`、让它认 `.cjs`：入口检查读的是 `package.json` 的 `main`，对不上的还是它。
+- 关掉字节码或把生产主进程改回 ESM：能绕开命名问题，但源码保护就没了；本条上面已经定了字节码保护要求 CJS。
+- 构建后再把 `.cjs` / `.cjsc` 批量改名：多一道构建后的文件操作，生成的加载桩里 `require("./main.cjsc")` 这类引用也要同步改，比在 `output` 里直接钉名字脆。
+
+### 生产主进程不外置依赖，解包的 .js 桩旁边带 package.json
+
+- 只排除三个 Pi 包（`externalizeDeps: { exclude: [...] }`）：改动最小，其余依赖仍从 asar 里加载，体积增长也最小。试过，主进程能起来，但 `agent-host` 报 `Cannot find module 'yaml'`；要用这个办法就得把每个外置依赖都补进 `asarUnpack`，名单要和 `dependencies` 同步，漏一个就是运行时才炸。
+- 把外置依赖整体 `asarUnpack`（`node_modules/**`）：能让解包的 chunk 找到包，但 Pi 包的 `require` 问题还在，还把 asar 的完整性保护和体积优势一起放掉。
+- 把 `agent-host` / `pi-worker` 的加载桩改成 `.cjs`，避开 `package.json` 查找：确实绕得开，但要改字节码插件的输出名、`asarUnpack` 和测试，和上一条钉死 `.js` / `.jsc` 的约定冲突；多 unpack 一个 `package.json` 更小。
+
 ### 已被取代的旧决定：主进程 V8 老生代上限从约 1.5GB 提到 4GB
 
 启动参数使用 `--js-flags=--max-old-space-size=4096`。`electron-vite` 通过 `ELECTRON_CLI_ARGS` 在拉起 Electron 之前写上。打包后的 exe 若参数里还没有这一项，主进程在创建窗口前 `relaunch` 一次再退出。
@@ -102,6 +137,31 @@ Status: implemented
 
 `electron-vite dev` 和 `preview` 拉起的主进程老生代上限是 4GB。同一条 `--js-flags` 也会作用到随后启动的渲染进程。不经过 `electron-vite` 直接打开的打包 exe 仍使用 Electron 默认上限。
 
+### 主进程生产产物的文件名钉成 .js / .jsc，不吃构建工具的 .cjs 默认值
+
+产物名不再依赖 electron-vite / rolldown 的默认值，升级它们不会悄悄把入口改回 `.cjs`；代价是 `output` 里多两行，`chunks/` 目录名也要自己和 `asarUnpack` 的 `out/main/chunks/**` 保持一致。别在这段 `output` 里换扩展名，`package.json` 的 `main`、`asarUnpack` 和 `sourceCodeProtection.test.ts` 都按 `.js` / `.jsc` 写死。`out/main/package.json`（`{"type":"commonjs"}`）必须随生产构建写出，否则这些 `.js` 会被当 ESM 加载。生产构建和 `electron-vite dev` 写同一个 `out/main`（dev 还会删掉 `out/main/package.json`），同一个工作区里两者不要同时跑，会互相覆盖。
+
+### 生产主进程不外置依赖，解包的 .js 桩旁边带 package.json
+
+依赖不再靠 asar 里的 `node_modules` 在运行时解析：`main.jsc` 约 1.0MB → 1.5MB，chunk 24 个 → 77 个、约 22MB。新加的依赖只要进主进程图就会被打进去，不用再管 asar 内外的解析路径；代价是 ESM-only 或用 `import.meta` 的依赖会在构建时报 `EMPTY_IMPORT_META` 这类警告，要逐个看。`asarUnpack` 里的 `out/main/package.json` 不能删，删了解包的 `.js` 桩又会被外层的 `type: module` 当 ESM。
+
+已知遗留，都是 2026-10-14 在打包后的 exe 里看到、没有处理的：
+
+- pi-ai 的 `env-api-keys.js` 启动时 `import("node:fs")` 等三个动态导入，在字节码里抛 `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`，stderr 里是未处理的 Promise 拒绝警告。它只负责 Google Vertex ADC 凭据探测，失败时探测恒为 false，其余启动不受影响。
+- pi-coding-agent `core/extensions/loader.js:51` 的 `import.meta.resolve` 被替换成 `{}`（构建时的 `EMPTY_IMPORT_META` 就是它）。只在 pi 用 jiti 加载文件形式的扩展、算别名时才会走到，没有验证过。
+- `asarUnpack` 里 pi-codemode 的 `worker.js` 和 quickjs-wasi 的 `quickjs.wasm`：打进主进程后这些资源按哪个路径找，打包后 codemode 能不能用，没有验证过。
+
 ## Verification
 
-verify: n/a 回填的历史决定，源记录（docs/decisions）未记录验证
+前三条：verify: n/a 回填的历史决定，源记录（docs/decisions）未记录验证
+
+后两条（产物文件名钉成 .js / .jsc；生产主进程不外置依赖、解包的 .js 桩旁边带 package.json），2026-10-14 实跑，结果：部分通过（能启动、agent-host 能拉起，下面「没验证」几项除外）。
+
+按出现顺序，每一步都是修之前失败、修之后过：
+
+- 只改文件名之前 `npm run build && npm run package`：`out/main` 是 `main.cjs` / `main.cjsc`，打包在入口检查处退出，报 `Application entry file "out\main\main.js" ... was not found in this archive`。钉成 `.js` 后打包成功。
+- 启动那次打出来的 `release/win-unpacked/GrenAgent.exe`：弹出 `ERR_PACKAGE_PATH_NOT_EXPORTED`（Pi 外置），读弹窗文字确认。只排除三个 Pi 包后主进程能起来，`agent-host` 报 `Cannot find module 'yaml'`；再往前报 `require is not defined in ES module scope`（缺解包的 `package.json`）。
+- 最终配置（`externalizeDeps: false` + `asarUnpack` 加 `out/main/package.json`）下，`npm run build` 后 `out/main` 为 `main.js`（71 字节桩）+ `main.jsc`（约 1.5MB），`chunks/` 下 77 个 `.jsc`、约 22MB；`npm run package` 退出码 0，产出 `release/GrenAgent Setup 0.3.0.exe`（约 231MB）。
+- 启动最终产物 `release/win-unpacked/GrenAgent.exe`（`--user-data-dir` 指向临时目录，等 25 秒后观察，之后只杀自己起的进程树）：主进程、GPU、渲染进程、`agent-host` 子进程、`pi-job-guard.exe` 都在，30 行 `extension loaded` 日志，stderr 里没有 `failed to start`、`Cannot find module`、`ReferenceError`、`ERR_PACKAGE`。退出后没有 GrenAgent 残留进程。
+- `cd electron-agent && npx vitest run electron/app/sourceCodeProtection.test.ts electron/mainHeap.test.ts`：2 个文件 10 条通过（含新增的 `out/main/package.json` 要在 `asarUnpack` 里的断言）。
+- 没验证：运行的是 `win-unpacked` 里的同一份文件，没有真的跑 NSIS 安装程序、没有在非仓库目录下启动；没有在界面里发消息、开会话，所以 Pi 运行时、codemode、文件形式扩展（见 Consequences 的已知遗留）都没走到；也没做 `npm run start` / `dev` 的回归。启动时 MCP 配置读的是真实 `~/.pi`，拉起了其中的 MCP 服务器，没有做写操作。

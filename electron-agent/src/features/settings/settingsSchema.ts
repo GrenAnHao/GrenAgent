@@ -1,4 +1,4 @@
-import { AudioLines, Bot, Cpu, Database, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { parseRepeatGuardConfig } from '@extensions/loop-guard/chain';
 
@@ -529,6 +529,45 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
             validate: validateBoundedInt(1, 20),
           },
         ],
+      },
+    ],
+  },
+  {
+    // 独立工作区（A 轨）：宿主在 <仓库>/.gren/worktrees/<id>/ 克隆、写主仓非法。键名与 electron/main.ts、IsolatedWorkspaceDialog 对齐。
+    id: 'isolatedWorkspace',
+    title: '独立工作区',
+    group: '扩展与安全',
+    icon: GitBranch,
+    fields: [
+      {
+        key: 'isolatedWorkspaceFetch',
+        label: '创建前先 fetch',
+        type: 'boolean',
+        default: '0',
+        description: '新建独立工作区时默认勾选「先 fetch 远端」，基准取到最新的远端默认分支。需要联网，默认关',
+        effect: 'instant',
+      },
+      {
+        key: 'isolatedWorkspaceLimit',
+        label: '每个仓库最多几个',
+        type: 'number',
+        placeholder: '15',
+        min: 1,
+        max: 50,
+        description: '每个独立工作区都是一份完整的仓库副本，超过上限时新建会被拒绝。留空＝15',
+        effect: 'instant',
+        validate: validateBoundedInt(1, 50),
+      },
+      {
+        key: 'isolatedWorkspaceReclaimDays',
+        label: '自动回收天数',
+        type: 'number',
+        placeholder: '30',
+        min: 0,
+        max: 365,
+        description: '启动时删除超过这么多天没动过、没有未提交改动、分支已回传到主仓的独立工作区。0＝不自动回收，留空＝30',
+        effect: 'instant',
+        validate: validateBoundedInt(0, 365),
       },
     ],
   },

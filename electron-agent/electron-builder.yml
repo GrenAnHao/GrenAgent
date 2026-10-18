@@ -24,6 +24,9 @@ asarUnpack:
   - node_modules/@vscode/ripgrep/**
   - node_modules/@vscode/ripgrep-*/**
   - node_modules/.pnpm/@vscode+ripgrep*/**
+  # 解包出来的 .js 桩按真实文件系统找 package.json；旁边没有这一份 {"type":"commonjs"}，
+  # 会一路找到外层 type: module 的 package.json，把桩当 ESM 加载，require 报错。
+  - out/main/package.json
   - out/main/pi-worker.js
   - out/main/pi-worker.jsc
   # agent-host 子进程和 pi-worker 一样以 RunAsNode 加载，入口要在 asar 外面。

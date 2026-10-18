@@ -52,6 +52,11 @@ describe('CodeGraph read-only RPC validation', () => {
     expect(validateCodeRetrievalArgs('/repo', 'codegraph_files', { path: 'src', pattern: '**/*.test.ts', format: 'flat' })).toEqual({ path: 'src', pattern: '**/*.test.ts', format: 'flat' });
   });
 
+  it('lets the file listing be read one page at a time', () => {
+    expect(validateCodeRetrievalArgs('/repo', 'codegraph_files', { format: 'flat', limit: 100, offset: 200 })).toEqual({ format: 'flat', limit: 100, offset: 200 });
+    expect(validateCodeRetrievalArgs('/repo', 'codegraph_files', { offset: 0 })).toEqual({ offset: 0 });
+  });
+
   it('accepts every SearchOptions field plus lookup modes', () => {
     expect(validateCodeRetrievalArgs('/repo', 'codegraph_search', {
       query: 'parse',
@@ -139,7 +144,8 @@ describe('CodeGraph read-only RPC validation', () => {
     ['codegraph_node', { file: 'src/a.ts', includeCode: 'yes' }],
     ['codegraph_search', { query: 'parse', limit: Infinity }],
     ['codegraph_files', { path: '../other' }], ['codegraph_files', { pattern: '../*' }],
-    ['codegraph_files', { format: ['flat'] }], ['codegraph_search', { query: 'parse', kind: ['class'] }],
+    ['codegraph_files', { format: ['flat'] }], ['codegraph_files', { limit: 0 }], ['codegraph_files', { offset: -1 }],
+    ['codegraph_search', { query: 'parse', kind: ['class'] }],
     ['codegraph_search', { query: 'parse', kinds: ['not-a-kind'] }],
     ['codegraph_search', { query: 'parse', languages: ['not-a-lang'] }],
     ['codegraph_search', { query: 'parse', mode: 'fts' }],

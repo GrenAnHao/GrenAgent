@@ -47,10 +47,13 @@ export interface SandboxGate {
   mode: FileSandboxMode;
   /** 沿用 bash_escalate 的规则：「工作区编辑」档下的 workspace-write 拒绝升权。 */
   presetBlocksEscalation: boolean;
+  /** 独立工作区（A 轨）：升权到 danger-full-access 一律拒，不弹审批。 */
+  fullAccessBlocked?: boolean;
 }
 
 /** 被拒后要不要提示模型可以升权：还有更宽的模式、审批档不拒绝、这次调用有审批通道。 */
 export function canOfferEscalation(gate: SandboxGate, effectiveMode: FileSandboxMode, approvalChannel: boolean): boolean {
+  if (gate.fullAccessBlocked && effectiveMode === "workspace-write") return false;
   return approvalChannel && !gate.presetBlocksEscalation && effectiveMode !== "danger-full-access";
 }
 
@@ -78,6 +81,11 @@ export async function approveEscalation(
   if (mode === gate.mode) return undefined;
   if (!isStrictWidening(gate.mode, mode)) {
     throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${gate.mode}" mode`);
+  }
+  if (gate.fullAccessBlocked && mode === "danger-full-access") {
+    throw new Error(
+      `sandbox escalation to "${mode}" is rejected: this is an isolated workspace, commands stay inside it and cannot write the parent repository`,
+    );
   }
   if (gate.presetBlocksEscalation) {
     throw new Error(

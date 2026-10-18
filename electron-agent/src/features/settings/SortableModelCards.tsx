@@ -32,6 +32,7 @@ interface SortableModelCardProps {
   index: number;
   api: string | undefined;
   expanded: boolean;
+  markEmptyId?: boolean;
   onToggle: () => void;
   onChange: (patch: Partial<UiModel>) => void;
   onRemove: () => void;
@@ -61,6 +62,8 @@ export interface SortableModelCardsProps<M extends KeyedModel> {
   models: M[];
   api: string | undefined;
   expanded: Record<string, boolean>;
+  /** 保存被空模型 ID 拦下后为 true：ID 为空的卡片标红。 */
+  markEmptyIds?: boolean;
   onToggle: (uid: string) => void;
   onChange: (index: number, patch: Partial<UiModel>) => void;
   onRemove: (index: number) => void;
@@ -72,6 +75,7 @@ export function SortableModelCards<M extends KeyedModel>({
   models,
   api,
   expanded,
+  markEmptyIds = false,
   onToggle,
   onChange,
   onRemove,
@@ -97,6 +101,7 @@ export function SortableModelCards<M extends KeyedModel>({
             index={i}
             api={api}
             expanded={!!expanded[m._uid]}
+            markEmptyId={markEmptyIds}
             onToggle={() => onToggle(m._uid)}
             onChange={(patch) => onChange(i, patch)}
             onRemove={() => onRemove(i)}

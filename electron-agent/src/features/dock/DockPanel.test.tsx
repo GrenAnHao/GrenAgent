@@ -130,4 +130,42 @@ describe('DockPanel session-owned tabs', () => {
     expect(screen.getByTestId('dock-body-m1#2').style.display).toBe('flex');
     expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
   });
+
+  it('在 A 里用启动页打开的标签不会在 B 的右栏里出现，B 看到的是自己的空右栏', async () => {
+    render(<Harness />);
+    act(() => {
+      useLayoutStore.getState().setRightPanelOpen(true);
+    });
+    fireEvent.click(screen.getByTestId('dock-launcher-browser'));
+    expect(screen.getByTestId('dock-strip-right')).toBeTruthy();
+    expect(useDockStore.getState().tabs[0]).toMatchObject({ kind: 'browser', ownerSessionPath: '/ws/a.jsonl' });
+
+    await switchSession('/ws/b.jsonl');
+    expect(screen.queryByTestId('dock-strip-right')).toBeNull();
+    expect(screen.getByTestId('dock-launcher-right')).toBeTruthy();
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+
+    await switchSession('/ws/a.jsonl');
+    expect(screen.getByTestId('dock-strip-right')).toBeTruthy();
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('切到 B 时 A 的常驻标签（网页 / 终端一类）只藏起来，切回 A 还是同一个实例', async () => {
+    render(<Harness />);
+    act(() => {
+      useDockStore.getState().openPage({ url: 'https://a', content: 'A 的网页', title: 'A 页' });
+    });
+    const body = screen.getByTestId('dock-body-page:https://a');
+
+    await switchSession('/ws/b.jsonl');
+    expect(screen.queryByTestId('dock-strip-right')).toBeNull();
+    expect(screen.getByTestId('dock-launcher-right')).toBeTruthy();
+    expect(screen.getByTestId('dock-body-page:https://a')).toBe(body);
+    expect((body.parentElement as HTMLElement).style.display).toBe('none');
+
+    await switchSession('/ws/a.jsonl');
+    expect(screen.getByTestId('dock-body-page:https://a')).toBe(body);
+    expect(body.style.display).toBe('flex');
+    expect((body.parentElement as HTMLElement).style.display).toBe('');
+  });
 });

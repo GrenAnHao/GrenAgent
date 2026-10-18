@@ -21,11 +21,11 @@ export function reviewView(messages: ChatMessage[], payload: ReviewPayload): Rev
   if (files.length === 0) return { kind: 'none' };
   const raw = payload.fileIndex ?? 0;
   const selected = raw >= 0 && raw < files.length ? raw : 0;
-  const path = files[selected].path;
+  const { path, cwd } = files[selected];
   const hunks = turn.segments.flatMap((segment) => {
     if (segment.kind !== 'tool' || segment.status !== 'done') return [];
     const diff = fileDiffModel(segment.toolName, segment.args, segment.result, segment.status);
-    return diff && mutationPath(segment.args) === path ? [diff] : [];
+    return diff && mutationPath(segment.args) === path && segment.cwd === cwd ? [diff] : [];
   });
   if (hunks.length === 0) return { kind: 'unavailable' };
   return { kind: 'ready', files, selected, hunks };

@@ -1,0 +1,35 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-retrieval-panel
+
+构建：3 个源文件有改动（src/features/agentData/CodeRetrievalPanel.tsx、src/features/agentData/codeStyles.ts 等）
+场景已构建（生产模式，4.1s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[57876:1014/180822.365:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[57876:1014/180822.365:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[57876:1014/180822.365:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[57876:1014/180822.373:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[57876:1014/180822.373:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[57876:1014/180822.373:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[57876:1014/180822.373:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[57876:1014/180822.373:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[57876:1014/180822.373:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+
+▸ code-retrieval-panel
+  PASS 文件列表渲染出来
+  MISS waitUntil document.querySelectorAll('[data-code-list] [aria-pressed]').length === 100
+  FAIL 3000 个文件只画第一页  got 3000  want 100
+  PASS 顶部写着总数
+  FAIL 空查询：外层面板没有被撑长（不出现整页滚动）  got false
+  FAIL 空查询：分栏有高度，底边在窗口里（272742 ≤ 880）  got false
+  FAIL 结果比栏高，列表在栏内滚动  got false
+  PASS 分栏吃掉了页头以下的剩余高度
+  INFO 截图 files-first-page  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-files-first-page.png
+  FAIL 找到「显示更多」  got false
+ERROR code-retrieval-panel: TypeError: Cannot read properties of null (reading 'y')
+    at default (file:///D:/OneDrive/Project%20Files/Pi/electron-agent/ui-harness/probes/code-retrieval-panel.mjs:60:33)
+    at async file:///D:/OneDrive/Project%20Files/Pi/electron-agent/ui-harness/run.mjs:124:5
+
+失败场景：code-retrieval-panel（17.6s）
+单独复跑确认：node ui-harness/check.mjs code-retrieval-panel

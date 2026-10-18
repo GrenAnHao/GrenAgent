@@ -136,6 +136,98 @@ describe('visual choice confirm', () => {
     iframe.remove();
   });
 
+  it('treats options as optional: confirming with nothing selected submits an empty choice', async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    const onMessage = (event: MessageEvent) => {
+      if (event.data && typeof event.data === 'object') messages.push(event.data);
+    };
+    window.addEventListener('message', onMessage);
+    const { doc, iframe } = mountPreview(`
+      <div class="options">
+        <div class="option" data-choice="a"><h3>方案 A</h3></div>
+        <div class="option" data-choice="b"><h3>方案 B</h3></div>
+      </div>
+    `);
+    const button = doc.querySelector<HTMLButtonElement>('#visual-confirm-btn');
+    expect(button?.disabled).toBe(false);
+
+    button?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages.filter((m) => m.type === 'visual-choice')).toEqual([
+      { type: 'visual-choice', choice: '', text: '未选择（已跳过）' },
+    ]);
+
+    window.removeEventListener('message', onMessage);
+    iframe.remove();
+  });
+
+  it('offers an optional supplement that rides along with the choice, and can be skipped', async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    const onMessage = (event: MessageEvent) => {
+      if (event.data && typeof event.data === 'object') messages.push(event.data);
+    };
+    window.addEventListener('message', onMessage);
+    const { doc, iframe } = mountPreview(`
+      <div class="options">
+        <div class="option" data-choice="a"><h3>方案 A</h3></div>
+      </div>
+    `);
+    const panel = doc.getElementById('visual-note-panel') as HTMLElement;
+    const noteBtn = doc.getElementById('visual-note-btn') as HTMLButtonElement;
+    expect(noteBtn.textContent).toBe('补充');
+    expect(panel.hidden).toBe(true);
+
+    noteBtn.click();
+    expect(panel.hidden).toBe(false);
+    const note = doc.getElementById('visual-note') as HTMLTextAreaElement;
+    note.value = '  标题再大一点  ';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(noteBtn.textContent).toBe('补充（已填）');
+
+    doc.querySelector<HTMLElement>('[data-choice="a"]')?.click();
+    doc.querySelector<HTMLButtonElement>('#visual-confirm-btn')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages.filter((m) => m.type === 'visual-choice')).toEqual([
+      { type: 'visual-choice', choice: 'a', text: '方案 A', supplement: '标题再大一点' },
+    ]);
+
+    window.removeEventListener('message', onMessage);
+    iframe.remove();
+  });
+
+  it('a group marked data-required blocks confirm until chosen and says why', async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    const onMessage = (event: MessageEvent) => {
+      if (event.data && typeof event.data === 'object') messages.push(event.data);
+    };
+    window.addEventListener('message', onMessage);
+    const { doc, iframe } = mountPreview(`
+      <div class="options" data-required data-required-reason="需要先定方案才能继续">
+        <div class="option" data-choice="a"><h3>方案 A</h3></div>
+      </div>
+      <div class="options">
+        <div class="option" data-choice="x"><h3>额外 X</h3></div>
+      </div>
+    `);
+    const button = doc.querySelector<HTMLButtonElement>('#visual-confirm-btn');
+    expect(button?.disabled).toBe(true);
+    expect(doc.getElementById('visual-confirm-hint')?.textContent).toBe('必选：需要先定方案才能继续');
+
+    // 只选了可选组，必选组仍缺
+    doc.querySelector<HTMLElement>('[data-choice="x"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(button?.disabled).toBe(true);
+    button?.click();
+    expect(messages.filter((m) => m.type === 'visual-choice')).toEqual([]);
+
+    doc.querySelector<HTMLElement>('[data-choice="a"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(button?.disabled).toBe(false);
+
+    window.removeEventListener('message', onMessage);
+    iframe.remove();
+  });
+
   it('confirms a page mockup that has no options', async () => {
     const messages: Array<{ type?: string; choice?: string; text?: string }> = [];
     const onMessage = (event: MessageEvent) => {

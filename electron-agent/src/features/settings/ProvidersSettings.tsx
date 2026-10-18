@@ -302,6 +302,14 @@ function validateProviderIds(ps: EditProvider[]): string | null {
   return null;
 }
 
+/**
+ * 首个含空模型 ID 的供应商。pi 按 schema 校验整份 models.json，一张空卡片落盘后整份文件被拒，
+ * 所有自定义供应商都会从模型列表消失，只剩内置模型。
+ */
+function findEmptyModelId(ps: EditProvider[]): EditProvider | undefined {
+  return ps.find((p) => p.models.some((m) => !m.id.trim()));
+}
+
 export function ProvidersSettings() {
   const [providers, setProviders] = useState<EditProvider[]>([]);
   const [activeId, setActiveId] = useState('openai');
@@ -312,6 +320,8 @@ export function ProvidersSettings() {
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // 保存被空模型 ID 拦下后才标红，刚添加的空卡片不一上来就红。
+  const [markEmptyModelIds, setMarkEmptyModelIds] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -403,6 +413,16 @@ export function ProvidersSettings() {
       setSyncInfo(null);
       return false;
     }
+    const emptyModel = findEmptyModelId(list);
+    if (emptyModel) {
+      setError(`供应商「${emptyModel.name || emptyModel.id}」有模型 ID 为空：填上 ID 或删掉这张卡片`);
+      setMarkEmptyModelIds(true);
+      setActiveId(emptyModel.id);
+      setSaved(false);
+      setSyncInfo(null);
+      return false;
+    }
+    setMarkEmptyModelIds(false);
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -677,6 +697,7 @@ export function ProvidersSettings() {
                     models={models}
                     api={active.api}
                     expanded={expanded}
+                    markEmptyIds={markEmptyModelIds}
                     onToggle={(uid) => setExpanded((cur) => ({ ...cur, [uid]: !cur[uid] }))}
                     onChange={updateModel}
                     onRemove={removeModel}

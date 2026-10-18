@@ -1,68 +1,8 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
-
-export interface ResolveShellPathDeps {
-  platform?: NodeJS.Platform;
-  which?: (name: string) => string | undefined | null;
-  exists?: (path: string) => boolean;
-  statSize?: (path: string) => number;
-}
-
-function winWhereExe(): string {
-  const root = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
-  return `${root}\\System32\\where.exe`;
-}
-
-function getWindowsSearchPath(): string {
-  const seen = new Set<string>();
-  const parts: string[] = [];
-  for (const chunk of (process.env.PATH ?? "").split(";")) {
-    if (chunk && !seen.has(chunk.toLowerCase())) {
-      seen.add(chunk.toLowerCase());
-      parts.push(chunk);
-    }
-  }
-  try {
-    const root = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
-    const ps = `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    const result = spawnSync(
-      ps,
-      [
-        "-NoProfile",
-        "-Command",
-        "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')",
-      ],
-      { encoding: "utf-8", timeout: 5000, windowsHide: true },
-    );
-    if (result.status === 0 && result.stdout) {
-      for (const chunk of result.stdout.trim().split(";")) {
-        if (chunk && !seen.has(chunk.toLowerCase())) {
-          seen.add(chunk.toLowerCase());
-          parts.push(chunk);
-        }
-      }
-    }
-  } catch {
-    // registry PATH is best-effort
-  }
-  return parts.join(";");
-}
-
-function spawnWhereAll(name: string): string[] {
-  const result = spawnSync(winWhereExe(), [name], {
-    encoding: "utf-8",
-    timeout: 5000,
-    windowsHide: true,
-    env: { ...process.env, PATH: getWindowsSearchPath() },
-  });
-  if (result.status === 0 && result.stdout) {
-    return result.stdout.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function spawnWhere(name: string): string | undefined {
-  return spawnWhereAll(name)[0];
+/** 壳和它的参数；照 pi 的 getShellConfig。WSL 的 bash.exe 命令要走 stdin（pi 同样处理）。 */
+export interface BashShell {
+  shell: string;
+  args: string[];
+  commandTransport?: "stdin";
 }
 
 /** Windows Store / System32 bash.exe is the WSL launcher, not Git Bash. */
@@ -75,47 +15,13 @@ export function isLegacyWslBashPath(path: string): boolean {
   );
 }
 
-function windowsPowershell51(): string {
-  const root = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
-  return `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-}
-
-function isWindowsAppsAlias(path: string): boolean {
-  return path.replace(/\//g, "\\").toLowerCase().includes("\\microsoft\\windowsapps\\");
-}
-
-function defaultStatSize(path: string): number {
-  try {
-    return statSync(path).size;
-  } catch {
-    return 0;
-  }
-}
-
-function isUsableWin32Exe(
-  path: string,
-  exists: (p: string) => boolean,
-  statSize: (p: string) => number,
-): boolean {
-  if (isWindowsAppsAlias(path)) return false;
-  if (!exists(path)) return false;
-  return statSize(path) > 0;
-}
-
-export async function resolveShellPath(deps: ResolveShellPathDeps = {}): Promise<string> {
-  const platform = deps.platform ?? process.platform;
-  if (platform !== "win32") return "bash";
-
-  const exists = deps.exists ?? existsSync;
-  const statSize = deps.statSize ?? defaultStatSize;
-  const ps51 = windowsPowershell51();
-
-  const pwshHits = deps.which
-    ? [deps.which("pwsh.exe")].filter((h): h is string => Boolean(h))
-    : spawnWhereAll("pwsh.exe");
-  for (const hit of pwshHits) {
-    if (isUsableWin32Exe(hit, exists, statSize)) return hit;
-  }
-  if (isUsableWin32Exe(ps51, exists, statSize)) return ps51;
-  return ps51;
+/**
+ * 和 pi 自己的 bash 工具同一套解析（utils/shell.js getShellConfig）：settings.json 的 shellPath →
+ * Windows 上 Program Files 下的 Git Bash → PATH 上第一个 bash.exe → 报错并给出安装说明。Unix 上 /bin/bash → PATH 上的 bash → sh。
+ * pi 包按需加载：sandbox 的共享模块本身不带上整个 SDK。
+ */
+export async function resolveBashShell(shellPath?: string): Promise<BashShell> {
+  const { getShellConfig } = await import("@earendil-works/pi-coding-agent");
+  const config = getShellConfig(shellPath || undefined) as BashShell;
+  return { shell: config.shell, args: [...config.args], ...(config.commandTransport === "stdin" ? { commandTransport: "stdin" } : {}) };
 }

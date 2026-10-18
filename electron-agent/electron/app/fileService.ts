@@ -9,8 +9,11 @@ const MAX_CHILDREN = 200;
 const MAX_TEXT_BYTES = 512 * 1024;
 const MAX_BINARY_BYTES = 64 * 1024 * 1024;
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'target', '.pi', '__pycache__', '.next', 'coverage']);
-/** 文件浏览器按层列目录时跳过的目录。点开头的文件照常列出：.github、.gitignore 这类正是要看的。 */
-const LISTING_SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'out']);
+/**
+ * 文件浏览器按层列目录时跳过的目录。点开头的文件照常列出：.github、.gitignore 这类正是要看的。
+ * .gren 是独立工作区的池目录（整份仓库副本），在主仓的文件树里只会混淆。
+ */
+const LISTING_SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'out', '.gren']);
 const MAX_LISTING_ENTRIES = 5000;
 /** 文件浏览器读文本的上限：更大的文件只读开头这么多，标成截断、只读。 */
 const MAX_VIEW_BYTES = 5 * 1024 * 1024;

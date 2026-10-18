@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Input, Typography } from 'antd';
 import { files } from '../../lib/files';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { openPath } from '../../platform/runtime';
 import { codeStyles as styles } from './codeStyles';
+import { CodeSourceLines, type CodeSourceLinesHandle } from './CodeSourceLines';
 
 export interface CodeSourceDetailProps { workspace: string; file: string; line?: number; visible?: boolean; reloadVersion?: number; onClose?: () => void }
 interface ReadSource { key: string; content: string; absolute: string; relative: string }
@@ -15,12 +16,12 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
   const [jump, setJump] = useState<{ key: string; indexedLine?: number; line: number; version: number }>();
   const [jumpInput, setJumpInput] = useState('');
   const [actionError, setActionError] = useState<{ key: string; message: string }>();
-  const targetElement = useRef<HTMLDivElement>(null);
+  const sourceLines = useRef<CodeSourceLinesHandle>(null);
   const lastScroll = useRef<string | undefined>(undefined);
   const epoch = useRef(0);
   const currentSource = source?.key === key ? source : undefined;
   const state = readState.key === key ? readState : undefined;
-  const lines = currentSource ? currentSource.content.split(/\r?\n/) : [];
+  const lines = useMemo(() => currentSource ? currentSource.content.split(/\r?\n/) : [], [currentSource]);
   const currentJump = jump?.key === key && jump.indexedLine === line ? jump : undefined;
   const requestedLine = currentJump?.line ?? line;
   const hasLine = typeof requestedLine === 'number' && Number.isInteger(requestedLine) && requestedLine > 0;
@@ -57,7 +58,7 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
     if (!visible || !target || !currentSource) return;
     const scrollKey = `${key}\0${target}\0${currentJump?.version ?? 0}`;
     if (lastScroll.current === scrollKey) return;
-    targetElement.current?.scrollIntoView?.({ block: 'center' });
+    sourceLines.current?.scrollToLine(target);
     lastScroll.current = scrollKey;
   }, [key, target, currentJump?.version, currentSource, visible]);
 
@@ -104,9 +105,7 @@ export function CodeSourceDetail({ workspace, file, line, visible = true, reload
         <Button onClick={jumpToLine}>跳转到行</Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{lines.length} 行 · 只读</Typography.Text>
       </div>
-      <pre className={styles.source} aria-label="源码内容">{lines.map((text, index) => <div key={index} data-testid={`code-source-line-${index + 1}`} aria-current={target === index + 1 ? 'location' : undefined} ref={target === index + 1 ? targetElement : undefined}>
-        <span data-line-number aria-hidden="true">{index + 1}</span><code>{text || ' '}</code>
-      </div>)}</pre>
+      <CodeSourceLines ref={sourceLines} lines={lines} target={target} />
     </> : null}
   </section>;
 }

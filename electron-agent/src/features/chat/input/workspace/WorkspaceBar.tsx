@@ -1,7 +1,11 @@
 import { useEffect } from 'react';
 import { Icon } from '@lobehub/ui';
 import { cx } from 'antd-style';
-import { BookOpenText, FolderGit2 } from 'lucide-react';
+import { App } from 'antd';
+import { ArrowUpFromLine, BookOpenText, FolderGit2, ShieldCheck } from 'lucide-react';
+import { isolatedPathOf } from '../../../../lib/isolatedWorkspace';
+import { useIsolatedWorkspaceStore } from '../../../../stores/isolatedWorkspaceStore';
+import { syncBackIsolated } from '../../../isolatedWorkspace/actions';
 import { onPiEvent } from '../../../../lib/pi';
 import { isUnder } from '../../../../lib/pathUtils';
 import { useSessionStore } from '../../../../store/session';
@@ -36,6 +40,16 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
   const openProjectContext = useDockStore((state) => state.openProjectContext);
   const compact = useComposerCompact();
+  const { message } = App.useApp();
+  // 独立工作区（A 轨）：标出来，并给回传入口。形状对还要主进程确认它是托管的、目录还在。
+  const iso = isolatedPathOf(workspace);
+  const isoKind = useIsolatedWorkspaceStore((state) => (workspace ? state.kinds[workspace] : undefined));
+  useEffect(() => {
+    if (iso && workspace) void useIsolatedWorkspaceStore.getState().refreshKinds([workspace]);
+    // iso 由 workspace 决定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
+  const isolated = iso && isoKind === 'active' ? iso : null;
 
   useEffect(() => {
     if (!workspace || isConversation) return;
@@ -61,8 +75,33 @@ export function WorkspaceBar(_props: WorkspaceBarProps) {
     <div className={cx(s.bar, compact && s.barCompact)}>
       <span className={cx(s.chip, s.chipReadonly)} title={workspace}>
         <Icon icon={FolderGit2} size={14} />
-        {compact ? null : <span className={s.chipName}>{workspaceName(workspace)}</span>}
+        {compact ? null : (
+          <span className={s.chipName}>{isolated ? workspaceName(isolated.parentRoot) : workspaceName(workspace)}</span>
+        )}
       </span>
+      {isolated ? (
+        <span
+          className={cx(s.chip, s.chipReadonly)}
+          data-testid="workspace-isolated-chip"
+          title={`独立工作区 ${isolated.branch}：这里的会话不能写主仓 ${isolated.parentRoot}。改完点「回传」把分支带回主仓。`}
+        >
+          <Icon icon={ShieldCheck} size={14} />
+          {compact ? null : <span>独立工作区</span>}
+        </span>
+      ) : null}
+      {isolated ? (
+        <button
+          aria-label="回传分支到主仓"
+          className={s.chip}
+          data-testid="workspace-isolated-sync"
+          title={`把 ${isolated.branch} 快进到主仓的同名分支`}
+          type="button"
+          onClick={() => void syncBackIsolated(isolated.parentRoot, isolated.id, message)}
+        >
+          <Icon icon={ArrowUpFromLine} size={14} />
+          {compact ? null : <span>回传</span>}
+        </button>
+      ) : null}
       <BranchPicker />
       <TaskTray />
       <button

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DirEntry } from '../../lib/files';
-import { buildTree, dirsToWatch, isDescendant, searchTree, withListing, type DirMap } from './treeModel';
+import { ancestorDirs, buildTree, dirsToWatch, isDescendant, searchTree, toTreePath, withListing, type DirMap } from './treeModel';
 
 const dir = (path: string): DirEntry => ({ name: path.split('/').pop()!, path, isDir: true, size: null });
 const file = (path: string, size = 1): DirEntry => ({ name: path.split('/').pop()!, path, isDir: false, size });
@@ -12,6 +12,18 @@ const loaded: DirMap = new Map([
 ]);
 
 describe('treeModel', () => {
+  it('rewrites a forward-slash workspace path into the tree form of the listed root', () => {
+    expect(toTreePath('D:\\ws', 'D:/ws', 'D:/ws/src/a.ts')).toBe('D:\\ws\\src\\a.ts');
+    expect(toTreePath('/r', '/r', '/r/src/a.ts')).toBe('/r/src/a.ts');
+    expect(toTreePath('/r', '/r', '/other/a.ts')).toBe('/other/a.ts');
+  });
+
+  it('lists the ancestor directories of a file from shallow to deep, without the root', () => {
+    expect(ancestorDirs('D:\\ws', 'D:\\ws\\src\\ui\\a.ts')).toEqual(['D:\\ws\\src', 'D:\\ws\\src\\ui']);
+    expect(ancestorDirs('/r', '/r/a.ts')).toEqual([]);
+    expect(ancestorDirs('/r', '/elsewhere/a.ts')).toEqual([]);
+  });
+
   it('builds nested nodes only for loaded directories', () => {
     const tree = buildTree('/r', loaded);
     expect(tree.map((n) => [n.key, n.isLeaf, n.children?.length])).toEqual([

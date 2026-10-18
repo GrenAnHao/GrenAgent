@@ -11,9 +11,10 @@ import {
 } from 'lucide-react';
 import FileIcon from '../../components/FileIcon';
 import { openTurnReview } from '../dock/openLauncherTab';
+import { openWorkspaceFile } from '../dock/openWorkspaceFile';
 import { openPath, revealItemInDir } from '../../platform/runtime';
 import type { ChangeFile, PresentedFile } from './turnDeliverables';
-import { resolveWorkspaceFile } from './turnDeliverables';
+import { resolveSessionFile } from './sessionCwd';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   root: css`
@@ -350,7 +351,7 @@ interface TurnTailProps {
   presented: PresentedFile[];
 }
 
-type OpenPhase = 'opening' | 'opened' | 'error' | 'revealing' | 'revealed' | 'revealError';
+type OpenPhase = 'opening' | 'opened' | 'openedDock' | 'error' | 'revealing' | 'revealed' | 'revealError';
 
 function fallbackDescription(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? path;
@@ -374,6 +375,7 @@ function revealFolderLabel(): string {
 function phaseStatus(phase: OpenPhase, reveal: string): string {
   if (phase === 'opening') return '正在打开…';
   if (phase === 'opened') return '已在默认程序中打开';
+  if (phase === 'openedDock') return '已在右侧文件标签中打开';
   if (phase === 'error') return '打开失败，点击重试';
   if (phase === 'revealing') return reveal === '打开所在文件夹' ? '正在打开所在文件夹…' : '正在文件管理器中显示…';
   if (phase === 'revealed') return reveal === '打开所在文件夹' ? '已请求打开所在文件夹' : '已请求在文件管理器中显示';
@@ -390,7 +392,9 @@ function Counts({ added, deleted }: { added: number; deleted: number }) {
 }
 
 function PresentedFileCard({ file, workspace }: { file: PresentedFile; workspace: string }) {
-  const resolved = resolveWorkspaceFile(workspace, file.path);
+  // 相对路径按调用时会话的工作目录解析，不是项目根；项目工作区之外的文件也能解析。
+  const target = resolveSessionFile(workspace, file.cwd, file.path);
+  const resolved = target?.absolute ?? null;
   const [phase, setPhase] = useState<OpenPhase | undefined>(undefined);
   const pending = phase === 'opening' || phase === 'revealing';
   const reveal = revealFolderLabel();
@@ -400,15 +404,26 @@ function PresentedFileCard({ file, workspace }: { file: PresentedFile; workspace
     : '没有可用的主机路径';
   const errored = phase === 'error' || phase === 'revealError';
 
-  async function run(kind: 'open' | 'reveal', event?: Pick<MouseEvent, 'stopPropagation'>) {
+  // open：可读文件在右侧「文件」标签里看，二进制 / 超大文件由 openWorkspaceFile 退回系统程序；
+  // system：用户在下拉里显式选了默认应用，不拦截。
+  async function run(kind: 'open' | 'system' | 'reveal', event?: Pick<MouseEvent, 'stopPropagation'>) {
     event?.stopPropagation();
-    if (!resolved || pending) return;
-    setPhase(kind === 'open' ? 'opening' : 'revealing');
+    if (!target || pending) return;
+    const revealing = kind === 'reveal';
+    setPhase(revealing ? 'revealing' : 'opening');
     try {
-      await (kind === 'open' ? openPath : revealItemInDir)(resolved);
-      setPhase(kind === 'open' ? 'opened' : 'revealed');
+      if (kind === 'reveal') {
+        await revealItemInDir(target.absolute);
+        setPhase('revealed');
+      } else if (kind === 'system') {
+        await openPath(target.absolute);
+        setPhase('opened');
+      } else {
+        const where = await openWorkspaceFile(target.absolute, target.root);
+        setPhase(where === 'dock' ? 'openedDock' : 'opened');
+      }
     } catch {
-      setPhase(kind === 'open' ? 'error' : 'revealError');
+      setPhase(revealing ? 'revealError' : 'error');
     }
   }
 
@@ -472,7 +487,7 @@ function PresentedFileCard({ file, workspace }: { file: PresentedFile; workspace
               ],
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
-                void run(key === 'reveal' ? 'reveal' : 'open');
+                void run(key === 'reveal' ? 'reveal' : 'system');
               },
             }}
           >
@@ -531,7 +546,7 @@ export function TurnTail({ turnId, workspace, changes, presented }: TurnTailProp
                   <button
                     type="button"
                     className={styles.changeRow}
-                    title={resolveWorkspaceFile(workspace, file.path) ?? file.path}
+                    title={resolveSessionFile(workspace, file.cwd, file.path)?.absolute ?? file.path}
                     aria-label={`查看 ${file.display} 的改动`}
                     onClick={() => openTurnReview({ turnId, fileIndex: index, workspace })}
                   >

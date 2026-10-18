@@ -2,7 +2,8 @@ import type { ConfinedArgv, SandboxPolicy } from "../types.js";
 import { SANDBOX_DENIAL_EXIT } from "../types.js";
 import { capabilitySid } from "./sids.js";
 
-const DENIAL_SIGNATURES = ["access is denied", "拒绝访问"] as const;
+// Git Bash（msys）报的是 Permission denied，原生程序报 Access is denied。
+const DENIAL_SIGNATURES = ["access is denied", "拒绝访问", "permission denied"] as const;
 
 const RUNNER_FAILURE_RULES = [
   {

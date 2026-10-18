@@ -16,6 +16,12 @@ import {
 import { DELEGATION_DENY_REASON, SUBAGENT_ASK_PINNED_RULE_ID } from "../_shared/delegation-scope.js";
 import { canRequestApproval, requestApproval, subagentApprovalTimeoutMs } from "../_shared/approval-route.js";
 import { grantEscalation } from "../_shared/sandbox/escalationGrant.js";
+import {
+  FULL_ACCESS_REFUSAL,
+  isolatedWorkspaceOf,
+  parentWriteRefusal,
+  writesIntoParent,
+} from "../_shared/isolated-workspace.js";
 
 const off = (v: string | undefined) => v === "0" || v?.toLowerCase() === "false";
 // 工具分组取自单一真相源（_shared/tool-groups），避免与 capability 能力闸各维护一份而漂移失配。
@@ -143,6 +149,21 @@ export default function (pi: ExtensionAPI) {
       }
       if (event.toolName === "bash" && isMutatingBash(String(event.input?.command ?? ""))) {
         return refuse("只读模式：禁止会改动文件系统的命令");
+      }
+    }
+
+    // ①' 独立工作区（A 轨）的写闸：写主仓和升权到 full-access 都是硬拒绝，审批档（含 full）和用户规则都越不过。
+    //    身份按会话原始目录认：working_directory 切到主仓里去，相对路径按当前目录解析后照样拦。
+    const isolated = isolatedWorkspaceOf(projectCwd(ctx));
+    if (isolated) {
+      const isWrite = event.toolName === "write" || event.toolName === "edit" || WRITE_BYPASS_TOOLS.has(event.toolName);
+      const p = isWrite ? extractPath((event.input ?? {}) as Record<string, unknown>) : undefined;
+      if (p !== undefined) {
+        const target = resolve(ctx.cwd, p);
+        if (writesIntoParent(isolated, target)) return refuse(parentWriteRefusal(isolated, target));
+      }
+      if (event.toolName === "bash" && (event.input as Record<string, unknown> | undefined)?.sandbox_permissions === "danger-full-access") {
+        return refuse(FULL_ACCESS_REFUSAL);
       }
     }
 

@@ -11,7 +11,7 @@ import { parseAskUserPayload } from '../../components/QuestionSelector/answers';
 import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
-import { useVisualStore } from '../../stores/visualStore';
+import { useVisualStore, type VisualOwner } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 import { isGoalReceiptNotify } from './goalReceiptNotify';
@@ -28,6 +28,15 @@ export function backgroundSessionPathOf(e: PiUiRequestEnvelope): string | undefi
   if (loaded) return pathsEquivalent(loaded, e.sessionPath) ? undefined : e.sessionPath;
   // 画面是还没绑定的草稿：请求只能来自已经停到后台的会话（草稿首发前不会有交互请求）。
   return store.hasLiveActivity() ? undefined : e.sessionPath;
+}
+
+/**
+ * 视觉设计属于发起它的会话：信封带 sessionPath 就记到那一份，不带（启动早期）当成该工作区画面上的会话，
+ * 这和 backgroundSessionPathOf 对「没带 sessionPath」的判断一致。
+ */
+export function visualOwnerOf(e: PiUiRequestEnvelope): VisualOwner {
+  const sessionPath = e.sessionPath ?? agentStoreRegistry.get(e.workspace)?.getLoadedSessionPath() ?? null;
+  return { sessionPath: sessionPath || null, workspace: e.workspace };
 }
 
 type MessageLevel = 'info' | 'success' | 'warning' | 'error';
@@ -141,7 +150,7 @@ export function ExtensionUiHost() {
           try {
             const d = typeof r.statusText === 'string' ? JSON.parse(r.statusText) : null;
             if (d?.action === 'show' && typeof d.html === 'string') {
-              useVisualStore.getState().setVisual(d.html, d.mode === 'panel' ? 'panel' : 'inline');
+              useVisualStore.getState().setVisual(visualOwnerOf(e), d.html, d.mode === 'panel' ? 'panel' : 'inline');
             }
           } catch { /* ignore malformed */ }
         }
@@ -172,13 +181,13 @@ export function ExtensionUiHost() {
           else useInlineQuestionStore.getState().setRequest(item);
           return;
         }
-        // visual choice 哨兵：read_visual_choice 阻塞中，标记 pending 并记录 requestId
+        // visual choice 哨兵：read_visual_choice 阻塞中，按发起会话标记 pending 并记录 requestId（后台会话也要记，切回去才点得动）
         try {
           const titleStr = typeof (e.request as { title?: unknown }).title === 'string'
             ? (e.request as { title: string }).title : null;
           const sentinel = titleStr ? JSON.parse(titleStr) : null;
           if (sentinel?.__visualChoice === 1) {
-            useVisualStore.getState().setPending(true, e.request.id);
+            useVisualStore.getState().setPending(visualOwnerOf(e), true, e.request.id);
             return;
           }
         } catch { /* not visual */ }

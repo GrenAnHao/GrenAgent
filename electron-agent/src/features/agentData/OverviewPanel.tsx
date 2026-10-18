@@ -57,21 +57,21 @@ export function OverviewPanel({ memory, workbench, libraries, codeProjects, task
     <div className={s.columns}>
       <section className={s.list} aria-label="最近任务">
         <div className={s.listHeader}>最近任务<Button type="link" size="small" autoInsertSpace={false} onClick={() => onNavigate('jobs')}>全部</Button></div>
-        {!tasksLoaded ? <Empty description="任务未获取" /> : !tasks.length ? <Empty description="暂无任务" /> : tasks.slice(0, 4).map((item) => <button key={item.key} type="button" className={s.row} aria-label={`查看任务 ${item.label}`} onClick={() => onOpenResource({ view: 'jobs', task: item.ref })}>
+        {!tasksLoaded ? <Empty className={s.listEmpty} description="任务未获取" /> : !tasks.length ? <Empty className={s.listEmpty} description="暂无任务" /> :tasks.slice(0, 4).map((item) => <button key={item.key} type="button" className={s.row} aria-label={`查看任务 ${item.label}`} onClick={() => onOpenResource({ view: 'jobs', task: item.ref })}>
           <span className={s.rowMain}>{item.label}<small>{item.stage ?? item.error ?? formatRelative(item.updatedAt)}</small></span>
           <Tag color={taskStatusColors[item.status]}>{item.cancellationRequested ? '正在取消' : taskStatusLabels[item.status]}</Tag>
         </button>)}
       </section>
       <section className={s.list} aria-label="知识库">
         <div className={s.listHeader}>知识库<Button type="link" size="small" autoInsertSpace={false} onClick={() => onNavigate('wiki')}>全部</Button></div>
-        {libraries.data && !recentLibraries.length ? <Empty description="还没有知识库" /> : recentLibraries.map((library) => <button key={library.wikiId} type="button" className={s.row} aria-label={`打开知识库 ${library.name}`} onClick={() => onOpenResource({ view: 'wiki', kbId: library.wikiId })}>
+        {libraries.data && !recentLibraries.length ? <Empty className={s.listEmpty} description="还没有知识库" /> : recentLibraries.map((library) => <button key={library.wikiId} type="button" className={s.row} aria-label={`打开知识库 ${library.name}`} onClick={() => onOpenResource({ view: 'wiki', kbId: library.wikiId })}>
           <span className={s.rowMain}>{library.name}<small>{library.pageCount ?? 0} 页</small></span>
           <StatusTag domain="wiki" status={library.status} />
         </button>)}
       </section>
       <section className={s.list} aria-label="最近记忆">
         <div className={s.listHeader}>最近记忆<Button type="link" size="small" autoInsertSpace={false} onClick={() => onNavigate('memory')}>全部</Button></div>
-        {data && !data.recentMemories.length ? <Empty description="暂无最近记忆" /> : data?.recentMemories.slice(0, 3).map((record) => <button key={record.id} type="button" className={s.row} title={record.content} aria-label={`打开记忆 ${record.content}`} onClick={() => onOpenResource({ view: 'memory', id: record.id })}>
+        {data && !data.recentMemories.length ? <Empty className={s.listEmpty} description="暂无最近记忆" /> : data?.recentMemories.slice(0, 3).map((record) => <button key={record.id} type="button" className={s.row} title={record.content} aria-label={`打开记忆 ${record.content}`} onClick={() => onOpenResource({ view: 'memory', id: record.id })}>
           <span className={s.rowMain}><span className={s.clamp}>{record.content}</span><small>L{record.level} · {record.scope === 'global' ? '全局' : record.sourceProjectId ? basename(record.sourceProjectId) : '未知归属'} · {formatRelative(record.updatedAt)}</small></span>
         </button>)}
       </section>

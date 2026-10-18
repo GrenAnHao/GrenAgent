@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { ActionIcon, Icon, Popover } from '@lobehub/ui';
 import { ChevronDown, Search, X } from 'lucide-react';
-import { useDockStore, type DockRegion, type DockTab } from '../../stores/dockStore';
+import { isDockOwnerViewed, useDockStore, type DockRegion, type DockTab } from '../../stores/dockStore';
+import { useSessionStore } from '../../store/session';
 import { dockTabKindIcon } from './dockKindIcon';
 import { dockTabStyles } from './dockTabStyles';
 import { formatClosedAgo } from './formatClosedAgo';
@@ -20,6 +21,8 @@ function matchesQuery(title: string, query: string): boolean {
 export function DockTabSwitcher({ region, tabs, onActivate, onClose }: DockTabSwitcherProps) {
   const closedTabs = useDockStore((s) => s.closedTabs ?? []);
   const restoreClosedTab = useDockStore((s) => s.restoreClosedTab);
+  // 切会话后「最近关闭」要重算（视觉设计只列在归属会话里）。
+  const viewedSession = useSessionStore((s) => `${s.activeWorkspace ?? ''}|${s.activeSessionPath ?? ''}`);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -29,9 +32,16 @@ export function DockTabSwitcher({ region, tabs, onActivate, onClose }: DockTabSw
     [tabs, q],
   );
   const closedFiltered = useMemo(() => {
-    const inRegion = closedTabs.filter((c) => c.region === region);
+    // 会话归属的关闭项（视觉设计）只在归属会话里列出：在别的会话里恢复得到的是看不见的标签。
+    const inRegion = closedTabs.filter(
+      (c) =>
+        c.region === region &&
+        (c.ownerSessionPath === undefined ||
+          isDockOwnerViewed({ ownerSessionPath: c.ownerSessionPath, ownerWorkspace: c.ownerWorkspace ?? '' })),
+    );
     return q ? inRegion.filter((c) => matchesQuery(c.title, q)) : inRegion;
-  }, [closedTabs, region, q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedTabs, region, q, viewedSession]);
 
   return (
     <Popover

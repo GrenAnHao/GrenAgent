@@ -92,12 +92,17 @@ export default async function (t) {
   t.check('运行中：调用状态（第 2 次还在跑）', runCalls.map((c) => c.status), ['ok', 'running'])
   t.ok('运行中：meta 显示调用中', (await t.text(`${run} [data-testid="codemode-meta"]`))?.includes('2 次调用'))
   t.check('运行中：卡片状态', await t.js(`document.querySelector('${run} [data-testid="codemode-card"] [data-status]')?.dataset.status`), 'running')
+  // 和 pi 1.2 TUI 的 Elapsed / Took 对齐：运行中标题按秒计时，结束后定格成脚本耗时。
+  const runDuration = (await t.text(`${run} [data-testid="codemode-card"] > [data-testid="tool-execution"] [data-testid="tool-run-duration"]`))?.trim() ?? ''
+  t.ok(`运行中：标题带实时计时（${runDuration}）`, /^· [0-9]+(s|m[0-9]*s?|h[0-9]*m?)$/.test(runDuration))
+  t.check('完成：标题定格成 pi 报的脚本耗时', (await t.text(`${done} [data-testid="codemode-card"] > [data-testid="tool-execution"] [data-testid="tool-run-duration"]`))?.trim(), '· 3.4s')
 
   // —— 实时 · 失败 ——
   const fail = at('live-failed')
   const failCalls = await callsOf(t, 'live-failed')
   t.check('失败：调用状态', failCalls.map((c) => c.status), ['ok', 'error'])
   t.ok('失败：meta 显示失败数', (await t.text(`${fail} [data-testid="codemode-meta"]`))?.includes('1 失败'))
+  t.check('失败：标题同样定格耗时', (await t.text(`${fail} [data-testid="codemode-card"] > [data-testid="tool-execution"] [data-testid="tool-run-duration"]`))?.trim(), '· 2.0s')
   await clickRow(t, `${fail} [data-testid="codemode-card"] > [data-testid="tool-execution"] > div`)
   await t.waitFor(`${fail} [data-testid="codemode-error"]`)
   t.ok('失败：脚本错误单独标红', (await t.text(`${fail} [data-testid="codemode-error"]`))?.includes('not indexed'))

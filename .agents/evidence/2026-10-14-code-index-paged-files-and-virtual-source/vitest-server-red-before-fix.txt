@@ -1,0 +1,125 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+ ❯ |main| electron/agentData/codeRetrievalProtocol.test.ts (68 tests | 1 failed) 15ms
+     × lets the file listing be read one page at a time 3ms
+(node:32108) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32108) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/app/codeGraph/codeGraphQuery.test.ts (16 tests | 5 failed) 1061ms
+       × returns one page and reports where it starts and how many files match in total 5ms
+       × returns an empty page, not an error, past the end 0ms
+       × keeps returning every file when no limit is given, and still reports the total 13ms
+       × applies path and glob filters before paging, so the total counts only the matches 0ms
+       × caps one page at 500 files however large a limit is asked for 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/agentData/codeRetrievalProtocol.test.ts > CodeGraph read-only RPC validation > lets the file listing be read one page at a time
+Error: Unsupported CodeGraph argument: limit
+ ❯ validateCodeRetrievalArgs electron/agentData/codeRetrievalProtocol.ts:74:64
+     72|   const allowed: readonly string[] = toolArguments[readCodeRetrievalTo…
+     73|   for (const key of Object.keys(args)) {
+     74|     if (key !== 'projectPath' && !allowed.includes(key)) throw new Err…
+       |                                                                ^
+     75|   }
+     76|   if (args.projectPath !== undefined) {
+ ❯ electron/agentData/codeRetrievalProtocol.test.ts:56:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |main| electron/app/codeGraph/codeGraphQuery.test.ts > SDK structured queries > paged file listing > returns one page and reports where it starts and how many files match in total
+Error: Unsupported CodeGraph argument: limit
+ ❯ validateCodeRetrievalArgs electron/agentData/codeRetrievalProtocol.ts:74:64
+     72|   const allowed: readonly string[] = toolArguments[readCodeRetrievalTo…
+     73|   for (const key of Object.keys(args)) {
+     74|     if (key !== 'projectPath' && !allowed.includes(key)) throw new Err…
+       |                                                                ^
+     75|   }
+     76|   if (args.projectPath !== undefined) {
+ ❯ executeCodeGraphTool electron/app/codeGraph/codeGraphQuery.ts:11:16
+ ❯ files electron/app/codeGraph/codeGraphQuery.test.ts:75:28
+ ❯ electron/app/codeGraph/codeGraphQuery.test.ts:80:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |main| electron/app/codeGraph/codeGraphQuery.test.ts > SDK structured queries > paged file listing > returns an empty page, not an error, past the end
+Error: Unsupported CodeGraph argument: limit
+ ❯ validateCodeRetrievalArgs electron/agentData/codeRetrievalProtocol.ts:74:64
+     72|   const allowed: readonly string[] = toolArguments[readCodeRetrievalTo…
+     73|   for (const key of Object.keys(args)) {
+     74|     if (key !== 'projectPath' && !allowed.includes(key)) throw new Err…
+       |                                                                ^
+     75|   }
+     76|   if (args.projectPath !== undefined) {
+ ❯ executeCodeGraphTool electron/app/codeGraph/codeGraphQuery.ts:11:16
+ ❯ files electron/app/codeGraph/codeGraphQuery.test.ts:75:28
+ ❯ electron/app/codeGraph/codeGraphQuery.test.ts:85:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  |main| electron/app/codeGraph/codeGraphQuery.test.ts > SDK structured queries > paged file listing > keeps returning every file when no limit is given, and still reports the total
+AssertionError: expected { Object (files, page) } to deeply equal { Object (files, page) }
+
+- Expected
++ Received
+
+@@ -2,10 +2,7 @@
+    "files": [
+      "src/main.ts",
+      "src/other.ts",
+      "src/parser.ts",
+    ],
+-   "page": {
+-     "offset": 0,
+-     "total": 3,
+-   },
++   "page": undefined,
+  }
+
+ ❯ electron/app/codeGraph/codeGraphQuery.test.ts:89:31
+     87|
+     88|     it('keeps returning every file when no limit is given, and still r…
+     89|       expect(await files({})).toEqual({ files: ['src/main.ts', 'src/ot…
+       |                               ^
+     90|     });
+     91|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  |main| electron/app/codeGraph/codeGraphQuery.test.ts > SDK structured queries > paged file listing > applies path and glob filters before paging, so the total counts only the matches
+Error: Unsupported CodeGraph argument: limit
+ ❯ validateCodeRetrievalArgs electron/agentData/codeRetrievalProtocol.ts:74:64
+     72|   const allowed: readonly string[] = toolArguments[readCodeRetrievalTo…
+     73|   for (const key of Object.keys(args)) {
+     74|     if (key !== 'projectPath' && !allowed.includes(key)) throw new Err…
+       |                                                                ^
+     75|   }
+     76|   if (args.projectPath !== undefined) {
+ ❯ executeCodeGraphTool electron/app/codeGraph/codeGraphQuery.ts:11:16
+ ❯ files electron/app/codeGraph/codeGraphQuery.test.ts:75:28
+ ❯ electron/app/codeGraph/codeGraphQuery.test.ts:93:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  |main| electron/app/codeGraph/codeGraphQuery.test.ts > SDK structured queries > paged file listing > caps one page at 500 files however large a limit is asked for
+Error: Unsupported CodeGraph argument: limit
+ ❯ validateCodeRetrievalArgs electron/agentData/codeRetrievalProtocol.ts:74:64
+     72|   const allowed: readonly string[] = toolArguments[readCodeRetrievalTo…
+     73|   for (const key of Object.keys(args)) {
+     74|     if (key !== 'projectPath' && !allowed.includes(key)) throw new Err…
+       |                                                                ^
+     75|   }
+     76|   if (args.projectPath !== undefined) {
+ ❯ executeCodeGraphTool electron/app/codeGraph/codeGraphQuery.ts:11:16
+ ❯ electron/app/codeGraph/codeGraphQuery.test.ts:99:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 failed | 78 passed (84)
+   Start at  18:15:03
+   Duration  1.76s (transform 99ms, setup 0ms, import 854ms, tests 1.08s, environment 0ms)
+

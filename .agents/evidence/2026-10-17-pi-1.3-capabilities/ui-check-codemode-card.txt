@@ -1,0 +1,72 @@
+构建：依赖重新安装过，或 depsGraph.mjs 改过
+场景已构建（生产模式，7.1s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[6348:1017/202328.462:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ codemode-card
+  INFO 截图 collapsed  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-collapsed.png
+  PASS 完成：标题是「运行脚本」
+  PASS 完成：标题摘要列出被调用的 MCP 工具
+  PASS 完成：meta 显示调用次数
+  PASS 完成：3 条嵌套调用都挂在卡片下
+  PASS 完成：嵌套调用状态
+  PASS 完成：嵌套调用来自实时事件
+  PASS 完成：服务器标签
+  PASS 完成：查询参数读成人话
+  PASS 完成：仓库 + 问题
+  PASS 完成：折叠态不出现 mcp__ 原名
+  PASS 完成：顶层只有一张 codemode 卡
+  PASS 完成：嵌套耗时用 pi 记录的值
+  PASS 展开：脚本可见
+  PASS 展开：脚本内容
+  PASS 展开：输出去掉 Script completed 头
+  PASS 展开：返回值 JSON 格式化
+  PASS 展开：文本输出保留
+  PASS 展开：1.1.0 的 ==> text N/M <== 标记不显示
+  PASS 展开：<console_output> 标签不显示
+  PASS 展开：text() 与返回值拆成一个文本块 + 一个 JSON 块
+  PASS 展开：控制台输出单独成块
+  PASS 展开：没有横向溢出
+  INFO 截图 live-done-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-live-done-expanded.png
+  PASS MCP：markdown 渲染出标题
+  PASS MCP：全文路径单独显示
+  PASS MCP：正文不含「全文:」尾巴
+  PASS MCP：JSON 结果格式化
+  INFO 截图 live-done-nested  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-live-done-nested.png
+  PASS 运行中：调用状态（第 2 次还在跑）
+  PASS 运行中：meta 显示调用中
+  PASS 运行中：卡片状态
+  PASS 运行中：标题带实时计时（· 4s）
+  PASS 完成：标题定格成 pi 报的脚本耗时
+  PASS 失败：调用状态
+  PASS 失败：meta 显示失败数
+  PASS 失败：标题同样定格耗时
+  PASS 失败：脚本错误单独标红
+  PASS 失败：没有普通输出块
+  PASS 失败：报错前的控制台输出单独成块
+  PASS 失败：错误块不带控制台内容
+  PASS 失败：输出（错误）排在脚本前面
+  INFO 截图 live-failed-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-live-failed-expanded.png
+  PASS 历史：从 details.calls 还原 3 条调用
+  PASS 历史：调用状态
+  PASS 历史：不是实时行
+  PASS 历史：服务器标签
+  PASS 历史：调用耗时
+  PASS 历史：标题带脚本耗时
+  PASS 历史：成功记录行不可展开
+  PASS 历史：展开后输出标明脚本耗时
+  PASS 历史（1.0.2 形状）：console 行和文本合并显示
+  PASS 历史（1.0.2 形状）：没有控制台块
+  INFO 截图 history-expanded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-history-expanded.png
+  PASS 很多：收起时露 5 条
+  PASS 很多：折叠行写出剩余次数
+  PASS 很多：标题合并同名调用
+  PASS 很多：点开后全部可见
+  PASS 很多：折叠行消失
+  PASS 浅色：服务器标签是深色字（rgb(129, 139, 152)）
+  INFO 截图 light  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\codemode-card-light.png
+  ── 55 passed, 0 failed
+
+通过：codemode-card（10.2s）。只跑了 1/19 个场景，其余 18 个没指定，未运行

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-const { openTurnReview, openPath, revealItemInDir } = vi.hoisted(() => ({
+const { openTurnReview, openPath, revealItemInDir, openWorkspaceFile } = vi.hoisted(() => ({
   openTurnReview: vi.fn(),
   openPath: vi.fn(),
   revealItemInDir: vi.fn(),
+  openWorkspaceFile: vi.fn(),
 }));
 vi.mock('../dock/openLauncherTab', () => ({ openTurnReview }));
+vi.mock('../dock/openWorkspaceFile', () => ({ openWorkspaceFile }));
 vi.mock('../../platform/runtime', () => ({ openPath, revealItemInDir }));
 
 import { TurnTail } from './TurnTail';
@@ -16,6 +18,7 @@ afterEach(() => {
   openTurnReview.mockReset();
   openPath.mockReset();
   revealItemInDir.mockReset();
+  openWorkspaceFile.mockReset();
 });
 
 const changes = [
@@ -48,8 +51,10 @@ describe('TurnTail', () => {
     fireEvent.click(screen.getByText('全部 4 个文件'));
     fireEvent.click(screen.getByText('c.txt'));
     expect(openTurnReview).toHaveBeenCalledWith({ turnId: 'turn-1', fileIndex: 2, workspace: 'D:/ws' });
+    openWorkspaceFile.mockResolvedValue('dock');
     fireEvent.click(screen.getByRole('button', { name: '打开' }));
-    expect(openPath).toHaveBeenCalled();
+    expect(openWorkspaceFile).toHaveBeenCalledWith('D:/ws/a.txt', 'D:/ws');
+    expect(openPath).not.toHaveBeenCalled();
   });
 
   it('uses the original file index while folded', () => {
@@ -77,6 +82,7 @@ describe('TurnTail', () => {
     expect(screen.getByText('没有可用的主机路径')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '打开' }));
     expect(openPath).not.toHaveBeenCalled();
+    expect(openWorkspaceFile).not.toHaveBeenCalled();
   });
 
   it('shows unavailable host path when the file is outside the workspace', () => {
@@ -91,6 +97,7 @@ describe('TurnTail', () => {
     expect(screen.getByText('没有可用的主机路径')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '打开' }));
     expect(openPath).not.toHaveBeenCalled();
+    expect(openWorkspaceFile).not.toHaveBeenCalled();
   });
 
   it('uses 全部 n 个文件 for the presented fold, not 产物', () => {
@@ -125,11 +132,11 @@ describe('TurnTail', () => {
     expect(screen.queryByText(/内部/)).toBeNull();
   });
 
-  it('shows opening then opened status after default-app open succeeds', async () => {
-    let finish = () => {};
-    openPath.mockImplementation(
+  it('shows opening then the dock status after the right-side open succeeds', async () => {
+    let finish = (_where: 'dock' | 'system') => {};
+    openWorkspaceFile.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<'dock' | 'system'>((resolve) => {
           finish = resolve;
         }),
     );
@@ -144,9 +151,73 @@ describe('TurnTail', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开' }));
     expect(screen.getByText('正在打开…')).toBeTruthy();
     await act(async () => {
-      finish();
+      finish('dock');
     });
-    expect(screen.getByText('已在默认程序中打开')).toBeTruthy();
+    expect(screen.getByText('已在右侧文件标签中打开')).toBeTruthy();
+  });
+
+  it('reports the default program when the file had to fall back to the system', async () => {
+    openWorkspaceFile.mockResolvedValue('system');
+    render(
+      <TurnTail turnId="turn-1" workspace="D:/ws" changes={[]} presented={[{ path: 'a.zip', display: 'a.zip' }]} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '打开' }));
+    expect(await screen.findByText('已在默认程序中打开')).toBeTruthy();
+  });
+
+  it('opens a file in the directory the session had moved to, not under the project root', async () => {
+    openWorkspaceFile.mockResolvedValue('dock');
+    render(
+      <TurnTail
+        turnId="turn-1"
+        workspace="D:\\Proj\\App"
+        changes={[]}
+        presented={[{ path: 'docs/r.md', display: 'r.md', cwd: 'E:\\extract' }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '打开' }));
+    expect(openWorkspaceFile).toHaveBeenCalledWith('E:/extract/docs/r.md', 'E:\\extract');
+  });
+
+  it('opens an absolute file outside the project instead of disabling the card', async () => {
+    openWorkspaceFile.mockResolvedValue('dock');
+    render(
+      <TurnTail
+        turnId="turn-1"
+        workspace="D:/ws"
+        changes={[]}
+        presented={[{ path: 'F:/other/n.txt', display: 'n.txt' }]}
+      />,
+    );
+    expect(screen.queryByText('没有可用的主机路径')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '打开' }));
+    expect(openWorkspaceFile).toHaveBeenCalledWith('F:/other/n.txt', 'F:/other');
+  });
+
+  it('shows a retry hint when opening fails', async () => {
+    openWorkspaceFile.mockRejectedValue(new Error('boom'));
+    render(
+      <TurnTail turnId="turn-1" workspace="D:/ws" changes={[]} presented={[{ path: 'a.zip', display: 'a.zip' }]} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '打开' }));
+    expect(await screen.findByText('打开失败，点击重试')).toBeTruthy();
+  });
+
+  it('always opens with the system program when the user picks it from the menu', async () => {
+    openPath.mockResolvedValue(undefined);
+    render(
+      <TurnTail
+        turnId="turn-1"
+        workspace="D:/ws"
+        changes={[]}
+        presented={[{ path: 'a.txt', display: 'a.txt', description: '文件读写测试' }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'a.txt 的更多文件操作' }));
+    fireEvent.click(await screen.findByText('用默认应用打开'));
+    expect(openPath).toHaveBeenCalledWith('D:/ws/a.txt');
+    expect(openWorkspaceFile).not.toHaveBeenCalled();
+    expect(await screen.findByText('已在默认程序中打开')).toBeTruthy();
   });
 
   it('offers default-app and reveal actions in the split menu', async () => {

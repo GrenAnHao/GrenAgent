@@ -1,0 +1,5 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 231 passed | 3 skipped (235)
+      Tests  1 failed | 2123 passed | 28 skipped (2152)
+
+（随后 shellPath.test 首个用例在全量并行下动态加载 pi SDK 超过 5 秒，给该 describe 加 30 秒超时后单跑 4/4 通过；其余 2123 条在这次全量里通过。）

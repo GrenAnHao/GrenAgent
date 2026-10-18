@@ -199,6 +199,18 @@ export class WorkspaceService {
     }
   }
 
+  /**
+   * 删独立工作区目录前：收口子代理、关掉 handle、释放子代理注册表。会话文件不删——W 删掉后历史仍可只读查看。
+   */
+  async releaseWorkspace(workspace: string): Promise<void> {
+    await this.tearDownChildSessions(workspace);
+    try {
+      await this.closeWorkspace?.(workspace);
+    } finally {
+      await this.subagentControl.release(workspace);
+    }
+  }
+
   async removeProject(workspace: string): Promise<void> {
     await this.deleteSessionsForWorkspace(workspace);
     await this.forgetProject(workspace);

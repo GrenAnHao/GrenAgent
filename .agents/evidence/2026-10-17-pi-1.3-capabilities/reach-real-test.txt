@@ -1,0 +1,8 @@
+# extensions/mcp/reach.real.test.ts — real AgentSession + official codemode + faux model
+## with the tool_call wait (npx vitest run mcp):
+ Test Files  19 passed (19)
+      Tests  191 passed (191)
+## tool_call wait disabled (temporary __NO_REACH__ guard, reverted):
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected 'Script failed\nWall time 0.1 seconds\…' to contain 'DOCS_OK'
+      Tests  1 failed (1)

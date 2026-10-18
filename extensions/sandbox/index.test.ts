@@ -1,4 +1,8 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetIsolatedWorkspaceCacheForTest, isolatedMarkerPath } from "../_shared/isolated-workspace.js";
 import { setApprovalPolicy, __resetApprovalForTest } from "../_shared/approval.js";
 import {
   grantEscalation,
@@ -131,15 +135,14 @@ describe("sandbox extension", () => {
     expect(Object.keys(properties)).toEqual(expect.arrayContaining(["sandbox_permissions", "justification"]));
   });
 
-  it("annotates the bash tool for PowerShell on win32", () => {
+  it("describes the bash tool the same on win32 as pi does: Git Bash, no PowerShell rules", () => {
     const original = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
     try {
       const tool = bash(load().tools);
-      expect(tool.promptSnippet).toContain("PowerShell");
-      expect(tool.promptSnippet).not.toContain("ls, grep, find");
-      expect(tool.description).toContain("exit $LASTEXITCODE");
-      expect(tool.promptGuidelines?.some((g) => g.includes("PowerShell"))).toBe(true);
+      expect(tool.promptSnippet).toBe("Execute bash commands (ls, grep, find, etc.)");
+      expect(tool.description).not.toMatch(/PowerShell|LASTEXITCODE/);
+      expect(tool.promptGuidelines?.some((g) => /PowerShell|LASTEXITCODE/.test(g))).toBe(false);
       expect(tool.parameters?.properties?.description).toBeTruthy();
       expect(tool.parameters?.required).toContain("description");
       expect(tool.promptGuidelines?.some((g) => g.includes("shown in the UI"))).toBe(true);
@@ -220,6 +223,57 @@ describe("sandbox extension", () => {
     await handlers.session_shutdown?.({}, sessionCtx());
     expect(mocks.dispose).toHaveBeenCalledWith(SESSION);
     expect(takeEscalationGrant(SESSION, "call-9", "workspace-write")).toBe(false);
+  });
+
+  describe("isolated workspace (A track)", () => {
+    function makeIsolated(): { tmp: string; w: string } {
+      __resetIsolatedWorkspaceCacheForTest();
+      const tmp = realpathSync.native(mkdtempSync(join(tmpdir(), "gren-sandbox-iso-")));
+      const parent = join(tmp, "repo");
+      const w = join(parent, ".gren", "worktrees", "abc12345");
+      mkdirSync(w, { recursive: true });
+      writeFileSync(isolatedMarkerPath(parent, "abc12345"), JSON.stringify({
+        version: 1, id: "abc12345", path: w, parentRoot: parent, branch: "gren/abc12345",
+        base: { kind: "fresh", ref: "origin/main", commit: "deadbeef" }, createdAt: "2026-10-18T00:00:00.000Z", createdBy: "grenagent",
+      }));
+      return { tmp, w };
+    }
+
+    it("full preset is clamped to workspace-write and the policy says full-access is blocked", async () => {
+      const { tmp, w } = makeIsolated();
+      try {
+        setApprovalPolicy("full", w);
+        const { handlers } = load();
+        await start(handlers, w);
+        expect(mocks.getPolicy?.()).toMatchObject({ mode: "workspace-write", workspaceRoot: w, fullAccessBlocked: true });
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("escalating to danger-full-access throws without a prompt and never runs", async () => {
+      const { tmp, w } = makeIsolated();
+      try {
+        setApprovalPolicy("auto", w);
+        const { tools, handlers } = load();
+        await start(handlers, w);
+        const ctx = execCtx({ cwd: w });
+        ctx.ui.select.mockResolvedValue("允许本次");
+        await expect(escalate(tools, ctx, "danger-full-access")).rejects.toThrow(/isolated workspace/);
+        expect(ctx.ui.select).not.toHaveBeenCalled();
+        expect(mocks.exec).not.toHaveBeenCalled();
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("an ordinary project with the full preset keeps danger-full-access", async () => {
+      setApprovalPolicy("full", CWD);
+      const { handlers } = load();
+      await start(handlers);
+      expect(mocks.getPolicy?.()).toMatchObject({ mode: "danger-full-access" });
+      expect(mocks.getPolicy?.()).not.toHaveProperty("fullAccessBlocked");
+    });
   });
 
   it("uses session_start ctx.cwd and sessionManager.getSessionId for getPolicy", async () => {

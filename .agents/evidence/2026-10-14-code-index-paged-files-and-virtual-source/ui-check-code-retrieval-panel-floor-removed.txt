@@ -1,0 +1,86 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-retrieval-panel
+
+构建：1 个源文件有改动（src/features/agentData/codeStyles.ts）
+场景已构建（生产模式，3.8s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+
+▸ code-retrieval-panel
+  PASS 文件列表渲染出来
+  PASS 3000 个文件只画第一页
+  PASS 只向主进程要了第一页
+  PASS 顶部写着真实总数（不是已加载的行数）
+  PASS 空查询：外层面板没有被撑长（不出现整页滚动）
+  PASS 空查询：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 结果比栏高，列表在栏内滚动
+  PASS 分栏吃掉了页头以下的剩余高度
+  INFO 截图 files-first-page  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-files-first-page.png
+  PASS 找到「显示更多」
+  PASS 滚到底后「显示更多」完整露在栏里
+  PASS 按钮写着剩余数量
+  PASS 点一次追加一页
+  PASS 第二页从第 100 项起，只要了一页
+  PASS 追加一页后：外层面板没有被撑长（不出现整页滚动）
+  PASS 追加一页后：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 一路点到底，3000 个文件全部加载
+  PASS 全部加载后「显示更多」消失
+  PASS 一共 30 次请求，每次一页
+  PASS 没有任何一次请求返回超过一页
+  PASS 顶部仍写着总数
+  PASS 全部加载后：外层面板没有被撑长（不出现整页滚动）
+  PASS 全部加载后：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 折叠着的原始结果不画内容
+  INFO 截图 files-all-loaded  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-files-all-loaded.png
+  PASS 搜索结果 40 条全画出来
+  PASS 不足一页没有「显示更多」
+  PASS 搜索结果：外层面板没有被撑长（不出现整页滚动）
+  PASS 搜索结果：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 找到「原始结果」
+  PASS 折叠时不画原始内容
+  PASS 展开后出现原始内容
+  PASS 原始内容高度有上限（420px ≤ 422px）
+  PASS 超长内容写明已截断
+  PASS 展开原始结果后：外层面板没有被撑长（不出现整页滚动）
+  PASS 展开原始结果后：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 源码预览出来
+  PASS 小文件 400 行全在 DOM 里（不虚拟化，整段可选中复制）
+  PASS 详情栏和列表栏同高
+  PASS 详情内容比栏高，在栏内滚动
+  PASS 源码预览自己有高度上限（520px ≤ 522px）
+  PASS 详情：外层面板没有被撑长（不出现整页滚动）
+  PASS 详情：分栏有高度，底边在窗口里（847 ≤ 880）
+  INFO 截图 detail  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-detail.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  PASS 大文件只挂窗口附近的行（35 行，不是 12000）
+  PASS 索引行 6 挂在 DOM 里且标成当前位置
+  PASS 索引行 6 完整在预览可视区里
+  PASS 大文件预览同样有高度上限（520px ≤ 522px）
+  PASS 大文件详情：外层面板没有被撑长（不出现整页滚动）
+  PASS 大文件详情：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 跳到第 9000 行后它在预览可视区里
+  PASS 第 9000 行大致居中（偏离 0px ≤ 120px）
+  PASS 跳转后窗口仍然很小
+  INFO 截图 big-source-line-9000  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-big-source-line-9000.png
+  PASS 折行的长注释比普通行高（61px > 20px）
+  PASS 长注释行紧接着上一行，没有重叠
+  PASS 滚到底能看到最后一行
+  PASS 滚到底时窗口仍然很小
+  PASS 滚回顶部能看到第一行
+  FAIL 矮窗口：分栏保住了下限（142px ≥ 260px）  got false
+  FAIL 矮窗口：放不下的部分由外层面板滚动  got false
+  PASS 窄视口详情：外层面板没有被撑长（不出现整页滚动）
+  PASS 窄视口详情：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 窄视口详情栏在栏内滚动
+  PASS 窄视口下大文件窗口仍然很小
+  INFO 截图 detail-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-detail-narrow.png
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  [page] ResizeObserver loop completed with undelivered notifications.
+  ── 59 passed, 2 failed
+
+失败场景：code-retrieval-panel（55.5s）
+单独复跑确认：node ui-harness/check.mjs code-retrieval-panel

@@ -1,0 +1,58 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-retrieval-panel
+
+构建：3 个源文件有改动（src/features/agentData/CodeRetrievalPanel.tsx、src/features/agentData/codeStyles.ts 等）
+场景已构建（生产模式，3.7s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[46612:1014/180850.587:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[46612:1014/180850.588:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[46612:1014/180850.588:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: 拒绝访问。 (0x5)
+[46612:1014/180850.594:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[46612:1014/180850.594:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[46612:1014/180850.594:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[46612:1014/180850.594:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+[46612:1014/180850.594:ERROR:net\disk_cache\disk_cache.cc:236] Unable to create cache
+[46612:1014/180850.594:ERROR:gpu\ipc\host\gpu_disk_cache.cc:724] Gpu Cache Creation failed: -2
+
+▸ code-retrieval-panel
+  PASS 文件列表渲染出来
+  PASS 3000 个文件只画第一页
+  PASS 顶部写着总数
+  PASS 空查询：外层面板没有被撑长（不出现整页滚动）
+  PASS 空查询：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 结果比栏高，列表在栏内滚动
+  PASS 分栏吃掉了页头以下的剩余高度
+  INFO 截图 files-first-page  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-files-first-page.png
+  PASS 找到「显示更多」
+  PASS 滚到底后「显示更多」完整露在栏里
+  PASS 按钮写着剩余数量
+  PASS 点一次追加一页
+  PASS 追加一页后：外层面板没有被撑长（不出现整页滚动）
+  PASS 追加一页后：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 找到「原始结果」
+  PASS 折叠时不画原始内容
+  PASS 展开后出现原始内容
+  PASS 原始内容高度有上限（420px ≤ 422px）
+  PASS 超长内容写明已截断
+  PASS 展开原始结果后：外层面板没有被撑长（不出现整页滚动）
+  PASS 展开原始结果后：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 搜索结果 40 条全画出来
+  PASS 不足一页没有「显示更多」
+  PASS 搜索结果：外层面板没有被撑长（不出现整页滚动）
+  PASS 搜索结果：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 源码预览出来
+  PASS 详情栏和列表栏同高
+  PASS 详情内容比栏高，在栏内滚动
+  PASS 源码预览自己有高度上限（520px ≤ 522px）
+  PASS 详情：外层面板没有被撑长（不出现整页滚动）
+  PASS 详情：分栏有高度，底边在窗口里（847 ≤ 880）
+  INFO 截图 detail  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-detail.png
+  PASS 窄视口详情：外层面板没有被撑长（不出现整页滚动）
+  PASS 窄视口详情：分栏有高度，底边在窗口里（847 ≤ 880）
+  PASS 窄视口详情栏在栏内滚动
+  INFO 截图 detail-narrow  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-retrieval-panel-detail-narrow.png
+  ── 33 passed, 0 failed
+
+通过：code-retrieval-panel（14.2s）。只跑了 1/18 个场景，其余 17 个没指定，未运行

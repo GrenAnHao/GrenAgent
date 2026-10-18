@@ -11,7 +11,7 @@ import { CodeViewWarmup } from './features/tools/LazyHighlighter';
 import { Sidebar } from './features/sessions/Sidebar';
 import { DockPanel } from './features/dock/DockPanel';
 import { DockDndProvider } from './features/dock/DockDndProvider';
-import { closeVisualDockTab, openVisualDockTab } from './features/visual/openVisualDockTab';
+import { closeVisualDockTab, forgetClosedVisualTab, openVisualDockTab, visualTabId } from './features/visual/openVisualDockTab';
 import { useVisualStore } from './stores/visualStore';
 import { useDockStore } from './stores/dockStore';
 import { Titlebar } from './components/Titlebar';
@@ -31,6 +31,8 @@ import { dismissBootSplash } from './lib/bootSplash';
 import { onPiEvent, pi, type OpenWorkspaceResult } from './lib/pi';
 import { readUiHistoryForSession, sessionKeyFromPath } from './lib/uiHistory';
 import { pickDirectory } from './lib/dialog';
+import { IsolatedWorkspaceDialogs } from './features/isolatedWorkspace/IsolatedWorkspaceDialogs';
+import { openReadonlyIfIsolatedGone } from './features/isolatedWorkspace/actions';
 import { prewarmWorkspace } from './lib/prewarm';
 import { createStartupPerf } from './lib/startupPerf';
 import { IS_DEV } from './lib/devMode';
@@ -219,37 +221,54 @@ const SidebarPanel = memo(function SidebarPanel({
 
 const RightPanelColumn = memo(function RightPanelColumn() {
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel);
-  const visualMode = useVisualStore((s) => s.mode);
-  const visualHtml = useVisualStore((s) => s.html);
-  const sessionId = useVisualStore((s) => s.sessionId);
-  const visualTabOpen = useDockStore((s) => s.tabs.some((tab) => tab.id === 'visual:panel'));
-  const openedRef = useRef(false);
-  const sawTabRef = useRef(false);
+  // 视觉设计按发起它的会话分开记：每个会话各自一个标签，归属、内容、回写都不看当前停在哪个会话。
+  const visualEntries = useVisualStore((s) => s.entries);
+  const visualTabIds = useDockStore((s) =>
+    s.tabs.filter((tab) => tab.kind === 'visual').map((tab) => tab.id).join('\n'),
+  );
+  /** key → 已为这个 rev 开过标签（同一页不重复抢焦点，用户关掉后也不自动再开） */
+  const shownRevRef = useRef(new Map<string, number>());
+  const sawTabRef = useRef(new Set<string>());
 
   useEffect(() => {
-    if (visualMode === 'panel' && visualHtml) {
-      openVisualDockTab(sessionId);
-      openedRef.current = true;
-      return;
+    const shown = shownRevRef.current;
+    for (const [key, entry] of Object.entries(visualEntries)) {
+      if (entry.mode === 'panel' && entry.html) {
+        if (shown.get(key) !== entry.rev) {
+          openVisualDockTab(entry);
+          shown.set(key, entry.rev);
+        }
+      } else if (shown.has(key)) {
+        closeVisualDockTab(key);
+        shown.delete(key);
+        sawTabRef.current.delete(key);
+      }
     }
-    if (openedRef.current) {
-      closeVisualDockTab();
-      openedRef.current = false;
-      sawTabRef.current = false;
+    for (const key of [...shown.keys()]) {
+      if (visualEntries[key]) continue;
+      closeVisualDockTab(key);
+      shown.delete(key);
+      sawTabRef.current.delete(key);
     }
-  }, [visualMode, visualHtml, sessionId]);
+  }, [visualEntries]);
 
   useEffect(() => {
-    if (visualTabOpen) {
-      sawTabRef.current = true;
-      return;
+    const open = new Set(visualTabIds ? visualTabIds.split('\n') : []);
+    for (const [key, entry] of Object.entries(visualEntries)) {
+      if (open.has(visualTabId(key))) {
+        sawTabRef.current.add(key);
+        continue;
+      }
+      // 打开的同一帧标签还不在列表里，不能当成用户关掉。
+      if (!sawTabRef.current.has(key) || entry.mode !== 'panel') continue;
+      sawTabRef.current.delete(key);
+      // 用户关掉标签：视觉设计还在等确认就保留条目（可从「最近关闭」重新打开），否则这一页到此为止。
+      if (entry.pending) continue;
+      shownRevRef.current.delete(key);
+      forgetClosedVisualTab(key);
+      useVisualStore.getState().clearVisual(entry);
     }
-    // 打开的同一帧标签还不在列表里，不能当成用户关掉。
-    if (!sawTabRef.current || visualMode !== 'panel') return;
-    sawTabRef.current = false;
-    openedRef.current = false;
-    useVisualStore.getState().clearVisual();
-  }, [visualTabOpen, visualMode]);
+  }, [visualTabIds, visualEntries]);
 
   return (
     <RightPanelShell>
@@ -486,6 +505,8 @@ const Workspace = memo(function Workspace() {
 
   const handleOpenSession = useCallback(
     async (cwd: string, path: string) => {
+      // 独立工作区已删除：目录不在，运行时开不起来；会话 jsonl 还在，改成只读查看。
+      if (openReadonlyIfIsolatedGone(cwd, path)) return;
       const st = useSessionStore.getState();
       const previousPath = st.activeSessionPath;
       const previousWorkspacePath = st.workspaceSessionPaths[cwd];
@@ -673,9 +694,8 @@ const Workspace = memo(function Workspace() {
     enterPendingNewSession(cwd, () => store.reset());
   }, [store]);
 
-  const handleOpenProject = useCallback(async () => {
-    const dir = await pickDirectory();
-    if (!dir) return;
+  /** 把一个目录当项目打开：选文件夹、新建独立工作区都走这里。 */
+  const openProjectAt = useCallback(async (dir: string) => {
     const openResult = await pi.openWorkspace(dir);
     const st = useSessionStore.getState();
     st.registerProject(dir);
@@ -683,6 +703,12 @@ const Workspace = memo(function Workspace() {
     applyOpenedProject(dir, openResult.sessionFile, () => store.reset());
     void refreshAllSessions(true);
   }, [store]);
+
+  const handleOpenProject = useCallback(async () => {
+    const dir = await pickDirectory();
+    if (!dir) return;
+    await openProjectAt(dir);
+  }, [openProjectAt]);
 
   const handleDeleteConversation = useCallback(
     (cwd: string) => {
@@ -794,6 +820,18 @@ const Workspace = memo(function Workspace() {
     [goToSafeWorkspace],
   );
 
+  // 删掉了一个独立工作区：不再记成空项目（有会话的话组还在，标「已删除」）；正停在它上面就回父项目。
+  const handleIsolatedDeleted = useCallback(
+    (path: string, parentRoot: string) => {
+      invalidateAllSessionsCache();
+      useSessionStore.getState().unregisterProject(path);
+      useSidebarPrefsStore.getState().dropKeptProject(path);
+      if (pathsEquivalent(useSessionStore.getState().activeWorkspace, path)) handleNewSession(parentRoot);
+      void refreshAllSessions(true);
+    },
+    [handleNewSession],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey && (e.key === 'n' || e.key === 'N')) {
@@ -852,6 +890,8 @@ const Workspace = memo(function Workspace() {
   const sidebarClearProjectSessions = useStableCallback(handleClearProjectSessions);
   const sidebarRemoveProject = useStableCallback(handleRemoveProject);
   const sidebarSubmitRename = useStableCallback(handleSubmitRename);
+  const isolatedOpenProject = useStableCallback(openProjectAt);
+  const isolatedDeleted = useStableCallback(handleIsolatedDeleted);
 
   return (
     <Flexbox style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
@@ -882,6 +922,7 @@ const Workspace = memo(function Workspace() {
           />
         </Flexbox>
       </Flexbox>
+      <IsolatedWorkspaceDialogs openProject={isolatedOpenProject} onDeleted={isolatedDeleted} />
     </Flexbox>
   );
 });

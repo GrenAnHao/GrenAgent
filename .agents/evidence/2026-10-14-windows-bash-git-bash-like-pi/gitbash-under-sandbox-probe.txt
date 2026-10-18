@@ -1,0 +1,36 @@
+
+===== main: D:\Kits\Git\bin\bash.exe (415 ms) workspace=C:\Users\rxstudio\AppData\Local\Temp\gb-ws-JFi9lo
+exit=7
+--- stdout
+中文
+/c/Users/rxstudio/AppData/Local/Temp/gb-ws-JFi9lo
+C:/Users/rxstudio/AppData/Local/Temp/gb-ws-JFi9lo
+HOME=/c/Users/rxstudio TMP=/tmp
+inside_ok
+outside_rc=1
+pipe_ok
+bg_ok
+git version 2.54.0.windows.1
+
+--- stderr
+/usr/bin/bash: line 6: /c/Users/rxstudio/AppData/Local/Temp/gb-out-IDdmYf/no.txt: Permission denied
+
+--- inside file: "in\n" | outside file: null
+
+===== main: D:\Kits\Git\usr\bin\bash.exe (477 ms) workspace=C:\Users\rxstudio\AppData\Local\Temp\gb-ws-s8yKtA
+exit=7
+--- stdout
+中文
+/c/Users/rxstudio/AppData/Local/Temp/gb-ws-s8yKtA
+C:/Users/rxstudio/AppData/Local/Temp/gb-ws-s8yKtA
+HOME=/c/Users/rxstudio TMP=/tmp
+inside_ok
+outside_rc=1
+pipe_ok
+bg_ok
+git version 2.46.0.windows.1
+
+--- stderr
+/usr/bin/bash: line 6: /c/Users/rxstudio/AppData/Local/Temp/gb-out-yR8NZH/no.txt: Permission denied
+
+--- inside file: "in\n" | outside file: null

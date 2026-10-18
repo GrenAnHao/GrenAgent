@@ -50,6 +50,31 @@ describe('fileDiffModel', () => {
     expect(readLineRange({ offset: 8 })).toBe('8-');
   });
 
+  it('reads strict-schema nulls and numeric strings like pi formatReadLineRange', async () => {
+    const { formatReadLineRange } = await import('@earendil-works/pi-coding-agent');
+    const toPi = (range: string | undefined) => (range === undefined ? '' : `:${range.replace(/-$/, '')}`);
+    const cases: Array<[unknown, unknown]> = [
+      [null, null],
+      [undefined, undefined],
+      [12, 20],
+      ['12', '20'],
+      [null, 5],
+      [7, null],
+      ['7', undefined],
+      ['abc', 3],
+      [3, 'abc'],
+      ['', 3],
+    ];
+    for (const [offset, limit] of cases) {
+      const ours = readLineRange({ path: 'a.ts', offset, limit });
+      const pi = formatReadLineRange(offset, limit);
+      // pi writes a one-line window as :4-4; we write 4. Compare the start and end numbers instead.
+      expect(toPi(ours).replace(/^:(\d+)$/, ':$1'), `offset=${String(offset)} limit=${String(limit)}`).toBe(
+        pi.replace(/^:(\d+)-\1$/, ':$1'),
+      );
+    }
+  });
+
   it('write intended is all additions and drops a trailing empty line', () => {
     const diff = fileDiffModel(
       'write',

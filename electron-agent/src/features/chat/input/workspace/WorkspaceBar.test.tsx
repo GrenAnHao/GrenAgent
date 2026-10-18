@@ -4,21 +4,33 @@ import { makeProjectContextPastedText } from './projectContextCitation';
 import { useDockStore } from '../../../../stores/dockStore';
 import { useLayoutStore } from '../../../../stores/layoutStore';
 
-const { gitLoad, piHandlers } = vi.hoisted(() => ({
+const { gitLoad, piHandlers, ctx, piApi } = vi.hoisted(() => ({
   gitLoad: vi.fn(),
   piHandlers: [] as Array<(e: { workspace: string; source?: string; event: { type: string } }) => void>,
+  ctx: { workspace: '/repo' },
+  piApi: {
+    probeIsolatedWorkspaces: vi.fn(async (paths: string[]) => Object.fromEntries(paths.map((p) => [p, 'active']))),
+    syncBackIsolatedWorkspace: vi.fn(async () => ({ branch: 'gren/abc12345', commit: '1234567abcdef' })),
+  },
 }));
 vi.mock('../../../../lib/pi', () => ({
   onPiEvent: vi.fn((handler: (typeof piHandlers)[number]) => {
     piHandlers.push(handler);
     return Promise.resolve(() => {});
   }),
+  pi: piApi,
 }));
-vi.mock('../../../../store/session', () => ({
-  useSessionStore: (selector: (state: { worksDir: string }) => unknown) => selector({ worksDir: '/works' }),
-}));
+vi.mock('../../../../store/session', () => {
+  // 右栏标签打开时要读当前会话（getState）记归属。
+  const state = { worksDir: '/works', activeSessionPath: '/repo/s.jsonl', activeWorkspace: '/repo' };
+  return {
+    useSessionStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), {
+      getState: () => state,
+    }),
+  };
+});
 vi.mock('../../../../stores/AgentStoreContext', () => ({
-  useAgentStoreContext: () => ({ workspace: '/repo' }),
+  useAgentStoreContext: () => ({ workspace: ctx.workspace }),
 }));
 vi.mock('../../../../stores/gitStore', () => ({
   useGitInfo: () => ({ current: '', branches: [], changes: [], loading: false, loaded: true }),
@@ -27,8 +39,11 @@ vi.mock('../../../../stores/gitStore', () => ({
 vi.mock('./TaskTray', () => ({ TaskTray: () => <span data-testid="task-tray" /> }));
 
 import { WorkspaceBar } from './WorkspaceBar';
+import { useIsolatedWorkspaceStore } from '../../../../stores/isolatedWorkspaceStore';
 
 beforeEach(() => {
+  ctx.workspace = '/repo';
+  useIsolatedWorkspaceStore.setState({ kinds: {} });
   gitLoad.mockClear();
   piHandlers.length = 0;
   useDockStore.setState({ tabs: [], activeByRegion: { right: null, bottom: null } });
@@ -83,6 +98,23 @@ describe('WorkspaceBar', () => {
     expect(gitLoad).toHaveBeenCalledTimes(1);
     emit('interactive', 'tool_execution_end');
     expect(gitLoad).toHaveBeenCalledTimes(2);
+  });
+
+  it('an ordinary project has no isolated chip', () => {
+    render(<WorkspaceBar />);
+    expect(screen.queryByTestId('workspace-isolated-chip')).toBeNull();
+    expect(piApi.probeIsolatedWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it('an isolated workspace shows the parent name, an isolated chip and a sync-back button', async () => {
+    ctx.workspace = '/repo/.gren/worktrees/abc12345';
+    render(<WorkspaceBar />);
+    expect(await screen.findByTestId('workspace-isolated-chip')).toBeTruthy();
+    expect(screen.getByTestId('workspace-isolated-chip').getAttribute('title')).toContain('不能写主仓');
+    expect(screen.getByText('repo')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('workspace-isolated-sync'));
+    await Promise.resolve();
+    expect(piApi.syncBackIsolatedWorkspace).toHaveBeenCalledWith('/repo', 'abc12345');
   });
 
   it('places the project context chip last and opens it in the existing right dock', () => {

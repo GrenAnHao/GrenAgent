@@ -6,7 +6,7 @@ import { useAgentDataTaskMonitor } from './AgentDataTaskProvider';
 import { CodeProjectList } from './CodeProjectList';
 import { CodeRelations, CodeResultContent, codeRequestError } from './CodeRelations';
 import { CodeSourceDetail } from './CodeSourceDetail';
-import { decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
+import { appendCodeResultPage, CODE_PAGE_SIZE, decodeCodeResult, retainedCodeResult, type CodeResultRow, type CodeResultView } from './codeResult';
 import { codeStyles as styles } from './codeStyles';
 import { useProjectOptions } from './useProjectOptions';
 import { taskStatusLabels } from './operationsPresentation';
@@ -29,7 +29,8 @@ interface CodeRetrievalPanelProps {
   navigationRequest?: number;
   onOpenTask?: (id: string) => void;
 }
-interface QueryState { workspace: string; result?: CodeResultView; retained?: CodeResultView; error?: string; loading: boolean }
+/** loadingMore：文件列表正在取下一页；整个 QueryState 被新查询替换时它自然归零。 */
+interface QueryState { workspace: string; result?: CodeResultView; retained?: CodeResultView; error?: string; loading: boolean; loadingMore?: boolean }
 const jobStateLabels = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
 function projectKey(workspace: string): string { return workspace.replace(/\\/g, '/').replace(/^\/\/\?\//, '').replace(/\/+$/, '').toLowerCase(); }
 
@@ -77,7 +78,14 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
   const currentResult = queryState?.workspace === project ? queryState : undefined;
   const currentNode = nodeState?.workspace === project ? nodeState : undefined;
   let queryTool: 'codegraph_search' | 'codegraph_explore' | 'codegraph_files' = 'codegraph_files';
-  if (query.trim()) queryTool = mode === 'search' ? 'codegraph_search' : 'codegraph_explore';
+  // 查询只认去掉首尾空白后的文本：只敲空格不该重取第一页，把已加载的页覆盖掉。
+  const queryText = query.trim();
+  if (queryText) queryTool = mode === 'search' ? 'codegraph_search' : 'codegraph_explore';
+  // 文件列表由主进程分页返回（结果带 page）：只要是分页结果就一直走 more，最后一页到了 remaining 为 0，按钮消失但行不退回前端切页。
+  const loadedResult = currentResult?.result;
+  const moreFiles = queryTool === 'codegraph_files' && loadedResult?.page
+    ? { remaining: Math.max(0, loadedResult.page.total - loadedResult.rows.length), loading: Boolean(currentResult?.loadingMore), onLoad: () => void loadMoreFiles() }
+    : undefined;
 
   useEffect(() => {
     mounted.current = true;
@@ -150,8 +158,8 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     if (!visible || !canQuery) return;
     setQueryState((old) => ({ workspace: project, result: old?.workspace === project ? old.result : undefined, retained: old?.workspace === project ? old.retained : undefined, loading: true }));
     const request: CodeRetrievalRequest = queryTool === 'codegraph_files'
-      ? { workspace: project, tool: queryTool, args: { format: 'flat' } }
-      : { workspace: project, tool: queryTool, args: { query: query.trim(), limit: 20 } };
+      ? { workspace: project, tool: queryTool, args: { format: 'flat', limit: CODE_PAGE_SIZE } }
+      : { workspace: project, tool: queryTool, args: { query: queryText, limit: 20 } };
     void agentDataApi.code.call(request)
       .then((raw) => {
         if (epoch !== queryEpoch.current) return;
@@ -162,7 +170,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
         if (epoch === queryEpoch.current) setQueryState((old) => ({ ...old, workspace: project, error: codeRequestError(cause), loading: false }));
       });
     return () => { queryEpoch.current++; };
-  }, [project, canQuery, query, queryTool, visible, monitor.watchedTaskVersion, reload]);
+  }, [project, canQuery, queryText, queryTool, visible, monitor.watchedTaskVersion, reload]);
 
   useEffect(() => {
     const epoch = ++nodeEpoch.current;
@@ -201,8 +209,9 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     restoreFocus.current = false; resultTrigger.current = null;
   }
 
+  // changeQuery / changeMode 不手动递增 queryEpoch：查询真的变了，查询 effect 的清理会递增；
+  // 没变（只敲了空格、空查询下切模式）时 effect 不重跑，手动递增只会让在途的响应被丢掉而没有新请求顶上，列表卡在「正在查询」。
   function changeQuery(next: string) {
-    queryEpoch.current++;
     setQuery(next);
     queries.current.set(projectKey(project), next);
   }
@@ -217,7 +226,6 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
 
   function changeMode(next: 'search' | 'explore') {
     if (next === mode) return;
-    queryEpoch.current++;
     setMode(next);
   }
 
@@ -225,6 +233,30 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     nodeEpoch.current++;
     restoreFocus.current = true;
     setSelected(undefined); setNodeState(undefined);
+  }
+
+  /** 不递增 queryEpoch：新查询、换项目、刷新都会递增它，到达时已过期的下一页就此丢弃。 */
+  async function loadMoreFiles() {
+    const loaded = currentResult?.result;
+    if (!loaded?.page || currentResult?.loading || currentResult?.loadingMore || !visible || !canQuery || queryTool !== 'codegraph_files') return;
+    const epoch = queryEpoch.current;
+    const workspace = project;
+    const patch = (change: Partial<QueryState>) => setQueryState((old) => old?.workspace === workspace && epoch === queryEpoch.current ? { ...old, ...change } : old);
+    patch({ loadingMore: true });
+    try {
+      const raw = await agentDataApi.code.call({ workspace, tool: 'codegraph_files', args: { format: 'flat', limit: CODE_PAGE_SIZE, offset: loaded.rows.length } });
+      if (epoch !== queryEpoch.current) return;
+      const next = decodeCodeResult('codegraph_files', raw);
+      if (next.isError || next.recognition !== 'rows') {
+        patch({ loadingMore: false, error: codeRequestError(next.text ?? next.message ?? 'CodeGraph 返回错误，详情见原始结果。') });
+        return;
+      }
+      // 总数变了说明两次取页之间索引被改过，按 offset 接上去会跳行或重复：整个重读，回到第一页。
+      if (next.page?.total !== loaded.page.total) { setStatusVersion((value) => value + 1); return; }
+      setQueryState((old) => old?.workspace === workspace && old.result ? { ...old, result: appendCodeResultPage(old.result, next), loadingMore: false, error: undefined } : old);
+    } catch (cause) {
+      patch({ loadingMore: false, error: codeRequestError(cause) });
+    }
   }
 
   async function sync() {
@@ -283,17 +315,17 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
       这个项目还没有索引
       <Typography.Text type="secondary">{project}</Typography.Text>
       <Button type="primary" disabled={!visible || syncing} onClick={() => void sync()}>建立索引</Button>
-    </div> : <div className={w.panel}>
+    </div> : <div className={`${w.panel} ${styles.fill}`}>
       <div className={w.panelToolbar}>
         <Input ref={queryInput} aria-label="搜索代码" placeholder={mode === 'search' ? '搜索符号或文件名；留空浏览文件' : '描述要找的功能'} value={query} onChange={(event) => changeQuery(event.target.value)} disabled={!canQuery} style={{ flex: 1 }} />
         <Segmented value={mode} disabled={!canQuery} onChange={(value) => changeMode(value as 'search' | 'explore')} options={[{ value: 'search', label: '符号' }, { value: 'explore', label: '相关上下文', disabled: !query.trim() }]} />
       </div>
-      <SplitPane detailOpen={Boolean(selected)}
+      <SplitPane className={styles.split} detailOpen={Boolean(selected)}
         side={<div className={styles.column} data-code-list>
-          {currentResult?.result ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{currentResult.result.rows.length} 个结果</Typography.Text> : null}
+          {currentResult?.result ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{currentResult.result.page?.total ?? currentResult.result.rows.length} 个结果</Typography.Text> : null}
           {currentResult?.loading ? <Typography.Text type="secondary" role="status">正在查询代码…</Typography.Text> : null}
           {currentResult?.error ? <Alert type="error" showIcon title={`${currentResult.error}${currentResult.result ? ' 当前显示上次成功读取的结果。' : ''}`} /> : null}
-          {currentResult?.result ? <CodeResultContent result={currentResult.result} retained={currentResult.retained} onSelect={selectResult} selected={selected} tool={queryTool} /> : null}
+          {currentResult?.result ? <CodeResultContent key={`${project}\0${queryTool}\0${queryText}`} result={currentResult.result} retained={currentResult.retained} onSelect={selectResult} selected={selected} tool={queryTool} more={moreFiles} /> : null}
         </div>}
         main={selected ? <div className={styles.column} aria-label="代码详情">
           <div className={w.detailHeader}><Typography.Title level={5} style={{ margin: 0 }}>{selected.symbol ?? selected.file ?? '代码详情'}</Typography.Title><Button className={w.spacer} onClick={closeDetail}>返回结果列表</Button></div>

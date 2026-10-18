@@ -210,24 +210,52 @@ export const HELPER_JS = `(function() {
   }
 
   // ── GrenAgent iframe 扩展：只有确认按钮 postMessage 到父窗口 ──
+  // 选项可选：没选任何方案直接确认时 choice 是空串，所以这里只要求它是字符串。
   function notifyChoice(event) {
-    if (!event.choice || submitted) return;
+    if (typeof event.choice !== 'string' || submitted) return;
     submitted = true;
     const text = event.text || event.choice;
+    const supplement = currentSupplement();
     const btn = document.getElementById('visual-confirm-btn');
     const hint = document.getElementById('visual-confirm-hint');
+    const noteBtn = document.getElementById('visual-note-btn');
+    const note = document.getElementById('visual-note');
+    const panel = document.getElementById('visual-note-panel');
     if (btn) { btn.disabled = true; btn.textContent = '已提交'; }
+    if (noteBtn) noteBtn.disabled = true;
+    if (note) note.disabled = true;
+    if (panel) panel.hidden = true;
     if (hint) hint.textContent = '已提交：' + text;
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ type: 'visual-choice', choice: event.choice, text }, '*');
+      const message = { type: 'visual-choice', choice: event.choice, text };
+      if (supplement) message.supplement = supplement;
+      window.parent.postMessage(message, '*');
     }
+  }
+
+  // 「补充」是可选的自由说明：不填也能提交。
+  function currentSupplement() {
+    const note = document.getElementById('visual-note');
+    return note ? note.value.trim() : '';
+  }
+
+  // 只有页面明确标了 data-required 的选项组才是必选；其余选项默认可选、可跳过。
+  // 必选要说明原因：data-required-reason 的文字会显示在确认条上。
+  function missingRequired() {
+    return Array.prototype.filter.call(document.querySelectorAll('[data-required]'), (group) => {
+      return !group.querySelector('[data-choice].selected, [data-value].selected');
+    });
   }
 
   function submitSelection() {
     if (submitted) return;
     const nodes = selectedNodes();
     if (hasChoices()) {
-      if (!nodes.length) return;
+      if (missingRequired().length) return;
+      if (!nodes.length) {
+        notifyChoice({ choice: '', text: '未选择（已跳过）' });
+        return;
+      }
       notifyChoice({
         choice: nodes.map(choiceOf).join(','),
         text: nodes.map(labelOf).join('、')
@@ -243,11 +271,18 @@ export const HELPER_JS = `(function() {
     const hint = document.getElementById('visual-confirm-hint');
     if (!btn || !hint || submitted) return;
     const nodes = selectedNodes();
+    refreshNoteButton();
     if (hasChoices()) {
       btn.textContent = '确认提交';
-      if (!nodes.length) {
+      const missing = missingRequired();
+      if (missing.length) {
         btn.disabled = true;
-        hint.textContent = '可先切换查看方案，选中后再确认提交';
+        hint.textContent = '必选：' + (missing[0].getAttribute('data-required-reason') || '请先选择一项');
+        return;
+      }
+      if (!nodes.length) {
+        btn.disabled = false;
+        hint.textContent = '选项可选，可直接提交，也可写补充';
         return;
       }
       btn.disabled = false;
@@ -257,6 +292,12 @@ export const HELPER_JS = `(function() {
     btn.disabled = false;
     btn.textContent = '确定页面';
     hint.textContent = '确认当前页面';
+  }
+
+  function refreshNoteButton() {
+    const noteBtn = document.getElementById('visual-note-btn');
+    if (!noteBtn || submitted) return;
+    noteBtn.textContent = currentSupplement() ? '补充（已填）' : '补充';
   }
 
   function ensureConfirmBar() {
@@ -273,11 +314,20 @@ export const HELPER_JS = `(function() {
       "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }",
       '#visual-confirm-hint { font-size: 13px; color: #8888a0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
       '#visual-confirm-btn { flex-shrink: 0; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; background: #7c7cf8; color: #fff; }',
-      '#visual-confirm-btn:disabled { cursor: default; background: #2a2a36; color: #6a6a80; }'
+      '#visual-confirm-btn:disabled { cursor: default; background: #2a2a36; color: #6a6a80; }',
+      '#visual-note-btn { flex-shrink: 0; border: 1px solid #2e2e38; border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; background: transparent; color: #c8c8d8; }',
+      '#visual-note-btn:disabled { cursor: default; color: #6a6a80; }',
+      '#visual-note-panel { position: absolute; left: 14px; right: 14px; bottom: 100%; margin-bottom: 8px; padding: 8px; background: rgba(15,15,18,0.97); border: 1px solid #2e2e38; border-radius: 10px; }',
+      '#visual-note-panel[hidden] { display: none; }',
+      '#visual-note { display: block; width: 100%; min-height: 64px; max-height: 160px; resize: vertical; box-sizing: border-box; background: #18181f; color: #e8e8f0; border: 1px solid #2e2e38; border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; outline: none; }',
+      '#visual-note:focus { border-color: #4a4a60; }'
     ].join('');
     const bar = document.createElement('div');
     bar.id = 'visual-confirm-bar';
-    bar.innerHTML = '<span id="visual-confirm-hint"></span><button type="button" id="visual-confirm-btn"></button>';
+    bar.innerHTML = '<span id="visual-confirm-hint"></span>' +
+      '<button type="button" id="visual-note-btn">补充</button>' +
+      '<button type="button" id="visual-confirm-btn"></button>' +
+      '<div id="visual-note-panel" hidden><textarea id="visual-note" placeholder="补充说明（可选）：想改哪里、有什么顾虑，都可以写在这里"></textarea></div>';
     document.body.appendChild(style);
     document.body.appendChild(bar);
     document.body.classList.add('visual-has-confirm');
@@ -286,6 +336,16 @@ export const HELPER_JS = `(function() {
       e.stopPropagation();
       submitSelection();
     });
+    bar.querySelector('#visual-note-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const panel = document.getElementById('visual-note-panel');
+      const note = document.getElementById('visual-note');
+      if (!panel || submitted) return;
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden && note) note.focus();
+    });
+    bar.querySelector('#visual-note').addEventListener('input', refreshNoteButton);
   }
 
   // 高度通知：DOM 渲染完成后告知父窗口实际内容高度

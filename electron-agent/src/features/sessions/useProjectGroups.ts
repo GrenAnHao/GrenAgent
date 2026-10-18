@@ -5,6 +5,7 @@ import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
 import { shareUnchanged } from '../../lib/structuralShare';
+import { isolatedPathOf } from '../../lib/isolatedWorkspace';
 
 export interface ProjectGroup {
   cwd: string;
@@ -13,6 +14,8 @@ export interface ProjectGroup {
   pinned: boolean;
   sessions: SessionInfo[];
   lastActivity: string; // 该组最新 timestamp
+  /** 独立工作区（<主仓>/.gren/worktrees/<id>）：挂在父项目下面显示。 */
+  isolated?: { parentCwd: string; id: string; branch: string; parentListed: boolean };
 }
 
 interface BuildParams {
@@ -98,7 +101,40 @@ export function buildProjectGroups(sessions: SessionInfo[], params: BuildParams)
     return a.name.localeCompare(b.name);
   });
 
-  return groups;
+  return nestIsolatedGroups(groups, aliases);
+}
+
+/**
+ * 独立工作区的组紧跟在父项目后面（父项目不在列表里时留在原位），默认名字是分支 gren/<id>，
+ * 父项目不在时前面带上父项目名。父项目自己的排序不受影响。
+ */
+function nestIsolatedGroups(groups: ProjectGroup[], aliases: Record<string, string>): ProjectGroup[] {
+  const children = new Map<ProjectGroup, ProjectGroup[]>();
+  const nested = new Set<ProjectGroup>();
+  const annotated = groups.map((group) => {
+    const iso = isolatedPathOf(group.cwd);
+    if (!iso) return group;
+    const parent = groups.find((g) => !isolatedPathOf(g.cwd) && pathsEquivalent(g.cwd, iso.parentRoot));
+    const name = aliases[group.cwd] || (parent ? iso.branch : `${basename(iso.parentRoot)} · ${iso.branch}`);
+    const next: ProjectGroup = {
+      ...group,
+      name,
+      isolated: { parentCwd: parent?.cwd ?? iso.parentRoot, id: iso.id, branch: iso.branch, parentListed: Boolean(parent) },
+    };
+    if (parent) {
+      nested.add(next);
+      children.set(parent, [...(children.get(parent) ?? []), next]);
+    }
+    return next;
+  });
+  const out: ProjectGroup[] = [];
+  for (const group of annotated) {
+    if (nested.has(group)) continue;
+    out.push(group);
+    const kids = children.get(group);
+    if (kids) out.push(...kids);
+  }
+  return out;
 }
 
 /** 先按路径共享每组的会话对象，再按 cwd 共享分组本身。 */

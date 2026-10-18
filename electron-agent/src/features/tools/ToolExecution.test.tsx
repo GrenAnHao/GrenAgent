@@ -74,6 +74,18 @@ describe('ToolExecution code search', { timeout: 30_000 }, () => {
     expect(document.body.textContent).not.toContain('未找到结果');
   });
 
+  it('新 schema：标题合并 pattern 与 patterns', () => {
+    wrap(
+      <ToolExecution
+        toolName="search"
+        args={{ pattern: 'openPath', patterns: ['revealInFolder', 'openPath'] }}
+        result={{ content: [{ type: 'text', text: 'No matches.' }], details: { matches: [], total: 0, files: 0, capped: false } }}
+        status="done"
+      />,
+    );
+    expect(screen.getByText('openPath | revealInFolder')).toBeTruthy();
+  });
+
   it('没有 patterns 时展开显示工具原因', () => {
     wrap(
       <ToolExecution
@@ -851,5 +863,39 @@ describe('ToolExecution 参数生成', () => {
     expect(screen.queryByTestId('streaming-file-body')).toBeNull();
     fireEvent.click(screen.getByText('写入'));
     expect(screen.getByTestId('streaming-file-body').textContent).toContain('等待参数');
+  });
+});
+
+describe('ToolExecution malformed arguments (pi 1.3.0)', { timeout: 30_000 }, () => {
+  const raw = '{"command": "echo hi", "timeout": 5,}';
+  const text = `Invalid arguments for tool "bash": Expected double-quoted property name in JSON at position 36 (line 1 column 37)\n\nReceived arguments:\n${raw}`;
+
+  it('shows why the call did not run and what the model sent, not an empty bash card', () => {
+    wrap(<ToolExecution toolName="bash" args={{}} result={{ content: [{ type: 'text', text }], isError: true }} status="error" />);
+    expect(screen.getByTestId('invalid-arguments-card')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-output')).toBeNull();
+    expect(screen.getByTestId('invalid-arguments-reason').textContent).toContain('Expected double-quoted property name');
+    expect(screen.getByTestId('invalid-arguments-meta').textContent).toBe('未执行');
+    expect(document.querySelector('[data-status="error"]')).toBeTruthy();
+    fireEvent.click(screen.getByText('参数无法解析', { exact: false }));
+    expect(screen.getByTestId('invalid-arguments-received').textContent).toBe(raw);
+  });
+
+  it('keeps the MCP server tag for MCP tools', () => {
+    const mcpText = text.replace('"bash"', '"mcp__antd__antd_doc"');
+    wrap(<ToolExecution toolName="mcp__antd__antd_doc" args={{}} result={{ content: [{ type: 'text', text: mcpText }] }} status="error" />);
+    expect(document.querySelector('[data-role="mcp-server"]')?.textContent).toBe('antd');
+  });
+
+  it('leaves ordinary failures to their own card', () => {
+    wrap(
+      <ToolExecution
+        toolName="bash"
+        args={{ command: 'false' }}
+        result={{ content: [{ type: 'text', text: 'Command exited with code 1' }], isError: true }}
+        status="error"
+      />,
+    );
+    expect(screen.queryByTestId('invalid-arguments-card')).toBeNull();
   });
 });

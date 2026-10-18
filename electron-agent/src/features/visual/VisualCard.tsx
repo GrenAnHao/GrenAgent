@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ExternalLink, Minimize2 } from 'lucide-react';
 import { ActionIcon, HtmlPreview } from '@lobehub/ui';
-import { useVisualStore } from '../../stores/visualStore';
+import { useVisualStore, visualKeyOf } from '../../stores/visualStore';
 import { buildSrcDoc } from './frameAssets';
-import { extensionUiRespond } from '../../lib/pi';
+import { parseVisualChoiceMessage, submitVisualChoice } from './submitVisualChoice';
 import { invoke, openUrl } from '../../platform/runtime';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 
@@ -82,27 +82,27 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export const VisualCard = memo(function VisualCard({ content }: { content: string }) {
-  const { workspace } = useAgentStoreContext();
-  const storeHtml = useVisualStore((s) => s.html);
-  const html = content && content !== 'visual-inline' ? content : (storeHtml ?? '');
-  const sessionId = useVisualStore((s) => s.sessionId);
-  const pending = useVisualStore((s) => s.pending);
+  const { workspace, store } = useAgentStoreContext();
+  // 卡片属于渲染它的这个会话：等待状态 / 请求 id 只读这个会话名下的条目，不读别的会话的。
+  const loadedPath = store?.getLoadedSessionPath?.() ?? null;
+  const visualKey = visualKeyOf({ sessionPath: loadedPath || null, workspace });
+  const entry = useVisualStore((s) => s.entries[visualKey]);
+  const html = content && content !== 'visual-inline' ? content : (entry?.html ?? '');
+  const sessionId = entry?.rev ?? 0;
+  const pending = entry?.pending ?? false;
   const submittedIds = useVisualStore((s) => s.submittedIds);
   const cardKey = sessionId;
   const isSubmitted = submittedIds.has(cardKey);
   const [choiceLabel, setChoiceLabel] = useState('');
   const [showOverlay, setShowOverlay] = useState(false);
 
-  const doSubmit = useCallback((choice: string, text: string) => {
-    const rid = useVisualStore.getState().requestId;
-    if (!rid) return false;
-    useVisualStore.getState().markSubmitted(cardKey);
-    setChoiceLabel(text);
-    extensionUiRespond(workspace, { type: 'extension_ui_response', id: rid, value: JSON.stringify({ choice, text, timestamp: Date.now() }) });
-    useVisualStore.getState().setPending(false);
+  const doSubmit = useCallback((message: { choice: string; text: string; supplement?: string }) => {
+    const latest = useVisualStore.getState().entries[visualKey];
+    if (!latest || !submitVisualChoice(latest, message)) return false;
+    setChoiceLabel(message.text);
     setShowOverlay(false);
     return true;
-  }, [cardKey, workspace]);
+  }, [visualKey]);
 
   // 浏览器打开：写临时文件 → file:// URL → openUrl（openPath 走文件默认程序，
   // 开发机上 .html 可能被编辑器覆盖；openUrl 走浏览器 URL handler，更可靠）
@@ -120,11 +120,8 @@ export const VisualCard = memo(function VisualCard({ content }: { content: strin
 
   const onMessage = useCallback(
     (e: MessageEvent) => {
-      if (!e.data || typeof e.data !== 'object') return;
-      const msg = e.data as { type?: string; choice?: string; text?: string };
-      if (msg.type === 'visual-choice' && msg.choice && !isSubmitted) {
-        doSubmit(msg.choice, msg.text ?? msg.choice);
-      }
+      const message = parseVisualChoiceMessage(e.data);
+      if (message && !isSubmitted) doSubmit(message);
     },
     [isSubmitted, doSubmit],
   );

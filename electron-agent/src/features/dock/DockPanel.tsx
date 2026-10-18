@@ -5,6 +5,7 @@ import { PanelRightClose } from 'lucide-react';
 import { useAgentStore } from '../../stores/AgentStoreContext';
 import { useSessionStore } from '../../store/session';
 import {
+  mountedRegionTabs,
   resolveVisibleActive,
   useDockStore,
   visibleRegionTabs,
@@ -54,12 +55,14 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     return map;
   }, [messages]);
 
-  // 会话归属 tab（子代理详情等）只在打开它的会话里显示；切走后保留在 store，切回来恢复。
+  // 右栏标签（和底部的子代理详情等）只在打开它的会话里显示；切走后保留在 store，切回来恢复。
   const view = useMemo(
     () => ({ sessionPath: activeSessionPath || null, workspace: activeWorkspace ?? '' }),
     [activeSessionPath, activeWorkspace],
   );
   const tabs = useMemo(() => visibleRegionTabs(allTabs, region, view), [allTabs, region, view]);
+  // 切到别的会话时，终端 / 浏览器 / 文件这类标签只藏起来不卸载：shell、页面和没保存的修改切回来还在。
+  const bodyTabs = useMemo(() => mountedRegionTabs(allTabs, region, view), [allTabs, region, view]);
   const activeId = resolveVisibleActive({ activeByRegion, activeBySession }, region, view, tabs);
 
   const toneOf = useCallback(
@@ -89,34 +92,37 @@ export function DockPanel({ region, onCollapse }: DockPanelProps) {
     </>
   ) : null;
 
-  if (tabs.length === 0) {
-    return (
-      <Flexbox className={cx('dock-panel', dockTabStyles.container)}>
-        {actions ? (
-          <div className={dockTabStyles.header}>
-            <div className={dockTabStyles.tabs} />
-            <div className={dockTabStyles.actions}>{actions}</div>
-          </div>
-        ) : null}
-        <DockLauncher region={region} />
-      </Flexbox>
-    );
-  }
+  const empty = tabs.length === 0;
 
+  // TabBodyStack 始终在同一个位置：当前会话没有标签、显示启动页时，别的会话的常驻 body 也不被卸掉。
   return (
     <Flexbox className={cx('dock-panel', dockTabStyles.container)}>
-      <TabStrip
-        region={region}
-        tabs={tabs}
-        activeId={activeId}
-        toneOf={toneOf}
-        onActivate={(id) => setActive(region, id)}
-        onClose={requestClose}
-        leading={<DockTabSwitcher region={region} tabs={tabs} onActivate={(id) => setActive(region, id)} onClose={requestClose} />}
-        trailing={<DockStripAddMenu region={region} />}
-        actions={actions}
-      />
-      <TabBodyStack tabs={tabs} activeId={activeId} emptyHint="" />
+      {empty ? (
+        <>
+          {actions ? (
+            <div className={dockTabStyles.header}>
+              <div className={dockTabStyles.tabs} />
+              <div className={dockTabStyles.actions}>{actions}</div>
+            </div>
+          ) : null}
+          <DockLauncher region={region} />
+        </>
+      ) : (
+        <TabStrip
+          region={region}
+          tabs={tabs}
+          activeId={activeId}
+          toneOf={toneOf}
+          onActivate={(id) => setActive(region, id)}
+          onClose={requestClose}
+          leading={<DockTabSwitcher region={region} tabs={tabs} onActivate={(id) => setActive(region, id)} onClose={requestClose} />}
+          trailing={<DockStripAddMenu region={region} />}
+          actions={actions}
+        />
+      )}
+      {empty && bodyTabs.length === 0 ? null : (
+        <TabBodyStack tabs={bodyTabs} activeId={activeId} emptyHint="" hidden={empty} />
+      )}
     </Flexbox>
   );
 }

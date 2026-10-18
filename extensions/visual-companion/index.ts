@@ -17,7 +17,10 @@ export default function (pi: ExtensionAPI) {
       "mode='auto'（默认）：含 .mockup/.split/.cards 类 → 右侧「视觉设计」标签；其余 → 聊天流内联卡片。" +
       "多个方案放进 .split 或 .cards：窄了会折行，右侧面板会把比较区撑满高度。不要用单行不换行的 flex 把方案挤在一起。" +
       "调用后立即返回；用 read_visual_choice 阻塞，直到用户确认页面。\n" +
-      "点选项只选中，也可以用来切换查看方案，不会提交。页面底部有「确认提交」；没有选项的页面设计则是「确定页面」。\n\n" +
+      "点选项只选中，也可以用来切换查看方案，不会提交。页面底部有「确认提交」；没有选项的页面设计则是「确定页面」。\n" +
+      "选项默认是可选的：用户可以不选直接提交（返回 choice 为空串），底部还有可选的「补充」输入框，内容放在返回的 supplement 字段。" +
+      "只有确属必要的选项组才在容器上加 data-required，并用 data-required-reason 写明为什么必选（会显示在确认条上），例如 " +
+      '<div class="options" data-required data-required-reason="需要先定方案才能继续">。\n\n' +
       "【重要】生成选项 HTML 时必须使用 data-choice 属性（不是 data-value），例如：\n" +
       '<div class="option" data-choice="a" onclick="toggleSelect(this)">' +
       '<div class="letter">A</div><div class="content"><h3>选项标题</h3></div></div>',
@@ -26,6 +29,7 @@ export default function (pi: ExtensionAPI) {
       "Use show_visual html only for a short choice card that is not saved as a file.",
       "Use .split or .cards in show_visual for side-by-side options; they wrap when narrow and stretch in the visual panel. Do not lay options out in one nowrap flex row.",
       "Use show_visual option clicks only to select or switch the visible scheme. The user confirms the page with the injected button; do not treat an option click as the final answer.",
+      "Use data-required on a show_visual option group only when the answer is truly needed to continue, and explain why in data-required-reason; every other group is optional and the user may submit with an empty choice.",
     ]),
     parameters: Type.Object({
       path: Type.Optional(Type.String({ description: "工作区内已生成的 .html 文件路径。整页预览优先用这个。" })),
@@ -80,7 +84,8 @@ export default function (pi: ExtensionAPI) {
     name: "read_visual_choice",
     label: "Read Visual Choice",
     description:
-      "阻塞等待用户在视觉设计里确认页面。点选项不会返回；用户点「确认提交」或「确定页面」后才返回。必须在 show_visual 之后调用。",
+      "阻塞等待用户在视觉设计里确认页面。点选项不会返回；用户点「确认提交」或「确定页面」后才返回。必须在 show_visual 之后调用。" +
+      "返回 JSON：choice（所选 data-choice，多选逗号连接；未选为空串）、text、可选的 supplement（用户的补充说明）。",
     promptSnippet: "Wait until the user confirms the visual page after show_visual.",
     parameters: Type.Object({
       timeout: Type.Optional(

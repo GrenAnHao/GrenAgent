@@ -1,0 +1,20 @@
+== kill msys process group (probe.mjs)
+stderr head: "" | sleeps running: 2
+pgid/ps:
+
+      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND
+cat: /proc/undefined/pgid: No such file or directory
+
+kill -9 -- -pgid exit 1 /usr/bin/bash: line 1: kill: `-': not a pid or valid job spec
+sleeps left after group kill: 2 | node child exited: false
+cleanup: killed leftovers
+
+== early aborts in a long-lived process (early-abort.mts)
+abort after 0ms -> leftover sleeps: 0, pid files: 2
+abort after 30ms -> leftover sleeps: 0, pid files: 2
+abort after 80ms -> leftover sleeps: 0, pid files: 2
+abort after 150ms -> leftover sleeps: 0, pid files: 2
+abort after 300ms -> leftover sleeps: 0, pid files: 2
+abort after 600ms -> leftover sleeps: 0, pid files: 2
+
+注：pid files 一列始终是 2，是这次之前的全量 vitest 留下的（vitest worker 退出时停止后的盯梢定时器来不及删文件）；这次 6 轮提前停止本身没有新增 pid 文件，也没有留下 sleep。

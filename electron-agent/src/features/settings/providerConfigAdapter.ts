@@ -83,11 +83,11 @@ interface ProviderEntry {
 // 各兼容协议「官方原生推理档位」→ models.json 的 thinkingLevelMap（pi 内部档位 → 供应商原生取值，null = 隐藏）。
 // pi 内部档位只作传输；选择器直接拿这里的供应商原生取值当标签，做到照搬各家而非迁就 pi。依据各家 API 文档：
 //  - OpenAI reasoning_effort: minimal/low/medium/high/xhigh（pi 同名直传）
-//  - Anthropic effort: low/medium/high/xhigh/max（无 minimal；pi 5 个推理档整体上移）。不按模型 ID 裁剪，默认全部露出。
+//  - Anthropic effort: low/medium/high/xhigh/max（无 minimal）。pi 的 low…max 与 effort 同名一一对应，minimal 隐藏。不按模型 ID 裁剪，默认全部露出。
 //  - Gemini thinking_level: minimal/low/medium/high（无 xhigh）
 const OPENAI_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
 const GOOGLE_THINKING_MAP: ThinkingLevelMap = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: null };
-const ANTHROPIC_THINKING_MAP: ThinkingLevelMap = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+const ANTHROPIC_THINKING_MAP: ThinkingLevelMap = { minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
 
 /**
  * 按供应商 API 类型给出官方原生推理档位映射；勾「推理」时写入自定义模型，让 pi 按各家原生档位生效、不会钳回 off。
@@ -336,6 +336,9 @@ export function loadState(
  * 内置: Key 写 auth.json；仅当有 baseUrl/自定义模型时才写 models.json 段。
  * 自定义: 整段写 models.json（含 apiKey，Pi schema 要求）。
  */
+/** Published by pi (1.2+); `$schema` is an accepted top-level key of models.json. */
+export const MODELS_JSON_SCHEMA = 'https://pi.dev/schemas/models.schema.json';
+
 export function serializeState(providers: UiProvider[]): { modelsJson: string; authJson: string } {
   const modelsProviders: Record<string, ProviderEntry> = {};
   const auth: AuthJson = {};
@@ -365,7 +368,8 @@ export function serializeState(providers: UiProvider[]): { modelsJson: string; a
   }
 
   return {
-    modelsJson: JSON.stringify({ providers: modelsProviders }, null, 2),
+    // pi 1.2+ publishes the schema; editors use it to validate and complete models.json.
+    modelsJson: JSON.stringify({ $schema: MODELS_JSON_SCHEMA, providers: modelsProviders }, null, 2),
     authJson: JSON.stringify(auth, null, 2),
   };
 }

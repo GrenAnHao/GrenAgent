@@ -359,6 +359,8 @@ describe('dock persist (重启不还原浏览器标签)', () => {
             closable: true,
             order: 1,
             payload: { workspace: '/repo' },
+            ownerSessionPath: '/repo/a.jsonl',
+            ownerWorkspace: '/repo',
           },
         ],
         closedTabs: [
@@ -380,6 +382,26 @@ describe('dock persist (重启不还原浏览器标签)', () => {
     expect(merged.closedTabs).toEqual([]);
     expect(merged.activeByRegion.right).toBe('file:right:/repo');
   });
+
+  it('旧版本存下的无归属右栏标签读回来就丢掉，不会变成所有会话共用的右栏；底部终端照旧保留', () => {
+    const merge = useDockStore.persist.getOptions().merge!;
+    const merged = merge(
+      {
+        tabs: [
+          { id: 'file:right:/repo', kind: 'file', region: 'right', title: '文件', closable: true, order: 0, payload: { workspace: '/repo' } },
+          { id: 'term-1', kind: 'terminal', region: 'bottom', title: 'T', closable: true, order: 0, payload: { status: 'idle' } },
+        ],
+        closedTabs: [
+          { id: 'page:https://x', kind: 'page', region: 'right', title: 'x', closable: true, payload: { url: 'https://x', content: '' }, closedAt: 1 },
+        ],
+        activeByRegion: { right: 'file:right:/repo', bottom: 'term-1' },
+      },
+      useDockStore.getState(),
+    ) as ReturnType<typeof useDockStore.getState>;
+    expect(merged.tabs.map((t) => t.id)).toEqual(['term-1']);
+    expect(merged.closedTabs).toEqual([]);
+    expect(merged.activeByRegion).toEqual({ right: null, bottom: 'term-1' });
+  });
 });
 
 describe('dockStore session-owned tabs', () => {
@@ -388,7 +410,8 @@ describe('dockStore session-owned tabs', () => {
 
   beforeEach(() => {
     reset();
-    useDockStore.setState({ activeBySession: {}, rightOpenBySession: {} });
+    useDockStore.setState({ activeBySession: {}, rightOpenBySession: {}, rightFillBySession: {} });
+    useLayoutStore.setState({ rightPanelFill: false });
     useSessionStore.setState({ activeSessionPath: A.sessionPath, activeWorkspace: '/ws' });
   });
 
@@ -428,17 +451,118 @@ describe('dockStore session-owned tabs', () => {
     expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
   });
 
-  it('keeps global tabs visible across sessions and leaves the panel open', () => {
-    useDockStore.getState().openPage({ url: 'https://a', content: 'x' });
-    useDockStore.getState().openSubAgentLog({ agentId: 'sa', task: 't', output: '', status: 'done' });
+  it('右栏每种入口打开的标签都记在当前会话名下，切到 B 看不到、面板收起，切回 A 原样恢复', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://a', content: 'x' });
+    s.openProjectContext('/ws');
+    s.addTab({ id: 'file:right:/ws', kind: 'file', region: 'right', title: '文件', closable: true, payload: { workspace: '/ws' } });
+    s.openSubAgentLog({ agentId: 'sa', task: 't', output: '', status: 'done' });
+    for (const tab of useDockStore.getState().tabs) {
+      expect(tab).toMatchObject({ ownerSessionPath: A.sessionPath, ownerWorkspace: '/ws' });
+    }
     expect(visibleRight(A).active).toBe('salog:sa');
 
     switchTo(B);
-    expect(visibleRight(B)).toEqual({ ids: ['page:https://a'], active: 'page:https://a' });
-    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    expect(visibleRight(B)).toEqual({ ids: [], active: null });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
 
     switchTo(A);
-    expect(visibleRight(A)).toEqual({ ids: ['page:https://a', 'salog:sa'], active: 'salog:sa' });
+    expect(visibleRight(A)).toEqual({
+      ids: ['page:https://a', 'project-context', 'file:right:/ws', 'salog:sa'],
+      active: 'salog:sa',
+    });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('在 A 里打开的空右栏（启动页）不会跟到 B；B 自己打开的面板也不会带回 A', () => {
+    useLayoutStore.getState().setRightPanelOpen(true);
+    switchTo(B);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+
+    switchTo(A);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    useLayoutStore.getState().setRightPanelOpen(false);
+
+    switchTo(B);
+    useLayoutStore.getState().setRightPanelOpen(true);
+    switchTo(A);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
+    switchTo(B);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+  });
+
+  it('占满状态也按会话记：A 占满不会让 B 的面板占满', () => {
+    useLayoutStore.getState().setRightPanelOpen(true);
+    switchTo(B);
+    useLayoutStore.getState().setRightPanelOpen(true);
+    switchTo(A);
+    useLayoutStore.setState({ rightPanelFill: true });
+
+    switchTo(B);
+    expect(useLayoutStore.getState()).toMatchObject({ rightPanelOpen: true, rightPanelFill: false });
+    switchTo(A);
+    expect(useLayoutStore.getState()).toMatchObject({ rightPanelOpen: true, rightPanelFill: true });
+  });
+
+  it('同一网址 / 项目上下文在 B 里另开自己的标签，不接管 A 的', () => {
+    useDockStore.getState().openPage({ url: 'https://same', content: 'A' });
+    useDockStore.getState().openProjectContext('/ws');
+    switchTo(B);
+    useDockStore.getState().openPage({ url: 'https://same', content: 'B' });
+    useDockStore.getState().openProjectContext('/ws');
+
+    const tabs = useDockStore.getState().tabs;
+    expect(tabs.filter((t) => t.kind === 'page').map((t) => [t.id, t.ownerSessionPath])).toEqual([
+      ['page:https://same', A.sessionPath],
+      ['page:https://same#2', B.sessionPath],
+    ]);
+    expect(tabs.filter((t) => t.kind === 'projectContext').map((t) => t.ownerSessionPath)).toEqual([A.sessionPath, B.sessionPath]);
+    expect((tabs.find((t) => t.id === 'page:https://same')!.payload as { content: string }).content).toBe('A');
+  });
+
+  it('拖进右栏的终端归当前会话，拖回底部又变回全局', () => {
+    const s = useDockStore.getState();
+    s.addTab({ id: 'term-1', kind: 'terminal', region: 'bottom', title: 'T', closable: true, payload: { status: 'idle' } });
+    expect(useDockStore.getState().tabs[0].ownerSessionPath).toBeUndefined();
+    s.moveTabRegion('term-1', 'right');
+    expect(useDockStore.getState().tabs[0]).toMatchObject({ region: 'right', ownerSessionPath: A.sessionPath });
+    s.moveTabRegion('term-1', 'bottom');
+    expect(useDockStore.getState().tabs[0].ownerSessionPath).toBeUndefined();
+    expect(useDockStore.getState().tabs[0].ownerWorkspace).toBeUndefined();
+  });
+
+  it('最近关闭的右栏标签带着归属，恢复回原会话；不会把别的会话里同 id 的标签拉过来', () => {
+    const s = useDockStore.getState();
+    s.openPage({ url: 'https://p', content: 'A' });
+    s.closeTab('page:https://p');
+    const closed = useDockStore.getState().closedTabs[0];
+    expect(closed).toMatchObject({ ownerSessionPath: A.sessionPath, ownerWorkspace: '/ws' });
+
+    switchTo(B);
+    s.openPage({ url: 'https://p', content: 'B' });
+    switchTo(A);
+    s.restoreClosedTab(closed.id, closed.closedAt);
+    const pages = useDockStore.getState().tabs.filter((t) => t.kind === 'page');
+    expect(pages.map((t) => t.ownerSessionPath)).toEqual([B.sessionPath, A.sessionPath]);
+    expect(visibleRight(A).active).toBe(pages[1].id);
+    expect(pages[1].id).not.toBe(pages[0].id);
+  });
+
+  it('草稿首发落盘：草稿里打开的右栏过户给新会话，面板不收起', () => {
+    const draft = { sessionPath: null, workspace: '/ws' };
+    const created = { sessionPath: '/ws/new.jsonl', workspace: '/ws' };
+    switchTo(draft);
+    useDockStore.getState().openPage({ url: 'https://d', content: '' });
+    expect(useDockStore.getState().tabs[0].ownerSessionPath).toBeNull();
+
+    useDockStore.getState().adoptDraftView('/ws', created.sessionPath);
+    switchTo(created);
+    expect(visibleRight(created)).toEqual({ ids: ['page:https://d'], active: 'page:https://d' });
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(true);
+    // 下一个草稿从空白右栏开始
+    switchTo(draft);
+    expect(visibleRight(draft).ids).toEqual([]);
+    expect(useLayoutStore.getState().rightPanelOpen).toBe(false);
   });
 
   it('closing a session-owned tab only falls back to tabs visible in that session', () => {
@@ -463,10 +587,15 @@ describe('dockStore session-owned tabs', () => {
   it('dropSessionTabs removes only the deleted session tabs', () => {
     useDockStore.getState().openSubAgent({ messageId: 'mA', toolCallId: 'c', subIndex: null, title: 'A' });
     useDockStore.getState().openPage({ url: 'https://g', content: 'x' });
+    useDockStore.getState().addTab({ id: 'term-1', kind: 'terminal', region: 'bottom', title: 'T', closable: true, payload: { status: 'idle' } });
     useDockStore.getState().openSubAgent({
       messageId: 'mB', toolCallId: 'c', subIndex: null, title: 'B', ownerSessionPath: B.sessionPath, ownerWorkspace: '/ws',
     });
+    useDockStore.getState().openPage({ url: 'https://closed', content: 'x' });
+    useDockStore.getState().closeTab('page:https://closed');
     useDockStore.getState().dropSessionTabs('\\WS\\a.jsonl');
-    expect(useDockStore.getState().tabs.map((t) => t.id).sort()).toEqual(['mB', 'page:https://g']);
+    // A 的右栏标签（含网页）和最近关闭项一起没了；底部全局终端和 B 的标签不动。
+    expect(useDockStore.getState().tabs.map((t) => t.id).sort()).toEqual(['mB', 'term-1']);
+    expect(useDockStore.getState().closedTabs).toEqual([]);
   });
 });

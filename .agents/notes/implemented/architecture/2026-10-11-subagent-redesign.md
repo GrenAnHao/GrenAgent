@@ -30,6 +30,7 @@ Pi 现在的子代理是一路叠加出来的，没有统一的模型（见 [202
   - `create_worktree` 在 `<仓库根>/.agents/worktrees/<name>` 建分支和 checkout，再把调用者自己会话的工作目录切过去；`working_directory` 读或换目录，也用来离开 worktree。
   - 委派不再隐含隔离，子代理继承调用者的当前目录。
   - 审批、沙箱可写根、注册表、记忆等「项目身份」固定在会话的原始目录。
+  - 这是弱隔离（B 轨）。要「写主仓非法」的 harness 级隔离用宿主托管的独立工作区（A 轨），见 [托管 Worktree 双轨](2026-10-17-grenagent-hosted-worktree-dual-track.md)。
 - **消息与续聊**：`send_message`（父 ↔ 直接子）、`interrupt_agent`、`list_agents`（从父会话 JSONL 里的子代理目录列出，重启后照样有）。结算后的进程内子会话留在驻留池（默认 8 个）；不在池里的按 JSONL 冷恢复，worker 子代理冷恢复回 worker。
 - **资源**：
   - 同时活跃的子代理上限 8（嵌套的只计数不排队）。

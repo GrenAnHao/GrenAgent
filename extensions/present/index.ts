@@ -5,7 +5,7 @@ import { presentFiles } from "./present.js";
 
 const PresentParams = Type.Object({
   files: Type.Array(Type.Object({
-    path: Type.String({ description: "Workspace-relative path of an existing regular file" }),
+    path: Type.String({ description: "Path of an existing regular file. Relative paths use the session working directory; absolute paths may name files outside it." }),
     description: Type.Optional(Type.String({ description: "Short note about this deliverable" })),
   })),
 });
@@ -15,10 +15,10 @@ export default function (pi: ExtensionAPI) {
     name: "present",
     label: "Present",
     description:
-      "Declare existing workspace files as this turn's deliverables. Call present after the files are written and before the final reply whenever the user should receive artifacts. Listing paths in the reply is not delivery. Every path must already exist as a regular file inside the workspace.",
-    ...toolPrompt("Declare existing workspace files as this turn's deliverables.", [
+      "Declare existing files as this turn's deliverables. Call present after the files are written and before the final reply whenever the user should receive artifacts. Listing paths in the reply is not delivery. Every path must already exist as a regular file; relative paths use the session working directory and absolute paths may name files outside it. The user opens the current file; its contents are not copied.",
+    ...toolPrompt("Declare existing files as this turn's deliverables.", [
       "Use present after writing user-facing deliverables and before the final reply; listing paths in the reply is not delivery.",
-      "Use present only for files that already exist as regular files inside the workspace.",
+      "Use present only for files that already exist as regular files; pass an absolute path for files written outside the session working directory.",
     ]),
     parameters: PresentParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

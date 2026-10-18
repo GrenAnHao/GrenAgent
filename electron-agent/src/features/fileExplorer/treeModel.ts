@@ -15,6 +15,36 @@ export function isDescendant(path: string, ancestor: string): boolean {
   return path.length > ancestor.length && path.startsWith(ancestor) && (path[ancestor.length] === '/' || path[ancestor.length] === '\\');
 }
 
+function relativeSegments(workspace: string, path: string): string[] | null {
+  const ws = workspace.replace(/\\/g, '/').replace(/\/+$/, '');
+  const p = path.replace(/\\/g, '/');
+  if (!ws || !p.toLowerCase().startsWith(`${ws.toLowerCase()}/`)) return null;
+  return p.slice(ws.length + 1).split('/').filter(Boolean);
+}
+
+function joinUnder(root: string, segments: readonly string[]): string {
+  const sep = root.includes('\\') ? '\\' : '/';
+  return [root.replace(/[\\/]+$/, ''), ...segments].join(sep);
+}
+
+/**
+ * 把外部给的工作区路径（常是正斜杠）改写成文件树里的形式（以列目录返回的根为准），
+ * 这样当前选中项、同文件重复打开的比较都和点文件树时一致。不在工作区下原样返回。
+ */
+export function toTreePath(root: string, workspace: string, path: string): string {
+  const segments = relativeSegments(workspace, path);
+  return segments ? joinUnder(root, segments) : path;
+}
+
+/** 文件所在的各级目录（不含根），从浅到深。 */
+export function ancestorDirs(root: string, filePath: string): string[] {
+  const rootNorm = root.replace(/\\/g, '/').replace(/\/+$/, '');
+  const p = filePath.replace(/\\/g, '/');
+  if (!p.toLowerCase().startsWith(`${rootNorm.toLowerCase()}/`)) return [];
+  const segments = p.slice(rootNorm.length + 1).split('/').filter(Boolean);
+  return segments.slice(0, -1).map((_, index) => joinUnder(root, segments.slice(0, index + 1)));
+}
+
 /** 从 dir 往下拼出树。visible 给了就只留其中的节点（搜索时用）。 */
 export function buildTree(dir: string, dirs: DirMap, visible?: ReadonlySet<string>): TreeNode[] {
   const entries = dirs.get(dir) ?? [];

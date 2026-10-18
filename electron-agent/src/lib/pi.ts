@@ -212,6 +212,31 @@ export interface GitBranches {
   current: string;
   branches: BranchInfo[];
 }
+/** 独立工作区（A 轨）的 marker，形状同 extensions/_shared/isolated-workspace.ts。path 当作新 workspace 打开。 */
+export interface IsolatedWorkspace {
+  version: 1;
+  id: string;
+  path: string;
+  parentRoot: string;
+  branch: string;
+  base: { kind: 'fresh' | 'head'; ref: string; commit: string };
+  createdAt: string;
+  createdBy: 'grenagent';
+  carried?: { tracked: boolean; untracked: number };
+}
+export interface IsolatedWorkspaceEntry extends IsolatedWorkspace {
+  exists: boolean;
+}
+export interface IsolatedWorkspaceState {
+  id: string;
+  exists: boolean;
+  dirty: boolean;
+  ahead: number;
+  synced: boolean;
+  lastActivity: string;
+}
+/** active：托管且在；missing：已删（会话只读）；unmanaged：目录在但没有 marker；none：不是独立工作区路径。 */
+export type IsolatedPathKind = 'active' | 'missing' | 'unmanaged' | 'none';
 export interface GitLogEntry {
   hash: string;
   shortHash: string;
@@ -441,6 +466,20 @@ export const pi = {
     invoke<void>('git_create_branch', { workspacePath: workspace, name, checkout }),
   getGitLogGraph: (workspace: string, limit?: number, skip = 0) =>
     invoke<GitLogEntry[]>('get_git_log_graph', { workspacePath: workspace, limit: limit ?? null, skip }),
+  /** 默认 base = fresh（远端默认分支 tip）；head 是例外，与主线重叠时更容易冲突。 */
+  createIsolatedWorkspace: (workspace: string, options: { base?: 'fresh' | 'head'; fetch?: boolean; carryChanges?: boolean } = {}) =>
+    invoke<IsolatedWorkspace>('isolated_workspace_create', { workspace, ...options }),
+  listIsolatedWorkspaces: (workspace: string) =>
+    invoke<IsolatedWorkspaceEntry[]>('isolated_workspace_list', { workspace }),
+  syncBackIsolatedWorkspace: (workspace: string, id: string) =>
+    invoke<{ branch: string; commit: string }>('isolated_workspace_sync_back', { workspace, id }),
+  isolatedWorkspaceState: (workspace: string, id: string) =>
+    invoke<IsolatedWorkspaceState>('isolated_workspace_state', { workspace, id }),
+  probeIsolatedWorkspaces: (paths: string[]) =>
+    invoke<Record<string, IsolatedPathKind>>('isolated_workspace_probe', { paths }),
+  /** 有会话在跑抛 ISOLATED_BUSY；有未提交 / 未回传且没 force 抛 ISOLATED_UNSAVED。 */
+  removeIsolatedWorkspace: (workspace: string, id: string, force = false) =>
+    invoke<{ removed: true }>('isolated_workspace_remove', { workspace, id, force }),
 };
 
 /**

@@ -1,53 +1,34 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isLegacyWslBashPath, resolveShellPath } from "./shellPath.js";
+import { isLegacyWslBashPath, resolveBashShell } from "./shellPath.js";
 
-const PS51 = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-const STORE = "C:\\Users\\x\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe";
-
-describe("resolveShellPath", () => {
-  it("returns bash on POSIX", async () => {
-    expect(await resolveShellPath({ platform: "linux" })).toBe("bash");
-    expect(await resolveShellPath({ platform: "darwin" })).toBe("bash");
+// 第一次调用要动态加载整个 pi SDK，全量并行跑时会超过默认的 5 秒。
+describe("resolveBashShell", { timeout: 30_000 }, () => {
+  it("uses the settings shellPath with -c, like pi", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-shellpath-"));
+    try {
+      const bash = join(dir, "bash.exe");
+      writeFileSync(bash, "");
+      await expect(resolveBashShell(bash)).resolves.toEqual({ shell: bash, args: ["-c"] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
-  it("prefers injected pwsh.exe on win32", async () => {
-    const which = (name: string) => (name === "pwsh.exe" ? PWSH : undefined);
-    const exists = (path: string) => path === PWSH;
-    const statSize = (path: string) => (path === PWSH ? 200000 : 0);
-    expect(await resolveShellPath({ platform: "win32", which, exists, statSize })).toBe(PWSH);
+  it("fails with pi's message when the settings shellPath does not exist", async () => {
+    await expect(resolveBashShell(join(tmpdir(), "pi-no-such-dir", "bash.exe"))).rejects.toThrow(/Custom shell path not found/);
   });
 
-  it("falls back to Windows PowerShell 5.1 when pwsh is absent", async () => {
-    const which = () => undefined;
-    const exists = (path: string) => path === PS51;
-    const statSize = (path: string) => (path === PS51 ? 400000 : 0);
-    expect(await resolveShellPath({ platform: "win32", which, exists, statSize })).toBe(PS51);
-  });
-
-  it("ignores System32 bash.exe even when which returns it", async () => {
-    const wsl = "C:\\Windows\\System32\\bash.exe";
-    const which = (name: string) => (name === "bash.exe" ? wsl : undefined);
-    const exists = (path: string) => path === wsl || path === PS51;
-    const statSize = () => 1;
-    expect(await resolveShellPath({ platform: "win32", which, exists, statSize })).toBe(PS51);
-  });
-
-  it("skips WindowsApps pwsh stubs and uses 5.1", async () => {
-    const which = (name: string) => (name === "pwsh.exe" ? STORE : undefined);
-    const exists = (path: string) => path === STORE || path === PS51;
-    const statSize = (path: string) => (path === STORE ? 0 : 400000);
-    expect(await resolveShellPath({ platform: "win32", which, exists, statSize })).toBe(PS51);
-  });
-
-  it("returns the 5.1 path string when nothing exists", async () => {
-    const which = () => undefined;
-    const exists = () => false;
-    const statSize = () => 0;
-    const resolved = await resolveShellPath({ platform: "win32", which, exists, statSize });
-    expect(resolved.replace(/\//g, "\\").toLowerCase()).toMatch(
-      /\\system32\\windowspowershell\\v1\.0\\powershell\.exe$/,
-    );
+  it("never resolves to PowerShell", async () => {
+    let shell: string | undefined;
+    try {
+      shell = (await resolveBashShell()).shell;
+    } catch {
+      // 没装 bash 的机器：pi 报错，同样不会退回 PowerShell
+    }
+    if (shell) expect(shell).not.toMatch(/(?:pwsh|powershell)\.exe$/i);
   });
 });
 

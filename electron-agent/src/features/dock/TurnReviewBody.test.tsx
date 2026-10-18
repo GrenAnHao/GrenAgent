@@ -25,14 +25,14 @@ const messages: ChatMessage[] = [
   },
 ];
 
-const { openPath, updateTab, messagesRef } = vi.hoisted(() => {
+const { openWorkspaceFile, updateTab, messagesRef } = vi.hoisted(() => {
   const messagesRef = { current: [] as ChatMessage[] };
   function useStore(selector?: (s: { messages: ChatMessage[] }) => unknown) {
     const state = { messages: messagesRef.current };
     return selector ? selector(state) : state;
   }
   return {
-    openPath: vi.fn(),
+    openWorkspaceFile: vi.fn(async () => 'dock'),
     updateTab: vi.fn(),
     messagesRef,
     useStore,
@@ -56,7 +56,7 @@ vi.mock('../../stores/AgentStoreContext', () => ({
   }),
 }));
 
-vi.mock('../../platform/runtime', () => ({ openPath }));
+vi.mock('./openWorkspaceFile', () => ({ openWorkspaceFile }));
 
 vi.mock('../../stores/dockStore', () => ({
   useDockStore: {
@@ -69,7 +69,7 @@ import { TurnReviewBody } from './TurnReviewBody';
 afterEach(() => {
   cleanup();
   updateTab.mockReset();
-  openPath.mockReset();
+  openWorkspaceFile.mockClear();
   messagesRef.current = [];
 });
 
@@ -124,6 +124,6 @@ describe('TurnReviewBody', () => {
     messagesRef.current = messages;
     render(<TurnReviewBody tab={reviewTab({ workspace: 'D:/ws', turnId: 'turn-1', fileIndex: 0 })} active />);
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
-    expect(openPath).toHaveBeenCalledWith('D:/ws/a.txt');
+    expect(openWorkspaceFile).toHaveBeenCalledWith('D:/ws/a.txt', 'D:/ws');
   });
 });

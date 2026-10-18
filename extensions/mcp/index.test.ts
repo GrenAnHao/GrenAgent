@@ -664,6 +664,54 @@ describe("bind", () => {
     expect(appendMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("tool_call waits for the still-connecting servers a codemode script reaches, and only those", async () => {
+    let releaseDocs: () => void = () => {};
+    const docs = new Promise<void>((resolve) => { releaseDocs = resolve; });
+    const vendor = new Promise<void>(() => {});
+    const pi = Object.assign(fakePiWithOn(), {
+      getAllTools: () => [
+        { name: "codemode", reachesTools: (input: Record<string, unknown>) => String(input.code ?? "").match(/\w+/g) ?? [] },
+        { name: "bash" },
+      ],
+    });
+    const mgr = {
+      ...fakeBindMgr(snap({
+        docs: { status: "connecting", tools: [], exposure: "codemode" },
+        vendor: { status: "connecting", tools: [], exposure: "codemode" },
+      })),
+      connectPromise: (name: string) => (name === "docs" ? docs : vendor),
+    };
+    bind(pi as never, mgr as never);
+    const settled = (p: Promise<unknown>) =>
+      Promise.race([p.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50))]);
+
+    // Not reaching any MCP server: runs right away even though both are connecting.
+    expect(await settled(pi.fire("tool_call", { toolName: "bash", input: { command: "ls" } }, {}))).toBe(true);
+    expect(await settled(pi.fire("tool_call", { toolName: "codemode", input: { code: "return 1" } }, {}))).toBe(true);
+
+    // Reaches docs only: waits for docs, not for vendor (which never connects).
+    const call = pi.fire("tool_call", { toolName: "codemode", input: { code: "await tools.mcp__docs__search({})" } }, {});
+    expect(await settled(call)).toBe(false);
+    releaseDocs();
+    expect(await settled(call)).toBe(true);
+  });
+
+  it("tool_call stops waiting when the run is aborted", async () => {
+    const pi = Object.assign(fakePiWithOn(), {
+      getAllTools: () => [{ name: "tool_search", reachesTools: () => "all" as const }],
+    });
+    const mgr = {
+      ...fakeBindMgr(snap({ docs: { status: "connecting", tools: [], exposure: "deferred" } })),
+      connectPromise: () => new Promise<void>(() => {}),
+    };
+    bind(pi as never, mgr as never);
+    const controller = new AbortController();
+    const call = pi.fire("tool_call", { toolName: "tool_search", input: { query: "docs" } }, { signal: controller.signal });
+    controller.abort();
+    const outcome = await Promise.race([call.then(() => "done"), new Promise((resolve) => setTimeout(() => resolve("stuck"), 200))]);
+    expect(outcome).toBe("done");
+  });
+
   it("gives mcp_servers_change servers to the manager and does not override a file entry of the same name", async () => {
     const connect = vi.fn(async (server: McpServerConfig) => ({
       listTools: async () => ({ tools: [{ name: "x" }] }),

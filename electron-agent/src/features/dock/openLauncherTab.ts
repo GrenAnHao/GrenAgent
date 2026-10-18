@@ -1,6 +1,8 @@
 import type { LauncherKind } from './launcherItems';
 import {
+  currentDockView,
   defaultTerminalTitle,
+  isDockTabVisible,
   useDockStore,
   type DockRegion,
   type DockTab,
@@ -8,6 +10,7 @@ import {
   type ReviewPayload,
 } from '../../stores/dockStore';
 import { useLayoutStore } from '../../stores/layoutStore';
+import { pathsEquivalent } from '../../lib/pathUtils';
 
 export function fileTabId(region: DockRegion, workspace: string): string {
   return `file:${region}:${workspace}`;
@@ -23,9 +26,13 @@ function revealRegion(region: DockRegion): void {
 }
 
 function findExisting(region: DockRegion, kind: LauncherKind, workspace?: string): DockTab | undefined {
+  const view = currentDockView();
   return useDockStore.getState().tabs.find((t) => {
     if (t.region !== region || t.kind !== kind) return false;
-    if (kind === 'file') return (t.payload as FilePayload).workspace === workspace;
+    // 右栏标签各会话一份：只复用当前会话看得见的，不把别的会话的标签激活到这里。
+    if (!isDockTabVisible(t, view)) return false;
+    // 同一目录的不同写法（E:\x / E:/x）算同一个标签。
+    if (kind === 'file') return !!workspace && pathsEquivalent((t.payload as FilePayload).workspace, workspace);
     return true;
   });
 }
@@ -58,54 +65,58 @@ function activateExisting(tab: DockTab, region: DockRegion): void {
   revealRegion(region);
 }
 
+/** 返回激活或新建的标签 id；没开成（缺 workspace）时 undefined。 */
 export function openLauncherTab(input: {
   region: DockRegion;
   kind: LauncherKind;
   workspace?: string;
-}): void {
+}): string | undefined {
   const { region, kind, workspace } = input;
 
   if (kind === 'browser') {
+    const id = nextBrowserTabId();
     useDockStore.getState().addTab({
-      id: nextBrowserTabId(),
+      id,
       kind: 'browser',
       region,
       title: '浏览器',
       closable: true,
       payload: { url: 'about:blank', title: '浏览器' },
     });
-    return;
+    return id;
   }
 
   if (kind === 'terminal') {
+    const id = `terminal-${Date.now()}`;
     useDockStore.getState().addTab({
-      id: `terminal-${Date.now()}`,
+      id,
       kind: 'terminal',
       region,
       title: defaultTerminalTitle(),
       closable: true,
       payload: { status: 'idle' },
     });
-    return;
+    return id;
   }
 
   if (kind === 'file') {
-    if (!workspace) return;
+    if (!workspace) return undefined;
     const existing = findExisting(region, 'file', workspace);
     if (existing) {
       activateExisting(existing, region);
-      return;
+      return existing.id;
     }
     const payload: FilePayload = { workspace };
+    const id = uniqueId(fileTabId(region, workspace));
     useDockStore.getState().addTab({
-      id: uniqueId(fileTabId(region, workspace)),
+      id,
       kind: 'file',
       region,
       title: '文件',
       closable: true,
       payload,
     });
-    return;
+    return id;
   }
 
   const existing = findExisting(region, 'review');
@@ -115,17 +126,19 @@ export function openLauncherTab(input: {
       payload: { workspace: workspace ?? prev.workspace },
     });
     activateExisting(existing, region);
-    return;
+    return existing.id;
   }
   const payload: ReviewPayload = { workspace };
+  const id = uniqueId(reviewTabId(region));
   useDockStore.getState().addTab({
-    id: uniqueId(reviewTabId(region)),
+    id,
     kind: 'review',
     region,
     title: '审查',
     closable: true,
     payload,
   });
+  return id;
 }
 
 export function openTurnReview(input: { turnId: string; fileIndex: number; workspace?: string }): void {
@@ -135,7 +148,10 @@ export function openTurnReview(input: { turnId: string; fileIndex: number; works
     turnId: input.turnId,
     fileIndex: input.fileIndex,
   };
-  const existing = useDockStore.getState().tabs.find((t) => t.region === region && t.kind === 'review');
+  const view = currentDockView();
+  const existing = useDockStore
+    .getState()
+    .tabs.find((t) => t.region === region && t.kind === 'review' && isDockTabVisible(t, view));
   if (existing) {
     useDockStore.getState().updateTab(existing.id, { payload });
     useDockStore.getState().setActive(region, existing.id);

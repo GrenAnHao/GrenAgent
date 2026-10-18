@@ -1,13 +1,14 @@
 import { Icon } from '@lobehub/ui';
+import { App } from 'antd';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { ExternalLink, PencilLine } from 'lucide-react';
-import { openPath } from '../../platform/runtime';
 import { useOptionalAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useDockStore, type ReviewPayload } from '../../stores/dockStore';
 import { reviewView } from '../chat/reviewView';
-import { resolveWorkspaceFile } from '../chat/turnDeliverables';
+import { resolveSessionFile } from '../chat/sessionCwd';
 import { FileDiffBlock } from '../tools/FileDiffBlock';
 import { dockTabStyles } from './dockTabStyles';
+import { openWorkspaceFile } from './openWorkspaceFile';
 import type { DockBodyProps } from './TabBodyRenderer';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -132,6 +133,7 @@ function EmptyBody({ testId, text }: { testId?: string; text: string }) {
 }
 
 export function TurnReviewBody({ tab }: DockBodyProps) {
+  const { message } = App.useApp();
   const payload = tab.payload as ReviewPayload;
   const context = useOptionalAgentStoreContext();
   const messages = context?.store.useStore((state) => state.messages) ?? [];
@@ -152,7 +154,7 @@ export function TurnReviewBody({ tab }: DockBodyProps) {
   }
 
   const selected = view.files[view.selected];
-  const resolved = selected ? resolveWorkspaceFile(workspace, selected.path) : null;
+  const target = selected ? resolveSessionFile(workspace, selected.cwd, selected.path) : null;
 
   return (
     <div className={styles.root} data-testid="turn-review">
@@ -164,10 +166,13 @@ export function TurnReviewBody({ tab }: DockBodyProps) {
         <button
           type="button"
           className={styles.open}
-          disabled={!resolved}
+          disabled={!target}
           onClick={() => {
-            if (!resolved) return;
-            void openPath(resolved);
+            if (!target) return;
+            // 可读文件在右侧「文件」标签里看，二进制 / 超大文件仍交给系统程序。
+            openWorkspaceFile(target.absolute, target.root).catch((err: unknown) => {
+              void message.error(`打开失败：${err instanceof Error ? err.message : String(err)}`);
+            });
           }}
         >
           <Icon icon={ExternalLink} size={14} />

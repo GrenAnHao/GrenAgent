@@ -7,6 +7,7 @@ describe('levelDisplayLabel', () => {
     expect(levelDisplayLabel('minimal')).toBe('最低');
     expect(levelDisplayLabel('medium')).toBe('中');
     expect(levelDisplayLabel('xhigh')).toBe('很高');
+    expect(levelDisplayLabel('max')).toBe('极致');
     expect(levelDisplayLabel('custom')).toBe('custom');
   });
 });
@@ -54,6 +55,17 @@ describe('levelOptions', () => {
   it('自定义供应商的协议默认映射不展示未配置的 off 和 max', () => {
     const opts = levelOptions({ provider: 'my-proxy', api: 'openai-completions', reasoning: true });
     expect(opts.map((o) => o.value)).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+  });
+
+  it('自定义 Anthropic 协议默认从低到极致五档，最低隐藏，标签和档位同名', () => {
+    const opts = levelOptions({ provider: 'my-claude', api: 'anthropic-messages', reasoning: true });
+    expect(opts).toEqual([
+      { label: 'low', value: 'low' },
+      { label: 'medium', value: 'medium' },
+      { label: 'high', value: 'high' },
+      { label: 'xhigh', value: 'xhigh' },
+      { label: 'max', value: 'max' },
+    ]);
   });
 
   it('标签用映射里的供应商原生值', () => {

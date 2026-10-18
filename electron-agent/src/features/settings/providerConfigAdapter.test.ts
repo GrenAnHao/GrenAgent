@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCompatKeys, groupsForEditor } from './modelCompatCatalog';
-import { defaultThinkingLevelMap, loadState, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
+import { defaultThinkingLevelMap, loadState, MODELS_JSON_SCHEMA, modelsWithApiThinkingLevels, serializeState, type UiProvider } from './providerConfigAdapter';
 
 const presets = [{ id: 'openai', name: 'OpenAI', api: 'openai-responses' }];
 
@@ -34,6 +34,15 @@ describe('providerConfigAdapter', () => {
     ]);
     expect(JSON.parse(modelsJson).providers.openai).toBeUndefined();
     expect(JSON.parse(authJson).openai).toEqual({ type: 'api_key', key: 'sk-y' });
+  });
+
+  it('writes the published models.json $schema first and still loads it back', () => {
+    const { modelsJson, authJson } = serializeState([]);
+    const parsed = JSON.parse(modelsJson);
+    expect(Object.keys(parsed)[0]).toBe('$schema');
+    expect(parsed.$schema).toBe(MODELS_JSON_SCHEMA);
+    expect(MODELS_JSON_SCHEMA).toBe('https://pi.dev/schemas/models.schema.json');
+    expect(loadState(modelsJson, authJson, presets)).toHaveLength(presets.length);
   });
 
   it('built-in with custom model writes a models.json entry', () => {
@@ -81,7 +90,7 @@ describe('providerConfigAdapter', () => {
   });
 
   it('uses the full Anthropic effort ladder for every model', () => {
-    const anthropic = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+    const anthropic = { minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
     expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-6')).toEqual(anthropic);
     expect(defaultThinkingLevelMap('anthropic-messages', 'claude-opus-4-8')).toEqual(anthropic);
     expect(defaultThinkingLevelMap('anthropic-messages', 'claude-fable-5')).toEqual(anthropic);
@@ -101,7 +110,7 @@ describe('providerConfigAdapter', () => {
     // anthropic 推理模型默认写入 compat.forceAdaptiveThinking=true（pi 才会发送 effort/推理强度）。
     const raw = JSON.parse(modelsJson).providers.p.models;
     expect(raw[0]).toMatchObject({ id: 'claude-opus-4-6', compat: { forceAdaptiveThinking: true } });
-    expect(raw[0].thinkingLevelMap).toEqual({ minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' });
+    expect(raw[0].thinkingLevelMap).toEqual({ minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
     expect(raw[1].thinkingLevelMap).toEqual(raw[0].thinkingLevelMap);
 
     const back = loadState(modelsJson, authJson, presets).find((x) => x.id === 'p');
@@ -143,7 +152,7 @@ describe('providerConfigAdapter', () => {
       ],
       'anthropic-messages',
     );
-    const anthropic = { minimal: 'low', low: 'medium', medium: 'high', high: 'xhigh', xhigh: 'max' };
+    const anthropic = { minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
     expect(models[0].thinkingLevelMap).toEqual(anthropic);
     expect(models[1].thinkingLevelMap).toEqual(anthropic);
     expect(models[2].thinkingLevelMap).toEqual(openai);

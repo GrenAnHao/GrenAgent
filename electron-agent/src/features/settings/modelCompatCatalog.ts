@@ -57,7 +57,7 @@ export const THINKING_LEVEL_ROWS: { level: 'off' | 'minimal' | 'low' | 'medium' 
   { level: 'medium', label: '中' },
   { level: 'high', label: '高' },
   { level: 'xhigh', label: '很高' },
-  { level: 'max', label: '最高' },
+  { level: 'max', label: '极致' },
 ];
 
 export const COMPAT_GROUPS: { id: CompatGroupId; title: string }[] = [

@@ -20,6 +20,10 @@ const mainInput = {
   "codegraph-worker": resolve(__dirname, "electron/app/codeGraph/workerEntry.ts"),
 };
 
+// electron-vite 6 默认 externalizeDeps: true，会把 package.json 的 dependencies 全部外置。
+// 生产主进程要求只外置下面这几个原生模块（已 asarUnpack）：
+// - Pi SDK 的 exports 只有 import 条件，外置后 CJS 里 require 它抛 ERR_PACKAGE_PATH_NOT_EXPORTED；
+// - agent-host / pi-worker 的 chunk 在 app.asar.unpacked 里加载，往上找 node_modules 找不到 asar 里的 yaml 等包。
 const mainExternal = [
   "@homebridge/node-pty-prebuilt-multiarch",
   "@colbymchenry/codegraph",
@@ -42,10 +46,25 @@ export default defineConfig(({ command, mode }) => {
         ],
       },
       build: {
-        ...(production ? { bytecode: { transformArrowFunctions: false } } : {}),
+        ...(production
+          ? {
+              bytecode: { transformArrowFunctions: false },
+              externalizeDeps: false,
+            }
+          : {}),
         rollupOptions: {
           input: mainInput,
-          ...(production ? { output: { format: "cjs" as const } } : {}),
+          // package.json 是 type: module，rolldown 对 CJS 默认出 .cjs / .cjsc。
+          // main 字段、asarUnpack 和 out/main/package.json（commonjs）都按 .js / .jsc 约定，这里显式钉住。
+          ...(production
+            ? {
+                output: {
+                  format: "cjs" as const,
+                  entryFileNames: "[name].js",
+                  chunkFileNames: "chunks/[name]-[hash].js",
+                },
+              }
+            : {}),
           external: mainExternal,
         },
       },

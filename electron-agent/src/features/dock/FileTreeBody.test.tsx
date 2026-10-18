@@ -31,6 +31,7 @@ vi.mock('../fileExplorer/CodeEditor', () => ({
   ),
 }));
 
+import { useFileOpenRequests } from '../../stores/fileOpenRequests';
 import { canCloseDockTab } from './dockCloseGuards';
 import { FileTreeBody } from './FileTreeBody';
 
@@ -91,6 +92,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useFileOpenRequests.setState({ byTab: {} });
   cleanup();
   vi.clearAllMocks();
 });
@@ -201,6 +203,47 @@ describe('FileTreeBody (file explorer)', () => {
 
     act(() => emitChange({ watchId: 'someone-else', workspace: '/repo', dirs: ['/repo'], paths: [] }));
     expect(api.listDir).toHaveBeenCalledTimes(3);
+  });
+
+  it('opens a file requested from outside, expands its folders and highlights it in the tree', async () => {
+    act(() => useFileOpenRequests.getState().request(tab.id, '/repo/src/b.ts'));
+    renderBody();
+    expect((await screen.findByTestId('mock-editor') as HTMLTextAreaElement).value).toBe('const a = 1;');
+    expect(api.readView).toHaveBeenCalledWith('/repo', '/repo/src/b.ts');
+    const tree = await screen.findByTestId('file-tree');
+    await waitFor(() => expect(tree.querySelector('[data-tree-row][data-selected="true"]')?.textContent).toContain('b.ts'));
+    expect(useFileOpenRequests.getState().byTab[tab.id]).toBeUndefined();
+  });
+
+  it('keeps the file, tree width and collapsed state when the same file is requested again', async () => {
+    localStorage.setItem('hermes-file-explorer-tree-width', '300');
+    renderBody();
+    await openFile('a.ts');
+    await screen.findByTestId('mock-editor');
+    const callsBefore = api.readView.mock.calls.length;
+
+    act(() => useFileOpenRequests.getState().request(tab.id, '/repo/a.ts'));
+    await waitFor(() => expect(useFileOpenRequests.getState().byTab[tab.id]).toBeUndefined());
+    expect(api.readView.mock.calls.length).toBe(callsBefore);
+    expect(screen.getAllByTestId('mock-editor')).toHaveLength(1);
+    expect((screen.getByTestId('file-explorer-tree') as HTMLElement).style.width).toBe('300px');
+    localStorage.removeItem('hermes-file-explorer-tree-width');
+  });
+
+  it('asks about unsaved changes before an external request replaces the open file', async () => {
+    renderBody();
+    await openFile('a.ts');
+    const editor = (await screen.findByTestId('mock-editor')) as HTMLTextAreaElement;
+    fireEvent.click(screen.getByText('编辑'));
+    await waitFor(() => expect(editor.dataset.readonly).toBe('false'));
+    fireEvent.change(editor, { target: { value: 'changed' } });
+
+    act(() => useFileOpenRequests.getState().request(tab.id, '/repo/README.md'));
+    await waitFor(() => expect(confirms).toHaveLength(1));
+    act(() => confirms[0].onCancel?.());
+    await waitFor(() => expect(useFileOpenRequests.getState().byTab[tab.id]).toBeUndefined());
+    expect(screen.queryByTestId('md-render')).toBeNull();
+    expect((screen.getByTestId('mock-editor') as HTMLTextAreaElement).value).toBe('changed');
   });
 
   it('shows retry when the root cannot be listed', async () => {

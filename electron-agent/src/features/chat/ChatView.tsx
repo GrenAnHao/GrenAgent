@@ -33,6 +33,7 @@ import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
 import { markScratchUsed } from '../../lib/startupConversation';
 import { createStartupPerf } from '../../lib/startupPerf';
 import { useSessionStore } from '../../store/session';
+import { useDockStore } from '../../stores/dockStore';
 import { useAgentStoreContext } from '../../stores/AgentStoreContext';
 import { useModuleStore } from '../../stores/moduleStore';
 import { commandLanes } from '../../lib/commandLanes';
@@ -425,6 +426,8 @@ export function ChatView() {
         // 用发送瞬间的 peek，不用 await 之后再读：openWorkspace/newSession 期间草稿 loadState
         // 可能把缓存套回设置默认。
         commitComposerModelToSession(workspace, path, peekBefore, levelBefore);
+        // 右侧边栏按会话走：草稿里打开的标签和面板状态过户给刚落盘的会话，必须在 setActiveSession 之前。
+        useDockStore.getState().adoptDraftView(workspace, path);
         st.setActiveSession(path);
         st.setWorkspaceSessionPath(workspace, path);
         st.upsertOptimisticSession({

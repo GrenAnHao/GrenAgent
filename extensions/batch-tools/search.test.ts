@@ -1,5 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { clampSearchMaxResults, compilePatterns, SEARCH_HARD_MAX_RESULTS, searchInText } from "./search.js";
+import {
+  clampSearchMaxResults,
+  compilePatterns,
+  prepareSearchArguments,
+  SEARCH_HARD_MAX_RESULTS,
+  searchInText,
+  searchPatternList,
+} from "./search.js";
+
+describe("prepareSearchArguments", () => {
+  it("leaves the canonical shape alone except for splitting pattern / patterns", () => {
+    expect(prepareSearchArguments({ pattern: "foo", patterns: ["bar"], globs: ["src/**"], path: "a" })).toEqual({
+      pattern: "foo", patterns: ["bar"], globs: ["src/**"], path: "a",
+    });
+  });
+  it("moves a legacy patterns array into pattern + patterns", () => {
+    expect(prepareSearchArguments({ patterns: ["a", "b", "c"], contextLines: 2 })).toEqual({
+      pattern: "a", patterns: ["b", "c"], contextLines: 2,
+    });
+  });
+  it("wraps a single patterns string", () => {
+    expect(prepareSearchArguments({ patterns: "only" })).toEqual({ pattern: "only" });
+  });
+  it("maps the DeepSeek-style misuse seen in session logs", () => {
+    expect(prepareSearchArguments({
+      paths: ["D:\\repo"], pattern: "session.?sidebar|SessionSidebar", maxResults: 40,
+      includePatterns: ["*.{ts,tsx}"],
+    })).toEqual({
+      pattern: "session.?sidebar|SessionSidebar", path: "D:\\repo", maxResults: 40, globs: ["*.{ts,tsx}"],
+    });
+  });
+  it("accepts query / glob aliases and dedupes", () => {
+    expect(prepareSearchArguments({ query: "x", pattern: "x", glob: "*.ts" })).toEqual({ pattern: "x", globs: ["*.ts"] });
+  });
+  it("returns empty or non-object input unchanged so validation reports the missing pattern", () => {
+    const empty = {};
+    expect(prepareSearchArguments(empty)).toBe(empty);
+    expect(prepareSearchArguments(null)).toBe(null);
+    expect(prepareSearchArguments({ patterns: [] })).toEqual({ patterns: [] });
+  });
+});
+
+describe("searchPatternList", () => {
+  it("merges pattern and patterns, dropping blanks and duplicates", () => {
+    expect(searchPatternList({ pattern: "a", patterns: ["b", "", "a"] })).toEqual(["a", "b"]);
+    expect(searchPatternList({ patterns: ["legacy"] })).toEqual(["legacy"]);
+  });
+});
 
 describe("compilePatterns", () => {
   it("compiles regex patterns and collects invalid ones", () => {

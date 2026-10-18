@@ -86,7 +86,9 @@ export default async function (t) {
   // —— 保存 ——
   await t.click('[data-testid="prov-save"]', 20)
   t.ok('保存写盘', await t.waitUntil(`(window.__uiEvents ?? []).includes('save')`))
-  const saved = JSON.parse((await t.data()).savedModelsJson).providers.relay.models
+  const savedDoc = JSON.parse((await t.data()).savedModelsJson)
+  t.check('保存：models.json 带 pi 发布的 $schema', savedDoc.$schema, 'https://pi.dev/schemas/models.schema.json')
+  const saved = savedDoc.providers.relay.models
   t.check('落盘顺序跟着拖动', saved.map((m) => m.id), ['gamma', 'beta', 'alpha'])
   t.check('落盘带分段（四价抄基础价）', saved[2].cost, {
     input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125,

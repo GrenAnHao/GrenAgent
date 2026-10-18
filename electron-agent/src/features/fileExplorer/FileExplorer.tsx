@@ -4,11 +4,13 @@ import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useElementMeasure } from '../../hooks/useElementMeasure';
 import { files } from '../../lib/files';
+import { useFileOpenRequests } from '../../stores/fileOpenRequests';
 import { setDockCloseGuard } from '../dock/dockCloseGuards';
 import { fileExplorerStyles as styles } from './fileExplorerStyles';
 import { parentDir } from './fileKinds';
 import { FileTree } from './FileTree';
 import { FileViewer } from './FileViewer';
+import { ancestorDirs, toTreePath } from './treeModel';
 import { askUnsaved, registerUnsaved } from './unsavedChanges';
 import { useFileTree } from './useFileTree';
 import { useOpenFile } from './useOpenFile';
@@ -48,7 +50,34 @@ export function FileExplorer({ workspace, watchId }: FileExplorerProps) {
   const openPath = 'path' in api.file ? api.file.path : null;
   const tree = useFileTree(workspace, watchId, openPath ? parentDir(openPath) : null);
   const { refreshDirs } = tree;
-  const { onFilesChanged, isDirty, resolveUnsaved } = api;
+  const { onFilesChanged, isDirty, resolveUnsaved, open: openFile } = api;
+
+  // 外部入口（交付卡、审查标签）发来的「打开这个文件」请求：等根目录列出来后接手，
+  // 走和点文件树同一条 open（未保存修改的询问、同文件不重载都在里面），再把祖先目录展开。
+  const openRequest = useFileOpenRequests((state) => state.byTab[watchId]);
+  const treeRef = useRef(tree);
+  treeRef.current = tree;
+  const treeRoot = tree.root;
+  useEffect(() => {
+    if (!openRequest || !treeRoot) return;
+    useFileOpenRequests.getState().consume(watchId, openRequest.nonce);
+    const path = toTreePath(treeRoot, workspace, openRequest.path);
+    void openFile(path);
+    const ancestors = ancestorDirs(treeRoot, path);
+    void (async () => {
+      for (const dir of ancestors) {
+        if (treeRef.current.dirs.has(dir)) continue;
+        try {
+          await treeRef.current.loadDir(dir);
+        } catch {
+          return;
+        }
+      }
+      const expanded = treeRef.current.expanded;
+      const missing = ancestors.filter((dir) => !expanded.includes(dir));
+      if (missing.length > 0) treeRef.current.setExpanded([...expanded, ...missing]);
+    })();
+  }, [openRequest, treeRoot, workspace, watchId, openFile]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;

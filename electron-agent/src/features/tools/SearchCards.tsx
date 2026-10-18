@@ -93,13 +93,22 @@ export const GrepCard = memo(function GrepCard({ result }: { result: unknown }) 
 });
 
 /** 本地代码检索卡：按文件分组展示 `search` 的命中行。 */
-export const CodeSearchCard = memo(function CodeSearchCard({ result }: { result: unknown }) {
+export const CodeSearchCard = memo(function CodeSearchCard({
+  result,
+  isError = false,
+}: {
+  result: unknown;
+  /** 工具调用失败（如参数校验没过，pi 返回 `Validation failed ...`）：原样展示原因，不要当成「未找到匹配」。 */
+  isError?: boolean;
+}) {
   const details =
     result && typeof result === 'object' && 'details' in result
       ? (result as { details?: unknown }).details
       : undefined;
+  const text = extractText(result);
+  if (isError) return <div className={styles.empty}>{text.trim() || '检索失败'}</div>;
   const view = parseCodeSearch(
-    extractText(result),
+    text,
     details && typeof details === 'object' && !Array.isArray(details) ? (details as Record<string, unknown>) : undefined,
   );
   if (view.error) return <div className={styles.empty}>{view.error}</div>;

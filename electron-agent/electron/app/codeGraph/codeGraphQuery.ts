@@ -136,6 +136,9 @@ async function explore(graph: CodeGraph, workspace: string, args: Record<string,
   return result('相关上下文', nodes.map(toRow), nodes, edges, text);
 }
 
+/** 文件列表一页最多这么多条；不传 limit 时仍返回全部，兼容不分页的调用方。 */
+const MAX_FILE_PAGE = 500;
+
 function listFiles(graph: CodeGraph, workspace: string, args: Record<string, unknown>): CodeRetrievalResult {
   const path = typeof args.path === 'string' ? indexPath(workspace, args.path) : '';
   const pattern = typeof args.pattern === 'string' ? args.pattern.replaceAll('\\', '/') : undefined;
@@ -146,13 +149,16 @@ function listFiles(graph: CodeGraph, workspace: string, args: Record<string, unk
     const tail = path ? name.slice(path.length).replace(/^\//, '') : name;
     return args.maxDepth === undefined || tail.split('/').length <= numberArg(args.maxDepth, 1);
   }).sort((a, b) => a.path.localeCompare(b.path));
-  const rows = files.map((entry): CodeRetrievalRow => ({
+  // 先过滤、排序，再切页：total 是过滤后的总数，调用方据此判断还有没有下一页。
+  const offset = numberArg(args.offset, 0);
+  const end = typeof args.limit === 'number' ? offset + Math.min(args.limit, MAX_FILE_PAGE) : undefined;
+  const rows = files.slice(offset, end).map((entry): CodeRetrievalRow => ({
     file: entry.path.replaceAll('\\', '/'), kind: 'file',
     ...(args.includeMetadata !== false ? {
       snippet: [entry.language, `${entry.nodeCount} 个节点`, entry.generated ? 'generated' : '', `${entry.size} B`].filter(Boolean).join(' · '),
     } : {}),
   }));
-  return result('索引文件', rows, [], [], formatFiles(rows, args.format));
+  return result('索引文件', rows, [], [], formatFiles(rows, args.format), { page: { offset, total: files.length } });
 }
 
 function status(graph: CodeGraph): CodeRetrievalResult {

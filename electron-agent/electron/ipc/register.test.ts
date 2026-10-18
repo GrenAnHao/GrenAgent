@@ -182,6 +182,65 @@ describe('registerIpcHandlers', () => {
     expect(piPackages.setEnabled).toHaveBeenCalledWith('C:/ws', 'npm:pi-demo@1.0.0', 'project', false);
   });
 
+  it('routes isolated workspace commands and rejects bad base / fetch values', async () => {
+    const isolatedWorkspace = {
+      create: vi.fn().mockResolvedValue({ id: 'abc12345' }),
+      list: vi.fn().mockReturnValue([]),
+      syncBack: vi.fn().mockResolvedValue({ branch: 'gren/abc12345', commit: 'c' }),
+    };
+    registerIpcHandlers({ isolatedWorkspace: isolatedWorkspace as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await invoke({}, { command: 'isolated_workspace_create', args: { workspace: 'C:/repo' } });
+    expect(isolatedWorkspace.create).toHaveBeenLastCalledWith({ project: 'C:/repo' });
+    await invoke({}, { command: 'isolated_workspace_create', args: { workspace: 'C:/repo', base: 'head', fetch: true } });
+    expect(isolatedWorkspace.create).toHaveBeenLastCalledWith({ project: 'C:/repo', base: 'head', fetch: true });
+    await expect(invoke({}, { command: 'isolated_workspace_create', args: { workspace: 'C:/repo', base: 'worktree' } })).rejects.toThrow('base');
+    await expect(invoke({}, { command: 'isolated_workspace_create', args: { workspace: 'C:/repo', fetch: 'yes' } })).rejects.toThrow('fetch');
+    await expect(invoke({}, { command: 'isolated_workspace_create', args: {} })).rejects.toThrow('workspace');
+    expect(isolatedWorkspace.create).toHaveBeenCalledTimes(2);
+
+    await invoke({}, { command: 'isolated_workspace_list', args: { workspace: 'C:/repo' } });
+    expect(isolatedWorkspace.list).toHaveBeenCalledWith('C:/repo');
+    await invoke({}, { command: 'isolated_workspace_sync_back', args: { workspace: 'C:/repo', id: 'abc12345' } });
+    expect(isolatedWorkspace.syncBack).toHaveBeenCalledWith('C:/repo', 'abc12345');
+    await invoke({}, { command: 'isolated_workspace_create', args: { workspace: 'C:/repo', carryChanges: true } });
+    expect(isolatedWorkspace.create).toHaveBeenLastCalledWith({ project: 'C:/repo', carryChanges: true });
+  });
+
+  it('isolated_workspace_remove refuses a running workspace and unsaved work before closing anything', async () => {
+    const W = 'C:/repo/.gren/worktrees/abc12345';
+    const entry = { id: 'abc12345', path: W, exists: true };
+    const state = vi.fn().mockResolvedValue({ dirty: false, synced: true });
+    const isolatedWorkspace = {
+      create: vi.fn(), syncBack: vi.fn(), probe: vi.fn().mockReturnValue({}),
+      list: vi.fn().mockReturnValue([entry]),
+      state,
+      remove: vi.fn().mockResolvedValue({ removed: true }),
+    };
+    const pi = { listRunningTurns: vi.fn().mockResolvedValue([{ workspace: 'C:\\repo\\.gren\\worktrees\\abc12345' }]) };
+    const workspace = { releaseWorkspace: vi.fn().mockResolvedValue(undefined) };
+    registerIpcHandlers({ isolatedWorkspace: isolatedWorkspace as never, pi: pi as never, workspace: workspace as never });
+    const invoke = handler(IPC_CHANNELS.invoke);
+
+    await expect(invoke({}, { command: 'isolated_workspace_remove', args: { workspace: 'C:/repo', id: 'abc12345' } })).rejects.toThrow('ISOLATED_BUSY');
+    expect(workspace.releaseWorkspace).not.toHaveBeenCalled();
+
+    pi.listRunningTurns.mockResolvedValue([]);
+    state.mockResolvedValue({ dirty: true, synced: true });
+    await expect(invoke({}, { command: 'isolated_workspace_remove', args: { workspace: 'C:/repo', id: 'abc12345' } })).rejects.toThrow('ISOLATED_UNSAVED');
+    expect(workspace.releaseWorkspace).not.toHaveBeenCalled();
+
+    await invoke({}, { command: 'isolated_workspace_remove', args: { workspace: 'C:/repo', id: 'abc12345', force: true } });
+    expect(workspace.releaseWorkspace).toHaveBeenCalledWith(W);
+    expect(isolatedWorkspace.remove).toHaveBeenCalledWith('C:/repo', 'abc12345', { force: true });
+
+    await invoke({}, { command: 'isolated_workspace_probe', args: { paths: [W] } });
+    expect(isolatedWorkspace.probe).toHaveBeenCalledWith([W]);
+    await invoke({}, { command: 'isolated_workspace_state', args: { workspace: 'C:/repo', id: 'abc12345' } });
+    expect(state).toHaveBeenLastCalledWith('C:/repo', 'abc12345');
+  });
+
   it('routes all Git commands with their contract argument names', async () => {
     const git = {
       status: vi.fn().mockResolvedValue([]), diff: vi.fn().mockResolvedValue(''), branches: vi.fn().mockResolvedValue({ current: '', branches: [] }),

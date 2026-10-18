@@ -1,7 +1,7 @@
 {
   "name": "pi-present",
   "version": "0.1.0",
-  "description": "Present existing workspace files as this turn's deliverables.",
+  "description": "Present existing files as this turn's deliverables.",
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "present"],

@@ -36,7 +36,7 @@ helper 用 `CreateProcessWithLogonW` 启动旁边的 `pi-sandbox-launch.exe`。�
 
 ### 长命令写入临时脚本文件，绕开 CreateProcessWithLogonW 的字符上限
 
-当用户命令超过 400 字符时，`operations.ts` 将 `PS_UTF8_PREFIX` + 命令体写入沙箱临时目录下的 `.ps1` 文件（带 UTF-8 BOM），shell argv 改用 `-File <path>` 替代 `-Command <inline>`。`lpCommandLine` 因此固定在约 250 字符以内，与命令长度无关。`helper.c` 增加预检：`wrapped` 超过 1000 字符时直接报明确的长度错误并退出，不再盲目重试。
+（2026-10-14 已被 [Git Bash](2026-10-14-windows-bash-git-bash-like-pi.md) 取代：命令改走 Git Bash，命令正文经环境变量带进固定的引导脚本，不再写 `.ps1`。下面是当时的做法。）当用户命令超过 400 字符时，`operations.ts` 将 `PS_UTF8_PREFIX` + 命令体写入沙箱临时目录下的 `.ps1` 文件（带 UTF-8 BOM），shell argv 改用 `-File <path>` 替代 `-Command <inline>`。`lpCommandLine` 因此固定在约 250 字符以内，与命令长度无关。`helper.c` 增加预检：`wrapped` 超过 1000 字符时直接报明确的长度错误并退出，不再盲目重试。
 
 ### Windows 沙箱环境变量改用 PiSandbox 自己的主目录
 

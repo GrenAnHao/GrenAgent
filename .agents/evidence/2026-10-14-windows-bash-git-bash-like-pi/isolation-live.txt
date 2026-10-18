@@ -1,0 +1,34 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > blocks writes outside the workspace and allows inside 7129ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live OS isolation > throws SANDBOX_UNAVAILABLE when the runner cannot be found 3ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > still runs ordinary commands under the UI restrictions 22971ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > blocks clipboard writes from inside the sandbox 5705ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live windows job hardening > stops the launcher and exits 163 when the job cannot be joined
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > lets the sandbox write inside its workspace (control) 5654ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into ProgramData 5671ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows ambient write-deny > cannot write into Public 5631ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows write boundary on the data drive > writes inside the workspace but not into a sibling directory on the same drive 11301ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live git in the sandbox account > runs init, commit and log in a workspace owned by another user 6065ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live Git Bash through the sandboxed bash operations > runs a long command in the workspace with UTF-8, the sandbox account's HOME and the exit code 5771ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live Git Bash through the sandboxed bash operations > reports a write outside the workspace as a sandbox denial and creates nothing 5706ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live Git Bash through the sandboxed bash operations > stops the shell and its children when aborted 8175ms
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > reads the elevated script's result bits back, and null when it fails
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > stamps the ambient write-deny and confirms it from the ACL
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > grants and confirms list on Windows Temp through the elevated path
+ ↓ _shared/sandbox/isolation.live.test.ts > live elevation without temp files > re-provisions the account and the sandbox still logs on with the new blob
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows grant reclaim > revokes a long-idle modify grant on the whole tree and keeps the one in use 810ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows grant reclaim of a parent > keeps the ACE of a workspace that sits under a long-idle directory 2166ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > blocks changing, creating, deleting and renaming the protected directories, and nothing else 50713ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > takes a directory the sandbox created itself away from it, because the owner can always rewrite the access list 23100ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > leaves the user's own account able to change them, and files the user adds are readable in the sandbox 11305ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > protects a directory that was deleted and created again 16982ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > protects again after the workspace grant is applied again, which writes the account's entry on every object below 17084ms
+ ✓ _shared/sandbox/isolation.live.test.ts > live windows protection of workspace configuration > keeps everyday git working with the directories protected 34662ms
+
+ Test Files  1 passed (1)
+      Tests  20 passed | 5 skipped (25)
+   Start at  07:57:54
+   Duration  248.68s (transform 250ms, setup 0ms, import 1.75s, tests 246.64s, environment 0ms)
+

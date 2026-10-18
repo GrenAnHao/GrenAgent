@@ -39,6 +39,31 @@ describe("canOfferEscalation", () => {
     expect(canOfferEscalation({ mode: "workspace-write", presetBlocksEscalation: true }, "workspace-write", true)).toBe(false);
     expect(canOfferEscalation(gate, "read-only", false)).toBe(false);
   });
+
+  it("isolated workspace: no offer from workspace-write (only full-access is wider), read-only still offers", () => {
+    const iso: SandboxGate = { mode: "read-only", presetBlocksEscalation: false, fullAccessBlocked: true };
+    expect(canOfferEscalation(iso, "workspace-write", true)).toBe(false);
+    expect(canOfferEscalation(iso, "read-only", true)).toBe(true);
+  });
+});
+
+describe("approveEscalation · isolated workspace", () => {
+  it("refuses full-access before asking, even when safety pre-approved the call", async () => {
+    const select = vi.fn(async () => "允许本次");
+    const gate: SandboxGate = { mode: "workspace-write", presetBlocksEscalation: false, fullAccessBlocked: true };
+    await expect(
+      approveEscalation("git push", { mode: "danger-full-access", justification: "推到主仓" }, gate, { channel: true, select, preApproved: true }),
+    ).rejects.toThrow(/isolated workspace/);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("still lets read-only widen to workspace-write with approval", async () => {
+    const select = vi.fn(async () => "允许本次");
+    const gate: SandboxGate = { mode: "read-only", presetBlocksEscalation: false, fullAccessBlocked: true };
+    await expect(
+      approveEscalation("npm run build", { mode: "workspace-write", justification: "写产物" }, gate, { channel: true, select, preApproved: false }),
+    ).resolves.toBe("workspace-write");
+  });
 });
 
 describe("approveEscalation (DSH order)", () => {

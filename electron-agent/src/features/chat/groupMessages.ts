@@ -1,4 +1,5 @@
 import type { ChatMessage, SteerState, UserImage } from '../../stores/agentReducer';
+import { cwdAfterTool } from './sessionCwd';
 
 export type ToolSegment = {
   kind: 'tool';
@@ -9,6 +10,11 @@ export type ToolSegment = {
   result: unknown;
   status: 'running' | 'done' | 'error';
   argsComplete?: boolean;
+  /**
+   * 这次调用发生时会话的工作目录。只有被 working_directory / create_worktree 切走过才有值；
+   * undefined 表示还在项目工作区。相对路径按它解析，不是按项目根。
+   */
+  cwd?: string;
   /** 开始执行的时刻；运行中据此实时计时。 */
   startedAt?: number;
   /** 执行耗时（ms），结束后定格。 */
@@ -58,6 +64,8 @@ export type CommandInputMessage = Extract<DisplayMessage, { kind: 'command-input
 export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
   const out: DisplayMessage[] = [];
   let pending: { id: string; segments: TimelineSegment[]; timestamp?: number } | null = null;
+  // 按消息顺序跟踪会话当前的工作目录（跨回合），给每个工具段盖上调用时的目录。
+  let sessionCwd: string | undefined;
 
   const flush = () => {
     if (pending && pending.segments.length > 0) {
@@ -130,8 +138,11 @@ export function groupMessages(messages: ChatMessage[]): DisplayMessage[] {
             argsComplete: msg.argsComplete,
             startedAt: msg.startedAt,
             durationMs: msg.durationMs,
+            ...(sessionCwd ? { cwd: sessionCwd } : {}),
             ...(msg.parentToolCallId ? { parentToolCallId: msg.parentToolCallId } : {}),
           });
+          // 嵌套调用（子代理里的工具）有自己的会话目录，不改主会话的。
+          if (!msg.parentToolCallId) sessionCwd = cwdAfterTool(msg.toolName, msg.status, msg.result) ?? sessionCwd;
         }
         break;
       default:
