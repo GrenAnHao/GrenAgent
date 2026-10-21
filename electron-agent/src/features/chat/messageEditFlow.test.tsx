@@ -251,7 +251,7 @@ describe('messageEditFlow', () => {
     expect(confirmSpy).toHaveBeenCalled();
     expect(truncateTo).toHaveBeenCalledWith('/ws', 'entry-u1', 'drop-target');
     // ChatInput 挂载后接管 setValue：回退入框会走 editor.setDocument
-    expect(setDocument).toHaveBeenCalledWith('markdown', '原文');
+    expect(setDocument).toHaveBeenCalledWith('text', '原文');
 
     truncateTo.mockClear();
     await act(async () => {

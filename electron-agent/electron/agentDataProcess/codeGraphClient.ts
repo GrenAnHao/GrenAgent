@@ -32,5 +32,6 @@ export function createCodeGraphClient(options: CodeGraphClientOptions): CodeGrap
       shutdownTimeoutMs: 10_000,
     }),
     onDiag: (sample) => options.diag({ kind: 'codegraph-host-sample', ...sample }),
+    onSyncEvent: (event) => options.diag({ kind: 'codegraph-sync-event', ...event }),
   });
 }

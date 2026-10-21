@@ -60,8 +60,27 @@ export interface ParsedAnswerBlock {
   imageCount?: number;
 }
 
-/** 从 formatAnswers 文本里拆出各题选项，不把「补充说明」误当成最后一题的答案。 */
-export function parseAnswerBlock(text: string): ParsedAnswerBlock {
+const OPEN_BRACKETS = '（(【[「『《';
+const CLOSE_BRACKETS = '）)】]」』》';
+
+/** 括号外的第一个全角冒号；题目常写「…（推荐：…）」，括号里的冒号不是题目和答案的分隔。 */
+function separatorColon(line: string): number {
+  let depth = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (OPEN_BRACKETS.includes(ch)) depth++;
+    else if (CLOSE_BRACKETS.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (ch === '：' && depth === 0) return i;
+  }
+  return line.indexOf('：');
+}
+
+/**
+ * 从 formatAnswers 文本里拆出各题选项，不把「补充说明」误当成最后一题的答案。
+ * 传了 titles（与 formatAnswers 写入时同一份题目全文）就按题目前缀切，题目里有冒号也不会切错；
+ * 没传或对不上时取括号外的第一个全角冒号。
+ */
+export function parseAnswerBlock(text: string, titles?: readonly string[]): ParsedAnswerBlock {
   const body = text.replace(/^\s*\[我的选择\]\n?/, '');
   const extraAt = body.search(/^补充说明：/m);
   const imageAt = body.search(/^补充图片：/m);
@@ -71,9 +90,12 @@ export function parseAnswerBlock(text: string): ParsedAnswerBlock {
   const tail = body.slice(headEnd);
 
   const chunks = head.split(/(?=^\d+\.\s)/m).filter((s) => /^\d+\./.test(s.trimStart()));
-  const choices = chunks.map((chunk) => {
-    const colonIdx = chunk.indexOf('：');
-    return colonIdx >= 0 ? chunk.slice(colonIdx + 1).trim() : chunk.replace(/^\d+\.\s*/, '').trim();
+  const choices = chunks.map((chunk, i) => {
+    const rest = chunk.trimStart().replace(/^\d+\.\s*/, '');
+    const title = titles?.[i]?.trim();
+    if (title && rest.startsWith(`${title}：`)) return rest.slice(title.length + 1).trim();
+    const colonIdx = separatorColon(rest);
+    return colonIdx >= 0 ? rest.slice(colonIdx + 1).trim() : rest.trim();
   });
 
   const extraMatch = tail.match(/^补充说明：([\s\S]*?)(?=^补充图片：)/m) ?? tail.match(/^补充说明：([\s\S]*)/);

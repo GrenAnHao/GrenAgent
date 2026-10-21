@@ -23,7 +23,7 @@ import { useSlashOptions } from './input/editor/useSlashOptions';
 import { useTauriFileDrop } from './input/editor/useTauriFileDrop';
 import ReactCommandPillPlugin from './input/editor/CommandPill/ReactCommandPillPlugin';
 import { CommandPillHostContext } from './input/editor/CommandPill/hostContext';
-import { focusMissingPillArg, readComposerText } from './input/editor/CommandPill/composerText';
+import { focusMissingPillArg, readComposerText, writeComposerText } from './input/editor/CommandPill/composerText';
 
 const PLACEHOLDER = '编辑消息，@ 引用文件/目录，/ 调用技能…';
 
@@ -170,8 +170,7 @@ export function MessageEditBox({
   useEffect(() => {
     if (primedRef.current) return;
     primedRef.current = true;
-    if (initialText) editor.setDocument('markdown', initialText);
-    else editor.cleanDocument();
+    writeComposerText(editor, initialText);
     setEmpty(!initialText.trim());
     requestAnimationFrame(() => editor.focus());
   }, [editor, initialText]);
@@ -234,8 +233,7 @@ export function MessageEditBox({
       empty,
       setEmpty,
       setValue: (text: string) => {
-        if (text) editor.setDocument('markdown', text);
-        else editor.cleanDocument();
+        writeComposerText(editor, text);
         setEmpty(!text);
       },
       readDraft,

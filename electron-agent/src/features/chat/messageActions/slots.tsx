@@ -1,4 +1,4 @@
-import { Copy, Eye, EyeOff, PencilLine, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { Copy, Eye, EyeOff, PencilLine, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
 import type { ConfirmOptions } from '../../../components/askConfirm';
 import type { MessageActionContext, MessageActionItem, MessageActionKey, Notify } from './types';
 
@@ -93,6 +93,16 @@ export function buildActionItem(
         label: excluded ? '恢复到上下文' : '移出上下文',
         disabled: ts == null || !handler,
         onClick: ts != null && handler ? () => handler(ts) : undefined,
+      };
+    }
+    case 'cancel': {
+      const handler = ctx.onCancel;
+      return {
+        key: 'cancel',
+        icon: X,
+        label: '取消引导',
+        disabled: !handler,
+        onClick: handler,
       };
     }
     case 'rewind': {

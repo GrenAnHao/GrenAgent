@@ -1,6 +1,6 @@
 import { App } from 'antd';
 import { useEffect } from 'react';
-import { onPiUiRequest } from '../../lib/pi';
+import { onPiEvent, onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
 import { applyGoalStatus } from './goalStatus';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
@@ -11,7 +11,7 @@ import { parseAskUserPayload } from '../../components/QuestionSelector/answers';
 import { isApprovalPolicy, useApprovalStore } from '../../stores/approvalStore';
 import { useWechatStatusStore, type WechatStatus } from '../../stores/wechatStatusStore';
 import { useImMessagesStore, type ImConversation } from '../../stores/imMessagesStore';
-import { useVisualStore, type VisualOwner } from '../../stores/visualStore';
+import { settleVisualOnTurnEnd, useVisualStore, type VisualOwner } from '../../stores/visualStore';
 import { agentStoreRegistry } from '../../stores/agentStoreRegistry';
 import { parseWaitingUiPrompt } from '../../stores/waitingUiPrompt';
 import { isGoalReceiptNotify } from './goalReceiptNotify';
@@ -90,6 +90,7 @@ export function ExtensionUiHost() {
       // 宿主不再等这条请求（超时、撤回、已答复）：卡片不管在画面上、排队还是后台暂存都收掉。
       if (method === 'dismiss') {
         dismissUiRequest(e.request.id);
+        useVisualStore.getState().dismissRequest(e.request.id);
         return;
       }
       if (method === 'setStatus') {
@@ -199,6 +200,8 @@ export function ExtensionUiHost() {
         else useUiPromptStore.getState().setRequest(item);
       }
     }));
+    // 视觉设计确认没有 dismiss（read_visual_choice 超时只是工具自己返回），回合结束时收掉。
+    register(onPiEvent(settleVisualOnTurnEnd));
     return () => {
       disposed = true;
       for (const un of unsubs.splice(0)) un();

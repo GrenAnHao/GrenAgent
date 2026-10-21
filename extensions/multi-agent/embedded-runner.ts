@@ -141,6 +141,7 @@ const CORE_ALWAYS_ON = new Set([
   "prompt-commands",
   "context-rules",
   "compaction-policy",
+  "image-limits",
   "auto-title",
   "todo",
   "agent-mode",
@@ -299,6 +300,19 @@ export type OpenedEmbedded = EmbeddedChildHandle & {
   structured?: StructuredCapture;
 };
 
+/**
+ * 任何子代理都带着的工具：和父代理说话的通道。命名代理的白名单（scout 只列了 read / grep 等）
+ * 不能把它挡掉，否则续聊子代理收到「用 send_message 交结果」的指引却没有这个工具。
+ */
+export const CHILD_ALWAYS_TOOLS = ["send_message"] as const;
+
+/** 命名代理白名单补上必带的工具（及 outputSchema 的 structured_output）；没有白名单时不限制。 */
+export function childToolAllowlist(tools: string[] | undefined, withStructured: boolean): string[] | undefined {
+  const names = tools?.map((t) => t.trim()).filter(Boolean) ?? [];
+  if (names.length === 0) return undefined;
+  return [...new Set([...names, ...CHILD_ALWAYS_TOOLS, ...(withStructured ? [STRUCTURED_OUTPUT_TOOL] : [])])];
+}
+
 /** 打开子会话的方式：本进程（openEmbeddedChildSession）或 worker 进程（worker-session.ts 的代理）。 */
 export type ChildSessionOpener = (opts: EmbeddedSubagentOpts, prepared: PreparedEmbedded) => Promise<OpenedEmbedded>;
 
@@ -355,6 +369,7 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
   });
 
   const excludeTools = buildExcludeTools(prepared.childConfig, opts.depth);
+  const allow = childToolAllowlist(opts.tools, Boolean(opts.outputSchema));
   let model = undefined;
   if (opts.model?.trim()) {
     const resolved = resolveCliModel({
@@ -371,13 +386,7 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
     services,
     sessionManager,
     ...(model ? { model } : {}),
-    ...(opts.tools?.length
-      ? {
-          tools: opts.outputSchema
-            ? [...new Set([...opts.tools, STRUCTURED_OUTPUT_TOOL])]
-            : opts.tools,
-        }
-      : {}),
+    ...(allow ? { tools: allow } : {}),
     ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     excludeTools,
     sessionStartEvent: { type: "session_start", reason: "startup" },
@@ -451,10 +460,9 @@ export async function openEmbeddedChildSession(opts: EmbeddedSubagentOpts, prepa
 
   // Named-agent `--tools` is an allowlist. SDK `tools` covers builtins; extension
   // tools (MCP, spawn_agent, …) stay registered unless the session can hide them.
-  const allow = opts.tools?.map((t) => t.trim()).filter(Boolean) ?? [];
   const setActive = (session as { setActiveTools?: (names: string[]) => void }).setActiveTools;
-  if (allow.length && typeof setActive === "function") {
-    setActive([...new Set(allow)]);
+  if (allow && typeof setActive === "function") {
+    setActive(allow);
   }
 
   // 监听方出错不能抛回 SDK（_shared/guard-listener.ts）。

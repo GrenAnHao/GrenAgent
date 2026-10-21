@@ -15,6 +15,7 @@ import { currentCwd } from "../_shared/workspace-context.js";
 import { batchToolRefresh } from "../_shared/tool-refresh-batch.js";
 import { waitForDirect } from "./wait.js";
 import { serversToWait, type ToolReach } from "./reach.js";
+import { isLegacyServersMessage } from "./legacyServersMessage.js";
 
 /** How long a call that reaches a still-connecting server waits before running without it. */
 const REACH_WAIT_MS = 30_000;
@@ -430,47 +431,6 @@ function serverIncludesDirect(entry: { exposure?: string; toolExposure?: Record<
   return Object.values(overrides).some((value) => normalizeExposure(value) === "direct");
 }
 
-function oneLineDescription(description: string | undefined): string {
-  if (!description) return "";
-  return (description.split("\n", 1)[0] ?? "").trim();
-}
-
-function formatServerSummary(snap: McpSnapshot): string {
-  const lines: string[] = [];
-  for (const [name, entry] of snap.servers) {
-    const exposure = normalizeExposure(entry.exposure) ?? "codemode";
-    const description = oneLineDescription(entry.description);
-    lines.push(description ? `${name} ${exposure} ${description}` : `${name} ${exposure}`);
-  }
-  return lines.join("\n");
-}
-
-function entryText(content: unknown): string | undefined {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return undefined;
-  const parts = content.flatMap((part) => {
-    if (!part || typeof part !== "object") return [];
-    const text = (part as { type?: unknown; text?: unknown }).text;
-    return (part as { type?: unknown }).type === "text" && typeof text === "string" ? [text] : [];
-  });
-  return parts.length > 0 ? parts.join("") : undefined;
-}
-
-function lastServerSummary(sessionManager: { buildContextEntries?: () => readonly unknown[]; getEntries?: () => readonly unknown[] } | undefined): string | undefined {
-  const entries = sessionManager?.buildContextEntries?.() ?? sessionManager?.getEntries?.() ?? [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i] as {
-      type?: string;
-      customType?: string;
-      content?: unknown;
-      message?: { customType?: string; content?: unknown };
-    } | undefined;
-    if (entry?.type === "custom_message" && entry.customType === "mcp-servers") return entryText(entry.content);
-    if (entry?.message?.customType === "mcp-servers") return entryText(entry.message.content);
-  }
-  return undefined;
-}
-
 /** ModelRuntime.getAuth 暴露的当前供应商登录态。只取 apiKey，和 ModelRegistry.getApiKeyForProvider 一致。 */
 interface ProviderTokenRuntime {
   getAuth(providerId: string): Promise<{ auth?: { apiKey?: string } } | undefined>;
@@ -547,7 +507,9 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
     unsub = undefined;
   });
 
-  pi.on("before_agent_start", async (_event, ctx) => {
+  // Waits for servers with direct tools, which must be in the active set before the request. Nothing
+  // about the servers is injected into the prompt: see legacyServersMessage.ts.
+  pi.on("before_agent_start", async () => {
     const pendings: Promise<unknown>[] = [];
     for (const [name, entry] of mgr.snapshot().servers) {
       if (!serverIncludesDirect(entry)) continue;
@@ -555,17 +517,14 @@ export function bind(pi: ExtensionAPI, mgr: McpManager, control: DesktopControlP
       if (pending) pendings.push(pending);
     }
     await waitForDirect(pendings, 10_000);
-    const content = formatServerSummary(mgr.snapshot());
-    const sessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
-      appendMessage?: (message: { role: "custom"; customType: string; content: string; display: boolean; timestamp: number }) => void;
-    };
-    const previous = lastServerSummary(sessionManager);
-    if (content === (previous ?? "")) return undefined;
-    const message = { customType: "mcp-servers", content, display: false as const };
-    if (typeof sessionManager.appendMessage === "function") {
-      sessionManager.appendMessage({ role: "custom", ...message, timestamp: Date.now() });
-    }
-    return { message };
+    return undefined;
+  });
+
+  // Sessions from earlier versions carry the server list as "mcp-servers" custom messages, which the
+  // model sees as user text and acts on; leave them out of what is sent.
+  pi.on("context", (event) => {
+    const messages = event.messages.filter((message) => !isLegacyServersMessage(message));
+    return messages.length === event.messages.length ? undefined : { messages };
   });
 
   // A call that reaches other tools (codemode, tool_search: pi `reachesTools`) waits for the servers

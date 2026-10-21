@@ -1,0 +1,149 @@
+{
+  "checks": [
+    {
+      "ok": true,
+      "label": "手动建立索引完成",
+      "detail": {
+        "files": 551,
+        "ms": 7087
+      }
+    },
+    {
+      "ok": true,
+      "label": "第一次查询后挂上文件监听、激活补同步结束",
+      "detail": {
+        "watcher": {
+          "active": true,
+          "degraded": false
+        },
+        "generation": 2
+      }
+    },
+    {
+      "ok": true,
+      "label": "新增文件的符号在 10 秒内可查（编辑到可查）",
+      "detail": "660 ms"
+    },
+    {
+      "ok": true,
+      "label": "删除文件后符号消失",
+      "detail": "463 ms"
+    },
+    {
+      "ok": true,
+      "label": "400 个新文件同步完，新符号可查",
+      "detail": "3902 ms"
+    },
+    {
+      "ok": true,
+      "label": "期间看到过 phase: syncing"
+    },
+    {
+      "ok": true,
+      "label": "增量同步期间同工作区查询没有 busy、没有报错",
+      "detail": {
+        "queries": 54,
+        "busy": 0,
+        "errors": 0
+      }
+    },
+    {
+      "ok": true,
+      "label": "期间的结果带 servingStale 标记",
+      "detail": {
+        "staleAnswers": 36
+      }
+    },
+    {
+      "ok": true,
+      "label": "删除整个目录后其中的符号消失",
+      "detail": "1864 ms"
+    },
+    {
+      "ok": true,
+      "label": "持锁时进入 backoff，lastError.code = CODEGRAPH_LOCKED",
+      "detail": {
+        "state": "indexed",
+        "nextRetryInMs": 9164,
+        "consecutiveFailures": 0
+      }
+    },
+    {
+      "ok": true,
+      "label": "持锁不算失败（state 不是 failed、失败次数 0）"
+    },
+    {
+      "ok": true,
+      "label": "持锁期间查询照常应答"
+    },
+    {
+      "ok": true,
+      "label": "锁释放后自动重试成功、新符号可查",
+      "detail": "9497 ms"
+    },
+    {
+      "ok": true,
+      "label": "自动同步在跑时发起的手动同步照常完成（不再报 busy）",
+      "detail": {
+        "result": "completed",
+        "ms": 1735,
+        "firstStage": "queued"
+      }
+    },
+    {
+      "ok": true,
+      "label": "手动同步完成后新文件都已可查"
+    },
+    {
+      "ok": true,
+      "label": "全程没有同步失败事件",
+      "detail": []
+    },
+    {
+      "ok": true,
+      "label": "关停后子进程以 0 退出",
+      "detail": {
+        "code": 0,
+        "signal": null
+      }
+    }
+  ],
+  "timings": {
+    "initialIndexMs": 7087,
+    "editToQueryableMs": 660,
+    "deleteToGoneMs": 463,
+    "bulkSyncMs": 3902,
+    "queryDuringSync": {
+      "count": 54,
+      "p50Ms": 5,
+      "maxMs": 65
+    },
+    "dirDeleteToGoneMs": 1864
+  },
+  "syncEvents": [],
+  "final": {
+    "workspace": "C:\\Users\\rxstudio\\AppData\\Local\\Temp\\cg-autosync-TOGVit",
+    "connected": true,
+    "indexed": true,
+    "sdkAvailable": true,
+    "sdkVersion": "1.6.2",
+    "state": "indexed",
+    "files": 752,
+    "nodes": 8244,
+    "edges": 24240,
+    "lastIndexedAt": 1792327872162,
+    "phase": "idle",
+    "lastAttemptAt": 1792327872726,
+    "lastSuccessAt": 1792327873178,
+    "consecutiveFailures": 0,
+    "pendingChanges": 0,
+    "generation": 9,
+    "autoSync": true,
+    "watcher": {
+      "active": true,
+      "degraded": false
+    },
+    "servingStale": false
+  },
+  "passed": true
+}

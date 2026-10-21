@@ -49,7 +49,9 @@ function fakeHandle(session: Record<string, unknown> = {}) {
       setSessionName: vi.fn(),
       messages: [],
       modelRuntime: { getAvailableSnapshot: () => [] },
-      sessionManager: { getLeafId: () => 'leaf' },
+      sessionManager: { getLeafId: () => 'leaf', setSessionFile: vi.fn() },
+      agent: { state: { messages: [] as unknown[] } },
+      _refreshFinalizedContext: vi.fn(),
       ...session,
     },
     prompt: vi.fn(async () => {}),
@@ -741,6 +743,34 @@ describe('PiRuntimeService', () => {
     }
   });
 
+  it('回退到此截断后，内存里的会话按新文件重读：下一轮模型读不到被删掉的回复', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pi-truncate-memory-'));
+    try {
+      const sm = SessionManager.create('C:/work', dir);
+      const u1 = sm.appendMessage({ role: 'user', content: '第一问', timestamp: 1 } as never);
+      sm.appendMessage({ role: 'assistant', content: [{ type: 'text', text: '第一答' }], timestamp: 2 } as never);
+      const u2 = sm.appendMessage({ role: 'user', content: '第二问', timestamp: 3 } as never);
+      sm.appendMessage({ role: 'assistant', content: [{ type: 'text', text: '被回退掉的回复' }], timestamp: 4 } as never);
+      const sessionFile = sm.getSessionFile()!;
+      await writeFile(sessionFile, [sm.getHeader(), ...sm.getEntries()].map((item) => JSON.stringify(item)).join('\n') + '\n');
+      const { host, handle } = fakeAgentHost(fakeHandle({ sessionManager: sm, agent: { state: { messages: sm.buildSessionProjection().messages } }, _refreshFinalizedContext: undefined }));
+      handle.getState = vi.fn(() => ({ sessionFile }));
+      const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost });
+
+      await expect(service.send('C:/work', 'agent_truncate_to', { entryId: u2, mode: 'drop-target' })).resolves.toMatchObject({ ok: true });
+
+      const contents = (handle.session.agent.state.messages as Array<{ content: unknown }>).map((m) => JSON.stringify(m.content));
+      expect(contents.join('|')).not.toContain('被回退掉的回复');
+      expect(contents.join('|')).not.toContain('第二问');
+      expect(contents).toHaveLength(2);
+      expect(sm.getEntries().map((entry) => entry.id)).not.toContain(u2);
+      expect(sm.getEntries()[0]!.id).toBe(u1);
+      expect(handle.reload).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('agent_get_messages 用 buildSessionProjection 的 entry id，且该 id 可作 truncateTo 目标', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-get-messages-entry-'));
     const sessionFile = join(root, 'session.jsonl');
@@ -755,6 +785,7 @@ describe('PiRuntimeService', () => {
     handle.getState = vi.fn(() => ({ sessionFile }));
     handle.session.sessionManager = {
       getLeafId: () => 'u2',
+      setSessionFile: vi.fn(),
       buildSessionProjection: () => ({
         entries: [
           { sourceEntry: { id: 'u1' }, messages: [{ role: 'user', content: 'u1', timestamp: 1 }] },
@@ -1131,6 +1162,16 @@ describe('进程内宿主交互路径', () => {
       steering: ['第一条', '第二条'],
     });
     expect(handle.session.clearQueue).toHaveBeenCalledTimes(1);
+    expect(handle.session.followUp).toHaveBeenCalledWith('稍后');
+  });
+
+  it('agent_cancel_steer 只撤那一条引导，其余引导和跟进排回去', async () => {
+    const { host, handle } = fakeAgentHost(fakeHandle({ getSteeringMessages: () => ['第一条', '第二条'] }));
+    handle.session.clearQueue.mockReturnValue({ steering: ['第一条', '第二条'], followUp: ['稍后'] });
+    const service = new PiRuntimeService({ agentDir: 'C:/a', agentHost: host, modelRuntimeHost: noopModelHost });
+    await expect(service.send('C:/work', 'agent_cancel_steer', { message: '第一条' })).resolves.toEqual({ cancelled: true });
+    expect(handle.session.steer).toHaveBeenCalledTimes(1);
+    expect(handle.session.steer).toHaveBeenCalledWith('第二条');
     expect(handle.session.followUp).toHaveBeenCalledWith('稍后');
   });
 

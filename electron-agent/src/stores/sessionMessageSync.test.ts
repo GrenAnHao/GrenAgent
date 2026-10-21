@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from './agentReducer';
-import { backfillEntryIds, cutMessagesAfterEntry, mergeLiveTail } from './sessionMessageSync';
+import { backfillEntryIds, cutMessagesAfterEntry, keepSettledLiveTools, mergeLiveTail } from './sessionMessageSync';
 
 const user = (id: string, text: string, entryId?: string): ChatMessage => ({
   kind: 'user',
@@ -109,5 +109,29 @@ describe('backfillEntryIds', () => {
     ]);
     expect(next[0]).toMatchObject({ entryId: 'keep-me' });
     expect(next[1]).toMatchObject({ entryId: 'backend-2' });
+  });
+});
+
+describe('keepSettledLiveTools', () => {
+  const tool = (id: string, toolCallId: string, status: 'running' | 'done' | 'error', text?: string): ChatMessage =>
+    ({
+      kind: 'tool',
+      id,
+      toolCallId,
+      toolName: 'code_explore',
+      args: { query: 'q' },
+      status,
+      ...(text ? { result: { content: [{ type: 'text', text }] } } : {}),
+    }) as ChatMessage;
+
+  it('快照里还在跑、实时已结束：沿用实时结果，id 保持快照的', () => {
+    const out = keepSettledLiveTools([tool('s1', 'c1', 'running'), tool('s2', 'b1', 'running')], [tool('l1', 'c1', 'done', 'hit')]);
+    expect(out[0]).toMatchObject({ id: 's1', status: 'done', result: { content: [{ text: 'hit' }] } });
+    expect(out[1]).toMatchObject({ id: 's2', status: 'running' });
+  });
+
+  it('实时还在跑、快照已有结果：以快照为准（进程子代理不推事件）', () => {
+    const base = [tool('s1', 'c1', 'done', 'from-jsonl')];
+    expect(keepSettledLiveTools(base, [tool('l1', 'c1', 'running')])).toBe(base);
   });
 });

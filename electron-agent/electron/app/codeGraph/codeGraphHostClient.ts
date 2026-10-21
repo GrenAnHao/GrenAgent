@@ -3,7 +3,7 @@ import type { CodeRetrievalTool } from '../../agentData/codeRetrievalProtocol';
 import type { CodeRetrievalResult } from '../../agentData/codeRetrievalResult';
 import type { CodeGraphStatusView } from './codeGraphEngine';
 import type { CodeSearchView } from './codeGraphService';
-import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, type CodeGraphDiagSample, type CodeGraphHostMethod, type CodeGraphProgressEvent } from './hostContract';
+import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphHostMethod, type CodeGraphProgressEvent, type CodeGraphSyncEvent } from './hostContract';
 import { probeProjects, type ProjectIndexState } from './indexProbe';
 
 /** 主进程只用到子进程客户端的这几样（AgentProcessClient 满足）。 */
@@ -18,6 +18,8 @@ export interface CodeGraphHostClientOptions {
   /** 传入 onEvent 回调，返回子进程客户端。构造时调用一次；子进程按需拉起。 */
   createProcess: (onEvent: (channel: string, payload: unknown) => void) => CodeGraphHostProcess;
   onDiag?: (sample: CodeGraphDiagSample) => void;
+  /** 同步失败 / 熔断 / 长时间占锁（自动同步不建 job，靠它留痕）。 */
+  onSyncEvent?: (event: CodeGraphSyncEvent) => void;
 }
 
 /**
@@ -59,6 +61,7 @@ export class CodeGraphHostClient {
     if (this.closed) throw new Error('CodeGraph engine is closed');
     if (onProgress) this.progress.set(jobId, onProgress);
     try {
+      // 同一工作区有同步在跑时子进程让它排队（进度先报 queued），不再报 busy。
       await this.request('codegraph.runSync', { jobId, workspace });
     } finally {
       this.progress.delete(jobId);
@@ -88,6 +91,7 @@ export class CodeGraphHostClient {
       if (event && typeof event.jobId === 'string') this.progress.get(event.jobId)?.(event.progress);
       return;
     }
-    if (channel === CODEGRAPH_DIAG_CHANNEL) this.options.onDiag?.(payload as CodeGraphDiagSample);
+    if (channel === CODEGRAPH_DIAG_CHANNEL) { this.options.onDiag?.(payload as CodeGraphDiagSample); return; }
+    if (channel === CODEGRAPH_SYNC_EVENT_CHANNEL && payload && typeof payload === 'object') this.options.onSyncEvent?.(payload as CodeGraphSyncEvent);
   }
 }

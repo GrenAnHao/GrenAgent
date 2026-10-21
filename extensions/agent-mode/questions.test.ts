@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   CUSTOM_OPTION_ID,
+  countValidQuestions,
   decodeAskUserAnswer,
+  MAX_QUESTIONS,
   makeQuestionsId,
   normalizeQuestions,
+  truncationNotice,
   type RawQuestion,
 } from "./questions.js";
 
@@ -102,14 +105,31 @@ describe("normalizeQuestions", () => {
     expect(normalizeQuestions([], "q-1")).toBeNull();
   });
 
-  it("caps questions at 8", () => {
+  it("keeps 11 questions (regression: used to cut at 8 silently)", () => {
     const raw: RawQuestion[] = Array.from({ length: 11 }, (_, i) => ({
       question: `Q${i + 1}`,
       options: [{ label: "x" }],
     }));
     const out = normalizeQuestions(raw, "q-1");
-    expect(out?.questions).toHaveLength(8);
-    expect(out?.questions[7].title).toBe("Q8");
+    expect(out?.questions).toHaveLength(11);
+    expect(out?.questions[10].title).toBe("Q11");
+    expect(truncationNotice(countValidQuestions(raw))).toBeUndefined();
+  });
+
+  it("caps at MAX_QUESTIONS and says which questions were dropped", () => {
+    const raw: RawQuestion[] = Array.from({ length: MAX_QUESTIONS + 3 }, (_, i) => ({
+      question: `Q${i + 1}`,
+      options: [{ label: "x" }],
+    }));
+    const out = normalizeQuestions(raw, "q-1");
+    expect(out?.questions).toHaveLength(MAX_QUESTIONS);
+    const notice = truncationNotice(countValidQuestions(raw));
+    expect(notice).toContain(`第 ${MAX_QUESTIONS + 1}–${MAX_QUESTIONS + 3} 题`);
+    expect(notice).toContain("ask_user");
+  });
+
+  it("counts only non-blank questions toward the cap", () => {
+    expect(countValidQuestions([{ question: "a" }, { question: "  " }, {}])).toBe(1);
   });
 });
 

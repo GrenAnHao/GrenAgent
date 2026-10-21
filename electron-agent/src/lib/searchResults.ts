@@ -1,6 +1,8 @@
 export interface GrepMatch {
   line: number;
   text: string;
+  /** pi grep 带 context 时的上下文行（`path-N- text`），不算命中。 */
+  context?: boolean;
 }
 export interface GrepFile {
   path: string;
@@ -23,14 +25,34 @@ export interface GrepResult {
  *     Line 5: <text>
  *   (Results truncated: ...)         // 可选
  *   (Some paths were inaccessible)   // 可选
+ *
+ * 也解析 pi 内置 grep（子代理用的就是它，pi 1.3.0 core/tools/grep.js）的逐行格式：
+ *   <path>:12: <text>                // 匹配行
+ *   <path>-11- <text>                // context > 0 时的上下文行
+ *   [100 matches limit reached. ...] // 可选提示
+ *   No matches found                 // 没有命中
  */
 export function parseGrepOutput(text: string): GrepResult {
   const files: GrepFile[] = [];
   let total = 0;
   let truncated = false;
   let current: GrepFile | null = null;
+  const piFiles = new Map<string, GrepFile>();
+  const piFile = (path: string): GrepFile => {
+    let file = piFiles.get(path);
+    if (!file) {
+      file = { path, matches: [] };
+      piFiles.set(path, file);
+      files.push(file);
+    }
+    return file;
+  };
 
   for (const raw of text.split('\n')) {
+    if (raw.startsWith('[') && raw.endsWith(']')) {
+      if (/limit reached/i.test(raw)) truncated = true;
+      continue;
+    }
     const found = raw.match(/^Found (\d+) matches?/);
     if (found) {
       total = Number(found[1]);
@@ -46,14 +68,25 @@ export function parseGrepOutput(text: string): GrepResult {
       if (current) current.matches.push({ line: Number(m[1]), text: m[2] });
       continue;
     }
+    // 路径段用懒匹配：Windows 盘符的冒号、文件名里的连字符后面都不是「数字 + 分隔符 + 空格」。
+    const hit = raw.match(/^(.+?):(\d+): ?(.*)$/);
+    if (hit && !raw.startsWith(' ')) {
+      piFile(hit[1]).matches.push({ line: Number(hit[2]), text: hit[3] });
+      continue;
+    }
+    const ctx = raw.match(/^(.+?)-(\d+)- ?(.*)$/);
+    if (ctx && !raw.startsWith(' ')) {
+      piFile(ctx[1]).matches.push({ line: Number(ctx[2]), text: ctx[3], context: true });
+      continue;
+    }
     if (raw.endsWith(':') && raw.trim().length > 1 && !raw.startsWith(' ')) {
       current = { path: raw.slice(0, -1), matches: [] };
       files.push(current);
     }
   }
 
-  // 文本没给「Found N」时（兜底）用实际命中行数。
-  if (total === 0) total = files.reduce((n, f) => n + f.matches.length, 0);
+  // 文本没给「Found N」时（兜底，含 pi 格式）用实际命中行数，上下文行不算。
+  if (total === 0) total = files.reduce((n, f) => n + f.matches.filter((match) => !match.context).length, 0);
   return { total, truncated, files };
 }
 

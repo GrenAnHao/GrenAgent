@@ -23,6 +23,10 @@ const { eventHandlers, exitHandlers, piMock } = vi.hoisted(() => ({
     deleteUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve()),
     readAskUserDraft: vi.fn((_ws: string, _toolCallId: string) => Promise.resolve(null)),
     readUiHistory: vi.fn((_ws: string, _key: string) => Promise.resolve('')),
+    cancelSteer: vi.fn(
+      (_ws: string, _message: string, _allowSole: boolean, _path?: string | null): Promise<{ cancelled: boolean }> =>
+        Promise.resolve({ cancelled: true }),
+    ),
   },
 }));
 vi.mock('../lib/pi', () => ({
@@ -68,6 +72,7 @@ describe('createAgentStore', () => {
     piMock.deleteUiHistory.mockReset().mockResolvedValue(undefined);
     piMock.readAskUserDraft.mockReset().mockResolvedValue(null);
     piMock.readUiHistory.mockReset().mockResolvedValue('');
+    piMock.cancelSteer.mockReset().mockResolvedValue({ cancelled: true });
     useInlineQuestionStore.setState({ byWorkspace: {} });
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -652,6 +657,44 @@ describe('createAgentStore', () => {
     expect(store.useStore.getState().isStreaming).toBe(true);
   });
 
+  describe('撤回等待中的引导', () => {
+    it('Pi 撤下后去掉这条气泡；界面只剩这一条未注入引导时允许按唯一一条撤', async () => {
+      store = createAgentStore('.');
+      store.pushUserMessage('改用 chrome', undefined, true);
+      const id = store.useStore.getState().messages[0]!.id;
+      await expect(store.cancelSteer(id)).resolves.toBe('cancelled');
+      expect(piMock.cancelSteer).toHaveBeenCalledWith('.', '改用 chrome', true, null);
+      expect(store.useStore.getState().messages).toEqual([]);
+    });
+
+    it('还有别的未注入引导时不允许按唯一一条撤', async () => {
+      store = createAgentStore('.');
+      store.pushUserMessage('改用 chrome', undefined, true);
+      store.pushUserMessage('再补登录态', undefined, true);
+      const second = store.useStore.getState().messages[1]!.id;
+      await store.cancelSteer(second);
+      expect(piMock.cancelSteer).toHaveBeenCalledWith('.', '再补登录态', false, null);
+      expect(store.useStore.getState().messages.map((m) => (m as { text: string }).text)).toEqual(['改用 chrome']);
+    });
+
+    it('Pi 说已经在注入时气泡不动', async () => {
+      store = createAgentStore('.');
+      piMock.cancelSteer.mockResolvedValueOnce({ cancelled: false });
+      store.pushUserMessage('改用 chrome', undefined, true);
+      const id = store.useStore.getState().messages[0]!.id;
+      await expect(store.cancelSteer(id)).resolves.toBe('missed');
+      expect(store.useStore.getState().messages).toHaveLength(1);
+    });
+
+    it('普通用户消息、已引导的消息不发撤回', async () => {
+      store = createAgentStore('.');
+      store.pushUserMessage('普通消息');
+      const id = store.useStore.getState().messages[0]!.id;
+      await expect(store.cancelSteer(id)).resolves.toBe('missed');
+      expect(piMock.cancelSteer).not.toHaveBeenCalled();
+    });
+  });
+
   describe('上下文控制（移出 / 恢复 / 回退 / 重建）', () => {
     it('excludeMessage 乐观加入 excluded 并调后端命令', async () => {
       store = createAgentStore('.');
@@ -1103,6 +1146,34 @@ describe('createAgentStore', () => {
       expect(store.showCachedSession(A)).toBe(true);
       expect(userTexts()).toEqual(['task A']);
       expect(assistantTexts()).toEqual(['old answer', 'live tail']);
+      expect(store.useStore.getState().isStreaming).toBe(true);
+    });
+
+    // 进程在 wait_agent 等待中被杀：UI 历史里留下 running 的 wait_agent。重启后 Goal 续跑先于画面载入，
+    // 后台补快照时会话在跑。只有后端末尾还在等的 bash 保持转圈，wait_agent 收成已中断。
+    it('后台补快照时会话在跑：UI 历史里进程被杀留下的 running 卡收成已中断', async () => {
+      store = createAgentStore('.');
+      store.loadMessages([{ role: 'user', content: 'task B' }] as never, { force: true, sessionPath: B });
+      const backend = [
+        { role: 'user', content: 'task A', timestamp: 1 },
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'w1', name: 'wait_agent', arguments: {} }], timestamp: 2 },
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'b2', name: 'bash', arguments: { command: 'ls' } }], timestamp: 3 },
+      ];
+      const uiHistory = [
+        { kind: 'user', id: 'h-0', text: 'early', timestamp: 0 },
+        { kind: 'user', id: 'h-1', text: 'task A', timestamp: 1 },
+        { kind: 'tool', id: 'h-2', toolCallId: 'w1', toolName: 'wait_agent', args: {}, status: 'running', startedAt: 1 },
+        { kind: 'tool', id: 'h-3', toolCallId: 'b2', toolName: 'bash', args: { command: 'ls' }, status: 'running', argsComplete: true },
+      ];
+      piMock.getMessages.mockResolvedValue({ messages: backend });
+      piMock.readUiHistory.mockResolvedValue(uiHistory.map((m) => JSON.stringify(m)).join('\n'));
+      emit({ type: 'agent_start' }, 'interactive', A);
+      await settle();
+
+      expect(store.showCachedSession(A)).toBe(true);
+      const tools = store.useStore.getState().messages.filter((m) => m.kind === 'tool');
+      expect(tools.find((m) => m.toolCallId === 'w1')).toMatchObject({ status: 'error', interrupted: true });
+      expect(tools.find((m) => m.toolCallId === 'b2')).toMatchObject({ status: 'running' });
       expect(store.useStore.getState().isStreaming).toBe(true);
     });
 

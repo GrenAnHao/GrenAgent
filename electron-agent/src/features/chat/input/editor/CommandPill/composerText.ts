@@ -1,7 +1,13 @@
 import type { IEditor } from '@lobehub/editor';
 import { $dfs } from '@lexical/utils';
-import { $getRoot, $getSelection, $isElementNode, $isRangeSelection, type LexicalEditor } from 'lexical';
-import { unescapeComposerMarkdown } from '../../unescapeComposerMarkdown';
+import {
+  $getRoot,
+  $getSelection,
+  $isElementNode,
+  $isRangeSelection,
+  type LexicalEditor,
+  type LexicalNode,
+} from 'lexical';
 import { $isCommandPillNode, PILL_MARKER, type CommandPillNode } from './CommandPillNode';
 import { FOCUS_PILL_ARG_COMMAND } from './commands';
 
@@ -34,10 +40,53 @@ export function substitutePillMarker(markdown: string, invocation: string | null
   return rest ? `${invocation} ${rest}` : invocation;
 }
 
-/** 输入框正文：markdown 去转义，再把胶囊标记换成调用文本。发送和存草稿都用它。 */
+/**
+ * 节点的纯文本：块之间一个换行，胶囊写 PILL_MARKER，其余用节点自己的 getTextContent
+ * （文本原样、换行节点 `\n`、标签 `@路径` / `/命令` / URL）。
+ * 和 Lexical 自带的 getTextContent 只差两处：块间不是两个换行，胶囊不直接写调用文本。
+ */
+function $plainText(node: LexicalNode): string {
+  if ($isCommandPillNode(node)) return PILL_MARKER;
+  if (!$isElementNode(node)) return node.getTextContent();
+  const children = node.getChildren();
+  return children
+    .map((child, i) => {
+      const text = $plainText(child);
+      const blockEnd = $isElementNode(child) && !child.isInline() && i < children.length - 1;
+      return blockEnd ? `${text}\n` : text;
+    })
+    .join('');
+}
+
+/**
+ * 整个输入框的纯文本（胶囊位置是 PILL_MARKER）。
+ *
+ * 不走 getDocument('markdown')：@lobehub/editor 写出 markdown 后会再过一遍 remark-gfm 格式化，
+ * `*` `[` `~` `_` 被加反斜杠，`* ` / `+ ` 开头的行改成 `- `，续行缩进被吃掉，`&amp;` 被解码成 `&`。
+ * 这个输入框关了 markdown 格式（markdownOption: false），里面只有纯文本、标签和胶囊，用户打什么就该发什么。
+ * Shift+Enter 在这个编辑器里是新段落，所以块之间写一个换行，和用户看到的行一致。
+ * 见 .agents/notes/implemented/bug-fix/2026-10-19-composer-plain-text.md
+ */
+export function $readComposerPlainText(): string {
+  return $plainText($getRoot()).replaceAll('\uFEFF', '');
+}
+
+/** 输入框正文：直接从 Lexical 树读纯文本，再把胶囊标记换成调用文本。发送和存草稿都用它。 */
 export function readComposerText(editor: IEditor): string {
-  const markdown = unescapeComposerMarkdown(String(editor.getDocument('markdown') || ''));
-  return substitutePillMarker(markdown, readPillInvocation(editor.getLexicalEditor?.()));
+  const lexical = editor.getLexicalEditor?.();
+  const text = lexical
+    ? lexical.getEditorState().read(() => $readComposerPlainText())
+    : String(editor.getDocument('text') || '');
+  return substitutePillMarker(text, readPillInvocation(lexical));
+}
+
+/**
+ * 把纯文本写回输入框（草稿恢复、发送失败回填、编辑消息、撤回引导）：每行一个段落，
+ * 和 readComposerText 互逆。不用 setDocument('markdown')，否则 `* a` 这类文本会先被当成 markdown 解析。
+ */
+export function writeComposerText(editor: IEditor, text: string): void {
+  if (text) editor.setDocument('text', text.replace(/\r\n?/g, '\n'));
+  else editor.cleanDocument();
 }
 
 /** 发送前检查：有必填参数空着就把焦点送过去并返回 true，调用方不再发送。 */

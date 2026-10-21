@@ -73,6 +73,8 @@ import { ChatInput } from './ChatInput';
 import { fireEvent, screen } from '@testing-library/react';
 import { offerBrowserElementToChat } from '../dock/browser/browserElementPicker';
 import { useComposerFilesStore } from './input/composerFiles';
+import { loadIntoComposer } from './input/composerBridge';
+import { act } from '@testing-library/react';
 
 afterEach(() => {
   cleanup();
@@ -90,6 +92,27 @@ afterEach(() => {
   chatState.steering = [];
   chatState.followUp = [];
   chatState.composerQueue = [];
+});
+
+describe('撤回的引导放回输入框', () => {
+  it('输入框是空的：原文写进去，图片回到待发附件', () => {
+    getDocument.mockReturnValue('');
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    act(() => {
+      expect(loadIntoComposer('改用 chrome', [{ mimeType: 'image/png', data: 'AAAA' }])).toBe(true);
+    });
+    expect(setDocument).toHaveBeenCalledWith('text', '改用 chrome');
+    expect(screen.getByTestId('image-count').textContent).toBe('1');
+  });
+
+  it('输入框已有草稿：接在后面，不覆盖', () => {
+    getDocument.mockReturnValue('正在写的');
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    act(() => {
+      loadIntoComposer('改用 chrome');
+    });
+    expect(setDocument).toHaveBeenCalledWith('text', '正在写的\n\n改用 chrome');
+  });
 });
 
 describe('ChatInput send overlay cancel', () => {
@@ -182,7 +205,7 @@ describe('ChatInput send overlay cancel', () => {
     fireEvent.click(screen.getByTestId('do-send'));
     await vi.waitFor(() => expect(onSend).toHaveBeenCalledWith('hello', undefined, undefined));
     expect(cleanDocument).toHaveBeenCalled();
-    expect(setDocument).toHaveBeenCalledWith('markdown', 'hello');
+    expect(setDocument).toHaveBeenCalledWith('text', 'hello');
   });
 
   it('does not send when cancel fails', async () => {
@@ -198,23 +221,15 @@ describe('ChatInput send overlay cancel', () => {
   });
 });
 
-describe('ChatInput send markdown unescape', () => {
-  it('sends email without gfm autolink brackets', async () => {
-    getDocument.mockReturnValue('hello <user@gmail.com>');
+describe('ChatInput send plain text', () => {
+  it('发送时读纯文本，不走 markdown 序列化', async () => {
+    getDocument.mockReturnValue('a * b [x] foo_bar user@gmail.com');
     render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
     fireEvent.click(screen.getByTestId('do-send'));
     await vi.waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith('hello user@gmail.com', undefined, undefined),
+      expect(onSend).toHaveBeenCalledWith('a * b [x] foo_bar user@gmail.com', undefined, undefined),
     );
-  });
-
-  it('sends email without a backslash before at-sign', async () => {
-    getDocument.mockReturnValue('hello user\\@gmail.com');
-    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
-    fireEvent.click(screen.getByTestId('do-send'));
-    await vi.waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith('hello user@gmail.com', undefined, undefined),
-    );
+    expect(getDocument).not.toHaveBeenCalledWith('markdown');
   });
 
   it('turns a picked browser element into a pasted chip', async () => {

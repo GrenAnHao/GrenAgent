@@ -608,17 +608,15 @@ describe("bind", () => {
     expect(other.getAuth).toHaveBeenCalledWith("anthropic");
   });
 
-  it("before_agent_start waits only for direct servers and appends the summary when it changes", async () => {
+  it("before_agent_start waits only for direct servers and injects nothing about the servers", async () => {
     let release: () => void = () => {};
     const direct = new Promise<void>((resolve) => { release = resolve; });
     const background = new Promise<void>(() => {});
     const seen: string[] = [];
     const pi = fakePiWithOn();
-    const appendMessage = vi.fn();
-    const entries: Array<{ type: string; customType: string; content: string; display: boolean }> = [];
     const mgr = {
       ...fakeBindMgr(snap({
-        docs: { status: "connecting", tools: [], exposure: "direct", description: "Docs\nsecond" },
+        docs: { status: "connecting", tools: [], exposure: "direct", description: "Docs" },
         vendor: { status: "connecting", tools: [], exposure: "codemode", description: "Vendor" },
         picked: { status: "connecting", tools: [], exposure: "codemode", toolExposure: { read: "direct" }, description: "Picked" },
       })),
@@ -629,9 +627,9 @@ describe("bind", () => {
       },
     };
     bind(pi as never, mgr as never);
-    const ctx = { sessionManager: { buildContextEntries: () => entries, appendMessage } };
+    const sections: Record<string, string> = {};
     let finished = false;
-    const pending = pi.fire("before_agent_start", {}, ctx).then((results) => {
+    const pending = pi.fire("before_agent_start", { messageType: "user", prompt: "hi", systemPromptOptions: { sections } }, {}).then((results) => {
       finished = true;
       return results;
     });
@@ -645,23 +643,20 @@ describe("bind", () => {
     ]);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    const message = (outcome.results[0] as { message?: { customType: string; content: string; display: boolean } }).message;
-    expect(message).toEqual({
-      customType: "mcp-servers",
-      content: "docs direct Docs\nvendor codemode Vendor\npicked codemode Picked",
-      display: false,
-    });
-    expect(appendMessage).toHaveBeenCalledWith({
-      role: "custom",
-      customType: "mcp-servers",
-      content: message?.content,
-      display: false,
-      timestamp: expect.any(Number),
-    });
-    entries.push({ type: "custom_message", customType: "mcp-servers", content: message?.content ?? "", display: false });
-    const again = await pi.fire("before_agent_start", {}, ctx);
-    expect(again[0]).toBeUndefined();
-    expect(appendMessage).toHaveBeenCalledTimes(1);
+    // No message (pi would send it as user text right after the prompt) and no prompt section.
+    expect(outcome.results[0]).toBeUndefined();
+    expect(sections).toEqual({});
+  });
+
+  it("drops server lists earlier versions injected as custom messages from the model context", async () => {
+    const pi = fakePiWithOn();
+    bind(pi as never, { ...fakeBindMgr(snap({})), connectPromise: () => undefined } as never);
+    const user = { role: "user", content: "hi", timestamp: 1 };
+    const legacy = { role: "custom", customType: "mcp-servers", content: ["antd codemode", "deepwiki codemode"].join("\n"), display: false, timestamp: 2 };
+    const other = { role: "custom", customType: "fable-behavior", content: "x", display: false, timestamp: 3 };
+    const [result] = await pi.fire("context", { messages: [user, legacy, other] }, {});
+    expect((result as { messages: unknown[] }).messages).toEqual([user, other]);
+    expect((await pi.fire("context", { messages: [user, other] }, {}))[0]).toBeUndefined();
   });
 
   it("tool_call waits for the still-connecting servers a codemode script reaches, and only those", async () => {

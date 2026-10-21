@@ -18,6 +18,8 @@ import { messagesWithEntryIds, type SessionProjectionLike } from './messagesWith
 import { deleteAskUserDraft, readAskUserDraft, writeAskUserDraft, type AskUserDraft } from '../agent/askUserDraft.js';
 import { completeAskUser, finishCompleteAskUser } from '../agent/completeAskUser.js';
 import { withEstimatedContextUsage } from './contextUsageEstimate.js';
+import { cancelQueuedSteer } from './cancelQueuedSteer.js';
+import { syncSessionFromDisk, type SessionFileSync } from './syncSessionFromDisk.js';
 
 type PiCommand = keyof typeof commandTypes;
 type ImageContent = NonNullable<PromptOptions['images']>[number];
@@ -28,6 +30,7 @@ const commandTypes = {
   agent_follow_up: 'follow_up',
   agent_abort: 'abort',
   agent_take_steering: 'abort',
+  agent_cancel_steer: 'abort',
   agent_set_model: 'set_model',
   agent_cycle_model: 'cycle_model',
   agent_get_available_models: 'get_available_models',
@@ -317,6 +320,7 @@ export class PiRuntimeService {
         // 目标会话已经不在任何 handle 上：停止 / 取引导没有可作用的回合，不能落到别的会话。
         if (command === 'agent_abort') return undefined;
         if (command === 'agent_take_steering') return { steering: [] };
+        if (command === 'agent_cancel_steer') return { cancelled: false };
         // 要快照的会话已经不在 handle 上（后台跑完被拆了）：读它自己的会话文件，不能拿前景那份顶替。
         if (command === 'agent_get_messages') return this.readDetachedMessages(workspace, targetPath);
         if (PROMPT_COMMANDS.has(command)) {
@@ -816,6 +820,8 @@ export class PiRuntimeService {
         for (const item of restored.followUp) await s.followUp(item);
         return { steering: restored.steering };
       }
+      case 'agent_cancel_steer':
+        return cancelQueuedSteer(s, readInput(args), { allowSole: args.allowSole === true });
       case 'agent_set_model': {
         const model = s.modelRuntime.getAvailableSnapshot().find((m) => m.provider === args.provider && m.id === args.modelId);
         if (!model) throw new Error(`Model not found: ${String(args.provider)}/${String(args.modelId)}`);
@@ -902,11 +908,17 @@ export class PiRuntimeService {
       throw error;
     }
 
-    try {
+    // 内存里的会话先按截断后的文件重读条目、重建上下文，再 reload 让扩展按新条目重建状态。
+    // 只 reload 不够：AgentSession.reload() 不重读会话文件，模型下一轮仍会读到被删掉的回复。
+    const resync = async () => {
+      syncSessionFromDisk(handle.session as unknown as SessionFileSync, sessionFile);
       await handle.reload();
+    };
+    try {
+      await resync();
     } catch (firstError) {
       try {
-        await handle.reload();
+        await resync();
       } catch (secondError) {
         const cause = secondError instanceof Error ? secondError.message : String(secondError);
         const prior = firstError instanceof Error ? firstError.message : String(firstError);
@@ -1263,7 +1275,7 @@ const SESSION_REPLACING_COMMANDS = ['agent_switch_session', 'agent_new_session',
 
 /** 带 targetSessionPath 时可以打到停在后台那份会话的命令。 */
 const ROUTED_COMMANDS = new Set([
-  'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering',
+  'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_cancel_steer',
   'agent_get_messages', 'agent_get_session_stats', 'agent_get_state',
 ]);
 const PROMPT_COMMANDS = new Set(['agent_prompt', 'agent_steer', 'agent_follow_up']);

@@ -48,6 +48,7 @@ Status: implemented
 - **收益**：详情和组卡片状态一致；运行中的命令保持转圈。
 - **代价**：漏调 `interruptPendingToolCards` 的新加载路径会留下永远转圈的卡。
 - **重访信号**：不在跑的会话里出现一直转圈的工具卡。
+- 会话在跑时也不再整份保留 running 卡：只留后端快照末尾还在等的调用，UI 历史里进程被杀留下的旧卡收成已中断，见 [进程被杀后留下的工具卡重启后一直转圈](2026-10-18-stale-running-tool-after-kill.md)。
 
 ## Verification
 

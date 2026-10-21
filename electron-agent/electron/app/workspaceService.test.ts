@@ -139,6 +139,25 @@ describe('WorkspaceService', () => {
     await expect(service.listAllSessions()).resolves.toMatchObject([{ path, name: '帮我修一下登录页 第二行' }]);
   });
 
+  it('untitled sessions unwrap pasted blocks, skills and image hints for the sidebar title', async () => {
+    const { service, agentDir } = await createService();
+    const sessionsDir = join(agentDir, 'sessions', 'hash');
+    await mkdir(sessionsDir, { recursive: true });
+    const write = (name: string, content: unknown) => writeFile(join(sessionsDir, `${name}.jsonl`), [
+      JSON.stringify({ type: 'session', id: name, cwd: 'C:/work', timestamp: `2026-10-19T00:00:0${name.length % 10}Z` }),
+      JSON.stringify({ type: 'message', message: { role: 'user', content } }),
+    ].join('\n'));
+    await write('pasted', '<pi:attachment type="text" lines="45" chars="4194">\n我们要为客服模块规划服务端设计。\n## 背景\n</pi:attachment>');
+    await write('skill', '<skill name="brainstorming" location="C:\\s\\SKILL.md">\nReferences are relative to C:\\s.\n\n# 头脑风暴\n</skill>\n\n规划套餐订购页');
+    await write('image', [
+      { type: 'text', text: '调整订单查询栏\n\n[Image: original 2559x1527, displayed at 2000x1193. Multiply coordinates by 1.28 to map to original image.]' },
+      { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+    ]);
+
+    const names = Object.fromEntries((await service.listAllSessions()).map((s) => [s.id, s.name]));
+    expect(names).toEqual({ pasted: '我们要为客服模块规划服务端设计。', skill: '规划套餐订购页', image: '调整订单查询栏' });
+  });
+
   it('untitled sessions truncate a long first user message for the sidebar title', async () => {
     const { service, agentDir } = await createService();
     const sessionsDir = join(agentDir, 'sessions', 'hash');
@@ -596,5 +615,112 @@ describe('WorkspaceService', () => {
     expect(getRegistry(workspace).get('sa-live')?.status).toBe('cancelled');
     await expect(readFile(child, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(parent, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('WorkspaceService session archive', () => {
+  async function withSessions(): Promise<{ service: WorkspaceService; agentDir: string; workspace: string; a: string; b: string }> {
+    const { service, agentDir } = await createService();
+    const workspace = join(agentDir, 'project'); await mkdir(workspace);
+    const sessions = join(agentDir, 'sessions', 'hash'); await mkdir(sessions, { recursive: true });
+    const a = join(sessions, 'a.jsonl');
+    const b = join(sessions, 'b.jsonl');
+    await writeFile(a, `${JSON.stringify({ type: 'session', id: 'a', cwd: workspace, timestamp: '2026-10-01T00:00:00Z' })}\n`);
+    await writeFile(b, `${JSON.stringify({ type: 'session', id: 'b', cwd: workspace, timestamp: '2026-10-02T00:00:00Z' })}\n`);
+    return { service, agentDir, workspace, a, b };
+  }
+
+  const registry = async (agentDir: string) =>
+    JSON.parse(await readFile(join(agentDir, 'archived-sessions.json'), 'utf8')) as { sessions: string[] };
+
+  it('marks archived sessions in both listings and survives a restart', async () => {
+    const { service, agentDir, workspace, a, b } = await withSessions();
+
+    await service.setSessionsArchived([a], true);
+
+    const all = await service.listAllSessions();
+    expect(all.find((s) => s.path === a)?.archived).toBe(true);
+    expect(all.find((s) => s.path === b)).not.toHaveProperty('archived');
+    const restarted = new WorkspaceService(agentDir);
+    expect((await restarted.listSessions(workspace)).find((s) => s.path === a)?.archived).toBe(true);
+    expect(await registry(agentDir)).toEqual({ sessions: [a] });
+  });
+
+  it('unarchives by path regardless of separator or case spelling', async () => {
+    const { service, agentDir, a } = await withSessions();
+    await service.setSessionsArchived([a], true);
+
+    await service.setSessionsArchived([a.replace(/\\/g, '/').toUpperCase()], false);
+
+    expect(await registry(agentDir)).toEqual({ sessions: [] });
+    expect((await service.listAllSessions()).some((s) => s.archived)).toBe(false);
+  });
+
+  it('does not record the same session twice', async () => {
+    const { service, agentDir, a } = await withSessions();
+    await service.setSessionsArchived([a, a], true);
+    await service.setSessionsArchived([a], true);
+    expect(await registry(agentDir)).toEqual({ sessions: [a] });
+  });
+
+  it('serializes concurrent archive writes', async () => {
+    const { service, agentDir, a, b } = await withSessions();
+    await Promise.all([service.setSessionsArchived([a], true), service.setSessionsArchived([b], true)]);
+    expect((await registry(agentDir)).sessions.sort()).toEqual([a, b].sort());
+  });
+
+  it('refuses to archive files outside the sessions directory or hidden sessions', async () => {
+    const { service, agentDir, workspace } = await withSessions();
+    const outside = join(agentDir, 'outside.jsonl');
+    await writeFile(outside, `${JSON.stringify({ type: 'session', cwd: workspace })}\n`);
+    const child = join(agentDir, 'sessions', 'hash', 'child.jsonl');
+    await writeFile(child, childLines('sa-1', workspace, null));
+
+    await expect(service.setSessionsArchived([outside], true)).rejects.toThrow('session file not in sessions directory');
+    await expect(service.setSessionsArchived([child], true)).rejects.toThrow('SESSION_NOT_FOUND');
+    await expect(service.setSessionsArchived([join(agentDir, 'sessions', 'missing.jsonl')], true)).rejects.toThrow('session file not found');
+  });
+
+  it('forgets an archived session when it is deleted', async () => {
+    const { service, agentDir, workspace, a, b } = await withSessions();
+    await service.setSessionsArchived([a, b], true);
+
+    await service.deleteSession(workspace, a);
+
+    expect(await registry(agentDir)).toEqual({ sessions: [b] });
+  });
+
+  it('drops entries whose files are gone on a full scan', async () => {
+    const { service, agentDir, a, b } = await withSessions();
+    await service.setSessionsArchived([a, b], true);
+    await rm(a);
+
+    const all = await service.listAllSessions();
+
+    expect(all.map((s) => [s.path, s.archived])).toEqual([[b, true]]);
+    expect(await registry(agentDir)).toEqual({ sessions: [b] });
+  });
+
+  it('keeps archived conversation directories when pruning orphans', async () => {
+    const { service, agentDir } = await createService();
+    const { cwd } = await service.createConversation();
+    const sessions = join(agentDir, 'sessions', 'conv'); await mkdir(sessions, { recursive: true });
+    const path = join(sessions, 'c.jsonl');
+    await writeFile(path, `${JSON.stringify({ type: 'session', id: 'c', cwd, timestamp: '2026-10-01T00:00:00Z' })}\n`);
+    await service.setSessionsArchived([path], true);
+
+    // 重启后没有草稿记忆，只靠「目录里有会话」保住它。
+    const restarted = new WorkspaceService(agentDir);
+    await expect(restarted.pruneOrphanConversations([])).resolves.toBe(0);
+    await expect(realpath(cwd)).resolves.toBeTruthy();
+  });
+
+  it('treats a corrupt registry as empty', async () => {
+    const { service, agentDir, a } = await withSessions();
+    await writeFile(join(agentDir, 'archived-sessions.json'), '{not json');
+
+    expect((await service.listAllSessions()).some((s) => s.archived)).toBe(false);
+    await service.setSessionsArchived([a], true);
+    expect(await registry(agentDir)).toEqual({ sessions: [a] });
   });
 });

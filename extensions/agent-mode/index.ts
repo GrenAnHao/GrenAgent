@@ -36,7 +36,15 @@ import {
   toolWhitelist,
 } from "./modes.js";
 import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
-import { decodeAskUserAnswer, makeQuestionsId, normalizeQuestions, type RawAskUserParams } from "./questions.js";
+import {
+  countValidQuestions,
+  decodeAskUserAnswer,
+  MAX_QUESTIONS,
+  makeQuestionsId,
+  normalizeQuestions,
+  truncationNotice,
+  type RawAskUserParams,
+} from "./questions.js";
 import { type TodoItem, extractTodoItems, markCompletedSteps } from "./utils.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -243,15 +251,14 @@ export default function (pi: ExtensionAPI) {
           ),
           customLabel: Type.Optional(Type.String({ description: "自定义选项标签，默认「其他（自定义）」" })),
         }),
-        { description: "一个或多个问题（逐题在卡片内渲染）" },
+        { description: `一个或多个问题（逐题分页渲染），最多 ${MAX_QUESTIONS} 题`, maxItems: MAX_QUESTIONS },
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const id = makeQuestionsId();
       const p = params as RawAskUserParams;
-      if ((p.questions?.length ?? 0) > 8) {
-        console.error(`[ask_user] 题目数 ${p.questions?.length} 超过上限 8，已截断。`);
-      }
+      const notice = truncationNotice(countValidQuestions(p.questions ?? []));
+      if (notice) console.error(`[ask_user] ${notice}`);
       const data = normalizeQuestions(p.questions ?? [], id, {
         allowExtra: p.allowExtra,
         allowExtraImages: p.allowExtraImages,
@@ -272,9 +279,10 @@ export default function (pi: ExtensionAPI) {
         const answer = await ctx.ui.input(payload, undefined, { signal });
         const decoded = decodeAskUserAnswer(answer);
         if (decoded.text.trim() || decoded.images.length > 0) {
+          const text = [decoded.text.trim() ? decoded.text : "", notice ?? ""].filter(Boolean).join("\n\n");
           return {
             content: [
-              ...(decoded.text.trim() ? [{ type: "text" as const, text: decoded.text }] : []),
+              ...(text ? [{ type: "text" as const, text }] : []),
               ...decoded.images,
             ],
             details: undefined,
@@ -294,7 +302,8 @@ export default function (pi: ExtensionAPI) {
             type: "text",
             text:
               `已在对话流展示提问卡片（${data.questions.length} 个问题）。当前环境不支持阻塞式对话框，` +
-              "请停止当前回合，等待用户在卡片上选择并回复后再继续——不要替用户作答。",
+              "请停止当前回合，等待用户在卡片上选择并回复后再继续——不要替用户作答。" +
+              (notice ? `\n\n${notice}` : ""),
           },
         ],
         details: undefined,

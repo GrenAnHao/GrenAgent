@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react';
 import type { SessionInfo } from '../../lib/pi';
-import { filterDeletedSessions, mergeAllSessions } from '../../lib/mergeSessions';
+import { visibleSessions } from '../../lib/mergeSessions';
 import { useSessionStore } from '../../store/session';
 import { isUnder } from '../../lib/pathUtils';
 import { pathsEquivalent } from '../../lib/pathUtils';
@@ -77,7 +77,7 @@ export function useConversations(): ConversationItem[] {
     const next = shareUnchanged(
       previous.current,
       buildConversations(
-        filterDeletedSessions(mergeAllSessions(all, optimistic), deletedSessionPaths),
+        visibleSessions(all, optimistic, deletedSessionPaths),
         worksDir,
         current,
         keyword,

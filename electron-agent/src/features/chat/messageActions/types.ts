@@ -27,6 +27,8 @@ export interface MessageActionContext {
   onDelete?: (entryId: string) => void | Promise<void>;
   /** 进入就地编辑（由 UserMessage 注入；缺失时编辑禁用）。 */
   onEdit?: () => void;
+  /** 撤下还在等待注入的引导（由 UserMessage 注入；缺失时取消禁用）。 */
+  onCancel?: () => void | Promise<void>;
 }
 
 /** 轻量提示句柄（解耦 antd MessageInstance，便于测试）。 */
@@ -43,6 +45,7 @@ export type MessageActionSlot =
   | 'del'
   | 'exclude'
   | 'rewind'
+  | 'cancel'
   | 'divider';
 export type MessageActionKey = Exclude<MessageActionSlot, 'divider'>;
 

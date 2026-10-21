@@ -165,6 +165,106 @@ describe('embedded CodeGraph lifecycle', () => {
     expect(sdk.CodeGraph.open).not.toHaveBeenCalled();
   });
 
+  it('plans uninitialized / full / incremental with the same rule runSync uses', async () => {
+    const fresh = fixture(false);
+    await expect(fresh.engine.plan('/repo')).resolves.toBe('uninitialized');
+    expect(fresh.sdk.CodeGraph.open).not.toHaveBeenCalled();
+    const { engine, graph } = fixture();
+    await expect(engine.plan('/repo')).resolves.toBe('incremental');
+    graph.isIndexStale.mockReturnValueOnce(true);
+    await expect(engine.plan('/repo')).resolves.toBe('full');
+    graph.getIndexState.mockReturnValueOnce(null as never);
+    await expect(engine.plan('/repo')).resolves.toBe('full');
+  });
+
+  it('an explicit incremental run syncs only the given paths, even when the index would otherwise be rebuilt', async () => {
+    const { engine, graph } = fixture();
+    graph.isIndexStale.mockReturnValue(true);
+    graph.sync.mockResolvedValueOnce({ filesAdded: 1, filesModified: 2, filesRemoved: 0 });
+    await expect(engine.runSync('job', '/repo', undefined, { mode: 'incremental', paths: ['src/a.ts'] })).resolves.toEqual({ mode: 'incremental', filesChanged: 3 });
+    expect(graph.sync).toHaveBeenCalledWith(expect.objectContaining({ paths: ['src/a.ts'], signal: expect.any(AbortSignal) }));
+    expect(graph.indexAll).not.toHaveBeenCalled();
+    await engine.runSync('whole', '/repo', undefined, { mode: 'incremental' });
+    expect(graph.sync.mock.calls[1][0]).not.toHaveProperty('paths');
+  });
+
+  it('an explicit incremental run never creates an index', async () => {
+    const { engine, sdk } = fixture(false);
+    await expect(engine.runSync('job', '/repo', undefined, { mode: 'incremental' })).rejects.toThrow(/not initialized/i);
+    expect(sdk.CodeGraph.init).not.toHaveBeenCalled();
+  });
+
+  it('reports a full index that could not take codegraph.lock as LockUnavailableError', async () => {
+    const { engine, graph } = fixture(false);
+    graph.indexAll.mockResolvedValueOnce({ success: false, errors: [{ message: 'Could not acquire file lock - another process may be indexing' }] } as never);
+    await expect(engine.runSync('job', '/repo')).rejects.toMatchObject({ name: 'LockUnavailableError' });
+  });
+
+  it('refresh hands later reads a new connection and closes the old one once its in-flight reads finish', async () => {
+    const { engine, sdk, graph } = fixture();
+    const second = { ...graph, close: vi.fn() };
+    sdk.CodeGraph.open.mockResolvedValueOnce(graph).mockResolvedValueOnce(second);
+    const pending = deferred<Awaited<ReturnType<typeof executeCodeGraphTool>>>();
+    vi.mocked(executeCodeGraphTool).mockImplementationOnce(() => pending.promise);
+    const reading = engine.call('/repo', 'codegraph_search', { query: 'old' });
+    await vi.waitFor(() => expect(executeCodeGraphTool).toHaveBeenCalledTimes(1));
+    await engine.refresh('/repo');
+    // 新读不等旧读，也不用旧连接
+    await engine.call('/repo', 'codegraph_search', { query: 'new' });
+    expect(vi.mocked(executeCodeGraphTool).mock.calls[1][0]).toBe(second);
+    expect(graph.close).not.toHaveBeenCalled();
+    pending.resolve({ content: [], isError: false, structuredContent: { schemaVersion: 1, rows: [], nodes: [], edges: [] } });
+    await reading;
+    await vi.waitFor(() => expect(graph.close).toHaveBeenCalledOnce());
+    expect(second.close).not.toHaveBeenCalled();
+  });
+
+  it('watch wires the SDK FileWatcher as an event source only and keeps the graph open while watching', async () => {
+    const { sdk, graph } = fixture();
+    const instances: Array<{ root: string; syncFn: (paths?: string[]) => Promise<unknown>; options: Record<string, unknown>; guard?: (path: string) => boolean; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+    class FakeWatcher {
+      start = vi.fn(() => true); stop = vi.fn();
+      constructor(root: string, syncFn: (paths?: string[]) => Promise<unknown>, options: Record<string, unknown>, guard?: (path: string) => boolean) { instances.push({ root, syncFn, options, guard, start: this.start, stop: this.stop }); }
+    }
+    const engine = new CodeGraphEngine({ loadSdk: async () => ({ ...sdk, FileWatcher: FakeWatcher }) as unknown as CodeGraphSdk, idleTimeoutMs: 5 });
+    engines.push(engine);
+    const changes: Array<string[] | null> = [];
+    const degraded: string[] = [];
+    await expect(engine.watch('/repo', { debounceMs: 750, onChange: (paths) => changes.push(paths), onDegraded: (reason) => degraded.push(reason) })).resolves.toEqual({ active: true });
+    await expect(engine.watch('/repo', { debounceMs: 750, onChange: () => {}, onDegraded: () => {} })).resolves.toEqual({ active: true });
+    expect(instances).toHaveLength(1);
+    expect(instances[0].options).toMatchObject({ debounceMs: 750 });
+    // syncFn 不同步，只上报改动并立刻返回
+    await expect(instances[0].syncFn(['src/a.ts'])).resolves.toEqual({ filesChanged: 1, durationMs: 0 });
+    await instances[0].syncFn(undefined);
+    expect(changes).toEqual([['src/a.ts'], null]);
+    expect(graph.sync).not.toHaveBeenCalled();
+    (instances[0].options.onDegraded as (reason: string) => void)('EMFILE');
+    expect(degraded).toEqual(['EMFILE']);
+    if (process.platform === 'win32') expect(instances[0].guard).toEqual(expect.any(Function));
+    // 挂着监听时不随空闲关闭
+    await engine.call('/repo', 'codegraph_search', { query: 'a' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(graph.close).not.toHaveBeenCalled();
+    await engine.unwatch('/repo');
+    expect(instances[0].stop).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(graph.close).toHaveBeenCalledOnce());
+  });
+
+  it('reports a watcher the platform refuses to start, and close stops active watchers', async () => {
+    const { sdk } = fixture();
+    let allow = false;
+    const stops: Array<ReturnType<typeof vi.fn>> = [];
+    class FakeWatcher { stop = vi.fn(); start = vi.fn(() => allow); constructor() { stops.push(this.stop); } }
+    const engine = new CodeGraphEngine({ loadSdk: async () => ({ ...sdk, FileWatcher: FakeWatcher }) as unknown as CodeGraphSdk });
+    const handlers = { debounceMs: 1, onChange: () => {}, onDegraded: () => {} };
+    await expect(engine.watch('/repo', handlers)).resolves.toMatchObject({ active: false, reason: expect.stringContaining('不支持') });
+    allow = true;
+    await expect(engine.watch('/repo', handlers)).resolves.toEqual({ active: true });
+    await engine.close();
+    expect(stops[1]).toHaveBeenCalledOnce();
+  });
+
   it('allows retry after an SDK load failure without falling back to a CLI', async () => {
     const { sdk } = fixture();
     const loadSdk = vi.fn().mockRejectedValueOnce(new Error('missing platform package')).mockResolvedValue(sdk);

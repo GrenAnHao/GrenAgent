@@ -30,6 +30,27 @@ export function pruneOptimisticSessions(allSessions: SessionInfo[], optimistic: 
   });
 }
 
+/**
+ * 侧栏里看得见的会话：磁盘 + 乐观占位，去掉乐观删除的和已归档的。
+ * 侧栏分组、删除 / 归档后挑下一个会话都用它，免得切到一份侧栏里没有的会话。
+ */
+export function visibleSessions(
+  allSessions: SessionInfo[],
+  optimistic: SessionInfo[],
+  deletedPaths: string[],
+): SessionInfo[] {
+  const merged = filterDeletedSessions(mergeAllSessions(allSessions, optimistic), deletedPaths);
+  return merged.some((s) => s.archived) ? merged.filter((s) => !s.archived) : merged;
+}
+
+/** 已归档的会话（不含乐观删除中的），时间倒序。 */
+export function archivedSessions(allSessions: SessionInfo[], deletedPaths: string[]): SessionInfo[] {
+  return filterDeletedSessions(
+    allSessions.filter((s) => s.archived),
+    deletedPaths,
+  ).sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
+}
+
 /** 过滤掉已乐观删除（等待后台清理完成）的会话 path，供侧栏列表即时移除。 */
 export function filterDeletedSessions(sessions: SessionInfo[], deletedPaths: string[]): SessionInfo[] {
   if (deletedPaths.length === 0) return sessions;

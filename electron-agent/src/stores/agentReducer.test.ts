@@ -752,6 +752,35 @@ describe('applyEvent', () => {
     expect(interruptPendingToolCards(done)).toBe(done);
   });
 
+  // 进程被杀时 UI 历史里落下一张 running 的 wait_agent，重启后会话接着跑（Goal 续跑）：
+  // 它不是末尾还在等的调用，回合在跑也要收成已中断，末尾那个调用照旧转圈。
+  it('interruptPendingToolCards keeps only the calls still pending in the backend snapshot', () => {
+    const msgs: ChatMessage[] = [
+      { kind: 'tool', id: 'h-1', toolCallId: 'w1', toolName: 'wait_agent', args: {}, result: undefined, status: 'running' },
+      { kind: 'assistant', id: 'm-2', text: '', thinking: 'go on', streaming: false },
+      { kind: 'tool', id: 'm-3', toolCallId: 'b2', toolName: 'bash', args: {}, result: undefined, status: 'running', argsComplete: true },
+    ];
+    const settled = interruptPendingToolCards(msgs, new Set(['b2']));
+    expect(settled[0]).toMatchObject({ toolCallId: 'w1', status: 'error', interrupted: true });
+    expect(settled[2]).toMatchObject({ toolCallId: 'b2', status: 'running' });
+  });
+
+  it('agent_end settles tool cards that never got a result, but leaves ask_user waiting', () => {
+    let s: AgentState = {
+      ...initialAgentState(),
+      isStreaming: true,
+      messages: [
+        { kind: 'tool', id: 'h-1', toolCallId: 'w1', toolName: 'wait_agent', args: {}, result: undefined, status: 'running' },
+        { kind: 'tool', id: 'h-2', toolCallId: 'q1', toolName: 'ask_user', args: {}, result: undefined, status: 'running' },
+        { kind: 'tool', id: 'h-3', toolCallId: 'b1', toolName: 'bash', args: {}, result: { content: [] }, status: 'done' },
+      ],
+    };
+    s = applyEvent(s, { type: 'agent_end', messages: [] } as never);
+    expect(s.messages[0]).toMatchObject({ toolCallId: 'w1', status: 'error', interrupted: true });
+    expect(s.messages[1]).toMatchObject({ toolCallId: 'q1', status: 'running' });
+    expect(s.messages[2]).toMatchObject({ toolCallId: 'b1', status: 'done' });
+  });
+
   it('accumulates thinking from thinking_delta and keeps it after message_end', () => {
     let s = initialAgentState();
     s = applyEvent(s, { type: 'message_start', message: { role: 'assistant', content: [] } } as AgentEvent);

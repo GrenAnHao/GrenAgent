@@ -4,9 +4,12 @@ import {
   dismissUiRequest,
   dropStashedUiRequests,
   hasStashedUiRequests,
+  listStashedUiRequests,
   parkVisibleUiRequests,
   restoreStashedUiRequests,
+  stashInlineQuestion,
   stashUiPrompt,
+  useStashedUiRequestsVersion,
 } from './backgroundUiRequests';
 import { useInlineQuestionStore } from './inlineQuestionStore';
 import { useUiPromptStore } from './uiPromptStore';
@@ -20,6 +23,54 @@ afterEach(() => {
   clearStashedUiRequestsForTest();
   useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   useInlineQuestionStore.setState({ byWorkspace: {} });
+});
+
+describe('backgroundUiRequests subscription', () => {
+  const version = () => useStashedUiRequestsVersion.getState().version;
+
+  it('bumps the version on every stash change and lists entries', () => {
+    const v0 = version();
+    stashUiPrompt(B, { workspace: WS, request: confirm('r1') });
+    expect(version()).toBe(v0 + 1);
+    expect(listStashedUiRequests()).toEqual([
+      { sessionPath: B, prompts: [expect.objectContaining({ request: expect.objectContaining({ id: 'r1' }) })] },
+    ]);
+    dismissUiRequest('r1');
+    expect(version()).toBe(v0 + 2);
+    expect(listStashedUiRequests()).toEqual([]);
+  });
+
+  it('bumps after restored requests are back on screen', () => {
+    stashUiPrompt(B, { workspace: WS, request: confirm('r9') });
+    const seen: Array<string | undefined> = [];
+    const unsub = useStashedUiRequestsVersion.subscribe(() => {
+      seen.push(useUiPromptStore.getState().byWorkspace[WS]?.request.id);
+    });
+    restoreStashedUiRequests(WS, B);
+    unsub();
+    expect(seen).toEqual(['r9']);
+  });
+
+  it('bumps for inline stash, restore, drop and clear, but not for no-ops', () => {
+    const inline = { workspace: WS, id: 'q1', data: { kind: 'questions', id: 'q1', questions: [] } as never, mode: 'live' as const };
+    const v0 = version();
+    stashInlineQuestion(A, inline);
+    expect(version()).toBe(v0 + 1);
+    restoreStashedUiRequests(WS, A);
+    expect(version()).toBe(v0 + 2);
+    restoreStashedUiRequests(WS, A);
+    expect(version()).toBe(v0 + 2);
+    stashUiPrompt(B, { workspace: WS, request: confirm('r2') });
+    dropStashedUiRequests(B);
+    expect(version()).toBe(v0 + 4);
+    dropStashedUiRequests(B);
+    dismissUiRequest('missing');
+    expect(version()).toBe(v0 + 4);
+    stashUiPrompt(B, { workspace: WS, request: confirm('r3') });
+    clearStashedUiRequestsForTest();
+    expect(version()).toBe(v0 + 6);
+    expect(listStashedUiRequests()).toEqual([]);
+  });
 });
 
 describe('backgroundUiRequests', () => {

@@ -30,6 +30,7 @@ import { pi } from '../../lib/pi';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { needsSessionCreateOnSend } from '../../lib/pendingSession';
 import { syncSidebarOnSend } from '../../lib/sidebarSessionSync';
+import { fallbackSessionTitle } from '@extensions/_shared/session-title';
 import { markScratchUsed } from '../../lib/startupConversation';
 import { createStartupPerf } from '../../lib/startupPerf';
 import { useSessionStore } from '../../store/session';
@@ -435,7 +436,8 @@ export function ChatView() {
           path,
           cwd: workspace,
           timestamp: new Date().toISOString(),
-          name: text || null,
+          // 和主进程列会话时同一套兑底：粘贴块、/skill: 调用不原样当标题。
+          name: fallbackSessionTitle(text, images?.length ?? 0),
         });
       }
       st.clearDraftConversation(workspace);
@@ -461,7 +463,7 @@ export function ChatView() {
       sendPerf.report();
       return 'failed';
     }
-    if (text) void syncSidebarOnSend(workspace, text);
+    if (text || images?.length) void syncSidebarOnSend(workspace, text, images?.length ?? 0);
 
     // 这一轮属于哪个会话在这里定下来。之后用户切到别的会话，本轮的提示、重试、回滚都不能落到新画面上。
     // 刚新建的会话优先：落盘期间切到了别的会话时 loadedSessionPath 已是那份，不能把首发打过去。

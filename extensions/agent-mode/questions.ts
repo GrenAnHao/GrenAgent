@@ -46,8 +46,22 @@ export interface RawAskUserParams {
   extraPlaceholder?: string;
 }
 
-/** ask_user 单次最多渲染的问题数（载荷与 UI 体量上限）。 */
-export const MAX_QUESTIONS = 8;
+/**
+ * ask_user 单次最多渲染的问题数。卡片按题分页，一屏只有一题，题多不撑高卡片；上限只防载荷失控。
+ * 工具 schema 的 maxItems 用同一个值，超出时模型先拿到校验错误，不会被静默截断。
+ */
+export const MAX_QUESTIONS = 20;
+
+/** 有效题（question 非空）的个数，和 normalizeQuestions 的过滤规则一致。 */
+export function countValidQuestions(raw: RawQuestion[]): number {
+  return raw.filter((q) => (q?.question ?? "").trim()).length;
+}
+
+/** 截断时追加到工具结果里的说明：让模型知道哪些题没问到，而不是以为用户全答了。 */
+export function truncationNotice(validCount: number): string | undefined {
+  if (validCount <= MAX_QUESTIONS) return undefined;
+  return `注意：本次只展示了前 ${MAX_QUESTIONS} 题，第 ${MAX_QUESTIONS + 1}–${validCount} 题没有展示给用户、也没有答案。需要的话再调用一次 ask_user 单独问这些题。`;
+}
 
 // 生成提问卡 id：q-<base36 时间戳>-<rand>。
 export function makeQuestionsId(now: Date = new Date(), rand: string = Math.random().toString(36).slice(2, 6)): string {

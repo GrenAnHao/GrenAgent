@@ -20,9 +20,9 @@ CodeGraph SDK 只在 codegraph-host 子进程里加载和执行，主进程不�
 
 子进程主线程不加载 SDK，只做 IPC 与调度（`CodeGraphThreads`）。SDK 在 `worker_threads` 里跑，入口 `workerEntry.ts`（产物 `codegraph-worker.js`，路径由主进程经 `CODEGRAPH_WORKER_ENTRY` 传入）：
 
-- 一个写线程：只收 `runSync` / `cancelSync`。多个工作区的同步在它里面照旧并发（与原来的引擎一致）。
+- 一个写线程：收 `plan` / `runSync` / `cancelSync` / `watch` / `unwatch`。手动同步跨工作区在它里面照旧并发；自动同步与排队规则见 [CodeGraph 自动同步](./2026-10-18-codegraph-auto-sync-and-stale-reads.md)。
 - N 个读线程：`status` / `call` / `search`，按在途数最少分派。N 默认 `clamp(核数 - 2, 1, 2)`，`GREN_CODEGRAPH_READ_WORKERS` 可覆盖（上限 8）。每个线程各持一条连接（SDK 库是 WAL）。
-- 同一工作区的读写规则不变：写期间读返回 `CodeGraph workspace is busy indexing`（`search` 返回带该消息的不可用视图），`status` 返回 `indexing` 加上次的快照。写开始前调度器先等该工作区在途的读结束，再让已启动的读线程 `evict`（关掉手里该库的连接），然后才把 `runSync` 交给写线程；写完读线程按需重开。写失败的原因记在调度器里，合并进之后的 `status`（与原引擎的 `failures` 语义相同）。参数校验在忙碌判断之前，错误顺序与原来一致。
+- （2026-10-18 起只适用于全量重建；增量同步期间读照常应答、写完读线程 `refresh`，见 [CodeGraph 自动同步](./2026-10-18-codegraph-auto-sync-and-stale-reads.md)。）同一工作区的读写规则不变：写期间读返回 `CodeGraph workspace is busy indexing`（`search` 返回带该消息的不可用视图），`status` 返回 `indexing` 加上次的快照。写开始前调度器先等该工作区在途的读结束，再让已启动的读线程 `evict`（关掉手里该库的连接），然后才把 `runSync` 交给写线程；写完读线程按需重开。写失败的原因记在调度器里，合并进之后的 `status`（与原引擎的 `failures` 语义相同）。参数校验在忙碌判断之前，错误顺序与原来一致。
 - 线程崩溃：该线程上在途的请求以 `CODEGRAPH_WORKER_EXITED: <role> code=…` 失败（写线程崩了就是 job 失败、工作区释放），下一条请求重新拉起；60 秒内 3 次就冷却 30 秒（`CODEGRAPH_WORKER_CRASH_LOOP`）。
 - 关停：取消在跑的同步并等它结束，再给已启动的线程发 `close`，线程关库后自己退出；15 秒不退才 `terminate`。不在 SDK 还在跑时 terminate：SDK 文档记录 Windows 上这样结束线程可能带走整个进程。
 - 退路：`GREN_CODEGRAPH_THREADS=off` 让子进程退回单线程（SDK 直接在子进程主线程跑），用于工作线程在某个环境起不来时；冷烟也用它做对照。

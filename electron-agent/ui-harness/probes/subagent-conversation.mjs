@@ -172,4 +172,24 @@ export default async function (t) {
   await new Promise((resolve) => setTimeout(resolve, 3000))
   t.ok(`终态挂载缺路径：只补查一次，不常驻轮询（${afterLookup - before} → ${(await listCalls()) - before}）`, afterLookup - before >= 1 && (await listCalls()) === afterLookup)
   t.ok('终态挂载缺路径：轮询释放后正文仍在', (await t.text(dn))?.includes(doneFinal))
+
+  // 子代理的 grep 是 pi 内置工具，输出 path:N: text；以前只认 opencode 格式，每条都画成「0 处 / 未找到匹配」。
+  await t.click('[data-testid="show-grep"]', 30)
+  const gp = '[data-testid="child-grep"]'
+  await t.waitForText(gp, '检索完成。', 8000)
+  const rows = await t.js(`Array.from(document.querySelectorAll('${gp} [data-testid="tool-execution"]'), (el) => el.textContent)`)
+  t.ok(`pi grep：有命中的折叠行写「2 处」（${rows?.[0]}）`, rows?.[0]?.includes('2 处'))
+  t.ok(`pi grep：真的没命中才写「0 处」（${rows?.[1]}）`, rows?.[1]?.includes('0 处'))
+  await t.js(`document.querySelector('${gp} [data-testid="tool-execution"]').setAttribute('data-case', 'grep-hit')`)
+  const hit = `${gp} [data-case="grep-hit"]`
+  t.ok('pi grep：行可以被点中', await settleHit(t, hit, 20))
+  await t.click(hit, 20)
+  t.ok('pi grep：展开后是按文件分组的命中卡', await t.waitFor(`${hit} [data-testid="card-grep"]`, 5000))
+  await t.waitForText(`${hit} [data-testid="card-grep"]`, 'export function CodeRetrievalPanel', 8000)
+  const card = await t.text(`${hit} [data-testid="card-grep"]`)
+  t.ok('pi grep：展开不显示「未找到匹配」', !card?.includes('未找到匹配'))
+  t.ok('pi grep：匹配行带行号', card?.includes('39: export function CodeRetrievalPanel'))
+  t.ok('pi grep：上下文行用「N-」区分', card?.includes('40- '))
+  t.ok('pi grep：上限提示画成已截断', card?.includes('结果较多，已截断显示'))
+  await t.shot('pi-grep-expanded')
 }

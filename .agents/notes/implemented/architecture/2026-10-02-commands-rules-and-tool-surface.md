@@ -17,7 +17,7 @@ Status: implemented
 ### 带参数的命令展开成 <command> 块，规则走 contextFiles 注入
 
 - 命令复用 Pi prompt template 文件。正文里有 `{参数}` 的模板由 `prompt-commands` 扩展在 `input` 钩子里展开成 `<command name="…" args="{JSON}">正文</command>`，参数解析用自己的转义规则（双引号内 `\"` `\\`）。气泡识别这个块，还原成只读胶囊，参照现有 `<skill>` 块折回 chip 的做法。
-- 输入框胶囊是 Lexical DecoratorNode 内嵌原生 `<input>`，事件在胶囊上原生截住，不让 Lexical 和 React 根节点处理。markdown 写出时写私用区字符，发送前换成调用文本，避开 remark 对参数里 `\ * _` 的转义。
+- 输入框胶囊是 Lexical DecoratorNode 内嵌原生 `<input>`，事件在胶囊上原生截住，不让 Lexical 和 React 根节点处理。读正文时胶囊位置写私用区字符，发送前换成调用文本。正文直接从 Lexical 树读纯文本、不经 remark，见 [输入框正文原样发出](../bug-fix/2026-10-19-composer-plain-text.md)；markdown 写出仍写同一个标记。
 - 发送 / 存草稿时由 `readComposerText` 把私用区标记换成调用文本，且调用文本总放在最前面：标记前后的正文各自 trim 后用一个空格接在调用文本后。用户用方向键把光标移到胶囊前打字时，命令仍然生效。
 - 胶囊只能在输入开头，所以不提供「跳到胶囊前面」：第一个参数上 Shift+Tab、开头按 ← 都不动，只有最后一个参数上 Tab / 末尾 → / Esc 跳到胶囊后。离开胶囊时先把焦点交还编辑器根节点再移动选区——lexical 0.42 的 `updateDOMSelection` 见 activeElement 是装饰器里的 input 就不写 DOM 选区，`editor.focus()` 不够。
 - 规则一条一个文件，由 `context-rules` 扩展在 `before_agent_start` 追加到 `systemPromptOptions.contextFiles`，和 AGENTS.md 同一段。
@@ -69,7 +69,7 @@ Status: implemented
 
 - `<command>` 块格式是会话里的持久数据，改格式要兼容旧会话。
 - Pi 原生模板展开不认 `{参数}`：带 `{}` 的模板在没有加载 `prompt-commands` 的环境里会原样发出占位符。
-- 草稿发送失败恢复时走 `setDocument('markdown')`，胶囊会变回调用文本；文本直接发送仍然有效。若以后要恢复成胶囊，在恢复路径上复用 `resolvePromptPill`。
+- 发送失败回填走 `writeComposerText`（`setDocument('text')`），胶囊会变回调用文本；文本直接发送仍然有效。草稿恢复（切会话 / 重启）已改成按 Lexical JSON 整份写回，胶囊原样回来，见 [输入框草稿整份保留](../feature/2026-10-19-composer-draft-full-restore.md)。
 - 如果 Pi 将来原生支持命名参数，重新评估是否去掉 `prompt-commands` 的展开逻辑。
 
 ### 网页抓收取成一个 fetch_url

@@ -1,0 +1,259 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+(node:15428) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:43752) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44396) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45396) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11348) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61092) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49716) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46012) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42756) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49368) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:20944) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/agentData/auditViewStore.test.ts (12 tests | 4 failed) 95ms
+     × applies combined action, resource and inclusive time filters before limiting 14ms
+     × preserves resource name snapshots after deletion and does not invent legacy names 3ms
+     × retains normal model slugs, Unicode resource labels and absolute project paths 4ms
+     × retains safe legacy page paths with spaces and Unicode without relaxing other IDs 3ms
+(node:59604) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32368) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32368) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/agentData/jobCleanup.test.ts (2 tests | 2 failed) 264ms
+     × removes only terminal records and preserves Wiki, memory and audit data 123ms
+     × requires explicit valid IDs instead of interpreting missing input as clear-all 139ms
+(node:56580) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32368) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11332) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:62756) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27516) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49788) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13496) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31604) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48828) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61092) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:14128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18668) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25720) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23396) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12732) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:31636) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56180) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63008) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27316) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |main| electron/agentData/runtime.test.ts (15 tests | 4 failed) 3857ms
+     × exposes module overview and code retrieval status contracts 261ms
+     × dispatches a created job to its registered runner 201ms
+     × does not record a runner rejection as failure after the job is already terminal 180ms
+     × defers the cancelled state to the runner so no work happens after it lands 198ms
+(node:24684) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63688) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:51984) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12440) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:62684) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55884) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2168) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > applies combined action, resource and inclusive time filters before limiting
+AssertionError: expected [ 'match-new' ] to deeply equal [ 'match-old' ]
+
+- Expected
++ Received
+
+  [
+-   "match-old",
++   "match-new",
+  ]
+
+ ❯ electron/agentData/auditViewStore.test.ts:35:171
+     33|     const first = store.query({ action: 'wiki.ingest.publish', resourc…
+     34|     expect(first.items.map((item) => item.id)).toEqual(['match-new']);
+     35|     expect(store.query({ action: 'wiki.ingest.publish', resource: { ty…
+       |                                                                                                                                                                           ^
+     36|   });
+     37|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > preserves resource name snapshots after deletion and does not invent legacy names
+AssertionError: expected undefined to be '资源已移除（gone-kb）' // Object.is equality
+
+- Expected:
+"资源已移除（gone-kb）"
+
++ Received:
+undefined
+
+ ❯ electron/agentData/auditViewStore.test.ts:72:72
+     70|     const entries = store.query({ resource: { type: 'wiki', id: 'gone-…
+     71|     expect(entries.find((item) => item.id === 'named')?.resourceName).…
+     72|     expect(entries.find((item) => item.id === 'legacy')?.resourceName)…
+       |                                                                        ^
+     73|   });
+     74|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains normal model slugs, Unicode resource labels and absolute project paths
+AssertionError: expected undefined to match object { resourceName: '知识库：研发 / 资料', …(1) }
+
+- Expected:
+{
+  "detail": {
+    "error": "MODEL_CHANGED: provider/model-v1:latest",
+    "model": "provider/model-v1:latest",
+  },
+  "resourceName": "知识库：研发 / 资料",
+}
+
++ Received:
+undefined
+
+ ❯ electron/agentData/auditViewStore.test.ts:91:75
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  |main| electron/agentData/auditViewStore.test.ts > AuditViewStore > retains safe legacy page paths with spaces and Unicode without relaxing other IDs
+AssertionError: expected {} to match object { page: 'docs/Design Notes.md' }
+
+- Expected
++ Received
+
+- {
+-   "page": "docs/Design Notes.md",
+- }
++ {}
+
+ ❯ electron/agentData/auditViewStore.test.ts:102:64
+    100|     add('page', 'wiki.ingest.publish', { kbId: 'k', pageId: '设计 文档/入门 …
+    101|     const items = store.query().items;
+    102|     expect(items.find((item) => item.id === 'legacy')?.detail).toMatch…
+       |                                                                ^
+    103|     expect(items.find((item) => item.id === 'page')?.detail).toMatchOb…
+    104|     expect(items.find((item) => item.id === 'page')?.detail).not.toHav…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > removes only terminal records and preserves Wiki, memory and audit data
+Error: METHOD_NOT_FOUND: unknown management method: wiki.replace
+ ❯ AgentDataRuntime.requestAdmin electron/agentData/runtime.ts:264:44
+    262|       try { return await pending as T; } finally { stop = agentDataTim…
+    263|     } catch (error) {
+    264|       if (error instanceof RpcError) throw new Error(`${error.code}: $…
+       |                                            ^
+    265|       throw error;
+    266|     } finally {
+ ❯ electron/agentData/jobCleanup.test.ts:15:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯
+
+ FAIL  |main| electron/agentData/jobCleanup.test.ts > AgentData job cleanup RPC > requires explicit valid IDs instead of interpreting missing input as clear-all
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > dispatches a created job to its registered runner
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > does not record a runner rejection as failure after the job is already terminal
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > defers the cancelled state to the runner so no work happens after it lands
+RpcError: Wiki jobs are no longer created through the job queue
+ ❯ AgentDataClient.resolve electron/agentData/client.ts:90:70
+     88|   private resolve(response: RpcResponse): void {
+     89|     const item = this.pending.get(response.id); if (!item) return; thi…
+     90|     if (response.ok) item.resolve(response.result); else item.reject(n…
+       |                                                                      ^
+     91|   }
+     92|   private fail(id: string, error: unknown): void { const item = this.p…
+ ❯ Socket.<anonymous> electron/agentData/client.ts:69:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯
+
+ FAIL  |main| electron/agentData/runtime.test.ts > AgentDataRuntime > exposes module overview and code retrieval status contracts
+AssertionError: promise rejected "Error: METHOD_NOT_FOUND: unknown manageme…" instead of resolving
+ ❯ electron/agentData/runtime.test.ts:93:91
+     91|     });
+     92|
+     93|     await expect(runtime.requestAdmin('wiki.admin.overview', { workspa…
+       |                                                                                           ^
+     94|       pages: 0,
+     95|       latestUpdatedAt: null,
+
+Caused by: Error: METHOD_NOT_FOUND: unknown management method: wiki.admin.overview
+ ❯ AgentDataRuntime.requestAdmin electron/agentData/runtime.ts:264:44
+ ❯ electron/agentData/runtime.test.ts:93:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯
+
+
+ Test Files  3 failed | 58 passed (61)
+      Tests  10 failed | 516 passed (526)
+   Start at  20:52:03
+   Duration  51.60s (transform 20.17s, setup 23.91s, import 41.98s, tests 130.35s, environment 10.12s)
+

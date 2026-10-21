@@ -106,6 +106,25 @@ const spacingMessage = { role: 'assistant', content: [{ type: 'text', text: '间
 spacingEvents.push({ type: 'message_start', message: spacingMessage }, { type: 'message_end', message: spacingMessage })
 const spacingResult = { details: { transcript: spacingEvents.map((event) => JSON.stringify(event)).join('\n') } }
 const spacingMessages = groupMessages(spacingEvents.reduce(applyEvent, initialAgentState()).messages)
+// 子代理用 pi 内置 grep：输出形状照 pi 1.3.0 core/tools/grep.js（匹配行 path:N: text，上下文行 path-N- text，末尾方括号提示）。
+const grepText = [
+  'features/agentData/AgentDataCenter.tsx:7: import { CodeRetrievalPanel } from \'./CodeRetrievalPanel\';',
+  'features/agentData/CodeRetrievalPanel.tsx-38- ',
+  'features/agentData/CodeRetrievalPanel.tsx:39: export function CodeRetrievalPanel() {',
+  'features/agentData/CodeRetrievalPanel.tsx-40-   const options = useProjectOptions();',
+  '',
+  '[100 matches limit reached. Use limit=200 for more, or refine pattern]',
+].join('\n')
+const grepMessage = { role: 'assistant', content: [{ type: 'text', text: '检索完成。' }] }
+const grepEvents: AgentEvent[] = [
+  { type: 'tool_execution_start', toolCallId: 'grep-hit', toolName: 'grep', args: { pattern: 'CodeRetrievalPanel', path: 'electron-agent/src', context: 1 } },
+  { type: 'tool_execution_end', toolCallId: 'grep-hit', toolName: 'grep', result: { content: [{ type: 'text', text: grepText }], details: { matchLimitReached: 100 } }, isError: false },
+  { type: 'tool_execution_start', toolCallId: 'grep-miss', toolName: 'grep', args: { pattern: 'NoSuchSymbolAnywhere' } },
+  { type: 'tool_execution_end', toolCallId: 'grep-miss', toolName: 'grep', result: { content: [{ type: 'text', text: 'No matches found' }] }, isError: false },
+  { type: 'message_start', message: grepMessage },
+  { type: 'message_end', message: grepMessage },
+]
+const grepResult = { details: { transcript: grepEvents.map((event) => JSON.stringify(event)).join('\n') } }
 
 exposeData({ steps: STEPS, task, finalText: '所有模块已检查完成。', reasoningLastLine: '推理第 80 行', liveTask, livePrefix, nopathTask, nopathFinal, doneTask, doneFinal })
 
@@ -135,7 +154,7 @@ const doneResult = { content: [{ type: 'text', text: 'Background sub-agent start
 useLayoutStore.setState({ rightPanelOpen: true, sidebarOpen: false, availableWidth: 1420 })
 
 export default function SubagentConversation(): ReactElement {
-  const [mode, setMode] = useState<'long' | 'spacing' | 'live' | 'nopath' | 'done-nopath'>('long')
+  const [mode, setMode] = useState<'long' | 'spacing' | 'live' | 'nopath' | 'done-nopath' | 'grep'>('long')
   return (
     <AgentStoreContext.Provider value={mockCtx}>
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', width: mode === 'spacing' ? 1100 : 780, margin: '0 auto', background: 'var(--gren-content-bg)' }}>
@@ -145,6 +164,7 @@ export default function SubagentConversation(): ReactElement {
           <button data-testid="show-live" onClick={() => setMode('live')}>后台子代理实时思考</button>
           <button data-testid="show-nopath" onClick={() => setMode('nopath')}>结果不带会话路径</button>
           <button data-testid="show-done-nopath" onClick={() => setMode('done-nopath')}>终态挂载缺路径</button>
+          <button data-testid="show-grep" onClick={() => setMode('grep')}>子代理 pi grep</button>
         </div>
         {mode === 'spacing' ? (
           <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -155,6 +175,8 @@ export default function SubagentConversation(): ReactElement {
           <AgentStoreContext.Provider value={liveCtx}><SubAgentBody tab={liveTab} active /></AgentStoreContext.Provider>
         ) : mode === 'nopath' ? (
           <AgentStoreContext.Provider value={nopathCtx}><SubAgentBody tab={nopathTab} active /></AgentStoreContext.Provider>
+        ) : mode === 'grep' ? (
+          <SubAgentConversation task="子代理检索" result={grepResult} status="done" data-testid="child-grep" />
         ) : mode === 'done-nopath' ? (
           <SubAgentConversation task={doneTask} result={doneResult} status="done" workspace={liveWorkspace} agentId="sa-done" data-testid="child-done-nopath" />
         ) : <SubAgentConversation task={task} result={result} status="done" data-testid="child-conversation" />}

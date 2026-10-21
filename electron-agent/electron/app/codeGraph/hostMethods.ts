@@ -4,7 +4,10 @@ import type { MethodHandler } from '../../agentProcess/rpcPeer';
 import type { CodeGraphService } from './codeGraphService';
 import type { CodeGraphHostMethod } from './hostContract';
 
-type Engine = Pick<CodeGraphService, 'status' | 'call' | 'search' | 'runSync' | 'cancelSync'>;
+/** CodeGraphThreads 与单线程退路的 CodeGraphService 都满足；同步结果不过线（runSync 只回 null）。 */
+type Engine = Pick<CodeGraphService, 'status' | 'call' | 'search' | 'cancelSync'> & {
+  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<unknown>;
+};
 
 function str(params: Record<string, unknown>, key: string): string {
   const value = params[key];

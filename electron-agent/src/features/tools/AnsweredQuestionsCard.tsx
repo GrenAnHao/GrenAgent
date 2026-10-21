@@ -93,6 +93,8 @@ const styles = createStaticStyles(({ css }) => ({
 
 interface QData {
   title: string;
+  /** 题目全文（trim 后），与扩展写入卡片、formatAnswers 回传时的题目一致，用来切答案。 */
+  fullTitle: string;
   options: string[];
 }
 
@@ -104,6 +106,7 @@ function extractQData(args: unknown): QData[] {
     .filter((q): q is { question?: unknown; options?: unknown[] } => Boolean(q) && typeof q === 'object')
     .map((q) => ({
       title: String(q.question ?? '').split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '',
+      fullTitle: String(q.question ?? '').trim(),
       options: Array.isArray(q.options)
         ? q.options.map((o) => String(typeof o === 'string' ? o : (o as { label?: unknown }).label ?? '').trim()).filter(Boolean)
         : [],
@@ -146,7 +149,10 @@ export const AnsweredQuestionsCard = memo(function AnsweredQuestionsCard({
 }) {
   const [open, setOpen] = useState(false);
   const qdata = extractQData(args);
-  const parsed = parseAnswerBlock(extractText(result));
+  const parsed = parseAnswerBlock(
+    extractText(result),
+    qdata.map((q) => q.fullTitle),
+  );
   const answers = parsed.choices;
   const extraImages = extractResultImages(result);
 

@@ -91,4 +91,72 @@ describe('SessionItem', () => {
     fireEvent.click(screen.getByTestId('session-delete-cancel'));
     expect(onDelete).not.toHaveBeenCalled();
   });
+
+  it('archives straight from the menu without a confirm dialog', () => {
+    const onArchive = vi.fn();
+    const { container } = render(<SessionItem {...base} onArchive={onArchive} />);
+    fireEvent.contextMenu(container.querySelector('.pi-session-row') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }));
+    expect(onArchive).toHaveBeenCalledOnce();
+  });
+
+  it('archives at once from the button left of 「更多」 without opening the row', () => {
+    const onArchive = vi.fn();
+    const onClick = vi.fn();
+    const { container } = render(<SessionItem {...base} onClick={onClick} onArchive={onArchive} />);
+    const row = container.querySelector('.pi-session-row') as HTMLElement;
+    expect(screen.queryByTestId('session-archive-button')).toBeNull();
+    fireEvent.mouseEnter(row);
+    const button = screen.getByTestId('session-archive-button');
+    // 在「更多」左边
+    const more = within(row).getAllByRole('button', { hidden: true }).at(-1)!;
+    expect(button.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(button);
+    expect(onArchive).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('has no archive button on a running row or without onArchive', () => {
+    const { container, rerender } = render(<SessionItem {...base} running onArchive={vi.fn()} />);
+    fireEvent.mouseEnter(container.querySelector('.pi-session-row') as HTMLElement);
+    expect(screen.queryByTestId('session-archive-button')).toBeNull();
+    rerender(<SessionItem {...base} />);
+    expect(screen.queryByTestId('session-archive-button')).toBeNull();
+  });
+
+  it('renders the attention badge instead of the spinner', () => {
+    const { container } = render(
+      <SessionItem {...base} running attention={{ kind: 'approval', tooltip: '等待批准：执行 npm publish？' }} />,
+    );
+    const badge = screen.getByTestId('session-attention');
+    expect(badge.getAttribute('data-kind')).toBe('approval');
+    expect(badge.getAttribute('aria-label')).toBe('等待批准：执行 npm publish？');
+    expect(screen.queryByTestId('session-running')).toBeNull();
+    expect(container.querySelector('[data-attention="approval"]')).not.toBeNull();
+    // 角标和「更多」在同一格
+    expect(badge.parentElement?.dataset.attention).toBe('approval');
+  });
+
+  it('mounts row actions for an idle row with attention', () => {
+    const { container } = render(<SessionItem {...base} attention={{ kind: 'done', tooltip: '已完成，未查看' }} />);
+    const slot = screen.getByTestId('session-attention').parentElement as HTMLElement;
+    expect(within(slot).queryAllByRole('button', { hidden: true }).length).toBeGreaterThan(0);
+    expect(container.querySelector('.pi-session-row')).not.toBeNull();
+  });
+
+  it.each(['approval', 'choice', 'failed', 'blocked', 'done'] as const)('renders a %s badge', (kind) => {
+    render(<SessionItem {...base} attention={{ kind, tooltip: kind }} />);
+    expect(screen.getByTestId('session-attention').getAttribute('data-kind')).toBe(kind);
+  });
+
+  it('greys out archive while the session is running', () => {
+    const onArchive = vi.fn();
+    const { container } = render(<SessionItem {...base} running onArchive={onArchive} />);
+    fireEvent.contextMenu(container.querySelector('.pi-session-row') as HTMLElement);
+    const item = screen.getByRole('menuitem', { name: '归档（运行中不可用）' });
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(item);
+    expect(onArchive).not.toHaveBeenCalled();
+  });
 });

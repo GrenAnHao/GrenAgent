@@ -1,0 +1,5 @@
+messages=2032 images=36 oversized before=3
+  #1276 user 2160x1350
+  #1421 user 2559x1527
+  #1849 user 3906x1557
+oversized after=0 first pass 3556ms, cached pass 4ms

@@ -723,7 +723,31 @@ describe("outputSchema", () => {
       agentId: "sa-allow",
       tools: ["read", "grep", "ask_user"],
     });
-    expect(setActiveTools).toHaveBeenCalledWith(["read", "grep", "ask_user"]);
+    expect(setActiveTools).toHaveBeenCalledWith(["read", "grep", "ask_user", "send_message"]);
+  });
+
+  it("keeps send_message (and structured_output) on any named-agent allowlist so the child can reach its parent", async () => {
+    const session = fakeSession({ provider: "a", id: "b" });
+    const setActiveTools = vi.fn();
+    (session as unknown as { setActiveTools: ReturnType<typeof vi.fn> }).setActiveTools = setActiveTools;
+    createAgentSessionFromServices.mockResolvedValue({ session });
+    await runEmbeddedSubagent({
+      cwd: "/ws",
+      task: "t",
+      agentId: "sa-scout",
+      outputSchema: schema as never,
+      tools: ["read", "grep", "find", "ls", "bash", "code_explore"],
+    });
+    expect(createAgentSessionFromServices.mock.calls[0][0].tools).toEqual(
+      expect.arrayContaining(["read", "send_message", "structured_output"]),
+    );
+    expect(setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["send_message", "structured_output"]));
+  });
+
+  it("does not restrict tools when the child has no allowlist", async () => {
+    createAgentSessionFromServices.mockResolvedValue({ session: fakeSession({ provider: "a", id: "b" }) });
+    await runEmbeddedSubagent({ cwd: "/ws", task: "t", agentId: "sa-free" });
+    expect(createAgentSessionFromServices.mock.calls[0][0].tools).toBeUndefined();
   });
 
   it("adds a per-child factory registering structured_output with the schema, and appends the instruction", async () => {

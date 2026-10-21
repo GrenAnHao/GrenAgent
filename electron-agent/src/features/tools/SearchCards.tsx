@@ -81,7 +81,7 @@ export const GrepCard = memo(function GrepCard({ result }: { result: unknown }) 
                 style={{ width: '100%' }}
                 styles={{ content: { fontFamily: 'var(--pi-font-mono)', fontSize: 13 } }}
               >
-                {f.matches.map((m) => (m.line > 0 ? `${m.line}: ${m.text}` : m.text)).join('\n')}
+                {f.matches.map((m) => (m.line > 0 ? `${m.line}${m.context ? '-' : ':'} ${m.text}` : m.text)).join('\n')}
               </LazyHighlighter>
             </div>
           </CodeCard>

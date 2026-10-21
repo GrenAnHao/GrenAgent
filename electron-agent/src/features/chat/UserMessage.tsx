@@ -1,5 +1,5 @@
 import { memo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import { Tooltip } from 'antd';
+import { App, Tooltip } from 'antd';
 import { Icon, Image } from '@lobehub/ui';
 import { AtSign, CircleHelp, EyeOff } from 'lucide-react';
 import { createStaticStyles, cx, keyframes } from 'antd-style';
@@ -20,8 +20,11 @@ import { MessageEditBox } from './MessageEditBox';
 import { TaskPromptFrame } from './TaskPromptFrame';
 import { isBeforeLatestCompaction } from './compactionBoundary';
 import type { PromptImage } from './input/ChatInputContext';
+import { loadIntoComposer } from './input/composerBridge';
 
 interface UserMessageProps {
+  /** 界面消息 id：撤回等待中的引导时按它找到这条。 */
+  id?: string;
   text: string;
   images?: UserImage[];
   /** pi 毫秒 timestamp：启用「移出上下文 / 回退到此」，并据此判断是否已被排除（灰显）。 */
@@ -209,11 +212,18 @@ function isLastInContextUser(
   return false;
 }
 
+/** 还在等待注入的引导：可以取消（X），也可以先取消再放回输入框重新编辑。 */
+interface PendingSteerActions {
+  onCancel?: () => void;
+  onEdit?: () => void;
+}
+
 /** 纯展示（不含 hooks）：供「带 store 订阅」与「无 store 降级」两条路径复用。 */
 function renderUserMessage(
   { text, images, timestamp, entryId, steering, steerState, promptFrame }: UserMessageProps,
   excluded: boolean,
   onEdit?: () => void,
+  pendingSteer?: PendingSteerActions,
 ): ReactNode {
   const parts = parseAttachments(text);
   const bodyText = parts
@@ -234,7 +244,14 @@ function renderUserMessage(
     images,
     onEdit,
   };
-  const actions = bodyText ? (
+  // 等待中的引导还没进会话，回退 / 重新生成 / 删除都无从谈起，只给取消、编辑、复制。
+  // ctx 不带 timestamp / entryId：走基础操作栏，执行中也不会被「忙碌时隐藏」滤掉。
+  const actions = pendingSteer ? (
+    <MessageActionBar
+      ctx={{ role: 'user', text: ctx.text, images, onCancel: pendingSteer.onCancel, onEdit: pendingSteer.onEdit }}
+      bar={['cancel', 'edit', 'copy']}
+    />
+  ) : bodyText ? (
     <MessageActionBar
       ctx={ctx}
       bar={['rewind', 'edit', 'copy']}
@@ -302,6 +319,7 @@ function renderUserMessage(
  * 父组件若按 timestamp 是否存在决定要不要 useStore，回填 timestamp 后会多出一个 Hook，整棵树崩溃。
  */
 function StoreBackedUserMessage({
+  id,
   text,
   images,
   timestamp,
@@ -324,6 +342,9 @@ function StoreBackedUserMessage({
   const hasReply = store.useStore((s) => hasReplyAfterUser(s.messages, entryId, timestamp));
   const aboveCompaction = store.useStore((s) => isBeforeLatestCompaction(s.messages, entryId, timestamp));
   const excludedNow = store.useStore((s) => timestamp != null && s.excluded.has(timestamp));
+  const { message } = App.useApp();
+  const [cancelling, setCancelling] = useState(false);
+  const pendingSteer = Boolean(steering) && (steerState ?? 'written') === 'written';
 
   if (editing) {
     return (
@@ -362,14 +383,39 @@ function StoreBackedUserMessage({
         }
       : undefined;
 
+  // 取消：从 Pi 的引导队列里撤下这一条，气泡跟着去掉。编辑：先取消，撤成功了再把原文和图片放回输入框，由人工再发。
+  const cancelPendingSteer = async (reload: boolean) => {
+    if (!id || cancelling) return;
+    setCancelling(true);
+    try {
+      const result = await store.cancelSteer(id);
+      if (result === 'missed') {
+        message?.warning?.('这条引导已经在注入当前回合，撤不回来了');
+        return;
+      }
+      if (reload) loadIntoComposer(bodyText, images);
+    } catch {
+      message?.error?.('取消引导失败');
+    } finally {
+      setCancelling(false);
+    }
+  };
+  const steerActions: PendingSteerActions | undefined = pendingSteer
+    ? {
+        onCancel: id && !cancelling ? () => void cancelPendingSteer(false) : undefined,
+        onEdit: id && !cancelling ? () => void cancelPendingSteer(true) : undefined,
+      }
+    : undefined;
+
   return renderUserMessage(
     { text, images, timestamp, entryId, steering, steerState, promptFrame },
     excludedNow,
     onEdit,
+    steerActions,
   );
 }
 
-function UserMessageInner({ text, images, timestamp, entryId, steering, steerState, promptFrame }: UserMessageProps) {
+function UserMessageInner({ id, text, images, timestamp, entryId, steering, steerState, promptFrame }: UserMessageProps) {
   const storeCtx = useOptionalAgentStoreContext();
   const [editing, setEditing] = useState(false);
   if (!storeCtx) {
@@ -377,6 +423,7 @@ function UserMessageInner({ text, images, timestamp, entryId, steering, steerSta
   }
   return (
     <StoreBackedUserMessage
+      id={id}
       text={text}
       images={images}
       timestamp={timestamp}

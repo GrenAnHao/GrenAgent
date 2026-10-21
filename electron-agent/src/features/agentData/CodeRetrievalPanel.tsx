@@ -10,7 +10,7 @@ import { appendCodeResultPage, CODE_PAGE_SIZE, decodeCodeResult, retainedCodeRes
 import { codeStyles as styles } from './codeStyles';
 import { useProjectOptions } from './useProjectOptions';
 import { taskStatusLabels } from './operationsPresentation';
-import { codeIndexPresentation } from './codeIndexPresentation';
+import { codeIndexPresentation, codeIndexSyncActive } from './codeIndexPresentation';
 import { formatRelative } from '../../lib/relativeTime';
 import { openPath } from '../../platform/runtime';
 import { PageHeader } from './workbench/PageHeader';
@@ -32,6 +32,8 @@ interface CodeRetrievalPanelProps {
 /** loadingMore：文件列表正在取下一页；整个 QueryState 被新查询替换时它自然归零。 */
 interface QueryState { workspace: string; result?: CodeResultView; retained?: CodeResultView; error?: string; loading: boolean; loadingMore?: boolean }
 const jobStateLabels = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
+/** 自动同步不建任务，页面在调度器推进期间静默轮询状态（不显示「检查中」），回到空闲就停。 */
+const SYNC_POLL_MS = 1500;
 function projectKey(workspace: string): string { return workspace.replace(/\\/g, '/').replace(/^\/\/\?\//, '').replace(/\/+$/, '').toLowerCase(); }
 
 export function CodeRetrievalPanel({ initialProject, visible = true, refreshToken = 0, navigation, navigationRequest = 0, onOpenTask }: CodeRetrievalPanelProps) {
@@ -55,6 +57,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
   const [selectionVersion, setSelectionVersion] = useState(0);
   const [nodeState, setNodeState] = useState<QueryState>();
   const [statusVersion, setStatusVersion] = useState(0);
+  const [pollTick, setPollTick] = useState(0);
   const reload = refreshToken + statusVersion;
   const [syncing, setSyncing] = useState(false);
   const [createdTask, setCreatedTask] = useState<{ id: string; workspace: string }>();
@@ -72,6 +75,8 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
   const restoreFocus = useRef(false);
   const currentStatus = status && pathsEquivalent(status.workspace, project) ? status : undefined;
   const view = codeIndexPresentation({ status: currentStatus, checking, error: statusError });
+  const syncActive = codeIndexSyncActive(currentStatus);
+  const syncProgress = currentStatus?.progress;
   // 页头/标签用 view（受 checking 与刷新错误影响）；查询能力只看最近一次成功读到的状态，
   // 这样一次失败的状态刷新不会抹掉仍可读的旧结果，也不会让查询 effect 因 canQuery 抖动而多发一次请求。
   const canQuery = Boolean(project) && Boolean(currentStatus) && codeIndexPresentation({ status: currentStatus, checking: false }).canQuery;
@@ -152,6 +157,18 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
       .finally(() => { if (epoch === statusEpoch.current) setChecking(false); });
     return () => { statusEpoch.current++; };
   }, [project, visible, monitor.watchedTaskVersion, reload]);
+
+  // 同步在跑或排队时静默轮询：不动 checking，失败也不弹错，只在项目没变时替换状态。
+  useEffect(() => {
+    if (!visible || !project || !syncActive || checking || statusError) return;
+    const epoch = statusEpoch.current;
+    const timer = setTimeout(() => {
+      void agentDataApi.code.status(project)
+        .then((value) => { if (epoch === statusEpoch.current && pathsEquivalent(value.workspace, project)) setStatus(value); })
+        .catch(() => { if (epoch === statusEpoch.current) setPollTick((value) => value + 1); });
+    }, SYNC_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [visible, project, syncActive, checking, statusError, status, pollTick]);
 
   useEffect(() => {
     const epoch = ++queryEpoch.current;
@@ -294,7 +311,7 @@ export function CodeRetrievalPanel({ initialProject, visible = true, refreshToke
     <PageHeader title="代码索引"
       extra={<>
         <CodeProjectList options={options} project={project} indexState={indexState} status={statusError ? undefined : currentStatus} onSelect={selectProject} />
-        {project ? <Tag color={view.color}>{view.label}</Tag> : null}
+        {project ? <Tag color={view.color} data-testid="code-index-state" title={syncProgress ? `${syncProgress.stage}${syncProgress.total ? ` ${syncProgress.processed ?? 0}/${syncProgress.total}` : ''}` : undefined}>{view.label}</Tag> : null}
         {project && currentStatus?.indexed ? <span className={styles.stats}>
           <span>{currentStatus.files ?? '未提供'} 文件</span><span>{currentStatus.nodes ?? '未提供'} 节点</span><span>{currentStatus.edges ?? '未提供'} 边</span>
           {currentStatus.lastIndexedAt ? <span title={new Date(currentStatus.lastIndexedAt).toLocaleString()}>同步于 {formatRelative(currentStatus.lastIndexedAt)}</span> : null}

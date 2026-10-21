@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react';
 import type { SessionInfo } from '../../lib/pi';
-import { filterDeletedSessions, mergeAllSessions } from '../../lib/mergeSessions';
+import { visibleSessions } from '../../lib/mergeSessions';
 import { isUnder, pathsEquivalent } from '../../lib/pathUtils';
 import { useSessionStore } from '../../store/session';
 import { useSidebarPrefsStore } from '../../stores/sidebarPrefsStore';
@@ -166,7 +166,7 @@ export function useProjectGroups(): ProjectGroup[] {
   return useMemo(
     () => {
       const built = buildProjectGroups(
-        filterDeletedSessions(mergeAllSessions(allSessions, optimisticSessions), deletedSessionPaths),
+        visibleSessions(allSessions, optimisticSessions, deletedSessionPaths),
         {
           current,
           pinnedProjects,

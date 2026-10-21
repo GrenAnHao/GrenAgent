@@ -11,10 +11,7 @@ import {
 import { isolatedErrorCode, isolatedErrorText } from '../../lib/isolatedWorkspace';
 import { useIsolatedWorkspaceStore } from '../../stores/isolatedWorkspaceStore';
 import { syncBackIsolated } from './actions';
-import { useChildSessionBinding } from '../panels/useChildSessionBinding';
-import { groupMessages } from '../chat/groupMessages';
-import { ChatMessageItems } from '../chat/ChatMessageItems';
-import { computeAnsweredQuestions, computeSubAgentUnits } from '../chat/messagePrecompute';
+import { ReadonlySessionView } from '../sessions/ReadonlySessionView';
 
 const styles = createStaticStyles(({ css }) => ({
   hint: css`
@@ -82,12 +79,6 @@ const styles = createStaticStyles(({ css }) => ({
     margin-top: 12px;
     color: ${cssVar.colorTextTertiary};
     font-size: 12px;
-  `,
-  viewer: css`
-    display: flex;
-    flex-direction: column;
-    height: 70vh;
-    min-height: 320px;
   `,
 }));
 
@@ -440,27 +431,7 @@ function ViewerDialog({ sessionPath, title, onClose }: { sessionPath: string | n
         message="这个会话所在的独立工作区已经删除，只能查看，不能继续对话。"
         style={{ marginBottom: 12 }}
       />
-      {sessionPath ? <ReadonlySession sessionPath={sessionPath} /> : null}
+      {sessionPath ? <ReadonlySessionView sessionPath={sessionPath} testId="isolated-readonly-session" /> : null}
     </Modal>
-  );
-}
-
-function ReadonlySession({ sessionPath }: { sessionPath: string }) {
-  const messages = useChildSessionBinding(sessionPath, false);
-  const display = useMemo(() => groupMessages(messages), [messages]);
-  const units = useMemo(() => computeSubAgentUnits(display), [display]);
-  const answered = useMemo(() => computeAnsweredQuestions(display), [display]);
-  return (
-    <div className={styles.viewer} data-testid="isolated-readonly-session">
-      <ChatMessageItems
-        messages={display}
-        unitsByMessage={units.unitsByMessage}
-        hiddenSpawnIds={units.hidden}
-        spawnOverlay={units.overlay}
-        answeredQuestions={answered}
-        paddingInline={8}
-        resetKey={sessionPath}
-      />
-    </div>
   );
 }

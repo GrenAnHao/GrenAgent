@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
-import { Dropdown, Input, Modal } from 'antd';
+import { App, Dropdown, Input, Modal } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { FolderPlus, MessageSquarePlus } from 'lucide-react';
 import { revealItemInDir } from '../../platform/runtime';
@@ -15,8 +15,11 @@ import { SidebarActions } from './SidebarActions';
 import { ConversationRow } from './ConversationRow';
 import { GroupSessionRow } from './GroupSessionRow';
 import { ProjectHeaderRow } from './ProjectHeaderRow';
+import { SidebarSectionHeader } from './SidebarSectionHeader';
 import { useSidebarItems, type SidebarItem } from './useSidebarItems';
 import { useIsolatedWorkspaceStore } from '../../stores/isolatedWorkspaceStore';
+import type { SessionInfo } from '../../lib/pi';
+import { ArchivedSessions } from './ArchivedSessions';
 
 /** 取某侧栏条目对应的工作区 cwd（用于 hover 预热）；分区/标题无 cwd。 */
 function cwdOfItem(item: SidebarItem): string | undefined {
@@ -35,25 +38,6 @@ function cwdOfItem(item: SidebarItem): string | undefined {
 }
 
 const styles = createStaticStyles(({ css }) => ({
-  sec: css`
-    padding: 12px 14px 4px;
-    color: ${cssVar.colorTextTertiary};
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-  `,
-  secRow: css`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 8px 4px 14px;
-  `,
-  secLabel: css`
-    color: ${cssVar.colorTextTertiary};
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-  `,
   more: css`
     display: flex;
     align-items: center;
@@ -85,6 +69,13 @@ export interface SidebarProps {
   onClearProjectSessions: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
+  /** 归档项目里的一份会话。不给就没有归档功能（菜单项、底部入口都不出）。 */
+  onArchiveSession?: (cwd: string, path: string) => void;
+  /** 归档一个对话目录下的全部会话。 */
+  onArchiveConversation?: (cwd: string) => void;
+  onUnarchiveSession?: (session: SessionInfo) => void;
+  /** 按第一条用户消息重新生成标题并写回，返回新标题（生成不出时为空串）。不给就没有这个菜单项。 */
+  onRegenerateTitle?: (cwd: string, path: string) => Promise<string>;
 }
 
 export const Sidebar = memo(function Sidebar(props: SidebarProps) {
@@ -94,6 +85,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const allSessionsLoading = useSessionStore((s) => s.allSessionsLoading);
 
   const toggleCollapsed = useSidebarPrefsStore((s) => s.toggleCollapsed);
+  const toggleSectionCollapsed = useSidebarPrefsStore((s) => s.toggleSectionCollapsed);
+  const expandSection = useSidebarPrefsStore((s) => s.expandSection);
   const togglePinnedProject = useSidebarPrefsStore((s) => s.togglePinnedProject);
   const togglePinnedConversation = useSidebarPrefsStore((s) => s.togglePinnedConversation);
   const togglePinnedSession = useSidebarPrefsStore((s) => s.togglePinnedSession);
@@ -141,6 +134,24 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
     [props.onSubmitRename],
   );
   const handleRequestRename = useCallback((path: string) => setRenamingPath(path), []);
+  const { message } = App.useApp();
+  const regenerateTitle = props.onRegenerateTitle;
+  const handleRegenerateTitle = useCallback(
+    async (cwd: string, path: string) => {
+      if (!regenerateTitle) return;
+      const key = `regenerate-title:${path}`;
+      void message.open({ key, type: 'loading', content: '正在生成标题…', duration: 0 });
+      try {
+        const title = await regenerateTitle(cwd, path);
+        if (title) void message.open({ key, type: 'success', content: `标题已更新：${title}`, duration: 2 });
+        else void message.open({ key, type: 'warning', content: '没有生成出合适的标题，保留原标题', duration: 3 });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        void message.open({ key, type: 'error', content: `生成标题失败：${reason}`, duration: 4 });
+      }
+    },
+    [message, regenerateTitle],
+  );
   // 用 revealItemInDir 而非 openPath：reveal 在 opener:default 权限内即可用；openPath 需额外
   // opener:allow-open-path 并重建 Tauri，否则调用被权限拦截、点击"在资源管理器中打开"无反应。
   const handleRevealProject = useCallback((cwd: string) => void revealItemInDir(cwd), []);
@@ -164,36 +175,56 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
     });
   }, []);
 
-  const newProjectMenu = {
-    items: [
-      { key: 'blank', label: '新建空白项目' },
-      { key: 'existing', label: '使用现有文件夹' },
-    ],
-    onClick: () => props.onOpenProject(),
-  };
+  // 区头里的新建入口先展开本区（同 VS Code 视图标题栏的动作），新建出来的那一行才看得见。
+  // Ctrl+Alt+N 等别的入口不动用户的折叠。
+  const handleNewConversation = useCallback(() => {
+    expandSection('conversations');
+    props.onNewConversation();
+  }, [expandSection, props.onNewConversation]);
+  const newProjectMenu = useMemo(
+    () => ({
+      items: [
+        { key: 'blank', label: '新建空白项目' },
+        { key: 'existing', label: '使用现有文件夹' },
+      ],
+      onClick: () => {
+        expandSection('projects');
+        props.onOpenProject();
+      },
+    }),
+    [expandSection, props.onOpenProject],
+  );
 
   const renderItem = useCallback(
     (item: SidebarItem) => {
       switch (item.type) {
         case 'section':
           return (
-            <div className={styles.secRow}>
-              <span className={styles.secLabel}>{item.label}</span>
-              {item.action === 'new-conversation' ? (
-                <ActionIcon
-                  icon={MessageSquarePlus}
-                  size="small"
-                  title="新建对话 (Ctrl+Alt+N)"
-                  onClick={props.onNewConversation}
-                />
-              ) : (
-                <Dropdown menu={newProjectMenu} trigger={['click']}>
-                  <span>
-                    <ActionIcon icon={FolderPlus} size="small" title="新建项目" />
-                  </span>
-                </Dropdown>
-              )}
-            </div>
+            <SidebarSectionHeader
+              id={item.id}
+              label={item.label}
+              collapsed={item.collapsed}
+              onToggle={toggleSectionCollapsed}
+              sessionPaths={item.sessionPaths}
+              runningSessionPaths={props.runningSessionPaths}
+              action={
+                item.action === 'new-conversation' ? (
+                  <ActionIcon
+                    icon={MessageSquarePlus}
+                    size="small"
+                    title="新建对话 (Ctrl+Alt+N)"
+                    data-testid="sidebar-new-conversation"
+                    onClick={handleNewConversation}
+                  />
+                ) : item.action === 'new-project' ? (
+                  <Dropdown menu={newProjectMenu} trigger={['click']}>
+                    <span data-testid="sidebar-new-project">
+                      <ActionIcon icon={FolderPlus} size="small" title="新建项目" />
+                    </span>
+                  </Dropdown>
+                ) : undefined
+              }
+            />
           );
         case 'conversation':
           return (
@@ -209,15 +240,16 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               onSubmitRename={handleSubmitRename}
               onRequestRename={handleRequestRename}
               onReveal={handleRevealProject}
+              onArchive={props.onArchiveConversation}
+              onRegenerateTitle={props.onRegenerateTitle ? handleRegenerateTitle : undefined}
             />
           );
-        case 'pinned-label':
-          return <div className={styles.sec}>置顶</div>;
         case 'project':
           return (
             <ProjectHeaderRow
               group={item.group}
               expanded={item.expanded}
+              runningSessionPaths={props.runningSessionPaths}
               onToggleExpand={toggleCollapsed}
               onNewInProject={props.onNewSession}
               onPinProject={togglePinnedProject}
@@ -243,6 +275,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               onRequestRename={handleRequestRename}
               onPinToggle={togglePinnedSession}
               onReveal={handleRevealProject}
+              onArchive={props.onArchiveSession}
+              onRegenerateTitle={props.onRegenerateTitle ? handleRegenerateTitle : undefined}
             />
           );
         case 'more':
@@ -259,13 +293,19 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
       activeSessionPath,
       renamingPath,
       props.runningSessionPaths,
-      props.onNewConversation,
+      handleNewConversation,
+      newProjectMenu,
+      toggleSectionCollapsed,
       props.onOpenSession,
       props.onDeleteConversation,
       props.onNewSession,
       props.onClearProjectSessions,
       props.onRemoveProject,
       props.onDeleteSession,
+      props.onArchiveSession,
+      props.onArchiveConversation,
+      props.onRegenerateTitle,
+      handleRegenerateTitle,
       handleSubmitRename,
       handleRequestRename,
       toggleCollapsed,
@@ -316,6 +356,9 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           </VList>
         )}
       </div>
+      {props.onUnarchiveSession ? (
+        <ArchivedSessions onUnarchive={props.onUnarchiveSession} onDelete={props.onDeleteSession} />
+      ) : null}
       <Modal
         open={aliasEdit != null}
         title="项目别名"

@@ -6,6 +6,7 @@ interface ClickItem {
   key?: string;
   label?: unknown;
   danger?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
 }
 
@@ -40,6 +41,38 @@ describe('buildSessionMenuItems', () => {
     expect(del.danger).toBe(true);
     del.onClick!();
     expect(onDelete).toHaveBeenCalledOnce();
+  });
+
+  it('archive only appears when wired, sits before delete and is disabled while running', () => {
+    const common = { pinned: false, onPinToggle: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() };
+    expect((buildSessionMenuItems(common) as ClickItem[]).some((i) => i.key === 'archive')).toBe(false);
+
+    const onArchive = vi.fn();
+    const idle = buildSessionMenuItems({ ...common, onArchive }) as ClickItem[];
+    const keys = idle.map((i) => i.key).filter(Boolean);
+    expect(keys.indexOf('archive')).toBe(keys.indexOf('delete') - 1);
+    const item = idle.find((i) => i.key === 'archive')!;
+    expect(item.label).toBe('归档');
+    expect(item.disabled).toBeFalsy();
+    item.onClick!();
+    expect(onArchive).toHaveBeenCalledOnce();
+
+    const running = buildSessionMenuItems({ ...common, onArchive, archiveDisabled: true }) as ClickItem[];
+    expect(running.find((i) => i.key === 'archive')!.disabled).toBe(true);
+  });
+
+  it('regenerate title only appears when wired, right after rename', () => {
+    const common = { pinned: false, onPinToggle: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() };
+    expect((buildSessionMenuItems(common) as ClickItem[]).some((i) => i.key === 'regenerate-title')).toBe(false);
+
+    const onRegenerateTitle = vi.fn();
+    const items = buildSessionMenuItems({ ...common, onRegenerateTitle }) as ClickItem[];
+    const keys = items.map((i) => i.key).filter(Boolean);
+    expect(keys.indexOf('regenerate-title')).toBe(keys.indexOf('rename') + 1);
+    const item = items.find((i) => i.key === 'regenerate-title')!;
+    expect(item.label).toBe('重新生成标题');
+    item.onClick!();
+    expect(onRegenerateTitle).toHaveBeenCalledOnce();
   });
 });
 

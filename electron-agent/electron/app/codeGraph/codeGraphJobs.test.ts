@@ -38,6 +38,15 @@ describe('CodeGraph SDK jobs', () => {
     expect(callbacks.fail).not.toHaveBeenCalled();
   });
 
+  it('shows a job queued behind another sync of the same workspace as waiting', async () => {
+    const { engine, callbacks, jobs } = setup();
+    engine.runSync.mockImplementationOnce(async (_id, _workspace, progress) => {
+      (progress as (value: unknown) => void)({ phase: 'queued', current: 0, total: 0 });
+    });
+    await jobs.run('job', '/repo');
+    expect(callbacks.stage).toHaveBeenCalledWith('job', '排队等待');
+  });
+
   it('remembers cancellation during the async job-start handshake', async () => {
     const { engine, callbacks, jobs } = setup();
     let started!: () => void;

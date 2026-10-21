@@ -13,8 +13,8 @@ import {
 import { formatInvocation, type PromptParam } from '@extensions/prompt-commands/syntax';
 
 /**
- * markdown 写出时胶囊位置放这个私用区字符，发送和存草稿前再换成调用文本。
- * 不直接写调用文本：getDocument('markdown') 会过一遍 remark，参数里的 \ * _ [ 会被转义。
+ * 读输入框正文（readComposerText）和 markdown 写出时，胶囊位置放这个私用区字符，
+ * 再由 substitutePillMarker 换成调用文本并挪到最前面：扩展只认以 `/名` 开头的文本。
  */
 export const PILL_MARKER = String.fromCharCode(0xe000);
 

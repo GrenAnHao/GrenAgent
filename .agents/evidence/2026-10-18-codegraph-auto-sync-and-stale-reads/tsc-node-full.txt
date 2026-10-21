@@ -1,0 +1,335 @@
+../cli/src/agent-data-plugins.test.ts(1,40): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+electron/agent/completeAskUser.ts(5,8): error TS6307: File 'D:/OneDrive/Project Files/Pi/electron-agent/src/features/chat/pendingAskUser.ts' is not listed within the file list of project 'D:/OneDrive/Project Files/Pi/electron-agent/tsconfig.node.json'. Projects must list all files or use an 'include' pattern.
+electron/agent/workspaceHandle.test.ts(617,15): error TS2352: Conversion of type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' to type '{ sendCustomMessage: Mock<Constructable | Procedure>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'sendCustomMessage' is missing in type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' but required in type '{ sendCustomMessage: Mock<Constructable | Procedure>; }'.
+electron/agent/workspaceHandle.test.ts(646,13): error TS2339: Property 'isStreaming' does not exist on type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { ...; }; }) => Promise<...>>; ... 5 more ...; subC...'.
+electron/agent/workspaceHandle.test.ts(675,17): error TS2352: Conversion of type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' to type '{ sendCustomMessage: Mock<Constructable | Procedure>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'sendCustomMessage' is missing in type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' but required in type '{ sendCustomMessage: Mock<Constructable | Procedure>; }'.
+electron/agent/workspaceHandle.test.ts(676,17): error TS2352: Conversion of type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' to type '{ sendCustomMessage: Mock<Constructable | Procedure>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'sendCustomMessage' is missing in type '{ id: string; sessionId: string; subscribe: Mock<(cb: (e: unknown) => void) => () => void>; bindExtensions: Mock<(_bindings: { mode: string; uiContext: unknown; onError: (err: { extensionPath: string; event: string; error: string; }) => void; commandContextActions: { newSession: (options?: unknown) => Promise<{ canc...' but required in type '{ sendCustomMessage: Mock<Constructable | Procedure>; }'.
+electron/agent/workspaceHandle.test.ts(681,92): error TS2339: Property 'mock' does not exist on type '(parentSessionPath: string) => Promise<void>'.
+electron/agentData/runtime.operations.test.ts(51,66): error TS2353: Object literal may only specify known properties, and 'wikiModelLabel' does not exist in type 'AgentDataRuntimeOptions'.
+electron/agentData/threadStore.ts(28,18): error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'ThreadRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, SQLOutputValue>' is missing the following properties from type 'ThreadRow': id, project_id, workspace, title, and 3 more.
+electron/agentData/threadStore.ts(35,20): error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'TurnRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, SQLOutputValue>' is missing the following properties from type 'TurnRow': id, thread_id, status, mode, and 6 more.
+electron/agentData/threadStore.ts(36,20): error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'ItemRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, SQLOutputValue>' is missing the following properties from type 'ItemRow': id, thread_id, turn_id, type, and 4 more.
+electron/agentData/threadStore.ts(65,12): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'Record<string, SQLInputValue>'.
+electron/agentData/threadStore.ts(71,18): error TS2352: Conversion of type 'Record<string, SQLOutputValue>[]' to type 'ItemRow[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, SQLOutputValue>' is missing the following properties from type 'ItemRow': id, thread_id, turn_id, type, and 4 more.
+electron/agentData/wikiEngine/ingest/index.ts(65,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(138,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(156,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(162,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(163,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(167,38): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(176,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(185,30): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(198,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(204,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(247,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(266,21): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(273,19): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(276,19): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(284,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(296,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(328,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(334,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(336,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/overview.ts(91,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/overview.ts(102,14): error TS2554: Expected 0 arguments, but got 1.
+electron/agentData/wikiEngine/ingest/overview.ts(111,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(63,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(81,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(124,16): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(165,16): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/runtime.test.ts(26,66): error TS2554: Expected 0 arguments, but got 1.
+electron/agentData/wikiEngine/service.ts(1397,16): error TS2554: Expected 0 arguments, but got 2.
+electron/app/agentDataService.ts(211,98): error TS2345: Argument of type 'CreateThreadInput' is not assignable to parameter of type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'CreateThreadInput'.
+electron/app/agentDataService.ts(214,90): error TS2345: Argument of type 'CreateTurnInput' is not assignable to parameter of type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'CreateTurnInput'.
+electron/app/codeGraph/codeGraphQuery.ts(91,40): error TS2339: Property 'nodeId' does not exist on type 'SegmentMatch'.
+electron/app/devinAccount.ts(59,29): error TS2367: This comparison appears to be unintentional because the types '"closed"' and '"timeout"' have no overlap.
+electron/app/mcpConfigService.ts(55,5): error TS2322: Type '{ name: string; config: unknown; }[]' is not assignable to type 'EffectiveMcpConfig[]'.
+  Type '{ name: string; config: unknown; }' is not assignable to type 'EffectiveMcpConfig'.
+    Types of property 'config' are incompatible.
+      Type 'unknown' is not assignable to type 'Config'.
+electron/app/memoryDedup.test.ts(18,147): error TS2345: Argument of type 'Map<string, { content: string; type: string; priority: number; }>' is not assignable to parameter of type 'Map<string, Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">>'.
+  Type '{ content: string; type: string; priority: number; }' is missing the following properties from type 'Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">': scene_name, source_message_ids, metadata
+electron/app/memoryDedup.test.ts(25,11): error TS2345: Argument of type 'Map<string, { content: string; type: "work_task"; priority: number; }>' is not assignable to parameter of type 'Map<string, Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">>'.
+  Type '{ content: string; type: "work_task"; priority: number; }' is missing the following properties from type 'Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">': scene_name, source_message_ids, metadata
+electron/app/memoryDedup.test.ts(32,62): error TS2345: Argument of type 'Map<string, { content: string; type: "work_fact"; priority: number; }>' is not assignable to parameter of type 'Map<string, Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">>'.
+  Type '{ content: string; type: "work_fact"; priority: number; }' is missing the following properties from type 'Pick<L1Record, "content" | "metadata" | "priority" | "scene_name" | "source_message_ids" | "type">': scene_name, source_message_ids, metadata
+electron/app/memoryLayers.ts(105,45): error TS2345: Argument of type '(this: undefined, item: { filename: string; action?: "delete" | "write" | undefined; content?: string | undefined; }) => { filename: string; action: "delete"; }[] | { filename: string; action: "write"; content: string; }[]' is not assignable to parameter of type '(this: undefined, value: { filename: string; action?: "delete" | "write" | undefined; content?: string | undefined; }, index: number, array: { filename: string; action?: "delete" | "write" | undefined; content?: string | undefined; }[]) => readonly { ...; }[] | { ...; }'.
+  Type '{ filename: string; action: "delete"; }[] | { filename: string; action: "write"; content: string; }[]' is not assignable to type 'readonly { filename: string; action: "delete"; }[] | { filename: string; action: "delete"; }'.
+    Type '{ filename: string; action: "write"; content: string; }[]' is not assignable to type 'readonly { filename: string; action: "delete"; }[] | { filename: string; action: "delete"; }'.
+      Type '{ filename: string; action: "write"; content: string; }[]' is not assignable to type 'readonly { filename: string; action: "delete"; }[]'.
+        Type '{ filename: string; action: 'write'; content: string; }' is not assignable to type '{ filename: string; action: 'delete'; }'.
+          Types of property 'action' are incompatible.
+            Type '"write"' is not assignable to type '"delete"'.
+electron/app/memoryLayers.ts(115,19): error TS2322: Type 'unknown[]' is not assignable to type 'SceneDecision[]'.
+  Type 'unknown' is not assignable to type 'SceneDecision'.
+electron/app/memoryLayers.ts(115,62): error TS2322: Type 'unknown[]' is not assignable to type 'SceneDecision[]'.
+  Type 'unknown' is not assignable to type 'SceneDecision'.
+electron/app/permissionManager.test.ts(36,27): error TS2322: Type '() => Promise<string>' is not assignable to type '(operation: PermissionOperation, profile: string) => Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+    Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+      Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/permissionManager.test.ts(37,25): error TS2322: Type '() => Promise<string>' is not assignable to type '(operation: PermissionOperation, profile: string) => Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+    Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+      Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/permissionManager.test.ts(38,29): error TS2322: Type '() => Promise<string>' is not assignable to type '(operation: PermissionOperation, profile: string) => Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+    Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+      Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/permissionManager.test.ts(39,34): error TS2322: Type '() => Promise<string>' is not assignable to type '(operation: PermissionOperation, profile: string) => Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+    Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+      Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/permissionManager.test.ts(48,91): error TS2322: Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+    Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/permissionManager.test.ts(67,61): error TS2322: Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision> | PermissionDecision'.
+  Type 'Promise<string>' is not assignable to type 'Promise<PermissionDecision>'.
+    Type 'string' is not assignable to type 'PermissionDecision'.
+electron/app/piRuntimeService.ts(417,44): error TS2345: Argument of type 'AgentSession' is not assignable to parameter of type 'CompleteAskUserSession'.
+  The types of 'sessionManager.appendMessage' are incompatible between these types.
+    Type '(message: BashExecutionMessage | CustomMessage<unknown> | Message) => string' is not assignable to type '(message: unknown) => unknown'.
+      Types of parameters 'message' and 'message' are incompatible.
+        Type 'unknown' is not assignable to type 'BashExecutionMessage | CustomMessage<unknown> | Message'.
+electron/app/piRuntimeService.ts(856,51): error TS2345: Argument of type 'SessionProjection' is not assignable to parameter of type 'SessionProjectionLike'.
+  Types of property 'entries' are incompatible.
+    Type 'ProjectedSessionEntry[]' is not assignable to type 'ProjectedSessionEntryLike[]'.
+      Type 'ProjectedSessionEntry' is not assignable to type 'ProjectedSessionEntryLike'.
+        Types of property 'messages' are incompatible.
+          Type 'AgentMessage[]' is not assignable to type 'Record<string, unknown>[]'.
+            Type 'AgentMessage' is not assignable to type 'Record<string, unknown>'.
+              Type 'AssistantMessage' is not assignable to type 'Record<string, unknown>'.
+                Index signature for type 'string' is missing in type 'AssistantMessage'.
+electron/app/settingsService.ts(147,22): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'object | null' is not assignable to parameter of type '{}'.
+      Type 'null' is not assignable to type '{}'.
+electron/app/sourceCodeProtection.test.ts(28,3): error TS2322: Type 'UserConfig' is not assignable to type 'ViteSlice'.
+  Types of property 'main' are incompatible.
+    Type 'MainViteConfig | undefined' is not assignable to type '{ build?: { bytecode?: unknown; rollupOptions?: { output?: unknown; } | undefined; } | undefined; }'.
+      Type 'undefined' is not assignable to type '{ build?: { bytecode?: unknown; rollupOptions?: { output?: unknown; } | undefined; } | undefined; }'.
+electron/app/taskViewService.test.ts(15,84): error TS2353: Object literal may only specify known properties, and 'previewWikiRetry' does not exist in type 'TaskViewServiceOptions'.
+electron/browser/webviewPopup.test.ts(31,80): error TS2353: Object literal may only specify known properties, and 'control' does not exist in type '{ type: string; key?: string | undefined; code?: string | undefined; }'.
+electron/browser/webviewPopup.ts(101,34): error TS2345: Argument of type '(_event: unknown, input: InputEventLike) => void' is not assignable to parameter of type '(...args: unknown[]) => void'.
+  Types of parameters 'input' and 'args' are incompatible.
+    Type 'unknown' is not assignable to type 'InputEventLike'.
+electron/ipc/contracts.ts(34,92): error TS2307: Cannot find module '../agentData/wikiContracts' or its corresponding type declarations.
+electron/ipc/register.test.ts(104,27): error TS2739: Type '{ read: Mock<Procedure>; write: Mock<Procedure>; delete: Mock<Procedure>; }' is missing the following properties from type 'UiHistoryService': pendingWrites, resolveWorkspace, writeAtomically, historyPath
+electron/ipc/register.test.ts(118,27): error TS2739: Type '{ approve: Mock<Procedure>; isApproved: Mock<Procedure>; }' is missing the following properties from type 'WorkspaceApprovalService': approvalsPath, dataDir, read, write
+electron/ipc/register.test.ts(249,27): error TS2741: Property 'assertRepository' is missing in type '{ status: Mock<Procedure>; diff: Mock<Procedure>; branches: Mock<Procedure>; checkout: Mock<Procedure>; createBranch: Mock<...>; logGraph: Mock<...>; }' but required in type 'GitService'.
+electron/ipc/register.test.ts(271,27): error TS2739: Type '{ execute: Mock<Procedure>; }' is missing the following properties from type 'TerminalService': registry, emit
+electron/main.config.test.ts(18,12): error TS18048: 'browserWindowOptions.webPreferences' is possibly 'undefined'.
+electron/tencentdb/runtime.test.ts(7,72): error TS2307: Cannot find module './runtime' or its corresponding type declarations.
+electron/tencentdb/runtime.test.ts(93,14): error TS18046: 'call.options' is of type 'unknown'.
+electron/tencentdb/runtime.test.ts(94,14): error TS18046: 'call.options' is of type 'unknown'.
+electron/tencentdb/runtime.test.ts(98,12): error TS2571: Object is of type 'unknown'.
+electron/tencentdb/runtime.test.ts(99,40): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+electron/tencentdb/runtime.test.ts(99,80): error TS2339: Property 'endsWith' does not exist on type 'never'.
+../extensions/_shared/sandbox/operations.test.ts(112,5): error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type '(argv: string[], policy: SandboxPolicy) => Promise<ConfinedArgv>'.
+  Type 'MockInstance<Constructable | Procedure> & (new (...args: any[]) => any) & {}' is not assignable to type '(argv: string[], policy: SandboxPolicy) => Promise<ConfinedArgv>'.
+    Type 'MockInstance<Constructable | Procedure> & (new (...args: any[]) => any) & {}' provides no match for the signature '(argv: string[], policy: SandboxPolicy): Promise<ConfinedArgv>'.
+../extensions/_shared/sandbox/operations.test.ts(113,5): error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type 'SpawnImpl | undefined'.
+  Type 'MockInstance<Constructable | Procedure> & (new (...args: any[]) => any) & {}' is not assignable to type 'SpawnImpl | undefined'.
+../extensions/_shared/sandbox/operations.ts(117,70): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'SpawnOptions | undefined' is not assignable to parameter of type 'SpawnOptions'.
+      Type 'undefined' is not assignable to type 'SpawnOptions'.
+../extensions/_shared/sandbox/operations.ts(360,79): error TS2554: Expected 2 arguments, but got 3.
+../extensions/_shared/sandbox/windows/reclaim.test.ts(157,28): error TS2339: Property 'mock' does not exist on type '((path: string) => void) | Mock<Procedure>'.
+  Property 'mock' does not exist on type '(path: string) => void'.
+../extensions/_shared/sandbox/windows/reclaim.test.ts(157,44): error TS7006: Parameter 'call' implicitly has an 'any' type.
+../extensions/_shared/sandbox/windows/reclaim.test.ts(198,30): error TS2339: Property 'mock' does not exist on type '((path: string) => void) | Mock<Procedure>'.
+  Property 'mock' does not exist on type '(path: string) => void'.
+../extensions/_shared/sandbox/windows/reclaim.test.ts(198,46): error TS7006: Parameter 'call' implicitly has an 'any' type.
+../extensions/mcp-policy/index.test.ts(41,41): error TS2493: Tuple type '[]' of length '0' has no element at index '4'.
+../extensions/mcp/index.test.ts(111,78): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(123,78): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(133,9): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(154,100): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(166,9): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(175,109): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(183,112): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(246,9): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(258,9): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(268,9): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(317,7): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(334,7): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(360,7): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(397,29): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(399,29): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(407,83): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(408,114): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(415,81): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(416,76): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(417,36): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(418,81): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(424,127): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(433,29): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(435,29): error TS2345: Argument of type '{ callTool: () => Promise<{ text: string; }>; }' is not assignable to parameter of type 'ResourceManager'.
+  The types returned by 'callTool(...)' are incompatible between these types.
+    Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+      Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.
+../extensions/mcp/index.test.ts(596,22): error TS2339: Property 'getProviderToken' does not exist on type '{ init: () => void; snapshot: () => McpSnapshot; callTool: () => Promise<{ text: string; }>; subscribe: (l: (s: McpSnapshot) => void) => () => void; closeAll: () => void; emit: (next: McpSnapshot) => void | undefined; calls: { ...; }; }'.
+../extensions/mcp/index.test.ts(601,16): error TS2339: Property 'getProviderToken' does not exist on type '{ init: () => void; snapshot: () => McpSnapshot; callTool: () => Promise<{ text: string; }>; subscribe: (l: (s: McpSnapshot) => void) => () => void; closeAll: () => void; emit: (next: McpSnapshot) => void | undefined; calls: { ...; }; }'.
+../extensions/mcp/index.test.ts(606,16): error TS2339: Property 'getProviderToken' does not exist on type '{ init: () => void; snapshot: () => McpSnapshot; callTool: () => Promise<{ text: string; }>; subscribe: (l: (s: McpSnapshot) => void) => () => void; closeAll: () => void; emit: (next: McpSnapshot) => void | undefined; calls: { ...; }; }'.
+../extensions/mcp/index.test.ts(607,23): error TS2339: Property 'getProviderToken' does not exist on type '{ init: () => void; snapshot: () => McpSnapshot; callTool: () => Promise<{ text: string; }>; subscribe: (l: (s: McpSnapshot) => void) => () => void; closeAll: () => void; emit: (next: McpSnapshot) => void | undefined; calls: { ...; }; }'.
+../extensions/mcp/index.test.ts(764,50): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../extensions/mcp/index.test.ts(764,54): error TS2339: Property 'name' does not exist on type 'never'.
+../extensions/mcp/index.test.ts(766,53): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../extensions/mcp/index.test.ts(766,57): error TS2339: Property 'name' does not exist on type 'never'.
+../extensions/mcp/index.test.ts(768,50): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../extensions/mcp/index.test.ts(768,54): error TS2339: Property 'name' does not exist on type 'never'.
+../extensions/mcp/index.ts(159,43): error TS2339: Property 'args' does not exist on type 'McpServerConfig'.
+  Property 'args' does not exist on type 'McpHttpServerConfig'.
+../extensions/mcp/index.ts(159,61): error TS2339: Property 'env' does not exist on type 'McpServerConfig'.
+  Property 'env' does not exist on type 'McpHttpServerConfig'.
+../extensions/mcp/manager.test.ts(158,7): error TS2322: Type 'Mock<(_server: McpServerConfig, hooks?: { getProviderToken?: ((provider: string) => Promise<string | undefined>) | undefined; } | undefined) => Promise<McpClient>>' is not assignable to type '((s: McpServerConfig, hooks?: OAuthConnectHooks | undefined) => Promise<McpClient>) | undefined'.
+  Type 'Mock<(_server: McpServerConfig, hooks?: { getProviderToken?: ((provider: string) => Promise<string | undefined>) | undefined; } | undefined) => Promise<McpClient>>' is not assignable to type '(s: McpServerConfig, hooks?: OAuthConnectHooks | undefined) => Promise<McpClient>'.
+    Types of parameters 'hooks' and 'hooks' are incompatible.
+      Type 'OAuthConnectHooks | undefined' is not assignable to type '{ getProviderToken?: ((provider: string) => Promise<string | undefined>) | undefined; } | undefined'.
+        Type 'OAuthConnectHooks' is not assignable to type '{ getProviderToken?: ((provider: string) => Promise<string | undefined>) | undefined; }'.
+          Types of property 'getProviderToken' are incompatible.
+            Type '((provider: string) => string | Promise<string | undefined> | undefined) | undefined' is not assignable to type '((provider: string) => Promise<string | undefined>) | undefined'.
+              Type '(provider: string) => string | Promise<string | undefined> | undefined' is not assignable to type '(provider: string) => Promise<string | undefined>'.
+                Type 'string | Promise<string | undefined> | undefined' is not assignable to type 'Promise<string | undefined>'.
+                  Type 'undefined' is not assignable to type 'Promise<string | undefined>'.
+../extensions/mcp/manager.test.ts(604,40): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../extensions/mcp/manager.test.ts(604,47): error TS18048: 's' is possibly 'undefined'.
+../extensions/mcp/manager.test.ts(863,12): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/manager.test.ts(864,20): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/manager.test.ts(865,20): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/manager.test.ts(866,20): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/manager.test.ts(896,20): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/manager.test.ts(897,20): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type '{}'.
+  Property '0' does not exist on type '{}'.
+../extensions/mcp/transport.test.ts(41,18): error TS2352: Conversion of type 'undefined' to type 'RequestInit' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+../extensions/mcp/transport.test.ts(41,44): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+../extensions/memory/capture.test.ts(86,32): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+../extensions/memory/capture.test.ts(87,32): error TS2493: Tuple type '[]' of length '0' has no element at index '1'.
+../extensions/multi-agent/activation.test.ts(14,86): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+../extensions/multi-agent/activation.test.ts(130,5): error TS2322: Type 'Mock<Constructable | Procedure>' is not assignable to type '(msg: { customType: string; content: string; display: boolean; details: Record<string, unknown>; }, opts: { triggerTurn: boolean; deliverAs?: "followUp" | "steer" | undefined; }) => void'.
+  Type 'MockInstance<Constructable | Procedure> & (new (...args: any[]) => any) & {}' is not assignable to type '(msg: { customType: string; content: string; display: boolean; details: Record<string, unknown>; }, opts: { triggerTurn: boolean; deliverAs?: "followUp" | "steer" | undefined; }) => void'.
+    Type 'MockInstance<Constructable | Procedure> & (new (...args: any[]) => any) & {}' provides no match for the signature '(msg: { customType: string; content: string; display: boolean; details: Record<string, unknown>; }, opts: { triggerTurn: boolean; deliverAs?: "followUp" | "steer" | undefined; }): void'.
+../extensions/multi-agent/activation.test.ts(693,25): error TS2322: Type '{ role: string; content: string; } | { role: string; content: { type: string; text: string; }[]; }' is not assignable to type '{ role: string; content: { type: string; text: string; }[]; }'.
+  Type '{ role: string; content: string; }' is not assignable to type '{ role: string; content: { type: string; text: string; }[]; }'.
+    Types of property 'content' are incompatible.
+      Type 'string' is not assignable to type '{ type: string; text: string; }[]'.
+../extensions/multi-agent/activation.test.ts(693,50): error TS2322: Type 'string' is not assignable to type '{ type: string; text: string; }[]'.
+../extensions/multi-agent/embedded-runner.run.test.ts(12,86): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+../extensions/multi-agent/embedded-runner.run.test.ts(621,7): error TS2322: Type '{ role: string; content: string; } | { role: string; content: { type: string; text: string; }[]; }' is not assignable to type '{ role: string; content: { type: string; text: string; }[]; stopReason: string; }'.
+  Property 'stopReason' is missing in type '{ role: string; content: string; }' but required in type '{ role: string; content: { type: string; text: string; }[]; stopReason: string; }'.
+../extensions/multi-agent/embedded-runner.run.test.ts(622,38): error TS2322: Type 'string | { type: string; text: string; } | { type: string; text: string; }' is not assignable to type '{ type: string; text: string; }'.
+  Type 'string' is not assignable to type '{ type: string; text: string; }'.
+../extensions/multi-agent/embedded-runner.run.test.ts(646,25): error TS2741: Property 'stopReason' is missing in type '{ role: string; content: { type: string; text: string; }[]; }' but required in type '{ role: string; content: { type: string; text: string; }[]; stopReason: string; }'.
+../extensions/multi-agent/embedded-runner.run.test.ts(646,50): error TS2322: Type 'string' is not assignable to type '{ type: string; text: string; }[]'.
+../extensions/multi-agent/embedded-runner.run.test.ts(693,55): error TS2345: Argument of type '(opts: { resourceLoaderOptions: { extensionFactories: Array<(pi: unknown) => void>; appendSystemPrompt?: string[]; }; }) => Promise<{ modelRuntime: { id: string; }; }>' is not assignable to parameter of type '() => Promise<{ modelRuntime: { id: string; }; }>'.
+  Target signature provides too few arguments. Expected 1 or more, but got 0.
+../extensions/multi-agent/index.test.ts(378,7): error TS2353: Object literal may only specify known properties, and 'modelRegistry' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.test.ts(592,71): error TS2322: Type 'Promise<{ ok: boolean; output: string; exitCode: number; error: string | undefined; transcript: string; sessionPath: string | undefined; stopReason: "completed" | "error"; }>' is not assignable to type 'Promise<EmbeddedSubagentResult>'.
+  Type '{ ok: boolean; output: string; exitCode: number; error: string | undefined; transcript: string; sessionPath: string | undefined; stopReason: "completed" | "error"; }' is not assignable to type 'EmbeddedSubagentResult'.
+    Types of property 'sessionPath' are incompatible.
+      Type 'string | undefined' is not assignable to type 'string'.
+        Type 'undefined' is not assignable to type 'string'.
+../extensions/multi-agent/index.test.ts(684,54): error TS2741: Property 'sessionPath' is missing in type '{ ok: true; output: string; exitCode: number; transcript: string; stopReason: "completed"; }' but required in type 'EmbeddedSubagentResult'.
+../extensions/multi-agent/index.test.ts(852,79): error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.test.ts(864,17): error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.test.ts(884,9): error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.test.ts(911,11): error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.test.ts(1119,92): error TS2353: Object literal may only specify known properties, and 'sessionManager' does not exist in type '{ cwd: string; model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }'.
+../extensions/multi-agent/index.ts(543,44): error TS2345: Argument of type '{ cwd: string; sessionManager?: { getSessionId?: (() => string) | undefined; } | undefined; } & { model?: { provider?: string | undefined; id?: string | undefined; } | undefined; }' is not assignable to parameter of type '{ sessionManager?: { getSessionFile?: (() => string | undefined) | undefined; } | undefined; }'.
+  Types of property 'sessionManager' are incompatible.
+    Type '{ getSessionId?: (() => string) | undefined; } | undefined' is not assignable to type '{ getSessionFile?: (() => string | undefined) | undefined; } | undefined'.
+      Type '{ getSessionId?: (() => string) | undefined; }' has no properties in common with type '{ getSessionFile?: (() => string | undefined) | undefined; }'.
+../extensions/multi-agent/index.ts(1475,13): error TS2322: Type '(EarlySlot | { task: string; ok: false; output: string; model: string | undefined; })[]' is not assignable to type '{ task: string; ok: boolean; output: string; error?: string | undefined; partial?: boolean | undefined; agentId?: string | undefined; sessionPath?: string | undefined; stopReason?: SubagentStopReason | undefined; model?: string | undefined; settled?: boolean | undefined; }[]'.
+  Type 'EarlySlot | { task: string; ok: false; output: string; model: string | undefined; }' is not assignable to type '{ task: string; ok: boolean; output: string; error?: string | undefined; partial?: boolean | undefined; agentId?: string | undefined; sessionPath?: string | undefined; stopReason?: SubagentStopReason | undefined; model?: string | undefined; settled?: boolean | undefined; }'.
+    Type 'EarlySlot' is not assignable to type '{ task: string; ok: boolean; output: string; error?: string | undefined; partial?: boolean | undefined; agentId?: string | undefined; sessionPath?: string | undefined; stopReason?: SubagentStopReason | undefined; model?: string | undefined; settled?: boolean | undefined; }'.
+      Types of property 'stopReason' are incompatible.
+        Type 'string | undefined' is not assignable to type 'SubagentStopReason | undefined'.
+          Type 'string' is not assignable to type 'SubagentStopReason | undefined'.
+../extensions/prompt-metadata.test.ts(77,31): error TS2322: Type 'Promise<{ text: string; }>' is not assignable to type 'Promise<{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }>'.
+  Type '{ text: string; }' has no properties in common with type '{ content?: unknown; isError?: boolean | undefined; structuredContent?: unknown; }'.

@@ -60,6 +60,20 @@ describe('parseAnswerBlock', () => {
     });
   });
 
+  it('does not split at a colon inside the title (（推荐：…）)', () => {
+    const text =
+      '[我的选择]\n1. 流水粒度（推荐：每条回复一条扣点流水）：每条回复一条（推荐）\n2. 备注：其他：自己填的';
+    expect(parseAnswerBlock(text).choices).toEqual(['每条回复一条（推荐）', '其他：自己填的']);
+  });
+
+  it('cuts by the known title when titles are given, even with a bare colon in it', () => {
+    const text = '[我的选择]\n1. 部署方式：同机还是分机：同机，只听 127.0.0.1\n补充说明：先这样';
+    expect(parseAnswerBlock(text, ['部署方式：同机还是分机'])).toEqual({
+      choices: ['同机，只听 127.0.0.1'],
+      extraNote: '先这样',
+    });
+  });
+
   it('splits extra note and image count from numbered answers', () => {
     expect(
       parseAnswerBlock(

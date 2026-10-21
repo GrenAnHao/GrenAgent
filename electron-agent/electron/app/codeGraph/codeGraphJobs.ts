@@ -1,5 +1,11 @@
 import type { IndexProgress } from '@colbymchenry/codegraph';
-import type { CodeGraphEngine } from './codeGraphEngine';
+
+/** CodeGraphHostClient / CodeGraphThreads / CodeGraphEngine 都满足；同步结果这里不用。 */
+interface SyncRunner {
+  runSync(jobId: string, workspace: string, onProgress?: (progress: IndexProgress) => void): Promise<unknown>;
+  cancelSync(jobId: string): Promise<void>;
+  close(): Promise<void>;
+}
 
 interface JobCallbacks {
   start(id: string): Promise<unknown>;
@@ -8,7 +14,8 @@ interface JobCallbacks {
   cancelled(id: string): Promise<unknown>;
   stage(id: string, stage: string, processed?: number, total?: number): void;
 }
-const stages: Record<string, string> = { scanning: '扫描文件', parsing: '解析代码', resolving: '解析引用', linking: '关联符号' };
+// queued：同一工作区还有一次同步（常是自动同步）在跑，这个任务排在它后面，见 syncScheduler.ts。
+const stages: Record<string, string> = { queued: '排队等待', scanning: '扫描文件', parsing: '解析代码', resolving: '解析引用', linking: '关联符号' };
 
 /** Keep terminal job persistence alive until the embedded SDK has finished using its DB. */
 export class CodeGraphJobs {
@@ -17,7 +24,7 @@ export class CodeGraphJobs {
   private closed = false;
   private shutdown?: Promise<void>;
 
-  constructor(private readonly engine: Pick<CodeGraphEngine, 'runSync' | 'cancelSync' | 'close'>, private readonly callbacks: JobCallbacks) {}
+  constructor(private readonly engine: SyncRunner, private readonly callbacks: JobCallbacks) {}
 
   run(id: string, workspace: string): Promise<void> {
     if (this.closed) return Promise.reject(new Error('CodeGraph jobs are closed'));

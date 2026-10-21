@@ -56,6 +56,8 @@ Status: implemented
 
 生产构建在 main 的 `build` 里设 `externalizeDeps: false`：除 `mainExternal` 里列的原生模块（node-pty、codegraph、ast-grep、ripgrep，都已 asarUnpack）之外，依赖一律打进主进程和 chunk，Pi SDK 也在其中。`dev` / `localrun` 不走这个分支，仍沿用 electron-vite 的默认外置，ESM 下 `import` 条件能解析。`electron-builder.yml` 的 `asarUnpack` 加 `out/main/package.json`，解包出来的 `agent-host.js`、`pi-worker.js` 旁边有 `{"type":"commonjs"}`，按 CJS 加载，不依赖外层目录有没有 `package.json`。
 
+pi-codemode 也随之打进 chunk。它的 `runtime/host.js` 默认用 `new URL("./worker.js", import.meta.url)` 起 worker 线程，打包后这个地址落在 host 所在 chunk 的同一目录，也就是 `out/main/chunks/worker.js`。生产构建因此多一个 main 入口 `chunks/worker`，源文件是 pi 给打包版准备的 `pi-coding-agent/dist/extensions/codemode/worker.js`（只 `import "@earendil-works/pi-codemode/worker"`），字节码插件照常出成 `chunks/worker.js` 桩 + `chunks/worker.jsc`，被 `out/main/chunks/**` 一并解包。`check-codemode-worker` 插件在 `generateBundle` 里核对：host 所在 chunk 的目录旁边必须有 `worker.js` 入口，否则构建失败（`electron/agent/codemodeWorkerBuild.ts`）。
+
 ### 涉及文件
 
 - `cli/src/official-package-dir.ts`
@@ -65,6 +67,7 @@ Status: implemented
 - `electron-agent/src/features/visual/VisualCard.tsx`
 - `electron-agent/src/features/tools/ContextToolGroup.tsx`
 - `electron-agent/electron-builder.yml`
+- `electron-agent/electron/agent/codemodeWorkerBuild.ts`
 - `electron-agent/electron/mainHeap.ts`
 - `electron-agent/electron.vite.config.ts`
 - `electron-agent/electron/main.ts`
@@ -112,6 +115,8 @@ Status: implemented
 - 只排除三个 Pi 包（`externalizeDeps: { exclude: [...] }`）：改动最小，其余依赖仍从 asar 里加载，体积增长也最小。试过，主进程能起来，但 `agent-host` 报 `Cannot find module 'yaml'`；要用这个办法就得把每个外置依赖都补进 `asarUnpack`，名单要和 `dependencies` 同步，漏一个就是运行时才炸。
 - 把外置依赖整体 `asarUnpack`（`node_modules/**`）：能让解包的 chunk 找到包，但 Pi 包的 `require` 问题还在，还把 asar 的完整性保护和体积优势一起放掉。
 - 把 `agent-host` / `pi-worker` 的加载桩改成 `.cjs`，避开 `package.json` 查找：确实绕得开，但要改字节码插件的输出名、`asarUnpack` 和测试，和上一条钉死 `.js` / `.jsc` 的约定冲突；多 unpack 一个 `package.json` 更小。
+- codemode worker 改走 pi 自己的打包路径：在 main 构建里 `define` 出 `PI_BUNDLED_NODE = true`，`getCodemodeWorkerSpecifier()` 就会读同目录的 `codemode-worker.js` 并转成 data: URL，更新时文件被替换也不受影响，是 pi 官方 Node 发行版用的办法。没用它，是因为同一个开关还让 `core/extensions/loader.js` 改走内嵌模块（`usesEmbeddedModules`），扩展加载方式跟着变，波及面远大于补一个 worker 入口。
+- 把 pi-codemode 留在外置名单里，让它用 node_modules 里自带的 `worker.js`：它和 Pi SDK 一样 exports 只有 `import` 条件，CJS 主进程 `require` 它会抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`。
 
 ### 已被取代的旧决定：主进程 V8 老生代上限从约 1.5GB 提到 4GB
 
@@ -149,7 +154,7 @@ Status: implemented
 
 - pi-ai 的 `env-api-keys.js` 启动时 `import("node:fs")` 等三个动态导入，在字节码里抛 `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`，stderr 里是未处理的 Promise 拒绝警告。它只负责 Google Vertex ADC 凭据探测，失败时探测恒为 false，其余启动不受影响。
 - pi-coding-agent `core/extensions/loader.js:51` 的 `import.meta.resolve` 被替换成 `{}`（构建时的 `EMPTY_IMPORT_META` 就是它）。只在 pi 用 jiti 加载文件形式的扩展、算别名时才会走到，没有验证过。
-- `asarUnpack` 里 pi-codemode 的 `worker.js` 和 quickjs-wasi 的 `quickjs.wasm`：打进主进程后这些资源按哪个路径找，打包后 codemode 能不能用，没有验证过。
+- codemode：2026-10-19 在 0.3.0 打包版里确认坏了，每次调用都报 `Cannot find module ...\out\main\chunks\worker.js`，一次工具调用都发不出去。已按 Decision 里的 `chunks/worker` 入口修好。`quickjs.wasm` 按 `createRequire(chunk).resolve("quickjs-wasi/quickjs.wasm")` 从 `app.asar.unpacked/node_modules` 找到，报错发生在 wasm 加载之后、起 worker 的时候，说明这一段是通的。`asarUnpack` 里 pi-codemode 那行 `dist/runtime/worker.js` 在打包版里不再被用到，留着没删。
 
 ## Verification
 
@@ -164,4 +169,5 @@ Status: implemented
 - 最终配置（`externalizeDeps: false` + `asarUnpack` 加 `out/main/package.json`）下，`npm run build` 后 `out/main` 为 `main.js`（71 字节桩）+ `main.jsc`（约 1.5MB），`chunks/` 下 77 个 `.jsc`、约 22MB；`npm run package` 退出码 0，产出 `release/GrenAgent Setup 0.3.0.exe`（约 231MB）。
 - 启动最终产物 `release/win-unpacked/GrenAgent.exe`（`--user-data-dir` 指向临时目录，等 25 秒后观察，之后只杀自己起的进程树）：主进程、GPU、渲染进程、`agent-host` 子进程、`pi-job-guard.exe` 都在，30 行 `extension loaded` 日志，stderr 里没有 `failed to start`、`Cannot find module`、`ReferenceError`、`ERR_PACKAGE`。退出后没有 GrenAgent 残留进程。
 - `cd electron-agent && npx vitest run electron/app/sourceCodeProtection.test.ts electron/mainHeap.test.ts`：2 个文件 10 条通过（含新增的 `out/main/package.json` 要在 `asarUnpack` 里的断言）。
+- codemode worker（2026-10-19，结果：通过）：`npx electron-vite build` 产出 `out/main/chunks/worker.js`（74 字节桩，`require("../bytecode-loader.cjs")` + `require("./worker.jsc")`）和 `worker.jsc`，`check-codemode-worker` 没报错。用 `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron.exe` 起 pi-codemode 的 `CodemodeSandbox`，`workerUrl` 指向这个桩，执行 `await tools.search(...)` 再 `return 42`：`ok: true`、`value: 42`、调用一次、输出正确。`npx vitest run electron/agent/codemodeWorkerBuild.test.ts`：4 条通过。没有重新 `npm run package`，因为那会覆盖正在运行的 `release/win-unpacked`；打包版里的确认要等下次打包后在界面里跑一次 codemode。
 - 没验证：运行的是 `win-unpacked` 里的同一份文件，没有真的跑 NSIS 安装程序、没有在非仓库目录下启动；没有在界面里发消息、开会话，所以 Pi 运行时、codemode、文件形式扩展（见 Consequences 的已知遗留）都没走到；也没做 `npm run start` / `dev` 的回归。启动时 MCP 配置读的是真实 `~/.pi`，拉起了其中的 MCP 服务器，没有做写操作。

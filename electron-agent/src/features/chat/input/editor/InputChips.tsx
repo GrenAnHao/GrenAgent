@@ -1,4 +1,4 @@
-import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { ActionIcon, Flexbox, Image } from '@lobehub/ui';
 import { MousePointerClick, X } from 'lucide-react';
 import { createStaticStyles, cssVar } from 'antd-style';
 import FileIcon from '../../../../components/FileIcon';
@@ -35,22 +35,29 @@ export function InputChips() {
 
   return (
     <Flexbox horizontal gap={8} style={{ flexWrap: 'wrap' }}>
-      {attachments.map((a, index) => (
-        <div key={`${a.name}-${index}`} style={{ position: 'relative' }}>
-          <img
-            src={a.url}
-            alt={a.name}
-            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, display: 'block' }}
-          />
-          <ActionIcon
-            icon={X}
-            size="small"
-            title="移除"
-            onClick={() => removeAttachment(index)}
-            style={{ position: 'absolute', top: -8, right: -8 }}
-          />
-        </div>
-      ))}
+      {/* PreviewGroup：和气泡里的图一样点开放大，多图可左右切换。 */}
+      <Image.PreviewGroup>
+        {attachments.map((a, index) => (
+          <div key={`${a.name}-${index}`} style={{ position: 'relative' }} data-testid="composer-image">
+            <Image
+              src={a.url}
+              alt={a.name}
+              width={48}
+              height={48}
+              objectFit="cover"
+              variant="borderless"
+              styles={{ image: { borderRadius: 6 }, wrapper: { borderRadius: 6 } }}
+            />
+            <ActionIcon
+              icon={X}
+              size="small"
+              title="移除"
+              onClick={() => removeAttachment(index)}
+              style={{ position: 'absolute', top: -8, right: -8 }}
+            />
+          </div>
+        ))}
+      </Image.PreviewGroup>
       {pastedTexts.map((p) => {
         const fileName = p.source?.split('/').pop() || p.source || '粘贴文本';
         return (

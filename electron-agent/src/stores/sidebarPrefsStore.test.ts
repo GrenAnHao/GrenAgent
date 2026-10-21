@@ -4,11 +4,13 @@ import { useSidebarPrefsStore } from './sidebarPrefsStore';
 const reset = () =>
   useSidebarPrefsStore.setState({
     pinnedProjects: [],
+    pinnedConversations: [],
     pinnedSessions: [],
     hiddenProjects: [],
     keptProjects: [],
     aliases: {},
     collapsed: {},
+    collapsedSections: {},
   });
 
 describe('sidebarPrefsStore', () => {
@@ -62,5 +64,49 @@ describe('sidebarPrefsStore', () => {
     expect(s.isCollapsed('/ws/x', false)).toBe(false);
     s.toggleCollapsed('/ws/x', true);
     expect(useSidebarPrefsStore.getState().isCollapsed('/ws/x', true)).toBe(false);
+  });
+
+  it('top-level sections default to expanded and toggle independently', () => {
+    const s = useSidebarPrefsStore.getState();
+    s.toggleSectionCollapsed('conversations');
+    expect(useSidebarPrefsStore.getState().collapsedSections).toEqual({ conversations: true });
+    s.toggleSectionCollapsed('projects');
+    s.toggleSectionCollapsed('conversations');
+    expect(useSidebarPrefsStore.getState().collapsedSections).toEqual({ conversations: false, projects: true });
+  });
+
+  it('expandSection only opens a collapsed section', () => {
+    const s = useSidebarPrefsStore.getState();
+    const before = useSidebarPrefsStore.getState().collapsedSections;
+    s.expandSection('projects');
+    expect(useSidebarPrefsStore.getState().collapsedSections).toBe(before);
+    s.toggleSectionCollapsed('projects');
+    s.expandSection('projects');
+    expect(useSidebarPrefsStore.getState().collapsedSections.projects).toBe(false);
+  });
+
+  it('pinning something expands a collapsed pinned section; unpinning leaves it alone', () => {
+    const s = useSidebarPrefsStore.getState();
+    s.toggleSectionCollapsed('pinned');
+    s.togglePinnedSession('/s/a.jsonl');
+    expect(useSidebarPrefsStore.getState().collapsedSections.pinned).toBe(false);
+
+    s.toggleSectionCollapsed('pinned');
+    s.togglePinnedSession('/s/a.jsonl');
+    expect(useSidebarPrefsStore.getState().collapsedSections.pinned).toBe(true);
+
+    s.togglePinnedConversation('/w/c');
+    expect(useSidebarPrefsStore.getState().collapsedSections.pinned).toBe(false);
+    s.toggleSectionCollapsed('pinned');
+    s.togglePinnedProject('/ws/a');
+    expect(useSidebarPrefsStore.getState().collapsedSections.pinned).toBe(false);
+  });
+
+  it('old persisted prefs without collapsedSections still load expanded sections', async () => {
+    localStorage.setItem('pi-sidebar', JSON.stringify({ state: { pinnedProjects: ['/ws/old'] }, version: 0 }));
+    await useSidebarPrefsStore.persist.rehydrate();
+    const state = useSidebarPrefsStore.getState();
+    expect(state.pinnedProjects).toEqual(['/ws/old']);
+    expect(state.collapsedSections).toEqual({});
   });
 });

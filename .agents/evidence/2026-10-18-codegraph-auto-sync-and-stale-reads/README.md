@@ -1,0 +1,8 @@
+# 证据：CodeGraph 自动同步与同步期间给旧结果
+
+- `smoke.txt` / `smoke.json`：`scripts/codegraph-auto-sync-smoke.mjs`，`electron-vite build --mode localrun --outDir out/cg-smoke` 产物里的真实 `codegraph-host.js` + `codegraph-worker.js`，应用自带 Electron Node 加 `--liftoff-only`，`extensions/` 副本 551 个文件。17 项全部通过。构建最后一步 `copyPiAdjacentAssets` 因运行中的应用锁住 `out/main/pi-job-guard.exe` 报 EBUSY，与本改动无关，两个入口已产出。
+- `test-codegraph.txt`：`npm run test:codegraph`（真实 SDK，应用自带 Electron Node），11 个文件 108 个用例通过。
+- `vitest.txt`：`npx vitest run electron/app/codeGraph electron/agentDataProcess electron/agentData electron/app/sourceCodeProtection.test.ts electron/main.config.test.ts electron/app/agentDataDiagnostics electron/ipc src/features/agentData/codeIndexPresentation.test.ts src/features/agentData/CodeRetrievalPanel src/lib/agentData.test.ts`：61 个文件，516 个通过、10 个失败。10 个失败全在 `electron/agentData/{auditViewStore,jobCleanup,runtime}.test.ts`（`wiki.admin.overview` / `wiki.replace` 方法不存在、审计视图断言），与本改动无关：在干净的 HEAD 工作树（`git worktree add --detach`，node_modules 用 junction）里跑这三个文件，同样 10 个失败、19 个通过。
+- `ui-check-code-index-sync.txt` / `code-index-sync.png`：新场景 `code-index-sync` 22 项通过。
+- `ui-check-code-retrieval-panel.txt`：同样受 `CodeRetrievalPanel.tsx` 改动影响的 `code-retrieval-panel` 全部通过。`--changed --dry-run` 里本改动只另外波及 `dock-session-binding`（经 `src/lib/agentData.ts` 的类型声明，编译后不存在），没有跑。
+- `tsc-node-changed.txt`：`npx tsc -p tsconfig.node.json --noEmit` 共 156 个已有错误，改动涉及的文件只剩 `codeGraphQuery.ts(91)` 一条已有错误（不是本次改的）。`tsc-renderer.txt`：临时 tsconfig 只含改动的渲染层文件，`CodeRetrievalPanel.tsx` / `codeIndexPresentation.ts` / 场景零错误，`src/lib/agentData.ts(79,90)` 两条在未改动的行上、改动前就有。

@@ -6,6 +6,7 @@ import { readSubagentSessionMeta, type SubagentSessionMeta } from './subagentSes
 import { isSystemWorkerSessionLines } from './systemWorkerSession.js';
 import { readFirstLine } from './sessionIdentity.js';
 import { firstLineOf, forEachLineContaining, linesContaining } from './sessionLineScan.js';
+import { fallbackSessionTitle, firstUserMessage } from '../../../extensions/_shared/session-title.js';
 
 export interface SessionInfo {
   id: string;
@@ -13,6 +14,8 @@ export interface SessionInfo {
   cwd: string | null;
   timestamp: string | null;
   name: string | null;
+  /** 用户归档了这份会话：侧栏不列，只在「已归档」里出现。没归档时不带这个字段。 */
+  archived?: true;
 }
 
 /** `hidden`：子代理 / 系统短调用会话——不进列表，但随所属工作区一起删除。 */
@@ -64,6 +67,8 @@ export class WorkspaceService {
   private closeWorkspace?: (workspace: string) => Promise<void>;
   private releaseSessions?: (sessionPaths: string[]) => Promise<void>;
   private subagentControl: SubagentControlPort = inProcessSubagentControl;
+  /** 归档登记表的读改写排成一队，并发的归档 / 取消归档 / 清理不会互相覆盖。 */
+  private archiveQueue: Promise<unknown> = Promise.resolve();
 
   constructor(agentDir: string) {
     this.agentDir = agentDir;
@@ -142,7 +147,16 @@ export class WorkspaceService {
     const files = await collectJsonlFiles(this.sessionsDir);
     this.forgetRecordsExcept(files);
     const sessions = (await Promise.all(files.map((path) => this.readSession(path)))).filter((session): session is SessionInfo => session !== null);
-    return sessions.filter((session) => session.cwd !== null).sort((left, right) => (right.timestamp ?? '').localeCompare(left.timestamp ?? ''));
+    const archived = await this.readArchiveRegistry();
+    if (archived.length > 0) {
+      // 文件已经不在的登记顺手去掉（外部删了、或删除时没经过 deleteSession）。
+      const present = new Set(files.map(normalizePath));
+      if (archived.some((path) => !present.has(normalizePath(path)))) {
+        await this.updateArchiveRegistry((list) => list.filter((path) => present.has(normalizePath(path))));
+      }
+    }
+    return markArchived(sessions.filter((session) => session.cwd !== null), archived)
+      .sort((left, right) => (right.timestamp ?? '').localeCompare(left.timestamp ?? ''));
   }
 
   async listSessions(workspace: string): Promise<SessionInfo[]> {
@@ -150,9 +164,30 @@ export class WorkspaceService {
     const files = await collectJsonlFiles(this.sessionsDir);
     const candidates = await Promise.all(files.map(async (path) => (await headerMayBelongTo(path, workspace) ? path : null)));
     const sessions = await Promise.all(candidates.filter((path): path is string => path !== null).map((path) => this.readSession(path)));
-    return sessions
-      .filter((session): session is SessionInfo => session !== null && session.cwd !== null && pathsEquivalent(session.cwd, workspace))
+    const listed = sessions.filter((session): session is SessionInfo => session !== null && session.cwd !== null && pathsEquivalent(session.cwd, workspace));
+    return markArchived(listed, await this.readArchiveRegistry())
       .sort((left, right) => (right.timestamp ?? '').localeCompare(left.timestamp ?? ''));
+  }
+
+  /**
+   * 归档 / 取消归档。只记路径，会话文件原地不动；路径必须是 sessions 目录下列得出来的会话（隐藏会话不行）。
+   * 按调用方给的拼法记（就是列表里的 path），比较时归一化。
+   */
+  async setSessionsArchived(sessionPaths: string[], archived: boolean): Promise<void> {
+    if (sessionPaths.length === 0) return;
+    if (archived) {
+      const root = await realpath(this.sessionsDir).catch(() => { throw new Error('sessions directory unavailable'); });
+      for (const sessionPath of sessionPaths) {
+        const target = await realpath(sessionPath).catch(() => { throw new Error('session file not found'); });
+        if (!isWithin(root, target) || !target.endsWith('.jsonl')) throw new Error('session file not in sessions directory');
+        if (!(await this.readSession(target))) throw new Error('SESSION_NOT_FOUND');
+      }
+    }
+    const keys = new Set(sessionPaths.map(normalizePath));
+    await this.updateArchiveRegistry((list) => {
+      const rest = list.filter((path) => !keys.has(normalizePath(path)));
+      return archived ? [...rest, ...dedupePaths(sessionPaths)] : rest;
+    });
   }
 
   async pruneOrphanConversations(keep: string[]): Promise<number> {
@@ -240,6 +275,7 @@ export class WorkspaceService {
     // 子会话 parentSession 是 SDK 落盘写法，与调用方传入 / realpath 后的拼法都可能不同，两者都作根。
     await this.removeChildSessions(workspace, descendantsLeafFirst(children, [sessionPath, target]));
     await rm(target, { force: true });
+    await this.forgetArchived([sessionPath, target]);
   }
 
   private async deleteSessionsForWorkspace(workspace: string): Promise<void> {
@@ -249,6 +285,7 @@ export class WorkspaceService {
     for (const record of records) {
       if (!kept.has(record.info.path)) await rm(record.info.path, { force: true });
     }
+    await this.forgetArchived(records.map((record) => record.info.path));
   }
 
   /** 只收口不删文件：deleteConversation 在 closeWorkspace 前调用。 */
@@ -321,6 +358,39 @@ export class WorkspaceService {
     await writeFile(this.projectsPath(), JSON.stringify({ projects }), 'utf8');
   }
 
+  private archivePath(): string {
+    return join(this.agentDir, 'archived-sessions.json');
+  }
+
+  /** 读不出（不存在、坏 JSON）当作空表：归档状态丢了只是会话回到侧栏，不丢数据。 */
+  private async readArchiveRegistry(): Promise<string[]> {
+    try {
+      const parsed = JSON.parse(await readFile(this.archivePath(), 'utf8')) as { sessions?: unknown };
+      if (!Array.isArray(parsed.sessions)) return [];
+      return parsed.sessions.filter((path): path is string => typeof path === 'string' && path.trim().length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private updateArchiveRegistry(update: (list: string[]) => string[]): Promise<void> {
+    const run = this.archiveQueue.then(async () => {
+      const before = await this.readArchiveRegistry();
+      const after = update(before);
+      if (after.length === before.length && after.every((path, index) => path === before[index])) return;
+      await writeFile(this.archivePath(), JSON.stringify({ sessions: after }), 'utf8');
+    });
+    // 一次写失败不卡住后面的排队。
+    this.archiveQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async forgetArchived(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    const keys = new Set(paths.map(normalizePath));
+    await this.updateArchiveRegistry((list) => list.filter((path) => !keys.has(normalizePath(path))));
+  }
+
   private async sessionRecordsIn(workspace: string): Promise<SessionRecord[]> {
     const files = await collectJsonlFiles(this.sessionsDir);
     this.forgetRecordsExcept(files);
@@ -361,6 +431,22 @@ export class WorkspaceService {
       if (!present.has(path)) this.records.delete(path);
     }
   }
+}
+
+function markArchived(sessions: SessionInfo[], archived: string[]): SessionInfo[] {
+  if (archived.length === 0) return sessions;
+  const keys = new Set(archived.map(normalizePath));
+  return sessions.map((session) => (keys.has(normalizePath(session.path)) ? { ...session, archived: true } : session));
+}
+
+function dedupePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  return paths.filter((path) => {
+    const key = normalizePath(path);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function toChildSession(record: SessionRecord): Promise<ChildSession> {
@@ -586,29 +672,24 @@ function parseEntry(line: string): Record<string, unknown> | null {
   }
 }
 
-const SIDEBAR_TITLE_MAX = 80;
-
+/**
+ * 没有生成标题时侧栏用首条用户消息兑底。技能展开、粘贴块、命令块、图片说明先拆掉，
+ * 不然侧栏显示的是 `<pi:attachment …` / `<skill name=…`。
+ */
 function firstUserTextFromEntry(entry: Record<string, unknown>): string | null {
   const nested = entry.message;
   const msg = (nested && typeof nested === 'object' ? nested : entry) as { role?: unknown; content?: unknown };
-  if (msg.role !== 'user') return null;
-  const raw = extractMessageText(msg.content).replace(/\s+/g, ' ').trim();
-  return raw ? raw.slice(0, SIDEBAR_TITLE_MAX) : null;
-}
-
-function extractMessageText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter((part): part is { type: string; text: string } =>
-      Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
-    .map((part) => part.text)
-    .join(' ');
+  const first = firstUserMessage([{ type: 'message', message: msg }]);
+  return first ? fallbackSessionTitle(first.text, first.images) : null;
 }
 
 function isWithin(parent: string, candidate: string): boolean {
-  const relative = normalizePath(candidate).slice(normalizePath(parent).length).replace(/^\/+/, '');
-  return relative.length > 0 && !relative.startsWith('..');
+  const root = normalizePath(parent);
+  const child = normalizePath(candidate);
+  // 先确认前缀真是 parent 目录：只按长度切掉前缀时，同长的兄弟目录也会被当成在 parent 里。
+  if (!child.startsWith(`${root}/`)) return false;
+  const relative = child.slice(root.length + 1);
+  return relative.length > 0 && !relative.split('/').includes('..');
 }
 
 function pathsEquivalent(left: string, right: string): boolean {

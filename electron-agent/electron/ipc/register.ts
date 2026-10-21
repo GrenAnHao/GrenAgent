@@ -26,6 +26,8 @@ import type { PiPackageService } from '../app/piPackageService';
 import { devinAccount } from '../app/devinAccount';
 import { openDevinOAuthWindow } from '../app/devinOAuthWindow';
 import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
+import type { AttentionService } from '../app/attentionService';
+import { isAttentionKind, type AttentionNotifyInput } from '../app/attentionContract';
 import { recordIpc } from '../runtimeDiag';
 
 type CommandHandler = (event: IpcMainInvokeEvent, args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -76,6 +78,8 @@ export interface IpcServices {
     abort(workspace: string): void;
   };
   workspace?: WorkspaceService;
+  /** 会话菜单「重新生成标题」：按会话文件的第一条用户消息起名，只返回标题，写回走 set_session_display_name。 */
+  sessionTitle?: { generate(sessionPath: string): Promise<string> };
   uiHistory?: UiHistoryService;
   workspaceApproval?: WorkspaceApprovalService;
   git?: GitService;
@@ -89,6 +93,8 @@ export interface IpcServices {
   plugins?: Pick<PluginManager, 'list' | 'start' | 'stop' | 'allowedPluginIds'>;
   piPackages?: PiPackageService;
   jobs?: JobsPort;
+  /** 会话注意状态的系统通知、任务栏闪烁与角标。 */
+  attention?: Pick<AttentionService, 'notify' | 'badge' | 'isFocused' | 'clear'>;
   /** 记住原生窗口底色，供下次启动建窗口时使用。 */
   windowBackground?: Pick<WindowBackgroundStore, 'save'>;
   /** 仅开发期注入（见 main.ts）：未注入则 dev_* 诊断命令不注册。 */
@@ -152,6 +158,7 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.piPackages) registerPiPackageCommands(services.piPackages);
   if (services.subagent) registerSubagentCommands(services.subagent);
   if (services.jobs) registerJobCommands(services.jobs);
+  if (services.attention) registerAttentionCommands(services.attention);
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
   if (services.promptLibrary) registerPromptLibraryCommands(services.promptLibrary);
@@ -175,6 +182,10 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
     });
   }
   if (services.workspace) registerWorkspaceCommands(services.workspace);
+  if (services.sessionTitle) {
+    const sessionTitle = services.sessionTitle;
+    registerCommand('generate_session_title', (_event, args) => sessionTitle.generate(readString(args, 'sessionPath')));
+  }
   if (services.uiHistory) registerUiHistoryCommands(services.uiHistory);
   if (services.workspaceApproval) registerWorkspaceApprovalCommands(services.workspaceApproval);
   if (services.git) registerGitCommands(services.git);
@@ -357,6 +368,29 @@ function registerPermissionCommands(service: PermissionManager): void {
 function registerJobCommands(service: JobsPort): void {
   registerCommand('job_snapshot', (_event, args) => service.snapshot(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
   registerCommand('job_kill', (_event, args) => service.kill(readString(args, 'jobId'), readFiniteNumber(args, 'startedAt')));
+}
+
+function registerAttentionCommands(service: NonNullable<IpcServices['attention']>): void {
+  registerCommand('attention_notify', (_event, args) => service.notify(readAttentionNotifyInput(args)));
+  registerCommand('attention_badge', (_event, args) => {
+    const count = args.count;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) throw new Error('count must be a non-negative integer');
+    const overlayDataUrl = typeof args.overlayDataUrl === 'string' && args.overlayDataUrl ? args.overlayDataUrl : undefined;
+    return service.badge({ count, overlayDataUrl });
+  });
+  registerCommand('attention_window_focused', () => service.isFocused());
+  registerCommand('attention_clear', (_event, args) => service.clear(readString(args, 'sessionPath')));
+}
+
+function readAttentionNotifyInput(args: Record<string, unknown>): AttentionNotifyInput {
+  if (!isAttentionKind(args.kind)) throw new Error('kind must be approval, choice, failed, blocked or done');
+  return {
+    kind: args.kind,
+    workspace: readString(args, 'workspace'),
+    sessionPath: readString(args, 'sessionPath'),
+    title: readText(args, 'title'),
+    body: readText(args, 'body'),
+  };
 }
 
 function readFiniteNumber(args: Record<string, unknown>, key: string): number {
@@ -572,6 +606,14 @@ function registerWorkspaceCommands(service: WorkspaceService): void {
   registerCommand('set_session_display_name', (_event, args) =>
     service.setSessionDisplayName(readString(args, 'sessionPath'), readText(args, 'name')),
   );
+  registerCommand('set_sessions_archived', (_event, args) => {
+    const paths = args.sessionPaths;
+    if (!Array.isArray(paths) || !paths.every((path) => typeof path === 'string' && path.length > 0)) {
+      throw new Error('sessionPaths must be a non-empty string array');
+    }
+    if (typeof args.archived !== 'boolean') throw new Error('archived must be a boolean');
+    return service.setSessionsArchived(paths, args.archived);
+  });
   registerCommand('delete_pi_session', (_event, args) => service.deleteSession(readString(args, 'workspace'), readString(args, 'sessionPath')));
   registerCommand('delete_conversation', (_event, args) => service.deleteConversation(readString(args, 'workspace')));
   registerCommand('remove_project', (_event, args) => service.removeProject(readString(args, 'workspace')));
@@ -698,7 +740,7 @@ function registerPiCommands(service: PiCommandsPort): void {
   registerCommand('close_workspace', (_event, args) => service.closeWorkspace(readString(args, 'workspace')));
   registerCommand('extension_ui_respond', (_event, args) => service.respondUi(readString(args, 'workspace'), readRecord(args, 'response')));
   for (const command of [
-    'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_set_model', 'agent_cycle_model',
+    'agent_prompt', 'agent_steer', 'agent_follow_up', 'agent_abort', 'agent_take_steering', 'agent_cancel_steer', 'agent_set_model', 'agent_cycle_model',
     'agent_get_available_models', 'agent_set_thinking_level', 'agent_cycle_thinking_level', 'agent_set_mode',
     'agent_set_approval', 'agent_exclude_entry', 'agent_restore_entry', 'agent_rewind_to', 'agent_truncate_to',
     'agent_compact', 'agent_set_auto_compaction', 'agent_abort_retry', 'agent_get_session_stats', 'agent_get_state',

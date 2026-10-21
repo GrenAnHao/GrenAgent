@@ -13,10 +13,15 @@ const { setStatus, goalSetGoal, goalSetSnapshot, setServers, msg, setRequest, se
   dismiss: vi.fn(),
 }));
 let emit: (e: unknown) => void = () => {};
+let emitPi: (e: unknown) => void = () => {};
 let loadedPath: string | null | undefined;
 vi.mock('../../lib/pi', () => ({
   onPiUiRequest: (h: (e: unknown) => void) => {
     emit = h;
+    return Promise.resolve(() => {});
+  },
+  onPiEvent: (h: (e: unknown) => void) => {
+    emitPi = h;
     return Promise.resolve(() => {});
   },
 }));
@@ -69,6 +74,25 @@ afterEach(() => {
   useImMessagesStore.getState().setConversations([]);
   loadedPath = undefined;
   clearStashedUiRequestsForTest();
+});
+
+describe('ExtensionUiHost visual pending', () => {
+  const owner = { sessionPath: '/ws/.pi/a.jsonl', workspace: '/ws' };
+  const entry = () => useVisualStore.getState().entries[visualKeyOf(owner)];
+
+  it('clears a pending visual choice when the host dismisses it', () => {
+    render(<ExtensionUiHost />);
+    useVisualStore.getState().setPending(owner, true, 'vc-1');
+    emit({ workspace: '/ws', sessionPath: owner.sessionPath, request: { id: 'vc-1', method: 'dismiss' } });
+    expect(entry()).toMatchObject({ pending: false, requestId: null });
+  });
+
+  it('clears a pending visual choice when its session ends the turn', () => {
+    render(<ExtensionUiHost />);
+    useVisualStore.getState().setPending(owner, true, 'vc-2');
+    emitPi({ workspace: '/ws', sessionPath: owner.sessionPath, source: 'interactive', event: { type: 'agent_end', messages: [] } });
+    expect(entry()).toMatchObject({ pending: false });
+  });
 });
 
 describe('ExtensionUiHost', () => {

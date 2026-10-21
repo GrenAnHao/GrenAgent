@@ -13,5 +13,22 @@ import { applyPendingAskUserOnLoad } from './pendingAskUserLoad';
 export function snapshotMessages(msgs: AgentMessage[], uiHistory?: ChatMessage[]) {
   const backend = messagesFromAgent(msgs, getThinkingDuration);
   const processed = expandSystemWorkerChat(uiHistory && uiHistory.length > backend.length ? uiHistory : backend);
-  return { backend, processed, sanitized: applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs)) };
+  return {
+    backend,
+    processed,
+    sanitized: applyPendingAskUserOnLoad(processed, findPendingAskUser(msgs)),
+    pendingCallIds: pendingCallIdsOf(backend),
+  };
+}
+
+/**
+ * 后端快照里还在等结果的调用（messagesFromAgent 只给最后一条助手消息补 running 卡）。
+ * 回合在跑时只有它们还可能等到结果；UI 历史里别的 running 卡是进程被杀时留下的。
+ */
+function pendingCallIdsOf(backend: ChatMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const m of backend) {
+    if (m.kind === 'tool' && m.status === 'running' && m.result === undefined) ids.add(m.toolCallId);
+  }
+  return ids;
 }

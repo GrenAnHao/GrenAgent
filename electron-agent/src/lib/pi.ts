@@ -7,6 +7,13 @@ import type { PackageListItem, PackageSearchResult } from '../../electron/app/pi
 export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
 import type { AskUserDraft } from '../../electron/agent/askUserDraft';
 import type { DevinAccountView } from './devinAccount';
+import {
+  ATTENTION_OPEN_EVENT,
+  WINDOW_FOCUS_EVENT,
+  type AttentionNotifyInput,
+  type AttentionNotifyResult,
+} from '../../electron/app/attentionContract';
+export type { AttentionKind, AttentionNotifyInput, AttentionNotifyResult } from '../../electron/app/attentionContract';
 export type { DevinAccountView } from './devinAccount';
 export type PackageInstallScope = 'user' | 'project';
 
@@ -276,6 +283,12 @@ export const pi = {
   /** 暂停后取走尚未注入的引导，跟进队列原样放回。 */
   takeSteering: (workspace: string, targetSessionPath?: string | null) =>
     invoke<{ steering: string[] }>('agent_take_steering', { workspace, ...target(targetSessionPath) }),
+  /**
+   * 撤下一条还在排队、没注入当前回合的引导。allowSole：界面上只剩这一条未注入的引导，
+   * 正文对不上（模板 / 技能展开过）时也撤队列里唯一那条。已经在注入的撤不回来，返回 cancelled: false。
+   */
+  cancelSteer: (workspace: string, message: string, allowSole: boolean, targetSessionPath?: string | null) =>
+    invoke<{ cancelled: boolean }>('agent_cancel_steer', { workspace, message, allowSole, ...target(targetSessionPath) }),
   setModel: (workspace: string, provider: string, modelId: string) =>
     invoke<unknown>('agent_set_model', { workspace, provider, modelId }),
   cycleModel: (workspace: string) => invoke<unknown>('agent_cycle_model', { workspace }),
@@ -340,8 +353,14 @@ export const pi = {
     invoke<unknown>('agent_set_session_name', { workspace, name }),
   setSessionDisplayName: (sessionPath: string, name: string) =>
     invoke<void>('set_session_display_name', { sessionPath, name }),
+  /** 按会话的第一条用户消息重新起名。只返回标题（给不出能用的时为空串），不写回。 */
+  generateSessionTitle: (sessionPath: string) =>
+    invoke<string>('generate_session_title', { sessionPath }),
   deleteSession: (workspace: string, sessionPath: string) =>
     invoke<void>('delete_pi_session', { workspace, sessionPath }),
+  /** 归档 / 取消归档：主进程只记路径，会话文件不动。 */
+  setSessionsArchived: (sessionPaths: string[], archived: boolean) =>
+    invoke<void>('set_sessions_archived', { sessionPaths, archived }),
   createConversation: () => invoke<{ cwd: string }>('create_conversation'),
   getWorksDir: () => invoke<string>('get_works_dir'),
   /** 清理 works 下所有无会话的孤儿对话目录（保留 keep 列表）；返回删除条数。 */
@@ -480,6 +499,15 @@ export const pi = {
   /** 有会话在跑抛 ISOLATED_BUSY；有未提交 / 未回传且没 force 抛 ISOLATED_UNSAVED。 */
   removeIsolatedWorkspace: (workspace: string, id: string, force = false) =>
     invoke<{ removed: true }>('isolated_workspace_remove', { workspace, id, force }),
+  /** 会话需要注意：主进程按设置和窗口焦点决定不提示 / 应用内提示 / 系统通知。 */
+  attentionNotify: (input: AttentionNotifyInput) =>
+    invoke<AttentionNotifyResult>('attention_notify', { ...input }),
+  /** 任务栏待处理数。Windows 用 overlayDataUrl 画覆盖图标，其他平台用系统角标数字。 */
+  attentionBadge: (count: number, overlayDataUrl?: string) =>
+    invoke<void>('attention_badge', { count, ...(overlayDataUrl ? { overlayDataUrl } : {}) }),
+  attentionWindowFocused: () => invoke<boolean>('attention_window_focused'),
+  /** 会话不再需要提醒：主进程收掉它留在行动中心里的系统通知。 */
+  attentionClear: (sessionPath: string) => invoke<void>('attention_clear', { sessionPath }),
 };
 
 /**
@@ -507,6 +535,8 @@ export interface SessionInfo {
   cwd: string | null;
   timestamp: string | null;
   name: string | null;
+  /** 已归档：侧栏不列，只在「已归档」弹窗里出现。 */
+  archived?: boolean;
 }
 
 /** 后台 job 的界面投影（与 extensions/jobs/observer.ts 的 JobLiveView 同形）。 */
@@ -546,4 +576,12 @@ export function onPiUiRequest(handler: (e: PiUiRequestEnvelope) => void): Promis
 }
 export function onPiExit(handler: (e: PiExitEnvelope) => void): Promise<UnlistenFn> {
   return listen<PiExitEnvelope>('pi://exit', (e) => handler(e.payload));
+}
+/** 主窗口拿到 / 失去系统焦点。以主进程为准：内嵌浏览器抢走 DOM 焦点时 window.onblur 也会触发。 */
+export function onWindowFocus(handler: (e: { focused: boolean }) => void): Promise<UnlistenFn> {
+  return listen<{ focused: boolean }>(WINDOW_FOCUS_EVENT, (e) => handler(e.payload));
+}
+/** 用户点了系统通知：打开那个会话。 */
+export function onAttentionOpen(handler: (e: { workspace: string; sessionPath: string }) => void): Promise<UnlistenFn> {
+  return listen<{ workspace: string; sessionPath: string }>(ATTENTION_OPEN_EVENT, (e) => handler(e.payload));
 }

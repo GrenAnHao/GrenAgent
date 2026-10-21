@@ -1,0 +1,23 @@
+INFO  临时工作区  C:\Users\rxstudio\AppData\Local\Temp\cg-autosync-TOGVit
+PASS  手动建立索引完成  {"files":551,"ms":7087}
+PASS  第一次查询后挂上文件监听、激活补同步结束  {"watcher":{"active":true,"degraded":false},"generation":2}
+PASS  新增文件的符号在 10 秒内可查（编辑到可查）  660 ms
+INFO  索引追上之前的结果里给过「还没追上」的提示  true
+PASS  删除文件后符号消失  463 ms
+PASS  400 个新文件同步完，新符号可查  3902 ms
+PASS  期间看到过 phase: syncing
+PASS  增量同步期间同工作区查询没有 busy、没有报错  {"queries":54,"busy":0,"errors":0}
+PASS  期间的结果带 servingStale 标记  {"staleAnswers":36}
+PASS  删除整个目录后其中的符号消失  1864 ms
+PASS  持锁时进入 backoff，lastError.code = CODEGRAPH_LOCKED  {"state":"indexed","nextRetryInMs":9164,"consecutiveFailures":0}
+PASS  持锁不算失败（state 不是 failed、失败次数 0）
+PASS  持锁期间查询照常应答
+PASS  锁释放后自动重试成功、新符号可查  9497 ms
+PASS  自动同步在跑时发起的手动同步照常完成（不再报 busy）  {"result":"completed","ms":1735,"firstStage":"queued"}
+INFO  手动同步收到的阶段  ["queued","scanning"]
+PASS  手动同步完成后新文件都已可查
+INFO  最终状态  {"phase":"idle","state":"indexed","generation":9,"watcher":{"active":true,"degraded":false},"files":752}
+PASS  全程没有同步失败事件  []
+PASS  关停后子进程以 0 退出  {"code":0,"signal":null}
+
+全部 17 项通过

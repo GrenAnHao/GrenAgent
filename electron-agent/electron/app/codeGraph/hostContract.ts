@@ -3,6 +3,7 @@
  * 见 .agents/notes/implemented/architecture/2026-10-16-codegraph-host-process.md。
  */
 import type { IndexProgress } from '@colbymchenry/codegraph';
+import type { SyncEvent } from './syncScheduler';
 
 export const CODEGRAPH_HOST_METHODS = [
   'codegraph.status',
@@ -25,3 +26,10 @@ export interface CodeGraphDiagSample {
   /** 这 10 秒末仍在跑的同步任务数。 */
   syncing: number;
 }
+
+/**
+ * 子进程 → 主进程：同步失败（failed）、连续失败熔断（breaker）、被别的进程占锁超过 5 分钟（locked）。
+ * 自动同步成功不建 job 也不发事件；失败必须留痕，主进程写进 runtime-diag.jsonl（kind: 'codegraph-sync-event'）。
+ */
+export const CODEGRAPH_SYNC_EVENT_CHANNEL = 'codegraph.syncEvent';
+export type CodeGraphSyncEvent = SyncEvent;

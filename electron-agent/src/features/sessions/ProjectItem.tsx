@@ -2,6 +2,8 @@ import { Dropdown } from 'antd';
 import { Icon } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { ChevronDown, ChevronRight, FolderClosed, FolderOpen, GitBranch } from 'lucide-react';
+import type { RowStatusKind } from '../../stores/attentionView';
+import { AttentionIcon } from './AttentionIcon';
 import { RowActions } from './RowActions';
 import { buildProjectMenuItems } from './useProjectMenu';
 
@@ -53,6 +55,19 @@ const styles = createStaticStyles(({ css }) => ({
       display: flex;
     }
   `,
+  /* 折叠时组里最高优先级的会话状态，后面跟需要处理的会话数。 */
+  attention: css`
+    display: inline-flex;
+    flex: none;
+    gap: 3px;
+    align-items: center;
+  `,
+  count: css`
+    color: ${cssVar.colorTextSecondary};
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 16px;
+  `,
 }));
 
 export interface ProjectItemProps {
@@ -73,6 +88,8 @@ export interface ProjectItemProps {
   onManageIsolated?: () => void;
   onSyncBack?: () => void;
   onDeleteIsolated?: () => void;
+  /** 会话注意状态汇总，只在折叠时显示。 */
+  attention?: { kind: RowStatusKind; count: number };
 }
 
 export function ProjectItem(p: ProjectItemProps) {
@@ -104,6 +121,16 @@ export function ProjectItem(p: ProjectItemProps) {
         </span>
         <Icon icon={iso ? GitBranch : p.expanded ? FolderOpen : FolderClosed} size="small" />
         <span className={styles.name}>{p.name}</span>
+        {!p.expanded && p.attention ? (
+          <span className={styles.attention} data-testid="project-attention" data-kind={p.attention.kind}>
+            <AttentionIcon kind={p.attention.kind} />
+            {p.attention.count > 0 ? (
+              <span className={styles.count} data-testid="project-attention-count">
+                {p.attention.count}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
         {iso ? (
           <span className={styles.tag} title={iso.missing ? '目录已删除，会话只能查看' : '独立工作区：不能写主仓'}>
             {iso.missing ? '已删除' : '独立'}

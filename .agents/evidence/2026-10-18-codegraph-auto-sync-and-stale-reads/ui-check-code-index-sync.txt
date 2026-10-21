@@ -1,0 +1,38 @@
+
+> electron-agent@0.3.0 ui:check
+> node ui-harness/check.mjs code-index-sync
+
+构建：场景有增减
+场景已构建（生产模式，6.7s）
+静默运行：离屏渲染，不弹窗、不抢焦点
+
+[61700:1018/204404.629:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load D:\OneDrive\Project Files\Pi\electron-agent\node_modules\.pnpm\electron@38.8.6_supports-color@7.2.0\node_modules\electron\dist\chrome_100_percent.pak
+Some features may not be available.
+
+▸ code-index-sync
+  PASS 标签写「同步中」
+  PASS 同步中仍能查询：文件列表查出来了
+  PASS 同步中搜索框可用
+  PASS 标签 title 带阶段与进度
+  PASS 增量同步不出「正在重建索引」横幅
+  PASS 轮询期间标签一帧也没变成「检查中」（578 帧）
+  PASS 同步中按间隔重读状态（3.5 秒内 2 次）
+  PASS 同步结束后标签回到「已索引」
+  PASS 统计数字换成新的文件数
+  PASS 回到空闲后不再轮询
+  PASS 占锁时标签写「等待重试」
+  PASS 横幅说明另一个程序在写索引、几秒后自动重试
+  PASS 占锁时不显示「索引失败」
+  PASS 占锁时搜索框仍可用
+  PASS 轮询拿到全量重建：标签「索引中」
+  PASS 全量重建横幅写明暂不能查询
+  PASS 全量重建期间搜索框不可用
+  PASS 轮询拿到熔断后的失败：标签「索引失败」
+  PASS 横幅写明连续失败次数与自动同步已暂停
+  PASS 熔断后不再轮询
+  PASS 监听不可用时标签仍是「已索引」
+  PASS 横幅提示监听不可用、需要手动同步
+  INFO 截图 code-index-sync  C:\Users\rxstudio\AppData\Local\Temp\grenagent-ui-shots\code-index-sync-code-index-sync.png
+  ── 22 passed, 0 failed
+
+通过：code-index-sync（19.0s）。只跑了 1/24 个场景，其余 23 个没指定，未运行

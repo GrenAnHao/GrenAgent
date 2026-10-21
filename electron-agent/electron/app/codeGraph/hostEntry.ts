@@ -10,7 +10,7 @@ import { Worker } from 'node:worker_threads';
 import { RpcPeer, toWireError, type WireMessage } from '../../agentProcess/rpcPeer';
 import { CodeGraphService } from './codeGraphService';
 import { CodeGraphThreads, type WorkerHandle } from './codeGraphThreads';
-import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, type CodeGraphDiagSample, type CodeGraphProgressEvent } from './hostContract';
+import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_PROGRESS_CHANNEL, CODEGRAPH_SYNC_EVENT_CHANNEL, type CodeGraphDiagSample, type CodeGraphProgressEvent, type CodeGraphSyncEvent } from './hostContract';
 import { createCodeGraphHostMethods } from './hostMethods';
 
 const DISCONNECT_SHUTDOWN_MS = 10_000;
@@ -30,11 +30,15 @@ process.on('message', (message) => peer.receive(message));
 // SDK 只在工作线程里加载：本线程只收发 IPC 和调度，一次长同步不会挡住别的查询、取消和关停。
 // 工作线程入口由主进程经环境变量给出（和本入口在同一个 out/main 下）。
 // GREN_CODEGRAPH_THREADS=off 退回单线程（SDK 直接在本线程里跑）：工作线程在某个环境里起不来时的退路。
+// 退路里没有写调度与自动同步，读写互斥与改动前一样；GREN_CODEGRAPH_AUTO_SYNC=off 只关自动同步。
 const workerEntry = process.env.CODEGRAPH_WORKER_ENTRY;
 const threaded = process.env.GREN_CODEGRAPH_THREADS !== 'off';
 if (threaded && !workerEntry) throw new Error('CODEGRAPH_WORKER_ENTRY is not set');
 const service = threaded
-  ? new CodeGraphThreads({ createWorker: (role) => new Worker(workerEntry!, { workerData: { role } }) as unknown as WorkerHandle })
+  ? new CodeGraphThreads({
+    createWorker: (role) => new Worker(workerEntry!, { workerData: { role } }) as unknown as WorkerHandle,
+    onSyncEvent: (event) => peer.emit(CODEGRAPH_SYNC_EVENT_CHANNEL, event satisfies CodeGraphSyncEvent),
+  })
   : Object.assign(new CodeGraphService({ listWorkspaces: () => [] }), { syncing: 0 });
 const tracker = { active: new Set<string>() };
 peer.handleAll(createCodeGraphHostMethods(service, (jobId, progress) => {

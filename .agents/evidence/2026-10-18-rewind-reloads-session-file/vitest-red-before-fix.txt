@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+ ❯ |main| electron/app/piRuntimeService.test.ts (68 tests | 1 failed | 67 skipped) 30ms
+     × 回退到此截断后，内存里的会话按新文件重读：下一轮模型读不到被删掉的回复 29ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |main| electron/app/piRuntimeService.test.ts > PiRuntimeService > 回退到此截断后，内存里的会话按新文件重读：下一轮模型读不到被删掉的回复
+AssertionError: expected '"第一问"|[{"type":"text","text":"第一答"}]|…' not to contain '被回退掉的回复'
+
+Expected: "被回退掉的回复"
+Received: ""第一问"|[{"type":"text","text":"第一答"}]|"第二问"|[{"type":"text","text":"被回退掉的回复"}]"
+
+ ❯ electron/app/piRuntimeService.test.ts:763:38
+    761|
+    762|       const contents = (handle.session.agent.state.messages as Array<{…
+    763|       expect(contents.join('|')).not.toContain('被回退掉的回复');
+       |                                      ^
+    764|       expect(contents.join('|')).not.toContain('第二问');
+    765|       expect(contents).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 67 skipped (68)
+   Start at  19:48:11
+   Duration  3.21s (transform 579ms, setup 0ms, import 2.95s, tests 30ms, environment 0ms)
+

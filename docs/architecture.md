@@ -60,7 +60,8 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `loop-guard` | 相同工具调用在第 3/5/8 次追加提醒；不拦截，不限单轮总次数 | 策略 / 中间件，无显式工具 |
 | `rulebook` | 声明式规则库（`.pi/rules.jsonc`），工具 / 文本规则拦截与纠正 | `/rules` |
 | `compaction-policy` | 超大结果熔断、按压力裁旧工具输出（缓存冷时定案、热时沿用）、压力指示、删任意段、自动压缩 | 无 slash；宿主 `agent_exclude_entry` / `agent_restore_entry` |
-| `auto-title` | 首轮结束后自动生成会话标题 | 策略 / 中间件，无显式工具 |
+| `image-limits` | 输入钩子把超过 2000×2000（或模型 `inputLimits.images.resize`）的新图片缩小，pi 1.3.0 不缩 steer / followUp 的图；请求前 `context` 钩子把历史里仍超限的图在副本里缩小或换成文字 | 策略 / 中间件，无显式工具 |
+| `auto-title` | 会话没有名字时，模型第一条回复结束就按首条用户消息生成标题；侧栏「重新生成标题」走主进程 `generate_session_title`，共用同一套输入整理和提示词 | 策略 / 中间件，无显式工具 |
 | `todo` | 会话内待办清单 | `todo` |
 | `present` | 把已有文件声明为本轮产物 | `present` |
 | `agent-mode` | Agent / Ask / Debug / Plan 模式切换与 Plan 卡片 | 宿主 `agent_set_mode`；卡片仍用 `/plan-build`；`ask_user` |
@@ -127,8 +128,8 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 - `memoryStore`：分级记忆和活动分支会话捕获，按来源合并提炼任务并保留未提交增量。`memory_search` 查询提炼后的记忆；`conversation_search` 查询已捕获会话的片段。L1 限来源项目，L2/L3 沿用全局作用域。
 - `wikiEngine`：每个知识库为 `<应用数据目录>/wiki/<wikiId>/`（原文 `raw/sources/`、生成页 `wiki/`、库内 `index.db`）；库状态在 `wiki_assets`（`draft` / `pending` / `processing` / `ready` / `failed`）。只有 `processing` 拒绝写入；工作台可 `resetDraft`。抽取在进程内队列完成，不建 `wiki.*` 系统任务。Agent 仅 `wiki_list` / `wiki_search` / `wiki_read`。
 - `jobStore`：任务、配置（version 乐观锁）与审计，支持导出 / 导入 / 诊断。
-- 代码检索通过内置的 CodeGraph SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。SDK 只在 codegraph-host 子进程里加载（由 agentdata-host 拉起，`CodeGraphHostClient` 门面），子进程内一个写线程、N 个读线程（`GREN_CODEGRAPH_READ_WORKERS`；`GREN_CODEGRAPH_THREADS=off` 退回单线程）。实例按工作区共享，空闲 15 分钟关闭；查询只与同工作区的索引写入互斥，其它工作区照常并行。子进程每 10 秒报 `codegraph-host-sample`。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
-- `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立/同步才写索引，不启用 SDK watcher；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
+- 代码检索通过内置的 CodeGraph SDK 执行，不启动 CodeGraph CLI/MCP，不再读取 `GREN_CODEGRAPH_COMMAND`。SDK 只在 codegraph-host 子进程里加载（由 agentdata-host 拉起，`CodeGraphHostClient` 门面），子进程内一个写线程、N 个读线程（`GREN_CODEGRAPH_READ_WORKERS`；`GREN_CODEGRAPH_THREADS=off` 退回单线程）。实例按工作区共享，空闲 15 分钟关闭。写由子进程主线程的 `SyncScheduler` 排：每个工作区至多一个在跑 + 一个待执行，重复请求合并；增量同步期间同工作区的查询照常应答（上一次提交的索引，写完读线程换连接），只有全量重建期间返回 busy。子进程每 10 秒报 `codegraph-host-sample`，同步失败 / 熔断 / 长时间占锁报 `codegraph-sync-event`。`codeRetrieval.call` 仅允许只读查询工具，参数与 CodeGraph 1.6.0 SDK 查询面对齐，缺少索引时不自动创建；GUI 使用版本化结构化行、节点与边，Agent 直接读取同一响应的文本。
+- `CodeGraphJobs` 把 SDK 的真实阶段接入现有任务系统。未知或不一致的进度数量不转换成百分比。只有用户显式建立才创建索引；已有索引由自动同步维护：被查询的已索引工作区（最多 3 个）在写线程里挂 SDK `FileWatcher`，改动合并成增量同步，第一次查询补一次整树比对；自动同步不建任务，失败指数退避、连续 6 次熔断，`GREN_CODEGRAPH_AUTO_SYNC=off` 关闭。同工作区已有同步时手动同步排在它后面；取消先发信号、等 SDK 安全结束再落终态，退出等待任务记录完成后关闭 AgentData。
 - SDK 是固定版本的应用依赖，保留 Rust 内核与 WASM 语法。`asarUnpack` 解出 SDK，`scripts/package-codegraph.cjs` 补齐平台包自带且被 builder 过滤的 `lib/node_modules`；加载器使用物理解包路径保证 worker、WASM 和原生模块可访问。没有平台包时报告安装包问题，不回退到全局 CLI 或在线安装。
 
 #### 会话 Goal

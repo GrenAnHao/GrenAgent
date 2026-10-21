@@ -1,6 +1,7 @@
-import { AudioLines, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
+import { AudioLines, Bell, Bot, Cpu, Database, GitBranch, Globe, Image, Palette, Settings2, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { parseRepeatGuardConfig } from '@extensions/loop-guard/chain';
+import { NOTIFY_SETTING_DEFAULTS } from '../../../electron/app/attentionContract';
 
 export type FieldType = 'text' | 'password' | 'number' | 'boolean' | 'select' | 'model' | 'capability' | 'model-list' | 'slider';
 export type SettingGroup = '核心' | '能力' | '联网' | '扩展与安全';
@@ -192,6 +193,63 @@ export const SETTINGS_SCHEMA: SettingCategory[] = [
     group: '核心',
     icon: Palette,
     fields: [],
+  },
+  {
+    // 主进程 AttentionService 每次提醒时现读；只管提示、通知和任务栏，侧栏角标始终显示。
+    id: 'notifications',
+    title: '通知',
+    group: '核心',
+    icon: Bell,
+    fields: [
+      {
+        key: 'notify.done',
+        label: '会话完成',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.done'],
+        effect: 'instant',
+        description: '后台会话跑完时提醒（默认关）',
+      },
+      {
+        key: 'notify.choice',
+        label: '需要选择或批准',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.choice'],
+        effect: 'instant',
+        description: '后台会话弹出选项卡、视觉设计确认或审批时提醒（默认开）',
+      },
+      {
+        key: 'notify.blocked',
+        label: '任务受阻',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.blocked'],
+        effect: 'instant',
+        description: 'Goal 受阻时提醒（默认开）',
+      },
+      {
+        key: 'notify.failed',
+        label: '失败',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.failed'],
+        effect: 'instant',
+        description: '回合出错结束时提醒（默认开）',
+      },
+      {
+        key: 'notify.sound',
+        label: '提示音',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.sound'],
+        effect: 'instant',
+        description: '提醒时播放提示音（默认开）',
+      },
+      {
+        key: 'notify.taskbar',
+        label: '任务栏闪烁与待处理数',
+        type: 'boolean',
+        default: NOTIFY_SETTING_DEFAULTS['notify.taskbar'],
+        effect: 'instant',
+        description: '窗口不在前台时闪烁任务栏，图标上显示待处理的会话数（默认开）',
+      },
+    ],
   },
   {
     id: 'image',

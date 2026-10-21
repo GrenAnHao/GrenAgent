@@ -20,12 +20,13 @@ import {
   shouldDispatchSingleQueued,
   waitForTurnIdle,
 } from './input/sendBehavior';
-import { focusMissingPillArg, readComposerText } from './input/editor/CommandPill/composerText';
+import { focusMissingPillArg, readComposerText, writeComposerText } from './input/editor/CommandPill/composerText';
+import { readComposerDraft, writeComposerDraft } from './input/editor/composerDraft';
 import { makePastedText } from './input/editor/pastedText';
 import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
 import { pi } from '../../lib/pi';
 import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
-import { registerComposerSend, registerComposerSetValue } from './input/composerBridge';
+import { registerComposerLoad, registerComposerSend, registerComposerSetValue } from './input/composerBridge';
 
 interface ChatInputProps {
   onSend: (
@@ -83,8 +84,10 @@ export function ChatInput({
     return () => bindBrowserElementChatSink(null);
   }, [draftKey]);
 
-  // 读当前编辑器正文：markdown 去转义，命令胶囊换成调用文本（见 composerText.ts）。
+  // 读当前编辑器正文：纯文本原样读出，命令胶囊换成调用文本（见 composerText.ts）。
   const readDraft = useCallback(() => readComposerText(editor), [editor]);
+  // 存草稿用整份：文本之外还带 Lexical JSON，胶囊和 @ 标签靠它原样回来（见 composerDraft.ts）。
+  const readStoredDraft = useCallback(() => readComposerDraft(editor), [editor]);
 
   const sendingRef = useRef(false);
   // 草稿持久化：debounce 写，避免每键都落 localStorage。
@@ -92,9 +95,9 @@ export function ChatInput({
   const scheduleSaveDraft = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, readDraft());
+      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, readStoredDraft());
     }, 300);
-  }, [draftKey, readDraft]);
+  }, [draftKey, readStoredDraft]);
 
   const queuedImages = (item: { images?: Array<{ mimeType: string; data: string }> }) =>
     item.images?.map(({ mimeType, data }) => ({ type: 'image' as const, mimeType, data }));
@@ -136,8 +139,8 @@ export function ChatInput({
     // 可选调用兼容测试里的 editor 桩；生产环境总有 lexical 实例
     if (focusMissingPillArg(editor.getLexicalEditor?.())) return;
     const interrupt = Boolean(options?.interrupt);
-    const markdown = readDraft();
-    const text = composeMessage(markdown, pastedTexts);
+    const draft = readDraft();
+    const text = composeMessage(draft, pastedTexts);
     const images: PromptImage[] = attachments.map(({ type, mimeType, data }) => ({
       type,
       mimeType,
@@ -165,7 +168,7 @@ export function ChatInput({
     if (sendingRef.current) return;
     sendingRef.current = true;
     const snapshot = {
-      markdown,
+      draft,
       pastedTexts: pastedTexts.slice(),
       attachments: attachments.slice(),
     };
@@ -216,18 +219,16 @@ export function ChatInput({
       const outcome = await onSend(text, images.length ? images : undefined, behavior);
       if (outcome === 'failed') {
         useComposerFilesStore.getState().restore(draftKey, snapshot);
-        if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
-        else editor.cleanDocument();
-        setEmpty(!snapshot.markdown);
-        if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.markdown);
+        writeComposerText(editor, snapshot.draft);
+        setEmpty(!snapshot.draft);
+        if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
         requestAnimationFrame(() => editor.focus());
       }
     } catch {
       useComposerFilesStore.getState().restore(draftKey, snapshot);
-      if (snapshot.markdown) editor.setDocument('markdown', snapshot.markdown);
-      else editor.cleanDocument();
-      setEmpty(!snapshot.markdown);
-      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.markdown);
+      writeComposerText(editor, snapshot.draft);
+      setEmpty(!snapshot.draft);
+      if (draftKey) useChatDraftStore.getState().setDraft(draftKey, snapshot.draft);
     } finally {
       sendingRef.current = false;
     }
@@ -239,23 +240,46 @@ export function ChatInput({
 
   const setValue = useCallback(
     (text: string) => {
-      if (text) editor.setDocument('markdown', text);
-      else editor.cleanDocument();
+      writeComposerText(editor, text);
       setEmpty(!text);
       requestAnimationFrame(() => editor.focus());
     },
     [editor],
   );
 
+  // 撤回的引导放回输入框：已有草稿时接在后面，不覆盖；图片回到待发附件。
+  const loadIntoDraft = useCallback(
+    (text: string, images?: Array<{ mimeType: string; data: string }>) => {
+      const current = readDraft().trim();
+      setValue(current ? `${current}\n\n${text}` : text);
+      if (images?.length) {
+        useComposerFilesStore.getState().addAttachments(
+          draftKey,
+          images.map((img, i) => ({
+            type: 'image' as const,
+            mimeType: img.mimeType,
+            data: img.data,
+            name: `image-${i + 1}`,
+            url: `data:${img.mimeType};base64,${img.data}`,
+          })),
+        );
+      }
+      scheduleSaveDraft();
+    },
+    [draftKey, readDraft, scheduleSaveDraft, setValue],
+  );
+
   // 供消息编辑 / 回退把文字写入底部输入框，以及编辑后走同一条普通发送。
   useEffect(() => {
     registerComposerSetValue(setValue);
     registerComposerSend((text, images) => onSend(text, images));
+    registerComposerLoad(loadIntoDraft);
     return () => {
       registerComposerSetValue(null);
       registerComposerSend(null);
+      registerComposerLoad(null);
     };
-  }, [setValue, onSend]);
+  }, [setValue, onSend, loadIntoDraft]);
 
   // 输入变化：更新空态 + 安排草稿持久化（MessageEditor 的 onChange 经 ctx.setEmpty 走到这里）。
   const handleChange = useCallback(
@@ -275,20 +299,23 @@ export function ChatInput({
     // 关键：清掉上一个会话 pending 的 debounce save，否则它会在切换后用「新会话内容」覆盖「旧会话草稿」。
     if (saveTimer.current) clearTimeout(saveTimer.current);
     if (prev !== null) {
-      useChatDraftStore.getState().setDraft(prev, readDraft());
+      useChatDraftStore.getState().setDraft(prev, readStoredDraft());
     }
     prevKeyRef.current = draftKey;
-    setValue(useChatDraftStore.getState().getDraft(draftKey));
-  }, [draftKey, readDraft, setValue]);
+    const draft = useChatDraftStore.getState().getDraft(draftKey);
+    writeComposerDraft(editor, draft);
+    setEmpty(!draft.text);
+    requestAnimationFrame(() => editor.focus());
+  }, [draftKey, editor, readStoredDraft]);
 
   // 卸载时把当前草稿同步落盘（debounce 可能还没触发）。
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const key = prevKeyRef.current;
-      if (key) useChatDraftStore.getState().setDraft(key, readDraft());
+      if (key) useChatDraftStore.getState().setDraft(key, readStoredDraft());
     };
-  }, [readDraft]);
+  }, [readStoredDraft]);
 
   const ctx: ChatInputContextValue = useMemo(
     () => ({

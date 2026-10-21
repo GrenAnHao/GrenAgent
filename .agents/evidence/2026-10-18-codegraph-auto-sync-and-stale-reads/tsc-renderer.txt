@@ -1,0 +1,86 @@
+electron/agent/askUserDraft.ts(1,41): error TS2591: Cannot find name 'node:fs/promises'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/storage.ts(1,30): error TS2591: Cannot find name 'node:sqlite'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/indexDb.ts(2,22): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/indexDb.ts(3,30): error TS2591: Cannot find name 'node:sqlite'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/indexDb.ts(6,15): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/cascade.ts(13,88): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/cascade.ts(14,42): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/concurrency.ts(15,39): error TS2503: Cannot find namespace 'NodeJS'.
+electron/agentData/wikiEngine/ingest/concurrency.ts(16,15): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/concurrency.ts(25,43): error TS2503: Cannot find namespace 'NodeJS'.
+electron/agentData/wikiEngine/ingest/concurrency.ts(25,63): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/concurrency.ts(34,46): error TS2503: Cannot find namespace 'NodeJS'.
+electron/agentData/wikiEngine/ingest/concurrency.ts(34,66): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/concurrency.ts(40,40): error TS2503: Cannot find namespace 'NodeJS'.
+electron/agentData/wikiEngine/ingest/concurrency.ts(40,60): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/index-builder.ts(15,80): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/index-builder.ts(16,32): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/index.ts(11,91): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/index.ts(12,41): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/index.ts(65,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(138,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(156,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(162,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(163,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(167,38): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(176,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(185,30): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(198,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(204,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(247,17): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(266,21): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(273,19): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(276,19): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(284,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(296,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(328,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(334,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/index.ts(336,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/log-writer.ts(18,57): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/log-writer.ts(19,22): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/overview.ts(12,80): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/overview.ts(13,32): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/overview.ts(91,15): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/overview.ts(102,14): error TS2554: Expected 0 arguments, but got 1.
+electron/agentData/wikiEngine/ingest/overview.ts(111,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(7,28): error TS2591: Cannot find name 'node:crypto'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(8,65): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(9,32): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(63,14): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(73,13): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(81,12): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(124,16): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/runIncremental.ts(165,16): error TS2554: Expected 0 arguments, but got 2.
+electron/agentData/wikiEngine/ingest/safe-path.ts(10,30): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/template.ts(16,42): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/ingest/template.ts(17,22): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(2,40): error TS2591: Cannot find name 'node:crypto'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(12,8): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(13,65): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(14,30): error TS2591: Cannot find name 'node:sqlite'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(500,64): error TS7006: Parameter 'entry' implicitly has an 'any' type.
+electron/agentData/wikiEngine/service.ts(710,18): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(747,20): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(908,9): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(918,9): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(953,11): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/agentData/wikiEngine/service.ts(1230,37): error TS7006: Parameter 'name' implicitly has an 'any' type.
+electron/agentData/wikiEngine/service.ts(1397,16): error TS2554: Expected 0 arguments, but got 2.
+electron/app/permissionManager.ts(1,35): error TS2591: Cannot find name 'node:fs/promises'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/app/permissionManager.ts(2,46): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/app/permissionManager.ts(3,28): error TS2591: Cannot find name 'node:crypto'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/app/plugin/pluginManager.ts(1,28): error TS2591: Cannot find name 'node:crypto'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/app/plugin/pluginStateStore.ts(1,35): error TS2591: Cannot find name 'node:sqlite'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+electron/ipc/contracts.ts(34,92): error TS2307: Cannot find module '../agentData/wikiContracts' or its corresponding type declarations.
+src/lib/agentData.ts(79,87): error TS2345: Argument of type 'AgentJobCreateInput' is not assignable to parameter of type 'RuntimeArgs'.
+  Index signature for type 'string' is missing in type 'AgentJobCreateInput'.
+src/lib/agentData.ts(90,91): error TS2345: Argument of type 'MemoryScope' is not assignable to parameter of type 'RuntimeArgs'.
+  Index signature for type 'string' is missing in type 'MemoryScope'.
+../extensions/_shared/runtime-config.ts(4,52): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/runtime-config.ts(9,21): error TS2591: Cannot find name 'node:fs'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/runtime-config.ts(17,13): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/runtime-config.ts(83,68): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/runtime-config.ts(89,9): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/workspace-context.ts(1,35): error TS2591: Cannot find name 'node:async_hooks'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/workspace-context.ts(27,37): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+../extensions/_shared/workspace-context.ts(42,10): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.

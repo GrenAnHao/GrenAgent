@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/extensions
+
+ ✓ image-limits/limits.test.ts > readImageSize > reads PNG, JPEG (SOF after APP1), GIF and WebP VP8X headers 3ms
+ ✓ image-limits/limits.test.ts > readImageSize > returns null for data it cannot recognise 0ms
+ ✓ image-limits/limits.test.ts > exceedsLimits > flags width, height or base64 size over the limit 1ms
+ ✓ image-limits/limits.test.ts > exceedsLimits > model resize options override the defaults 0ms
+ ✓ image-limits/limits.test.ts > fitContentImages > keeps the same array when nothing exceeds the limit 1ms
+ ✓ image-limits/limits.test.ts > fitContentImages > replaces only the oversized image and keeps block order 1ms
+ ✓ image-limits/limits.test.ts > fitContentImages > keeps the original on failure for input, and omits it for requests 1ms
+ ✓ image-limits/limits.test.ts > fitContextImages > fixes user, custom and toolResult messages and leaves the rest untouched 8ms
+ ✓ image-limits/limits.test.ts > fitContextImages > returns undefined when every image already fits 0ms
+ ✓ image-limits/limits.test.ts > cachedResize > resizes the same image once per limits 1ms
+ ✓ image-limits/limits.test.ts > with pi's real resizeImage > shrinks a 3906px-wide PNG to fit 2000x2000 83ms
+ ✓ image-limits/limits.test.ts > extension hooks > input: transforms oversized images but keeps the text for queued-steer matching 73ms
+ ✓ image-limits/limits.test.ts > extension hooks > input: continues untouched when images already fit or are absent 0ms
+ ✓ image-limits/limits.test.ts > extension hooks > context: repairs an oversized image already in history 75ms
+ ✓ image-limits/image-limits-live.real.test.ts > oversized images (real SDK, faux model) > without the extension pi keeps the steered image at full size (the bug) 138ms
+ ✓ image-limits/image-limits-live.real.test.ts > oversized images (real SDK, faux model) > with the extension the steered image is stored and sent within 2000px 166ms
+ ✓ image-limits/image-limits-live.real.test.ts > oversized images (real SDK, faux model) > repairs an oversized image that is already in history before the request 104ms
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  16:00:57
+   Duration  1.81s (transform 93ms, setup 0ms, import 2.28s, tests 674ms, environment 0ms)
+

@@ -1,0 +1,11 @@
+# extensions/mcp/legacyServersMessage.real.test.ts — real AgentSession, faux model records the request
+## current code
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+## HEAD version of extensions/mcp/index.ts (injects the list, sends the legacy message)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected 'antd codemode\ndeepwiki codemode\n\n/…' not to match /antd codemode|deepwiki codemode/
+      Tests  1 failed (1)
+## npx vitest run mcp
+ Test Files  20 passed (20)
+      Tests  194 passed (194)

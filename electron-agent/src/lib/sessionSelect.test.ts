@@ -31,4 +31,13 @@ describe('pickAutoSelected', () => {
   it('returns null when nothing to pick', () => {
     expect(pickAutoSelected(null, undefined, [])).toBeNull();
   });
+
+  it('skips an archived session restored by pi and picks the newest visible one', () => {
+    const sessions = [{ ...si('/arch.jsonl'), archived: true }, si('/s.jsonl')];
+    expect(pickAutoSelected(null, owr('/ARCH.jsonl'), sessions)).toBe('/s.jsonl');
+  });
+
+  it('picks nothing when every session is archived', () => {
+    expect(pickAutoSelected(null, owr('/arch.jsonl'), [{ ...si('/arch.jsonl'), archived: true }])).toBeNull();
+  });
 });

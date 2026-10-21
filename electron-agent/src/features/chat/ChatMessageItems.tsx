@@ -97,6 +97,7 @@ export function renderMessageBody(
     case 'user':
       return (
         <UserMessage
+          id={msg.id}
           text={msg.text}
           images={msg.images}
           timestamp={msg.timestamp}

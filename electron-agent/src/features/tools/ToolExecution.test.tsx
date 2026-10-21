@@ -105,6 +105,38 @@ describe('ToolExecution code search', { timeout: 30_000 }, () => {
   });
 });
 
+describe('ToolExecution pi grep（子代理）', { timeout: 30_000 }, () => {
+  it('pi 1.3.0 的 path:N: text 输出不再画成「0 处 / 未找到匹配」', async () => {
+    wrap(
+      <ToolExecution
+        toolName="grep"
+        args={{ pattern: 'CodeRetrievalPanel', path: 'electron-agent/src' }}
+        result={{
+          content: [{
+            type: 'text',
+            text: [
+              "features/agentData/AgentDataCenter.tsx:7: import { CodeRetrievalPanel } from './CodeRetrievalPanel';",
+              'features/agentData/CodeRetrievalPanel.tsx:39: export function CodeRetrievalPanel() {',
+              '',
+              '[100 matches limit reached. Use limit=200 for more, or refine pattern]',
+            ].join('\n'),
+          }],
+          details: { matchLimitReached: 100 },
+        }}
+        status="done"
+      />,
+    );
+    expect(document.body.textContent).toContain('2 处');
+    expect(document.body.textContent).not.toContain('0 处');
+
+    fireEvent.click(screen.getByText('CodeRetrievalPanel'));
+    const card = await screen.findByTestId('card-grep');
+    expect(card.textContent).toContain('39: export function CodeRetrievalPanel() {');
+    expect(card.textContent).toContain('结果较多，已截断显示');
+    expect(document.body.textContent).not.toContain('未找到匹配');
+  });
+});
+
 describe('ToolExecution skill invocation inspector', { timeout: 30_000 }, () => {
   it('read 某个 SKILL.md 时显示「使用技能 <name>」', () => {
     wrap(

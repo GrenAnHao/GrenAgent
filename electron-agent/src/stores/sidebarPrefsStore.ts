@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { pathsEquivalent } from '../lib/pathUtils';
 
+/** 侧栏最顶层的三个分区。 */
+export type SidebarSectionId = 'pinned' | 'conversations' | 'projects';
+
 interface SidebarPrefsState {
   pinnedProjects: string[]; // 按 cwd
   pinnedConversations: string[]; // 按 conversation cwd
@@ -10,6 +13,7 @@ interface SidebarPrefsState {
   keptProjects: string[]; // 清空会话后仍留在侧栏的项目 cwd（重启后仍在）
   aliases: Record<string, string>; // cwd -> 别名
   collapsed: Record<string, boolean>; // cwd -> 是否折叠（仅存非默认值）
+  collapsedSections: Partial<Record<SidebarSectionId, boolean>>; // 分区 -> 是否折叠（默认展开）
 
   togglePinnedProject: (cwd: string) => void;
   togglePinnedConversation: (cwd: string) => void;
@@ -21,10 +25,21 @@ interface SidebarPrefsState {
   setAlias: (cwd: string, alias: string) => void;
   toggleCollapsed: (cwd: string, defaultCollapsed: boolean) => void;
   isCollapsed: (cwd: string, defaultCollapsed: boolean) => boolean;
+  toggleSectionCollapsed: (id: SidebarSectionId) => void;
+  expandSection: (id: SidebarSectionId) => void;
 }
 
 const toggle = (arr: string[], v: string) =>
   arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
+
+/**
+ * 置顶一项时，置顶区若是收起的就展开：不然刚置顶的那一行从原分区消失、又落进收起的区里，看起来像丢了。
+ * 取消置顶不动分区。
+ */
+const pinPatch = (s: SidebarPrefsState, arr: string[], v: string) =>
+  arr.includes(v) || !s.collapsedSections.pinned
+    ? {}
+    : { collapsedSections: { ...s.collapsedSections, pinned: false } };
 
 export const useSidebarPrefsStore = create<SidebarPrefsState>()(
   persist(
@@ -36,13 +51,17 @@ export const useSidebarPrefsStore = create<SidebarPrefsState>()(
       keptProjects: [],
       aliases: {},
       collapsed: {},
+      collapsedSections: {},
 
       togglePinnedProject: (cwd) =>
-        set((s) => ({ pinnedProjects: toggle(s.pinnedProjects, cwd) })),
+        set((s) => ({ pinnedProjects: toggle(s.pinnedProjects, cwd), ...pinPatch(s, s.pinnedProjects, cwd) })),
       togglePinnedConversation: (cwd) =>
-        set((s) => ({ pinnedConversations: toggle(s.pinnedConversations, cwd) })),
+        set((s) => ({
+          pinnedConversations: toggle(s.pinnedConversations, cwd),
+          ...pinPatch(s, s.pinnedConversations, cwd),
+        })),
       togglePinnedSession: (path) =>
-        set((s) => ({ pinnedSessions: toggle(s.pinnedSessions, path) })),
+        set((s) => ({ pinnedSessions: toggle(s.pinnedSessions, path), ...pinPatch(s, s.pinnedSessions, path) })),
       hideProject: (cwd) =>
         set((s) => ({
           hiddenProjects: s.hiddenProjects.includes(cwd)
@@ -76,6 +95,10 @@ export const useSidebarPrefsStore = create<SidebarPrefsState>()(
         const v = get().collapsed[cwd];
         return v === undefined ? defaultCollapsed : v;
       },
+      toggleSectionCollapsed: (id) =>
+        set((s) => ({ collapsedSections: { ...s.collapsedSections, [id]: !s.collapsedSections[id] } })),
+      expandSection: (id) =>
+        set((s) => (s.collapsedSections[id] ? { collapsedSections: { ...s.collapsedSections, [id]: false } } : s)),
     }),
     {
       name: 'pi-sidebar',

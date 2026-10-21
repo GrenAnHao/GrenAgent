@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, nativeImage, Notification } from "electron";
 import { join } from "node:path";
 import { browserWindowOptions, resolveAppIcon, resolveRendererHtml } from "./mainConfig";
 import { WindowBackgroundStore } from "./app/windowBackground";
@@ -12,6 +12,7 @@ import { UsageService } from "./app/usageService";
 import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
+import { generateSessionTitle } from "./app/sessionTitle";
 import { UiHistoryService } from "./app/uiHistoryService";
 import { WorkspaceApprovalService } from "./app/workspaceApprovalService";
 import { GitService } from "./app/gitService";
@@ -25,6 +26,7 @@ import { AgentDataService } from "./app/agentDataService";
 import { PermissionManager } from "./app/permissionManager";
 import { DevService } from "./app/devService";
 import { createEnhancePrompt } from "./app/enhancePrompt";
+import { AttentionService } from "./app/attentionService";
 import { registerIpcHandlers } from "./ipc/register";
 import { IPC_CHANNELS } from "./ipc/contracts";
 import { attachEmbeddedWebview } from "./browser/attachEmbeddedWebview";
@@ -54,7 +56,7 @@ import { createAgentPorts, createHostMethods } from "./agentProcess/mainBindings
 import { startJobGuard } from "./agentProcess/jobGuard";
 
 /** backgroundColor：上次运行时按明暗记下的底色，没有就用 browserWindowOptions 的默认深色。 */
-export function createWindow(backgroundColor?: string) {
+export function createWindow(backgroundColor?: string): BrowserWindow {
   const window = new BrowserWindow({
     ...browserWindowOptions,
     ...(backgroundColor ? { backgroundColor } : {}),
@@ -69,12 +71,15 @@ export function createWindow(backgroundColor?: string) {
   } else {
     void window.loadFile(resolveRendererHtml(app.getAppPath()));
   }
+  return window;
 }
 
 if (!process.env.VITEST) {
   installFastRealpath();
   app.whenReady().then(async () => {
     startRuntimeDiag();
+    // Windows 上系统通知按 AppUserModelId 归属。打包后和 electron-builder.yml 的 appId 一致；开发态没有快捷方式，用 exe 路径。
+    if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'com.rxstudio.grenagent' : process.execPath);
     // userData 随应用名变化（dev 用 package.json name，打包用 productName），
     // 早期版本的数据留在旧目录；读不到时回退到 com.rxstudio.grenagent。
     const settings = new SettingsService(app.getPath('userData'), [
@@ -324,6 +329,18 @@ if (!process.env.VITEST) {
         }
       },
     });
+    let mainWindow: BrowserWindow | undefined;
+    const attention = new AttentionService({
+      window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
+      readSettings: () => settings.getAll(),
+      createNotification: (options) => (Notification.isSupported() ? new Notification(options) : undefined),
+      createImage: (dataUrl) => nativeImage.createFromDataURL(dataUrl),
+      setBadgeCount: (count) => {
+        app.setBadgeCount(count);
+      },
+      send: (event, payload) => broadcastPiEvent(event, payload),
+      platform: process.platform,
+    });
     const enhancePrompt = createEnhancePrompt({
       host: modelRuntimeHost,
       activeModel: (target) => agent.pi.activeModel(target),
@@ -366,6 +383,16 @@ if (!process.env.VITEST) {
         oneshot: (request, onLine, signal) => runHostOneshot(modelRuntimeHost, request, onLine, signal),
       }),
       workspace,
+      // 短调用走主进程那份 ModelRuntime；标题模型每次现读设置。
+      sessionTitle: {
+        generate: (sessionPath) => generateSessionTitle(sessionPath, {
+          complete: (input) => modelRuntimeHost.completeSimple(input),
+          titleModel: () => {
+            refreshConfig();
+            return getConfig('titleModel');
+          },
+        }),
+      },
       uiHistory: new UiHistoryService((path) => workspace.ensureWorkspace(path)),
       workspaceApproval: new WorkspaceApprovalService(app.getPath('userData')),
       git: new GitService(),
@@ -384,6 +411,7 @@ if (!process.env.VITEST) {
       permissions,
       plugins,
       windowBackground,
+      attention,
       // 开发者工作台的后端：打包产物里不注入 → dev_* 命令不注册，工作台读不到主进程信息。
       dev: app.isPackaged ? undefined : new DevService(),
     });
@@ -418,7 +446,8 @@ if (!process.env.VITEST) {
       .catch((error) => console.error('Isolated workspace reclaim failed', error));
     // 子进程加载 pi SDK 和全部扩展要一两秒，和窗口加载并行。
     void agentProcess.start().catch((error) => console.error('agent-host failed to start', error));
-    createWindow(windowBackground.read());
+    mainWindow = createWindow(windowBackground.read());
+    attention.attachWindow(mainWindow);
   });
   app.on("window-all-closed", () => app.quit());
 }

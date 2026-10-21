@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { SETTINGS_SCHEMA, validateSettingValues } from './settingsSchema';
+import { NOTIFY_SETTING_DEFAULTS, type NotifySettingKey } from '../../../electron/app/attentionContract';
+
+describe('SETTINGS_SCHEMA notifications', () => {
+  it('核心组在外观之后有「通知」分类，六个开关的默认值与主进程一致', () => {
+    const ids = SETTINGS_SCHEMA.filter((c) => c.group === '核心').map((c) => c.id);
+    expect(ids.indexOf('notifications')).toBe(ids.indexOf('appearance') + 1);
+    const category = SETTINGS_SCHEMA.find((c) => c.id === 'notifications')!;
+    expect(category.title).toBe('通知');
+    const fields = category.fields!;
+    expect(fields.map((f) => [f.key, f.label, f.type, f.default, f.effect])).toEqual([
+      ['notify.done', '会话完成', 'boolean', '0', 'instant'],
+      ['notify.choice', '需要选择或批准', 'boolean', '1', 'instant'],
+      ['notify.blocked', '任务受阻', 'boolean', '1', 'instant'],
+      ['notify.failed', '失败', 'boolean', '1', 'instant'],
+      ['notify.sound', '提示音', 'boolean', '1', 'instant'],
+      ['notify.taskbar', '任务栏闪烁与待处理数', 'boolean', '1', 'instant'],
+    ]);
+    for (const f of fields) expect(f.default).toBe(NOTIFY_SETTING_DEFAULTS[f.key as NotifySettingKey]);
+  });
+});
 
 describe('SETTINGS_SCHEMA general', () => {
   it('在标题模型后提供默认开启的自动标题开关', () => {

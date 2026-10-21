@@ -1,3 +1,4 @@
+import { create } from 'zustand';
 import { pathsEquivalent } from '../lib/pathUtils';
 import { useInlineQuestionStore, type InlineQuestionItem } from './inlineQuestionStore';
 import { useUiPromptStore, type UiPromptItem } from './uiPromptStore';
@@ -13,6 +14,27 @@ interface Stashed {
 }
 
 const stash = new Map<string, Stashed>();
+
+/** 暂存每变一次加一。侧栏角标要知道后台会话有没有在等的请求，暂存本身是普通 Map，靠它订阅。 */
+export const useStashedUiRequestsVersion = create<{ version: number }>(() => ({ version: 0 }));
+
+function bump(): void {
+  useStashedUiRequestsVersion.setState((s) => ({ version: s.version + 1 }));
+}
+
+export interface StashedUiRequests {
+  sessionPath: string;
+  inline?: InlineQuestionItem;
+  prompts: UiPromptItem[];
+}
+
+export function listStashedUiRequests(): StashedUiRequests[] {
+  return [...stash].map(([sessionPath, found]) => ({
+    sessionPath,
+    ...(found.inline ? { inline: found.inline } : {}),
+    prompts: [...found.prompts],
+  }));
+}
 
 function keyOf(sessionPath: string): string | undefined {
   for (const key of stash.keys()) if (pathsEquivalent(key, sessionPath)) return key;
@@ -32,6 +54,7 @@ function isSubagentRequest(item: UiPromptItem): boolean {
 
 export function stashInlineQuestion(sessionPath: string, item: InlineQuestionItem): void {
   entry(sessionPath).inline = { ...item, sessionPath };
+  bump();
 }
 
 export function stashUiPrompt(sessionPath: string, item: UiPromptItem): void {
@@ -40,6 +63,7 @@ export function stashUiPrompt(sessionPath: string, item: UiPromptItem): void {
   const at = found.prompts.findIndex((p) => p.request.id === item.request.id);
   if (at >= 0) found.prompts[at] = stamped;
   else found.prompts.push(stamped);
+  bump();
 }
 
 /** 切走时把画面上属于 sessionPath 的现场请求收起来，不能直接清掉：后端那次请求还在等回包。 */
@@ -63,6 +87,8 @@ export function restoreStashedUiRequests(workspace: string, sessionPath: string)
   stash.delete(key);
   if (found.inline) useInlineQuestionStore.getState().setRequest({ ...found.inline, workspace });
   for (const prompt of found.prompts) useUiPromptStore.getState().setRequest({ ...prompt, workspace });
+  // 放回画面之后再通知：先通知的话派生会看到「两边都没有」的一瞬，角标和计数会闪一下。
+  bump();
 }
 
 /**
@@ -73,9 +99,12 @@ export function restoreStashedUiRequests(workspace: string, sessionPath: string)
 export function dropStashedUiRequests(sessionPath: string, opts: { hostGone?: boolean } = {}): void {
   const key = keyOf(sessionPath);
   if (!key) return;
-  const kept = opts.hostGone ? [] : stash.get(key)!.prompts.filter(isSubagentRequest);
+  const found = stash.get(key)!;
+  const kept = opts.hostGone ? [] : found.prompts.filter(isSubagentRequest);
+  if (kept.length === found.prompts.length && !found.inline) return;
   if (kept.length) stash.set(key, { prompts: kept });
   else stash.delete(key);
+  bump();
 }
 
 /** 宿主不再等这条请求：画面上、排队中、后台暂存里都摘掉。ask_user 卡不经这里。 */
@@ -86,6 +115,7 @@ export function dismissUiRequest(id: string): void {
     if (prompts.length === found.prompts.length) continue;
     if (prompts.length || found.inline) stash.set(key, { ...found, prompts });
     else stash.delete(key);
+    bump();
   }
 }
 
@@ -94,5 +124,7 @@ export function hasStashedUiRequests(sessionPath: string): boolean {
 }
 
 export function clearStashedUiRequestsForTest(): void {
+  if (!stash.size) return;
   stash.clear();
+  bump();
 }

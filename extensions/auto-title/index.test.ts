@@ -22,9 +22,11 @@ import autoTitle, { __resetAutoTitleForTest, subscribeSessionTitleWritten } from
 
 type Handler = (event: unknown, ctx: unknown) => Promise<void> | void;
 
+type Entry = { type?: string; name?: unknown; customType?: string; data?: unknown; message?: unknown };
+
 function setup(
-  entries: Array<{ type?: string; name?: unknown; customType?: string; data?: unknown }> = [],
-  options: { sessionFile?: string } = {},
+  entries: Entry[] = [],
+  options: { sessionFile?: string; sessionId?: string } = {},
 ) {
   const handlers = new Map<string, Handler[]>();
   let agentEnd: Handler | undefined;
@@ -47,6 +49,7 @@ function setup(
     sessionManager: {
       getEntries: () => entries,
       getSessionFile: () => options.sessionFile,
+      getSessionId: () => options.sessionId ?? "",
       appendSessionInfo,
     },
     signal: new AbortController().signal,
@@ -184,19 +187,109 @@ describe("auto-title", () => {
     const { agentEnd, ctx, setSessionName } = setup();
     const instruction = "D:\\OneDrive\\Project Files\\Pi\\docs\\superpowers\\specs\\2026-10-04-context-checkpoint-prune-design.md 审这个规格";
 
-    await agentEnd({ messages: [{ role: "user", content: instruction }] }, ctx);
+    await agentEnd({ messages: [{ role: "user", content: instruction }, { role: "assistant", content: "好的" }] }, ctx);
 
     await vi.waitFor(() => expect(setSessionName).toHaveBeenCalledWith("审检查点裁剪规格"));
     const userPrompt = String(mocks.summarize.mock.calls[0]?.[1] ?? "");
-    const options = mocks.summarize.mock.calls[0]?.[2] as { systemPrompt?: string; maxTokens?: number } | undefined;
-    expect(options?.systemPrompt).toContain("You are a professional conversation summarizer");
-    expect(options?.systemPrompt).toContain("Reply with only the title");
-    expect(options?.maxTokens).toBe(64);
-    expect(userPrompt).toBe(
-      "<task>\nGenerate a concise title that captures the essence of the conversation.\n</task>\n\n<conversation>\n"
-      + `<user>\n${instruction}\n</user>\n</conversation>`,
-    );
-    expect(userPrompt).not.toContain("assistant");
+    const options = mocks.summarize.mock.calls[0]?.[2] as { systemPrompt?: string; maxTokens?: number; raw?: boolean; signal?: unknown } | undefined;
+    expect(options?.systemPrompt).toBe("");
+    expect(userPrompt).toContain("Reply with the title only");
+    expect(options?.maxTokens).toBe(1024);
+    expect(options?.raw).toBe(true);
+    // 第一条回复后就起名：用户停掉这一轮不该把标题请求一起取消。
+    expect(options?.signal).toBeUndefined();
+    expect(userPrompt.endsWith(`<request>\n${instruction}\n</request>\n\nTitle:`)).toBe(true);
+    expect(userPrompt).not.toContain("好的");
+  });
+
+  it("标题取会话的第一条用户消息，不取本轮的（「继续吧」）", async () => {
+    const { agentEnd, ctx } = setup([
+      { type: "message", message: { role: "user", content: "首轮要求：给订单页加导出" } },
+      { type: "message", message: { role: "assistant", content: "出错了" } },
+      { type: "message", message: { role: "user", content: "继续吧" } },
+    ]);
+
+    await agentEnd({ messages: [{ role: "user", content: "继续吧" }] }, ctx);
+
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1));
+    const userPrompt = String(mocks.summarize.mock.calls[0]?.[1] ?? "");
+    expect(userPrompt).toContain("给订单页加导出");
+    expect(userPrompt).not.toContain("继续吧");
+  });
+
+  it("技能展开和粘贴块先拆开，不把整份 SKILL.md 给标题模型", async () => {
+    const { agentEnd, ctx } = setup([
+      {
+        type: "message",
+        message: {
+          role: "user",
+          content: '<skill name="brainstorming" location="C:/s/SKILL.md">\nReferences are relative to C:/s.\n\n# 头脑风暴\n</skill>\n\n规划套餐订购页',
+        },
+      },
+    ]);
+
+    await agentEnd({ messages: [] }, ctx);
+
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1));
+    const userPrompt = String(mocks.summarize.mock.calls[0]?.[1] ?? "");
+    expect(userPrompt).toContain("<request>\n规划套餐订购页\n</request>");
+    expect(userPrompt).toContain("Skill: brainstorming");
+    expect(userPrompt).not.toContain("头脑风暴");
+  });
+
+  it("第一条助手消息结束就起名，不等整轮；之后的回复不再重复调用", async () => {
+    const entries: Entry[] = [{ type: "message", message: { role: "user", content: "输入框总是转义" } }];
+    const { ctx, setSessionName, emit } = setup(entries);
+
+    await emit("message_end", { message: { role: "user", content: "输入框总是转义" } });
+    expect(summarize).not.toHaveBeenCalled();
+
+    await emit("message_end", { message: { role: "assistant", content: [] } });
+    await vi.waitFor(() => expect(setSessionName).toHaveBeenCalledWith("Runtime Config Title"));
+    entries.push({ type: "session_info", name: "Runtime Config Title" });
+
+    await emit("message_end", { message: { role: "assistant", content: [] } });
+    await emit("agent_end", { messages: [] }, ctx);
+    expect(summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("模型输出先清洗：markdown / JSON 去掉，拒绝句不写", async () => {
+    mocks.summarize.mockResolvedValueOnce('{"isNewTopic":true,"title":"套餐订购页面"}');
+    const first = setup();
+    await first.agentEnd(first.event, first.ctx);
+    await vi.waitFor(() => expect(first.setSessionName).toHaveBeenCalledWith("套餐订购页面"));
+
+    __resetAutoTitleForTest();
+    mocks.summarize.mockReset().mockResolvedValue("无法生成有意义的标题——对话中只有一句。");
+    const second = setup();
+    await second.agentEnd(second.event, second.ctx);
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(second.setSessionName).not.toHaveBeenCalled();
+  });
+
+  it("一直生成不出标题时，同一会话最多试两次", async () => {
+    mocks.resolveSummaryModel.mockReturnValue({ provider: "chat", id: "main" });
+    mocks.summarize.mockResolvedValue("");
+    const { ctx, emit } = setup([{ type: "message", message: { role: "user", content: "做点事" } }], { sessionId: "s1" });
+
+    for (let i = 0; i < 5; i++) {
+      await emit("message_end", { message: { role: "assistant", content: [] } }, ctx);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("只发了图片、没有文字时不起名", async () => {
+    const { agentEnd, ctx, setSessionName } = setup([
+      { type: "message", message: { role: "user", content: [{ type: "image", data: "", mimeType: "image/png" }] } },
+    ]);
+
+    await agentEnd({ messages: [] }, ctx);
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(setSessionName).not.toHaveBeenCalled();
   });
 
   it("生成期间出现手动标题时不覆盖", async () => {

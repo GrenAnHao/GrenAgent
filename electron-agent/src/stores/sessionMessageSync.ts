@@ -73,6 +73,28 @@ export function mergeLiveTail(base: ChatMessage[], tail: ChatMessage[]): ChatMes
 }
 
 /**
+ * 整份采用快照时，快照里还在跑、实时状态里已经结束的工具沿用实时的结果。
+ *
+ * pi 并行执行一批工具时，每个工具跑完就发 tool_execution_end，但 toolResult 消息要等整批都结束才写进 JSONL
+ * （agent-loop 的 executeToolCallsParallel）。批里有一个慢命令时，快照里快的那个也没有结果。
+ * 反过来不覆盖：实时里还在跑、快照里已经有结果的（进程子代理不推事件）以快照为准。
+ */
+export function keepSettledLiveTools(base: ChatMessage[], live: ChatMessage[]): ChatMessage[] {
+  const settled = new Map<string, Tool>();
+  for (const m of live) if (m.kind === 'tool' && m.status !== 'running') settled.set(m.toolCallId, m);
+  if (settled.size === 0) return base;
+  let changed = false;
+  const out = base.map((m) => {
+    if (m.kind !== 'tool' || m.status !== 'running') return m;
+    const done = settled.get(m.toolCallId);
+    if (!done) return m;
+    changed = true;
+    return { ...m, ...done, id: m.id, args: done.args ?? m.args };
+  });
+  return changed ? out : base;
+}
+
+/**
  * 回合结束后按顺序把后端用户消息的 entryId（及缺失的 timestamp）补到本地列表。
  * 不重排、不增删消息；已有字段保留。
  */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterDeletedSessions, mergeAllSessions, pruneOptimisticSessions } from './mergeSessions';
+import { archivedSessions, filterDeletedSessions, mergeAllSessions, pruneOptimisticSessions, visibleSessions } from './mergeSessions';
 import type { SessionInfo } from './pi';
 
 const s = (path: string, cwd: string): SessionInfo => ({
@@ -75,5 +75,24 @@ describe('filterDeletedSessions', () => {
   it('matches paths irrespective of separator/case differences', () => {
     const list = [s('C:\\proj\\a\\s1.jsonl', 'C:\\proj\\a')];
     expect(filterDeletedSessions(list, ['c:/proj/a/s1.jsonl'])).toHaveLength(0);
+  });
+});
+
+describe('visibleSessions / archivedSessions', () => {
+  const disk = [
+    { ...s('/a/old.jsonl', '/proj/a'), timestamp: '2026-01-01T00:00:00Z', archived: true },
+    { ...s('/a/new.jsonl', '/proj/a'), timestamp: '2026-02-01T00:00:00Z', archived: true },
+    s('/a/live.jsonl', '/proj/a'),
+    s('/a/gone.jsonl', '/proj/a'),
+  ];
+
+  it('hides archived and deleted sessions from the sidebar but keeps optimistic ones', () => {
+    const out = visibleSessions(disk, [s('/a/draft.jsonl', '/proj/a')], ['/a/gone.jsonl']);
+    expect(out.map((x) => x.path)).toEqual(['/a/live.jsonl', '/a/draft.jsonl']);
+  });
+
+  it('lists archived sessions newest first, minus the ones being deleted', () => {
+    expect(archivedSessions(disk, []).map((x) => x.path)).toEqual(['/a/new.jsonl', '/a/old.jsonl']);
+    expect(archivedSessions(disk, ['/A/NEW.jsonl']).map((x) => x.path)).toEqual(['/a/old.jsonl']);
   });
 });

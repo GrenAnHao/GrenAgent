@@ -112,6 +112,11 @@ export interface AgentStoreApi {
   /** 删除确认：drop-target，不写入输入框。 */
   deleteFrom: (entryId: string) => Promise<void>;
   /**
+   * 撤下一条还在等待注入的引导（按界面消息 id）。Pi 队列里撤掉了才把气泡去掉，返回 'cancelled'；
+   * 已经在注入、或已经不是等待中，返回 'missed'，气泡不动。
+   */
+  cancelSteer: (messageId: string) => Promise<'cancelled' | 'missed'>;
+  /**
    * prompt 被后端接受后立刻补本地用户消息的 entryId/timestamp（不重排、不 loadMessages）。
    * 回合结束也会再跑一次，幂等。
    */
@@ -392,9 +397,12 @@ export function createAgentStore(workspace: string): AgentStoreApi {
         const shadow = key ? shadows.get(key) : undefined;
         if (key && shadow && partialShadows.has(key)) {
           // 快照把结果还没落盘的调用补成 running 卡；后台这一轮已经不跑了就收成已中断。
-          const snapshot = snapshotMessages(res.messages, uiHistory).sanitized;
+          const { sanitized: snapshot, pendingCallIds } = snapshotMessages(res.messages, uiHistory);
           const shadowRunning = shadow.isStreaming || shadow.runActive || shadow.awaitingResponse;
-          const merged = mergeLiveTail(shadowRunning ? snapshot : interruptPendingToolCards(snapshot), shadow.messages);
+          const merged = mergeLiveTail(
+            interruptPendingToolCards(snapshot, shadowRunning ? pendingCallIds : undefined),
+            shadow.messages,
+          );
           shadows.set(key, { ...shadow, messages: merged, excluded: excludedFromAgent(res.messages) });
           partialShadows.delete(key);
           setCachedSession(key, merged, sessionSignature(merged));
@@ -487,9 +495,10 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     // 避免压缩后的短历史盖掉完整对话（rewind 等需要后端权威时调用方不传 uiHistory，自然走后端）。
     // 先补回当前未完成 ask_user 的 waiting 行，再算签名 / 写缓存，避免 uiHistory 盖掉 backend
     // 后缓存缺行；切回时 showCachedSession + sig 命中会永久跳过补行。
-    const { backend, processed, sanitized } = snapshotMessages(msgs, options?.uiHistory);
+    const { backend, processed, sanitized, pendingCallIds } = snapshotMessages(msgs, options?.uiHistory);
     if (fillHistory) {
-      const merged = mergeLiveTail(sanitized, liveState.messages);
+      // 画面上是这一轮的实时尾巴，快照里只有末尾那几个调用还可能等到结果。
+      const merged = mergeLiveTail(interruptPendingToolCards(sanitized, pendingCallIds), liveState.messages);
       viewHasHistory = true;
       currentSig = sessionSignature(merged);
       setCachedSession(sessionPath, merged, currentSig);
@@ -538,7 +547,8 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     setFullState({
       ...initialAgentState(),
       ...keepClock,
-      messages: running ? sanitized : interruptPendingToolCards(sanitized),
+      // 在跑也只留后端快照末尾还在等的调用；UI 历史里更早的 running 卡是进程被杀时留下的。
+      messages: interruptPendingToolCards(sanitized, running ? pendingCallIds : undefined),
       excluded: excludedFromAgent(msgs),
       composerQueue,
       assistantStop: assistantStopFromMessages(msgs),
@@ -706,6 +716,29 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     await truncateTo(entryId, 'drop-target');
   };
 
+  const cancelSteer = async (messageId: string): Promise<'cancelled' | 'missed'> => {
+    const isPendingSteer = (message: ChatMessage | undefined) =>
+      message?.kind === 'user' && message.steering === true && message.steerState === 'written';
+    const { messages } = useStore.getState();
+    const target = messages.find((message) => message.id === messageId);
+    if (!target || target.kind !== 'user' || !isPendingSteer(target)) return 'missed';
+    const pendingCount = messages.filter(isPendingSteer).length;
+    const pathAtCall = loadedSessionPath;
+    const sessionPath = pathAtCall ?? null;
+    const { cancelled } = await pi.cancelSteer(workspace, target.text, pendingCount === 1, sessionPath);
+    if (!cancelled) return 'missed';
+    const dropFrom = (list: ChatMessage[]) => list.filter((message) => message.id !== messageId);
+    if (samePath(loadedSessionPath, pathAtCall)) {
+      useStore.setState((s) => ({ messages: dropFrom(s.messages) }));
+    } else {
+      // 等回执期间切走了：这条气泡已经跟着会话停到后台。
+      const key = sessionPath ? shadowKey(sessionPath) : undefined;
+      const shadow = key ? shadows.get(key) : undefined;
+      if (key && shadow) shadows.set(key, { ...shadow, messages: dropFrom(shadow.messages) });
+    }
+    return 'cancelled';
+  };
+
   const reset = () => {
     if (loadedSessionPath) parkCurrent(loadedSessionPath);
     else detachedPath = undefined;
@@ -814,6 +847,7 @@ export function createAgentStore(workspace: string): AgentStoreApi {
     rewindAndLoad,
     regenerate,
     deleteFrom,
+    cancelSteer,
     syncEntryIdsAfterAccept,
     reset,
     hasLiveActivity: () => liveActivity,

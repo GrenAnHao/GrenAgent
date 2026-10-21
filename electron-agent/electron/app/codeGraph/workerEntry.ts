@@ -1,7 +1,7 @@
 /**
  * codegraph-host 的 SDK 工作线程。workerData.role 决定它是写线程还是读线程；
  * 两种都是同一个 CodeGraphService，读写互斥、取消、空闲回收、错误文案都在它里面。
- * 写线程只收 runSync / cancelSync，读线程只收 status / call / search / evict，由主线程保证。
+ * 写线程收 plan / runSync / cancelSync / watch / unwatch，读线程收 status / call / search / evict / refresh，由主线程保证。
  */
 import { parentPort, workerData } from 'node:worker_threads';
 import { toWireError } from '../../agentProcess/rpcPeer';
@@ -14,17 +14,35 @@ const role = (workerData as { role?: WorkerRole } | undefined)?.role ?? 'read';
 const service = new CodeGraphService({ listWorkspaces: () => [] });
 const post = (message: WorkerMessage) => port.postMessage(message);
 
+function writeOnly(op: string): void {
+  if (role !== 'write') throw new Error(`codegraph worker: ${op} on a read worker`);
+}
+
 async function handle(request: WorkerRequest): Promise<unknown> {
   switch (request.op) {
     case 'status': return service.status(request.workspace);
     case 'call': return service.call(request.workspace, request.tool, request.args);
     case 'search': return service.search(request.workspace, request.query, request.limit);
+    case 'plan': writeOnly('plan'); return service.plan(request.workspace);
     case 'runSync':
-      if (role !== 'write') throw new Error('codegraph worker: runSync on a read worker');
-      await service.runSync(request.jobId, request.workspace, (progress) => post({ type: 'progress', jobId: request.jobId, progress }));
-      return null;
+      writeOnly('runSync');
+      return service.runSync(request.jobId, request.workspace, (progress) => post({ type: 'progress', jobId: request.jobId, progress }), {
+        ...(request.mode ? { mode: request.mode } : {}),
+        ...(request.paths?.length ? { paths: request.paths } : {}),
+      });
     case 'cancelSync': await service.cancelSync(request.jobId); return null;
     case 'evict': await service.evict(request.workspace); return null;
+    case 'refresh': await service.refresh(request.workspace); return null;
+    case 'watch': {
+      writeOnly('watch');
+      const { workspace } = request;
+      return service.watch(workspace, {
+        debounceMs: request.debounceMs,
+        onChange: (paths) => post({ type: 'changed', workspace, paths }),
+        onDegraded: (reason) => post({ type: 'watchDegraded', workspace, reason }),
+      });
+    }
+    case 'unwatch': await service.unwatch(request.workspace); return null;
     case 'close':
       await service.close();
       // 关完库再让线程自然退出：不在 SDK 还在跑时被 terminate（Windows 上可能带走整个进程）。
@@ -35,7 +53,7 @@ async function handle(request: WorkerRequest): Promise<unknown> {
 
 port.on('message', (request: WorkerRequest) => {
   void handle(request).then(
-    (value) => post({ type: 'result', id: request.id, ok: true, value }),
+    (value) => post({ type: 'result', id: request.id, ok: true, value: value ?? null }),
     (error: unknown) => post({ type: 'result', id: request.id, ok: false, error: toWireError(error) }),
   );
 });

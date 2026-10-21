@@ -207,6 +207,43 @@ describe('useChildSessionBinding', () => {
     expect(result.current.find((m) => m.kind === 'tool')).toMatchObject({ toolName: 'bash', status: 'error', interrupted: true });
   });
 
+  // pi 并行执行工具时，整批都结束才把 toolResult 写进 JSONL（agent-loop executeToolCallsParallel）。
+  // 快的工具先发了 tool_execution_end，慢的还在静默跑；安静补读拿到的快照里两个都没有结果。
+  it('运行中安静补读：并行批次里已经结束的工具不被快照退回运行中', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    const batch = {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'b1', name: 'bash', arguments: { command: 'npm test' } },
+        { type: 'toolCall', id: 'c1', name: 'code_explore', arguments: { query: 'relay' } },
+      ],
+      timestamp: 3,
+    };
+    piMock.subagentGetSessionMessages.mockResolvedValue({ messages: [user, batch] });
+    const { result } = renderHook(() => useChildSessionBinding(CHILD, true));
+    await settle();
+
+    act(() => {
+      emit({ type: 'tool_execution_start', toolCallId: 'b1', toolName: 'bash', args: { command: 'npm test' } });
+      emit({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'code_explore', args: { query: 'relay' } });
+      emit({
+        type: 'tool_execution_end',
+        toolCallId: 'c1',
+        toolName: 'code_explore',
+        result: { content: [{ type: 'text', text: '相关上下文（3）' }] },
+        isError: false,
+      });
+      flushRAF();
+    });
+    const tool = (id: string) => result.current.find((m) => m.kind === 'tool' && m.toolCallId === id);
+    expect(tool('c1')).toMatchObject({ status: 'done' });
+
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(piMock.subagentGetSessionMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(tool('c1')).toMatchObject({ toolName: 'code_explore', status: 'done' });
+    expect(tool('b1')).toMatchObject({ toolName: 'bash', status: 'running' });
+  });
+
   it('换 sessionPath 会退订旧的、清空画面', async () => {
     piMock.subagentGetSessionMessages.mockResolvedValue({ messages: [user, first] });
     const { result, rerender } = renderHook(({ path }) => useChildSessionBinding(path, false), {

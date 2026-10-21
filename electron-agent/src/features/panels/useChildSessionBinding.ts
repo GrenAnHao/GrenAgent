@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { initialAgentState, interruptPendingToolCards, type AgentState, type ChatMessage } from '../../stores/agentReducer';
-import { mergeLiveTail } from '../../stores/sessionMessageSync';
+import { keepSettledLiveTools, mergeLiveTail } from '../../stores/sessionMessageSync';
 import { snapshotMessages } from '../../stores/sessionSnapshot';
 import { createSessionStream, persistThinkingDurations } from '../../stores/sessionStream';
 import { onPiEvent, pi } from '../../lib/pi';
@@ -70,7 +70,8 @@ export function useChildSessionBinding(sessionPath: string | null | undefined, r
         const live = state.messages;
         // 开头读到的快照比实时事件旧，尾巴为准。补读时事件已经安静了，快照至少一样新：
         // 条数不少就整份采用（进程子代理的工具结果靠这里更新），否则快照落后于实时尾巴，仍叠上尾巴。
-        const next = mode === 'catchup' && base.length >= live.length ? base : mergeLiveTail(base, live);
+        // 整份采用时保留实时里已结束的工具：并行批次的结果要等整批跑完才落盘。
+        const next = mode === 'catchup' && base.length >= live.length ? keepSettledLiveTools(base, live) : mergeLiveTail(base, live);
         state = { ...state, messages: next };
         setMessages(next);
       } catch {

@@ -44,6 +44,64 @@ describe('parseGrepOutput', () => {
     expect(r.total).toBe(0);
     expect(r.files).toHaveLength(0);
   });
+
+  // pi 1.3.0 内置 grep（core/tools/grep.js）：匹配行 `path:N: text`，上下文行 `path-N- text`，提示放在末尾方括号里。
+  it('parses pi grep lines grouped by file', () => {
+    const text = [
+      'features/agentData/AgentDataCenter.tsx:7: import { CodeRetrievalPanel } from \'./CodeRetrievalPanel\';',
+      'features/agentData/AgentDataCenter.tsx:107: return <CodeRetrievalPanel />',
+      'features/agentData/CodeRetrievalPanel.tsx:39: export function CodeRetrievalPanel() {',
+    ].join('\n');
+    const r = parseGrepOutput(text);
+    expect(r.total).toBe(3);
+    expect(r.truncated).toBe(false);
+    expect(r.files).toEqual([
+      {
+        path: 'features/agentData/AgentDataCenter.tsx',
+        matches: [
+          { line: 7, text: "import { CodeRetrievalPanel } from './CodeRetrievalPanel';" },
+          { line: 107, text: 'return <CodeRetrievalPanel />' },
+        ],
+      },
+      { path: 'features/agentData/CodeRetrievalPanel.tsx', matches: [{ line: 39, text: 'export function CodeRetrievalPanel() {' }] },
+    ]);
+  });
+
+  it('keeps pi context lines but counts only matches', () => {
+    const text = [
+      'ui-harness/probes/code-index-sync.mjs-13- // 注释',
+      'ui-harness/probes/code-index-sync.mjs:14: const PANEL = \'x\'',
+      'ui-harness/probes/code-index-sync.mjs-15- ',
+    ].join('\n');
+    const r = parseGrepOutput(text);
+    expect(r.total).toBe(1);
+    expect(r.files).toEqual([
+      {
+        path: 'ui-harness/probes/code-index-sync.mjs',
+        matches: [
+          { line: 13, text: '// 注释', context: true },
+          { line: 14, text: "const PANEL = 'x'" },
+          { line: 15, text: '', context: true },
+        ],
+      },
+    ]);
+  });
+
+  it('handles pi windows paths and limit notices', () => {
+    const text = [
+      'C:\\proj\\x.ts:12: hit: with colon',
+      '',
+      '[100 matches limit reached. Use limit=200 for more, or refine pattern]',
+    ].join('\n');
+    const r = parseGrepOutput(text);
+    expect(r.total).toBe(1);
+    expect(r.truncated).toBe(true);
+    expect(r.files).toEqual([{ path: 'C:\\proj\\x.ts', matches: [{ line: 12, text: 'hit: with colon' }] }]);
+  });
+
+  it('returns empty for pi No matches found', () => {
+    expect(parseGrepOutput('No matches found')).toEqual({ total: 0, truncated: false, files: [] });
+  });
 });
 
 describe('parseCodeSearch', () => {

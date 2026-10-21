@@ -6,6 +6,9 @@ import { App } from 'antd';
 import { buildCommandBlock } from '@extensions/prompt-commands/syntax';
 import { UserMessage } from './UserMessage';
 
+const { loadIntoComposer } = vi.hoisted(() => ({ loadIntoComposer: vi.fn(() => true) }));
+vi.mock('./input/composerBridge', () => ({ loadIntoComposer }));
+
 afterEach(cleanup);
 
 const { storeState, fakeStore, useOptional } = vi.hoisted(() => {
@@ -18,6 +21,7 @@ const { storeState, fakeStore, useOptional } = vi.hoisted(() => {
   const fakeStore = {
     useStore: (sel: (s: typeof storeState) => unknown) => sel(storeState),
     rewindAndLoad: vi.fn(),
+    cancelSteer: vi.fn(async (_id: string): Promise<'cancelled' | 'missed'> => 'cancelled'),
     regenerate: () => {},
     deleteFrom: () => {},
     excludeMessage: () => {},
@@ -50,6 +54,9 @@ describe('UserMessage', () => {
     storeState.awaitingResponse = false;
     storeState.messages = [];
     useOptional.mockImplementation(() => ({ store: fakeStore, workspace: '.' }));
+    fakeStore.cancelSteer.mockReset();
+    fakeStore.cancelSteer.mockResolvedValue('cancelled');
+    loadIntoComposer.mockClear();
   });
 
   it('把 pi:attachment 标记渲染成附件卡片, 正文进气泡', () => {
@@ -276,6 +283,57 @@ describe('UserMessage', () => {
       );
       screen.getByTestId('msg-action-bar-edit').click();
       expect(fakeStore.rewindAndLoad).toHaveBeenCalledWith('e-last', invocation);
+    });
+  });
+  describe('等待中的引导', () => {
+    const image = { mimeType: 'image/png', data: 'AAAA' };
+    const renderSteer = (steerState: 'written' | 'consumed' | 'requeued') => {
+      storeState.isStreaming = true;
+      return render(
+        <App>
+          <ThemeProvider>
+            <UserMessage id="s1" text="改用 chrome" images={[image]} steering steerState={steerState} />
+          </ThemeProvider>
+        </App>,
+      );
+    };
+
+    it('操作栏是取消（X）、编辑、复制，没有回退和更多菜单，执行中也在', () => {
+      renderSteer('written');
+      const bar = within(screen.getByTestId('message-action-bar'));
+      const keys = Array.from(screen.getByTestId('message-action-bar').querySelectorAll('[data-testid^="msg-action-bar-"]'))
+        .map((el) => el.getAttribute('data-testid'));
+      expect(keys).toEqual(['msg-action-bar-cancel', 'msg-action-bar-edit', 'msg-action-bar-copy']);
+      expect(bar.getByRole('button', { name: '取消引导' })).toBeTruthy();
+      expect(bar.queryByRole('button', { name: '更多' })).toBeNull();
+    });
+
+    it('点 X 按消息 id 撤下引导，不往输入框里放', async () => {
+      renderSteer('written');
+      screen.getByTestId('msg-action-bar-cancel').click();
+      await vi.waitFor(() => expect(fakeStore.cancelSteer).toHaveBeenCalledWith('s1'));
+      expect(loadIntoComposer).not.toHaveBeenCalled();
+    });
+
+    it('编辑先取消，撤成功后把原文和图片放回输入框', async () => {
+      renderSteer('written');
+      screen.getByTestId('msg-action-bar-edit').click();
+      await vi.waitFor(() => expect(loadIntoComposer).toHaveBeenCalledWith('改用 chrome', [image]));
+      expect(fakeStore.cancelSteer).toHaveBeenCalledWith('s1');
+    });
+
+    it('已经在注入、撤不回来时不放回输入框', async () => {
+      fakeStore.cancelSteer.mockResolvedValue('missed');
+      renderSteer('written');
+      screen.getByTestId('msg-action-bar-edit').click();
+      await vi.waitFor(() => expect(fakeStore.cancelSteer).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(loadIntoComposer).not.toHaveBeenCalled();
+    });
+
+    it('已引导的消息没有取消按钮', () => {
+      renderSteer('consumed');
+      expect(screen.queryByTestId('msg-action-bar-cancel')).toBeNull();
     });
   });
 });

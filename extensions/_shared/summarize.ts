@@ -54,6 +54,8 @@ export interface SummarizeOptions {
   signal?: AbortSignal;
   /** 补全请求的 max_tokens。标题调用传小值，避免按模型默认输出上限计费。 */
   maxTokens?: number;
+  /** 返回模型原文（只去首尾空白），由调用方自己清洗。会话标题要看整段输出才认得出 JSON 和拒绝句。 */
+  raw?: boolean;
 }
 
 /**
@@ -70,27 +72,33 @@ export async function summarize(
   if (!text) return "";
   const model = resolveSummaryModel(ctx, opts.modelSpec);
   if (!model) return "";
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) return "";
+  const context = {
+    systemPrompt: opts.systemPrompt ?? DEFAULT_PROMPT,
+    // 摘要不是代理：不声明工具，模型只能根据这段提示词和用户文本回答。
+    tools: [],
+    messages: [{ role: "user" as const, content: text.slice(0, 4000), timestamp: Date.now() }],
+  };
+  const options = {
+    // 类型只声明到 ThinkingLevel（不含 "off"），运行时（EXTENDED_THINKING_LEVELS）接受。
+    reasoning: "off" as SimpleStreamOptions["reasoning"],
+    maxTokens: opts.maxTokens,
+    signal: opts.signal,
+  };
 
-  const { completeSimple } = await import("@earendil-works/pi-ai/compat");
-  const msg = await completeSimple(
-    model,
-    {
-      systemPrompt: opts.systemPrompt ?? DEFAULT_PROMPT,
-      // 摘要不是代理：不声明工具，模型只能根据这段提示词和用户文本回答。
-      tools: [],
-      messages: [{ role: "user", content: text.slice(0, 4000), timestamp: Date.now() }],
-    },
-    {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      // 类型只声明到 ThinkingLevel（不含 "off"），运行时（EXTENDED_THINKING_LEVELS）接受。
-      reasoning: "off" as SimpleStreamOptions["reasoning"],
-      maxTokens: opts.maxTokens,
-      signal: opts.signal,
-    },
-  );
+  // pi 1.3 让扩展的嵌套模型调用走 ctx.modelRegistry.streamSimple：请求时取鉴权，虚拟模型、只注册在
+  // ModelRuntime 上的 provider（faux、扩展自带的）也能用。旧版没有这个方法时退回 pi-ai 的全局 completeSimple。
+  const registry = ctx.modelRegistry as unknown as {
+    streamSimple?: (m: unknown, c: unknown, o: unknown) => { result(): Promise<{ content: unknown }> };
+  };
+  let msg: { content: unknown };
+  if (typeof registry.streamSimple === "function") {
+    msg = await registry.streamSimple(model, context, options).result();
+  } else {
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok) return "";
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    msg = await completeSimple(model, context, { ...options, apiKey: auth.apiKey, headers: auth.headers });
+  }
   const out = (msg.content as unknown[])
     .filter(
       (c): c is { type: "text"; text: string } =>
@@ -98,5 +106,5 @@ export async function summarize(
     )
     .map((c) => c.text)
     .join("");
-  return cleanLine(out, opts.maxChars ?? 80);
+  return opts.raw ? out.trim() : cleanLine(out, opts.maxChars ?? 80);
 }

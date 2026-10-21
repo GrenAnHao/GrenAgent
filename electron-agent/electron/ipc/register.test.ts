@@ -408,3 +408,47 @@ describe('registerIpcHandlers', () => {
   });
 
 });
+
+describe('attention commands', () => {
+  function setup() {
+    const attention = {
+      notify: vi.fn().mockResolvedValue({ route: 'os', sound: true }),
+      badge: vi.fn().mockResolvedValue(undefined),
+      isFocused: vi.fn().mockReturnValue(true),
+      clear: vi.fn(),
+    };
+    registerIpcHandlers({ attention: attention as never });
+    return { attention, invoke: handler(IPC_CHANNELS.invoke) };
+  }
+
+  it('validates and forwards attention_notify', async () => {
+    const { attention, invoke } = setup();
+    const args = { kind: 'failed', workspace: 'D:/repo', sessionPath: 'D:/s.jsonl', title: 'T', body: 'B' };
+    await expect(invoke({}, { command: 'attention_notify', args })).resolves.toEqual({ route: 'os', sound: true });
+    expect(attention.notify).toHaveBeenCalledWith(args);
+    await expect(invoke({}, { command: 'attention_notify', args: { ...args, kind: 'nope' } })).rejects.toThrow();
+    await expect(invoke({}, { command: 'attention_notify', args: { ...args, sessionPath: '' } })).rejects.toThrow();
+  });
+
+  it('rejects a negative badge count', async () => {
+    const { attention, invoke } = setup();
+    await expect(invoke({}, { command: 'attention_badge', args: { count: -1 } })).rejects.toThrow();
+    await expect(invoke({}, { command: 'attention_badge', args: { count: 1.5 } })).rejects.toThrow();
+    await invoke({}, { command: 'attention_badge', args: { count: 2 } });
+    expect(attention.badge).toHaveBeenCalledWith({ count: 2, overlayDataUrl: undefined });
+    await invoke({}, { command: 'attention_badge', args: { count: 1, overlayDataUrl: 'data:x' } });
+    expect(attention.badge).toHaveBeenLastCalledWith({ count: 1, overlayDataUrl: 'data:x' });
+  });
+
+  it('forwards attention_clear', async () => {
+    const { attention, invoke } = setup();
+    await invoke({}, { command: 'attention_clear', args: { sessionPath: 'D:/s.jsonl' } });
+    expect(attention.clear).toHaveBeenCalledWith('D:/s.jsonl');
+    await expect(invoke({}, { command: 'attention_clear', args: {} })).rejects.toThrow();
+  });
+
+  it('reports the window focus', async () => {
+    const { invoke } = setup();
+    await expect(invoke({}, { command: 'attention_window_focused', args: {} })).resolves.toBe(true);
+  });
+});

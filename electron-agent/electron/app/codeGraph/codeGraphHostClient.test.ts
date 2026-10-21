@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RpcPeer } from '../../agentProcess/rpcPeer';
 import { CodeGraphHostClient, type CodeGraphHostProcess } from './codeGraphHostClient';
 import { CodeGraphJobs } from './codeGraphJobs';
-import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_HOST_METHODS } from './hostContract';
+import { CODEGRAPH_DIAG_CHANNEL, CODEGRAPH_HOST_METHODS, CODEGRAPH_SYNC_EVENT_CHANNEL } from './hostContract';
 import { createCodeGraphHostMethods } from './hostMethods';
 
 type Engine = Parameters<typeof createCodeGraphHostMethods>[0];
@@ -25,12 +25,14 @@ function wire(engine: Partial<Engine>) {
     get isRunning() { return running; },
   };
   const diag = vi.fn();
+  const syncEvents = vi.fn();
   const client = new CodeGraphHostClient({
     listWorkspaces: () => ['/definitely/missing/workspace'],
     createProcess: (listener) => { onEvent = listener; return process; },
     onDiag: diag,
+    onSyncEvent: syncEvents,
   });
-  return { client, child, main, shutdown, diag, tracker, crash: (error: Error) => { running = false; main.close(error); } };
+  return { client, child, main, shutdown, diag, syncEvents, tracker, crash: (error: Error) => { running = false; main.close(error); } };
 }
 
 describe('CodeGraphHostClient', () => {
@@ -112,9 +114,13 @@ describe('CodeGraphHostClient', () => {
   });
 
   it('forwards diagnostics and refuses work after close', async () => {
-    const { client, child, shutdown, diag } = wire({});
+    const { client, child, shutdown, diag, syncEvents } = wire({});
     child.emit(CODEGRAPH_DIAG_CHANNEL, { memory: { rss: 1 }, lag: { maxMs: 5 }, syncing: 0 });
     await vi.waitFor(() => expect(diag).toHaveBeenCalledWith({ memory: { rss: 1 }, lag: { maxMs: 5 }, syncing: 0 }));
+    const failed = { workspace: '/w', outcome: 'failed', triggers: ['watch'], mode: 'incremental', message: 'boom', consecutiveFailures: 1, nextRetryAt: 31_000 };
+    child.emit(CODEGRAPH_SYNC_EVENT_CHANNEL, failed);
+    await vi.waitFor(() => expect(syncEvents).toHaveBeenCalledWith(failed));
+    expect(diag).toHaveBeenCalledTimes(1);
     await client.close();
     await client.close();
     expect(shutdown).toHaveBeenCalledTimes(1);

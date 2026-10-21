@@ -20,6 +20,9 @@ import { AgentStoreProvider, useAgentStoreContext } from './stores/AgentStoreCon
 import { agentStoreRegistry, useAgentRegistryStore } from './stores/agentStoreRegistry';
 import { restoreRunningTurns } from './stores/restoreRunningTurns';
 import { forgetRunningSession, resolveRunningSessionPaths, startRunningSessionTracking } from './stores/runningSessions';
+import { forgetSessionAttention } from './stores/sessionAttention';
+import { AttentionHost } from './features/attention/AttentionHost';
+import { registerAttentionOpenHandler } from './features/attention/openSessionBridge';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
 import { MainChatColumn } from './features/layout/MainChatColumn';
@@ -36,10 +39,11 @@ import { openReadonlyIfIsolatedGone } from './features/isolatedWorkspace/actions
 import { prewarmWorkspace } from './lib/prewarm';
 import { createStartupPerf } from './lib/startupPerf';
 import { IS_DEV } from './lib/devMode';
-import { pathsEquivalent } from './lib/pathUtils';
+import { isUnder, pathsEquivalent } from './lib/pathUtils';
 import { useStableCallback } from './lib/structuralShare';
 import { applyOpenedProject, enterPendingNewSession } from './lib/pendingSession';
 import { canReuseScratch, readRememberedScratch, rememberScratch } from './lib/startupConversation';
+import { lastOpenEquals, lastOpenFromState, pickStartupTarget, readLastOpen, writeLastOpen } from './lib/lastOpen';
 import {
   bumpSessionMutationEpoch,
   getAllSessionsInflight,
@@ -51,13 +55,16 @@ import {
   setCachedAllSessions,
 } from './lib/sessionCache';
 import { invalidateCachedSession } from './lib/sessionMessageCache';
-import { filterDeletedSessions, mergeAllSessions } from './lib/mergeSessions';
+import { mergeAllSessions, visibleSessions } from './lib/mergeSessions';
+import type { SessionInfo } from './lib/pi';
+import { archiveSessionPaths, conversationSessionPaths, unarchiveSessionPath } from './features/sessions/archiveActions';
 import { pickAutoSelected } from './lib/sessionSelect';
 import { useCommandInputStore } from './stores/commandInputStore';
 import { useSidebarPrefsStore } from './stores/sidebarPrefsStore';
 import { useThinkingMemoryStore } from './stores/thinkingMemoryStore';
 
-// 初始工作区由 App 启动时解析（恢复最近会话所属 cwd，否则新建对话）。
+// 初始工作区由 App 启动时解析：回到上次停的会话 / 项目草稿，否则进空白对话。
+// 见 .agents/notes/implemented/feature/2026-10-19-startup-restores-last-session.md
 
 /** 拉取并刷新当前工作区的会话列表。 */
 async function refreshSessions(
@@ -157,17 +164,20 @@ function sessionAlreadyActive(path: string | null, openResult: OpenWorkspaceResu
 /**
  * 取一个空白对话 cwd：优先复用上次记住、至今未使用（无落盘会话）的 draft，否则新建并记住。
  * 启动与「新建对话」共用此逻辑，把磁盘上的空对话目录收敛到最多 1 个，避免无限堆积。
+ * 调用方已经拿到全量会话时传进来，不再扫第二遍。
  */
-async function acquireDraftScratch(): Promise<string> {
-  let worksDir = '';
-  try {
-    worksDir = await pi.getWorksDir();
-  } catch {
-    /* ignore — worksDir 取不到时仅靠「是否已落盘」判定复用 */
+async function acquireDraftScratch(known?: { worksDir: string; sessions: SessionInfo[] }): Promise<string> {
+  let worksDir = known?.worksDir ?? '';
+  if (!known) {
+    try {
+      worksDir = await pi.getWorksDir();
+    } catch {
+      /* ignore — worksDir 取不到时仅靠「是否已落盘」判定复用 */
+    }
   }
   let sessionCwds: Array<string | null> = [];
   try {
-    sessionCwds = (await pi.listAllSessions()).map((s) => s.cwd);
+    sessionCwds = (known?.sessions ?? (await pi.listAllSessions())).map((s) => s.cwd);
   } catch {
     /* ignore */
   }
@@ -189,6 +199,10 @@ const SidebarPanel = memo(function SidebarPanel({
   onClearProjectSessions,
   onRemoveProject,
   onSubmitRename,
+  onArchiveSession,
+  onArchiveConversation,
+  onUnarchiveSession,
+  onRegenerateTitle,
 }: {
   runningSessionPaths: Set<string>;
   onNewConversation: () => void;
@@ -200,6 +214,10 @@ const SidebarPanel = memo(function SidebarPanel({
   onClearProjectSessions: (cwd: string) => void;
   onRemoveProject: (cwd: string) => void;
   onSubmitRename: (cwd: string, path: string, name: string) => void;
+  onArchiveSession: (cwd: string, path: string) => void;
+  onArchiveConversation: (cwd: string) => void;
+  onUnarchiveSession: (session: SessionInfo) => void;
+  onRegenerateTitle: (cwd: string, path: string) => Promise<string>;
 }) {
   return (
     <SidebarShell>
@@ -214,6 +232,10 @@ const SidebarPanel = memo(function SidebarPanel({
         onClearProjectSessions={onClearProjectSessions}
         onRemoveProject={onRemoveProject}
         onSubmitRename={onSubmitRename}
+        onArchiveSession={onArchiveSession}
+        onArchiveConversation={onArchiveConversation}
+        onUnarchiveSession={onUnarchiveSession}
+        onRegenerateTitle={onRegenerateTitle}
       />
     </SidebarShell>
   );
@@ -333,6 +355,8 @@ const Workspace = memo(function Workspace() {
   const ask = useAskConfirm();
   const activeSessionPath = useSessionStore((s) => s.activeSessionPath);
   const prevWorkspaceRef = useRef(workspace);
+  /** 归档时要查运行态；下面算出 runningSessionPaths 后写进来。 */
+  const runningPathsRef = useRef<Set<string>>(new Set());
 
   // 冷启动加载页是 index.html 的静态首屏，首个对话就绪后收起。
   useEffect(() => {
@@ -560,6 +584,8 @@ const Workspace = memo(function Workspace() {
     useModuleStore.getState().setActiveModule('chat');
     await handleOpenSession(cwd, path);
   }, [handleOpenSession]);
+  // 应用内提示的「前往」和系统通知的点击都走这里打开会话。
+  useEffect(() => registerAttentionOpenHandler(handleOpenSourceSession), [handleOpenSourceSession]);
 
   const handleDeleteSession = useCallback(async (cwd: string, path: string) => {
     const st = useSessionStore.getState();
@@ -582,6 +608,7 @@ const Workspace = memo(function Workspace() {
       await pi.deleteSession(cwd, path);
       // 主进程已经停掉并摘下这份会话；停靠的 handle 被拆时不再发 agent_end，这里自己熄灭运行态。
       forgetRunningSession(path);
+      forgetSessionAttention(path);
       // 会话删成功后再删 UI 历史：若 deleteSession 失败（会话仍在），不应抹掉其完整历史。
       const histKey = sessionKeyFromPath(path);
       if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
@@ -590,10 +617,7 @@ const Workspace = memo(function Workspace() {
       if (wasActive) {
         // 从"已过滤隐藏集"的可见列表里挑下一个，避免选到刚隐藏的已删项。
         const cur = useSessionStore.getState();
-        const visible = filterDeletedSessions(
-          mergeAllSessions(cur.allSessions, cur.optimisticSessions),
-          cur.deletedSessionPaths,
-        );
+        const visible = visibleSessions(cur.allSessions, cur.optimisticSessions, cur.deletedSessionPaths);
         const nextInProject = visible
           .filter((s) => s.cwd && pathsEquivalent(s.cwd, cwd))
           .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))[0];
@@ -671,10 +695,17 @@ const Workspace = memo(function Workspace() {
     void refreshAllSessions(true);
   }, []);
 
+  // 「重新生成标题」：主进程按第一条用户消息起名，写回和手动重命名同一条路。
+  const handleRegenerateTitle = useCallback(async (cwd: string, path: string) => {
+    const title = await pi.generateSessionTitle(path);
+    if (title) await handleSubmitRename(cwd, path, title);
+    return title;
+  }, [handleSubmitRename]);
+
   const goToSafeWorkspace = useCallback(async () => {
     await refreshAllSessions(true);
     const all = useSessionStore.getState().allSessions;
-    const next = all[0]?.cwd;
+    const next = all.find((s) => !s.archived)?.cwd;
     const st = useSessionStore.getState();
     st.setActiveSession('');
     if (next) {
@@ -726,10 +757,7 @@ const Workspace = memo(function Workspace() {
         // 从"已过滤隐藏集 + 排除已删对话 cwd"的可见列表里挑下一个，
         // 不再选到另一个已隐藏未清理的对话（消除切到已删 cwd 的闪/错）。
         const cur = useSessionStore.getState();
-        const visible = filterDeletedSessions(
-          mergeAllSessions(cur.allSessions, cur.optimisticSessions),
-          cur.deletedSessionPaths,
-        );
+        const visible = visibleSessions(cur.allSessions, cur.optimisticSessions, cur.deletedSessionPaths);
         const next = visible
           .filter(
             (s) =>
@@ -760,6 +788,42 @@ const Workspace = memo(function Workspace() {
     [handleNewConversation],
   );
 
+  /**
+   * 归档一组会话（项目里的一份，或对话目录下的全部）。回合还在跑的不归档。
+   * 归档的是正在看的会话：项目切到同项目最近的可见会话、没有就进新会话；对话切到最近的另一个对话、没有就新建。
+   */
+  const archiveSessions = useCallback(
+    async (cwd: string, paths: string[], conversation: boolean) => {
+      const wasActive = paths.some((p) => pathsEquivalent(useSessionStore.getState().activeSessionPath ?? '', p));
+      if (!(await archiveSessionPaths(paths, runningPathsRef.current))) return;
+      if (wasActive) {
+        const cur = useSessionStore.getState();
+        const next = visibleSessions(cur.allSessions, cur.optimisticSessions, cur.deletedSessionPaths)
+          .filter((s) => s.cwd && (conversation ? cur.worksDir && isUnder(s.cwd, cur.worksDir) : pathsEquivalent(s.cwd, cwd)))
+          .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))[0];
+        if (next?.cwd) await handleOpenSession(next.cwd, next.path);
+        else if (conversation) await handleNewConversation();
+        else handleNewSession(cwd);
+      }
+      void refreshAllSessions(true);
+    },
+    [handleOpenSession, handleNewConversation, handleNewSession],
+  );
+
+  const handleArchiveSession = useCallback(
+    (cwd: string, path: string) => void archiveSessions(cwd, [path], false),
+    [archiveSessions],
+  );
+
+  const handleArchiveConversation = useCallback(
+    (cwd: string) => void archiveSessions(cwd, conversationSessionPaths(cwd), true),
+    [archiveSessions],
+  );
+
+  const handleUnarchiveSession = useCallback(async (session: SessionInfo) => {
+    if (await unarchiveSessionPath(session.path)) void refreshAllSessions(true);
+  }, []);
+
   const handleClearProjectSessions = useCallback(
     async (cwd: string) => {
       if (!(await ask({ title: '清空该项目下的全部会话？', content: '项目会保留。', danger: true }))) return;
@@ -789,6 +853,7 @@ const Workspace = memo(function Workspace() {
         useSidebarPrefsStore.getState().keepProject(cwd);
         for (const path of pathsUnderCwd) {
           forgetRunningSession(path);
+          forgetSessionAttention(path);
           const histKey = sessionKeyFromPath(path);
           if (histKey) void pi.deleteUiHistory(cwd, histKey).catch(() => {});
         }
@@ -878,6 +943,7 @@ const Workspace = memo(function Workspace() {
     () => resolveRunningSessionPaths(listedRunningPaths, allSessions, optimisticSessions),
     [listedRunningPaths, allSessions, optimisticSessions],
   );
+  runningPathsRef.current = runningSessionPaths;
 
   // 这些回调依赖当前工作区的 store，切到别的项目就全换了引用，侧栏每一行跟着重渲。
   // 侧栏只在点击时调用它们，给它恒定引用、调用时转到最新实现。
@@ -890,6 +956,10 @@ const Workspace = memo(function Workspace() {
   const sidebarClearProjectSessions = useStableCallback(handleClearProjectSessions);
   const sidebarRemoveProject = useStableCallback(handleRemoveProject);
   const sidebarSubmitRename = useStableCallback(handleSubmitRename);
+  const sidebarRegenerateTitle = useStableCallback(handleRegenerateTitle);
+  const sidebarArchiveSession = useStableCallback(handleArchiveSession);
+  const sidebarArchiveConversation = useStableCallback(handleArchiveConversation);
+  const sidebarUnarchiveSession = useStableCallback(handleUnarchiveSession);
   const isolatedOpenProject = useStableCallback(openProjectAt);
   const isolatedDeleted = useStableCallback(handleIsolatedDeleted);
 
@@ -915,6 +985,10 @@ const Workspace = memo(function Workspace() {
                     onClearProjectSessions={sidebarClearProjectSessions}
                     onRemoveProject={sidebarRemoveProject}
                     onSubmitRename={sidebarSubmitRename}
+                    onArchiveSession={sidebarArchiveSession}
+                    onArchiveConversation={sidebarArchiveConversation}
+                    onUnarchiveSession={sidebarUnarchiveSession}
+                    onRegenerateTitle={sidebarRegenerateTitle}
                   />
                 }
               />
@@ -997,21 +1071,46 @@ export default function App() {
   }, [worksDir]);
 
   useEffect(() => {
+    // 记住停在哪：工作区 + 会话（草稿时没有会话）。启动过程里的空态不写，免得还没恢复就把记忆清掉。
+    const unsubscribeLastOpen = useSessionStore.subscribe((state, prev) => {
+      const next = lastOpenFromState(state);
+      if (!next || lastOpenEquals(next, lastOpenFromState(prev))) return;
+      writeLastOpen(next);
+    });
     void (async () => {
+      let bootWorksDir = '';
       try {
-        const bootWorksDir = await pi.getWorksDir();
+        bootWorksDir = await pi.getWorksDir();
         useSessionStore.getState().setWorksDir(bootWorksDir);
       } catch {
         /* ignore — 上面的自愈 effect 会持续重试补上 worksDir */
       }
-
-      // 首屏默认空的新对话：不恢复最近项目会话。优先复用上次留下、至今未使用过的空白对话，
-      // 一旦被用过（首发落盘后 markScratchUsed 清除记忆）就改为新建，既保证首屏干净又避免堆积。
-      let ws = '';
+      let sessions: SessionInfo[] = [];
       try {
-        ws = await acquireDraftScratch();
+        sessions = await pi.listAllSessions();
       } catch {
-        /* ignore */
+        /* ignore — 列不出会话就按没有记忆处理 */
+      }
+
+      // 首屏回到上次停的地方：记住的会话还在就打开它，输入框草稿按会话 key 跟着回来；
+      // 项目里的空草稿回到那个项目。没记忆、会话已删 / 已归档时才进空白对话：
+      // 优先复用上次留下、至今未使用过的空白对话，一旦被用过（首发落盘后 markScratchUsed 清除记忆）就改为新建。
+      const target = pickStartupTarget(readLastOpen(), sessions, bootWorksDir);
+      let ws = '';
+      if (target?.kind === 'session') {
+        const st = useSessionStore.getState();
+        st.clearDraftConversation();
+        st.setActiveSession(target.sessionPath);
+        st.setWorkspaceSessionPath(target.workspace, target.sessionPath);
+        st.setActiveWorkspace(target.workspace);
+      } else if (target?.kind === 'projectDraft') {
+        ws = target.workspace;
+      } else {
+        try {
+          ws = await acquireDraftScratch({ worksDir: bootWorksDir, sessions });
+        } catch {
+          /* ignore */
+        }
       }
 
       if (ws) {
@@ -1023,11 +1122,14 @@ export default function App() {
       // 清理历史 / 崩溃残留的空对话目录：删掉 works 下所有无会话的孤儿，仅保留当前草稿。
       // 配合「统一复用未使用 draft」把磁盘空目录收敛到最多 1 个。
       // 要再扫一遍全部会话，放在进入草稿之后、不等它：它不碰当前草稿，也不该挡加载页。
-      void pi.pruneOrphanConversations(ws ? [ws] : []).catch(() => {
+      // 回到上次的会话时当前没有草稿，但记住的空白对话还要留给「新建对话」复用，不然下次新建会拿到一个已被删掉的目录。
+      const keep = ws || readRememberedScratch();
+      void pi.pruneOrphanConversations(keep ? [keep] : []).catch(() => {
         /* ignore — 清理失败无害，下次启动再试 */
       });
     })();
     return () => {
+      unsubscribeLastOpen();
       // store 由 registry 常驻；卸载时统一取消所有订阅（后端进程由窗口关闭事件 close_all 兜底）。
       agentStoreRegistry.destroyAll();
     };
@@ -1058,6 +1160,7 @@ export default function App() {
       <ConfigProvider motion={m}>
         <ThemeBridge />
         <ExtensionUiHost />
+        <AttentionHost />
         <FullAccessConfirmModal />
         <MarkdownWarmup />
         <CodeViewWarmup />

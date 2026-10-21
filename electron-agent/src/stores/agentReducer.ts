@@ -574,6 +574,12 @@ function settleToolFromResultMessage(state: AgentState, msg: AgentMessage): Agen
   return { ...state, messages };
 }
 
+/**
+ * 一轮结束时收尾：还在流的 assistant 收起；参数没写完、或一直没等到结果的工具卡标成中断。
+ * pi 在 agent_end 之前会等完本轮所有工具，这时还在转圈、没有任何结果的卡只可能是丢了
+ * tool_execution_end，或是进程被杀前留下、重启后从 UI 历史读回来的调用。
+ * ask_user 的等待行有自己的恢复流程，不动。
+ */
 function settleIncompleteToolCards(messages: ChatMessage[]): ChatMessage[] {
   let touched = false;
   const next = messages.map((m) => {
@@ -581,12 +587,17 @@ function settleIncompleteToolCards(messages: ChatMessage[]): ChatMessage[] {
       touched = true;
       return { ...m, streaming: false };
     }
-    if (m.kind === 'tool' && m.argsComplete === false) {
+    if (
+      m.kind === 'tool' &&
+      (m.argsComplete === false || (m.status === 'running' && m.result === undefined && m.toolName !== 'ask_user'))
+    ) {
       touched = true;
       return {
         ...m,
         status: 'error' as const,
         argsComplete: true,
+        // 结果消息晚到（中止时先到助手消息）仍能按 interrupted 换成真实结果。
+        interrupted: true,
         result: { content: [{ type: 'text', text: '已中断' }] },
       };
     }
@@ -1318,11 +1329,16 @@ export function messagesFromAgent(
  * 快照补出来的 running 卡（结果还没落盘的调用）在回合已经不跑时收成「已中断」，
  * 应用重启留下的调用不能一直转圈。之后真有结果到，按 interrupted 的语义换成真实结果。
  * ask_user 的等待行有自己的恢复流程，不动。
+ *
+ * keep 是回合还在跑时仍可能等到结果的调用（后端快照末尾那条助手消息里没结果的调用）。
+ * UI 历史里更早的 running 卡是进程被杀时落盘的半截状态，后面已经有了新的助手消息，
+ * 永远等不到结果，回合在跑也要收掉。
  */
-export function interruptPendingToolCards(messages: ChatMessage[]): ChatMessage[] {
+export function interruptPendingToolCards(messages: ChatMessage[], keep?: ReadonlySet<string>): ChatMessage[] {
   let touched = false;
   const next = messages.map((m) => {
     if (m.kind !== 'tool' || m.status !== 'running' || m.result !== undefined || m.toolName === 'ask_user') return m;
+    if (keep?.has(m.toolCallId)) return m;
     touched = true;
     return {
       ...m,

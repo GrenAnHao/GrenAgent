@@ -1,0 +1,1 @@
+electron/app/codeGraph/codeGraphQuery.ts(91,40): error TS2339: Property 'nodeId' does not exist on type 'SegmentMatch'.

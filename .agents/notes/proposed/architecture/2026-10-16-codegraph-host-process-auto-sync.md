@@ -7,19 +7,20 @@ Status: proposed
 > - SDK 只在 codegraph-host 子进程里跑，子进程内一个写线程、N 个读线程、写前 evict，见 [CodeGraph 运行在 codegraph-host 子进程](../../implemented/architecture/2026-10-16-codegraph-host-process.md)。主进程在同步期间最长卡顿 452 ms → 25 ms，下文 S0 基线与 E1 响应性冒烟已在那篇做完；S1（只读连接与写者并发）、S6（`node:sqlite` 在 RunAsNode 的 worker 里可用）由 `codeGraphThreads.sdk.test.ts` 覆盖了一部分。
 > - `CodeGraphHostClient` 由 agentdata-host 持有（codegraph-host 是它的子进程），不在主进程，见 [AgentData 运行在 agentdata-host 子进程](../../implemented/architecture/2026-10-16-agentdata-host-process.md)。下文所有「主进程」一侧（状态表、`touch`、广播、关停顺序）落地时都改在 agentdata-host 里做，状态推送经它的诊断 / 事件通道回到主进程再广播。
 > - `codegraph.sync` 残留 job 的收尾已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
+> - （2026-10-18）增量同步期间给旧结果、写调度（合并、优先级、自动同步单车道、排队、退避、熔断、占锁延后）、触发器（FileWatcher、查询即激活的补同步、只维护已有索引）、状态里的 phase 等字段、结果里的 `meta`、同步失败进 `runtime-diag.jsonl`、面板同步中可查与静默轮询，见 [CodeGraph 自动同步，增量同步期间给旧结果](../../implemented/architecture/2026-10-18-codegraph-auto-sync-and-stale-reads.md)。那次落地与下文不同的决定（理由在那篇）：手动任务排在正在跑的自动同步后面而不是附着；自动同步一律增量，不升级为全量；手动同步不受车道限制；只有查询 / 搜索算激活，查状态不算；监听防抖 1000ms；状态没有 `disabled` / `unavailable` 阶段，总开关是 `GREN_CODEGRAPH_AUTO_SYNC=off`。
 >
-> 仍是提案、未动工的：增量同步期间给同一工作区的旧结果（现在仍返回 busy）、读队列上限与读超时、写调度（合并、优先级、退避、熔断、附着）、自动同步触发器、状态模型与 `codegraph_state` 表、资源守卫、配置项与面板。下文保留原提案的完整设计，其中「总体结构」「1. 执行隔离与响应性」里读池 / 写线程的部分以 implemented 那篇为准。
+> 仍是提案、未动工的：读队列上限、读超时与读单飞；`codegraph_state` 表与重启后的启动补同步；定时轮询兜底与 `.git/HEAD` 探测；熔断后在任务中心建失败 job；`codegraph://state` 推送与 `admin.states / touch / rebuild`；混合读检测（`PRAGMA data_version`）；写的停滞超时；资源守卫（RSS、降优先级、解析线程数、`--liftoff-only`）；配置项与面板开关。下文保留原提案的完整设计，已落地的部分以两篇 implemented 笔记为准。
 
 ## Problem
 
 代码检索（`code_explore` 与代码索引面板）已经不占主线程（见上）。剩下的问题：
 
 1. ~~**长检索与索引占主线程。**~~ 已由 codegraph-host 解决；当时实测主进程在一次同步里卡 19.8 秒。
-2. **索引靠人点。** [内嵌 SDK 的决定](../../implemented/architecture/2026-09-07-embedded-codegraph-sdk.md)明确「不启用 SDK watcher，缺索引不自动创建」，同步只有面板上的按钮（`jobs.create('codegraph.sync')`）。官方 CodeGraph 有 watcher 自动增量同步；这里索引与代码的差距要人工对齐，`code_explore` 在模型改完代码后立刻查，拿到的是旧结果。
+2. ~~**索引靠人点。**~~ 已由 2026-10-18 的自动同步解决（见文首）；下面是当时的描述。 [内嵌 SDK 的决定](../../implemented/architecture/2026-09-07-embedded-codegraph-sdk.md)明确「不启用 SDK watcher，缺索引不自动创建」，同步只有面板上的按钮（`jobs.create('codegraph.sync')`）。官方 CodeGraph 有 watcher 自动增量同步；这里索引与代码的差距要人工对齐，`code_explore` 在模型改完代码后立刻查，拿到的是旧结果。
 
 现状里还有几处会在引入后台同步后被放大的缺陷：
 
-- 读与写互斥（仍在；读写线程分离后只剩同一工作区互斥，其它工作区的查询已不再排在同步后面）：同工作区有写者时读直接返回 `CodeGraph workspace is busy indexing`。手动同步偶发，自动同步每次保存都发生就不可接受。
+- ~~读与写互斥~~（2026-10-18 起只剩全量重建期间互斥，增量同步期间给旧结果）：同工作区有写者时读直接返回 `CodeGraph workspace is busy indexing`。手动同步偶发，自动同步每次保存都发生就不可接受。
 - 超时只在传输层（仍在）：`AgentDataClient` 65 秒超时、`closeOnTimeout: false`，客户端放弃后读线程里的计算继续跑完，没有取消，也没有排队上限。
 - ~~同步 job 崩溃后不收尾~~：已由 [孤儿任务落定](../../implemented/bug-fix/2026-10-16-orphan-job-settle.md) 修好。
 - 生产环境没有给 SDK 传 `--liftoff-only`（仍在；SDK 的 WASM Zone-OOM 防护，`wasm-runtime-flags`）：`scripts/test-codegraph.mjs` 跑测试时传了，codegraph-host 的字节码入口不能带 V8 参数；现在 OOM 只会带走子进程。

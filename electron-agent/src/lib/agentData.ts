@@ -14,7 +14,9 @@ export interface AgentJob { id: string; kind: string; workspace: string; state: 
 export interface AgentConfig { version: number; value: Record<string, unknown> }
 export interface MemoryScope { userId: string; workspace?: string; projectId?: string; sessionId?: string; includeOtherProjects?: boolean }
 export interface MemoryOverview { total: number; byLevel: { L0: number; L1: number; L2: number; L3: number } }
-export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number; lastIndexedAt?: number | null }
+export interface CodeGraphStatus { workspace: string; connected: boolean; indexed: boolean; state?: string; sdkAvailable?: boolean; sdkVersion?: string; message?: string; files?: number; nodes?: number; edges?: number; lastIndexedAt?: number | null; phase?: CodeGraphSyncPhase; mode?: 'incremental' | 'full'; trigger?: 'manual' | 'watch' | 'activate' | 'retry'; progress?: { stage: string; processed?: number; total?: number }; lastSuccessAt?: number; lastError?: { message: string; at: number; code?: string }; consecutiveFailures?: number; nextRetryAt?: number; pendingChanges?: number; generation?: number; watcher?: { active: boolean; degraded: boolean; reason?: string }; servingStale?: boolean; autoSync?: boolean }
+/** codegraph-host 调度器的阶段：增量同步（syncing）期间仍可查询，全量重建（rebuilding）期间 state 是 indexing。 */
+export type CodeGraphSyncPhase = 'idle' | 'queued' | 'syncing' | 'rebuilding' | 'backoff' | 'failed';
 export interface CodeGraphProject { workspace: string; indexed: boolean }
 export interface CodeSearchResult { file: string; line?: number; symbol?: string; snippet?: string }
 export type CodeKind = 'file'|'module'|'class'|'struct'|'interface'|'trait'|'protocol'|'function'|'method'|'property'|'field'|'variable'|'constant'|'enum'|'enum_member'|'type_alias'|'namespace'|'parameter'|'import'|'export'|'route'|'component'|'union'|'type';

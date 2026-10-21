@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSidebarItems } from './useSidebarItems';
+import { buildSidebarItems, type SidebarItem } from './useSidebarItems';
 import type { ConversationItem } from './useConversations';
 import type { ProjectGroup } from './useProjectGroups';
 
@@ -14,6 +14,44 @@ const group: ProjectGroup = {
   lastActivity: '',
 };
 
+const sectionIds = (items: SidebarItem[]) => items.flatMap((i) => (i.type === 'section' ? [i.id] : []));
+const indexOfSection = (items: SidebarItem[], id: string) =>
+  items.findIndex((i) => i.type === 'section' && i.id === id);
+
+describe('buildSidebarItems section session paths', () => {
+  const sectionOf = (items: SidebarItem[], id: string) =>
+    items.find((i): i is Extract<SidebarItem, { type: 'section' }> => i.type === 'section' && i.id === id);
+
+  it('lists the sessions hidden by a collapsed section', () => {
+    const pinnedConv: ConversationItem = { ...conv, cwd: '/w/p', sessionPath: '/w/p/s.json' };
+    const items = buildSidebarItems({
+      conversations: [conv, pinnedConv],
+      pinnedGroups: [],
+      normalGroups: [group],
+      collapsed: {},
+      pinnedSessions: ['s2'],
+      pinnedConversations: ['/w/p'],
+      showAllCwds: new Set(),
+      collapsedSections: { pinned: true, conversations: true, projects: true },
+    });
+    expect(sectionOf(items, 'pinned')?.sessionPaths).toEqual(['/w/p/s.json', 's2']);
+    expect(sectionOf(items, 'conversations')?.sessionPaths).toEqual(['/w/c/s.json']);
+    expect(sectionOf(items, 'projects')?.sessionPaths).toEqual(['s1', 's3', 's4', 's5', 's6']);
+  });
+
+  it('has no session paths on an expanded section', () => {
+    const items = buildSidebarItems({
+      conversations: [conv],
+      pinnedGroups: [],
+      normalGroups: [group],
+      collapsed: {},
+      pinnedSessions: [],
+      showAllCwds: new Set(),
+    });
+    expect(sectionOf(items, 'conversations')?.sessionPaths).toBeUndefined();
+  });
+});
+
 describe('buildSidebarItems', () => {
   it('flattens conversations and groups with section headers', () => {
     const items = buildSidebarItems({
@@ -26,6 +64,7 @@ describe('buildSidebarItems', () => {
     });
     const types = items.map((i) => i.type);
     expect(types[0]).toBe('section'); // 对话
+    expect(sectionIds(items)).toEqual(['conversations', 'projects']);
     expect(types).toContain('conversation');
     expect(types).toContain('project');
     // isCurrent=true 默认展开，6 条 > DEFAULT_VISIBLE(5) → 5 session + 1 more
@@ -68,10 +107,10 @@ describe('buildSidebarItems', () => {
       pinnedSessions: [],
       showAllCwds: new Set(),
     });
-    const types = items.map((i) => i.type);
-    expect(types[0]).toBe('pinned-label');
-    expect(types.indexOf('pinned-label')).toBeLessThan(types.indexOf('section'));
-    expect(types.indexOf('conversation')).toBeGreaterThan(types.indexOf('pinned-label'));
+    expect(sectionIds(items)).toEqual(['pinned', 'conversations', 'projects']);
+    expect(indexOfSection(items, 'pinned')).toBe(0);
+    expect(items.findIndex((i) => i.type === 'project')).toBeLessThan(indexOfSection(items, 'conversations'));
+    expect(items.findIndex((i) => i.type === 'conversation')).toBeGreaterThan(indexOfSection(items, 'conversations'));
   });
 
   it('lifts a pinned session into the pinned section and does not duplicate it in the project', () => {
@@ -83,9 +122,11 @@ describe('buildSidebarItems', () => {
       pinnedSessions: ['s6'],
       showAllCwds: new Set(),
     });
-    const convIdx = items.findIndex((i) => i.type === 'section' && i.action === 'new-conversation');
-    const lifted = items.filter((i) => i.type === 'session' && i.session.path === 's6');
-    expect(items[0]?.type).toBe('pinned-label');
+    const convIdx = indexOfSection(items, 'conversations');
+    const lifted = items.filter(
+      (i): i is Extract<SidebarItem, { type: 'session' }> => i.type === 'session' && i.session.path === 's6',
+    );
+    expect(indexOfSection(items, 'pinned')).toBe(0);
     expect(lifted).toHaveLength(1);
     expect(lifted[0]?.pinned).toBe(true);
     expect(items.indexOf(lifted[0]!)).toBeLessThan(convIdx);
@@ -102,13 +143,52 @@ describe('buildSidebarItems', () => {
       pinnedConversations: ['/w/other'],
       showAllCwds: new Set(),
     });
-    const convIdx = items.findIndex((i) => i.type === 'section' && i.action === 'new-conversation');
+    const convIdx = indexOfSection(items, 'conversations');
     const lifted = items.filter((i) => i.type === 'conversation' && i.item.cwd === '/w/other');
     const rest = items.filter((i) => i.type === 'conversation' && i.item.cwd === '/w/c');
-    expect(items[0]?.type).toBe('pinned-label');
+    expect(indexOfSection(items, 'pinned')).toBe(0);
     expect(lifted).toHaveLength(1);
     expect(rest).toHaveLength(1);
     expect(items.indexOf(lifted[0]!)).toBeLessThan(convIdx);
     expect(items.indexOf(rest[0]!)).toBeGreaterThan(convIdx);
+  });
+
+  it('collapsed top-level sections keep only their header', () => {
+    const other: ConversationItem = { cwd: '/w/other', sessionPath: '/w/other/s.json', name: '对话2', timestamp: '', isCurrent: false };
+    const base = {
+      conversations: [conv, other],
+      pinnedGroups: [{ ...group, cwd: '/p/pin', pinned: true }],
+      normalGroups: [group],
+      collapsed: {},
+      pinnedSessions: ['s6'],
+      pinnedConversations: ['/w/other'],
+      showAllCwds: new Set<string>(),
+    };
+
+    const all = buildSidebarItems({
+      ...base,
+      collapsedSections: { pinned: true, conversations: true, projects: true },
+    });
+    expect(all.map((i) => i.type)).toEqual(['section', 'section', 'section']);
+    expect(all.every((i) => i.type === 'section' && i.collapsed)).toBe(true);
+    // 新建入口跟着区头走，折叠了也在
+    expect(all.map((i) => (i.type === 'section' ? i.action : null))).toEqual([undefined, 'new-conversation', 'new-project']);
+
+    const onlyPinned = buildSidebarItems({ ...base, collapsedSections: { pinned: true } });
+    // 置顶的会话 s6 不回到原项目，置顶的对话也不回「对话」区
+    expect(onlyPinned.some((i) => i.type === 'session' && i.session.path === 's6')).toBe(false);
+    expect(onlyPinned.some((i) => i.type === 'project' && i.group.cwd === '/p/pin')).toBe(false);
+    expect(onlyPinned.filter((i) => i.type === 'conversation').map((i) => i.type === 'conversation' && i.item.cwd)).toEqual(['/w/c']);
+    expect(onlyPinned.some((i) => i.type === 'project' && i.group.cwd === '/p/g')).toBe(true);
+
+    const onlyConvs = buildSidebarItems({ ...base, collapsedSections: { conversations: true } });
+    const convIdx = indexOfSection(onlyConvs, 'conversations');
+    expect(onlyConvs[convIdx + 1]).toMatchObject({ type: 'section', id: 'projects' });
+    // 置顶区里的对话不受「对话」区折叠影响
+    expect(onlyConvs.some((i) => i.type === 'conversation' && i.item.cwd === '/w/other')).toBe(true);
+
+    const onlyProjects = buildSidebarItems({ ...base, collapsedSections: { projects: true } });
+    expect(onlyProjects[onlyProjects.length - 1]).toMatchObject({ type: 'section', id: 'projects', collapsed: true });
+    expect(onlyProjects.some((i) => i.type === 'project' && i.group.cwd === '/p/pin')).toBe(true);
   });
 });

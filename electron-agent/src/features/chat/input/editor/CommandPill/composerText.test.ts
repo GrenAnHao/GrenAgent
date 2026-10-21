@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from 'lexical';
+import { $createLineBreakNode, $createParagraphNode, $createTextNode, $getRoot, createEditor } from 'lexical';
 import { describe, expect, it, vi } from 'vitest';
+import { $createChatTagNode, ChatTagNode } from '../ChatTag/ChatTagNode';
 import { $createCommandPillNode, CommandPillNode, PILL_MARKER } from './CommandPillNode';
 import { FOCUS_PILL_ARG_COMMAND } from './commands';
 import type { IEditor } from '@lobehub/editor';
@@ -11,6 +12,7 @@ import {
   readComposerText,
   readPillInvocation,
   substitutePillMarker,
+  writeComposerText,
 } from './composerText';
 
 const params = [{ name: 'file' }, { name: 'style', defaultValue: 'fp' }];
@@ -53,19 +55,100 @@ describe('substitutePillMarker', () => {
   });
 });
 
+/** 按 @lobehub/editor TextDataSource.read 的做法建文档：每行一个段落。Shift+Enter 在这个编辑器里也是新段落。 */
+function editorWithLines(lines: string[]) {
+  const editor = createEditor({ nodes: [CommandPillNode, ChatTagNode], onError: (error) => { throw error; } });
+  editor.update(() => {
+    for (const line of lines) {
+      const paragraph = $createParagraphNode();
+      if (line) paragraph.append($createTextNode(line));
+      $getRoot().append(paragraph);
+    }
+  }, { discrete: true });
+  return editor;
+}
+
+function composer(lexical: ReturnType<typeof createEditor>) {
+  const getDocument = vi.fn(() => 'markdown 不该被读');
+  return { editor: { getDocument, getLexicalEditor: () => lexical } as unknown as IEditor, getDocument };
+}
+
 describe('readComposerText', () => {
-  it('markdown 去转义，调用文本放在开头', () => {
-    const lexical = editorWith(['a\\b', '']).editor;
-    const editor = {
-      getDocument: () => `x\\_y ${M}`,
-      getLexicalEditor: () => lexical,
-    } as unknown as IEditor;
-    expect(readComposerText(editor)).toBe('/refactor "a\\\\b" "" x_y');
+  it('用户打什么就发什么：markdown 特殊字符不加反斜杠、列表符不改、缩进不丢', () => {
+    // 这些行过 remark-gfm 都会变：\* \[ \~ \_ <邮箱> - item、缩进被吃掉、&amp; → &
+    const lines = [
+      'a * b [x] array[0] ~tilde~ foo_bar snake_case_name',
+      'user@gmail.com &amp; 2*3=6 <div> `code`',
+      'def f():',
+      '    return 1',
+      '* 第一项',
+      '+ 第二项',
+      '# 不是标题',
+      'C:\\Users\\foo path\\_x \\*',
+      '',
+      '  开头两个空格',
+    ];
+    const { editor, getDocument } = composer(editorWithLines(lines));
+    expect(readComposerText(editor)).toBe(lines.join('\n'));
+    expect(getDocument).not.toHaveBeenCalled();
   });
 
-  it('拿不到 lexical 实例时只删标记', () => {
-    const editor = { getDocument: () => `x\\_y ${M}` } as unknown as IEditor;
-    expect(readComposerText(editor)).toBe('x_y ');
+  it('段落内的换行节点和段落之间都是一个换行', () => {
+    const lexical = createEditor({ nodes: [], onError: (error) => { throw error; } });
+    lexical.update(() => {
+      $getRoot().append(
+        $createParagraphNode().append($createTextNode('a'), $createLineBreakNode(), $createTextNode('b')),
+        $createParagraphNode().append($createTextNode('c')),
+      );
+    }, { discrete: true });
+    expect(readComposerText(composer(lexical).editor)).toBe('a\nb\nc');
+  });
+
+  it('文件标签写成 @路径，光标占位符去掉', () => {
+    const lexical = createEditor({ nodes: [ChatTagNode], onError: (error) => { throw error; } });
+    lexical.update(() => {
+      $getRoot().append(
+        $createParagraphNode().append(
+          $createTextNode('\uFEFF看看 '),
+          $createChatTagNode('file', 'a_b.ts', 'src/a_b.ts'),
+          $createTextNode(' 里的 *args'),
+        ),
+      );
+    }, { discrete: true });
+    expect(readComposerText(composer(lexical).editor)).toBe('看看 @src/a_b.ts 里的 *args');
+  });
+
+  it('胶囊换成调用文本放在开头，后面的正文原样', () => {
+    const lexical = createEditor({ nodes: [CommandPillNode], onError: (error) => { throw error; } });
+    lexical.update(() => {
+      $getRoot().append(
+        $createParagraphNode().append($createCommandPillNode('refactor', params, ['a\\b', '']), $createTextNode(' x_y *z*')),
+      );
+    }, { discrete: true });
+    expect(readComposerText(composer(lexical).editor)).toBe('/refactor "a\\\\b" "" x_y *z*');
+  });
+
+  it('拿不到 lexical 实例时读纯文本数据源、只删标记', () => {
+    const getDocument = vi.fn(() => `x_y ${M}`);
+    expect(readComposerText({ getDocument } as unknown as IEditor)).toBe('x_y ');
+    expect(getDocument).toHaveBeenCalledWith('text');
+  });
+});
+
+describe('writeComposerText', () => {
+  it('按纯文本写回，CRLF 统一成 LF；空文本清空', () => {
+    const setDocument = vi.fn();
+    const cleanDocument = vi.fn();
+    const editor = { setDocument, cleanDocument } as unknown as IEditor;
+    writeComposerText(editor, '* a\r\n  b');
+    expect(setDocument).toHaveBeenCalledWith('text', '* a\n  b');
+    writeComposerText(editor, '');
+    expect(cleanDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('写回再读出是同一段文本（每行一个段落，空行保留）', () => {
+    const text = 'a * b\n\n    缩进\n- 列表\n';
+    expect(readComposerText(composer(editorWithLines(text.split('\n'))).editor)).toBe(text);
   });
 });
 

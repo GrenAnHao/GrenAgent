@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { defineConfig } from "electron-vite";
 import { copyPiAdjacentAssets } from "./electron/agent/copyPiAdjacentAssets";
+import { CODEMODE_WORKER_ENTRY, CODEMODE_WORKER_SOURCE, codemodeWorkerMismatch } from "./electron/agent/codemodeWorkerBuild";
 import { ignoreNonFrontendWatch, isFrontendHmrPath } from "./electron/dev/frontendWatch";
 import { removeMainCjsPackageJson, writeMainCjsPackageJson } from "./electron/agent/writeMainCjsPackageJson";
 import { installDevElectronHeapArg } from "./electron/mainHeap";
@@ -53,7 +54,11 @@ export default defineConfig(({ command, mode }) => {
             }
           : {}),
         rollupOptions: {
-          input: mainInput,
+          // 生产构建把 pi-codemode 打进 chunks/，它按 import.meta.url 找同目录的 worker.js；单独出这个入口。
+          // 开发态 pi-codemode 外置，用它自己 node_modules 里的 worker。
+          input: production
+            ? { ...mainInput, [CODEMODE_WORKER_ENTRY]: resolve(__dirname, CODEMODE_WORKER_SOURCE) }
+            : mainInput,
           // package.json 是 type: module，rolldown 对 CJS 默认出 .cjs / .cjsc。
           // main 字段、asarUnpack 和 out/main/package.json（commonjs）都按 .js / .jsc 约定，这里显式钉住。
           ...(production
@@ -69,6 +74,17 @@ export default defineConfig(({ command, mode }) => {
         },
       },
       plugins: [
+        {
+          name: "check-codemode-worker",
+          generateBundle(_options, bundle) {
+            if (!production) return;
+            const chunks = Object.values(bundle).flatMap((item) =>
+              item.type === "chunk" ? [{ fileName: item.fileName, isEntry: item.isEntry, moduleIds: item.moduleIds }] : [],
+            );
+            const problem = codemodeWorkerMismatch(chunks);
+            if (problem) this.error(problem);
+          },
+        },
         {
           name: "copy-pi-adjacent-assets",
           closeBundle() {

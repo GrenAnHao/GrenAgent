@@ -1,8 +1,48 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useVisualStore, visualKeyOf, type VisualOwner } from './visualStore';
+import { settleVisualOnTurnEnd, useVisualStore, visualKeyOf, type VisualOwner } from './visualStore';
 
 const A: VisualOwner = { sessionPath: 'C:/ws/.sessions/a.jsonl', workspace: 'C:/ws' };
 const B: VisualOwner = { sessionPath: 'C:/ws/.sessions/b.jsonl', workspace: 'C:/other' };
+
+describe('visualStore pending lifecycle', () => {
+  beforeEach(() => {
+    useVisualStore.setState({ entries: {}, seq: 0, submittedIds: new Set() });
+  });
+  const pending = (o: VisualOwner) => useVisualStore.getState().entries[visualKeyOf(o)];
+  const end = (sessionPath: string | undefined, extra: Record<string, unknown> = {}, event: Record<string, unknown> = { type: 'agent_end', messages: [] }) =>
+    settleVisualOnTurnEnd({ workspace: 'C:/ws', sessionPath, event, ...extra } as never);
+
+  it('settles pending when the owning session ends its turn', () => {
+    useVisualStore.getState().setVisual(A, '<p>x</p>', 'panel');
+    useVisualStore.getState().setPending(A, true, 'v1');
+    useVisualStore.getState().setPending(B, true, 'v2');
+    end('C:\\WS\\.sessions\\A.jsonl', {}, { type: 'agent_end', messages: [], willRetry: true });
+    end(A.sessionPath!, { source: 'goal' });
+    end(undefined);
+    expect(pending(A)).toMatchObject({ pending: true, requestId: 'v1' });
+    end('C:\\WS\\.sessions\\A.jsonl');
+    expect(pending(A)).toMatchObject({ pending: false, requestId: null, html: '<p>x</p>' });
+    expect(pending(B)).toMatchObject({ pending: true });
+  });
+
+  it('settles on agent_settled and for a draft owner of the same workspace', () => {
+    const draft: VisualOwner = { sessionPath: null, workspace: 'C:/ws' };
+    useVisualStore.getState().setPending(draft, true, 'v3');
+    end(A.sessionPath!, {}, { type: 'agent_settled' });
+    expect(pending(draft)).toMatchObject({ pending: false });
+  });
+
+  it('dismissRequest clears pending by request id', () => {
+    useVisualStore.getState().setPending(A, true, 'v1');
+    useVisualStore.getState().setPending(B, true, 'v2');
+    useVisualStore.getState().dismissRequest('v2');
+    expect(pending(B)).toMatchObject({ pending: false, requestId: null });
+    expect(pending(A)).toMatchObject({ pending: true });
+    const before = useVisualStore.getState().entries;
+    useVisualStore.getState().dismissRequest('missing');
+    expect(useVisualStore.getState().entries).toBe(before);
+  });
+});
 
 describe('visualStore', () => {
   beforeEach(() => {

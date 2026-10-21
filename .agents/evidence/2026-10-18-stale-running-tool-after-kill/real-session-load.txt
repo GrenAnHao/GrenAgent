@@ -1,0 +1,15 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi/electron-agent
+
+stdout | src/stores/zz-real-stale-wait.test.ts > real stuck session > stale wait_agent from the killed process is interrupted on load, running or not
+before {"status":"running","pending":["toolu_01NX2VrZepEzkGpwBD3bque3"]}
+running true after {"status":"error","interrupted":true}
+running false after {"status":"error","interrupted":true}
+
+ ✓ |renderer| src/stores/zz-real-stale-wait.test.ts > real stuck session > stale wait_agent from the killed process is interrupted on load, running or not 62ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:08:45
+   Duration  3.38s (transform 127ms, setup 2.06s, import 116ms, tests 63ms, environment 867ms)
+
