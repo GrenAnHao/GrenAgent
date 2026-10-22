@@ -4,7 +4,6 @@
   "description": "Web search (Bing/Sogou/Baidu/DuckDuckGo) for the Pi coding agent — result links.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "web", "search"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

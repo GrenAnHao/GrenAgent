@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "code-exec", "python", "repl"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

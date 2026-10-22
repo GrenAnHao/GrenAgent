@@ -4,7 +4,6 @@
   "description": "MCP client for the Pi coding agent — connect external MCP servers (stdio/SSE) and expose their tools.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "mcp"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

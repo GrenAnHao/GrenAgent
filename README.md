@@ -127,7 +127,7 @@ pnpm ui:check -- <场景名>          # 真实 Electron 窗口里的 UI 检查�
 
 ## 许可证
 
-MIT。
+保留所有权利。本仓库的代码不对外授予使用、复制、修改或再分发的许可，详见 [LICENSE](./LICENSE)。第三方依赖与参考实现各自遵守其许可证，见 [第三方声明](./docs/third-party-notices.md)。
 
 ## 友情链接
 

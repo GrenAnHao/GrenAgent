@@ -4,7 +4,6 @@
   "description": "Text-to-speech for the Pi coding agent via an OpenAI-compatible audio API.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "tts", "speech", "audio"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

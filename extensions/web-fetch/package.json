@@ -4,7 +4,6 @@
   "description": "Fetch web pages as markdown/text for the Pi coding agent (zero deps, SSRF-guarded).",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "web", "fetch"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

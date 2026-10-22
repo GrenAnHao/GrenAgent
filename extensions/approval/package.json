@@ -4,7 +4,6 @@
   "description": "Codex-style approval policy (ask/auto/full) parallel to agent-mode: drives safety confirmations.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "approval", "safety"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

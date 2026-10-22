@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "ast", "ast-grep", "codemod"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

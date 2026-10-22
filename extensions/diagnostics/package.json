@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "diagnostics"],
-  "license": "MIT",
   "pi": { "extensions": ["./index.ts"] },
   "scripts": { "test": "vitest run" },
   "peerDependencies": { "typebox": "*" },

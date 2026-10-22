@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "mcp", "permission"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

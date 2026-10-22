@@ -1,0 +1,20 @@
+Copyright (c) 2026 GrenAnHao. All rights reserved.
+
+This repository and its contents (source code, documentation, assets and
+build scripts, collectively the "Software") are proprietary. No license is
+granted to any person to use, copy, modify, merge, publish, distribute,
+sublicense, sell, or create derivative works of the Software, in whole or in
+part, without prior written permission from the copyright holder.
+
+Viewing the Software in this repository does not grant any such right.
+
+Third-party components included in or referenced by the Software remain
+subject to their own licenses, which are not modified by this notice. See
+docs/third-party-notices.md.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.

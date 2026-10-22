@@ -4,7 +4,6 @@
   "description": "Delegate tasks to isolated pi sub-agents (parallel) for the Pi coding agent.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "subagent", "multi-agent"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

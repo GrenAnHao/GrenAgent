@@ -4,7 +4,6 @@
   "description": "Text-to-image generation for the Pi coding agent via an OpenAI-compatible images API.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "image", "dall-e"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

@@ -4,7 +4,6 @@
   "description": "Batch read_files + structured search tools for the Pi coding agent.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "batch", "read", "search"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

@@ -12,7 +12,6 @@
     "image",
     "multi-agent"
   ],
-  "license": "MIT",
   "pi": {
     "extensions": [
       "./web-fetch/index.ts",

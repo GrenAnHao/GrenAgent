@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "system-prompt", "behavior"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

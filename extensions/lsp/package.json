@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "lsp", "language-server"],
-  "license": "MIT",
   "pi": {
     "extensions": ["./index.ts"]
   },

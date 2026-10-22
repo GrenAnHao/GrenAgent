@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "compaction"],
-  "license": "MIT",
   "pi": { "extensions": ["./index.ts"] },
   "scripts": { "test": "vitest run" },
   "devDependencies": {
