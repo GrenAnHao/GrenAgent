@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pagination } from 'antd';
 import { Icon } from '@lobehub/ui';
 import { AccuracyBarChart, BarChart, DonutChart } from '@lobehub/charts';
-import { RefreshCw } from 'lucide-react';
+import { DatabaseZap, Loader2, RefreshCw } from 'lucide-react';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { pi } from '../../lib/pi';
 import type { UsageReport } from '../../lib/usageReport';
@@ -256,17 +256,25 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
+/** 上一次拿到的报表：切走再切回来先画它，后台刷新完再换。 */
+let lastReport: UsageReport | null = null;
+
 export function UsagePanel() {
-  const [report, setReport] = useState<UsageReport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<UsageReport | null>(lastReport);
+  // 没有旧报表时首帧就是「加载中」，不先闪一下「暂无数据」。
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [callPage, setCallPage] = useState(1);
+  const [reconciling, setReconciling] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setReport(await pi.getUsageReport());
+      const next = await pi.getUsageReport();
+      lastReport = next;
+      setReport(next);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -276,6 +284,21 @@ export function UsagePanel() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // 补录：扫一遍会话目录，把账本没记到的调用（命令行 pi、记账上线前的会话）补进来。
+  const reconcile = useCallback(async () => {
+    setReconciling(true);
+    setNotice(null);
+    try {
+      const result = await pi.reconcileUsage();
+      setNotice(result.added > 0 ? `补录了 ${result.added} 次调用` : '没有需要补录的调用');
+      await load();
+    } catch (e) {
+      setNotice(`补录失败:${String(e)}`);
+    } finally {
+      setReconciling(false);
+    }
   }, [load]);
 
   const openSession = useCallback((cwd: string | null, path: string) => {
@@ -295,13 +318,21 @@ export function UsagePanel() {
     if (worksDir) for (const c of buildConversations(allSessions, worksDir, '', '')) m.set(c.cwd, c.name);
     return m;
   }, [allSessions, worksDir]);
+  // 账本里的会话名是记账那一刻的；侧栏列得出来的会话以侧栏为准（之后改过名也对得上）。
+  const sidebarSessionByPath = useMemo(() => new Map(allSessions.map((s) => [s.path, s])), [allSessions]);
 
   // 调用明细里的 provider 是 id，显示成供应商显示名（取不到回落 id）。
   const providerList = useProviderList();
   const providerNameOf = (id: string) => providerList.find((p) => p.id === id)?.name ?? id;
 
-  if (loading && !report) return <div className={styles.root}><div className={styles.state}>加载中…</div></div>;
-  if (error) return <div className={styles.root}><div className={styles.state}>加载失败:{error}</div></div>;
+  if (loading && !report) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.state}>加载中…（第一次打开会把历史会话导入用量账本，需要几秒）</div>
+      </div>
+    );
+  }
+  if (error && !report) return <div className={styles.root}><div className={styles.state}>加载失败:{error}</div></div>;
   if (!report) return <div className={styles.root}><div className={styles.state}>暂无数据</div></div>;
 
   const t = report.totals;
@@ -327,12 +358,26 @@ export function UsagePanel() {
       <div className={styles.head}>
         <div>
           <span className={styles.title}>用量统计</span>
-          <span className={styles.sub}>全部项目汇总 · 来自 pi 会话记录</span>
+          <span className={styles.sub}>
+            {error ? `刷新失败:${error}` : notice ?? '全部项目汇总 · 每次模型调用结束时记账'}
+          </span>
         </div>
-        <button type="button" className={styles.refresh} onClick={() => void load()}>
-          <Icon icon={RefreshCw} size={13} />
-          刷新
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            className={styles.refresh}
+            disabled={reconciling || loading}
+            title="扫描会话记录，补上没有记到账的调用（如命令行里的 pi 会话）"
+            onClick={() => void reconcile()}
+          >
+            <Icon icon={reconciling ? Loader2 : DatabaseZap} size={13} spin={reconciling} />
+            {reconciling ? '补录中' : '补录'}
+          </button>
+          <button type="button" className={styles.refresh} disabled={loading} onClick={() => void load()}>
+            <Icon icon={RefreshCw} size={13} spin={loading} />
+            {loading ? '刷新中' : '刷新'}
+          </button>
+        </div>
       </div>
 
       <div className={styles.kpis}>
@@ -474,14 +519,22 @@ export function UsagePanel() {
           </thead>
           <tbody>
             {report.recentSessions.map((s) => {
+              const listed = sidebarSessionByPath.get(s.path);
+              const name = listed?.name ?? s.name;
               const casual = !!worksDir && !!s.cwd && isUnder(s.cwd, worksDir);
               // 对话：会话标题 / 友好时间；项目会话：「项目名 - 会话标题」（标题缺省回退 新对话，与侧栏一致）。
               const label = casual
-                ? s.name || friendlyTime(s.timestamp)
-                : `${s.cwd ? basename(s.cwd) : '未知项目'} - ${s.name || '新对话'}`;
+                ? name || friendlyTime(s.timestamp)
+                : `${s.cwd ? basename(s.cwd) : '未知项目'} - ${name || '新对话'}`;
+              // 账本不删账：会话删掉了用量还在，但侧栏列不出来的会话打不开。
+              const openable = !!listed;
               return (
-                <tr key={s.path} className={styles.tr} onClick={() => openSession(s.cwd, s.path)}>
-                  <td className={styles.td} title={s.cwd ?? ''}>{label}</td>
+                <tr
+                  key={s.path}
+                  className={openable ? styles.tr : undefined}
+                  onClick={openable ? () => openSession(s.cwd, s.path) : undefined}
+                >
+                  <td className={styles.td} title={openable ? s.cwd ?? '' : `${s.cwd ?? ''}\n会话已不在侧栏（删除或子代理会话）`}>{label}</td>
                   <td className={styles.td}>{s.timestamp ? new Date(s.timestamp).toLocaleString() : '—'}</td>
                   <td className={styles.tdRight}>{formatTokens(s.tokens)}</td>
                   <td className={styles.tdRight}>{formatCost(s.cost)}</td>

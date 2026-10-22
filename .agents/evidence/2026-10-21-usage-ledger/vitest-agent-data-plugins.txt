@@ -1,0 +1,94 @@
+
+ RUN  v4.1.11 D:/OneDrive/Project Files/Pi
+
+ ❯ .claude/worktrees/infallible-wright-6e8eca/cli/src/agent-data-plugins.test.ts (0 test)
+ ❯ .claude/worktrees/kind-margulis-db01b1/cli/src/agent-data-plugins.test.ts (0 test)
+ ❯ .claude/worktrees/laughing-mcclintock-591446/cli/src/agent-data-plugins.test.ts (0 test)
+ ❯ .claude/worktrees/funny-neumann-f6a64d/cli/src/agent-data-plugins.test.ts (0 test)
+ ❯ .claude/worktrees/intelligent-euclid-26578b/cli/src/agent-data-plugins.test.ts (0 test)
+(node:15712) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44460) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56260) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41464) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:66996) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:20544) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .claude/worktrees/funny-neumann-f6a64d/cli/src/agent-data-plugins.test.ts [ .claude/worktrees/funny-neumann-f6a64d/cli/src/agent-data-plugins.test.ts ]
+Error: Cannot find package '@earendil-works/pi-coding-agent' imported from D:/OneDrive/Project Files/Pi/.claude/worktrees/funny-neumann-f6a64d/extensions/prompt-commands/index.ts
+ ❯ .claude/worktrees/funny-neumann-f6a64d/extensions/prompt-commands/index.ts:3:1
+      1| // prompt-commands：把 `/名 "参数"…` 展开成 <command> 块。只接管正文里写了 {参数} 的模板，
+      2| // 其余交回 Pi 原生的 prompt template 展开。气泡靠 <command> 块还原成命令胶囊。
+      3| import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-cod…
+       | ^
+      4| import { expandInvocation } from "./expand.js";
+      5| import { loadTemplate } from "./templates.js";
+ ❯ .claude/worktrees/funny-neumann-f6a64d/extensions/index.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  .claude/worktrees/infallible-wright-6e8eca/cli/src/agent-data-plugins.test.ts [ .claude/worktrees/infallible-wright-6e8eca/cli/src/agent-data-plugins.test.ts ]
+Error: Cannot find package '@earendil-works/pi-coding-agent' imported from D:/OneDrive/Project Files/Pi/.claude/worktrees/infallible-wright-6e8eca/extensions/prompt-commands/index.ts
+ ❯ .claude/worktrees/infallible-wright-6e8eca/extensions/prompt-commands/index.ts:3:1
+      1| // prompt-commands：把 `/名 "参数"…` 展开成 <command> 块。只接管正文里写了 {参数} 的模板，
+      2| // 其余交回 Pi 原生的 prompt template 展开。气泡靠 <command> 块还原成命令胶囊。
+      3| import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-cod…
+       | ^
+      4| import { expandInvocation } from "./expand.js";
+      5| import { loadTemplate } from "./templates.js";
+ ❯ .claude/worktrees/infallible-wright-6e8eca/extensions/index.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  .claude/worktrees/kind-margulis-db01b1/cli/src/agent-data-plugins.test.ts [ .claude/worktrees/kind-margulis-db01b1/cli/src/agent-data-plugins.test.ts ]
+Error: Cannot find package '@earendil-works/pi-coding-agent' imported from D:/OneDrive/Project Files/Pi/.claude/worktrees/kind-margulis-db01b1/extensions/prompt-commands/index.ts
+ ❯ .claude/worktrees/kind-margulis-db01b1/extensions/prompt-commands/index.ts:3:1
+      1| // prompt-commands：把 `/名 "参数"…` 展开成 <command> 块。只接管正文里写了 {参数} 的模板，
+      2| // 其余交回 Pi 原生的 prompt template 展开。气泡靠 <command> 块还原成命令胶囊。
+      3| import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-cod…
+       | ^
+      4| import { expandInvocation } from "./expand.js";
+      5| import { loadTemplate } from "./templates.js";
+ ❯ .claude/worktrees/kind-margulis-db01b1/extensions/index.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  .claude/worktrees/intelligent-euclid-26578b/cli/src/agent-data-plugins.test.ts [ .claude/worktrees/intelligent-euclid-26578b/cli/src/agent-data-plugins.test.ts ]
+Error: Cannot find package '@earendil-works/pi-coding-agent' imported from D:/OneDrive/Project Files/Pi/.claude/worktrees/intelligent-euclid-26578b/extensions/prompt-commands/index.ts
+ ❯ .claude/worktrees/intelligent-euclid-26578b/extensions/prompt-commands/index.ts:3:1
+      1| // prompt-commands：把 `/名 "参数"…` 展开成 <command> 块。只接管正文里写了 {参数} 的模板，
+      2| // 其余交回 Pi 原生的 prompt template 展开。气泡靠 <command> 块还原成命令胶囊。
+      3| import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-cod…
+       | ^
+      4| import { expandInvocation } from "./expand.js";
+      5| import { loadTemplate } from "./templates.js";
+ ❯ .claude/worktrees/intelligent-euclid-26578b/extensions/index.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  .claude/worktrees/laughing-mcclintock-591446/cli/src/agent-data-plugins.test.ts [ .claude/worktrees/laughing-mcclintock-591446/cli/src/agent-data-plugins.test.ts ]
+Error: Cannot find package '@earendil-works/pi-coding-agent' imported from D:/OneDrive/Project Files/Pi/.claude/worktrees/laughing-mcclintock-591446/extensions/prompt-commands/index.ts
+ ❯ .claude/worktrees/laughing-mcclintock-591446/extensions/prompt-commands/index.ts:3:1
+      1| // prompt-commands：把 `/名 "参数"…` 展开成 <command> 块。只接管正文里写了 {参数} 的模板，
+      2| // 其余交回 Pi 原生的 prompt template 展开。气泡靠 <command> 块还原成命令胶囊。
+      3| import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-cod…
+       | ^
+      4| import { expandInvocation } from "./expand.js";
+      5| import { loadTemplate } from "./templates.js";
+ ❯ .claude/worktrees/laughing-mcclintock-591446/extensions/index.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  5 failed | 6 passed (11)
+      Tests  36 passed (36)
+   Start at  16:33:38
+   Duration  10.27s (transform 41.38s, setup 0ms, import 55.12s, tests 91ms, environment 1ms)
+

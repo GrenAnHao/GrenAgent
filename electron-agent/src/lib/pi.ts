@@ -6,7 +6,6 @@ export type { UsageReport } from './usageReport';
 import type { PackageListItem, PackageSearchResult } from '../../electron/app/piPackageModel';
 export type { PackageListItem, PackageSearchResult, MarketplaceHit } from '../../electron/app/piPackageModel';
 import type { AskUserDraft } from '../../electron/agent/askUserDraft';
-import type { DevinAccountView } from './devinAccount';
 import {
   ATTENTION_OPEN_EVENT,
   WINDOW_FOCUS_EVENT,
@@ -14,7 +13,6 @@ import {
   type AttentionNotifyResult,
 } from '../../electron/app/attentionContract';
 export type { AttentionKind, AttentionNotifyInput, AttentionNotifyResult } from '../../electron/app/attentionContract';
-export type { DevinAccountView } from './devinAccount';
 export type PackageInstallScope = 'user' | 'project';
 
 export interface PiEventEnvelope {
@@ -385,14 +383,13 @@ export const pi = {
   completeAskUser: (workspace: string, toolCallId: string, value?: string, cancelled?: boolean) =>
     invoke<'ok' | 'duplicate'>('agent_complete_ask_user', { workspace, toolCallId, value, cancelled }),
   getUsageReport: () => invoke<UsageReport>('usage_report'),
+  /** 把会话目录里账本没有的调用补进用量账本（命令行 pi、记账上线前的会话）。 */
+  reconcileUsage: () => invoke<{ files: number; added: number }>('usage_reconcile'),
   getCommands: (workspace: string) => invoke<unknown>('agent_get_commands', { workspace }),
   createList: (workspace: string) => invoke<ImageItem[]>('create_list', { workspace }),
   createImage: (workspace: string, name: string) =>
     invoke<string>('create_image', { workspace, name }),
   getSettings: () => invoke<Record<string, string>>('get_settings'),
-  devinAccountStatus: () => invoke<DevinAccountView>('devin_account_status'),
-  devinAccountLogin: () => invoke<DevinAccountView>('devin_account_login'),
-  devinAccountLogout: () => invoke<DevinAccountView>('devin_account_logout'),
   setSettings: (settings: Record<string, string>) =>
     invoke<void>('set_settings', { settings }),
   listMcpConfigs: (workspace: string) =>

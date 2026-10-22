@@ -1,0 +1,19 @@
+会话目录 ~/.pi/agent/sessions（账本写到临时目录，不碰真实 ~/.pi/agent/usage）
+旧实现（每次全量扫描）: 4019 ms, 事件循环最长阻塞 122 ms
+账本 首次打开（导入全部历史）: 4444 ms, 事件循环最长阻塞 154 ms
+账本 再次打开（纯 SQL）: 4 ms, 事件循环最长阻塞 0 ms
+账本 第三次打开（纯 SQL）: 4 ms, 事件循环最长阻塞 0 ms
+账本 手动补录（全量扫描，按键去重）: 3397 ms, 事件循环最长阻塞 111 ms
+补录结果 {"files":931,"added":0}
+账本文件 13.3 MB
+totals.input 旧=66598932 账本=66598932
+totals.output 旧=55017337 账本=55017337
+totals.cacheRead 旧=10213302071 账本=10213302071
+totals.cacheWrite 旧=211088063 账本=211088063
+totals.totalTokens 旧=10546028447 账本=10546028447
+totals.messages 旧=46957 账本=46957
+totals.sessions 旧=931 账本=931
+totals.cost 旧=829.742642 账本=829.742642
+byDay tokens 一致: true  byModel 一致: true
+byProject tokens 一致: true
+calls 前 500 条 totalTokens 合计 旧/账本 97236727 97236727

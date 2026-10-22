@@ -7,6 +7,7 @@
 import autoTitle from "./auto-title/index.js";
 import compactionPolicy from "./compaction-policy/index.js";
 import imageLimits from "./image-limits/index.js";
+import usageLedger from "./usage-ledger/index.js";
 import loopGuard from "./loop-guard/index.js";
 import rulebook from "./rulebook/index.js";
 import promptCommands from "./prompt-commands/index.js";
@@ -59,6 +60,7 @@ export {
   contextRules,
   compactionPolicy,
   imageLimits,
+  usageLedger,
   autoTitle,  todo, present,
   agentMode,
   debugTools,
@@ -102,6 +104,7 @@ export const allExtensions = [
   contextRules,
   compactionPolicy,
   imageLimits,
+  usageLedger,
   autoTitle,  todo, present,
   agentMode,
   debugTools,
@@ -146,6 +149,7 @@ export const namedExtensions: Array<{ name: string; factory: (typeof allExtensio
   { name: "context-rules", factory: contextRules },
   { name: "compaction-policy", factory: compactionPolicy },
   { name: "image-limits", factory: imageLimits },
+  { name: "usage-ledger", factory: usageLedger },
   { name: "auto-title", factory: autoTitle },
   { name: "todo", factory: todo },
   { name: "present", factory: present },

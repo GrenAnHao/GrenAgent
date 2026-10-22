@@ -1,0 +1,22 @@
+✔ project profile keeps everything (0.5853ms)
+✔ chat profile drops heavy code extensions but keeps chat-relevant ones (0.1211ms)
+✔ safety is never in the exclusion set (0.0712ms)
+✔ Electron allowed ids only filter managed plugins (0.5525ms)
+✔ Electron allowed ids retain auto-title without enabling other unmanaged extensions (0.1187ms)
+✔ Electron empty allowed ids retain only safety, auto-title and sandbox (0.1038ms)
+✔ Electron allowlist keeps product-core extensions and still drops heavy tools (0.1012ms)
+✔ product core and chat-excluded sets do not overlap (0.0765ms)
+(node:67364) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ 转发注入的 modelRuntime 到 services (0.8713ms)
+✔ allowedExtensionsJson 参与 filterManagedExtensions（只留 core + 白名单 id） (0.1933ms)
+✔ PI_SYSTEM_WORKER 不是 1 时，工厂数等于过滤后的 manifest 再加 extraFactories (0.117ms)
+✔ PI_SYSTEM_WORKER 为 1 时不加载扩展，也不追加 extraFactories (0.1877ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4787.5213

@@ -6,10 +6,16 @@ directories:
 # 复制 pnpm 已安装的 Electron。仓库在 OneDrive 下时，zip 解压目录改名会返回 EPERM。
 electronDist: node_modules/electron/dist
 files:
-  - dist/**
-  - out/**
   - package.json
   - build/icon.ico
+  # 生产构建写在 out-pkg/（见 electron.vite.config.ts），这里映射回 asar 里原来的 out/、dist/ 布局，
+  # package.json 的 main、子进程入口和页面路径都不用改。不收 out/、dist/：那是 dev / start 的产物。
+  - from: out-pkg/main
+    to: out/main
+  - from: out-pkg/preload
+    to: out/preload
+  - from: out-pkg/renderer
+    to: dist
 asar: true
 # @homebridge/node-pty-prebuilt-multiarch 是 Node-API 预编译包。
 # 发布的 npm 包没有 src/ 与 deps/winpty，electron-rebuild 看到 binding.gyp
@@ -19,6 +25,7 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
 asarUnpack:
+  # asarUnpack 按源路径匹配（相对本目录），所以写 out-pkg/main；解包后仍落在 app.asar.unpacked/out/main。
   - node_modules/@colbymchenry/**
   - node_modules/@ast-grep/**
   - node_modules/@vscode/ripgrep/**
@@ -26,32 +33,32 @@ asarUnpack:
   - node_modules/.pnpm/@vscode+ripgrep*/**
   # 解包出来的 .js 桩按真实文件系统找 package.json；旁边没有这一份 {"type":"commonjs"}，
   # 会一路找到外层 type: module 的 package.json，把桩当 ESM 加载，require 报错。
-  - out/main/package.json
-  - out/main/pi-worker.js
-  - out/main/pi-worker.jsc
+  - out-pkg/main/package.json
+  - out-pkg/main/pi-worker.js
+  - out-pkg/main/pi-worker.jsc
   # agent-host 子进程和 pi-worker 一样以 RunAsNode 加载，入口要在 asar 外面。
-  - out/main/agent-host.js
-  - out/main/agent-host.jsc
+  - out-pkg/main/agent-host.js
+  - out-pkg/main/agent-host.jsc
   # AgentData 与 CodeGraph 的子进程同理。
-  - out/main/agentdata-host.js
-  - out/main/agentdata-host.jsc
-  - out/main/codegraph-host.js
-  - out/main/codegraph-host.jsc
-  - out/main/codegraph-worker.js
-  - out/main/codegraph-worker.jsc
+  - out-pkg/main/agentdata-host.js
+  - out-pkg/main/agentdata-host.jsc
+  - out-pkg/main/codegraph-host.js
+  - out-pkg/main/codegraph-host.jsc
+  - out-pkg/main/codegraph-worker.js
+  - out-pkg/main/codegraph-worker.jsc
   # agent-host 的进程树守卫：主进程 spawn 它，asar 里的 exe 起不来。
-  - out/main/pi-job-guard.exe
-  - out/main/bytecode-loader.cjs
-  - out/main/chunks/**
-  - out/main/runner.py
-  - out/main/runner.mjs
-  - out/main/prompts/**
-  # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out/main。
+  - out-pkg/main/pi-job-guard.exe
+  - out-pkg/main/bytecode-loader.cjs
+  - out-pkg/main/chunks/**
+  - out-pkg/main/runner.py
+  - out-pkg/main/runner.mjs
+  - out-pkg/main/prompts/**
+  # 选 A：预编译 helper 入仓后由 copyPiAdjacentAssets 拷到 out-pkg/main。
   # asar:true 下 exe 必须 unpack，否则无法 spawn。
-  - out/main/pi-sandbox-win.exe
-  - out/main/pi-sandbox-launch.exe
-  - out/main/chunks/pi-sandbox-win.exe
-  - out/main/chunks/pi-sandbox-launch.exe
+  - out-pkg/main/pi-sandbox-win.exe
+  - out-pkg/main/pi-sandbox-launch.exe
+  - out-pkg/main/chunks/pi-sandbox-win.exe
+  - out-pkg/main/chunks/pi-sandbox-launch.exe
   - node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
   - node_modules/quickjs-wasi/quickjs.wasm
   - node_modules/.pnpm/quickjs-wasi@*/node_modules/quickjs-wasi/quickjs.wasm

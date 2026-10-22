@@ -39,12 +39,12 @@ describe('copyPiAdjacentAssets', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('asarUnpack 列出 out/main 与 chunks 下的 helper', () => {
+  it('asarUnpack 列出生产产物 out-pkg/main 与 chunks 下的 helper', () => {
     const config = parse(readFileSync(resolve(__dirname, '../../electron-builder.yml'), 'utf8'));
-    expect(config.asarUnpack).toContain('out/main/pi-sandbox-win.exe');
-    expect(config.asarUnpack).toContain('out/main/pi-sandbox-launch.exe');
-    expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-win.exe');
-    expect(config.asarUnpack).toContain('out/main/chunks/pi-sandbox-launch.exe');
-    expect(config.asarUnpack).toContain('out/main/pi-job-guard.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/pi-sandbox-win.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/pi-sandbox-launch.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/chunks/pi-sandbox-win.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/chunks/pi-sandbox-launch.exe');
+    expect(config.asarUnpack).toContain('out-pkg/main/pi-job-guard.exe');
   });
 });

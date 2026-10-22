@@ -8,7 +8,6 @@ import { McpConfigService } from "./app/mcpConfigService";
 import { FileService } from "./app/fileService";
 import { SkillService } from "./app/skillService";
 import { PromptLibraryService } from "./app/promptLibraryService";
-import { UsageService } from "./app/usageService";
 import { PiPackageService } from "./app/piPackageService";
 import { ProviderService } from "./app/providerService";
 import { WorkspaceService } from "./app/workspaceService";
@@ -361,7 +360,7 @@ if (!process.env.VITEST) {
       skills: new SkillService(app.getPath('home')),
       promptLibrary: new PromptLibraryService(agentDir),
       piPackages,
-      usage: new UsageService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent')),
+      usage: agent.usage,
       pi: agent.pi,
       provider: new ProviderService({
         agentDir: process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'),

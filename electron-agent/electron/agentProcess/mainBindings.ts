@@ -5,6 +5,7 @@
  * 本文件不引入任何扩展模块。
  */
 import type { PermissionAuthorization, PermissionOperation } from '../app/permissionManager';
+import type { UsageReport } from '../../src/lib/usageReport';
 import type {
   ActiveModel,
   AgentMethod,
@@ -160,6 +161,11 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
     },
     extensions: {
       catalog: () => request<ExtensionCatalogEntry[]>('extensions.catalog'),
+    },
+    // 用量账本在 agent-host 里查：同步 sqlite 和历史导入都不占主进程。
+    usage: {
+      report: () => request<UsageReport>('usage.report'),
+      reconcile: () => request<{ files: number; added: number }>('usage.reconcile'),
     },
   };
 }

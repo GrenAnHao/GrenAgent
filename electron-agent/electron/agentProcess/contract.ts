@@ -38,6 +38,8 @@ export const AGENT_METHODS = [
   'controlPlane.releaseChildForDelete',
   'resources.reload',
   'extensions.catalog',
+  'usage.report',
+  'usage.reconcile',
 ] as const;
 export type AgentMethod = typeof AGENT_METHODS[number];
 

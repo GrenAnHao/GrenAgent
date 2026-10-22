@@ -144,7 +144,7 @@ pi-codemode 也随之打进 chunk。它的 `runtime/host.js` 默认用 `new URL(
 
 ### 主进程生产产物的文件名钉成 .js / .jsc，不吃构建工具的 .cjs 默认值
 
-产物名不再依赖 electron-vite / rolldown 的默认值，升级它们不会悄悄把入口改回 `.cjs`；代价是 `output` 里多两行，`chunks/` 目录名也要自己和 `asarUnpack` 的 `out/main/chunks/**` 保持一致。别在这段 `output` 里换扩展名，`package.json` 的 `main`、`asarUnpack` 和 `sourceCodeProtection.test.ts` 都按 `.js` / `.jsc` 写死。`out/main/package.json`（`{"type":"commonjs"}`）必须随生产构建写出，否则这些 `.js` 会被当 ESM 加载。生产构建和 `electron-vite dev` 写同一个 `out/main`（dev 还会删掉 `out/main/package.json`），同一个工作区里两者不要同时跑，会互相覆盖。
+产物名不再依赖 electron-vite / rolldown 的默认值，升级它们不会悄悄把入口改回 `.cjs`；代价是 `output` 里多两行，`chunks/` 目录名也要自己和 `asarUnpack` 的 `out/main/chunks/**` 保持一致。别在这段 `output` 里换扩展名，`package.json` 的 `main`、`asarUnpack` 和 `sourceCodeProtection.test.ts` 都按 `.js` / `.jsc` 写死。`out/main/package.json`（`{"type":"commonjs"}`）必须随生产构建写出，否则这些 `.js` 会被当 ESM 加载。生产构建的产物实际写在 `out-pkg/main`，打包时映射回 asar 里的 `out/main`，和 dev / start 的 `out/main` 分开，见 [生产构建写到 out-pkg](../../implemented/bug-fix/2026-10-22-production-build-own-out-dir.md)；本笔记里 `asarUnpack` 的 `out/main/...` 写法现在是 `out-pkg/main/...`。
 
 ### 生产主进程不外置依赖，解包的 .js 桩旁边带 package.json
 

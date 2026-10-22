@@ -5,7 +5,8 @@ describe("tool-groups", () => {
   it("NET_TOOLS lists real registered networking tools (no phantom names)", () => {
     // 真实注册的联网工具（web-search / web-fetch / github）。
     expect(NET_TOOLS).toContain("web_search");
-    expect(NET_TOOLS).toContain("web_search_multi");
+    expect(NET_TOOLS).toContain("anysearch_search");
+    expect(NET_TOOLS).toContain("anysearch_sub_domains");
     expect(NET_TOOLS).toContain("fetch_url");
     expect(NET_TOOLS).toContain("github");
     expect(NET_TOOLS as readonly string[]).not.toContain("fetch_llms");

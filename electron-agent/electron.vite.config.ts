@@ -37,6 +37,10 @@ export default defineConfig(({ command, mode }) => {
   // npm run start（--mode localrun）：渲染层用生产构建，主进程保持开发时的 ESM。
   // CJS 字节码产物 require 不到只有 import 条件的 pi 包，本机直接跑起不来。
   const production = command === "build" && mode !== "localrun";
+  // 生产构建（打包用）写 out-pkg/，dev 和 localrun 写 out/ 与 dist/。两套产物同名不同格式，
+  // 共用目录时开着 dev 打包会互相覆盖。electron-builder.yml 再把 out-pkg 映射回 asar 里的 out/、dist/。
+  const outRoot = resolve(__dirname, production ? "out-pkg" : "out");
+  const mainOutDir = resolve(outRoot, "main");
   return {
     main: {
       resolve: {
@@ -47,6 +51,7 @@ export default defineConfig(({ command, mode }) => {
         ],
       },
       build: {
+        outDir: mainOutDir,
         ...(production
           ? {
               bytecode: { transformArrowFunctions: false },
@@ -88,16 +93,16 @@ export default defineConfig(({ command, mode }) => {
         {
           name: "copy-pi-adjacent-assets",
           closeBundle() {
-            const outDir = resolve(__dirname, "out/main");
-            copyPiAdjacentAssets(resolve(__dirname, ".."), outDir);
-            if (production) writeMainCjsPackageJson(outDir);
-            else removeMainCjsPackageJson(outDir);
+            copyPiAdjacentAssets(resolve(__dirname, ".."), mainOutDir);
+            if (production) writeMainCjsPackageJson(mainOutDir);
+            else removeMainCjsPackageJson(mainOutDir);
           },
         },
       ],
     },
     preload: {
       build: {
+        outDir: resolve(outRoot, "preload"),
         rollupOptions: {
           input: {
             preload: resolve(__dirname, "electron/preload.ts"),
@@ -140,7 +145,7 @@ export default defineConfig(({ command, mode }) => {
         dedupe: ["@pierre/diffs"],
       },
       build: {
-        outDir: resolve(__dirname, "dist"),
+        outDir: production ? resolve(outRoot, "renderer") : resolve(__dirname, "dist"),
         rollupOptions: {
           input: resolve(__dirname, "index.html"),
         },

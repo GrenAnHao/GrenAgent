@@ -13,19 +13,24 @@ type ViteCommand = 'build' | 'serve';
 type ViteSlice = {
   main: {
     build?: {
+      outDir?: string;
       bytecode?: unknown;
       rollupOptions?: { output?: unknown };
     };
   };
-  preload: { build?: { bytecode?: unknown } };
-  renderer?: { build?: { bytecode?: unknown } };
+  preload: { build?: { outDir?: string; bytecode?: unknown } };
+  renderer?: { build?: { outDir?: string; bytecode?: unknown } };
 };
 
-function resolveViteConfig(command: ViteCommand): ViteSlice {
+function resolveViteConfig(command: ViteCommand, mode?: string): ViteSlice {
   if (typeof viteConfig !== 'function') {
     throw new Error('electron.vite.config must export defineConfig(({ command }) => ...)');
   }
-  return viteConfig({ command, mode: command === 'build' ? 'production' : 'development' });
+  return viteConfig({ command, mode: mode ?? (command === 'build' ? 'production' : 'development') });
+}
+
+function outDirs(config: ViteSlice) {
+  return [config.main.build?.outDir, config.preload.build?.outDir, config.renderer?.build?.outDir];
 }
 
 function outputFormat(output: unknown): string | undefined {
@@ -58,6 +63,17 @@ describe('source code protection: electron-vite main', () => {
     expect(pkg.main).toBe('out/main/main.js');
   });
 
+  it('writes the production build to out-pkg so a running dev / start never shares its output', () => {
+    expect(outDirs(resolveViteConfig('build'))).toEqual([
+      join(root, 'out-pkg', 'main'),
+      join(root, 'out-pkg', 'preload'),
+      join(root, 'out-pkg', 'renderer'),
+    ]);
+    const devLike = [join(root, 'out', 'main'), join(root, 'out', 'preload'), join(root, 'dist')];
+    expect(outDirs(resolveViteConfig('serve'))).toEqual(devLike);
+    expect(outDirs(resolveViteConfig('build', 'localrun'))).toEqual(devLike);
+  });
+
   it('writes out/main/package.json as commonjs after a production bundle', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pi-main-cjs-'));
     writeMainCjsPackageJson(dir);
@@ -71,6 +87,7 @@ describe('source code protection: electron-vite main', () => {
 
 describe('source code protection: electron-builder', () => {
   const config = parse(readFileSync(join(root, 'electron-builder.yml'), 'utf8')) as {
+    files?: Array<string | { from?: string; to?: string }>;
     asar?: boolean | { disableIntegrity?: boolean };
     asarUnpack?: string[];
     electronFuses?: {
@@ -91,27 +108,40 @@ describe('source code protection: electron-builder', () => {
     }
   });
 
+  it('packs only out-pkg, mapped back to the out/ and dist/ layout the runtime expects', () => {
+    const fileSets = (config.files ?? []).filter((item): item is { from?: string; to?: string } => typeof item !== 'string');
+    expect(fileSets).toEqual([
+      { from: 'out-pkg/main', to: 'out/main' },
+      { from: 'out-pkg/preload', to: 'out/preload' },
+      { from: 'out-pkg/renderer', to: 'dist' },
+    ]);
+    const globs = (config.files ?? []).filter((item): item is string => typeof item === 'string');
+    expect(globs.some((glob) => glob.startsWith('out/') || glob.startsWith('dist'))).toBe(false);
+    // asarUnpack 按源路径匹配：写成 out/main/... 就一个也对不上，子进程入口会留在 asar 里。
+    expect(config.asarUnpack?.some((glob) => glob.startsWith('out/'))).toBe(false);
+  });
+
   it('unpacks the agentdata-host entry', () => {
-    expect(config.asarUnpack).toContain('out/main/agentdata-host.js');
-    expect(config.asarUnpack).toContain('out/main/agentdata-host.jsc');
+    expect(config.asarUnpack).toContain('out-pkg/main/agentdata-host.js');
+    expect(config.asarUnpack).toContain('out-pkg/main/agentdata-host.jsc');
   });
 
   it('unpacks out/main/package.json beside the unpacked .js stubs so they load as commonjs', () => {
-    expect(config.asarUnpack).toContain('out/main/package.json');
-    expect(config.asarUnpack).toContain('out/main/agent-host.js');
+    expect(config.asarUnpack).toContain('out-pkg/main/package.json');
+    expect(config.asarUnpack).toContain('out-pkg/main/agent-host.js');
   });
 
   it('unpacks the codegraph-host entry and its worker thread entry', () => {
-    expect(config.asarUnpack).toContain('out/main/codegraph-host.js');
-    expect(config.asarUnpack).toContain('out/main/codegraph-host.jsc');
-    expect(config.asarUnpack).toContain('out/main/codegraph-worker.js');
-    expect(config.asarUnpack).toContain('out/main/codegraph-worker.jsc');
+    expect(config.asarUnpack).toContain('out-pkg/main/codegraph-host.js');
+    expect(config.asarUnpack).toContain('out-pkg/main/codegraph-host.jsc');
+    expect(config.asarUnpack).toContain('out-pkg/main/codegraph-worker.js');
+    expect(config.asarUnpack).toContain('out-pkg/main/codegraph-worker.jsc');
   });
 
   it('unpacks the worker stub, bytecode and loader, not main.jsc', () => {
-    expect(config.asarUnpack).toContain('out/main/pi-worker.js');
-    expect(config.asarUnpack).toContain('out/main/pi-worker.jsc');
-    expect(config.asarUnpack).toContain('out/main/bytecode-loader.cjs');
-    expect(config.asarUnpack).not.toContain('out/main/main.jsc');
+    expect(config.asarUnpack).toContain('out-pkg/main/pi-worker.js');
+    expect(config.asarUnpack).toContain('out-pkg/main/pi-worker.jsc');
+    expect(config.asarUnpack).toContain('out-pkg/main/bytecode-loader.cjs');
+    expect(config.asarUnpack).not.toContain('out-pkg/main/main.jsc');
   });
 });

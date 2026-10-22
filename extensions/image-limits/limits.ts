@@ -143,19 +143,11 @@ export async function fitContentImages<T extends { type: string }>(
   let out: Array<T | ImageBlock | TextBlock> | undefined;
   for (let i = 0; i < content.length; i++) {
     const block = content[i];
-    if (!isImageBlock(block) || !exceedsLimits(block, limits)) {
-      out?.push(block);
-      continue;
-    }
-    let replacement: ImageBlock | TextBlock | undefined;
-    try {
-      const resized = await resize(block, limits);
-      if (resized) replacement = { type: "image", data: resized.data, mimeType: resized.mimeType };
-    } catch {
-      replacement = undefined;
-    }
-    if (!replacement && onFail === "omit") replacement = omittedText(block);
-    if (!replacement) {
+    const replacement =
+      isImageBlock(block) && exceedsLimits(block, limits)
+        ? await fitImage(block, limits, resize, onFail)
+        : block;
+    if (replacement === block) {
       out?.push(block);
       continue;
     }
@@ -163,6 +155,22 @@ export async function fitContentImages<T extends { type: string }>(
     out.push(replacement);
   }
   return out ?? content;
+}
+
+/** 缩一张超限的图；缩不下来时按 `onFail` 保留原图或换成文字说明。 */
+async function fitImage(
+  block: ImageBlock,
+  limits: ImageLimits,
+  resize: ResizeFn,
+  onFail: "keep" | "omit",
+): Promise<ImageBlock | TextBlock> {
+  try {
+    const resized = await resize(block, limits);
+    if (resized) return { type: "image", data: resized.data, mimeType: resized.mimeType };
+  } catch {
+    // 缩放失败按 onFail 处理
+  }
+  return onFail === "omit" ? omittedText(block) : block;
 }
 
 export function isImageBlock(block: unknown): block is ImageBlock {
@@ -204,15 +212,16 @@ export function cachedResize(resize: ResizeFn, capacity = 64): ResizeFn {
   const cache = new Map<string, { limitsKey: string; mimeType: string; result: ResizeOutcome | null }>();
   return async (block, limits) => {
     const limitsKey = `${limits.maxWidth}x${limits.maxHeight}/${limits.maxBytes}`;
-    const hit = cache.get(block.data);
+    const key = block.data;
+    const hit = cache.get(key);
     if (hit && hit.limitsKey === limitsKey && hit.mimeType === block.mimeType) {
-      cache.delete(block.data);
-      cache.set(block.data, hit);
+      cache.delete(key);
+      cache.set(key, hit);
       return hit.result;
     }
     const result = await resize(block, limits);
-    cache.delete(block.data);
-    cache.set(block.data, { limitsKey, mimeType: block.mimeType, result });
+    cache.delete(key);
+    cache.set(key, { limitsKey, mimeType: block.mimeType, result });
     if (cache.size > capacity) cache.delete(cache.keys().next().value as string);
     return result;
   };

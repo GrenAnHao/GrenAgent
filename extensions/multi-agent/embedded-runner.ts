@@ -142,6 +142,7 @@ const CORE_ALWAYS_ON = new Set([
   "context-rules",
   "compaction-policy",
   "image-limits",
+  "usage-ledger",
   "auto-title",
   "todo",
   "agent-mode",

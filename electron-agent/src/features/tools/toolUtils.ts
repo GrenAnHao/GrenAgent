@@ -127,7 +127,7 @@ export function toolMeta(toolName: string): { icon: LucideIcon } {
   if (name === 'generate_image') return { icon: Image };
   if (name === 'spawn_agent') return { icon: Network };
   if (name === 'fetch_url') return { icon: Globe };
-  if (name === 'web_search' || name === 'web_search_multi' || name === 'search') return { icon: Search };
+  if (name === 'web_search' || name === 'anysearch_search' || name === 'anysearch_sub_domains' || name === 'search') return { icon: Search };
   if (name.startsWith('fetch_')) return { icon: Globe };
   if (name === 'speak') return { icon: Volume2 };
   if (name === 'todo') return { icon: ListChecks };

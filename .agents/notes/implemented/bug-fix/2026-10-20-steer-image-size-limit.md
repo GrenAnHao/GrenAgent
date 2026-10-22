@@ -17,7 +17,7 @@ electron-mall-manager 的会话卡死：之后每次请求都被 Anthropic 拒�
 - 超限的判定：先只解码 base64 开头 256KB，读 PNG / JPEG / GIF / WebP 头里的宽高，宽或高超过上限、或 base64 长度超过 `maxBytes` 才调 `resizeImage`，没超限的图片零成本。读不出宽高的格式只按体积判。
 - 上限：当前模型 `inputLimits.images.resize` 有就用，否则和 pi 默认一致（2000×2000、base64 4.5MB）。不读 `images.autoResize` 设置：GrenAgent 没有暴露这个开关，而超过 provider 硬上限的图关掉缩放也只会让请求失败。
 - 缩放结果按原图 base64 缓存（同一进程最多 64 张，LRU），老会话里的大图每次请求都会被看到，只缩第一次。
-- 注册：`extensions/index.ts` 三张清单都加 `image-limits`（放在 `compaction-policy` 后面，先让排除集去掉的消息不参与），`multi-agent/embedded-runner.ts` 的 `CORE_ALWAYS_ON` 也加上，任何档位、子代理都会加载。
+- 注册：`extensions/index.ts` 三张清单都加 `image-limits`（放在 `compaction-policy` 后面，先让排除集去掉的消息不参与），`multi-agent/embedded-runner.ts` 和 `cli/src/extension-profile.ts` 的 `CORE_ALWAYS_ON` 也加上，任何档位、子代理都会加载。最初漏了 `cli/src/extension-profile.ts` 那一份：Electron 主会话带插件白名单走 `filterManagedExtensions`，没有 manifest 又不在这份集合里的扩展不会加载，`cli/src/agent-data-plugins.test.ts` 为此报红；2026-10-21 接用量账本时补上。
 
 ## Alternatives considered
 

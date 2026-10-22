@@ -1,5 +1,5 @@
-// Pure helpers for the web_search tool: provider selection, response parsing
-// (Tavily / Brave), and LLM-friendly result formatting. No network here so the
+// Pure helpers for the web_search tool: provider selection, HTML/JSON response
+// parsing, and LLM-friendly result formatting. No network here so the
 // logic stays unit-testable.
 
 export interface SearchResult {
@@ -9,7 +9,6 @@ export interface SearchResult {
 }
 
 export interface ParsedSearch {
-  answer?: string;
   results: SearchResult[];
 }
 
@@ -41,63 +40,20 @@ function sourceLabel(url: string, title: string): string {
 }
 
 export type ProviderChoice =
-  | { ok: true; provider: "tavily" | "brave"; apiKey: string }
-  | { ok: true; provider: "devin" | "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" }
+  | { ok: true; provider: "bing" | "sogou" | "duckduckgo" | "baidu" }
   | { ok: false; reason: string };
 
 // 选择搜索 provider。Bing / DuckDuckGo 是零配置（无 key）白嫖源，保证 web_search 开箱即用：
 // 1) 显式 WEB_SEARCH_PROVIDER 指定且满足条件就用它；
-// 2) 否则有 TAVILY / BRAVE key 就用对应付费源；
-// 3) 都没有 → Bing 抓取（国内可达）。DuckDuckGo 在部分网络（如国内）被墙，仅在显式指定时用。
+// 2) 否则 → Bing 抓取（国内可达）。DuckDuckGo 在部分网络（如国内）被墙，仅在显式指定时用。
 export function resolveProvider(env: Record<string, string | undefined>): ProviderChoice {
   const explicit = (env.WEB_SEARCH_PROVIDER ?? "").trim().toLowerCase();
 
-  if (explicit === "devin") return { ok: true, provider: "devin" };
   if (explicit === "bing") return { ok: true, provider: "bing" };
   if (explicit === "sogou") return { ok: true, provider: "sogou" };
   if (explicit === "baidu") return { ok: true, provider: "baidu" };
-  if (explicit === "csdn") return { ok: true, provider: "csdn" };
-  if (explicit === "juejin") return { ok: true, provider: "juejin" };
   if (explicit === "duckduckgo" || explicit === "ddg") return { ok: true, provider: "duckduckgo" };
-  if (explicit === "brave" && env.BRAVE_API_KEY) return { ok: true, provider: "brave", apiKey: env.BRAVE_API_KEY };
-  if (explicit === "tavily" && env.TAVILY_API_KEY) return { ok: true, provider: "tavily", apiKey: env.TAVILY_API_KEY };
-
-  if (env.TAVILY_API_KEY) return { ok: true, provider: "tavily", apiKey: env.TAVILY_API_KEY };
-  if (env.BRAVE_API_KEY) return { ok: true, provider: "brave", apiKey: env.BRAVE_API_KEY };
-
   return { ok: true, provider: "bing" };
-}
-
-function asRecord(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-}
-function asStr(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-function asArray(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : [];
-}
-
-export function parseTavily(json: unknown): ParsedSearch {
-  const obj = asRecord(json);
-  const results: SearchResult[] = asArray(obj.results)
-    .map((r) => {
-      const ro = asRecord(r);
-      return { title: asStr(ro.title), url: asStr(ro.url), snippet: asStr(ro.content) };
-    })
-    .filter((r) => r.url);
-  return { answer: typeof obj.answer === "string" ? obj.answer : undefined, results };
-}
-
-export function parseBrave(json: unknown): ParsedSearch {
-  const web = asRecord(asRecord(json).web);
-  const results: SearchResult[] = asArray(web.results)
-    .map((r) => {
-      const ro = asRecord(r);
-      return { title: asStr(ro.title), url: asStr(ro.url), snippet: asStr(ro.description) };
-    })
-    .filter((r) => r.url);
-  return { results };
 }
 
 function stripTags(s: string): string {
@@ -218,7 +174,6 @@ export function retainSearchResults(results: SearchResult[]): { results: SearchR
 export function formatResults(query: string, parsed: ParsedSearch): string {
   const { results: retained, truncated } = retainSearchResults(parsed.results);
   const parts: string[] = [];
-  if (parsed.answer) parts.push(clipSnippet(parsed.answer, 2000));
   if (retained.length > 0) {
     const lines = retained.map((r) => {
       const label = sourceLabel(r.url, r.title);
@@ -226,7 +181,7 @@ export function formatResults(query: string, parsed: ParsedSearch): string {
       return `- [${label}](${r.url})${suffix}`;
     });
     parts.push(`搜索「${query}」结果：\n${lines.join("\n")}`);
-  } else if (!parsed.answer) {
+  } else {
     parts.push(`搜索「${query}」无结果`);
   }
   if (truncated) parts.push(`（仅显示前 ${WEB_SEARCH_MAX_RESULTS} 条来源，缩小查询可看更多。）`);

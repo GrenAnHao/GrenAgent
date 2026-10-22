@@ -1,0 +1,38 @@
+54716 GrenAgent.exe "C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe" --user-data-dir="C:\Users\rxstudio\AppData\Local\Temp\grenagent-verify-ud...
+32612 GrenAgent.exe "C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe" --type=gpu-process --user-data-dir="C:\Users\rxstudio\AppData\Local\Temp\...
+68812 GrenAgent.exe "C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-...
+73024 GrenAgent.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\reso...
+73064 pi-job-guard.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\pi-job-guard.exe --pid 73024 --wait-ms 15000
+73036 GrenAgent.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\reso...
+61752 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"@ant-design/cli^" ^"mcp^""
+70408 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+65576 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "@ant-design/cli" "mcp"
+10120 cmd.exe C:\Windows\system32\cmd.exe /d /s /c antd mcp
+70608 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\d5bd507560b6d09b\node_modules\.bin\\..\@ant-design\cli\dist\index.js" mcp
+69952 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"@upstash/context7-mcp@latest^""
+70640 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+69884 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "@upstash/context7-mcp@latest"
+52392 cmd.exe C:\Windows\system32\cmd.exe /d /s /c context7-mcp
+13220 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\c35ab75beed40a3c\node_modules\.bin\\..\@upstash\context7-mcp\dist\index.js" 
+71608 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"mcp-remote^" ^"https://mcp.deepwiki.com/mcp^""
+66600 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+63500 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "mcp-remote" "https://mcp.deepwiki.com/mcp"
+48096 cmd.exe C:\Windows\system32\cmd.exe /d /s /c mcp-remote https://mcp.deepwiki.com/mcp
+71876 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\705d23756ff7dacc\node_modules\.bin\\..\mcp-remote\dist\proxy.js" https://mcp.deepwiki.com/mcp
+68268 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"@ant-design/cli^" ^"mcp^""
+25152 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+29592 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "@ant-design/cli" "mcp"
+12284 cmd.exe C:\Windows\system32\cmd.exe /d /s /c antd mcp
+34644 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\d5bd507560b6d09b\node_modules\.bin\\..\@ant-design\cli\dist\index.js" mcp
+4232 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"@upstash/context7-mcp@latest^""
+70244 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+70176 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "@upstash/context7-mcp@latest"
+68000 cmd.exe C:\Windows\system32\cmd.exe /d /s /c context7-mcp
+73072 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\c35ab75beed40a3c\node_modules\.bin\\..\@upstash\context7-mcp\dist\index.js" 
+4692 cmd.exe C:\Windows\system32\cmd.exe /d /s /c "npx ^"-y^" ^"mcp-remote^" ^"https://mcp.deepwiki.com/mcp^""
+56060 conhost.exe \??\C:\Windows\system32\conhost.exe 0x4
+13364 node.exe "D:\nvm4w\nodejs\\node.exe"  "D:\nvm4w\nodejs\node_modules\npm\bin\npx-cli.js" "-y" "mcp-remote" "https://mcp.deepwiki.com/mcp"
+69676 cmd.exe C:\Windows\system32\cmd.exe /d /s /c mcp-remote https://mcp.deepwiki.com/mcp
+44528 node.exe "node"   "C:\Users\rxstudio\AppData\Local\npm-cache\_npx\705d23756ff7dacc\node_modules\.bin\\..\mcp-remote\dist\proxy.js" https://mcp.deepwiki.com/mcp
+73672 pi-job-guard.exe C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\pi-job-guard.exe --pid 73036 --wait-ms 15000
+72528 GrenAgent.exe "C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\GrenAgent.exe" --type=renderer --user-data-dir="C:\Users\rxstudio\AppData\Local\Temp\gre...

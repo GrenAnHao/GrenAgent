@@ -7,7 +7,8 @@
 // 联网工具（web-search / web-fetch / github 扩展实际注册的工具名）。
 export const NET_TOOLS = [
   "web_search",
-  "web_search_multi",
+  "anysearch_search",
+  "anysearch_sub_domains",
   "fetch_url",
   "github",
 ] as const;

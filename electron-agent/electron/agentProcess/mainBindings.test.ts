@@ -116,6 +116,8 @@ describe('createAgentPorts', () => {
       agent.controlPlane.releaseChildForDelete('D:/p', null, 'c.jsonl'),
       agent.resources.reload(),
       agent.extensions.catalog(),
+      agent.usage.report(),
+      agent.usage.reconcile(),
     ]);
     const used = new Set(calls.map(([method]) => method));
     for (const method of used) expect(AGENT_METHODS).toContain(method);

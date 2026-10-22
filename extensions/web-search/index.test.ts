@@ -16,14 +16,11 @@ describe('web-search desktop authorization', () => {
     fetchSpy.mockRestore();
   });
 
-  it('does not start devin code search when Electron denies the network operation', async () => {
-    const tools = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
-    const control = { request: vi.fn(async () => ({ status: 'denied' })) };
-    factory({ registerTool: (tool: { name: string; execute: (...args: any[]) => Promise<any> }) => tools.set(tool.name, tool) } as never, control as never);
+  it('registers only web_search(query, maxResults)', () => {
+    const tools = new Map<string, { parameters: { properties: Record<string, { description?: string }> } }>();
+    factory({ registerTool: (tool: { name: string; parameters: never }) => tools.set(tool.name, tool as never) } as never, { request: vi.fn() } as never);
 
-    const result = await tools.get('devin_code_search')!.execute('call-2', { query: 'oauth callback' }, undefined, undefined, { cwd: 'D:/repo' });
-
-    expect(control.request).toHaveBeenCalledWith('permission.authorize', expect.objectContaining({ operation: expect.objectContaining({ kind: 'network.request', toolName: 'devin_code_search' }) }));
-    expect(result.details).toEqual({ error: 'network_denied' });
+    expect(Object.keys(tools.get('web_search')!.parameters.properties).sort()).toEqual(['maxResults', 'query']);
+    expect(tools.has("web_search_multi")).toBe(false);
   });
 });

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { rawFs, rawFsPromises } from './rawFs.js';
+
+// 工作区里的 .asar 只是文件：Electron 的 node:fs 会把它当目录打开并一直占着，见 rawFs.ts。
+const { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } = rawFsPromises;
+const { existsSync } = rawFs;
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { runSafeGit } from '../../../extensions/_shared/git-safe.js';
 

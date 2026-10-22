@@ -1,0 +1,12 @@
+== lstat
+mode=lstat isDirectory=true pid=36500
+holders: 36500 Electron
+unlink while running: EBUSY
+== stat
+mode=stat isDirectory=true pid=20292
+holders: 20292 Electron
+unlink while running: EBUSY
+== original
+mode=original isDirectory=false pid=52964
+holders: (none)
+unlink while running: ok

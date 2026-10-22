@@ -170,7 +170,7 @@ function toolTitle(
     };
   }
 
-  if (lname === 'web_search' || lname === 'web_search_multi') {
+  if (lname === 'web_search' || lname === 'anysearch_search') {
     const query = getArgString(args, 'query');
     const details = getDetails(result);
     const countRaw = details?.count;

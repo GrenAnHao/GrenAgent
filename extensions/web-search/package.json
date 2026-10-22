@@ -1,7 +1,7 @@
 {
   "name": "pi-web-search",
   "version": "0.1.0",
-  "description": "Web search (Tavily/Brave) for the Pi coding agent — summary + result links.",
+  "description": "Web search (Bing/Sogou/Baidu/DuckDuckGo) for the Pi coding agent — result links.",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "web", "search"],
   "license": "MIT",

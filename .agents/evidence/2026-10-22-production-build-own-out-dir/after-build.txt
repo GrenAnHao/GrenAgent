@@ -1,0 +1,51 @@
+== after build
+out/main/main.js 66a482d1a4574c9c 2026-10-21 14:48:54.106218100 +0800
+out/main/agent-host.js 837ae15492f6c55c 2026-10-21 14:48:54.103713100 +0800
+out/preload/preload.js f89183ab6b992c53 2026-10-21 14:48:54.227735900 +0800
+dist/index.html 820aa522db4b8246 2026-10-19 13:20:32.733222900 +0800
+ls: cannot access 'out/main/package.json': No such file or directory
+== out-pkg
+out-pkg:
+main
+preload
+renderer
+
+out-pkg/main:
+agent-host.js
+agent-host.jsc
+agentdata-host.js
+agentdata-host.jsc
+bytecode-loader.cjs
+chunks
+codegraph-host.js
+codegraph-host.jsc
+codegraph-worker.js
+codegraph-worker.jsc
+main.js
+main.jsc
+package.json
+pi-job-guard.exe
+pi-sandbox-launch.exe
+pi-sandbox-win.exe
+pi-worker.js
+pi-worker.jsc
+prompts
+runner.mjs
+runner.py
+main.js:
+"use strict";
+require("./bytecode-loader.cjs");
+require("./main.jsc");
+
+{"type":"commonjs"}
+
+89
+out-pkg/preload:
+preload.js
+webviewPreload.js
+
+out-pkg/renderer:
+assets
+favicon.ico
+favicon.png
+index.html

@@ -41,7 +41,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 ### cli —— 内嵌 SDK 与 worker 入口
 
-源码仍在 `cli/`（`gren-runtime` / `pi-sdk` / `pi-worker` / `json-event`），由 electron-vite 打进 `out/main/`，不再产出 `pi.exe`。`pi-worker` 只跑官方 `main()` 的 `--mode json` / print 路径；启动期主进程把 `PI_WORKER_ENTRY` 设为 worker chunk 路径，子代理直读该环境变量。
+源码仍在 `cli/`（`gren-runtime` / `pi-sdk` / `pi-worker` / `json-event`），由 electron-vite 打进 `out/main/`（`dev` / `start`；打包用的 `build` 写 `out-pkg/main/`，electron-builder 再映射回 asar 里的 `out/main/`），不再产出 `pi.exe`。`pi-worker` 只跑官方 `main()` 的 `--mode json` / print 路径；启动期主进程把 `PI_WORKER_ENTRY` 设为 worker chunk 路径，子代理直读该环境变量。
 
 进程退出时，worker 在模块加载阶段注册 `EPIPE` 处理：一旦命中即干净退出，避免对死管道反复写入导致 stderr 刷屏。
 
@@ -75,7 +75,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `code-retrieval` | 经 AgentData 复用主进程内置 CodeGraph SDK 实例 | `code_explore` |
 | `session-memory` | 带分支锚点的会话工作状态；压缩时一次抽取兼作压缩摘要，交给 Pi 摘要时压缩后重锚 | 内部 `/session-state`（slash 菜单不列） |
 | `web-fetch` | 单页 URL 抓取 | `fetch_url`（`format`: markdown / text / html / json / llms） |
-| `web-search` | 多引擎联网搜索。Devin 登录有效且未指定引擎链时，`web_search` 先走 Devin，失败再回退 Bing、搜狗、百度。`devin_code_search` 把查询和选中片段发往 Windsurf | `web_search`、`web_search_multi`、`devin_code_search` |
+| `web-search` | 联网搜索。`web_search` 默认走 Bing，失败再回退搜狗、百度；可用 `WEB_SEARCH_PROVIDER` / `WEB_SEARCH_ENGINES` 指定。另内置 AnySearch（`ANYSEARCH_API_KEY` 可选，匿名走每日免费额度） | `web_search`、`anysearch_search`、`anysearch_sub_domains` |
 | `mcp` | 外部 MCP server 工具桥接 | `mcp__<server>__<tool>`（动态） |
 | `mcp-policy` | MCP 工具权限策略与审计 | 策略 / 中间件，无显式工具 |
 | `image-gen` | 文生图 | `generate_image` |
@@ -142,7 +142,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 记忆提炼共用 `TaskQueue` 的系统任务通道；Wiki 抽取走进程内串行队列与 Electron 模型短调用，不再创建 `wiki.ingest` / `wiki.sync` 任务。`SystemWorkerManager` 经 `ModelRuntime.completeSimple` 做串行短调用，不持有会话。自动记忆遵守 `MEMORY_AUTO_INJECT`、`MEMORY_AUTO_CAPTURE`、`MEMORY_EXTRACT`，子代理和系统 worker 不触发自动记忆流程。大请求采用 64 KiB 分片，单物理帧上限 1 MiB，单逻辑请求上限 32 MiB；超限明确失败，不裁剪会话尾部代替全文。
 
-部分命令直接读取本地数据，例如 `usageService` 扫描会话 jsonl 聚合用量。侧栏会话列表（`WorkspaceService.listAllSessions` / `listSessions`）按字节标记只解码标题、首条用户消息、子代理与旧短调用标记所在的行，并按文件大小和修改时间缓存每份会话的解析结果，文件没变时只做一次 `stat`。
+部分命令直接读取本地数据。用量报表来自用量账本 `<pi agentDir>/usage/ledger.db`：`extensions/usage-ledger` 在每条带 `usage` 的助手消息 `message_end` 时记一笔（主会话、子代理、命令行 pi 写同一份，WAL），插入触发器同步维护按 日 × 会话 × 模型 的汇总表；`usage_report` / `usage_reconcile` 经 agent-host 子进程的 `usageService` 查询，账本第一次被查时把会话目录里的历史导入一次，之后只在用户点「补录」时扫目录。侧栏会话列表（`WorkspaceService.listAllSessions` / `listSessions`）按字节标记只解码标题、首条用户消息、子代理与旧短调用标记所在的行，并按文件大小和修改时间缓存每份会话的解析结果，文件没变时只做一次 `stat`。
 
 ### tauri-agent —— 桌面应用（已封存）
 
@@ -194,7 +194,7 @@ Goal 条和详情抽屉只存在当前会话页的输入区，不建立跨会话
 
 ## 用量统计口径
 
-`usageService`（`electron-agent/electron/app/usageService.ts`，历史实现为 `tauri-agent/src-tauri/src/commands/usage.rs` 的 `usage_report`）扫描会话 jsonl，只聚合满足以下条件的记录：`type` 为 `message`、`message.role` 为 `assistant`、且带 `usage` 字段，从中累加 input / output / cacheRead / cacheWrite、totalTokens 与 cost，并据此计算 cacheHitRate。
+用量账本（`extensions/usage-ledger/ledger.ts`；历史导入在 `electron-agent/electron/app/usageService.ts`，更早的实现是 `tauri-agent/src-tauri/src/commands/usage.rs` 的 `usage_report`）只记满足以下条件的调用：`message.role` 为 `assistant` 且带 `usage` 字段（导入时另要求条目 `type` 为 `message`），从中累加 input / output / cacheRead / cacheWrite、totalTokens 与 cost，并据此计算 cacheHitRate。每次调用按 provider + responseId 去重，没有 responseId 时按会话 id + 助手消息的 timestamp。账本只增不删：回退截掉的轮次、删掉的会话，用量仍然计入。
 
 由此可知：生图、TTS 等工具调用以 tool result 形式返回、不带 `usage` 字段，因此其调用量与费用不计入用量统计；统计页是纯 Token 报表。
 

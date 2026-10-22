@@ -27,6 +27,7 @@ const PRESETS: Array<{ label: string; command: string; args: (workspace: string)
   { label: '设置', command: 'get_settings', args: () => '{}' },
   { label: '全量会话', command: 'list_all_sessions', args: () => '{}' },
   { label: '用量报告', command: 'usage_report', args: () => '{}' },
+  { label: '用量补录', command: 'usage_reconcile', args: () => '{}' },
   { label: 'AgentData 状态', command: 'agentData_status', args: () => '{}' },
 ];
 

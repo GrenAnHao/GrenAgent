@@ -6,7 +6,6 @@ import { SettingCard } from './SettingCard';
 import { SettingFieldInput } from './SettingField';
 import { useSettingsForm } from './useSettingsForm';
 import { AppearanceSettings } from './AppearanceSettings';
-import { DevinAccountCard } from './DevinAccountCard';
 import { ProvidersSettings } from './ProvidersSettings';
 import { CapabilityModelField } from './CapabilityModelField';
 import { migratePhase2 } from './phase2Migration';
@@ -196,7 +195,6 @@ export function SettingsPanel() {
                                 />
                               ),
                             )}
-                          {sec.title === '搜索' ? <DevinAccountCard /> : null}
                         </SettingCard>
                       ))}
                     </>

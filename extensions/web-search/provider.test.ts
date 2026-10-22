@@ -3,67 +3,28 @@ import {
   clampWebSearchLimit,
   formatResults,
   parseBing,
-  parseBrave,
   parseDuckDuckGo,
   parseSogou,
-  parseTavily,
   resolveProvider,
   WEB_SEARCH_MAX_RESULTS,
   WEB_SEARCH_SNIPPET_CHARS,
 } from "./provider.js";
 
 describe("resolveProvider", () => {
-  it("uses tavily when its key is set", () => {
-    expect(resolveProvider({ TAVILY_API_KEY: "tvly-x" })).toMatchObject({
-      ok: true,
-      provider: "tavily",
-      apiKey: "tvly-x",
-    });
-  });
-  it("selects brave when configured", () => {
-    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "brave", BRAVE_API_KEY: "b-x" })).toMatchObject({
-      ok: true,
-      provider: "brave",
-      apiKey: "b-x",
-    });
-  });
-  it("falls back to bing when no key is set", () => {
+  it("falls back to bing when nothing is configured", () => {
     expect(resolveProvider({})).toEqual({ ok: true, provider: "bing" });
-    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "tavily" })).toEqual({ ok: true, provider: "bing" });
+    // 已移除的 provider 名不再识别，回落到 bing。
+    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "tavily", TAVILY_API_KEY: "k" })).toEqual({ ok: true, provider: "bing" });
+    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "brave", BRAVE_API_KEY: "k" })).toEqual({ ok: true, provider: "bing" });
   });
-  it("uses bing / sogou / duckduckgo / baidu / csdn / juejin when explicitly requested", () => {
+  it("uses bing / sogou / duckduckgo / baidu when explicitly requested", () => {
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "bing" })).toEqual({ ok: true, provider: "bing" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "sogou" })).toEqual({ ok: true, provider: "sogou" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "duckduckgo" })).toEqual({ ok: true, provider: "duckduckgo" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "ddg" })).toEqual({ ok: true, provider: "duckduckgo" });
     expect(resolveProvider({ WEB_SEARCH_PROVIDER: "baidu" })).toEqual({ ok: true, provider: "baidu" });
-    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "csdn" })).toEqual({ ok: true, provider: "csdn" });
-    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "juejin" })).toEqual({ ok: true, provider: "juejin" });
-    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "devin", TAVILY_API_KEY: "tvly-x" })).toEqual({ ok: true, provider: "devin" });
-  });
-});
-
-describe("parseTavily", () => {
-  it("maps content→snippet, reads answer, drops urlless rows", () => {
-    const parsed = parseTavily({
-      answer: "AI summary",
-      results: [
-        { title: "T1", url: "https://a.com", content: "snip1", score: 0.9 },
-        { title: "T2", url: "", content: "x" },
-      ],
-    });
-    expect(parsed.answer).toBe("AI summary");
-    expect(parsed.results).toEqual([{ title: "T1", url: "https://a.com", snippet: "snip1" }]);
-  });
-  it("tolerates missing fields", () => {
-    expect(parseTavily({})).toEqual({ answer: undefined, results: [] });
-  });
-});
-
-describe("parseBrave", () => {
-  it("maps web.results description→snippet", () => {
-    const parsed = parseBrave({ web: { results: [{ title: "B1", url: "https://b.com", description: "desc1" }] } });
-    expect(parsed.results).toEqual([{ title: "B1", url: "https://b.com", snippet: "desc1" }]);
+    // 已移除的引擎名不再识别，回落到默认 bing。
+    expect(resolveProvider({ WEB_SEARCH_PROVIDER: "csdn" })).toEqual({ ok: true, provider: "bing" });
   });
 });
 
@@ -134,9 +95,8 @@ describe("parseSogou", () => {
 });
 
 describe("formatResults", () => {
-  it("renders answer + DSH-style markdown source list", () => {
-    const out = formatResults("q", { answer: "A", results: [{ title: "T", url: "https://u", snippet: "s" }] });
-    expect(out).toContain("A");
+  it("renders a DSH-style markdown source list", () => {
+    const out = formatResults("q", { results: [{ title: "T", url: "https://u", snippet: "s" }] });
     expect(out).toContain("- [T](https://u) — s");
   });
   it("handles empty results", () => {

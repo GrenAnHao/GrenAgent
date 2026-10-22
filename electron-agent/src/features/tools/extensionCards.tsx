@@ -1085,24 +1085,6 @@ const WebSearchCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
   );
 };
 
-const MultiSearchCard: FC<ExtensionCardProps> = ({ args, result, status }) => {
-  const d = getDetails(result);
-  const query = asString(d?.query) || getArgString(args, 'query');
-  const engines = Array.isArray(d?.engines) ? (d!.engines as unknown[]).map(asString).filter(Boolean).join(', ') : 'multi';
-  const error = asString(d?.error);
-  const results = Array.isArray(d?.results) ? (d!.results as Array<{ title?: unknown; url?: unknown; snippet?: unknown }>) : [];
-  return (
-    <SearchResultsPanel
-      query={query}
-      provider={engines}
-      results={results}
-      status={status}
-      error={error}
-      testId="card-web_search_multi"
-    />
-  );
-};
-
 const FetchArticleCard: FC<ExtensionCardProps & { testId: string }> = ({ args, result, status, testId }) => {
   const d = getDetails(result);
   const url = asString(d?.url) || getArgString(args, 'url');
@@ -1216,7 +1198,7 @@ const EXTENSION_CARD_RENDERERS: Record<string, FC<ExtensionCardProps>> = {
   spawn_agent: SpawnAgentCard,
   fetch_url: FetchUrlCard,
   web_search: WebSearchCard,
-  web_search_multi: MultiSearchCard,
+  anysearch_search: WebSearchCard,
   fetch_csdn_article: (p) => <FetchArticleCard {...p} testId="card-fetch_csdn_article" />,
   fetch_juejin_article: (p) => <FetchArticleCard {...p} testId="card-fetch_juejin_article" />,
   fetch_linuxdo_article: (p) => <FetchArticleCard {...p} testId="card-fetch_linuxdo_article" />,

@@ -18,6 +18,7 @@ import { ModelRuntimeHost } from '../agent/modelRuntimeHost';
 import { snapshotSessionModel } from '../agent/workspaceHandle';
 import { PiRuntimeService } from '../app/piRuntimeService';
 import { SubagentService } from '../app/subagentService';
+import { UsageService } from '../app/usageService';
 import { SandboxManager } from '../app/sandbox/sandboxManager';
 import { startJobsBridge } from '../app/jobsBridge';
 import type { ActiveModel, AgentMethod, ExtensionCatalogEntry, HostApi } from './contract';
@@ -138,6 +139,7 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
     workspaceForCwd: (cwd) => agentHost.workspaceForCwd(cwd) ?? cwd,
   });
   const subagents = new SubagentService(new SandboxManager({}));
+  const usage = new UsageService(agentDir);
   // 会话已被替换时，auto-title 把标题写进原 jsonl，不会再走当前 pi 的 session_info_changed。
   // 补一次同名事件，侧栏会重读会话列表。workspace 留空，避免被当成当前画面上的会话事件。
   const stopAutoTitleNotice = subscribeSessionTitleWritten(() => {
@@ -204,6 +206,8 @@ export function createRuntimeGraph(options: RuntimeGraphOptions): RuntimeGraph {
       name: entry.name,
       ...(entry.manifest ? { manifest: { id: entry.manifest.id } } : {}),
     })),
+    'usage.report': () => usage.report(),
+    'usage.reconcile': () => usage.reconcile(),
   };
 
   return {

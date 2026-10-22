@@ -1,40 +1,27 @@
-// web-search: open-webSearch 能力内置版 — 多引擎联网搜索（web_search / web_search_multi）。
+// web-search: 联网搜索（web_search）与 AnySearch（anysearch_search / anysearch_sub_domains）。
 // 单页抓取走 web-fetch 的 fetch_url，这里不再注册站点专用抓取。
 
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { isSafeUrl } from "../web-fetch/html.js";
-import { getCrawler, type CrawlSuccessResult } from "../web-crawler/index.js";
 import {
   resolveWebSearchChain,
-  filterResultsByHost,
-  normalizeEngineName,
   parseBaidu,
-  parseCsdn,
   parseEngineChain,
-  parseExa,
-  parseJuejin,
   runEngineChain,
-  siteQuery,
-  SUPPORTED_SEARCH_ENGINES,
   type BuiltinEngine,
 } from "./engines/index.js";
-import { codeSearchFolder, devinSessionReady, devinUserMessage, runDevinCodeSearch, runDevinWebSearch } from "./devin.js";
 import { toolPrompt } from "../_shared/toolPrompt.js";
+import { registerAnySearchTools } from "./anysearch.js";
 import {
   clampWebSearchLimit,
   formatResults,
   parseBing,
-  parseBrave,
   parseDuckDuckGo,
   parseSogou,
-  parseTavily,
   retainSearchResults,
   resolveProvider,
   type ParsedSearch,
-  type SearchResult,
 } from "./provider.js";
-import { executeMultiEngineSearch, type SearchEngineExecutor } from "./searchService.js";
 import { getConfig, getAllConfig } from "../_shared/runtime-config.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
 import { currentCwd } from "../_shared/workspace-context.js";
@@ -44,7 +31,6 @@ function toolCwd(ctx: { cwd?: unknown } | undefined): string {
 }
 
 const TIMEOUT_MS = Number(process.env.WEB_SEARCH_TIMEOUT_MS ?? "15000") || 15000;
-const FETCH_BODY_MAX = 4000;
 
 export const pluginManifest = {
   id: "web-search",
@@ -70,33 +56,6 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
-}
-
-async function tavilySearch(apiKey: string, query: string, maxResults: number, signal: AbortSignal | undefined) {
-  const res = await fetchWithTimeout(
-    "https://api.tavily.com/search",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey, query, max_results: maxResults, include_answer: true }),
-    },
-    signal,
-    TIMEOUT_MS,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.json() as Promise<unknown>;
-}
-
-async function braveSearch(apiKey: string, query: string, maxResults: number, signal: AbortSignal | undefined) {
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
-  const res = await fetchWithTimeout(
-    url,
-    { headers: { "X-Subscription-Token": apiKey, accept: "application/json", "accept-encoding": "gzip" } },
-    signal,
-    TIMEOUT_MS,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.json() as Promise<unknown>;
 }
 
 async function duckduckgoSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
@@ -145,78 +104,6 @@ async function baiduSearch(query: string, maxResults: number, signal: AbortSigna
   return { results: parseBaidu(await res.text()).slice(0, maxResults) };
 }
 
-async function csdnSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
-  const res = await fetchWithTimeout(
-    `https://so.csdn.net/api/v3/search?q=${encodeURIComponent(query)}&p=1&t=all`,
-    { headers: { accept: "application/json", "user-agent": UA } },
-    signal,
-    TIMEOUT_MS,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return { results: parseCsdn(await res.json()).slice(0, maxResults) };
-}
-
-async function juejinSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
-  const params = new URLSearchParams({
-    aid: "2608",
-    spider: "0",
-    query,
-    id_type: "0",
-    cursor: "0",
-    limit: String(Math.min(20, maxResults)),
-    search_type: "0",
-    sort_type: "0",
-    version: "1",
-  });
-  const res = await fetchWithTimeout(`https://api.juejin.cn/search_api/v1/search?${params}`, {
-    headers: { accept: "application/json", "content-type": "application/json", "user-agent": UA },
-  }, signal, TIMEOUT_MS);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return { results: parseJuejin(await res.json()).slice(0, maxResults) };
-}
-
-async function exaSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
-  const res = await fetchWithTimeout(
-    "https://exa.ai/search/api/search-fast",
-    {
-      method: "POST",
-      headers: {
-        accept: "*/*",
-        "content-type": "text/plain;charset=UTF-8",
-        origin: "https://exa.ai",
-        "user-agent": UA,
-      },
-      body: JSON.stringify({
-        numResults: maxResults,
-        query,
-        type: "auto",
-        useAutoprompt: true,
-        text: true,
-        density: "compact",
-        resolvedSearchType: "neural",
-        moderation: true,
-        fastMode: false,
-      }),
-    },
-    signal,
-    TIMEOUT_MS,
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return { results: parseExa(await res.json()).slice(0, maxResults) };
-}
-
-async function zhihuSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
-  const parsed = await bingSearch(siteQuery("zhuanlan.zhihu.com", query), maxResults, signal);
-  return {
-    results: filterResultsByHost(parsed.results, (h) => h === "zhuanlan.zhihu.com").slice(0, maxResults),
-  };
-}
-
-async function linuxdoSearch(query: string, maxResults: number, signal: AbortSignal | undefined): Promise<ParsedSearch> {
-  const parsed = await bingSearch(siteQuery("linux.do", query), maxResults, signal);
-  return { results: filterResultsByHost(parsed.results, (h) => h === "linux.do" || h.endsWith(".linux.do")).slice(0, maxResults) };
-}
-
 async function runBuiltinEngine(
   engine: BuiltinEngine,
   query: string,
@@ -226,47 +113,7 @@ async function runBuiltinEngine(
   if (engine === "bing") return bingSearch(query, maxResults, signal);
   if (engine === "sogou") return sogouSearch(query, maxResults, signal);
   if (engine === "duckduckgo") return duckduckgoSearch(query, maxResults, signal);
-  if (engine === "baidu") return baiduSearch(query, maxResults, signal);
-  if (engine === "csdn") return csdnSearch(query, maxResults, signal);
-  if (engine === "juejin") return juejinSearch(query, maxResults, signal);
-  if (engine === "exa") return exaSearch(query, maxResults, signal);
-  if (engine === "zhihu") return zhihuSearch(query, maxResults, signal);
-  if (engine === "devin") return { results: await runDevinWebSearch(query, maxResults, signal) };
-  return linuxdoSearch(query, maxResults, signal);
-}
-
-function buildEngineExecutors(signal: AbortSignal | undefined): Record<string, SearchEngineExecutor> {
-  return Object.fromEntries(
-    SUPPORTED_SEARCH_ENGINES.map((engine) => [
-      engine,
-      async (query, limit, sig) => (await runBuiltinEngine(engine, query, limit, sig ?? signal)).results,
-    ]),
-  );
-}
-
-function resolveSearchEngines(raw: string[] | undefined, fallback: BuiltinEngine[]): BuiltinEngine[] {
-  if (!raw?.length) return fallback;
-  const out: BuiltinEngine[] = [];
-  for (const item of raw) {
-    const name = normalizeEngineName(item);
-    if (name && !out.includes(name)) out.push(name);
-  }
-  return out.length > 0 ? out : fallback;
-}
-
-async function fetchBodies(results: SearchResult[], signal: AbortSignal | undefined): Promise<string> {
-  const parts: string[] = [];
-  const crawler = getCrawler();
-  for (const r of results) {
-    if (!isSafeUrl(r.url).ok) continue;
-    const res = await crawler.crawl({ url: r.url, signal: signal ?? undefined });
-    if (!("contentType" in res.data)) continue;
-    let md = (res.data as CrawlSuccessResult).content ?? "";
-    if (!md) continue;
-    if (md.length > FETCH_BODY_MAX) md = `${md.slice(0, FETCH_BODY_MAX)}…`;
-    parts.push(`## ${r.title || r.url}\n${r.url}\n\n${md}`);
-  }
-  return parts.join("\n\n---\n\n");
+  return baiduSearch(query, maxResults, signal);
 }
 
 function searchDetails(query: string, provider: string, parsed: ParsedSearch, engines?: string[]) {
@@ -285,12 +132,11 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web with zero-config fallback (Bing → Sogou → Baidu). When a Devin login is present and no engine chain is set, Devin is tried first. Use web_search_multi for multi-engine control, or fetch_* tools for full article bodies.",
-    promptSnippet: "Search the web; returns summary + result links.",
+      "Search the web with zero-config fallback (Bing → Sogou → Baidu). Use fetch_url for full article bodies. For one site, put a `site:` operator in the query.",
+    promptSnippet: "Search the web; returns result links.",
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
       maxResults: Type.Optional(Type.Number({ description: "Max sources (default 8, hard cap 8)" })),
-      fetchTop: Type.Optional(Type.Number({ description: "Also fetch the body of the top N results as markdown (default 0, max 3)" })),
     }),
     async execute(_toolCallId, params, signal, _update, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
       const denied = await requireNetwork(control, 'web_search', toolCwd(ctx));
@@ -308,21 +154,13 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
       let parsed: ParsedSearch;
       let usedEngine: string = choice.provider;
       try {
-        if (choice.provider === "brave") {
-          parsed = parseBrave(await braveSearch(choice.apiKey, query, maxResults, signal ?? undefined));
-        } else if (choice.provider === "tavily") {
-          parsed = parseTavily(await tavilySearch(choice.apiKey, query, maxResults, signal ?? undefined));
-        } else {
-          const explicitChain = parseEngineChain(getConfig("WEB_SEARCH_ENGINES"));
-          const provider = choice.provider as BuiltinEngine;
-          const devinReady = explicitChain.length === 0 && provider === "bing" ? await devinSessionReady() : false;
-          const chain = resolveWebSearchChain(explicitChain, provider, devinReady);
-          const out = await runEngineChain(chain, query, maxResults, signal ?? undefined, (engine) =>
-            runBuiltinEngine(engine, query, maxResults, signal ?? undefined),
-          );
-          parsed = out.parsed;
-          if (out.engine !== "none") usedEngine = out.engine;
-        }
+        const explicitChain = parseEngineChain(getConfig("WEB_SEARCH_ENGINES"));
+        const chain = resolveWebSearchChain(explicitChain, choice.provider);
+        const out = await runEngineChain(chain, query, maxResults, signal ?? undefined, (engine) =>
+          runBuiltinEngine(engine, query, maxResults, signal ?? undefined),
+        );
+        parsed = out.parsed;
+        if (out.engine !== "none") usedEngine = out.engine;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return {
@@ -331,120 +169,14 @@ export default function (pi: ExtensionAPI, control: DesktopControlPort = desktop
         };
       }
 
-      let text = formatResults(query, parsed);
-      const fetchTop = Math.max(0, Math.min(params.fetchTop ?? 0, 3));
-      if (fetchTop > 0 && parsed.results.length > 0) {
-        const bodies = await fetchBodies(parsed.results.slice(0, fetchTop), signal ?? undefined);
-        if (bodies) text += `\n\n---\n\n${bodies}`;
-      }
-
       return {
-        content: [{ type: "text", text }],
+        content: [{ type: "text", text: formatResults(query, parsed) }],
         details: searchDetails(query, usedEngine, parsed),
       };
     },
   });
 
-  // open-webSearch 多引擎联网搜索工具。原名 search，与 batch-tools 的本地代码检索 search 同名冲突，故改名 web_search_multi。
-  pi.registerTool({
-    name: "web_search_multi",
-    label: "Multi-Engine Search",
-    description:
-      "Search the web using one or more built-in engines (devin, bing, baidu, sogou, csdn, juejin, exa, linuxdo, duckduckgo). Devin needs a login from Settings; the others need no API key.",
-    promptSnippet: "Multi-engine web search (open-webSearch compatible).",
-    parameters: Type.Object({
-      query: Type.String({ description: "Search query" }),
-      limit: Type.Optional(Type.Number({ description: "Max sources (default 8, hard cap 8)" })),
-      engines: Type.Optional(
-        Type.Array(Type.String(), {
-          description: `Engines to use (default: bing,baidu). Supported: ${SUPPORTED_SEARCH_ENGINES.join(", ")}`,
-        }),
-      ),
-    }),
-    async execute(_toolCallId, params, signal, _update, ctx) {
-      const denied = await requireNetwork(control, 'web_search_multi', toolCwd(ctx));
-      if (denied) return denied;
-      const query = params.query.trim();
-      const limit = clampWebSearchLimit(params.limit);
-      const engines = resolveSearchEngines(params.engines, ["bing", "baidu"]);
-      const out = await executeMultiEngineSearch(
-        query,
-        engines,
-        limit,
-        signal ?? undefined,
-        buildEngineExecutors(signal ?? undefined),
-      );
-      const text = formatResults(query, { results: out.results });
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          query,
-          provider: "multi",
-          engines: out.engines,
-          count: out.results.length,
-          partialFailures: out.partialFailures,
-          results: retainSearchResults(out.results).results.map((r) => ({
-            title: r.title,
-            url: r.url,
-            snippet: r.snippet,
-          })),
-        },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "devin_code_search",
-    label: "Devin Code Search",
-    description:
-      "Semantic code search through a logged-in Devin account. Sends the query and selected file excerpts to Windsurf. " +
-      "The folder must stay inside the workspace. One search runs at a time. Use search for exact regex, or when code must stay on this machine.",
-    ...toolPrompt(
-      "Semantic code search via Devin; sends the query and selected excerpts to Windsurf.",
-      [
-        "Use devin_code_search to locate code by meaning when a Devin login exists. It sends the query and selected file excerpts to Windsurf.",
-        "Use search for exact regex or literal text, and whenever code must stay on this machine. Do not use devin_code_search on a workspace that contains secrets.",
-      ],
-    ),
-    parameters: Type.Object({
-      query: Type.String({ description: "What to find in the workspace" }),
-      path: Type.Optional(Type.String({ description: "Subdirectory inside the workspace (default: workspace root)." })),
-    }),
-    async execute(_toolCallId, params, signal, _update, ctx) {
-      const denied = await requireNetwork(control, "devin_code_search", toolCwd(ctx));
-      if (denied) return denied;
-      const cwd = toolCwd(ctx);
-      let folder: string;
-      try {
-        folder = codeSearchFolder(cwd, params.path);
-      } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text }], details: { error: text } };
-      }
-      const query = params.query.trim();
-      try {
-        const out = await runDevinCodeSearch(query, cwd, folder, signal ?? new AbortController().signal);
-        if (out.status === "error") {
-          const text = devinUserMessage(out.content);
-          return { content: [{ type: "text", text }], details: { error: text, query, folder } };
-        }
-        return {
-          content: [{ type: "text", text: out.content }],
-          details: {
-            query,
-            folder,
-            files: out.files.map((file) => ({
-              path: file.path,
-              ranges: file.ranges.map((range) => ({ start: range.start, end: range.end })),
-            })),
-          },
-        };
-      } catch (error) {
-        const text = devinUserMessage(error instanceof Error ? error.message : String(error));
-        return { content: [{ type: "text", text }], details: { error: text, query, folder } };
-      }
-    },
-  });
+  registerAnySearchTools(pi, (toolName, ctx) => requireNetwork(control, toolName, toolCwd(ctx)));
 }
 
 async function requireNetwork(

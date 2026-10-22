@@ -61,7 +61,7 @@ export function __resetAgentModeForTest(): void {
 // sandbox_permissions 在同一次调用里升权，用户批准）：
 //   - pi 内置：read / grep / find / ls / bash
 //   - 联网只读：fetch_url（web-fetch，format 选 markdown / text / html / json / llms）、
-//     web_search / web_search_multi（web-search）
+//     web_search / anysearch_search / anysearch_sub_domains（web-search）
 //   - 本地只读检索：search（batch-tools 多正则/glob 本地检索）、
 //     memory_search / conversation_search、git_diff（code-review）、
 //     code_explore（code-retrieval，只读 CodeGraph 检索；与上游 MCP 一样只列这一个）
@@ -78,7 +78,8 @@ export const ASK_TOOLS: readonly string[] = [
   "bash",
   "fetch_url",
   "web_search",
-  "web_search_multi",
+  "anysearch_search",
+  "anysearch_sub_domains",
   "search",
   "memory_search",
   "conversation_search",

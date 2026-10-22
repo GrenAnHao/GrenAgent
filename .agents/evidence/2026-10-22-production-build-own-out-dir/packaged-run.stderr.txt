@@ -1,0 +1,157 @@
+(node:54716) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `GrenAgent --trace-warnings ...` to show where the warning was created)
+(node:54716) UnhandledPromiseRejectionWarning: TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+    at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+    at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634406)
+    at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\bytecode-loader.cjs:71:26)
+    at Module.load (node:internal/modules/cjs/loader:1448:32)
+    at Module._load (node:internal/modules/cjs/loader:1270:12)
+    at c._load (node:electron/js2c/node_init:2:17993)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+    at Module.require (node:internal/modules/cjs/loader:1470:12)
+(node:54716) UnhandledPromiseRejectionWarning: Unhandled promise rejection. This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). To terminate the node process on unhandled promise rejection, use the CLI flag `--unhandled-rejections=strict` (see https://nodejs.org/api/cli.html#cli_unhandled_rejections_mode). (rejection id: 4)
+(node:54716) UnhandledPromiseRejectionWarning: TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+    at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+    at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634489)
+    at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\bytecode-loader.cjs:71:26)
+    at Module.load (node:internal/modules/cjs/loader:1448:32)
+    at Module._load (node:internal/modules/cjs/loader:1270:12)
+    at c._load (node:electron/js2c/node_init:2:17993)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+    at Module.require (node:internal/modules/cjs/loader:1470:12)
+(node:54716) UnhandledPromiseRejectionWarning: Unhandled promise rejection. This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). To terminate the node process on unhandled promise rejection, use the CLI flag `--unhandled-rejections=strict` (see https://nodejs.org/api/cli.html#cli_unhandled_rejections_mode). (rejection id: 5)
+(node:54716) UnhandledPromiseRejectionWarning: TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+    at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+    at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\chunks\armin-CNkKJmPz.jsc:1:634566)
+    at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar\out\main\bytecode-loader.cjs:71:26)
+    at Module.load (node:internal/modules/cjs/loader:1448:32)
+    at Module._load (node:internal/modules/cjs/loader:1270:12)
+    at c._load (node:electron/js2c/node_init:2:17993)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+    at Module.require (node:internal/modules/cjs/loader:1470:12)
+(node:54716) UnhandledPromiseRejectionWarning: Unhandled promise rejection. This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). To terminate the node process on unhandled promise rejection, use the CLI flag `--unhandled-rejections=strict` (see https://nodejs.org/api/cli.html#cli_unhandled_rejections_mode). (rejection id: 6)
+[54716:1022/121115.118:ERROR:ui\base\resource\resource_bundle.cc:1106] Failed to load C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\chrome_100_percent.pak
+Some features may not be available.
+[agentdata-host] (node:73024) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[agentdata-host] (Use `GrenAgent --trace-warnings ...` to show where the warning was created)
+[agent-host] (node:73036) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[agent-host] (Use `GrenAgent --trace-warnings ...` to show where the warning was created)
+[agent-host] [agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+[agent-host]     at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+[agent-host]     at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+[agent-host]     at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634406)
+[agent-host]     at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\bytecode-loader.cjs:71:26)
+[agent-host]     at Module.load (node:internal/modules/cjs/loader:1448:32)
+[agent-host]     at Module._load (node:internal/modules/cjs/loader:1270:12)
+[agent-host]     at c._load (node:electron/js2c/node_init:2:17993)
+[agent-host]     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+[agent-host]     at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+[agent-host]     at Module.require (node:internal/modules/cjs/loader:1470:12) {
+[agent-host]   code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'
+[agent-host] }
+[agent-host] [agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+[agent-host]     at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+[agent-host]     at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+[agent-host]     at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634489)
+[agent-host]     at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\bytecode-loader.cjs:71:26)
+[agent-host]     at Module.load (node:internal/modules/cjs/loader:1448:32)
+[agent-host]     at Module._load (node:internal/modules/cjs/loader:1270:12)
+[agent-host]     at c._load (node:electron/js2c/node_init:2:17993)
+[agent-host]     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+[agent-host]     at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+[agent-host]     at Module.require (node:internal/modules/cjs/loader:1470:12) {
+[agent-host]   code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'
+[agent-host] }
+[agent-host] [agent-host] unhandledRejection TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+[agent-host]     at importModuleDynamicallyCallback (node:internal/modules/esm/utils:273:9)
+[agent-host]     at dynamicImport (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634157)
+[agent-host]     at Object.<anonymous> (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\chunks\armin-CNkKJmPz.jsc:1:634566)
+[agent-host]     at Module._extensions..jsc.Module._extensions..cjsc (C:\Users\rxstudio\AppData\Local\Temp\grenagent-pkg-verify\win-unpacked\resources\app.asar.unpacked\out\main\bytecode-loader.cjs:71:26)
+[agent-host]     at Module.load (node:internal/modules/cjs/loader:1448:32)
+[agent-host]     at Module._load (node:internal/modules/cjs/loader:1270:12)
+[agent-host]     at c._load (node:electron/js2c/node_init:2:17993)
+[agent-host]     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+[agent-host]     at wrapModuleLoad (node:internal/modules/cjs/loader:244:24)
+[agent-host]     at Module.require (node:internal/modules/cjs/loader:1470:12) {
+[agent-host]   code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING'
+[agent-host] }
+[agent-host] [loop-guard] extension loaded
+[agent-host] [rulebook] extension loaded
+[agent-host] [agent-mode] extension loaded
+[agent-host] [diagram-hint] extension loaded
+[agent-host] [fable-behavior] extension loaded
+[agent-host] [github] extension loaded
+[agent-host] [loop-guard] extension loaded
+[agent-host] [rulebook] extension loaded
+[agent-host] [agent-mode] extension loaded
+[agent-host] [diagram-hint] extension loaded
+[agent-host] [fable-behavior] extension loaded
+[agent-host] [github] extension loaded
+[agent-host] [71876] Using callback port derived from the server URL: 18783
+[agent-host] [71876] Discovering OAuth server configuration...
+[agent-host] [44528] Using callback port derived from the server URL: 18783
+[agent-host] [44528] Discovering OAuth server configuration...
+[agent-host] Context7 Documentation MCP Server v4.4.4 running on stdio
+[agent-host] Context7 Documentation MCP Server v4.4.4 running on stdio
+[agent-host] [71876] [71876] Connecting to remote server: https://mcp.deepwiki.com/mcp
+[agent-host] [71876] Using transport strategy: http-first
+[agent-host] [44528] [44528] Connecting to remote server: https://mcp.deepwiki.com/mcp
+[agent-host] [44528] Using transport strategy: http-first
+[agent-host] [71876] Connected to remote server using StreamableHTTPClientTransport
+[agent-host] [71876] Local STDIO server running
+[agent-host] [71876] Proxy established successfully between local STDIO and remote StreamableHTTPClientTransport
+[agent-host] [71876] Press Ctrl+C to exit
+[agent-host] [71876] [Local→Remote] initialize
+[agent-host] [71876] {
+[agent-host]   "jsonrpc": "2.0",
+[agent-host]   "id": 0,
+[agent-host]   "method": "initialize",
+[agent-host]   "params": {
+[agent-host]     "protocolVersion": "2025-11-25",
+[agent-host]     "capabilities": {},
+[agent-host]     "clientInfo": {
+[agent-host]       "name": "grenagent (via mcp-remote 0.15.2)",
+[agent-host]       "version": "0.1.0"
+[agent-host]     }
+[agent-host]   }
+[agent-host] }
+[agent-host] [44528] Connected to remote server using StreamableHTTPClientTransport
+[agent-host] [44528] Local STDIO server running
+[agent-host] [44528] Proxy established successfully between local STDIO and remote StreamableHTTPClientTransport
+[agent-host] [44528] Press Ctrl+C to exit
+[agent-host] [44528] [Local→Remote] initialize
+[agent-host] [44528] {
+[agent-host]   "jsonrpc": "2.0",
+[agent-host]   "id": 0,
+[agent-host]   "method": "initialize",
+[agent-host]   "params": {
+[agent-host]     "protocolVersion": "2025-11-25",
+[agent-host]     "capabilities": {},
+[agent-host]     "clientInfo": {
+[agent-host]       "name": "grenagent (via mcp-remote 0.15.2)",
+[agent-host]       "version": "0.1.0"
+[agent-host]     }
+[agent-host]   }
+[agent-host] }
+[agent-host] [71876] [Remote→Local] 0
+[agent-host] [71876] [Local→Remote] notifications/initialized
+[agent-host] [71876] [Local→Remote] tools/list
+[agent-host] [44528] [Remote→Local] 0
+[agent-host] [44528] [Local→Remote] notifications/initialized
+[agent-host] [44528] [Local→Remote] tools/list
+[agent-host] [44528] [Remote→Local] 1
+[agent-host] [44528] [Local→Remote] resources/list
+[agent-host] [44528] [Remote→Local] 2
+[agent-host] [44528] [Local→Remote] resources/templates/list
+[agent-host] [44528] [Remote→Local] 3
+[agent-host] [71876] [Remote→Local] 1
+[agent-host] [71876] [Local→Remote] resources/list
+[agent-host] [71876] [Remote→Local] 2
+[agent-host] [71876] [Local→Remote] resources/templates/list
+[agent-host] [71876] [Remote→Local] 3

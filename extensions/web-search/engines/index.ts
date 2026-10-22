@@ -1,19 +1,8 @@
 import type { ParsedSearch } from "../provider.js";
 
-export type BuiltinEngine = "devin" | "bing" | "sogou" | "duckduckgo" | "baidu" | "csdn" | "juejin" | "exa" | "linuxdo" | "zhihu";
+export type BuiltinEngine = "bing" | "sogou" | "duckduckgo" | "baidu";
 
-export const SUPPORTED_SEARCH_ENGINES: BuiltinEngine[] = [
-  "devin",
-  "bing",
-  "sogou",
-  "duckduckgo",
-  "baidu",
-  "csdn",
-  "juejin",
-  "exa",
-  "linuxdo",
-  "zhihu",
-];
+export const SUPPORTED_SEARCH_ENGINES: BuiltinEngine[] = ["bing", "sogou", "duckduckgo", "baidu"];
 
 const ENGINE_SET = new Set<string>(SUPPORTED_SEARCH_ENGINES);
 
@@ -21,7 +10,6 @@ export function normalizeEngineName(engine: string): BuiltinEngine | null {
   const cleaned = engine.trim().toLowerCase().replace(/[\s._-]+/g, "");
   if (cleaned === "ddg" || cleaned === "duckduckgo") return "duckduckgo";
   if (cleaned === "sougou" || cleaned === "搜狗") return "sogou";
-  if (cleaned === "zhihu" || cleaned === "知乎") return "zhihu";
   if (isBuiltinEngine(cleaned)) return cleaned;
   return null;
 }
@@ -40,19 +28,14 @@ export function parseEngineChain(raw: string | undefined): BuiltinEngine[] {
   return out;
 }
 
-/** Explicit engine list wins. Otherwise Devin leads when a session is ready, or when the user asked for Devin. */
-export function resolveWebSearchChain(
-  explicit: BuiltinEngine[],
-  provider: BuiltinEngine,
-  devinReady: boolean,
-): BuiltinEngine[] {
+/** Explicit engine list wins. Otherwise the provider's default fallback chain. */
+export function resolveWebSearchChain(explicit: BuiltinEngine[], provider: BuiltinEngine): BuiltinEngine[] {
   if (explicit.length > 0) return explicit;
-  return defaultSearchChain(provider, devinReady);
+  return defaultSearchChain(provider);
 }
 
-export function defaultSearchChain(provider: BuiltinEngine, devinReady: boolean): BuiltinEngine[] {
-  if (provider === "devin") return ["devin", "bing", "sogou", "baidu"];
-  if (provider === "bing") return devinReady ? ["devin", "bing", "sogou", "baidu"] : ["bing", "sogou", "baidu"];
+export function defaultSearchChain(provider: BuiltinEngine): BuiltinEngine[] {
+  if (provider === "bing") return ["bing", "sogou", "baidu"];
   if (provider === "sogou") return ["sogou", "baidu"];
   return [provider];
 }
@@ -76,7 +59,3 @@ export async function runEngineChain(
 }
 
 export { parseBaidu } from "./baidu.js";
-export { parseCsdn } from "./csdn.js";
-export { parseJuejin } from "./juejin.js";
-export { parseExa } from "./exa.js";
-export { filterResultsByHost, siteQuery } from "./site.js";

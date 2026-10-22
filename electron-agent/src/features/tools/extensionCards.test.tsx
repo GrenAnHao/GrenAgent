@@ -107,7 +107,7 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     renderCard('web_search', {
       content: [{ type: 'text', text: 'summary' }],
       details: {
-        provider: 'tavily',
+        provider: 'bing',
         query: 'pi',
         count: 2,
         results: [
@@ -125,19 +125,19 @@ describe('renderExtensionCard', { timeout: 30_000 }, () => {
     expect(screen.getByText('one.dev')).toBeTruthy();
   });
 
-  it('web_search_multi shows aggregated links', () => {
-    renderCard('web_search_multi', {
+  it('anysearch_search reuses the search card and shows the anysearch provider', () => {
+    renderCard('anysearch_search', {
       content: [{ type: 'text', text: 'summary' }],
       details: {
-        query: 'react 19',
-        engines: ['bing', 'baidu'],
+        query: 'go 1.26',
+        provider: 'anysearch',
         count: 1,
-        results: [{ title: 'React Docs', url: 'https://react.dev', snippet: 'hooks' }],
+        results: [{ title: 'Go 1.26 Release Notes', url: 'https://go.dev/doc/go1.26', snippet: 'notes' }],
       },
     });
-    expect(screen.getByTestId('card-web_search_multi')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('card-web_search_multi-toggle'));
-    expect(screen.getByText('React Docs')).toBeTruthy();
+    expect(screen.getByTestId('card-web_search-toggle').textContent).toContain('anysearch');
+    fireEvent.click(screen.getByTestId('card-web_search-toggle'));
+    expect(screen.getByText('Go 1.26 Release Notes')).toBeTruthy();
   });
 
   it('does not paint local code search as a web result card', () => {

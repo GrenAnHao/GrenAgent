@@ -5,7 +5,6 @@ import {
   fitContextImages,
   isImageBlock,
   resolveLimits,
-  type ImageBlock,
   type ImageLimits,
   type ResizeFn,
 } from "./limits.js";
@@ -35,7 +34,7 @@ export default function imageLimits(pi: ExtensionAPI) {
     const fitted = await fitContentImages(images, limitsFor(ctx.model), resize, "keep");
     if (fitted === images) return { action: "continue" as const };
     // 正文不动：撤回排队引导靠正文匹配，pi 自己的 prompt 路径也会再补尺寸说明。
-    return { action: "transform" as const, text: event.text, images: fitted.filter(isImageBlock) as ImageBlock[] };
+    return { action: "transform" as const, text: event.text, images: fitted.filter(isImageBlock) };
   });
 
   pi.on("context", async (event, ctx) => {

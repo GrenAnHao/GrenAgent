@@ -26,6 +26,8 @@ export const CORE_ALWAYS_ON = new Set<string>([
   "prompt-commands",
   "context-rules",
   "compaction-policy",
+  "image-limits",
+  "usage-ledger",
   "auto-title",
   "todo",
   "present",

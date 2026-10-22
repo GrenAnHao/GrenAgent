@@ -1,0 +1,31 @@
+import { UsageService as Old } from './svc.mjs';
+import { UsageService } from './svc3.mjs';
+import { UsageLedger } from './ledger.mjs';
+import { homedir, tmpdir } from 'node:os'; import { join } from 'node:path'; import { rmSync, statSync } from 'node:fs';
+const agent = join(homedir(), '.pi', 'agent');
+const dbPath = join(tmpdir(), 'usagebench', 'ledger', 'ledger.db'); rmSync(join(tmpdir(), 'usagebench', 'ledger'), { recursive: true, force: true });
+async function timed(label, fn) {
+  let maxLag = 0, last = performance.now();
+  const timer = setInterval(() => { const now = performance.now(); maxLag = Math.max(maxLag, now - last - 5); last = now; }, 5);
+  const s = performance.now(); const r = await fn(); const ms = performance.now() - s; clearInterval(timer);
+  console.log(`${label}: ${Math.round(ms)} ms, 事件循环最长阻塞 ${Math.round(maxLag)} ms`); return r;
+}
+console.log('会话目录 ~/.pi/agent/sessions（账本写到临时目录，不碰真实 ~/.pi/agent/usage）');
+const oldR = await timed('旧实现（每次全量扫描）', () => new Old(agent).report());
+const ledger = new UsageLedger(dbPath);
+const svc = new UsageService(agent, { ledger });
+const first = await timed('账本 首次打开（导入全部历史）', () => svc.report());
+await timed('账本 再次打开（纯 SQL）', () => svc.report());
+await timed('账本 第三次打开（纯 SQL）', () => svc.report());
+const rec = await timed('账本 手动补录（全量扫描，按键去重）', () => svc.reconcile());
+console.log('补录结果', JSON.stringify(rec));
+console.log('账本文件', (statSync(dbPath).size / 1e6).toFixed(1), 'MB');
+for (const k of ['input','output','cacheRead','cacheWrite','totalTokens','messages','sessions']) console.log(`totals.${k} 旧=${oldR.totals[k]} 账本=${first.totals[k]}`);
+console.log(`totals.cost 旧=${oldR.totals.cost.toFixed(6)} 账本=${first.totals.cost.toFixed(6)}`);
+const byDayEq = JSON.stringify(oldR.byDay.map(d=>[d.date,d.tokens])) === JSON.stringify(first.byDay.map(d=>[d.date,d.tokens]));
+const byModel = (r) => JSON.stringify(r.byModel.map(m=>[m.provider,m.model,m.tokens,m.messages]).sort());
+console.log('byDay tokens 一致:', byDayEq, ' byModel 一致:', byModel(oldR) === byModel(first));
+const proj = (r) => JSON.stringify(r.byProject.map(p=>[p.cwd,p.tokens]).sort());
+console.log('byProject tokens 一致:', proj(oldR) === proj(first));
+console.log('calls 前 500 条 totalTokens 合计 旧/账本', oldR.calls.reduce((a,c)=>a+c.totalTokens,0), first.calls.reduce((a,c)=>a+c.totalTokens,0));
+ledger.close();

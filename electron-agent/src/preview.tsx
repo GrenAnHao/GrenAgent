@@ -244,9 +244,6 @@ function Gallery() {
         <Item label="web_search · 空结果">
           {renderExtensionCard({ toolName: 'web_search', args: { query: 'zzz-no-hit' }, result: withDetails({ query: 'zzz-no-hit', results: [] }), status: 'done' })}
         </Item>
-        <Item label="web_search_multi · 多引擎聚合">
-          {renderExtensionCard({ toolName: 'web_search_multi', args: { query: 'react 19 use hook' }, result: withDetails({ query: 'react 19 use hook', engines: ['bing', 'duckduckgo'], results: webResults.slice(0, 2) }), status: 'done' })}
-        </Item>
         <Item label="fetch_url · done（卡片可点开右坞）">
           {renderExtensionCard({ toolName: 'fetch_url', args: { url: 'https://ui.lobehub.com' }, result: withDetails({ url: 'https://ui.lobehub.com', title: 'LobeHub UI 组件库', chars: 5234, crawler: 'jina' }, '一套 React 组件、合理的 UI 设计与友好的开发体验。base-ui 无头基元优先。'), status: 'done' })}
         </Item>

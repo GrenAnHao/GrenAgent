@@ -7,7 +7,7 @@ import { isListingSkippedName, type FileService } from '../app/fileService';
 import { FileWatchService } from '../app/fileWatchService';
 import type { SkillService } from '../app/skillService';
 import type { PromptLibraryService } from '../app/promptLibraryService';
-import type { UsageService } from '../app/usageService';
+import type { UsageReport } from '../../src/lib/usageReport';
 import type { DiagnoseChunk, ProviderService } from '../app/providerService';
 import type { WorkspaceService } from '../app/workspaceService';
 import type { UiHistoryService } from '../app/uiHistoryService';
@@ -23,8 +23,6 @@ import type { PermissionManager } from '../app/permissionManager';
 import type { PluginManager } from '../app/plugin/pluginManager';
 import type { DevService } from '../app/devService';
 import type { PiPackageService } from '../app/piPackageService';
-import { devinAccount } from '../app/devinAccount';
-import { openDevinOAuthWindow } from '../app/devinOAuthWindow';
 import { isHexColor, type WindowBackgroundStore } from '../app/windowBackground';
 import type { AttentionService } from '../app/attentionService';
 import { isAttentionKind, type AttentionNotifyInput } from '../app/attentionContract';
@@ -70,7 +68,11 @@ export interface IpcServices {
   files?: FileService;
   skills?: SkillService;
   promptLibrary?: PromptLibraryService;
-  usage?: UsageService;
+  /** 用量账本（在 agent-host 里查）。 */
+  usage?: {
+    report(): Promise<UsageReport>;
+    reconcile(): Promise<{ files: number; added: number }>;
+  };
   pi?: PiCommandsPort;
   provider?: ProviderService;
   enhancePrompt?: {
@@ -150,7 +152,6 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   });
 
   if (services.settings) registerSettingsCommands(services.settings);
-  registerDevinAccountCommands();
   if (services.mcpPolicy) registerMcpPolicyCommands(services.mcpPolicy);
   if (services.mcpConfig) registerMcpConfigCommands(services.mcpConfig);
   if (services.permissions) registerPermissionCommands(services.permissions);
@@ -162,7 +163,11 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
   if (services.files) registerFileCommands(services.files);
   if (services.skills) registerSkillCommands(services.skills);
   if (services.promptLibrary) registerPromptLibraryCommands(services.promptLibrary);
-  if (services.usage) registerCommand('usage_report', () => services.usage!.report());
+  if (services.usage) {
+    const usage = services.usage;
+    registerCommand('usage_report', () => usage.report());
+    registerCommand('usage_reconcile', () => usage.reconcile());
+  }
   if (services.pi) registerPiCommands(services.pi);
   if (services.provider) registerProviderCommands(services.provider);
   if (services.enhancePrompt) {
@@ -568,12 +573,6 @@ function registerProviderCommands(service: ProviderService): void {
     }, emit);
   });
   registerCommand('diagnose_provider_model_abort', (_event, args) => service.abortDiagnose(readString(args, 'requestId')));
-}
-
-function registerDevinAccountCommands(): void {
-  registerCommand('devin_account_status', () => devinAccount.status());
-  registerCommand('devin_account_login', () => devinAccount.login(openDevinOAuthWindow));
-  registerCommand('devin_account_logout', () => devinAccount.logout());
 }
 
 function registerSettingsCommands(service: SettingsService): void {
