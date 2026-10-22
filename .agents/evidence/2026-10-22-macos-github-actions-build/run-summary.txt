@@ -1,0 +1,10 @@
+run: https://github.com/GrenAnHao/GrenAgent/actions/runs/39735628734 (workflow_dispatch, arch=arm64, macos-latest / macOS 26.6.2)
+result: success; job duration 06:42:38Z -> 06:48:51Z (about 6 min)
+artifact: GrenAgent-mac-arm64 314822680 bytes
+--- electron-builder log (Package dmg step) ---
+  • packaging       platform=darwin arch=arm64 electron=38.8.6 appOutDir=release/mac-arm64
+  • signing         file=release/mac-arm64/GrenAgent.app platform=darwin type=distribution identityName=- identityHash=none provisioningProfile=none
+  • building        target=DMG arch=arm64 file=release/GrenAgent-0.3.0-mac-arm64.dmg
+  • building block map  blockMapFile=release/GrenAgent-0.3.0-mac-arm64.dmg.blockmap
+--- first failed run (allowBuilds placeholder) ---
+run 39735479511: Install extensions failed with ERR_PNPM_IGNORED_BUILDS (@google/genai, esbuild, protobufjs)
