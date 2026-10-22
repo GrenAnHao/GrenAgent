@@ -69,8 +69,15 @@ win:
     - nsis
 mac:
   icon: build/icon.icns
+  category: public.app-category.developer-tools
   target:
     - dmg
+  # 没有 Apple 开发者证书：ad-hoc 签名。Apple Silicon 上未签名或签名被改动的 .app 直接报“已损坏”，
+  # ad-hoc 至少能在系统设置里“仍要打开”。ad-hoc 签名不能开 hardened runtime（库校验会拒绝加载未同签的 .node）。
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
 linux:
   icon: build/icon.png
   target:
