@@ -898,6 +898,52 @@ describe("resources", () => {
   });
 });
 
+describe("reloadMcpServer", () => {
+  // 设置页的状态原来只靠会话里的扩展订阅 manager 再推上去；没有活会话订阅时，重连成功了界面也不知道，
+  // 一直停在上一次的「连接失败」。重载把这个工作区 manager 的权威状态直接带回去。
+  it("重连完返回这个工作区 manager 的状态摘要，失败过的服务器变成已连接", async () => {
+    let attempts = 0;
+    const mgr = createManager({
+      workspace: "D:/reload-ws",
+      connect: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("MCP error -32000: Connection closed");
+        return fakeClient([{ name: "list_pages" }, { name: "click" }]);
+      },
+      readServers: () => [srv("js-reverse-mcp")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("js-reverse-mcp")?.status === "failed");
+
+    const servers = await reloadMcpServer("D:/reload-ws", "js-reverse-mcp", (workspace) => {
+      expect(workspace).toBe("D:/reload-ws");
+      return mgr;
+    });
+
+    expect(servers).toEqual([expect.objectContaining({
+      name: "js-reverse-mcp",
+      status: "connected",
+      tools: 2,
+      toolNames: ["mcp__js_reverse_mcp__list_pages", "mcp__js_reverse_mcp__click"],
+    })]);
+  });
+
+  it("重连仍然失败时如实带回失败", async () => {
+    const mgr = createManager({
+      connect: async () => { throw new Error("spawn pnpm ENOENT"); },
+      readServers: () => [srv("s")],
+      watch: () => () => {},
+      writeCache: () => {},
+    });
+    mgr.init();
+    await waitFor(mgr.subscribe, mgr.snapshot, (s) => s.servers.get("s")?.status === "failed");
+    const servers = await reloadMcpServer("D:/w", "s", () => mgr);
+    expect(servers).toEqual([expect.objectContaining({ name: "s", status: "failed", tools: 0 })]);
+  });
+});
+
 describe("getMcpManagerFor", () => {
   it("按 workspace 分键，同键返回同一实例", () => {
     const a = getMcpManagerFor("D:/a");

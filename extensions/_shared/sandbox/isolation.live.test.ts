@@ -11,7 +11,7 @@ import { createSandboxProvider } from "./provider.js";
 import { defaultIo, grantKey, grantSandboxAccess, SANDBOX_GROUP, SANDBOX_USERNAME, type AccountIo } from "./windows/account.js";
 import { stampAmbientDenies } from "./windows/ambient.js";
 import { ELEVATED_DONE, runElevated, windowsPowerShellEnv, windowsPowerShellPath } from "./windows/elevate.js";
-import { GRANT_MAX_IDLE_MS, usedKey } from "./windows/reclaim.js";
+import { GRANT_MAX_IDLE_MS, revokeArgs, usedKey } from "./windows/reclaim.js";
 
 const live = process.env.PI_SANDBOX_LIVE === "1";
 
@@ -371,7 +371,7 @@ describe.skipIf(!liveElevate)("live elevation without temp files", () => {
   it("grants and confirms list on Windows Temp through the elevated path", async () => {
     const windowsTemp = join(process.env.SystemRoot || "C:\\Windows", "Temp");
     const before = tempEntries();
-    await expect(defaultIo().grant(windowsTemp, SANDBOX_USERNAME, "RD1", false)).resolves.toBeUndefined();
+    await expect(defaultIo().grant(windowsTemp, SANDBOX_USERNAME, "RD1")).resolves.toBeUndefined();
     expect(tempEntries()).toEqual(before);
   });
 
@@ -400,7 +400,7 @@ describe.skipIf(!live || process.platform !== "win32")("live windows grant recla
     writeFileSync(join(idle, "sub", "f.txt"), "x");
 
     const io = defaultIo();
-    await io.grant(idle, SANDBOX_USERNAME, "M", true);
+    await io.grant(idle, SANDBOX_USERNAME, "M");
     expect([aceCount(idle), aceCount(join(idle, "sub", "f.txt"))]).toEqual([1, 1]);
 
     const store: Record<string, string> = {
@@ -446,7 +446,7 @@ describe.skipIf(!live || process.platform !== "win32")("live windows grant recla
     mkdirSync(workspace);
 
     const io = defaultIo();
-    await io.grant(parent, SANDBOX_USERNAME, "M", true);
+    await io.grant(parent, SANDBOX_USERNAME, "M");
     expect(aceCount(workspace)).toBeGreaterThan(0);
 
     const store: Record<string, string> = {
@@ -573,7 +573,7 @@ describe.skipIf(!live || process.platform !== "win32")("live windows protection 
     await expect(read(join(workspace, ".pi", "keep.txt"))).resolves.toBe("second");
   });
 
-  it("protects again after the workspace grant is applied again, which writes the account's entry on every object below", async () => {
+  it("protects again after a reclaim stripped the tree and the workspace is granted again", async () => {
     const workspace = await workspaceWithConfig();
     await run(workspace, "echo ok> src\\fine.txt");
     const aces = (path: string) => execFileSync("icacls", [path]).toString("latin1").split(/\r?\n/).filter((line) => /PiSandbox/i.test(line)).join(" ");
@@ -582,16 +582,18 @@ describe.skipIf(!live || process.platform !== "win32")("live windows protection 
     const grantsFile = join(homedir(), ".pi", "sandbox", "grants.json");
     const original = readFileSync(grantsFile, "utf8");
     try {
-      // Forget the workspace grant the way a reclaim would. The next command grants it again with /T, which sets Modify on the protected file too:
-      // the marker below proves that grant really ran before the protection was put back.
+      // Reclaim the workspace the way reclaim.ts does: drop the record and revoke with /T, which also strips the
+      // read entry the protection put on .pi. The next command grants the root again (inherited, no /T) and has to
+      // put the protection back, or the sandbox could not even read .pi.
       const grants = JSON.parse(original) as Record<string, string>;
       delete grants[grantKey(workspace)];
       writeFileSync(grantsFile, JSON.stringify(grants));
+      execFileSync("icacls", revokeArgs(workspace, "PiSandbox"));
       const probe = join(workspace, "src", "fine.txt");
-      execFileSync("icacls", [probe, "/grant:r", "PiSandbox:(R)"]);
-      expect(aces(probe)).toMatch(/\(R\)/);
+      expect(aces(probe)).toBe("");
+      expect(aces(join(workspace, ".pi", "keep.txt"))).toBe("");
       await run(workspace, "echo again> src\\again.txt");
-      expect(aces(probe)).toMatch(/\(M\)/);
+      expect(aces(probe)).toMatch(/\(I\)\(M\)/);
       expect(aces(join(workspace, ".pi", "keep.txt"))).toMatch(/\(RX\)/);
       expect(aces(join(workspace, ".pi", "keep.txt"))).not.toMatch(/\(M\)/);
       expect((await run(workspace, "echo changed> .pi\\keep.txt")).text).toMatch(DENIED);

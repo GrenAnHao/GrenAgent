@@ -23,15 +23,21 @@ describe('isCasualSession', () => {
 });
 
 describe('launcherItems', () => {
-  it('returns browser then terminal for a casual session', () => {
+  it('returns browser, terminal, file for a casual session (no review)', () => {
     const items = launcherItems({
       cwd: '/home/.pi/agent/works/u1',
       worksDir: '/home/.pi/agent/works',
       workspace: '/home/.pi/agent/works/u1',
     });
-    expect(items.map((i) => i.kind)).toEqual(['browser', 'terminal']);
-    expect(items.map((i) => i.label)).toEqual(['浏览器', '终端']);
-    expect(items.map((i) => i.shortcut)).toEqual(['Ctrl+T', 'Ctrl+`']);
+    expect(items.map((i) => i.kind)).toEqual(['browser', 'terminal', 'file']);
+    expect(items.map((i) => i.label)).toEqual(['浏览器', '终端', '文件管理器']);
+    expect(items.map((i) => i.shortcut)).toEqual(['Ctrl+T', 'Ctrl+`', 'Ctrl+P']);
+    expect(items.find((i) => i.kind === 'file')?.disabled).toBe(false);
+  });
+
+  it('disables file for a casual session without a directory', () => {
+    const items = launcherItems({ cwd: null, worksDir: '/home/.pi/agent/works', workspace: '' });
+    expect(items.find((i) => i.kind === 'file')?.disabled).toBe(true);
   });
 
   it('returns review, terminal, browser, file for a project session', () => {
@@ -41,7 +47,7 @@ describe('launcherItems', () => {
       workspace: '/repo',
     });
     expect(items.map((i) => i.kind)).toEqual(['review', 'terminal', 'browser', 'file']);
-    expect(items.map((i) => i.label)).toEqual(['审查', '终端', '浏览器', '文件']);
+    expect(items.map((i) => i.label)).toEqual(['审查', '终端', '浏览器', '文件管理器']);
     expect(items.map((i) => i.shortcut)).toEqual(['Ctrl+Shift+G', 'Ctrl+`', 'Ctrl+T', 'Ctrl+P']);
     expect(items.find((i) => i.kind === 'file')?.disabled).toBe(false);
   });
@@ -68,9 +74,9 @@ describe('canOpenLauncherKind', () => {
     expect(canOpenLauncherKind('terminal', project)).toBe(true);
   });
 
-  it('ignores review and file in a casual session', () => {
+  it('ignores review but allows file in a casual session', () => {
     expect(canOpenLauncherKind('review', casual)).toBe(false);
-    expect(canOpenLauncherKind('file', casual)).toBe(false);
+    expect(canOpenLauncherKind('file', casual)).toBe(true);
     expect(canOpenLauncherKind('browser', casual)).toBe(true);
     expect(canOpenLauncherKind('terminal', casual)).toBe(true);
   });

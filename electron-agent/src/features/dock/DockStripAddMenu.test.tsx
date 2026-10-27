@@ -54,12 +54,12 @@ describe('DockStripAddMenu', () => {
     expect(useLayoutStore.getState().terminalOpen).toBe(true);
   });
 
-  it('hides review and file for a casual conversation', () => {
+  it('offers file but not review for a casual conversation', () => {
     ctx.workspace = '/home/.pi/agent/works/u1';
     render(<DockStripAddMenu region="right" />);
     expect(screen.getByTestId('dock-add-browser')).toBeTruthy();
     expect(screen.getByTestId('dock-add-terminal')).toBeTruthy();
     expect(screen.queryByTestId('dock-add-review')).toBeNull();
-    expect(screen.queryByTestId('dock-add-file')).toBeNull();
+    expect((screen.getByTestId('dock-add-file') as HTMLButtonElement).disabled).toBe(false);
   });
 });

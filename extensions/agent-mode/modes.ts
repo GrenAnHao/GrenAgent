@@ -97,8 +97,16 @@ export const ASK_TOOLS: readonly string[] = [
   "working_directory",
 ];
 
-// plan：与 ask 共用白名单（含 bash）；bash 再由 isSafeCommand 限定为只读命令，带不带 sandbox_permissions 都一样。
-export const PLAN_TOOLS: readonly string[] = ASK_TOOLS;
+// 只在规划模式出现的工具：写结构化 Plan。其余模式从激活工具里滤掉、tool_call 兜底拦下。
+export const PLAN_ONLY_TOOLS: readonly string[] = ["upsert_plan"];
+
+// plan：ask 的白名单（含 bash）+ upsert_plan；bash 再由 isSafeCommand 限定为只读命令，带不带 sandbox_permissions 都一样。
+export const PLAN_TOOLS: readonly string[] = [...ASK_TOOLS, ...PLAN_ONLY_TOOLS];
+
+/** 非规划模式的完整工具集：去掉只属于规划模式的工具。 */
+export function withoutPlanOnlyTools(tools: readonly string[]): string[] {
+  return tools.filter((t) => !PLAN_ONLY_TOOLS.includes(t));
+}
 
 // brainstorm：使用完整工具集（与 agent 相同），不限制写文件/执行命令。
 // 头脑风暴模式下 AI 仍需要能写文件、生成原型、执行代码——限制工具集是错误设计。
@@ -165,6 +173,9 @@ export function gateToolCall(mode: AgentMode, toolName: string, input: unknown):
       };
     }
     return undefined;
+  }
+  if (PLAN_ONLY_TOOLS.includes(toolName)) {
+    return { block: true, reason: `「${toolName}」只在规划（Plan）模式可用。` };
   }
   return undefined;
 }

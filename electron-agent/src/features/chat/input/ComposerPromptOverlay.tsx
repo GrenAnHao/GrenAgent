@@ -1,4 +1,4 @@
-import { memo, type RefObject } from 'react';
+import { memo, useContext, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { createStaticStyles } from 'antd-style';
 import { InlineQuestionCard } from '../InlineQuestionCard';
@@ -8,6 +8,7 @@ import { useSessionOverlayBox } from './sessionOverlay';
 import { useAgentStoreContext } from '../../../stores/AgentStoreContext';
 import { useInlineQuestionStore } from '../../../stores/inlineQuestionStore';
 import { useUiPromptStore } from '../../../stores/uiPromptStore';
+import { ComposerOverlayRegistration } from '../composerClearance';
 
 const MENU_GAP = 8;
 
@@ -36,6 +37,7 @@ export const ComposerPromptOverlay = memo(function ComposerPromptOverlay({
   anchorRef: RefObject<HTMLElement | null>;
 }) {
   const { workspace } = useAgentStoreContext();
+  const registerOverlay = useContext(ComposerOverlayRegistration);
   const hasQuestion = useInlineQuestionStore((s) => Boolean(s.byWorkspace[workspace]));
   const uiPrompt = useUiPromptStore((s) => s.byWorkspace[workspace]?.request);
   const hasOverlayPrompt = Boolean(uiPrompt && shouldRenderUiPromptInOverlay(uiPrompt));
@@ -46,6 +48,7 @@ export const ComposerPromptOverlay = memo(function ComposerPromptOverlay({
 
   return createPortal(
     <div
+      ref={registerOverlay}
       className={styles.root}
       data-testid="composer-prompt-overlay"
       style={{ left: box.left, bottom: box.bottom, width: box.width }}

@@ -10,7 +10,9 @@ import {
   defaultSandboxHome,
   grantKey,
   grantSandboxAccess,
+  grantTimeoutMs,
   icaclsGrantArgs,
+  shareInFlight,
   isGrantableAncestor,
   listGrantScript,
   needsGrant,
@@ -27,27 +29,53 @@ import {
 import { ELEVATED_DONE, PS_ICACLS } from "./elevate.js";
 
 describe("windows sandbox account grants", () => {
-  it("builds an inheritable icacls grant and propagates only when asked", () => {
-    expect(icaclsGrantArgs("C:/work/repo", "PiSandbox", "M", true)).toEqual([
+  it("builds an inheritable icacls grant on the root and leaves the tree to inheritance, never /T", () => {
+    // /T writes every object and each write propagates again below it: 70k files took 320s instead of 21s.
+    expect(icaclsGrantArgs("C:/work/repo", "PiSandbox", "M")).toEqual([
       "C:/work/repo",
       "/grant:r",
       "PiSandbox:(OI)(CI)M",
       "/C",
-      "/T",
     ]);
-    expect(icaclsGrantArgs("C:/work/repo", "PiSandbox", "RX", false)).not.toContain("/T");
-    expect(icaclsGrantArgs("C:/Users/me/.pi", "PiSandbox", "RAX", true)).toEqual([
+    expect(icaclsGrantArgs("C:/work/repo", "PiSandbox", "RX")).not.toContain("/T");
+    expect(icaclsGrantArgs("C:/Users/me/.pi", "PiSandbox", "RAX")).toEqual([
       "C:/Users/me/.pi",
       "/grant:r",
       "PiSandbox:(RA,X)",
       "/C",
     ]);
-    expect(icaclsGrantArgs("C:/Windows/Temp", "PiSandbox", "RD", true)).toEqual([
+    expect(icaclsGrantArgs("C:/Windows/Temp", "PiSandbox", "RD")).toEqual([
       "C:/Windows/Temp",
       "/grant:r",
       "PiSandbox:(S,RD,RA)",
       "/C",
     ]);
+  });
+
+  it("gives a grant that propagates through a tree minutes, not the 5 seconds a single directory needs", () => {
+    // 70k files under node_modules took longer than 5s: icacls was killed every time and never recorded.
+    expect(grantTimeoutMs("M")).toBeGreaterThanOrEqual(10 * 60 * 1000);
+    expect(grantTimeoutMs("RX")).toBeGreaterThanOrEqual(10 * 60 * 1000);
+    expect(grantTimeoutMs("RD1")).toBe(5000);
+    expect(grantTimeoutMs("RAX")).toBe(30_000);
+  });
+
+  it("runs one grant for parallel callers of the same target and lets a caller stop waiting on its own", async () => {
+    let release!: () => void;
+    const run = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    const first = shareInFlight("k", run);
+    const controller = new AbortController();
+    const second = shareInFlight("k", run, controller.signal);
+    expect(run).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await expect(second).rejects.toThrow("aborted");
+    release();
+    await expect(first).resolves.toBeUndefined();
+    // Settled: the next caller starts a fresh run.
+    const third = shareInFlight("k", run);
+    expect(run).toHaveBeenCalledTimes(2);
+    release();
+    await third;
   });
 
   it("points identity and temp at the sandbox profile, not the signed-in user", () => {
@@ -108,7 +136,7 @@ describe("windows sandbox account grants", () => {
   });
 
   it("grants list on Windows Temp for this directory only, never propagated", () => {
-    expect(icaclsGrantArgs("C:/Windows/Temp", "PiSandbox", "RD1", true)).toEqual([
+    expect(icaclsGrantArgs("C:/Windows/Temp", "PiSandbox", "RD1")).toEqual([
       "C:/Windows/Temp",
       "/grant:r",
       "PiSandbox:(S,RD,RA)",
@@ -306,7 +334,7 @@ describe("account setup and the Windows Temp list grant without temp files", () 
   });
 
   it("grants list on Windows Temp elevated and confirms it from the ACL by SID, with no log file", () => {
-    const args = icaclsGrantArgs("C:\\Windows\\Temp", "PiSandbox", "RD1", false);
+    const args = icaclsGrantArgs("C:\\Windows\\Temp", "PiSandbox", "RD1");
     const script = listGrantScript("C:\\Windows\\Temp", "PiSandbox", args);
     expect(script).toContain(`& ${PS_ICACLS} 'C:\\Windows\\Temp' '/grant:r' 'PiSandbox:(S,RD,RA)' '/C'`);
     expect(script).toContain("'Allow'");

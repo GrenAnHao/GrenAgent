@@ -57,7 +57,7 @@ Status: implemented
 
 - 搜索结果：`GrepCard` / `CodeSearchCard` / `GlobCard` 的文件行没有点击打开动作。
 - 报错、日志里的文件路径：代码里没有解析并可点击的逻辑；对话里的 `@path` 标签（`messageTags.tsx`）只渲染成标签；终端也未发现链接处理。
-- 聊天 Markdown 里的普通链接是否经 Electron 默认导航处理，没有核对到主窗口的导航配置，本次不动。
+- 聊天 Markdown 里的普通链接：当时没有核对到主窗口的导航配置，本次不动。后来确认主窗口没有任何导航拦截，点链接会把应用窗口导航走，已由 [文件管理器：普通对话也有、Markdown 链接不再跳走应用、链接走内置浏览器、显示路径](./2026-10-23-file-explorer-casual-links-and-paths.md) 统一处理（网页进内置浏览器，项目内文件路径经本篇的 `openWorkspaceFile` 进右侧「文件」标签）。
 
 无法统一的例外：无。工作区外的文件原本无法读取（`safeWorkspacePath` 越界即拒），现在由入口选出能读到它的根目录再打开，主进程的越界检查不变。
 

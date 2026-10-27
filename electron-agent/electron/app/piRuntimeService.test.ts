@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getApprovalPolicy, __resetApprovalForTest } from '../../../extensions/_shared/approval.js';
-import { getAgentMode, hasAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
+import { getAgentMode, hasAgentMode, setAgentMode, __resetAgentModeForTest } from '../../../extensions/agent-mode/modes.js';
+import { setSessionPlan, __resetPlanStateForTest } from '../../../extensions/agent-mode/planState.js';
+import { createPlan } from '../../../extensions/agent-mode/plan.js';
 import { PiRuntimeService, type AgentHostPort } from './piRuntimeService';
 import { SessionManager } from '../../../cli/src/pi-sdk.js';
 
@@ -521,6 +523,40 @@ describe('PiRuntimeService', () => {
     } finally {
       __resetApprovalForTest();
       __resetAgentModeForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('未确认的计划在场时手切到 Agent 被取消：不动内存、不落条目、不写盘', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-plan-guard-'));
+    const runtimeConfigPath = join(root, 'runtime-settings.json');
+    await writeFile(runtimeConfigPath, '{}');
+    __resetAgentModeForTest();
+    __resetPlanStateForTest();
+    const appendCustomEntry = vi.fn();
+    const handle = fakeHandle();
+    handle.session.sessionId = 'sid-a';
+    handle.session.sessionFile = 'C:/work/a.jsonl';
+    handle.session.sessionManager = { getLeafId: () => 'leaf', appendCustomEntry };
+    handle.ui = { respond: vi.fn(), context: { setStatus: vi.fn() } };
+    const { host } = fakeAgentHost(handle);
+    await host.open('C:/work', 'C:/work');
+    const service = new PiRuntimeService({ agentDir: 'C:/agent', agentHost: host, modelRuntimeHost: noopModelHost, runtimeConfigPath });
+    try {
+      setAgentMode('plan', 'C:/work', 'sid-a');
+      setSessionPlan('sid-a', createPlan('plan-1', { title: 't', goal: '', steps: [{ text: 'a', done: false }], risks: [] }, 1));
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'agent', targetSessionPath: 'C:/work/a.jsonl' }))
+        .resolves.toMatchObject({ ok: false, blocked: 'PLAN_UNCONFIRMED', mode: 'plan' });
+      expect(getAgentMode('C:/work', 'sid-a')).toBe('plan');
+      expect(appendCustomEntry).not.toHaveBeenCalled();
+      expect(JSON.parse(await readFile(runtimeConfigPath, 'utf8'))).toEqual({});
+      // 只读的 Ask 不受限；取消计划后 Agent 也放行
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'ask', targetSessionPath: 'C:/work/a.jsonl' })).resolves.toEqual({ ok: true, mode: 'ask' });
+      setSessionPlan('sid-a', undefined);
+      await expect(service.send('C:/work', 'agent_set_mode', { mode: 'agent', targetSessionPath: 'C:/work/a.jsonl' })).resolves.toEqual({ ok: true, mode: 'agent' });
+    } finally {
+      __resetAgentModeForTest();
+      __resetPlanStateForTest();
       await rm(root, { recursive: true, force: true });
     }
   });

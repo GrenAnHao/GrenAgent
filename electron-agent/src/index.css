@@ -536,3 +536,25 @@ html[data-theme='dark'] .ant-checkbox-checked:not(.ant-checkbox-disabled)::after
   color: var(--ant-color-text-tertiary, #9aa0a6);
   font-size: 11px;
 }
+
+/* —— 查找高亮（会话 / 文件预览共用，见 features/find）——
+   用 CSS Custom Highlight API：不改 DOM，链接、代码、加粗里的命中都能高亮，原有格式不受影响。
+   ::highlight 只能改背景色和文字色，所以「当前项」靠更实的底色 + 高对比文字区分。
+   对比度：深色 其他 ≈7.6:1 / 当前 ≈7.5:1；浅色 其他 ≈12:1 / 当前 ≈7.4:1。 */
+:root {
+  --gren-find-hit: rgba(210, 153, 34, 0.35);
+  --gren-find-current: #d29922;
+  --gren-find-current-text: #0d1117;
+}
+html[data-theme='light'] {
+  --gren-find-hit: rgba(255, 212, 0, 0.4);
+  --gren-find-current: #ff9a1f;
+  --gren-find-current-text: #1f2328;
+}
+::highlight(gren-find) {
+  background-color: var(--gren-find-hit);
+}
+::highlight(gren-find-current) {
+  background-color: var(--gren-find-current);
+  color: var(--gren-find-current-text);
+}

@@ -63,7 +63,7 @@ describe('DockLauncher', () => {
     expect(useLayoutStore.getState().terminalOpen).toBe(true);
   });
 
-  it('hides review and file for a casual conversation', () => {
+  it('offers file but not review for a casual conversation', () => {
     ctx.workspace = '/home/.pi/agent/works/u1';
     renderLauncher('right');
 
@@ -72,15 +72,15 @@ describe('DockLauncher', () => {
     expect(screen.getByTestId('dock-launcher-browser')).toBeTruthy();
     expect(screen.getByTestId('dock-launcher-terminal')).toBeTruthy();
     expect(screen.queryByTestId('dock-launcher-review')).toBeNull();
-    expect(screen.queryByTestId('dock-launcher-file')).toBeNull();
+    expect((screen.getByTestId('dock-launcher-file') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('treats empty workspace as casual with no file row', () => {
+  it('treats empty workspace as casual with a disabled file row', () => {
     ctx.workspace = '';
     renderLauncher('right');
 
     expect(screen.getByTestId('dock-launcher-browser')).toBeTruthy();
-    expect(screen.queryByTestId('dock-launcher-file')).toBeNull();
+    expect((screen.getByTestId('dock-launcher-file') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByTestId('dock-launcher-review')).toBeNull();
   });
 });

@@ -144,10 +144,15 @@ describe('EnhancePromptOverlay', () => {
     expect(screen.queryByTestId('enhance-prompt-overlay')).toBeNull();
   });
 
-  it('awaitingContext 显示正在结合项目上下文…，首包后生成中', () => {
+  it('awaitingContext 显示正在理解草稿，步骤更新后换成当前这一步，首包不盖掉步骤', () => {
     useEnhancePromptStore.getState().start('/ws', { awaitingContext: true, source: '原文' });
     renderOverlay();
-    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('正在结合项目上下文');
+    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('正在理解草稿');
+    act(() => {
+      const seq = useEnhancePromptStore.getState().byWorkspace['/ws'].seq;
+      useEnhancePromptStore.getState().setPhase('/ws', seq, '正在搜索知识库');
+    });
+    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('正在搜索知识库');
     act(() => {
       useEnhancePromptStore.getState().append(
         '/ws',
@@ -155,7 +160,7 @@ describe('EnhancePromptOverlay', () => {
         'x',
       );
     });
-    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('生成中');
+    expect(screen.getByTestId('enhance-prompt-status').textContent).toContain('正在搜索知识库');
   });
 
   it('首包未到显示等待模型响应，error 显示失败', () => {

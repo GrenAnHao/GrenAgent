@@ -11,7 +11,7 @@ Status: implemented
 ## Decision
 
 - 模式 / 审批 / 删段由桌面 IPC 带锁写 `runtime-settings.json`，扩展用 `watchConfig` 应用（`docs/architecture.md`「控制面约定」）。
-- 斜杠菜单只保留发生式命令（`/goal`、`/rules`、工作流、技能、前端 `/compact`）；`/plan-build` 仍由计划卡片 `runCommand` 触发，但不出现在菜单。
+- 斜杠菜单只保留发生式命令（`/goal`、`/rules`、工作流、技能、前端 `/compact`）；计划面板的 `/plan-update` `/plan-confirm` `/plan-cancel` `/plan-finish` 由面板 `runCommand` 触发，不出现在菜单（见 [Plan 模式重设计](../feature/2026-10-23-plan-mode-redesign.md)）。
 - 每个会话（含子代理）各订一份 `watchConfig`，`session_shutdown` 时退订，见 [并行子代理冷启动开销](./2026-10-10-subagent-parallel-startup-cost.md)。
 
 ### 涉及文件

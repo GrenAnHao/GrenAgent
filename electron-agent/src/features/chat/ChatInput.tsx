@@ -26,7 +26,15 @@ import { makePastedText } from './input/editor/pastedText';
 import { bindBrowserElementChatSink } from '../dock/browser/browserElementPicker';
 import { pi } from '../../lib/pi';
 import { useEnhancePromptStore } from '../../stores/enhancePromptStore';
-import { registerComposerLoad, registerComposerSend, registerComposerSetValue } from './input/composerBridge';
+import {
+  composerFileTagValue,
+  registerComposerInsertFile,
+  registerComposerLoad,
+  registerComposerSend,
+  registerComposerSetValue,
+  type ComposerFileRef,
+} from './input/composerBridge';
+import { INSERT_CHAT_TAG_COMMAND } from './input/editor/ChatTag/command';
 
 interface ChatInputProps {
   onSend: (
@@ -269,17 +277,34 @@ export function ChatInput({
     [draftKey, readDraft, scheduleSaveDraft, setValue],
   );
 
+  // 文件管理器右键「添加到对话」：在光标处（输入框没聚焦过就是末尾）插一个和 @ 提及同样的文件标签，再把焦点给输入框。
+  const insertFile = useCallback(
+    (file: ComposerFileRef) => {
+      editor.dispatchCommand(INSERT_CHAT_TAG_COMMAND, {
+        category: file.isDirectory ? 'directory' : 'file',
+        label: file.name,
+        value: composerFileTagValue(workspace, file),
+      });
+      setEmpty(false);
+      scheduleSaveDraft();
+      requestAnimationFrame(() => editor.focus());
+    },
+    [editor, workspace, scheduleSaveDraft],
+  );
+
   // 供消息编辑 / 回退把文字写入底部输入框，以及编辑后走同一条普通发送。
   useEffect(() => {
     registerComposerSetValue(setValue);
     registerComposerSend((text, images) => onSend(text, images));
     registerComposerLoad(loadIntoDraft);
+    registerComposerInsertFile(insertFile);
     return () => {
       registerComposerSetValue(null);
       registerComposerSend(null);
       registerComposerLoad(null);
+      registerComposerInsertFile(null);
     };
-  }, [setValue, onSend, loadIntoDraft]);
+  }, [setValue, onSend, loadIntoDraft, insertFile]);
 
   // 输入变化：更新空态 + 安排草稿持久化（MessageEditor 的 onChange 经 ctx.setEmpty 走到这里）。
   const handleChange = useCallback(

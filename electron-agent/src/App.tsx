@@ -22,6 +22,8 @@ import { restoreRunningTurns } from './stores/restoreRunningTurns';
 import { forgetRunningSession, resolveRunningSessionPaths, startRunningSessionTracking } from './stores/runningSessions';
 import { forgetSessionAttention } from './stores/sessionAttention';
 import { AttentionHost } from './features/attention/AttentionHost';
+import { AppLinkGuard } from './features/links/AppLinkGuard';
+import { FindShortcutHost } from './features/find/FindShortcutHost';
 import { registerAttentionOpenHandler } from './features/attention/openSessionBridge';
 import { useSessionStore } from './store';
 import { useLayoutStore } from './stores/layoutStore';
@@ -1161,6 +1163,8 @@ export default function App() {
         <ThemeBridge />
         <ExtensionUiHost />
         <AttentionHost />
+        <AppLinkGuard />
+        <FindShortcutHost />
         <FullAccessConfirmModal />
         <MarkdownWarmup />
         <CodeViewWarmup />

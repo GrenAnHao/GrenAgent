@@ -76,7 +76,7 @@ export interface IpcServices {
   pi?: PiCommandsPort;
   provider?: ProviderService;
   enhancePrompt?: {
-    run(input: { workspace: string; text: string; goalText?: string }, emit: (chunk: string) => void): Promise<unknown>;
+    run(input: { workspace: string; text: string; goalText?: string; recentTurn?: string }, emit: (chunk: string) => void, onStatus?: (text: string) => void): Promise<unknown>;
     abort(workspace: string): void;
   };
   workspace?: WorkspaceService;
@@ -176,10 +176,16 @@ export function registerIpcHandlers(services: IpcServices = {}): void {
       const emit = channel && typeof channel === 'object' && typeof (channel as Record<string, unknown>).__grenChannelId === 'string'
         ? (chunk: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(channel as Record<string, string>).__grenChannelId}`, chunk)
         : () => {};
+      const statusChannel = args.onStatus;
+      const onStatus = statusChannel && typeof statusChannel === 'object' && typeof (statusChannel as Record<string, unknown>).__grenChannelId === 'string'
+        ? (text: string) => event.sender.send(`${IPC_CHANNELS.eventPrefix}channel:${(statusChannel as Record<string, string>).__grenChannelId}`, text)
+        : () => {};
       const goalText = typeof args.goalText === 'string' ? args.goalText : '';
+      const recentTurn = typeof args.recentTurn === 'string' ? args.recentTurn : '';
       return services.enhancePrompt!.run(
-        { workspace: readString(args, 'workspace'), text: readText(args, 'text'), goalText },
+        { workspace: readString(args, 'workspace'), text: readText(args, 'text'), goalText, recentTurn },
         emit,
+        onStatus,
       );
     });
     registerCommand('enhance_prompt_abort', (_event, args) => {

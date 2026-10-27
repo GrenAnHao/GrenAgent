@@ -128,7 +128,7 @@ const TAB = {
   id: TAB_ID,
   kind: 'file' as const,
   region: 'right' as const,
-  title: '文件',
+  title: '文件管理器',
   closable: true,
   order: 0,
   payload: { workspace: ROOT },

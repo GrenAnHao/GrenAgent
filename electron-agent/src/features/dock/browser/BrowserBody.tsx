@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Globe, MonitorSmartphone, MoreHorizontal, MousePointerClick, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, MonitorSmartphone, MoreHorizontal, MousePointerClick, RefreshCw } from 'lucide-react';
 import { PiBrandLogo } from '../../../components/PiBrandLogo';
-import { getBrowser } from '../../../platform/runtime';
+import { getBrowser, openUrl } from '../../../platform/runtime';
 import { useDockStore, type BrowserPayload } from '../../../stores/dockStore';
 import type { DockBodyProps } from '../TabBodyRenderer';
 import { BrowserAddressSuggest } from './BrowserAddressSuggest';
@@ -476,6 +476,18 @@ export function BrowserBody({ tab }: DockBodyProps) {
           onClick={togglePicker}
         >
           <MousePointerClick size={15} />
+        </button>
+        <button
+          type="button"
+          aria-label="在系统浏览器中打开"
+          title="在系统浏览器中打开"
+          disabled={blankPage || Boolean(guestFailure)}
+          onClick={() => {
+            const url = lastRestorableUrlRef.current;
+            if (isAllowedDocumentUrl(url) && !isBlankBrowserUrl(url)) void openUrl(url).catch(() => {});
+          }}
+        >
+          <ExternalLink size={15} />
         </button>
         <button type="button" aria-label="浏览器菜单" title="浏览器菜单" onClick={() => {}}>
           <MoreHorizontal size={16} />

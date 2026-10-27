@@ -1,13 +1,14 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { onSend, cancelPendingOverlay, getDocument, cleanDocument, setDocument, toastError, abortEnhancePrompt, chatState, sessionState } = vi.hoisted(() => ({
+const { onSend, cancelPendingOverlay, getDocument, cleanDocument, setDocument, dispatchCommand, toastError, abortEnhancePrompt, chatState, sessionState } = vi.hoisted(() => ({
   sessionState: { activeSessionPath: null as string | null },
   onSend: vi.fn(() => Promise.resolve()),
   cancelPendingOverlay: vi.fn(() => Promise.resolve('cancelled' as const)),
   getDocument: vi.fn(() => 'hello'),
   cleanDocument: vi.fn(),
   setDocument: vi.fn(),
+  dispatchCommand: vi.fn(),
   toastError: vi.fn(),
   abortEnhancePrompt: vi.fn(() => Promise.resolve()),
   chatState: { isStreaming: false, messages: [] as unknown[], steering: [] as string[], followUp: [] as string[], composerQueue: [] as unknown[] },
@@ -25,6 +26,7 @@ vi.mock('@lobehub/editor/react', () => ({
     getDocument,
     cleanDocument,
     setDocument,
+    dispatchCommand,
     focus: vi.fn(),
   }),
 }));
@@ -73,7 +75,8 @@ import { ChatInput } from './ChatInput';
 import { fireEvent, screen } from '@testing-library/react';
 import { offerBrowserElementToChat } from '../dock/browser/browserElementPicker';
 import { useComposerFilesStore } from './input/composerFiles';
-import { loadIntoComposer } from './input/composerBridge';
+import { addFileToComposer, loadIntoComposer } from './input/composerBridge';
+import { INSERT_CHAT_TAG_COMMAND } from './input/editor/ChatTag/command';
 import { act } from '@testing-library/react';
 
 afterEach(() => {
@@ -112,6 +115,22 @@ describe('撤回的引导放回输入框', () => {
       loadIntoComposer('改用 chrome');
     });
     expect(setDocument).toHaveBeenCalledWith('text', '正在写的\n\n改用 chrome');
+  });
+});
+
+describe('文件管理器「添加到对话」', () => {
+  it('在输入框里插一个文件标签，路径按会话工作区写；目录是目录标签', () => {
+    render(<ChatInput onSend={onSend} onAbort={vi.fn()} />);
+    act(() => {
+      expect(addFileToComposer({ absolute: '/ws/src/a.ts', relative: 'src/a.ts', workspace: '/ws', name: 'a.ts', isDirectory: false })).toBe(true);
+    });
+    expect(dispatchCommand).toHaveBeenLastCalledWith(INSERT_CHAT_TAG_COMMAND, { category: 'file', label: 'a.ts', value: 'src/a.ts' });
+    act(() => {
+      addFileToComposer({ absolute: '/elsewhere/docs', relative: 'docs', workspace: '/elsewhere', name: 'docs', isDirectory: true });
+    });
+    expect(dispatchCommand).toHaveBeenLastCalledWith(INSERT_CHAT_TAG_COMMAND, { category: 'directory', label: 'docs', value: '/elsewhere/docs' });
+    cleanup();
+    expect(addFileToComposer({ absolute: '/ws/a', relative: 'a', workspace: '/ws', name: 'a', isDirectory: false })).toBe(false);
   });
 });
 

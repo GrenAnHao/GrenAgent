@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react';
-import type { DockTab, DockTabKind, VisualPayload } from '../../stores/dockStore';
+import type { DockTab, DockTabKind, PlanPayload, VisualPayload } from '../../stores/dockStore';
 import { PageBody } from './PageBody';
 import { BrowserBody } from './browser/BrowserBody';
 import { FileTreeBody } from './FileTreeBody';
@@ -8,6 +8,7 @@ import { SubAgentBody } from './SubAgentBody';
 import { SubAgentLogBody } from './SubAgentLogBody';
 import { TurnReviewBody } from './TurnReviewBody';
 import { VisualPanel } from '../visual/VisualPanel';
+import { PlanPanel } from '../plan/PlanPanel';
 
 export interface DockBodyProps {
   tab: DockTab;
@@ -17,6 +18,11 @@ export interface DockBodyProps {
 function VisualDockBody({ tab }: DockBodyProps) {
   // 面板绑定发起视觉设计的会话（payload.visualKey），不跟着当前画面上的会话走。
   return <VisualPanel visualKey={(tab.payload as VisualPayload).visualKey} />;
+}
+
+function PlanDockBody({ tab }: DockBodyProps) {
+  // 计划面板绑定发起它的会话（payload.planKey）。
+  return <PlanPanel planKey={(tab.payload as PlanPayload).planKey} />;
 }
 
 // xterm 只有打开终端标签才用得到，不进首包。
@@ -40,6 +46,7 @@ const BODY_RENDERERS: Record<DockTabKind, ComponentType<DockBodyProps>> = {
   file: FileTreeBody,
   review: TurnReviewBody,
   visual: VisualDockBody,
+  plan: PlanDockBody,
 };
 
 export function TabBodyRenderer({ tab, active }: DockBodyProps) {

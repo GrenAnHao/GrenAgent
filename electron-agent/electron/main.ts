@@ -1,5 +1,7 @@
 import { app, BrowserWindow, nativeImage, Notification } from "electron";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { APP_NAV_EVENT, BROWSER_OPEN_URL_EVENT, forwardAppCommands, guardMainWindowNavigation } from "./mainWindowNavigation";
 import { browserWindowOptions, resolveAppIcon, resolveRendererHtml } from "./mainConfig";
 import { WindowBackgroundStore } from "./app/windowBackground";
 import { SettingsService } from "./app/settingsService";
@@ -64,6 +66,13 @@ export function createWindow(backgroundColor?: string): BrowserWindow {
   attachEmbeddedWebview(window.webContents);
   attachDevToolsShortcut(window);
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+  // 主窗口不能被链接导航走、不自己弹新窗：网页链接转给渲染进程在内置浏览器里开。
+  forwardAppCommands(window, (direction) => window.webContents.send(`${IPC_CHANNELS.eventPrefix}${APP_NAV_EVENT}`, { direction }));
+  guardMainWindowNavigation(window.webContents, {
+    appUrl: rendererUrl ?? pathToFileURL(resolveRendererHtml(app.getAppPath())).href,
+    openInApp: (url) =>
+      window.webContents.send(`${IPC_CHANNELS.eventPrefix}${BROWSER_OPEN_URL_EVENT}`, { url, disposition: 'foreground-tab' }),
+  });
 
   if (rendererUrl) {
     void window.loadURL(rendererUrl);
@@ -109,6 +118,7 @@ if (!process.env.VITEST) {
       hotReload: (workspace, runtimeJson) => agent.mcp.hotReload(workspace, runtimeJson)
         .catch((error) => console.error('MCP hot reload failed', error)),
       reload: (workspace, name) => agent.mcp.reload(workspace, name),
+      publish: (workspace, servers) => publishMcpState(workspace, servers),
     });
     const workspace = new WorkspaceService(process.env.PI_CODING_AGENT_DIR || join(app.getPath('home'), '.pi', 'agent'));
     // 独立工作区上限由设置页决定，每次创建现读。
@@ -173,17 +183,7 @@ if (!process.env.VITEST) {
       'mcp.state.publish': async (params) => {
         const published = typeof params.workspace === 'string' ? params.workspace : '';
         const workspace = published ? await agent.mcp.workspaceForCwd(published).catch(() => published) : published;
-        const servers = Array.isArray(params.servers) ? params.servers : [];
-        broadcastPiEvent('pi://ui-request', {
-          workspace,
-          source: 'interactive',
-          request: {
-            id: 'mcp-state',
-            method: 'setStatus',
-            statusKey: 'mcp',
-            statusText: JSON.stringify(servers),
-          },
-        });
+        publishMcpState(workspace, Array.isArray(params.servers) ? params.servers : []);
         return null;
       },
     };
@@ -476,6 +476,20 @@ function broadcastPiEvent(event: string, payload: unknown): void {
     window.webContents.send(`${IPC_CHANNELS.eventPrefix}${event}`, payload);
     recordEventSend(typeof source === 'string' ? `${event}:${source}` : event);
   }
+}
+
+/** 把一个工作区的 MCP 状态推给设置页。会话扩展的订阅推送和「重载」的回报都走这里。 */
+function publishMcpState(workspace: string, servers: unknown[]): void {
+  broadcastPiEvent('pi://ui-request', {
+    workspace,
+    source: 'interactive',
+    request: {
+      id: 'mcp-state',
+      method: 'setStatus',
+      statusKey: 'mcp',
+      statusText: JSON.stringify(servers),
+    },
+  });
 }
 
 function readRpcString(params: Record<string, unknown>, key: string): string {

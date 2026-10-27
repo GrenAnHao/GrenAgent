@@ -147,7 +147,8 @@ export function createAgentPorts(channel: AgentRequest | AgentChannel, tracker =
     mcp: {
       // 子进程下次启动时自己读最新配置
       hotReload: async (workspace: string, runtimeJson: string) => { await whenRunning('mcp.hotReload', { workspace, runtime: runtimeJson }, null); },
-      reload: async (workspace: string, name: string) => { await request('mcp.reload', { workspace, name }); },
+      // 带回这个工作区 manager 的状态摘要；旧子进程回 null。
+      reload: (workspace: string, name: string) => request<unknown[] | null>('mcp.reload', { workspace, name }),
       probe: (configJson: string) => request<string>('mcp.probe', { configJson }),
       workspaceForCwd: (cwd: string) => whenRunning('mcp.workspaceForCwd', { cwd }, cwd),
     },

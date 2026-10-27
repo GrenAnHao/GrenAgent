@@ -15,6 +15,7 @@ import { PromptPendingRow } from './PromptPendingRow';
 import { shouldRenderUiPromptInOverlay } from './input/overlayPrompt';
 import { waitingUiPromptLabel } from '../../stores/waitingUiPrompt';
 import type { TranscriptScrollHandle } from './VirtualizedMessageList';
+import { useSessionFind } from '../find/useSessionFind';
 
 const EMPTY_COMMAND_INPUTS: CommandInputMessage[] = [];
 
@@ -53,6 +54,7 @@ export function ChatListView({ paddingBottom, scrollRef, onGutterChange }: ChatL
     [grouped, sessionPath, commandInputs],
   );
   const subAgents = useMemo(() => computeSubAgentUnits(display), [display]);
+  useSessionFind(display, subAgents.hidden, scrollRef, sessionPath);
   const answeredQuestions = useMemo(() => computeAnsweredQuestions(display), [display]);
 
   const runStartedAt = useStore((s) => s.runStartedAt);

@@ -14,7 +14,8 @@ export type DockTabKind =
   | 'projectContext'
   | 'file'
   | 'review'
-  | 'visual';
+  | 'visual'
+  | 'plan';
 
 export type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 
@@ -64,7 +65,14 @@ export interface ProjectContextPayload {
 
 export interface FilePayload {
   workspace: string;
+  /** 文件管理器里打开着的文件（绝对路径，按标签顺序）。旧数据没有这一项。 */
+  openFiles?: string[];
+  /** 当前看的那个；null / 缺省 = 没有打开文件。 */
+  activeFile?: string | null;
 }
+
+/** 文件管理器 dock 标签的名字。旧版本存下来的「文件」在读回和写盘时统一改成它。 */
+export const FILE_TAB_TITLE = '文件管理器';
 
 export interface ReviewPayload {
   workspace?: string;
@@ -79,7 +87,12 @@ export interface VisualPayload {
   visualKey: string;
 }
 
-export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload | VisualPayload;
+export interface PlanPayload {
+  /** planStore 里这份计划的 key（发起会话）：面板只读它，不读「当前会话」。 */
+  planKey: string;
+}
+
+export type DockTabPayload = TerminalPayload | BrowserPayload | PagePayload | SubAgentPayload | SubAgentLogPayload | ProjectContextPayload | FilePayload | ReviewPayload | VisualPayload | PlanPayload;
 
 export interface DockTab {
   id: string;
@@ -135,7 +148,7 @@ export function dockOwnerFromStore(
 }
 
 export function isSessionOwnedKind(kind: DockTabKind): boolean {
-  return kind === 'subagent' || kind === 'subagentLog' || kind === 'visual';
+  return kind === 'subagent' || kind === 'subagentLog' || kind === 'visual' || kind === 'plan';
 }
 
 function normKey(p: string): string {
@@ -369,7 +382,7 @@ function pushClosed(list: ClosedDockTab[] | undefined, snap: ClosedDockTab): Clo
 }
 
 function isSessionOnlyDockKind(kind: DockTabKind): boolean {
-  return kind === 'subagent' || kind === 'subagentLog' || kind === 'browser' || kind === 'visual';
+  return kind === 'subagent' || kind === 'subagentLog' || kind === 'browser' || kind === 'visual' || kind === 'plan';
 }
 
 /** 右区没有归属的 tab 是旧版本留下的全局右栏标签：不再存、读回来也丢掉，否则它会出现在每个会话里。 */
@@ -388,16 +401,23 @@ function sanitizePersistedActive(
   return { right: pick('right'), bottom: pick('bottom') };
 }
 
+/** 终端的 runtime 状态不落盘；文件标签的旧标题改成新名字。 */
+function normalizePersistedTab<T extends Pick<DockTab, 'kind' | 'title' | 'payload'>>(t: T): T {
+  if (t.kind === 'terminal') return { ...t, payload: { status: 'idle' as const } } as T;
+  if (t.kind === 'file' && t.title !== FILE_TAB_TITLE) return { ...t, title: FILE_TAB_TITLE };
+  return t;
+}
+
 function persistDockSnapshot(s: Pick<DockState, 'tabs' | 'closedTabs' | 'activeByRegion'>): Pick<
   DockState,
   'tabs' | 'closedTabs' | 'activeByRegion'
 > {
   const tabs = s.tabs
     .filter((t) => !isSessionOnlyDockKind(t.kind) && !isOwnerlessRight(t))
-    .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
+    .map((t) => normalizePersistedTab(t));
   const closedTabs = (s.closedTabs ?? [])
     .filter((t) => !isSessionOnlyDockKind(t.kind) && !isOwnerlessRight(t))
-    .map((t) => (t.kind === 'terminal' ? { ...t, payload: { status: 'idle' as const } } : t));
+    .map((t) => normalizePersistedTab(t));
   return {
     tabs,
     closedTabs,

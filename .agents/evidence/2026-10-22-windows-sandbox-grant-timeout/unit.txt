@@ -1,0 +1,8 @@
+
+��Ϣ: ���ṩ��ģʽ�޷��ҵ��ļ���
+
+ Test Files  22 passed | 2 skipped (24)
+      Tests  244 passed | 26 skipped (270)
+   Start at  16:35:48
+   Duration  17.67s (transform 8.80s, setup 0ms, import 12.60s, tests 19.37s, environment 4ms)
+

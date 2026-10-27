@@ -1,19 +1,21 @@
-// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan，互斥）。
+// agent-mode: 统一的模式系统（Agent / Ask / Debug / Plan / Brainstorm，互斥）。
 //
-// 取代原独立的 plan-mode：把"模式"做成一个可视化、可回读、可持久化的统一概念。
 //   - Agent ：默认，完整工具集，无额外约束。
 //   - Ask   ：只读问答。只读检索 + bash（写由只读 OS 沙箱执行，升权经用户批准）；禁 写/编辑/MCP。
-//   - Debug ：完整工具集 + 调试方法论 prompt（参考 Cursor Debug Mode：先假设→插桩→
-//             复现取证→定位→最小修复→验证后清理插桩）。
-//   - Plan  ：只读规划 + 只读白名单 bash，产出编号步骤并可一键转入执行。
+//   - Debug ：完整工具集 + 调试方法论 prompt。
+//   - Plan  ：只读调研 + upsert_plan 写结构化 Plan；侧栏审阅 / 修改后「确认执行」自动切 Agent 开跑。
 //
 // 工具 gate 走两道：setActiveTools 限制 LLM 可见工具（主） + tool_call hook 兜底拦截
 // （防止动态注册的工具绕过）。当前模式经 ctx.ui.setStatus("agent-mode", <mode>) 推到前端，
-// 前端据此渲染模式选择器并在切会话/刷新后回读，状态本身持久化到 session entry。
-// 桌面切换走宿主 agent_set_mode：先写 live 再落盘。门闩现读 live；
-// 工具集在下一轮 before_agent_start 对齐。不再注册 /mode、/plan。
-// /plan-build 与 /brainstorm-deliver 仍由卡片 / 模型触发，经 applyMode 写 live。
+// 状态本身持久化到 session entry。桌面切换走宿主 agent_set_mode：先写 live 再落盘；门闩现读 live；
+// 工具集在下一轮 before_agent_start 对齐。
+//
+// Plan 是一等工件（见 .agents/notes/implemented/feature/2026-10-23-plan-mode-redesign.md）：
+//   upsert_plan 写入 / 同 id 修订 → setStatus("agent-plan", 快照) 推侧栏；
+//   侧栏经 /plan-update、/plan-confirm、/plan-cancel、/plan-finish 回写；
+//   未确认（drafting / ready）时宿主拒绝手切到能动手的模式（planState.planBlocksModeSwitch）。
 import { projectCwd } from "../_shared/session-cwd.js";
+import { toolPrompt } from "../_shared/toolPrompt.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -23,6 +25,7 @@ import { currentSessionId } from "../_shared/workspace-context.js";
 import {
   type AgentMode,
   DEFAULT_MODE,
+  PLAN_ONLY_TOOLS,
   activeToolsFor,
   agentModeConfigKey,
   gateToolCall,
@@ -34,8 +37,30 @@ import {
   parseModeArg,
   setAgentMode,
   toolWhitelist,
+  withoutPlanOnlyTools,
 } from "./modes.js";
-import { buildPlanCard, makePlanId, renderPlanMarkdown, writePlanFile } from "./plan.js";
+import {
+  type Plan,
+  type PlanStatus,
+  type PlanStatusPayload,
+  MAX_PLAN_STEPS,
+  PLAN_STATUSES,
+  allStepsDone,
+  createPlan,
+  isPlanOpen,
+  isUnconfirmed,
+  makePlanId,
+  markDoneFromText,
+  planEditedContext,
+  planExecutionPrompt,
+  planRefContent,
+  planRemainingContext,
+  revisePlan,
+  validatePlanContent,
+  withStatus,
+  writePlanProjection,
+} from "./plan.js";
+import { PLAN_UNCONFIRMED_MESSAGE, isExecutingMode, setSessionPlan } from "./planState.js";
 import {
   countValidQuestions,
   decodeAskUserAnswer,
@@ -45,7 +70,6 @@ import {
   truncationNotice,
   type RawAskUserParams,
 } from "./questions.js";
-import { type TodoItem, extractTodoItems, markCompletedSteps } from "./utils.js";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
   return m.role === "assistant" && Array.isArray(m.content);
@@ -59,10 +83,42 @@ function getTextContent(message: AssistantMessage): string {
 
 interface PersistedState {
   mode?: AgentMode;
-  todos?: TodoItem[];
-  executing?: boolean;
   savedTools?: string[];
-  planId?: string;
+  plan?: Plan;
+  /** 模型最后见过的 Plan 版本；用户在侧栏改过（rev 更大）时下一轮规划把新版本告诉模型。 */
+  planSeenRev?: number;
+}
+
+const STATUS_LABELS: Record<PlanStatus, string> = {
+  drafting: "草稿",
+  ready: "待确认",
+  confirmed: "已确认",
+  executing: "执行中",
+  done: "已完成",
+  cancelled: "已取消",
+};
+
+/** 会话条目里读回的 Plan：只做形状检查，旧版卡片数据（todos / executing）一律不认。 */
+export function restorePlan(raw: unknown): Plan | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const p = raw as Partial<Plan>;
+  if (typeof p.id !== "string" || typeof p.title !== "string" || !Array.isArray(p.steps)) return undefined;
+  if (!PLAN_STATUSES.includes(p.status as PlanStatus)) return undefined;
+  return {
+    id: p.id,
+    title: p.title,
+    goal: typeof p.goal === "string" ? p.goal : "",
+    steps: p.steps
+      .filter((s): s is { text: string; done: boolean } => Boolean(s) && typeof (s as { text?: unknown }).text === "string")
+      .map((s) => ({ text: s.text, done: s.done === true })),
+    risks: Array.isArray(p.risks) ? p.risks.filter((r): r is string => typeof r === "string") : [],
+    status: p.status as PlanStatus,
+    rev: typeof p.rev === "number" ? p.rev : 1,
+    createdAt: typeof p.createdAt === "number" ? p.createdAt : 0,
+    updatedAt: typeof p.updatedAt === "number" ? p.updatedAt : 0,
+    updatedBy: p.updatedBy === "user" ? "user" : "model",
+    ...(typeof p.file === "string" ? { file: p.file } : {}),
+  };
 }
 
 /** 会话里最近一条模式：本扩展的 agent-mode 条目或宿主切换写的 session-controls 条目。 */
@@ -86,29 +142,33 @@ export default function (pi: ExtensionAPI) {
   let currentMode: AgentMode = DEFAULT_MODE;
   // 进入受限模式（ask/plan）前的完整工具集，退出时还原（避免丢失动态扩展工具）。
   let savedTools: string[] | undefined;
-  // plan 的步骤跟踪：规划阶段产出 todoItems；用户点卡片「开始执行」（/plan-build）后 executionMode=true（此时已切回 agent 拿全工具）。
-  let todoItems: TodoItem[] = [];
-  let executionMode = false;
-  // 最近一次规划产出的 plan id（对应 .pi/plans/<id>.md），随会话持久化，便于回看/关联执行。
-  let planId: string | undefined;
+  // 本会话绑定的 Plan（源真值，随会话条目持久化）。
+  let plan: Plan | undefined;
+  let planSeenRev = 0;
+  // 本轮（一次 agent run）里 upsert_plan 有没有成功过：规划回合结束时没有工件要显式报出来。
+  let upsertedThisRun = false;
+  // 确认执行那一轮的开跑消息已带全文步骤，不再重复注入剩余步骤。
+  let skipNextExecutionContext = false;
 
   const persistState = () =>
     pi.appendEntry("agent-mode", {
       mode: currentMode,
-      todos: todoItems,
-      executing: executionMode,
       savedTools,
-      planId,
+      ...(plan ? { plan, planSeenRev } : {}),
     } satisfies PersistedState);
+
+  const pushPlan = (ctx: ExtensionContext, reason: PlanStatusPayload["reason"]) => {
+    ctx.ui.setStatus("agent-plan", JSON.stringify({ plan: plan ?? null, reason } satisfies PlanStatusPayload));
+  };
 
   // 把当前模式推给前端（模式选择器据此回读/高亮），并维护 plan 执行进度徽章。
   const pushStatus = (ctx: ExtensionContext) => {
     ctx.ui.setStatus("agent-mode", currentMode);
     // 项目默认模式：草稿输入栏显示用（新会话将继承它）。
     ctx.ui.setStatus("agent-mode-default", getDefaultAgentMode(projectCwd(ctx)));
-    if (executionMode && todoItems.length > 0) {
-      const done = todoItems.filter((t) => t.completed).length;
-      ctx.ui.setStatus("plan-mode", `执行中 ${done}/${todoItems.length}`);
+    if (plan?.status === "executing") {
+      const done = plan.steps.filter((t) => t.done).length;
+      ctx.ui.setStatus("plan-mode", `执行中 ${done}/${plan.steps.length}`);
     } else if (currentMode === "plan") {
       ctx.ui.setStatus("plan-mode", "Plan");
     } else {
@@ -116,35 +176,49 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  // 应用模式：按需抓取/还原完整工具集，设置受限工具集，推状态并持久化。
-  // 不触碰 plan 子状态（todoItems/executionMode）——那由调用方按场景决定。
+  /** 换 Plan：同步宿主共享表、写 MD 投影、持久化、推侧栏和徽章。 */
+  const setPlan = (next: Plan | undefined, ctx: ExtensionContext, reason: PlanStatusPayload["reason"]) => {
+    if (next) {
+      try {
+        next = { ...next, file: writePlanProjection(ctx.cwd, next) };
+      } catch (err) {
+        // 投影写失败不影响源真值：侧栏照常显示与确认。
+        console.error("[agent-mode] 写入计划投影失败：", err);
+      }
+    }
+    plan = next;
+    setSessionPlan(sessionId, next);
+    persistState();
+    pushPlan(ctx, reason);
+    pushStatus(ctx);
+  };
+
+  // 按模式对齐激活工具：受限模式取白名单交集（plan 额外带上 upsert_plan，它默认不激活），
+  // 其余模式还原完整集合并去掉只属于规划模式的工具。
+  const syncTools = (mode: AgentMode, restoreFrom?: string[]) => {
+    if (toolWhitelist(mode)) {
+      const picked = activeToolsFor(mode, savedTools ?? pi.getActiveTools()) ?? [];
+      if (mode === "plan") for (const t of PLAN_ONLY_TOOLS) if (!picked.includes(t)) picked.push(t);
+      pi.setActiveTools(picked);
+    } else if (restoreFrom) {
+      pi.setActiveTools(withoutPlanOnlyTools(restoreFrom));
+    }
+  };
+
+  // 应用模式：按需抓取/还原完整工具集，设置受限工具集，推状态并持久化。不触碰 Plan。
   const applyMode = (next: AgentMode, ctx: ExtensionContext, opts?: { silent?: boolean; persist?: boolean }) => {
     const wasRestricted = toolWhitelist(currentMode) !== undefined;
     const willRestrict = toolWhitelist(next) !== undefined;
     // 仅在「当前非受限」时抓取 savedTools，避免把已受限的集合误当成完整集合存下来。
-    if (willRestrict && !wasRestricted) savedTools = pi.getActiveTools();
+    if (willRestrict && !wasRestricted) savedTools = withoutPlanOnlyTools(pi.getActiveTools());
 
     currentMode = next;
     setAgentMode(next, projectCwd(ctx), sessionId);
-
-    if (willRestrict) {
-      pi.setActiveTools(activeToolsFor(next, savedTools ?? pi.getActiveTools()) ?? []);
-    } else if (wasRestricted && savedTools) {
-      pi.setActiveTools(savedTools);
-    }
+    syncTools(next, wasRestricted ? savedTools : undefined);
 
     pushStatus(ctx);
     if (opts?.persist !== false) persistState();
     if (!opts?.silent) ctx.ui.notify(`已切换到 ${modeLabel(next)} 模式`, "info");
-  };
-
-  // 用户主动切换模式：离开 plan 时一并清掉规划/执行子状态。
-  const switchMode = (next: AgentMode, ctx: ExtensionContext) => {
-    if (next !== "plan") {
-      todoItems = [];
-      executionMode = false;
-    }
-    applyMode(next, ctx);
   };
 
   // 盘上的项目默认模式变了：只更新默认（给新会话继承），不改已打开会话的模式。
@@ -155,13 +229,16 @@ export default function (pi: ExtensionAPI) {
     const parsed = parseModeArg(next[agentModeConfigKey(projectCwd(sessionCtx))] ?? "");
     if (!sessionId) {
       // 无会话身份时只有项目级模式可用：沿用旧行为，直接切。
-      if (parsed && parsed !== getAgentMode(projectCwd(sessionCtx))) switchMode(parsed, sessionCtx);
+      if (parsed && parsed !== getAgentMode(projectCwd(sessionCtx))) applyMode(parsed, sessionCtx);
       return;
     }
     if (!parsed || parsed === getDefaultAgentMode(projectCwd(sessionCtx))) return;
     setAgentMode(parsed, projectCwd(sessionCtx));
   });
-  pi.on("session_shutdown", () => { unwatch(); });
+  pi.on("session_shutdown", () => {
+    unwatch();
+    setSessionPlan(sessionId, undefined);
+  });
 
   // brainstorm-deliver：从头脑风暴模式进入交付阶段，自动切回 Agent 模式并触发执行。
   // AI 在确认设计、准备开始实施时调用，省去用户手动切换模式的操作。
@@ -182,28 +259,160 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Plan 卡片「开始执行」按钮触发（前端 runCommand('/plan-build')）：切回 agent 拿全工具，
-  // 保留 todoItems 进入执行阶段，并启动一轮执行。模型可由卡片先行切换（pi.setModel）。
-  pi.registerCommand("plan-build", {
-    description: "开始执行当前计划（由计划卡片的执行按钮调用）",
-    handler: async (_args, ctx) => {
-      if (todoItems.length === 0) {
-        ctx.ui.notify("没有可执行的计划步骤。", "warning");
+  // ── Plan：侧栏回写的命令（前端 runCommand 调用，不进模型上下文） ──
+
+  /** 命令参数里的 planId 要对得上本会话的 Plan；对不上时提示并返回 undefined。 */
+  const planFor = (id: string | undefined, ctx: ExtensionContext): Plan | undefined => {
+    if (!plan || !id || plan.id !== id) {
+      ctx.ui.notify("找不到这份计划（可能已被新的计划取代）。", "warning");
+      return undefined;
+    }
+    return plan;
+  };
+
+  pi.registerCommand("plan-update", {
+    description: "保存侧栏里改过的计划（由计划面板调用）",
+    handler: async (args, ctx) => {
+      let raw: { planId?: unknown; rev?: unknown } & Record<string, unknown>;
+      try {
+        raw = JSON.parse(args);
+      } catch {
+        ctx.ui.notify("计划保存失败：参数不是合法 JSON。", "error");
         return;
       }
+      const current = planFor(typeof raw.planId === "string" ? raw.planId : undefined, ctx);
+      if (!current) return;
+      if (!isUnconfirmed(current)) {
+        ctx.ui.notify(`计划${STATUS_LABELS[current.status]}，不能再修改。`, "warning");
+        return;
+      }
+      if (typeof raw.rev === "number" && raw.rev !== current.rev) {
+        ctx.ui.notify(`计划已更新到第 ${current.rev} 版，请载入最新版本后再改。`, "warning");
+        return;
+      }
+      const checked = validatePlanContent(raw);
+      if (!checked.ok) {
+        ctx.ui.notify(`计划保存失败：${checked.error}`, "error");
+        return;
+      }
+      setPlan(revisePlan(current, checked.value, Date.now(), "user"), ctx, "updated");
+      ctx.ui.notify(`计划已保存（第 ${plan!.rev} 版）。`, "info");
+    },
+  });
+
+  pi.registerCommand("plan-confirm", {
+    description: "确认执行计划：自动切到 Agent 模式并开跑（由计划面板调用）",
+    handler: async (args, ctx) => {
+      const [id, revRaw] = args.trim().split(/\s+/);
+      const current = planFor(id, ctx);
+      if (!current) return;
+      if (current.status !== "ready") {
+        ctx.ui.notify(`计划${STATUS_LABELS[current.status]}，不能确认执行。`, "warning");
+        return;
+      }
+      if (revRaw && Number(revRaw) !== current.rev) {
+        ctx.ui.notify(`计划已更新到第 ${current.rev} 版，请先看过最新版本再确认。`, "warning");
+        return;
+      }
+      if (ctx.isIdle?.() === false) {
+        ctx.ui.notify("会话正在运行，等这一轮结束再确认执行。", "warning");
+        return;
+      }
+      // 单一编排：先落 confirmed（宿主守卫放行），再切 Agent 拿全工具，再进 executing 并开跑。
+      const now = Date.now();
+      setPlan(withStatus(current, "confirmed", now), ctx, "updated");
       applyMode("agent", ctx, { silent: true });
-      executionMode = true;
-      pushStatus(ctx);
-      persistState();
-      const first = todoItems[0]?.text;
+      setPlan(withStatus(plan!, "executing", now), ctx, "updated");
+      skipNextExecutionContext = true;
+      ctx.ui.notify("计划已确认，切到 Agent 模式开始执行。", "info");
       pi.sendMessage(
-        {
-          customType: "plan-execute",
-          content: first ? `执行计划，从第一步开始：${first}` : "执行你刚制定的计划。",
-          display: true,
-        },
+        { customType: "plan-execute", content: planExecutionPrompt(plan!), display: true },
         { triggerTurn: true },
       );
+    },
+  });
+
+  pi.registerCommand("plan-cancel", {
+    description: "取消当前计划（由计划面板调用）",
+    handler: async (args, ctx) => {
+      const current = planFor(args.trim().split(/\s+/)[0], ctx);
+      if (!current) return;
+      if (!isPlanOpen(current)) {
+        ctx.ui.notify(`计划${STATUS_LABELS[current.status]}。`, "info");
+        return;
+      }
+      setPlan(withStatus(current, "cancelled", Date.now()), ctx, "updated");
+      ctx.ui.notify("计划已取消。", "info");
+    },
+  });
+
+  pi.registerCommand("plan-finish", {
+    description: "把执行中的计划标记为完成（由计划面板调用）",
+    handler: async (args, ctx) => {
+      const current = planFor(args.trim().split(/\s+/)[0], ctx);
+      if (!current) return;
+      if (current.status !== "executing") {
+        ctx.ui.notify(`计划${STATUS_LABELS[current.status]}，不能标记完成。`, "warning");
+        return;
+      }
+      setPlan(withStatus(current, "done", Date.now()), ctx, "updated");
+      ctx.ui.notify("计划已标记完成。", "info");
+    },
+  });
+
+  // ── Plan：模型写计划的唯一入口 ──
+  pi.registerTool({
+    name: "upsert_plan",
+    label: "Upsert Plan",
+    description:
+      "在规划（Plan）模式下写入或修订本会话的结构化计划。计划显示在用户的右侧计划面板，" +
+      "用户可以在那里修改步骤并点「确认执行」——确认后会自动切到 Agent 模式开跑，你不能自己开始执行。" +
+      "省略 planId 时：会话已有未确认的计划就修订它（同一 id），否则新建。传 planId 必须是当前计划的 id。" +
+      "每次调用都传完整内容（title / goal / steps 全量覆盖，不是增量补丁）。参数不合法会返回错误，修正后重试。",
+    ...toolPrompt("Write or revise this session's structured plan (plan mode only).", [
+      "In plan mode, deliver the plan only by calling upsert_plan — never as a `Plan:` list in reply text; a planning turn that ends without upsert_plan is reported to the user as a failure.",
+      "Call upsert_plan with the full content every time (title, goal, every step in full detail with target files/interfaces); it replaces the previous revision of the same planId. Omit planId to revise the open plan or start the first one.",
+      "After upsert_plan succeeds, tell the user to review it in the plan panel and click 确认执行; do not start executing, and do not ask them to switch modes by hand.",
+    ]),
+    defaultActive: false,
+    parameters: Type.Object({
+      planId: Type.Optional(Type.String({ description: "要修订的计划 id（上一次 upsert_plan 返回的）。省略则修订当前未确认的计划或新建" })),
+      title: Type.String({ description: "一句话标题" }),
+      goal: Type.String({ description: "目标与验收标准：做什么、怎么算完成、关键取舍" }),
+      steps: Type.Array(Type.String({ description: "一个步骤的完整描述（含目标文件 / 接口），不要缩写" }), {
+        description: `按执行顺序的步骤，最多 ${MAX_PLAN_STEPS} 项`,
+        maxItems: MAX_PLAN_STEPS,
+      }),
+      risks: Type.Optional(Type.Array(Type.String(), { description: "风险与回滚要点（可选）" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (liveMode(ctx?.cwd) !== "plan") throw new Error("upsert_plan 只在规划（Plan）模式可用。");
+      const checked = validatePlanContent(params);
+      if (!checked.ok) throw new Error(`upsert_plan 参数不合法：${checked.error}`);
+      const requested = typeof params.planId === "string" && params.planId.trim() ? params.planId.trim() : undefined;
+      const open = isUnconfirmed(plan) ? plan : undefined;
+      if (requested && requested !== open?.id) {
+        throw new Error(
+          open
+            ? `planId「${requested}」不是当前计划（当前为 ${open.id}）。修订请传 ${open.id}，或省略 planId。`
+            : `planId「${requested}」不存在或已结束。省略 planId 以新建计划。`,
+        );
+      }
+      const now = Date.now();
+      const created = !open;
+      const next = open ? revisePlan(open, checked.value, now, "model") : createPlan(makePlanId(new Date(now)), checked.value, now);
+      planSeenRev = next.rev;
+      upsertedThisRun = true;
+      setPlan(next, ctx, created ? "created" : "updated");
+      // 对话流里每份计划只放一张摘要卡；修订不再发。
+      if (created) pi.sendMessage({ customType: "agent-plan", content: planRefContent(next), display: true }, { triggerTurn: false });
+      const saved = plan!;
+      const text =
+        `计划已${created ? "创建" : "修订"}：${saved.id}（第 ${saved.rev} 版，${saved.steps.length} 步，状态 ${saved.status}）。` +
+        (saved.status === "ready"
+          ? "用户会在右侧计划面板审阅并点「确认执行」；不要自己开始执行。"
+          : "步骤为空，计划仍是草稿；补上步骤后再次调用 upsert_plan。");
+      return { content: [{ type: "text", text }], details: { planId: saved.id, rev: saved.rev, status: saved.status } };
     },
   });
 
@@ -316,87 +525,66 @@ export default function (pi: ExtensionAPI) {
   );
 
   pi.on("before_agent_start", async () => {
+    upsertedThisRun = false;
     if (sessionCtx) {
-      const live = liveMode();
-      if (live !== currentMode) {
-        // 宿主切了本会话的模式：与 switchMode 一致，离开 plan 系即清掉规划 / 执行子状态。
-        if (live !== "plan") {
-          todoItems = [];
-          executionMode = false;
-        }
-        applyMode(live, sessionCtx, { silent: true });
+      let live = liveMode();
+      // 兜底：未确认的计划不允许经任何路径进入能动手的模式（宿主切换已先拦一道）。
+      if (isExecutingMode(live) && isUnconfirmed(plan)) {
+        setAgentMode("plan", projectCwd(sessionCtx), sessionId);
+        live = "plan";
+        sessionCtx.ui.notify(PLAN_UNCONFIRMED_MESSAGE, "warning");
       }
+      if (live !== currentMode) applyMode(live, sessionCtx, { silent: true });
     }
-    // 执行阶段（currentMode 已切回 agent，但仍带着待办步骤）：注入剩余步骤。
-    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，
-    // 此处不再注入中文模式 prompt，避免双份重复占用 token。
-    if (executionMode && todoItems.length > 0) {
-      const remaining = todoItems
-        .filter((t) => !t.completed)
-        .map((t) => `${t.step}. ${t.text}`)
-        .join("\n");
+    // 模式说明（ask/debug/plan）的提示词由 fable-behavior 的英文 mode slice 统一注入，此处不再注入。
+    if (plan?.status === "executing") {
+      if (skipNextExecutionContext) {
+        skipNextExecutionContext = false;
+        return undefined;
+      }
       return {
-        message: {
-          customType: "plan-execution-context",
-          content: `[EXECUTING PLAN]\nRemaining steps:\n${remaining}\nExecute in order; mark each finished step with [DONE:n] in your reply.`,
-          display: false,
-        },
+        message: { customType: "plan-execution-context", content: planRemainingContext(plan), display: false },
       };
+    }
+    // 规划阶段：用户在侧栏改过计划，把当前版本告诉模型，避免它按旧版修订。
+    if (currentMode === "plan" && plan && isUnconfirmed(plan) && plan.rev !== planSeenRev) {
+      planSeenRev = plan.rev;
+      persistState();
+      return { message: { customType: "plan-edited-context", content: planEditedContext(plan), display: false } };
     }
     return undefined;
   });
 
   pi.on("turn_end", async (event, ctx) => {
-    if (!executionMode || todoItems.length === 0) return;
+    if (plan?.status !== "executing") return;
     if (!isAssistantMessage(event.message)) return;
-    if (markCompletedSteps(getTextContent(event.message), todoItems) > 0) {
-      pushStatus(ctx);
-      persistState();
-    }
+    const marked = markDoneFromText(plan, getTextContent(event.message), Date.now());
+    if (marked.changed > 0) setPlan(marked.plan, ctx, "updated");
   });
 
   pi.on("agent_end", async (event, ctx) => {
-    // 用户中断（abort）：直接收手，不做执行收尾、不弹"执行计划/留在规划"确认框。
-    // 否则中断后会先冒出 Request was aborted、紧接着又弹出计划确认模态框。
+    // 用户中断（abort）：直接收手，不做执行收尾、不报规划失败。
     if (ctx.signal?.aborted) return;
-    // 执行阶段：全部步骤完成则收尾，回到纯 Agent。
-    if (executionMode && todoItems.length > 0) {
-      if (todoItems.every((t) => t.completed)) {
+    if ((event as { willRetry?: boolean }).willRetry === true) return;
+
+    if (plan?.status === "executing") {
+      if (allStepsDone(plan)) {
+        setPlan(withStatus(plan, "done", Date.now()), ctx, "updated");
         pi.sendMessage({ customType: "plan-complete", content: "**计划完成。**", display: true }, { triggerTurn: false });
-        executionMode = false;
-        todoItems = [];
-        pushStatus(ctx);
-        persistState();
       }
       return;
     }
 
-    // 规划阶段：从最后一条助手消息提取编号步骤，写 .pi/plans/<id>.md，并在对话流产出一张
-    // Plan 摘要卡（customType=agent-plan）。不再弹 modal——执行 / 继续改都在卡片上完成：
-    // 卡片「开始执行」按钮经前端 runCommand('/plan-build') 转入执行；继续发消息则让 AI 改 plan。
-    if (currentMode !== "plan") return;
-
+    // 规划回合结束却没有可审阅的计划：显式报出来，不回退到解析正文。
+    if (liveMode(ctx.cwd) !== "plan" || upsertedThisRun || isPlanOpen(plan)) return;
     const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
-    const fullText = lastAssistant ? getTextContent(lastAssistant) : "";
-    if (fullText) {
-      const extracted = extractTodoItems(fullText);
-      if (extracted.length > 0) todoItems = extracted;
-    }
-    // 没解析到可执行步骤：不产卡片（助手叙述已在对话流），也不打扰用户。
-    if (todoItems.length === 0) return;
-
-    const id = makePlanId();
-    const card = buildPlanCard(id, fullText, todoItems, `.pi/plans/${id}.md`);
-    try {
-      writePlanFile(ctx.cwd, id, renderPlanMarkdown(card, fullText));
-    } catch (err) {
-      // 写文件失败不致命：卡片仍展示摘要与步骤，只是 View Plan 读不到全文。
-      console.error("[agent-mode] 写入计划文件失败：", err);
-    }
-    planId = id;
-    persistState();
+    if (lastAssistant?.stopReason === "error" || lastAssistant?.stopReason === "aborted") return;
     pi.sendMessage(
-      { customType: "agent-plan", content: JSON.stringify(card), display: true },
+      {
+        customType: "agent-plan-missing",
+        content: "本轮规划没有产出计划：模型没有调用 upsert_plan。可以补充需求或直接要求它调用 upsert_plan 写出计划。",
+        display: true,
+      },
       { triggerTurn: false },
     );
   });
@@ -407,28 +595,20 @@ export default function (pi: ExtensionAPI) {
     const entries = ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>;
     const entry = entries.filter((e) => e.type === "custom" && e.customType === "agent-mode").pop();
     const data = entry?.data as PersistedState | undefined;
-    if (data) {
-      currentMode = isAgentMode(data.mode) ? data.mode : DEFAULT_MODE;
-      todoItems = data.todos ?? [];
-      executionMode = data.executing ?? false;
-      savedTools = data.savedTools;
-      planId = data.planId;
-    } else {
-      currentMode = DEFAULT_MODE;
-      todoItems = [];
-      executionMode = false;
-      savedTools = undefined;
-      planId = undefined;
-    }
+    currentMode = data && isAgentMode(data.mode) ? data.mode : DEFAULT_MODE;
+    savedTools = data?.savedTools;
+    plan = restorePlan(data?.plan);
+    planSeenRev = typeof data?.planSeenRev === "number" ? data.planSeenRev : plan?.rev ?? 0;
+    upsertedThisRun = false;
+    skipNextExecutionContext = false;
+    setSessionPlan(sessionId, plan);
+    pushPlan(ctx, "sync");
+
     if (!sessionId) {
       // 无会话身份（旧 worker / 测试桩）：沿用项目级行为，已写入的 live 优先，其次盘上，再会话条目。
       if (!hasAgentMode(projectCwd(ctx))) {
         const fromFile = parseModeArg(getConfig(agentModeConfigKey(projectCwd(ctx))) ?? "");
         const next = fromFile ?? persistedMode(entries) ?? DEFAULT_MODE;
-        if (fromFile && fromFile !== currentMode && fromFile !== "plan") {
-          todoItems = [];
-          executionMode = false;
-        }
         applyMode(next, ctx, { silent: true, persist: false });
         return;
       }
@@ -443,12 +623,7 @@ export default function (pi: ExtensionAPI) {
       const inherited = parent && parent !== sessionId && hasAgentMode(projectCwd(ctx), parent)
         ? getAgentMode(projectCwd(ctx), parent)
         : undefined;
-      const next = own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx));
-      if (next !== currentMode && next !== "plan") {
-        todoItems = [];
-        executionMode = false;
-      }
-      applyMode(next, ctx, { silent: true, persist: false });
+      applyMode(own ?? inherited ?? getDefaultAgentMode(projectCwd(ctx)), ctx, { silent: true, persist: false });
       return;
     }
 
@@ -457,11 +632,7 @@ export default function (pi: ExtensionAPI) {
       applyMode(live, ctx, { silent: true });
       return;
     }
-    if (toolWhitelist(currentMode)) {
-      pi.setActiveTools(activeToolsFor(currentMode, savedTools ?? pi.getActiveTools()) ?? []);
-    } else if (savedTools) {
-      pi.setActiveTools(savedTools);
-    }
+    syncTools(currentMode, savedTools);
     pushStatus(ctx);
   });
 }

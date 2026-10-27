@@ -1,8 +1,20 @@
 import { Breadcrumb, Button, Segmented, Tag, Tooltip } from 'antd';
-import { Diff, ExternalLink, Save } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Diff, ExternalLink, RefreshCw, Save } from 'lucide-react';
 import { formatBytes } from '../devtools/devtoolsFormat';
 import { fileExplorerStyles as styles } from './fileExplorerStyles';
 import type { ViewMode } from './useOpenFile';
+
+/** 面包屑最多显示末尾几级；完整路径在悬停提示和文件树底部的路径栏里。 */
+const CRUMB_LEVELS = 2;
+
+export interface ViewerNav {
+  canBack: boolean;
+  canForward: boolean;
+  refreshing: boolean;
+  onBack: () => void;
+  onForward: () => void;
+  onRefresh: () => void;
+}
 
 export interface ViewerToolbarProps {
   segments: string[];
@@ -17,18 +29,60 @@ export interface ViewerToolbarProps {
   diff: { active: boolean; disabled: boolean } | null;
   onToggleDiff: () => void;
   onSave: () => void;
-  onOpenExternal: () => void;
+  /** 没有打开文件（空闲 / 加载中 / 出错）时不给「用系统打开」。 */
+  onOpenExternal?: () => void;
+  nav: ViewerNav;
 }
 
 export function ViewerToolbar(props: ViewerToolbarProps) {
-  const { segments, size, truncated, modeSwitch, dirty, saving, diff } = props;
+  const { segments, size, truncated, modeSwitch, dirty, saving, diff, nav } = props;
+  const collapsed = segments.length > CRUMB_LEVELS;
+  const shown = collapsed ? ['…', ...segments.slice(-CRUMB_LEVELS)] : segments;
+  const crumbs = (
+    <Breadcrumb
+      className={styles.crumbs}
+      data-testid="file-viewer-path"
+      items={shown.map((title, index) => ({ key: `${index}:${title}`, title }))}
+    />
+  );
   return (
     <div className={styles.toolbar} data-testid="file-viewer-toolbar">
-      <Breadcrumb
-        className={styles.crumbs}
-        data-testid="file-viewer-path"
-        items={segments.map((title, index) => ({ key: `${index}:${title}`, title }))}
-      />
+      <div className={styles.navButtons} data-testid="file-viewer-nav">
+        <Tooltip title="后退（Alt+←）">
+          <Button
+            size="small"
+            type="text"
+            data-testid="file-nav-back"
+            aria-label="后退"
+            disabled={!nav.canBack}
+            icon={<ArrowLeft size={14} />}
+            onClick={nav.onBack}
+          />
+        </Tooltip>
+        <Tooltip title="前进（Alt+→）">
+          <Button
+            size="small"
+            type="text"
+            data-testid="file-nav-forward"
+            aria-label="前进"
+            disabled={!nav.canForward}
+            icon={<ArrowRight size={14} />}
+            onClick={nav.onForward}
+          />
+        </Tooltip>
+        <Tooltip title="刷新文件和文件树（F5）">
+          <Button
+            size="small"
+            type="text"
+            data-testid="file-nav-refresh"
+            aria-label="刷新"
+            aria-busy={nav.refreshing}
+            icon={<RefreshCw size={14} className={nav.refreshing ? styles.spin : undefined} />}
+            onClick={nav.onRefresh}
+          />
+        </Tooltip>
+      </div>
+      {collapsed ? <Tooltip title={segments.join('/')}>{crumbs}</Tooltip> : crumbs}
       {dirty ? <span className={styles.dirtyDot} data-testid="file-dirty-dot" title="有未保存的修改" /> : null}
       {size !== null ? <span className={styles.meta}>{formatBytes(size)}</span> : null}
       {truncated ? (
@@ -80,9 +134,11 @@ export function ViewerToolbar(props: ViewerToolbarProps) {
             </Button>
           </Tooltip>
         ) : null}
-        <Tooltip title="用系统默认程序打开">
-          <Button size="small" type="text" data-testid="file-open-external" icon={<ExternalLink size={14} />} onClick={props.onOpenExternal} />
-        </Tooltip>
+        {props.onOpenExternal ? (
+          <Tooltip title="用系统默认程序打开">
+            <Button size="small" type="text" data-testid="file-open-external" icon={<ExternalLink size={14} />} onClick={props.onOpenExternal} />
+          </Tooltip>
+        ) : null}
       </div>
     </div>
   );

@@ -8,7 +8,9 @@ import { fileExplorerStyles as styles } from './fileExplorerStyles';
 import { LARGE_TEXT_BYTES, pathSegments } from './fileKinds';
 import { MarkdownPreview } from './MarkdownPreview';
 import type { OpenFileApi, TextFile } from './useOpenFile';
-import { ViewerToolbar } from './ViewerToolbar';
+import { ViewerToolbar, type ViewerNav } from './ViewerToolbar';
+import { FindBar } from '../find/FindBar';
+import { useFindScope } from '../find/findStore';
 
 // CodeMirror 只有打开文本文件才用得到，不进首包。
 const LazyCodeEditor = lazy(() => import('./CodeEditor'));
@@ -23,9 +25,14 @@ export interface FileViewerProps {
   root: string | null;
   api: OpenFileApi;
   isDark: boolean;
+  /** markdown 预览里点了链接（锚点由预览自己滚动，不会走到这里）。 */
+  onOpenLink?: (href: string, options: { system: boolean }) => void;
+  nav: ViewerNav;
+  /** 这个文件标签的查找范围 id（即标签 id）；不给就没有查找。 */
+  findScope?: string;
 }
 
-export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
+export function FileViewer({ workspace, root, api, isDark, onOpenLink, nav, findScope }: FileViewerProps) {
   const { file } = api;
   const { message } = App.useApp();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -37,19 +44,49 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
     });
   };
 
+  // 没有打开文件（空闲 / 加载中 / 出错）时仍然显示后退 / 前进 / 刷新：打开失败的文件之后要能退回去。
+  const navOnlyToolbar = (path: string | null) => (
+    <ViewerToolbar
+      segments={path ? pathSegments(root ?? '', path) : []}
+      size={null}
+      truncated={false}
+      modeSwitch={null}
+      dirty={false}
+      saving={false}
+      diff={null}
+      onModeChange={api.setMode}
+      onToggleDiff={() => {}}
+      onSave={() => {}}
+      nav={nav}
+    />
+  );
+
   let content;
   if (file.status === 'idle') {
-    content = <div className={styles.center}>从右边选一个文件查看</div>;
+    content = (
+      <>
+        {navOnlyToolbar(null)}
+        <div className={styles.center}>从右边选一个文件查看</div>
+      </>
+    );
   } else if (file.status === 'loading') {
-    content = <div className={styles.center}>加载中…</div>;
+    content = (
+      <>
+        {navOnlyToolbar(file.path)}
+        <div className={styles.center}>加载中…</div>
+      </>
+    );
   } else if (file.status === 'error') {
     content = (
-      <div className={styles.center} data-testid="file-viewer-error">
-        <span>打不开这个文件：{file.message}</span>
-        <Button size="small" onClick={() => void api.open(file.path)}>
-          重试
-        </Button>
-      </div>
+      <>
+        {navOnlyToolbar(file.path)}
+        <div className={styles.center} data-testid="file-viewer-error">
+          <span>打不开这个文件：{file.message}</span>
+          <Button size="small" onClick={() => void api.open(file.path)}>
+            重试
+          </Button>
+        </div>
+      </>
     );
   } else {
     const toolbarBase = {
@@ -59,6 +96,7 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
       onModeChange: api.setMode,
       onSave: () => void api.save(),
       onOpenExternal: () => openExternal(file.path),
+      nav,
     };
     if (file.status === 'text') {
       content = (
@@ -69,6 +107,9 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
           splitFits={splitFits}
           toolbarBase={toolbarBase}
           onOpenExternal={openExternal}
+          onOpenLink={onOpenLink}
+          onNotice={(text) => void message.warning(text)}
+          findScope={findScope}
           refocus={() => ref.current?.focus({ preventScroll: true })}
         />
       );
@@ -103,7 +144,7 @@ export function FileViewer({ workspace, root, api, isDark }: FileViewerProps) {
 
 type ToolbarBase = Pick<
   Parameters<typeof ViewerToolbar>[0],
-  'segments' | 'size' | 'dirty' | 'onModeChange' | 'onSave' | 'onOpenExternal'
+  'segments' | 'size' | 'dirty' | 'onModeChange' | 'onSave' | 'onOpenExternal' | 'nav'
 >;
 
 interface TextViewerProps {
@@ -114,11 +155,14 @@ interface TextViewerProps {
   splitFits: boolean;
   toolbarBase: ToolbarBase;
   onOpenExternal: (path: string) => void;
+  onOpenLink?: (href: string, options: { system: boolean }) => void;
+  onNotice: (text: string) => void;
+  findScope?: string;
   /** 横幅里的按钮点完会消失，把焦点还给内容区。 */
   refocus: () => void;
 }
 
-function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal, refocus }: TextViewerProps) {
+function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal, onOpenLink, onNotice, findScope, refocus }: TextViewerProps) {
   const [showDiff, setShowDiff] = useState(false);
   const [editorPath, setEditorPath] = useState<string | null>(null);
   const editing = file.mode === 'edit';
@@ -136,6 +180,9 @@ function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal,
   const mountEditor = !isMarkdown || editing || editorPath === file.path;
   const showEditor = !isMarkdown || editing;
   const showPreview = isMarkdown && (!editing || splitFits);
+  // 查找的对象：markdown 只看不改时查预览，其余（代码、编辑中的 markdown）查编辑器。
+  const findTarget: 'preview' | 'editor' = isMarkdown && !editing ? 'preview' : 'editor';
+  const findOpen = useFindScope(findScope ?? '').open;
 
   return (
     <>
@@ -147,6 +194,7 @@ function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal,
         diff={editing ? { active: showDiff, disabled: large || (!api.dirty && !showDiff) } : null}
         onToggleDiff={() => setShowDiff((on) => !on)}
       />
+      {findScope && findOpen ? <FindBar scope={findScope} placeholder="在文件中查找" data-testid="file-find-bar" /> : null}
       {file.disk === 'changed' ? (
         <Alert
           className={styles.banner}
@@ -208,13 +256,23 @@ function TextViewer({ file, api, isDark, splitFits, toolbarBase, onOpenExternal,
                 large={large}
                 isDark={isDark}
                 onChange={api.setContent}
+                onActivity={api.noteEdit}
+                bindEditorText={api.bindEditorText}
+                findScope={findTarget === 'editor' ? findScope : undefined}
               />
             </Suspense>
           </div>
         ) : null}
         {showPreview ? (
           <div className={cx(styles.pane, editing && styles.splitPreview)}>
-            <MarkdownPreview content={file.content} debounceMs={editing ? SPLIT_PREVIEW_DEBOUNCE_MS : 0} />
+            <MarkdownPreview
+              content={file.content}
+              debounceMs={editing ? SPLIT_PREVIEW_DEBOUNCE_MS : 0}
+              onOpenLink={onOpenLink}
+              onNotice={onNotice}
+              findScope={findTarget === 'preview' ? findScope : undefined}
+              findResetKey={file.path}
+            />
           </div>
         ) : null}
       </div>

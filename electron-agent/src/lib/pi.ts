@@ -429,8 +429,14 @@ export const pi = {
   diagnoseProviderModel: (request: DiagnoseRequest, onChunk: Channel<DiagnoseChunk>) =>
     invoke<DiagnoseResult>('diagnose_provider_model', { ...request, onChunk }),
   abortDiagnoseProviderModel: (requestId: string) => invoke<void>('diagnose_provider_model_abort', { requestId }),
-  enhancePrompt: (workspace: string, text: string, onChunk: Channel<string>, goalText?: string) =>
-    invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText }),
+  enhancePrompt: (
+    workspace: string,
+    text: string,
+    onChunk: Channel<string>,
+    goalText?: string,
+    recentTurn?: string,
+    onStatus?: Channel<string>,
+  ) => invoke<EnhancePromptResult>('enhance_prompt', { workspace, text, onChunk, goalText, recentTurn, onStatus }),
   abortEnhancePrompt: (workspace: string) => invoke<void>('enhance_prompt_abort', { workspace }),
   /** 给了 sessionPath 只列这份会话派出去的子代理（含孙级）；不给列整个项目。 */
   subagentList: (workspace: string, sessionPath?: string | null) =>
@@ -467,8 +473,9 @@ export const pi = {
     invoke<void>('ui_history_write', { workspace, sessionKey, content }),
   deleteUiHistory: (workspace: string, sessionKey: string) =>
     invoke<void>('ui_history_delete', { workspace, sessionKey }),
-  runCommand: (workspace: string, command: string) =>
-    invoke<unknown>('agent_prompt', { workspace, message: command }),
+  /** 执行扩展命令（/name args）。带会话路径时打到那份会话，不落到前景会话上。 */
+  runCommand: (workspace: string, command: string, targetSessionPath?: string | null) =>
+    invoke<unknown>('agent_prompt', { workspace, message: command, ...target(targetSessionPath) }),
   readFile: (workspace: string, path: string) => invoke<string>('read_file', { workspace, path }),
   getGitDiff: (workspace: string, file: string) =>
     invoke<string>('get_git_diff', { workspacePath: workspace, filePath: file }),

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,6 +31,7 @@ vi.mock('../fileExplorer/CodeEditor', () => ({
   ),
 }));
 
+import { useDockStore } from '../../stores/dockStore';
 import { useFileOpenRequests } from '../../stores/fileOpenRequests';
 import { canCloseDockTab } from './dockCloseGuards';
 import { FileTreeBody } from './FileTreeBody';
@@ -39,7 +40,7 @@ const tab = {
   id: 'file:right:/repo',
   kind: 'file' as const,
   region: 'right' as const,
-  title: '文件',
+  title: '文件管理器',
   closable: true,
   order: 0,
   payload: { workspace: '/repo' },
@@ -106,8 +107,12 @@ function renderBody() {
 }
 
 async function openFile(name: string) {
-  fireEvent.click(await screen.findByText(name));
+  fireEvent.click(await screen.findByText(name, { selector: '[data-tree-row] *' }));
 }
+
+const tabPaths = () => screen.queryAllByTestId('file-tab').map((el) => el.dataset.path);
+const tabEl = (path: string) => screen.getAllByTestId('file-tab').find((el) => el.dataset.path === path)!;
+const paneEl = (path: string) => screen.getAllByTestId('file-tab-pane').find((el) => el.dataset.path === path)!;
 
 describe('FileTreeBody (file explorer)', () => {
   it('lists only the root first and lists a folder when it is expanded', async () => {
@@ -149,7 +154,7 @@ describe('FileTreeBody (file explorer)', () => {
     await waitFor(() => expect(screen.queryByTestId('file-dirty-dot')).toBeNull());
   });
 
-  it('asks before switching away from unsaved changes and before closing the tab', async () => {
+  it('opens another file in a new tab without asking, keeps the edits, and asks when the dirty tab or the dock tab closes', async () => {
     renderBody();
     await openFile('a.ts');
     const editor = (await screen.findByTestId('mock-editor')) as HTMLTextAreaElement;
@@ -158,21 +163,77 @@ describe('FileTreeBody (file explorer)', () => {
     fireEvent.change(editor, { target: { value: 'changed' } });
     expect(screen.getByTestId('file-dirty-dot')).toBeTruthy();
 
+    await openFile('README.md');
+    expect((await screen.findByTestId('md-render')).textContent).toBe('# Hello');
+    expect(confirms).toHaveLength(0);
+    expect(tabPaths()).toEqual(['/repo/a.ts', '/repo/README.md']);
+    expect(tabEl('/repo/a.ts').dataset.dirty).toBe('true');
+    expect(paneEl('/repo/a.ts').style.display).toBe('none');
+
+    // 切回去：还是同一个编辑器，修改还在，没有重新读盘。
+    const reads = api.readView.mock.calls.length;
+    fireEvent.click(tabEl('/repo/a.ts'));
+    await waitFor(() => expect(paneEl('/repo/a.ts').dataset.active).toBe('true'));
+    expect(screen.getByTestId('mock-editor')).toBe(editor);
+    expect(editor.value).toBe('changed');
+    expect(api.readView.mock.calls.length).toBe(reads);
+
+    // 关 dock 标签：问未保存，取消就不关。
     let closing: Promise<boolean> = Promise.resolve(true);
     act(() => {
       closing = canCloseDockTab(tab.id);
     });
+    await waitFor(() => expect(confirms).toHaveLength(1));
     expect(confirms[0]?.title).toBe('a.ts 有未保存的修改');
     act(() => confirms[0].onCancel?.());
     await expect(closing).resolves.toBe(false);
 
-    await openFile('README.md');
+    // 关文件标签：先问；取消不关。
+    fireEvent.click(within(tabEl('/repo/a.ts')).getByTestId('file-tab-close'));
     await waitFor(() => expect(confirms).toHaveLength(2));
-    // 渲染真实的对话框底栏，点「放弃修改」。
-    const footer = render(<>{confirms[1].footer?.(null, { OkBtn: () => <button>保存</button>, CancelBtn: () => <button>取消</button> })}</>);
+    act(() => confirms[1].onCancel?.());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(tabPaths()).toEqual(['/repo/a.ts', '/repo/README.md']);
+
+    // 再关，选「放弃修改」：标签关掉、没写盘，激活右边的 README。
+    fireEvent.click(within(tabEl('/repo/a.ts')).getByTestId('file-tab-close'));
+    await waitFor(() => expect(confirms).toHaveLength(3));
+    const footer = render(<>{confirms[2].footer?.(null, { OkBtn: () => <button>保存</button>, CancelBtn: () => <button>取消</button> })}</>);
     fireEvent.click(footer.getByTestId('file-unsaved-discard'));
-    expect((await screen.findByTestId('md-render')).textContent).toBe('# Hello');
+    await waitFor(() => expect(tabPaths()).toEqual(['/repo/README.md']));
+    expect(tabEl('/repo/README.md').dataset.active).toBe('true');
     expect(api.write).not.toHaveBeenCalled();
+  });
+
+  it('closes a clean tab with the middle button without asking', async () => {
+    renderBody();
+    await openFile('a.ts');
+    await screen.findByTestId('mock-editor');
+    await openFile('README.md');
+    await screen.findByTestId('md-render');
+    fireEvent(tabEl('/repo/README.md'), new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    await waitFor(() => expect(tabPaths()).toEqual(['/repo/a.ts']));
+    expect(tabEl('/repo/a.ts').dataset.active).toBe('true');
+    expect(confirms).toHaveLength(0);
+  });
+
+  it('restores tabs from the dock payload, reads only the active one, and writes changes back', async () => {
+    useDockStore.setState({ tabs: [{ ...tab, payload: { workspace: '/repo', openFiles: ['/repo/a.ts', '/repo/README.md'], activeFile: '/repo/README.md' } }] });
+    render(
+      <App>
+        <FileTreeBody tab={useDockStore.getState().tabs[0]} active />
+      </App>,
+    );
+    expect((await screen.findByTestId('md-render')).textContent).toBe('# Hello');
+    expect(tabPaths()).toEqual(['/repo/a.ts', '/repo/README.md']);
+    expect(api.readView).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('mock-editor')).toBeNull();
+
+    fireEvent.click(tabEl('/repo/a.ts'));
+    expect(await screen.findByTestId('mock-editor')).toBeTruthy();
+    expect(api.readView).toHaveBeenCalledWith('/repo', '/repo/a.ts');
+    await waitFor(() => expect(useDockStore.getState().tabs[0].payload).toEqual({ workspace: '/repo', openFiles: ['/repo/a.ts', '/repo/README.md'], activeFile: '/repo/a.ts' }));
+    useDockStore.setState({ tabs: [] });
   });
 
   it('shows binary files as unsupported and truncated files read-only with a tag', async () => {
@@ -230,7 +291,7 @@ describe('FileTreeBody (file explorer)', () => {
     localStorage.removeItem('hermes-file-explorer-tree-width');
   });
 
-  it('asks about unsaved changes before an external request replaces the open file', async () => {
+  it('opens an external request in a new tab and leaves unsaved edits in the old one', async () => {
     renderBody();
     await openFile('a.ts');
     const editor = (await screen.findByTestId('mock-editor')) as HTMLTextAreaElement;
@@ -239,10 +300,9 @@ describe('FileTreeBody (file explorer)', () => {
     fireEvent.change(editor, { target: { value: 'changed' } });
 
     act(() => useFileOpenRequests.getState().request(tab.id, '/repo/README.md'));
-    await waitFor(() => expect(confirms).toHaveLength(1));
-    act(() => confirms[0].onCancel?.());
-    await waitFor(() => expect(useFileOpenRequests.getState().byTab[tab.id]).toBeUndefined());
-    expect(screen.queryByTestId('md-render')).toBeNull();
+    expect((await screen.findByTestId('md-render')).textContent).toBe('# Hello');
+    expect(confirms).toHaveLength(0);
+    expect(tabPaths()).toEqual(['/repo/a.ts', '/repo/README.md']);
     expect((screen.getByTestId('mock-editor') as HTMLTextAreaElement).value).toBe('changed');
   });
 

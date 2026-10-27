@@ -6,8 +6,9 @@ import type { AgentToolResult, ExtensionAPI, RegisteredMcpServer } from "@earend
 import { Type } from "typebox";
 import { toolPrompt } from "../_shared/toolPrompt.js";
 import { remoteTransportKind, sanitize, type McpServerConfig } from "./config.js";
-import { getMcpManager, type McpAuthKind, type McpManager, type McpSnapshot } from "./manager.js";
+import { getMcpManager, type McpManager, type McpSnapshot } from "./manager.js";
 import { exposureForTool, normalizeExposure, type McpExposure } from "./merge.js";
+import { summary } from "./summary.js";
 import { registerToolName } from "./naming.js";
 import { shapeMcpResult } from "./resultShape.js";
 import { authorizeDesktopOperation, desktopControl, type DesktopControlPort } from "../_shared/desktop-control.js";
@@ -42,15 +43,7 @@ export const pluginManifest = {
   permissions: { network: "full", process: "allowlist", secrets: "selected" },
 } as const;
 
-export interface ServerSummary {
-  name: string;
-  status: string;
-  tools: number;
-  toolNames: string[];
-  exposure: McpExposure;
-  auth: McpAuthKind;
-  loginUrl?: string;
-}
+export { summary, type ServerSummary } from "./summary.js";
 type McpToolDetails = { server: string; tool: string; error?: 'denied' | 'blocked' };
 
 const mcpResultOutputSchema = {
@@ -62,23 +55,6 @@ const mcpResultOutputSchema = {
   },
   required: ["content"],
 };
-
-function summaryAuth(auth: string | undefined): McpAuthKind {
-  return auth === "oauth" || auth === "provider" ? auth : "none";
-}
-
-// 每 server 的 status / 工具数 / 注册全名，加上 exposure、auth，以及需要登录时的 loginUrl。
-export function summary(snap: McpSnapshot): ServerSummary[] {
-  return [...snap.servers.entries()].map(([name, e]) => ({
-    name,
-    status: e.status,
-    tools: e.tools.length,
-    toolNames: e.tools.map((t) => `mcp__${sanitize(name)}__${sanitize(t.name)}`),
-    exposure: normalizeExposure(e.exposure) ?? "codemode",
-    auth: summaryAuth(e.auth),
-    ...(e.loginUrl ? { loginUrl: e.loginUrl } : {}),
-  }));
-}
 
 interface ProjectablePi {
   registerTool: ExtensionAPI["registerTool"];

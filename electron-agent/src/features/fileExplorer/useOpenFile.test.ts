@@ -132,6 +132,37 @@ describe('useOpenFile', () => {
     expect(current().dirty).toBe(false);
   });
 
+  it('does not reread a file when only a sibling in the same directory is named', async () => {
+    readView.mockResolvedValueOnce(text('v1'));
+    const { current } = setup();
+    await act(() => current().open('/ws/src/a.ts'));
+    const reads = readView.mock.calls.length;
+    await act(async () => current().onFilesChanged({ dirs: ['/ws/src'], paths: ['/ws/src/b.ts'] }));
+    expect(readView).toHaveBeenCalledTimes(reads);
+
+    readView.mockResolvedValueOnce(text('v2'));
+    await act(async () => current().onFilesChanged({ dirs: ['/ws/src'], paths: [] }));
+    expect(asText(current().file).content).toBe('v2');
+  });
+
+  it('marks dirty as soon as the editor is touched, and save writes the editor text', async () => {
+    readView.mockResolvedValueOnce(text('v1'));
+    const { current } = setup();
+    await act(() => current().open('/ws/src/a.ts'));
+    let live = 'v1';
+    act(() => current().bindEditorText(() => live));
+    act(() => current().noteEdit());
+    expect(current().dirty).toBe(true);
+    expect(asText(current().file).content).toBe('v1');
+    live = 'v1 changed';
+    await act(async () => {
+      expect(await current().save()).toBe(true);
+    });
+    expect(write).toHaveBeenCalledWith('/ws', '/ws/src/a.ts', 'v1 changed');
+    expect(current().dirty).toBe(false);
+    expect(asText(current().file).content).toBe('v1 changed');
+  });
+
   it('ignores changes in other directories and flags a deleted file', async () => {
     readView.mockResolvedValueOnce(text('v1'));
     const { current } = setup();

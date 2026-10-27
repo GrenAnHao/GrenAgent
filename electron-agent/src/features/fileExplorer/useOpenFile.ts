@@ -19,6 +19,8 @@ export interface TextFile {
   docVersion: number;
   lineSeparator: LineSeparator;
   mode: ViewMode;
+  /** 编辑器里已经有按键，正文还没送上来。脏标记靠它先亮。 */
+  pendingEdit?: boolean;
   /** 磁盘上的文件被别人改了 / 删了，而这边有未保存的修改。 */
   disk: 'same' | 'changed' | 'deleted';
   saving: boolean;
@@ -36,8 +38,13 @@ export type OpenFileState =
 export interface OpenFileApi {
   file: OpenFileState;
   dirty: boolean;
-  open: (path: string) => Promise<void>;
+  /** true：现在打开的就是 path（含本来就在看它）；false：被「未保存」询问取消，或被后来的 open 顶掉。 */
+  open: (path: string) => Promise<boolean>;
   setContent: (content: string) => void;
+  /** 编辑器有按键、正文还没送上来时立刻把脏标记亮上。 */
+  noteEdit: () => void;
+  /** 保存和磁盘比对前，从编辑器读最新正文。传 null 表示编辑器卸了。 */
+  bindEditorText: (pull: (() => string) | null) => void;
   setMode: (mode: ViewMode) => void;
   toggleMode: () => void;
   save: () => Promise<boolean>;
@@ -53,7 +60,7 @@ export interface OpenFileApi {
 type Confirm = (fileName: string) => Promise<UnsavedChoice>;
 
 function isDirtyState(file: OpenFileState): boolean {
-  return file.status === 'text' && file.content !== file.original;
+  return file.status === 'text' && (file.pendingEdit === true || file.content !== file.original);
 }
 
 function errorText(error: unknown): string {
@@ -77,6 +84,14 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
   const dismissedDiskRef = useRef<string | null>(null);
   /** 最近一次检测到、和本地不同的磁盘内容。 */
   const pendingDiskRef = useRef<string | null>(null);
+  /** 编辑器当前正文。按键先亮脏标记，整篇字符串稍后才送上来；保存前从这里取。 */
+  const editorTextRef = useRef<(() => string) | null>(null);
+  const pullEditor = useCallback((current: OpenFileState): OpenFileState => {
+    const latest = editorTextRef.current?.();
+    if (current.status !== 'text' || typeof latest !== 'string') return current;
+    if (current.content === latest && !current.pendingEdit) return current;
+    return { ...current, content: latest, pendingEdit: false };
+  }, []);
 
   /** 同步更新 ref 和 state：异步回调里读到的总是最新状态。换掉图片时顺手回收 blob URL。 */
   const update = useCallback((fn: (cur: OpenFileState) => OpenFileState) => {
@@ -125,10 +140,14 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
   );
 
   const save = useCallback(async (): Promise<boolean> => {
+    const pulled = pullEditor(fileRef.current);
+    if (pulled !== fileRef.current) fileRef.current = pulled;
     const cur = fileRef.current;
     if (cur.status !== 'text' || cur.truncated || cur.saving) return false;
     const { path, content } = cur;
-    update((f) => (f.status === 'text' && f.path === path ? { ...f, saving: true, saveError: null } : f));
+    update((f) =>
+      f.status === 'text' && f.path === path ? { ...f, content, pendingEdit: false, saving: true, saveError: null } : f,
+    );
     try {
       await files.write(workspace, path, content);
       dismissedDiskRef.current = null;
@@ -141,7 +160,7 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
       update((f) => (f.status === 'text' && f.path === path ? { ...f, saving: false, saveError: errorText(err) } : f));
       return false;
     }
-  }, [workspace, update]);
+  }, [workspace, update, pullEditor]);
 
   const resolveUnsaved = useCallback(async (): Promise<boolean> => {
     const cur = fileRef.current;
@@ -149,15 +168,15 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
     const choice = await confirm(baseName(cur.path));
     if (choice === 'cancel') return false;
     if (choice === 'save') return save();
-    update((f) => (f.status === 'text' ? { ...f, content: f.original, docVersion: ++docVersionSeq } : f));
+    update((f) => (f.status === 'text' ? { ...f, content: f.original, pendingEdit: false, docVersion: ++docVersionSeq } : f));
     return true;
   }, [confirm, save, update]);
 
   const open = useCallback(
-    async (path: string) => {
+    async (path: string): Promise<boolean> => {
       const cur = fileRef.current;
-      if ('path' in cur && cur.path === path && cur.status !== 'error') return;
-      if (!(await resolveUnsaved())) return;
+      if ('path' in cur && cur.path === path && cur.status !== 'error') return true;
+      if (!(await resolveUnsaved())) return false;
       const token = ++tokenRef.current;
       dismissedDiskRef.current = null;
       pendingDiskRef.current = null;
@@ -166,20 +185,31 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
         const next = await loadPath(path);
         if (token !== tokenRef.current) {
           if (next.status === 'image') URL.revokeObjectURL(next.url);
-          return;
+          return false;
         }
         update(() => next);
       } catch (err) {
-        if (token === tokenRef.current) update(() => ({ status: 'error', path, message: errorText(err) }));
+        if (token !== tokenRef.current) return false;
+        update(() => ({ status: 'error', path, message: errorText(err) }));
       }
+      return true;
     },
     [loadPath, resolveUnsaved, update],
   );
 
   const setContent = useCallback(
-    (content: string) => update((f) => (f.status === 'text' && f.content !== content ? { ...f, content } : f)),
+    (content: string) =>
+      update((f) => (f.status === 'text' && (f.content !== content || f.pendingEdit) ? { ...f, content, pendingEdit: false } : f)),
     [update],
   );
+
+  const noteEdit = useCallback(() => {
+    update((f) => (f.status === 'text' && !f.truncated && !isDirtyState(f) ? { ...f, pendingEdit: true } : f));
+  }, [update]);
+
+  const bindEditorText = useCallback((pull: (() => string) | null) => {
+    editorTextRef.current = pull;
+  }, []);
 
   const setMode = useCallback(
     (mode: ViewMode) =>
@@ -210,6 +240,7 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
             lineSeparator: detectLineSeparator(view.content),
             docVersion: ++docVersionSeq,
             disk: 'same',
+            pendingEdit: false,
             mode: view.truncated ? 'preview' : f.mode,
           }
         : f,
@@ -236,14 +267,18 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
       // 读盘期间用户可能还在打字：按路径认文件，脏不脏以此刻的状态为准。
       update((f) => {
         if (f.status !== 'text' || f.path !== path) return f;
-        if (disk.content === f.original) return f.disk === 'same' ? f : { ...f, disk: 'same' };
-        if (disk.content === dismissedDiskRef.current) return f;
-        if (isDirtyState(f)) {
+        const base = pullEditor(f);
+        if (disk.content === base.original) {
+          if (base === f && base.disk === 'same') return f;
+          return base.disk === 'same' ? base : { ...base, disk: 'same' };
+        }
+        if (disk.content === dismissedDiskRef.current) return base === f ? f : base;
+        if (isDirtyState(base)) {
           pendingDiskRef.current = disk.content;
-          return f.disk === 'changed' ? f : { ...f, disk: 'changed' };
+          return base.disk === 'changed' ? base : { ...base, disk: 'changed' };
         }
         return {
-          ...f,
+          ...base,
           original: disk.content,
           content: disk.content,
           size: disk.size,
@@ -251,11 +286,12 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
           lineSeparator: detectLineSeparator(disk.content),
           docVersion: ++docVersionSeq,
           disk: 'same',
-          mode: disk.truncated ? 'preview' : f.mode,
+          pendingEdit: false,
+          mode: disk.truncated ? 'preview' : base.mode,
         };
       });
     },
-    [workspace, update],
+    [workspace, update, pullEditor],
   );
 
   const onFilesChanged = useCallback(
@@ -263,10 +299,9 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
       const cur = fileRef.current;
       if (cur.status === 'idle' || cur.status === 'loading') return;
       const named = event.paths.some((p) => pathsEquivalent(p, cur.path));
-      const parent = parentDir(cur.path);
-      const inParent = event.dirs.some((d) => pathsEquivalent(d, parent));
+      // 点名了具体文件就只核对那些文件。paths 为空才按父目录回退（监听只报了目录、没点名是哪个文件）。
+      const inParent = event.paths.length === 0 && event.dirs.some((d) => pathsEquivalent(d, parentDir(cur.path)));
       if (cur.status === 'text') {
-        // 文本文件靠内容比对把关：自己刚保存、或别的文件变了触发的事件，内容一样就什么都不做。
         if (named || inParent) void checkText(cur.path);
         return;
       }
@@ -292,6 +327,8 @@ export function useOpenFile(workspace: string, confirm: Confirm): OpenFileApi {
     dirty: isDirtyState(file),
     open,
     setContent,
+    noteEdit,
+    bindEditorText,
     setMode,
     toggleMode,
     save,

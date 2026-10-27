@@ -11,7 +11,7 @@ import { AgentMessagePill } from './AgentMessagePill';
 import { GoalRoundPill } from './GoalRoundPill';
 import { UiPromptReceipt } from './UiPromptReceipt';
 import { AnswerCard } from './AnswerCard';
-import { PlanCard } from './PlanCard';
+import { PlanMissingNotice, PlanSummaryCard } from '../plan/PlanSummaryCard';
 import { QuestionsCard } from './QuestionsCard';
 import { VisualCard } from '../visual/VisualCard';
 import { VirtualizedMessageList, type MessageListViewport, type TranscriptScrollHandle } from './VirtualizedMessageList';
@@ -163,7 +163,8 @@ export function renderMessageBody(
       return <CompactionDivider label="已压缩" testId="compaction-done" />;
     case 'notice':
       if (msg.customType === 'agent-answer') return <AnswerCard content={msg.content} />;
-      if (msg.customType === 'agent-plan') return <PlanCard content={msg.content} />;
+      if (msg.customType === 'agent-plan') return <PlanSummaryCard content={msg.content} />;
+      if (msg.customType === 'agent-plan-missing') return <PlanMissingNotice content={msg.content} />;
       if (msg.customType === 'agent-questions') {
         return <QuestionsCard answered={answeredQuestions.has(msg.id)} content={msg.content} />;
       }

@@ -376,7 +376,8 @@ describe('registerIpcHandlers', () => {
     const sender = { send: vi.fn() };
     await invoke({ sender }, { command: 'enhance_prompt', args: { workspace: '/ws', text: 'hello', onChunk: { __grenChannelId: 'channel-9' } } });
     expect(run).toHaveBeenCalledWith(
-      { workspace: '/ws', text: 'hello', goalText: '' },
+      { workspace: '/ws', text: 'hello', goalText: '', recentTurn: '' },
+      expect.any(Function),
       expect.any(Function),
     );
     expect(sender.send).toHaveBeenCalledWith(`${IPC_CHANNELS.eventPrefix}channel:channel-9`, 'chunk-1');

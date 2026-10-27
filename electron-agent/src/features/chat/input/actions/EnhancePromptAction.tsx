@@ -4,7 +4,7 @@ import { ActionIcon } from '@lobehub/ui';
 import { Wand2 } from 'lucide-react';
 import { Channel } from '../../../../platform/runtime';
 import { pi } from '../../../../lib/pi';
-import { useAgentStoreContext } from '../../../../stores/AgentStoreContext';
+import { useAgentStore, useAgentStoreContext } from '../../../../stores/AgentStoreContext';
 import { useEnhancePromptStore } from '../../../../stores/enhancePromptStore';
 import { useGoalStore } from '../../../../stores/goalStore';
 import { useInlineQuestionStore } from '../../../../stores/inlineQuestionStore';
@@ -12,6 +12,7 @@ import { useUiPromptStore } from '../../../../stores/uiPromptStore';
 import { useChatInput } from '../ChatInputContext';
 import { readSessionId } from '../GoalPill';
 import { shouldRenderUiPromptInOverlay } from '../overlayPrompt';
+import { formatRecentTurn } from '../recentTurn';
 import { peekComposerModel } from './ModelThinkingAction';
 
 const MAX_DRAFT_CHARS = 16000;
@@ -27,6 +28,7 @@ const PROJECT_WATCHDOG_MS = 105_000;
 
 export default function EnhancePromptAction() {
   const { workspace } = useAgentStoreContext();
+  const agent = useAgentStore();
   const { empty, readDraft } = useChatInput();
   const { message } = App.useApp();
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -65,11 +67,14 @@ export default function EnhancePromptAction() {
     const snapshot = Object.keys(settings).length ? settings : await pi.getSettings().catch(() => settings);
     const useProjectContext = snapshot.enhancePromptUseProjectContext === '1';
     let goalText: string | undefined;
+    let recentTurn: string | undefined;
     if (useProjectContext) {
       const sessionId = readSessionId(await pi.getState(workspace));
       const goal = sessionId ? useGoalStore.getState().bySession[sessionId] : undefined;
       goalText = goal ? `状态: ${goal.status}\n条件: ${goal.condition}` : '';
       if (goalText.length > MAX_GOAL_CHARS) goalText = goalText.slice(0, MAX_GOAL_CHARS);
+      const session = agent.useStore.getState();
+      recentTurn = formatRecentTurn(session.messages, session.excluded);
     }
     const again = useEnhancePromptStore.getState().byWorkspace[workspace];
     if (again && again.status !== 'idle') return;
@@ -81,12 +86,16 @@ export default function EnhancePromptAction() {
     onChunk.onmessage = (chunk) => {
       useEnhancePromptStore.getState().append(workspace, seq, chunk);
     };
+    const onStatus = new Channel<string>();
+    onStatus.onmessage = (phase) => {
+      useEnhancePromptStore.getState().setPhase(workspace, seq, phase);
+    };
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
         useProjectContext
-          ? pi.enhancePrompt(workspace, text, onChunk, goalText)
-          : pi.enhancePrompt(workspace, text, onChunk),
+          ? pi.enhancePrompt(workspace, text, onChunk, goalText, recentTurn, onStatus)
+          : pi.enhancePrompt(workspace, text, onChunk, undefined, undefined, onStatus),
         new Promise<null>((resolve) => {
           watchdog = setTimeout(
             () => resolve(null),
@@ -116,7 +125,7 @@ export default function EnhancePromptAction() {
     } finally {
       if (watchdog) clearTimeout(watchdog);
     }
-  }, [workspace, readDraft, message, settings]);
+  }, [workspace, readDraft, message, settings, agent]);
 
   return (
     <ActionIcon

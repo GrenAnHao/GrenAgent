@@ -10,7 +10,8 @@ import type { PermissionAuthorization, PermissionManager, PermissionProfileName 
 import { adaptPiEvent, type PiProjection } from '../pi/eventAdapter';
 import { isSessionWorkspaceMismatch, readSessionIdentity } from './sessionIdentity';
 import { parseApproval, setApprovalPolicy, type ApprovalPolicy } from '../../../extensions/_shared/approval.js';
-import { isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
+import { getAgentMode, isAgentMode, setAgentMode } from '../../../extensions/agent-mode/modes.js';
+import { PLAN_UNCONFIRMED_MESSAGE, planBlocksModeSwitch } from '../../../extensions/agent-mode/planState.js';
 import { buildGoalStatus, type GoalStatusEnvelope } from '../../../extensions/goal/status.js';
 import { agentModeConfigKey, approvalPolicyConfigKey, contextExclusionConfigKey, mergeRuntimeSettingsFile } from './settingsService';
 import { truncateSessionLines, type TruncateMode } from './truncateSession.js';
@@ -776,9 +777,19 @@ export class PiRuntimeService {
     if (approval) handle.ui.context.setStatus('approval-policy', approval);
   }
 
-  private async writeAgentMode(workspace: string, rawMode: unknown, targetPath?: string): Promise<{ ok: true; mode: string }> {
+  private async writeAgentMode(
+    workspace: string,
+    rawMode: unknown,
+    targetPath?: string,
+  ): Promise<{ ok: true; mode: string } | { ok: false; blocked: 'PLAN_UNCONFIRMED'; mode: string; message: string }> {
     const mode = String(rawMode ?? '').trim().toLowerCase();
     if (!isAgentMode(mode)) throw new Error('INVALID_AGENT_MODE');
+    // 未确认的计划只能经侧栏「确认执行」进入执行：手切到能动手的模式直接取消，不动内存、不落盘。
+    const owner = targetPath ? this.handleOwningPath(workspace, targetPath) : this.options.agentHost.get(workspace);
+    const ownerSessionId = typeof owner?.session.sessionId === 'string' ? owner.session.sessionId : undefined;
+    if (planBlocksModeSwitch(ownerSessionId, mode)) {
+      return { ok: false, blocked: 'PLAN_UNCONFIRMED', mode: getAgentMode(workspace, ownerSessionId), message: PLAN_UNCONFIRMED_MESSAGE };
+    }
     this.pinSessionControl(workspace, targetPath, { mode });
     setAgentMode(mode, workspace);
     if (!this.options.mergeRuntimeSettings && !this.options.runtimeConfigPath) throw new Error('RUNTIME_CONFIG_UNAVAILABLE');

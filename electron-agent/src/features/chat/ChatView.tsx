@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Icon } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { App } from 'antd';
 import { ChatListView } from './ChatListView';
+import { FindBar } from '../find/FindBar';
+import { FIND_BAR_HEIGHT } from '../find/findActions';
+import { useFindScope } from '../find/findStore';
+import { CHAT_FIND_SCOPE } from '../find/useSessionFind';
 import { ChatListSkeleton } from './ChatListSkeleton';
 import { ChatInput } from './ChatInput';
+import { ComposerOverlayRegistration, useComposerClearance } from './composerClearance';
 import { scrollerKeepsWheel } from './composerWheel';
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { EmptyChatPrompt } from './EmptyChatPrompt';
@@ -140,6 +145,7 @@ export function ChatView() {
   const isConversation = Boolean(worksDir && isUnder(workspace, worksDir));
   const isDraftConversation = Boolean(draftConversationCwd && pathsEquivalent(draftConversationCwd, workspace));
   const showEmptyLayout = isEmpty && workspaceReady;
+  const findOpen = useFindScope(CHAT_FIND_SCOPE).open && !showEmptyLayout;
   // 用户是否点了「停止」：abort 可能以抛错 / lastError / 空轮等多种形式体现，统一靠这个标记判定。
   const userAbortedRef = useRef(false);
   const cancelSleepRef = useRef<(() => void) | null>(null);
@@ -159,20 +165,13 @@ export function ChatView() {
         resolve();
       };
     });
-  const [seatHeight, setSeatHeight] = useState(0);
   const [gutter, setGutter] = useState(0);
   const transcriptRef = useRef<TranscriptScrollHandle>(null);
   const seatRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const seat = seatRef.current;
-    if (!seat) return;
-    const update = () => setSeatHeight(seat.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(seat);
-    return () => ro.disconnect();
-  }, [showEmptyLayout]);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const { paddingBottom: seatHeight, registerOverlay } = useComposerClearance(
+    viewportRef, seatRef, laneKey(workspace, activeSessionPath),
+  );
 
   useEffect(() => {
     if (showEmptyLayout) return;
@@ -682,7 +681,10 @@ export function ChatView() {
   };
 
   return (
+    <ComposerOverlayRegistration.Provider value={registerOverlay}>
     <div
+      ref={viewportRef}
+      data-find-scope={CHAT_FIND_SCOPE}
       style={{
         height: '100%',
         position: 'relative',
@@ -716,7 +718,7 @@ export function ChatView() {
           </AnimatePresence>
         </div>
       ) : (
-        <div style={{ position: 'absolute', inset: 0 }}>
+        <div style={{ position: 'absolute', inset: 0, top: findOpen ? FIND_BAR_HEIGHT : 0 }}>
           {workspaceReady ? (
             <ChatListView
               paddingBottom={seatHeight}
@@ -728,6 +730,12 @@ export function ChatView() {
           )}
         </div>
       )}
+      {/* 查找栏占顶部一整行：列表顶边下移了同样的高度，不压消息，也不碰底部输入区。 */}
+      {findOpen ? (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 3 }}>
+          <FindBar scope={CHAT_FIND_SCOPE} placeholder="在会话中查找" data-testid="chat-find-bar" />
+        </div>
+      ) : null}
       <div
         ref={seatRef}
         data-testid="composer-seat"
@@ -754,5 +762,6 @@ export function ChatView() {
         </div>
       </div>
     </div>
+    </ComposerOverlayRegistration.Provider>
   );
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  FILE_TAB_TITLE,
   useDockStore,
   defaultTerminalTitle,
   subAgentTabId,
@@ -401,6 +402,23 @@ describe('dock persist (重启不还原浏览器标签)', () => {
     expect(merged.tabs.map((t) => t.id)).toEqual(['term-1']);
     expect(merged.closedTabs).toEqual([]);
     expect(merged.activeByRegion).toEqual({ right: null, bottom: 'term-1' });
+  });
+
+  it('旧版本存下的「文件」标签读回来改名「文件管理器」，打开着的文件照旧保留', () => {
+    const merge = useDockStore.persist.getOptions().merge!;
+    const owner = { ownerSessionPath: '/ws/a.jsonl', ownerWorkspace: '/ws' };
+    const payload = { workspace: '/repo', openFiles: ['/repo/a.ts'], activeFile: '/repo/a.ts' };
+    const merged = merge(
+      {
+        tabs: [{ id: 'file:right:/repo', kind: 'file', region: 'right', title: '文件', closable: true, order: 0, payload, ...owner }],
+        closedTabs: [{ id: 'file:right:/old', kind: 'file', region: 'right', title: '文件', closable: true, payload: { workspace: '/old' }, closedAt: 1, ...owner }],
+        activeByRegion: { right: 'file:right:/repo', bottom: null },
+      },
+      useDockStore.getState(),
+    ) as ReturnType<typeof useDockStore.getState>;
+    expect(merged.tabs.map((t) => [t.title, t.payload])).toEqual([[FILE_TAB_TITLE, payload]]);
+    expect(merged.closedTabs.map((t) => t.title)).toEqual([FILE_TAB_TITLE]);
+    expect(FILE_TAB_TITLE).toBe('文件管理器');
   });
 });
 

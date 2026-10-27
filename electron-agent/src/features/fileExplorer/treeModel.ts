@@ -15,14 +15,14 @@ export function isDescendant(path: string, ancestor: string): boolean {
   return path.length > ancestor.length && path.startsWith(ancestor) && (path[ancestor.length] === '/' || path[ancestor.length] === '\\');
 }
 
-function relativeSegments(workspace: string, path: string): string[] | null {
+export function relativeSegments(workspace: string, path: string): string[] | null {
   const ws = workspace.replace(/\\/g, '/').replace(/\/+$/, '');
   const p = path.replace(/\\/g, '/');
   if (!ws || !p.toLowerCase().startsWith(`${ws.toLowerCase()}/`)) return null;
   return p.slice(ws.length + 1).split('/').filter(Boolean);
 }
 
-function joinUnder(root: string, segments: readonly string[]): string {
+export function joinUnder(root: string, segments: readonly string[]): string {
   const sep = root.includes('\\') ? '\\' : '/';
   return [root.replace(/[\\/]+$/, ''), ...segments].join(sep);
 }

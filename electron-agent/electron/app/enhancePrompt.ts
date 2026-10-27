@@ -39,9 +39,39 @@ export const DEFAULT_ENHANCE_SYSTEM = `你是面向编程助手的提示词增�
 - 把改写后的提示词放在〈改写稿〉和〈/改写稿〉之间输出，标签之外一个字都不要写。`;
 
 export const PROJECT_ENHANCE_SYSTEM = `你可以调用只读工具查阅本项目的 wiki、记忆和代码图，以便改写后的提示词贴合该项目的关键约定与实现。
+草稿如果离开上一轮对话就写不清楚（例如「上面」「刚才」「继续」「这个方案」），调用 read_recent_turn 读取最近一轮看得见的用户消息和助手正文，把任务、范围和约束写具体。草稿本身已经说清楚时不要调用。读到的内容不要复述，也不要开始执行。
 不要向用户复述工具原始输出。最终只输出改写后的提示词正文。
 当前会话目标：
 `;
+
+/** 浮层上的当前步骤。和渲染层显示的是同一句。 */
+export const ENHANCE_PHASE = {
+  understand: '正在理解草稿',
+  decide: '正在决定要查什么',
+  recent: '正在读取最近一轮对话',
+  wikiSearch: '正在搜索知识库',
+  wikiRead: '正在阅读知识库',
+  memory: '正在搜索记忆',
+  code: '正在查阅代码',
+  write: '正在写改写稿',
+} as const;
+
+function phaseForTool(name: string): string {
+  switch (name) {
+    case 'read_recent_turn':
+      return ENHANCE_PHASE.recent;
+    case 'wiki_search':
+      return ENHANCE_PHASE.wikiSearch;
+    case 'wiki_read':
+      return ENHANCE_PHASE.wikiRead;
+    case 'memory_search':
+      return ENHANCE_PHASE.memory;
+    case 'codegraph_explore':
+      return ENHANCE_PHASE.code;
+    default:
+      return '正在查阅';
+  }
+}
 
 /**
  * 草稿必须包进 USER INPUT 再发给模型：裸 user message 碰上祈使句草稿（如「深度分析一下项目」），
@@ -170,6 +200,11 @@ const ENHANCE_TOOLS: Tool[] = [
   { name: 'wiki_read', description: '读取 wiki 页面。', parameters: Type.Object({ page: Type.String() }) },
   { name: 'memory_search', description: '搜索本工作区记忆。', parameters: Type.Object({ query: Type.String(), limit: Type.Optional(Type.Number()) }) },
   { name: 'codegraph_explore', description: '查阅代码图：一次返回相关源码和调用路径。', parameters: Type.Object({ query: Type.String(), maxFiles: Type.Optional(Type.Number()) }) },
+  {
+    name: 'read_recent_turn',
+    description: '读取当前会话最近一轮看得见的对话（用户消息和助手正文，不含思考和工具输出）。仅当草稿离开上一轮就写不清楚时调用。',
+    parameters: Type.Object({}),
+  },
 ];
 
 type DrainEvent = {
@@ -368,8 +403,14 @@ async function executeEnhanceTool(
   workspace: string,
   name: string,
   args: Record<string, unknown>,
+  recentTurn: string,
 ): Promise<{ isError: boolean; text: string }> {
   try {
+    if (name === 'read_recent_turn') {
+      const text = recentTurn.trim();
+      if (!text) return { isError: false, text: '没有更早的对话' };
+      return { isError: false, text: text.length > MAX_TOOL_RESULT_CHARS ? text.slice(0, MAX_TOOL_RESULT_CHARS) : text };
+    }
     let result: unknown;
     if (name === 'wiki_search') {
       result = await request('wiki.search', {
@@ -440,6 +481,8 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
     systemPrompt: string;
     signal: AbortSignal;
     emit: (chunk: string) => void;
+    onStatus: (text: string) => void;
+    recentTurn: string;
   }): Promise<EnhancePromptResult> {
     const messages: Message[] = [{ role: 'user', content: buildDraftUserMessage(input.text), timestamp: Date.now() }];
     let executed = 0;
@@ -454,11 +497,14 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
       const stopped = timeoutOrAbort(input.workspace, input.signal);
       if (stopped) return stopped;
       const tools = executed >= MAX_TOOL_CALLS || round >= MAX_TOOL_ROUNDS ? [] : ENHANCE_TOOLS;
+      input.onStatus(tools.length === 0 ? ENHANCE_PHASE.write : ENHANCE_PHASE.decide);
       let buffered = '';
       let liveEmitted = false;
       const stream = runtime.stream(input.model, { systemPrompt: input.systemPrompt, messages, tools }, { signal: input.signal, temperature: ENHANCE_TEMPERATURE, samplingParams: { ...ENHANCE_SAMPLING_PARAMS } }) as StreamLike;
       const drained = await drain(stream, input.signal, (chunk) => {
         buffered += chunk;
+        // 这轮开始出正文，就是在写改写稿；如果后面其实是工具调用，执行前会改成那一步。
+        if (chunk) input.onStatus(ENHANCE_PHASE.write);
         if (tools.length === 0) {
           liveEmitted = true;
           input.emit(chunk);
@@ -494,8 +540,9 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
           continue;
         }
         executed += 1;
+        input.onStatus(phaseForTool(call.name));
         const raced = await Promise.race([
-          executeEnhanceTool(deps.agentData.request, input.workspace, call.name, call.arguments)
+          executeEnhanceTool(deps.agentData.request, input.workspace, call.name, call.arguments, input.recentTurn)
             .then((result) => ({ kind: 'ok' as const, result })),
           aborted.then(() => ({ kind: 'stop' as const })),
         ]);
@@ -528,10 +575,12 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
     systemPrompt: string;
     signal: AbortSignal;
     emit: (chunk: string) => void;
+    onStatus: (text: string) => void;
   }): Promise<EnhancePromptResult> {
     let raw = '';
     let firstChunkAt = 0;
     const startedAt = Date.now();
+    input.onStatus(ENHANCE_PHASE.write);
     const drained = await drain(
       deps.host.streamSimple({
         user: buildDraftUserMessage(input.text),
@@ -564,8 +613,9 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
   }
 
   async function run(
-    input: { workspace: string; text: string; goalText?: string },
+    input: { workspace: string; text: string; goalText?: string; recentTurn?: string },
     emit: (chunk: string) => void,
+    onStatus: (text: string) => void = () => {},
   ): Promise<EnhancePromptResult> {
     const workspace = input.workspace;
     const text = input.text;
@@ -615,6 +665,8 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
             systemPrompt,
             signal: controller.signal,
             emit: emitStripped,
+            onStatus,
+            recentTurn: typeof input.recentTurn === 'string' ? input.recentTurn : '',
           })
           : await runDefaultEnhance({
             workspace,
@@ -623,6 +675,7 @@ export function createEnhancePrompt(deps: EnhancePromptDeps) {
             systemPrompt,
             signal: controller.signal,
             emit: emitStripped,
+            onStatus,
           });
       } finally {
         // 尾部扣留的最后几个字符在此放行；cancel/timeout 后渲染层已清槽，多发的 chunk 会被 store 丢弃。

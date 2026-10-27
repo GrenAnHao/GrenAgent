@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoalSnapshot } from '../../../stores/goalStore';
 
-const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abortEnhancePrompt } = vi.hoisted(() => ({
+const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abortEnhancePrompt, session } = vi.hoisted(() => ({
   chatInput: {
     empty: true,
     readDraft: vi.fn(() => ''),
@@ -13,6 +13,10 @@ const { chatInput, peekComposerModel, getSettings, getState, enhancePrompt, abor
   getState: vi.fn(() => Promise.resolve({} as Record<string, unknown>)),
   enhancePrompt: vi.fn(() => Promise.resolve({ ok: true, content: '美化' })),
   abortEnhancePrompt: vi.fn(() => Promise.resolve()),
+  session: {
+    messages: [] as Array<{ kind: string; id: string; text: string; thinking?: string; streaming?: boolean; timestamp?: number }>,
+    excluded: new Set<number>(),
+  },
 }));
 
 vi.mock('@lobehub/ui', () => ({
@@ -56,6 +60,7 @@ vi.mock('../../../../lib/pi', () => ({
 
 vi.mock('../../../../stores/AgentStoreContext', () => ({
   useAgentStoreContext: () => ({ workspace: '/ws' }),
+  useAgentStore: () => ({ useStore: { getState: () => session } }),
 }));
 
 vi.mock('antd', async (importOriginal) => {
@@ -102,6 +107,8 @@ beforeEach(() => {
   getSettings.mockResolvedValue({});
   getState.mockReset();
   getState.mockResolvedValue({});
+  session.messages = [];
+  session.excluded = new Set();
   enhancePrompt.mockReset();
   enhancePrompt.mockResolvedValue({ ok: true, content: '美化' });
   abortEnhancePrompt.mockReset();
@@ -161,6 +168,24 @@ describe('EnhancePromptAction', () => {
     expect(enhancePrompt.mock.calls[0][0]).toBe('/ws');
     expect(enhancePrompt.mock.calls[0][1]).toBe('草稿');
     expect(enhancePrompt.mock.calls[0][3]).toBe('状态: active\n条件: 完成登录');
+    expect(enhancePrompt.mock.calls[0][4]).toBe('');
+  });
+
+  it('项目上下文开启时把最近一轮对话交给增强', async () => {
+    chatInput.empty = false;
+    chatInput.readDraft.mockReturnValue('按上面的方案');
+    getSettings.mockResolvedValue({ enhancePromptUseProjectContext: '1' });
+    getState.mockResolvedValue({ sessionId: 's1' });
+    session.messages = [
+      { kind: 'user', id: 'u', text: '修登录', timestamp: 1 },
+      { kind: 'assistant', id: 'a', text: '改 auth.ts', thinking: '略', streaming: false, timestamp: 2 },
+    ];
+    render(<EnhancePromptAction />);
+    await waitForSettings();
+    fireEvent.click(screen.getByTestId('composer-enhance-prompt'));
+    await waitFor(() => expect(enhancePrompt).toHaveBeenCalled());
+    expect(enhancePrompt.mock.calls[0][4]).toBe('用户：\n修登录\n\n助手：\n改 auth.ts');
+    expect(useEnhancePromptStore.getState().byWorkspace['/ws']?.phase).toBe('正在理解草稿');
   });
 
   it('passes empty goal text when project context is on but sessionId is missing', async () => {

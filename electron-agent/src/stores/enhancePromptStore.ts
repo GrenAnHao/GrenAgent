@@ -8,6 +8,8 @@ export interface EnhancePromptSlot {
   error: string;
   seq: number;
   awaitingContext: boolean;
+  /** 当前这一步在做什么。流式期间浮层直接显示这句话。 */
+  phase: string;
   source: string;
   /** 本次开始时间（ms）。浮层据此显示已等待时长，区分「模型慢」与「卡住」。 */
   startedAt: number;
@@ -16,6 +18,7 @@ export interface EnhancePromptSlot {
 interface EnhancePromptState {
   byWorkspace: Record<string, EnhancePromptSlot>;
   start: (workspace: string, opts?: { awaitingContext?: boolean; source?: string }) => number;
+  setPhase: (workspace: string, seq: number, phase: string) => void;
   append: (workspace: string, seq: number, chunk: string) => void;
   finish: (workspace: string, seq: number, content: string) => void;
   fail: (workspace: string, seq: number, error: string) => void;
@@ -24,7 +27,7 @@ interface EnhancePromptState {
 }
 
 const empty = (): EnhancePromptSlot => ({
-  status: 'idle', preview: '', error: '', seq: 0, awaitingContext: false, source: '', startedAt: 0,
+  status: 'idle', preview: '', error: '', seq: 0, awaitingContext: false, phase: '', source: '', startedAt: 0,
 });
 
 function isStreamingSeq(cur: EnhancePromptSlot | undefined, seq: number): cur is EnhancePromptSlot {
@@ -45,12 +48,23 @@ export const useEnhancePromptStore = create<EnhancePromptState>((set, get) => ({
           error: '',
           seq,
           awaitingContext: Boolean(opts?.awaitingContext),
+          phase: opts?.awaitingContext ? '正在理解草稿' : '等待模型响应',
           source: opts?.source ?? '',
           startedAt: Date.now(),
         },
       },
     });
     return seq;
+  },
+  setPhase: (workspace, seq, phase) => {
+    const cur = get().byWorkspace[workspace];
+    if (!isStreamingSeq(cur, seq) || cur.phase === phase) return;
+    set({
+      byWorkspace: {
+        ...get().byWorkspace,
+        [workspace]: { ...cur, phase },
+      },
+    });
   },
   append: (workspace, seq, chunk) => {
     const cur = get().byWorkspace[workspace];

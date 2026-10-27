@@ -2,9 +2,10 @@ import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from '@he
 import { useTree } from '@headless-tree/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cx } from 'antd-style';
-import { Button, Input } from 'antd';
+import { Button, Dropdown, Input, type MenuProps } from 'antd';
 import { ChevronRight, Search } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import FileIcon from '../../components/FileIcon';
 import type { DirEntry } from '../../lib/files';
 import { fileExplorerStyles as styles } from './fileExplorerStyles';
@@ -34,14 +35,25 @@ function highlight(name: string, needle: string): ReactNode {
   );
 }
 
+/** 右键点中的那一行。 */
+export interface TreeMenuTarget {
+  path: string;
+  name: string;
+  isDir: boolean;
+}
+
 export interface FileTreeProps {
   tree: FileTreeState;
   selectedPath: string | null;
   onOpen: (path: string) => void;
+  /** 鼠标停到某一行时报该行路径。离开行不报 null，由调用方在离开整块面板时清，鼠标移到路径栏上时还能复制那一项。 */
+  onHoverPath?: (path: string) => void;
+  /** 右键某一行时弹的菜单；不给就没有菜单。菜单项点完自动收起。 */
+  contextMenu?: (target: TreeMenuTarget) => MenuProps;
 }
 
 /** 文件树：headless-tree 管展开和键盘，浏览器原生滚动；只渲染可视区。展开目录时才列那一层。 */
-export function FileTree({ tree, selectedPath, onOpen }: FileTreeProps) {
+export function FileTree({ tree, selectedPath, onOpen, onHoverPath, contextMenu }: FileTreeProps) {
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const search = useMemo(() => (tree.root ? searchTree(tree.root, tree.dirs, needle) : null), [tree.root, tree.dirs, needle]);
@@ -91,6 +103,8 @@ export function FileTree({ tree, selectedPath, onOpen }: FileTreeProps) {
             onExpandedItems={search ? setSearchExpanded : tree.setExpanded}
             selectedPath={selectedPath}
             onOpen={onOpen}
+            onHoverPath={onHoverPath}
+            contextMenu={contextMenu}
           />
         ) : (
           <div className={styles.treeHint} data-testid="file-tree-loading">
@@ -111,6 +125,8 @@ interface HeadlessFileTreeProps {
   onExpandedItems: (ids: string[]) => void;
   selectedPath: string | null;
   onOpen: (path: string) => void;
+  onHoverPath?: (path: string) => void;
+  contextMenu?: (target: TreeMenuTarget) => MenuProps;
 }
 
 function HeadlessFileTree({
@@ -122,7 +138,30 @@ function HeadlessFileTree({
   onExpandedItems,
   selectedPath,
   onOpen,
+  onHoverPath,
+  contextMenu,
 }: HeadlessFileTreeProps) {
+  // 右键菜单只有一份，挂在鼠标位置的锚点上：行是虚拟化的，菜单开着时滚动会卸掉那一行，不能挂在行上。
+  const [menu, setMenu] = useState<(TreeMenuTarget & { x: number; y: number }) | null>(null);
+  const onContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    if (!contextMenu) return;
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-tree-row]');
+    const path = row?.dataset.path;
+    if (!row || !path || row.dataset.truncated === 'true') return;
+    event.preventDefault();
+    setMenu({ path, name: row.dataset.name ?? path, isDir: row.dataset.dir === 'true', x: event.clientX, y: event.clientY });
+  };
+  const menuProps = useMemo(() => {
+    if (!menu || !contextMenu) return null;
+    const built = contextMenu(menu);
+    return {
+      ...built,
+      onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
+        setMenu(null);
+        built.onClick?.(info);
+      },
+    } satisfies MenuProps;
+  }, [menu, contextMenu]);
   const dirsRef = useRef(tree.dirs);
   dirsRef.current = tree.dirs;
   const truncatedRef = useRef(tree.truncatedDirs);
@@ -216,7 +255,27 @@ function HeadlessFileTree({
       }}
       className={styles.treeScroll}
       data-testid="file-tree"
+      onContextMenu={onContextMenu}
     >
+      {menu && menuProps
+        ? createPortal(
+            <Dropdown
+              open
+              menu={menuProps}
+              trigger={['contextMenu']}
+              placement="bottomLeft"
+              onOpenChange={(open) => {
+                if (!open) setMenu(null);
+              }}
+            >
+              <span
+                data-testid="file-tree-menu-anchor"
+                style={{ position: 'fixed', left: menu.x, top: menu.y, width: 1, height: 1, pointerEvents: 'none' }}
+              />
+            </Dropdown>,
+            document.body,
+          )
+        : null}
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         {rows.map((virtualRow) => {
           const item = items[virtualRow.index];
@@ -229,7 +288,15 @@ function HeadlessFileTree({
               key={item.getId()}
               data-index={virtualRow.index}
               data-tree-row=""
+              data-path={item.getId()}
+              data-name={data.name}
+              data-dir={data.isDir ? 'true' : 'false'}
+              data-truncated={data.truncated ? 'true' : undefined}
               data-selected={item.isSelected() ? 'true' : undefined}
+              data-menu-open={menu?.path === item.getId() ? 'true' : undefined}
+              onPointerEnter={() => {
+                if (!data.truncated) onHoverPath?.(item.getId());
+              }}
               ref={(el) => {
                 props.ref?.(el);
               }}

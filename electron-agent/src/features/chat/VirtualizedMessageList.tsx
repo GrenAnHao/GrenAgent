@@ -19,6 +19,12 @@ import { TranscriptFollow } from './transcriptFollow';
 
 export interface TranscriptScrollHandle {
   scrollBy: (deltaY: number) => void;
+  /** 把某条消息滚进渲染范围（查找跳到还没渲染的消息）。会打断贴底跟随。 */
+  scrollToItem?: (id: string) => void;
+  /** 列表容器元素（查找在它里面找每条消息的 `data-find-item`）。 */
+  getRoot?: () => HTMLElement | null;
+  /** 列表的滚动容器。 */
+  getScroller?: () => HTMLElement | null;
 }
 
 /**
@@ -270,12 +276,26 @@ export function VirtualizedMessageList<T extends { id: string }>({
 
   useEffect(() => () => follow.dispose(), [follow]);
 
+  const displayRef = useRef(display);
+  displayRef.current = display;
   useImperativeHandle(scrollRef, () => ({
     scrollBy(deltaY) {
       if (deltaY === 0) return;
       stopPinning();
       follow.noteIntent();
       ref.current?.scrollBy(deltaY);
+    },
+    scrollToItem(id) {
+      const index = displayRef.current.findIndex((item) => item.id === id);
+      if (index < 0) return;
+      stopPinning();
+      follow.noteIntent();
+      ref.current?.scrollToIndex(index, { align: 'start' });
+    },
+    getRoot: () => containerRef.current,
+    getScroller: () => {
+      const el = containerRef.current?.firstElementChild;
+      return el instanceof HTMLElement ? el : null;
     },
   }));
 
@@ -438,7 +458,7 @@ export function VirtualizedMessageList<T extends { id: string }>({
                 ) : null}
               </div>
             ) : (
-              <div key={row.id} style={itemStyle}>
+              <div key={row.id} data-find-item={row.id} style={itemStyle}>
                 {renderItem(row)}
               </div>
             )

@@ -147,7 +147,7 @@ describe('McpConfigService', () => {
 
   it('reload 按 workspace 与 name 转发，不写配置文件', async () => {
     const { home, workspace, settings, currentSettings } = await fixture();
-    const reload = vi.fn(async () => {});
+    const reload = vi.fn(async () => [] as unknown[]);
     const before = JSON.stringify(currentSettings());
     const service = new McpConfigService(home, settings, { reload });
 
@@ -155,6 +155,27 @@ describe('McpConfigService', () => {
 
     expect(reload).toHaveBeenCalledWith(workspace, 'settings');
     expect(JSON.stringify(currentSettings())).toBe(before);
+  });
+
+  it('reload 把运行时带回的状态按这个 workspace 发布给界面', async () => {
+    const { home, workspace, settings } = await fixture();
+    const servers = [{ name: 'settings', status: 'connected', tools: 2 }];
+    const publish = vi.fn();
+    const service = new McpConfigService(home, settings, { reload: async () => servers, publish });
+
+    await service.reload(workspace, 'settings');
+
+    expect(publish).toHaveBeenCalledWith(workspace, servers);
+  });
+
+  it('运行时没带回状态（旧子进程）时不发布空列表把界面清掉', async () => {
+    const { home, workspace, settings } = await fixture();
+    const publish = vi.fn();
+    const service = new McpConfigService(home, settings, { reload: async () => null, publish });
+
+    await service.reload(workspace, 'settings');
+
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it('改配置后把该工作区完整的 runtime 列表交给运行时热重载', async () => {

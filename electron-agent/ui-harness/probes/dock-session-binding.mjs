@@ -28,11 +28,13 @@ export default async function probe(t) {
   await settle()
   t.ok('A：点「右栏」后面板展开', (await panelWidth(t)) > 300)
   t.check('A：空右栏显示启动页', await t.countVisible(LAUNCHER), 1)
+  t.ok('启动页里的入口叫「文件管理器」', (await t.text('[data-testid="dock-launcher-file"]')).includes('文件管理器'))
 
   await t.click('[data-testid="dock-launcher-file"]', 30)
   await t.waitFor(STRIP)
   await t.waitFor(`${FILE_BODY} [data-testid="file-tree"] [data-tree-title]`)
   t.check('A：标签条里有一个文件标签', await t.countVisible(`${STRIP} [data-testid^="dock-tab-file:right:"]`), 1)
+  t.ok('标签条里写「文件管理器」', (await t.text(`${STRIP} [data-testid^="dock-tab-file:right:"]`)).includes('文件管理器'))
   await t.js(`document.querySelector('${FILE_BODY}').dataset.probeMark = 'a'`)
 
   // ——— 切到 B：A 的右栏不跟过来 ———

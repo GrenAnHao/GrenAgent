@@ -64,7 +64,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `auto-title` | 会话没有名字时，模型第一条回复结束就按首条用户消息生成标题；侧栏「重新生成标题」走主进程 `generate_session_title`，共用同一套输入整理和提示词 | 策略 / 中间件，无显式工具 |
 | `todo` | 会话内待办清单 | `todo` |
 | `present` | 把已有文件声明为本轮产物 | `present` |
-| `agent-mode` | Agent / Ask / Debug / Plan 模式切换与 Plan 卡片 | 宿主 `agent_set_mode`；卡片仍用 `/plan-build`；`ask_user` |
+| `agent-mode` | Agent / Ask / Debug / Plan 模式切换；结构化 Plan（`upsert_plan`）与右栏计划面板 | 宿主 `agent_set_mode`（未确认计划时拒绝切到能动手的模式）；面板经 `/plan-update` `/plan-confirm` `/plan-cancel` `/plan-finish` 回写；`ask_user` |
 | `debug-tools` | 调试日志工具 | `debug_log` |
 | `dap` | Debug Adapter Protocol 调试 | `dap_launch`、`dap_set_breakpoints`、`dap_evaluate` 等 |
 | `diagram-hint` | Mermaid / KaTeX 渲染约定提示（隐式注入） | 策略 / 中间件，无显式工具 |
@@ -93,7 +93,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 | `im-gateway` | HTTP webhook IM 网关（Slack / Feishu 等适配） | 暂缓加载；内部状态命令不进 slash |
 | `im-platforms` | 微信 ilink bot 接入，隔离式远程遥控 | 暂缓加载；内部状态命令不进 slash |
 
-控制面约定：模式 / 审批 / 删段由桌面 IPC 写 `runtime-settings.json`，扩展 `watchConfig` 应用，不再经假 prompt 或 slash 命令。slash 菜单只保留发生式命令（`/goal`、`/rules`、工作流、技能、前端 `/compact`）。`/plan-build` 仍由计划卡片 `runCommand` 触发，但不出现在菜单。
+控制面约定：模式 / 审批 / 删段由桌面 IPC 写 `runtime-settings.json`，扩展 `watchConfig` 应用，不再经假 prompt 或 slash 命令。slash 菜单只保留发生式命令（`/goal`、`/rules`、工作流、技能、前端 `/compact`）。计划面板的 `/plan-*` 命令由面板 `runCommand`（带会话路径）触发，不出现在菜单。
 
 ### electron-agent —— 桌面应用（当前主线）
 
@@ -101,7 +101,7 @@ GrenAgent 是一个本地优先的桌面 AI 编码 Agent，由三层组成：
 
 **渲染层（`electron-agent/src`）：**
 
-- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件」标签里的项目文件浏览器）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（记忆与知识资产）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
+- `features/`：按域划分的业务模块——`chat`（对话）、`sessions`（会话 / 项目侧栏）、`connections`（IM 接入 / 微信）、`usage`（用量）、`settings`（供应商 / 模型）、`dock`（终端 Dock）、`fileExplorer`（Dock「文件管理器」标签：项目文件树 + 多文件标签）、`tools`（工具卡片）、`extensions`（扩展 / 技能）、`agentData`（记忆与知识资产）、`workspace`、`context`、`panels`、`subagents`、`visual`、`layout`、`common`、`extensionUi`。
 - `stores/`：zustand store 群，`agent.ts` / `agentReducer.ts` 为核心，把 pi 事件流折叠为会话状态。
 - `lib/`：主进程能力封装——`pi.ts`（`onPiEvent` / `onPiUiRequest` / `onPiExit`）、`agentData.ts`（记忆与 Wiki API）等。
 - `platform/`：**后端抽象层**。`runtime.ts` 定义 `GrenRuntimeBridge` 并对接 `window.gren`，无 bridge 时降级为 `browserPreviewBridge`，使渲染层可在纯浏览器预览态运行。

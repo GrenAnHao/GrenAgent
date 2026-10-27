@@ -2,6 +2,8 @@ import { App } from 'antd';
 import { useEffect } from 'react';
 import { onPiEvent, onPiUiRequest } from '../../lib/pi';
 import { usePlanModeStore } from '../../stores/planModeStore';
+import { parsePlanStatus, usePlanStore } from '../../stores/planStore';
+import { openPlanDockTab } from '../plan/openPlanDockTab';
 import { applyGoalStatus } from './goalStatus';
 import { useMcpStatusStore, type McpServerStatus } from '../../stores/mcpStatusStore';
 import { isAgentMode, useModeStore } from '../../stores/modeStore';
@@ -106,6 +108,14 @@ export function ExtensionUiHost() {
           if (isAgentMode(r.statusText)) useModeStore.getState().setMode(e.workspace, r.statusText);
         } else if (r.statusKey === 'plan-mode') {
           usePlanModeStore.getState().setStatus(text);
+        } else if (r.statusKey === 'agent-plan') {
+          // 结构化计划属于发起它的会话（与视觉设计同一套归属）；新建时自动打开它的计划面板。
+          const parsed = parsePlanStatus(r.statusText);
+          if (parsed) {
+            const owner = visualOwnerOf(e);
+            usePlanStore.getState().setPlan(owner, parsed.plan);
+            if (parsed.reason === 'created' && parsed.plan) openPlanDockTab(owner);
+          }
         } else if (r.statusKey === 'goal') {
           applyGoalStatus(r.statusText, e.sessionId, e.sessionPath);
         } else if (r.statusKey === 'mcp') {

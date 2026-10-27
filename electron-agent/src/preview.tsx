@@ -12,7 +12,7 @@ import { AnsweredQuestionsCard } from './features/tools/AnsweredQuestionsCard';
 import { ReasoningInline } from './features/chat/ReasoningInline';
 import { NoticePill } from './features/chat/NoticePill';
 import { UserMessage } from './features/chat/UserMessage';
-import { PlanCard } from './features/chat/PlanCard';
+import { PlanSummaryCard } from './features/plan/PlanSummaryCard';
 import { SubAgentInline } from './features/chat/SubAgentInline';
 import { AttachmentCard } from './features/chat/AttachmentCard';
 import { TodoDock } from './features/chat/input/TodoDock';
@@ -76,20 +76,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-const plan = JSON.stringify({
-  kind: 'plan',
-  id: 'p1',
-  title: '统一对话控件视觉系统',
-  summary: '抽出共享基元 conv/*，把工具卡、子代理、问答、待办都收敛到统一 surface + token。',
-  todos: [
-    { text: '抽 ConvRow / ConvCard / ConvStrip 基元', done: true },
-    { text: '迁移通用工具卡到 ConvRow', done: true },
-    { text: 'TodoCard 卡头对齐 ConvCard', done: false },
-    { text: '回归测试 + 预览验收', done: false },
-  ],
-  planFile: 'docs/plan.md',
-  status: 'draft',
-});
+const plan = '[plan:plan-20261023-101500-ab12] 已生成计划「统一对话控件视觉系统」，在右侧计划面板审阅、修改并确认执行。';
 
 const webResults = [
   { title: 'antd-style createStaticStyles 零运行时样式', url: 'https://ant-design.github.io/antd-style/', snippet: '用 cssVar 变量编写静态样式，切主题不重渲染组件。' },
@@ -228,9 +215,9 @@ function Gallery() {
         </Item>
       </Section>
 
-      <Section title="计划卡 PlanCard（L4 ConvCard surface）">
-        <Item label="draft · 标题 + 摘要 + todo 预览 + 页脚">
-          <PlanCard content={plan} />
+      <Section title="计划摘要卡 PlanSummaryCard（L4 ConvCard surface）">
+        <Item label="只显示状态 + 打开计划面板（没有计划数据时显示已被取代）">
+          <PlanSummaryCard content={plan} />
         </Item>
       </Section>
 

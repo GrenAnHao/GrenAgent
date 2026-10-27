@@ -12,7 +12,7 @@ interface AgentStoreContextValue {
 }
 
 // 导出原始 context：供 preview 沙盒注入 mock 值，在不连后端、不创建真实 store 的前提下
-// 渲染依赖 workspace 的对话控件（PlanCard / 子代理 / 媒体卡等）。应用代码请用下方 hook。
+// 渲染依赖 workspace 的对话控件（计划摘要卡 / 子代理 / 媒体卡等）。应用代码请用下方 hook。
 export const AgentStoreContext = createContext<AgentStoreContextValue | null>(null);
 
 interface AgentStoreProviderProps {

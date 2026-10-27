@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   workspace: '/home/.pi/agent/works/u1',
   workspaceReady: true,
   messageCount: 0,
+  promptOverlay: false,
   storeState: {
     messages: [] as unknown[],
     isStreaming: false,
@@ -67,14 +68,21 @@ vi.mock('../../lib/sidebarSessionSync', () => ({ syncSidebarOnSend: vi.fn() }));
 vi.mock('./input/composerBridge', () => ({
   setComposerValue: (text: string) => state.setComposerValue(text),
 }));
-vi.mock('./ChatListView', () => ({ ChatListView: () => <div data-testid="chat-list" /> }));
+vi.mock('./ChatListView', () => ({ ChatListView: ({ paddingBottom }: { paddingBottom?: number }) => <div data-testid="chat-list" data-padding-bottom={paddingBottom} /> }));
 vi.mock('./ChatListSkeleton', () => ({ ChatListSkeleton: () => <div data-testid="chat-skeleton" /> }));
-vi.mock('./ChatInput', () => ({
-  ChatInput: (props: {
+vi.mock('./InlineQuestionCard', () => ({ InlineQuestionCard: () => <div>question</div> }));
+vi.mock('./input/OverlayUiPromptCard', () => ({ OverlayUiPromptCard: () => <div>select</div> }));
+vi.mock('./ChatInput', async () => {
+  const { useRef } = await import('react');
+  const { ComposerPromptOverlay } = await import('./input/ComposerPromptOverlay');
+  return { ChatInput: (props: {
     onSend: (message: string, images?: unknown, behavior?: 'steer' | 'followUp') => void | Promise<void>;
     onAbort?: () => void | Promise<void>;
-  }) => (
+  }) => {
+    const anchorRef = useRef<HTMLDivElement>(null);
+    return (
     <div>
+      {state.promptOverlay ? <><div ref={anchorRef} data-testid="overlay-anchor" /><ComposerPromptOverlay anchorRef={anchorRef} /></> : null}
       <button type="button" data-testid="chat-input" onClick={() => void props.onSend(state.pendingSend, undefined, state.pendingBehavior)}>
         send
       </button>
@@ -82,8 +90,9 @@ vi.mock('./ChatInput', () => ({
         abort
       </button>
     </div>
-  ),
-}));
+    );
+  } };
+});
 vi.mock('./input/actions/ModelThinkingAction', () => ({
   peekComposerModel: () => {
     const queued = state.peekCalls.shift();
@@ -160,6 +169,90 @@ state.commandRun.mockImplementation((_: string, fn: () => Promise<unknown>) => f
 import { CHAT_CONTENT_WIDTH } from './chatStyles';
 import { ChatView, laneKey } from './ChatView';
 import { useCommandInputStore } from '../../stores/commandInputStore';
+import { useInlineQuestionStore } from '../../stores/inlineQuestionStore';
+import { useUiPromptStore } from '../../stores/uiPromptStore';
+
+describe('prompt overlay clearance', () => {
+  it.each(['question', 'select'] as const)('reserves the actual %s overlay extent and releases it', async (kind) => {
+    state.promptOverlay = true;
+    state.storeState.messages = [{ kind: 'user', id: 'u', text: 'hello' }];
+    let overlayTop = 500;
+    let viewportBottom = 800;
+    const observers = new Set<{ callback: ResizeObserverCallback; targets: Set<Element> }>();
+    const previousObserver = globalThis.ResizeObserver;
+    class Observer {
+      targets = new Set<Element>();
+      constructor(readonly callback: ResizeObserverCallback) { observers.add(this); }
+      observe(el: Element) { this.targets.add(el); }
+      unobserve(el: Element) { this.targets.delete(el); }
+      disconnect() { observers.delete(this); }
+    }
+    vi.stubGlobal('ResizeObserver', Observer);
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const id = this.getAttribute('data-testid');
+      const top = id === 'composer-prompt-overlay' ? overlayTop : id === 'overlay-anchor' ? 700 : 0;
+      const bottom = id === 'composer-prompt-overlay' ? 692 : viewportBottom;
+      return { top, bottom, left: 0, right: 480, width: 480, height: bottom - top, x: 0, y: top, toJSON() {} } as DOMRect;
+    });
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
+    const padding = () => Number(screen.getByTestId('chat-list').getAttribute('data-padding-bottom'));
+    const open = () => {
+      if (kind === 'question') useInlineQuestionStore.getState().setRequest({ workspace: state.workspace, id: 'q', mode: 'live', data: { kind: 'questions', id: 'q', questions: [] } });
+      else useUiPromptStore.getState().setRequest({ workspace: state.workspace, request: { id: 's', method: 'select', options: ['a', 'b'] } });
+    };
+    const close = () => {
+      useInlineQuestionStore.setState({ byWorkspace: {} });
+      useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
+    };
+    try {
+      const view = render(<div data-chat-column=""><ChatView /></div>);
+      expect(padding()).toBe(100);
+      await act(async () => open());
+      expect(padding()).toBe(308);
+      const overlay = screen.getByTestId('composer-prompt-overlay');
+      // 换题 / 卡片增高；不是输入区变高。
+      await act(async () => {
+        overlayTop = 320;
+        for (const o of observers) if (o.targets.has(overlay)) o.callback([], {} as ResizeObserver);
+      });
+      expect(padding()).toBe(488);
+      // 位置变化但尺寸观察未触发：锚点重定位写入 style 后也必须重新量。
+      await act(async () => {
+        overlayTop = 420;
+        overlay.style.bottom = '200px';
+      });
+      expect(padding()).toBe(388);
+      // 窗口 / 正文视口尺寸变化也会更新覆盖范围。
+      await act(async () => {
+        viewportBottom = 850;
+        for (const o of observers) o.callback([], {} as ResizeObserver);
+      });
+      expect(padding()).toBe(438);
+      await act(async () => {
+        state.sessionState.activeSessionPath = '/active-overlay-session.jsonl';
+        view.rerender(<div data-chat-column=""><ChatView /></div>);
+      });
+      expect(padding()).toBe(438);
+      await act(async () => close());
+      expect(padding()).toBe(100);
+      await act(async () => open());
+      expect(padding()).toBe(438);
+      await act(async () => {
+        close();
+        state.sessionState.activeSessionPath = '/another-session.jsonl';
+        view.rerender(<div data-chat-column=""><ChatView /></div>);
+      });
+      expect(padding()).toBe(100);
+      view.unmount();
+      expect(observers.size).toBe(0);
+    } finally {
+      cleanup();
+      rectSpy.mockRestore();
+      heightSpy.mockRestore();
+      vi.stubGlobal('ResizeObserver', previousObserver);
+    }
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -168,6 +261,9 @@ afterEach(() => {
   state.workspace = '/home/.pi/agent/works/u1';
   state.workspaceReady = true;
   state.messageCount = 0;
+  state.promptOverlay = false;
+  useInlineQuestionStore.setState({ byWorkspace: {} });
+  useUiPromptStore.setState({ byWorkspace: {}, waiting: {} });
   state.storeState = {
     messages: [],
     isStreaming: false,

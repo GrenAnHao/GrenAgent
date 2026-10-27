@@ -2,6 +2,7 @@ import type { LauncherKind } from './launcherItems';
 import {
   currentDockView,
   defaultTerminalTitle,
+  FILE_TAB_TITLE,
   isDockTabVisible,
   useDockStore,
   type DockRegion,
@@ -112,7 +113,7 @@ export function openLauncherTab(input: {
       id,
       kind: 'file',
       region,
-      title: '文件',
+      title: FILE_TAB_TITLE,
       closable: true,
       payload,
     });

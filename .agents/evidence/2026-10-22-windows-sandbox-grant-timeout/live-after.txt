@@ -1,0 +1,6 @@
+first call: 21961 ms, record = M
+second call (cached): 7 ms
+
+D:\OneDrive\Project Files\mcp\JSReverser\node_modules\typescript\package.json бв\PiSandbox:(I)(M)
+
+

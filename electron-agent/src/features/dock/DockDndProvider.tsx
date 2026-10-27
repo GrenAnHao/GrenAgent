@@ -16,6 +16,7 @@ import { useDockStore, type DockTab } from '../../stores/dockStore';
 import { dockTabStyles, resolveTone, toneColor } from './dockTabStyles';
 import { planDrop, restrictToWindowBelowTitlebar } from './dockDnd';
 import { useBrowserOpenUrl } from './browser/useBrowserOpenUrl';
+import { useAppNavCommand } from '../fileExplorer/fileNavBus';
 import { useDockLauncherHotkeys } from './useDockLauncherHotkeys';
 import { useDockSessionSwitch } from './useDockSessionSwitch';
 
@@ -55,6 +56,7 @@ function DockTabOverlay({ tab, theme }: { tab: DockTab; theme: AppTheme }) {
 export function DockDndProvider({ children }: { children: ReactNode }) {
   useDockLauncherHotkeys();
   useBrowserOpenUrl();
+  useAppNavCommand();
   useDockSessionSwitch();
   const theme = useTheme();
   const tabs = useDockStore((s) => s.tabs);

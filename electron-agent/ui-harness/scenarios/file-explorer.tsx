@@ -1,11 +1,14 @@
 import type { ReactElement } from 'react'
 import { App } from 'antd'
 import { FileTreeBody } from '../../src/features/dock/FileTreeBody'
+import { FindShortcutHost } from '../../src/features/find/FindShortcutHost'
+import { useDockStore, type BrowserPayload } from '../../src/stores/dockStore'
 import { useFileOpenRequests } from '../../src/stores/fileOpenRequests'
+import { registerComposerInsertFile } from '../../src/features/chat/input/composerBridge'
 import { exposeActions, exposeData, installBridge, track } from '../stubs'
 
 /**
- * 「文件」标签里的文件浏览器：真实 FileTreeBody → FileExplorer（headless-tree + CodeMirror + LazyMarkdown）。
+ * 「文件管理器」标签：真实 FileTreeBody → FileExplorer（文件标签栏 + headless-tree + CodeMirror + LazyMarkdown）。
  * 主进程用桩：内存里的一棵文件树；写盘、列目录、监听都记下来给 probe 断言；
  * probe 用 act('externalEdit' / 'addFile') 模拟别的程序改文件，桩按主进程的形状推 files://changed。
  */
@@ -36,6 +39,29 @@ const README = [
   '',
 ].join('\n')
 
+// 链接夹具单独放一个文件：README 是别的断言的基线，加长它会让「点编辑器中心」落到屏幕外。
+// 每条链接单独一行，probe 好点；填充行让预览能滚动，标题后面也要有内容，否则滚到底时标题停不到顶部。
+const LINKS = [
+  '# Links doc',
+  '',
+  '- [guide](./guide.md)',
+  '- [spaced](my%20notes.md?plain=1#top)',
+  '- [readme](../README.md)',
+  '- [web](https://example.com/page)',
+  '- [gone](./gone.md)',
+  '- [outside](../../outside.md)',
+  '- [mail](mailto:a@b.c)',
+  '- [dir](./long-directory-name-that-keeps-going-and-going/)',
+  '- [jump](#sub-heading)',
+  '',
+  ...Array.from({ length: 40 }, (_, i) => `Filler line ${i + 1}`).flatMap((line) => [line, '']),
+  '## Sub Heading',
+  '',
+  'Bottom of the document.',
+  '',
+  ...Array.from({ length: 40 }, (_, i) => `Tail line ${i + 1}`).flatMap((line) => [line, '']),
+].join('\n')
+
 const LOGO_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="12" fill="#5b8def"/></svg>'
 
@@ -48,12 +74,19 @@ const file = (path: string, content: string, extra: { binary?: boolean; size?: n
 dir(ROOT)
 dir(`${ROOT}/src`)
 dir(`${ROOT}/docs`)
+const LONG_DIR = `${ROOT}/docs/long-directory-name-that-keeps-going-and-going`
+dir(LONG_DIR)
+file(`${LONG_DIR}/deeply-nested-file-name.ts`, 'export {}\n')
+// 和 docs/guide.md 同名：标签栏要附目录区分。放在只有点「dir」链接才会展开的目录里，不影响树里按名字找节点。
+file(`${LONG_DIR}/guide.md`, '# Another guide\n')
 dir(`${ROOT}/big`)
 dir(`${ROOT}/node_modules`)
 file(`${ROOT}/README.md`, README)
 file(`${ROOT}/src/app.ts`, 'export function add(a: number, b: number) {\n  return a + b\n}\n')
 file(`${ROOT}/src/util.json`, '{\n  "name": "util",\n  "version": 1\n}\n')
-file(`${ROOT}/docs/guide.md`, '# Guide\n\nRead me.\n')
+file(`${ROOT}/docs/guide.md`, '# Guide\n\nRead me.\n\n[home](../README.md)\n')
+file(`${ROOT}/docs/my notes.md`, '# Spaced note\n')
+file(`${ROOT}/docs/links.md`, LINKS)
 file(`${ROOT}/crlf.txt`, 'line one\r\nline two\r\nline three\r\n')
 file(`${ROOT}/logo.svg`, LOGO_SVG)
 file(`${ROOT}/app.bin`, '', { binary: true, size: 4096 })
@@ -97,7 +130,16 @@ function emitChange(path: string): void {
   changeHandler?.({ payload: { watchId: TAB_ID, workspace: ROOT, dirs: [parent], paths: [path] } })
 }
 
+// 文件树右键「添加到对话」交给底部输入框；场景里没有输入框，登记一个只记事件的（真实插入标签由 ChatInput 单测覆盖）。
+registerComposerInsertFile((file) => track(`composer:${JSON.stringify(file)}`))
+
 installBridge({
+  openUrl: async (url: string) => {
+    track(`system-open:${url}`)
+  },
+  revealItemInDir: async (path: string) => {
+    track(`reveal:${path}`)
+  },
   subscribe: async (event: string, handler: ChangeHandler) => {
     if (event === 'files://changed') changeHandler = handler
     return () => {
@@ -162,18 +204,29 @@ exposeActions({
     file(path, content)
     emitChange(path)
   },
+  /** 磁盘上变了但监听没推事件（监听没覆盖到 / 事件丢失）：只有点「刷新」才会看到。 */
+  silentEdit: (path: string, content: string) => {
+    file(path, content)
+  },
   /** 交付卡 / 审查标签的「打开」：向「文件」标签发一条打开请求（真实 store）。 */
   requestOpen: (path: string) => {
     useFileOpenRequests.getState().request(TAB_ID, path)
   },
 })
-exposeData({ root: ROOT, tabId: TAB_ID, bigCount: BIG_DIR_COUNT, writes: [], watched: [] })
+exposeData({ root: ROOT, tabId: TAB_ID, bigCount: BIG_DIR_COUNT, longFile: `${LONG_DIR}/deeply-nested-file-name.ts`, dupGuide: `${LONG_DIR}/guide.md`, writes: [], watched: [], browserUrls: [] })
+
+// 内置浏览器标签走真实的 dock store（openInAppBrowser）；场景里没有渲染 Dock，只把开出来的网址交给 probe。
+useDockStore.subscribe((state) => {
+  exposeData({
+    browserUrls: state.tabs.filter((tab) => tab.kind === 'browser').map((tab) => (tab.payload as BrowserPayload).url),
+  })
+})
 
 const TAB = {
   id: TAB_ID,
   kind: 'file' as const,
   region: 'right' as const,
-  title: '文件',
+  title: '文件管理器',
   closable: true,
   order: 0,
   payload: { workspace: ROOT },
@@ -182,6 +235,8 @@ const TAB = {
 export default function FileExplorerScenario(): ReactElement {
   return (
     <App>
+      {/* 应用里 Ctrl+F 的全局入口（App.tsx 挂一份） */}
+      <FindShortcutHost />
       <div style={{ height: '100vh', background: 'var(--gren-content-bg)' }}>
         <FileTreeBody tab={TAB} active />
       </div>

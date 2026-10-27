@@ -81,7 +81,7 @@ describe('visibleSlashCommands', () => {
     const commands: PiCommand[] = [
       { name: 'approval', description: '切换审批策略', source: 'api', apiSource: 'extension' },
       { name: 'mode', description: '切换模式', source: 'api', apiSource: 'extension' },
-      { name: 'plan-build', description: '执行计划', source: 'api', apiSource: 'extension' },
+      { name: 'plan-confirm', description: '确认执行计划', source: 'api', apiSource: 'extension' },
       { name: 'goal', description: '创建目标', source: 'api', apiSource: 'extension' },
       { name: 'rules', description: '查看规则', source: 'api', apiSource: 'extension' },
     ];

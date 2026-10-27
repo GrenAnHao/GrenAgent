@@ -1,0 +1,2 @@
+first call: 235998 ms, record = M
+second call (cached): 7 ms

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  /* 取自应用默认的 GitHub 配色方案（electron-agent/src/theme/colorSchemes.ts）。 */
+  .theme-dark {
+    --layout:#0d1117; --container:#161b22; --elevated:#1c2128; --border:#30363d;
+    --text:#e6edf3; --text2:#9198a1; --text3:#6e7681; --fill:rgba(110,118,129,.20); --fill-hover:rgba(110,118,129,.32);
+    --accent:#388bfd; --error:#f85149; --select:#12264a;
+    --hit:rgba(210,153,34,.35); --hit-cur:#d29922; --hit-cur-text:#0d1117;
+    --hit-blue:rgba(56,139,253,.32); --hit-blue-cur:#388bfd; --hit-blue-cur-text:#0d1117;
+  }
+  .theme-light {
+    --layout:#f6f8fa; --container:#ffffff; --elevated:#ffffff; --border:#d0d7de;
+    --text:#1f2328; --text2:#59636e; --text3:#818b98; --fill:rgba(129,139,152,.16); --fill-hover:rgba(129,139,152,.28);
+    --accent:#0969da; --error:#cf222e; --select:#ddf4ff;
+    --hit:rgba(255,212,0,.40); --hit-cur:#ff9a1f; --hit-cur-text:#1f2328;
+    --hit-blue:rgba(9,105,218,.20); --hit-blue-cur:#0969da; --hit-blue-cur-text:#ffffff;
+  }
+  body { margin:0; padding:20px 22px 40px; font:13px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; color:#d0d7de; background:#0b0e13; }
+  h1 { font-size:16px; margin:0 0 4px; color:#f0f6fc; }
+  h2 { font-size:13px; margin:26px 0 8px; color:#f0f6fc; letter-spacing:.02em; }
+  p.note, .note { color:#9198a1; font-size:12px; margin:4px 0 10px; }
+  code { background:rgba(110,118,129,.25); padding:1px 5px; border-radius:4px; font-size:11.5px; }
+  .cards, .split { display:flex; flex-wrap:wrap; gap:14px; }
+  .cards > .option, .split > .col { flex:1 1 380px; min-width:340px; }
+  .option { border:1px solid #30363d; border-radius:10px; padding:12px; cursor:pointer; background:#10141b; }
+  .option:hover { border-color:#6e7681; }
+  .option.selected { border-color:#388bfd; box-shadow:0 0 0 1px #388bfd inset; }
+  .option h3 { margin:0 0 2px; font-size:13px; color:#f0f6fc; }
+  .letter { display:inline-block; width:18px; height:18px; line-height:18px; text-align:center; border-radius:5px; background:#30363d; margin-right:6px; font-size:11px; }
+  .col { border:1px solid #30363d; border-radius:10px; padding:12px; background:#10141b; }
+  .col h3 { margin:0 0 8px; font-size:12px; color:#9198a1; font-weight:500; }
+
+  /* —— 迷你应用窗口 —— */
+  .win { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--container); color:var(--text); font-size:13px; }
+  .hdr { height:34px; display:flex; align-items:center; padding:0 12px; gap:8px; border-bottom:1px solid var(--border); color:var(--text2); font-size:12px; }
+  .hdr b { color:var(--text); font-weight:500; }
+  .hdr .sp { flex:1; }
+  .msgs { padding:10px 18px; display:flex; flex-direction:column; gap:8px; height:150px; overflow:hidden; }
+  .u { align-self:flex-end; max-width:70%; background:var(--fill); border-radius:10px; padding:6px 10px; }
+  .a { max-width:90%; }
+  .a code { font-family:ui-monospace,Consolas,monospace; background:var(--fill); }
+  .a a { color:var(--accent); text-decoration:underline; }
+  .composer { margin:0 14px 12px; height:34px; border:1px solid var(--border); border-radius:10px; display:flex; align-items:center; padding:0 12px; color:var(--text3); background:var(--container); }
+
+  /* —— 查找栏 —— */
+  .findrow { background:var(--container); border-bottom:1px solid var(--border); }
+  .findrow.A { height:40px; display:flex; align-items:center; padding:0 12px; }
+  .findrow.B { height:46px; display:flex; align-items:center; justify-content:flex-end; padding:0 12px; background:var(--layout); }
+  .bar { display:flex; align-items:center; gap:2px; }
+  .findrow.B .bar { background:var(--elevated); border:1px solid var(--border); border-radius:8px; padding:4px 4px 4px 6px; box-shadow:0 2px 8px rgba(0,0,0,.18); }
+  .inp { display:flex; align-items:center; gap:6px; width:240px; height:26px; padding:0 8px; border-radius:6px; background:var(--fill); border:1px solid transparent; color:var(--text); font-size:13px; }
+  .inp svg { flex:none; color:var(--text3); }
+  .inp .ph { color:var(--text3); }
+  .inp.hover { background:var(--fill-hover); }
+  .inp.focus { background:var(--container); border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 28%,transparent); }
+  .inp.err { border-color:var(--error); }
+  .caret { width:1px; height:14px; background:var(--text); margin-left:-4px; }
+  .count { min-width:54px; text-align:center; font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums; white-space:nowrap; padding:0 6px; }
+  .count.err { color:var(--error); }
+  .count.none { color:var(--text3); }
+  .ib { width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; color:var(--text2); background:transparent; }
+  .ib.hover { background:var(--fill); color:var(--text); }
+  .ib.dis { opacity:.35; }
+  .sep { width:1px; height:16px; background:var(--border); margin:0 4px; }
+
+  /* —— 高亮样本（真实实现用 CSS ::highlight，只能改背景和文字色）—— */
+  .h { background:var(--hit); border-radius:2px; }
+  .hc { background:var(--hit-cur); color:var(--hit-cur-text); border-radius:2px; }
+  .hb { background:var(--hit-blue); border-radius:2px; }
+  .hbc { background:var(--hit-blue-cur); color:var(--hit-blue-cur-text); border-radius:2px; }
+  .blue .h { background:var(--hit-blue); } .blue .hc { background:var(--hit-blue-cur); color:var(--hit-blue-cur-text); }
+
+  /* 文件查看器 */
+  .tb { height:36px; display:flex; align-items:center; gap:6px; padding:0 8px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text2); }
+  .tb b { color:var(--text); font-weight:500; }
+  .doc { padding:10px 16px; height:120px; overflow:hidden; }
+  .doc h4 { margin:0 0 6px; font-size:15px; color:var(--text); }
+  .doc .code { font-family:ui-monospace,Consolas,monospace; background:var(--fill); border-radius:6px; padding:6px 10px; margin-top:6px; }
+  table.spec { border-collapse:collapse; width:100%; font-size:12px; }
+  table.spec td, table.spec th { border-top:1px solid #30363d; padding:5px 8px; text-align:left; vertical-align:top; }
+  table.spec th { color:#9198a1; font-weight:500; width:110px; }
+  .opts { display:flex; flex-wrap:wrap; gap:14px; }
+</style>
+</head>
+<body>
+<h1>查找栏视觉方案：会话查找 + 文件内快速查找</h1>
+<p class="note">配色取自应用默认的 GitHub 方案，下面每个样例都画了深色和浅色。「视觉伴侣」没有现成的查找栏样式，所以沿用已有组件的基线：侧栏搜索框（<code>SearchBar</code> small + filled）、<code>ActionIcon</code> small（24px，hover 出灰底）、文件树筛选框，高度对齐文件查看器工具栏的 36px。</p>
+
+<h2>① 会话查找栏的布局（二选一）</h2>
+<p class="note">共同点：查找栏占独立的一行，推着消息列表往下收缩，所以不盖消息内容，也不碰底部输入区。关闭后这一行消失。</p>
+<div class="cards options" data-required data-required-reason="先定布局，才能按它写组件">
+  <div class="option" data-choice="layout-a" onclick="toggleSelect(this)">
+    <h3><span class="letter">A</span>通栏条（推荐）</h3>
+    <p class="note">贴着页头下沿，整行底色同页面容器色，和页头一样横贯。控件左对齐，像 VS Code 的查找条。占 40px。</p>
+    <div class="theme-dark"><div class="win">
+      <div class="hdr"><b>重构登录模块</b><span class="sp"></span><span>⋯</span></div>
+      <div class="findrow A"><div class="bar" id="barA"></div></div>
+      <div class="msgs">
+        <div class="u">帮我看下 <span class="h">login</span> 的报错</div>
+        <div class="a">问题在 <code>useAuth</code> 里：<span class="hc">login</span> 请求没带 token，所以 <a>/api/<span class="h">login</span></a> 返回 401。</div>
+      </div>
+      <div class="composer">输入消息…</div>
+    </div></div>
+  </div>
+  <div class="option" data-choice="layout-b" onclick="toggleSelect(this)">
+    <h3><span class="letter">B</span>右侧浮卡（预留一行）</h3>
+    <p class="note">控件收成一张带阴影的圆角卡片，靠右，像 Chrome。为了不遮内容，卡片外仍要预留一整行（46px），左边那一块是空的。</p>
+    <div class="theme-dark"><div class="win">
+      <div class="hdr"><b>重构登录模块</b><span class="sp"></span><span>⋯</span></div>
+      <div class="findrow B"><div class="bar" id="barB"></div></div>
+      <div class="msgs">
+        <div class="u">帮我看下 <span class="h">login</span> 的报错</div>
+        <div class="a">问题在 <code>useAuth</code> 里：<span class="hc">login</span> 请求没带 token，所以 <a>/api/<span class="h">login</span></a> 返回 401。</div>
+      </div>
+      <div class="composer">输入消息…</div>
+    </div></div>
+  </div>
+</div>
+
+<h2>② 查找栏的各个状态（按方案 A 的控件画，深色 / 浅色）</h2>
+<div class="split">
+  <div class="col theme-dark"><h3>深色</h3><div id="states-dark" style="display:flex;flex-direction:column;gap:10px"></div></div>
+  <div class="col theme-light"><h3 style="color:#59636e">浅色</h3><div id="states-light" style="display:flex;flex-direction:column;gap:10px"></div></div>
+</div>
+<p class="note">控件从左到右：输入框（放大镜 + 文字，13px）→ 命中计数（12px，等宽数字，「当前 / 总数」）→ 竖分隔线 → 上一个 ↑ → 下一个 ↓ → 关闭 ×。图标全部 lucide 14px，按钮 24×24、圆角 6px。聚焦时输入框变容器底色，描边用强调色并带 2px 柔光；无结果时描边和计数变红、计数写「无结果」，上下按钮置灰（35% 不透明、不可点）；输入为空时不显示计数，上下按钮同样置灰。</p>
+
+<h2>③ 高亮颜色（二选一）</h2>
+<p class="note">所有命中项一个底色，当前项换成更实的颜色并且文字改成高对比色。实现用 CSS Custom Highlight API，不改 DOM，所以链接、代码、加粗里的命中都能高亮，原有格式不受影响。限制：它只能改背景色和文字色，没法画描边，所以「当前项」靠底色加深区分，不靠边框。</p>
+<div class="cards options">
+  <div class="option" data-choice="hit-amber" onclick="toggleSelect(this)">
+    <h3><span class="letter">1</span>琥珀色（推荐）</h3>
+    <p class="note">浏览器查找的通用习惯：黄色是「命中」，橙色是「当前」。和蓝色链接、选中态不会混。</p>
+    <div class="split">
+      <div class="col theme-dark" style="flex:1 1 150px;min-width:150px"><h3>深色</h3>其他 <span class="h">login</span><br>当前 <span class="hc">login</span><div class="note">其他 ≈7.6:1 · 当前 ≈7.5:1</div></div>
+      <div class="col theme-light" style="flex:1 1 150px;min-width:150px"><h3 style="color:#59636e">浅色</h3><span style="color:var(--text)">其他 <span class="h">login</span><br>当前 <span class="hc">login</span></span><div class="note" style="color:#59636e">其他 ≈12:1 · 当前 ≈7.4:1</div></div>
+    </div>
+  </div>
+  <div class="option" data-choice="hit-blue" onclick="toggleSelect(this)">
+    <h3><span class="letter">2</span>蓝色</h3>
+    <p class="note">更贴近应用的冷色调，但和链接色、文件树选中底色接近，在链接里的命中不容易一眼分清。</p>
+    <div class="split">
+      <div class="col theme-dark" style="flex:1 1 150px;min-width:150px"><h3>深色</h3>其他 <span class="hb">login</span><br>当前 <span class="hbc">login</span></div>
+      <div class="col theme-light" style="flex:1 1 150px;min-width:150px"><h3 style="color:#59636e">浅色</h3><span style="color:var(--text)">其他 <span class="hb">login</span><br>当前 <span class="hbc">login</span></span></div>
+    </div>
+  </div>
+</div>
+
+<h2>④ 文件里的快速查找（Markdown 预览 / 代码）</h2>
+<p class="note">同一个查找栏，放在文件查看器工具栏下面，占独立一行推着内容往下，不盖文档。文件树在右边，所以不会和它重叠。计数、上下跳转、Esc 关闭都和会话里一致。</p>
+<div class="split">
+  <div class="col theme-dark" style="flex:1 1 420px"><h3>Markdown 预览（深色）</h3>
+    <div class="win">
+      <div class="tb"><span class="ib hover" id="nb1"></span><b>docs / guide.md</b><span style="flex:1"></span><span>预览 | 编辑</span></div>
+      <div class="findrow A" style="height:38px"><div class="bar" id="barF"></div></div>
+      <div class="doc"><h4>部署 <span class="h">指南</span></h4>先读 <span class="hc">指南</span>，再看下面的命令。<div class="code">npm run build  # 构建<span class="h">指南</span>站点</div></div>
+    </div>
+  </div>
+  <div class="col theme-light" style="flex:1 1 420px"><h3 style="color:#59636e">代码（浅色）</h3>
+    <div class="win">
+      <div class="tb"><b>src / auth.ts</b><span style="flex:1"></span><span>只读 | 编辑</span></div>
+      <div class="findrow A" style="height:38px"><div class="bar" id="barG"></div></div>
+      <div class="doc"><div class="code" style="background:transparent;padding:0;line-height:1.7">export async function <span class="h">login</span>(u) {<br>&nbsp;&nbsp;return fetch('/api/<span class="hc">login</span>', u)<br>}</div></div>
+    </div>
+  </div>
+</div>
+
+<h2>⑤ 交互与焦点约定（需要你过目）</h2>
+<table class="spec">
+  <tr><th>触发</th><td>Ctrl+F（macOS ⌘+F）。会话里：焦点在对话区或底部输入框时生效；文件里：焦点在该文件标签内时生效。其他区域（浏览器标签、终端、设置页、弹窗）不拦截。</td></tr>
+  <tr><th>⚠ 冲突</th><td>侧栏的会话搜索框现在已经绑了 Ctrl+F（聚焦它）。方案：焦点在对话区 / 文件标签时，Ctrl+F 归查找栏；焦点在侧栏或其他地方时，保留原来「聚焦会话搜索」。</td></tr>
+  <tr><th>打开 / 关闭</th><td>打开：焦点进输入框，已有选中文字就预填它；已打开时再按 Ctrl+F 是全选输入框文字。关闭：Esc 或点 ×，清掉高亮，焦点回到打开前的位置（原位置没了就回到输入区）。</td></tr>
+  <tr><th>跳转</th><td>Enter 下一个，Shift+Enter 上一个，到末尾再按回到第一个（计数照常显示 1 / m，不弹额外提示）。输入变化实时重算，并回到第一个命中。当前项不在视口内时自动滚到视口中部。</td></tr>
+  <tr><th>范围（默认取舍）</th><td>会话：当前会话已加载的全部消息，包含代码块，不跨会话。折叠着的工具输出和思考内容默认不查（它们没有渲染出来，命中了也看不见）。已渲染但在视口外的消息查得到并能跳过去；还没渲染的长会话消息按文字内容计数，跳过去后精确高亮。文件：当前打开的文件内容。</td></tr>
+</table>
+
+<script>
+  var SEARCH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+  var UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
+  var DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  var X = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  function bar(o) {
+    o = o || {};
+    var text = o.text == null ? '' : o.text;
+    var inp = '<div class="inp ' + (o.inp || '') + '">' + SEARCH + (text ? '<span>' + text + '</span>' + (o.inp === 'focus' ? '<i class="caret"></i>' : '') : '<span class="ph">' + (o.inp === 'focus' ? '<i class="caret" style="display:inline-block;vertical-align:middle;margin:0 2px 0 0"></i>' : '') + '在会话中查找</span>') + '</div>';
+    var count = o.count ? '<span class="count ' + (o.countCls || '') + '">' + o.count + '</span>' : '<span class="count"></span>';
+    var dis = o.dis ? ' dis' : '';
+    var nav = '<span class="sep"></span><span class="ib' + dis + (o.hoverUp ? ' hover' : '') + '">' + UP + '</span><span class="ib' + dis + (o.hoverDown ? ' hover' : '') + '">' + DOWN + '</span><span class="ib' + (o.hoverX ? ' hover' : '') + '">' + X + '</span>';
+    return inp + count + nav;
+  }
+  function put(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+  put('barA', bar({ text: 'login', inp: 'focus', count: '2 / 5' }));
+  put('barB', bar({ text: 'login', inp: 'focus', count: '2 / 5' }));
+  put('barF', bar({ text: '指南', inp: 'focus', count: '2 / 3' }).replace('在会话中查找', '在文件中查找'));
+  put('barG', bar({ text: 'login', inp: 'focus', count: '2 / 2' }));
+  var rows = [
+    ['默认（输入为空）', { inp: '', dis: true }],
+    ['聚焦、已输入有结果', { text: 'login', inp: 'focus', count: '2 / 5' }],
+    ['悬停输入框', { text: 'login', inp: 'hover', count: '2 / 5' }],
+    ['悬停「下一个」', { text: 'login', count: '2 / 5', hoverDown: true }],
+    ['悬停「关闭」', { text: 'login', count: '2 / 5', hoverX: true }],
+    ['无结果（跳转置灰）', { text: 'logout2', inp: 'err', count: '无结果', countCls: 'err', dis: true }]
+  ];
+  ['dark', 'light'].forEach(function (t) {
+    var box = document.getElementById('states-' + t);
+    rows.forEach(function (r) {
+      var wrap = document.createElement('div');
+      var label = document.createElement('div');
+      label.className = 'note'; label.style.margin = '0 0 4px'; label.textContent = r[0];
+      if (t === 'light') label.style.color = '#59636e';
+      var holder = document.createElement('div');
+      holder.className = 'bar'; holder.style.cssText = 'background:var(--container);border:1px solid var(--border);border-radius:8px;padding:6px 8px;';
+      holder.innerHTML = bar(r[1]);
+      wrap.appendChild(label); wrap.appendChild(holder); box.appendChild(wrap);
+    });
+  });
+  var nb = document.getElementById('nb1');
+  if (nb) nb.outerHTML = '<span style="display:inline-flex;gap:2px;margin-right:6px"><span class="ib">' + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7M19 12H5"/></svg>' + '</span><span class="ib dis">' + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 5 7 7-7 7M5 12h14"/></svg>' + '</span></span>';
+</script>
+</body>
+</html>

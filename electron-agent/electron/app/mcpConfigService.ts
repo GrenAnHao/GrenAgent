@@ -23,7 +23,10 @@ export interface EffectiveMcpConfig { name: string; config: Config; }
 export interface McpRuntimeHooks {
   /** runtimeJson：该工作区完整的 runtime 列表（含密钥），替换管理器冻住的快照后立刻重读。 */
   hotReload?(workspace: string, runtimeJson: string): Promise<void>;
-  reload?(workspace: string, name: string): Promise<void>;
+  /** 重连一个 server，带回这个工作区 manager 的状态摘要（旧子进程没有时为 null / undefined）。 */
+  reload?(workspace: string, name: string): Promise<unknown[] | null | undefined | void>;
+  /** 把状态按 workspace 推给界面（setStatus('mcp')）。 */
+  publish?(workspace: string, servers: unknown[]): void;
 }
 
 export class McpConfigService {
@@ -35,7 +38,9 @@ export class McpConfigService {
 
   async reload(workspace: string, name: string): Promise<void> {
     if (!this.runtimeHooks.reload) throw new Error('MCP runtime is not available');
-    await this.runtimeHooks.reload(workspace, name);
+    const servers = await this.runtimeHooks.reload(workspace, name);
+    // 设置页的状态不能只靠会话订阅推送：那个工作区没有活会话订阅 manager 时，重连成功了面板也不会变。
+    if (Array.isArray(servers)) this.runtimeHooks.publish?.(workspace, servers);
   }
 
   async list(workspace: string): Promise<McpConfigEntry[]> {

@@ -52,11 +52,14 @@ beforeEach(() => {
 });
 
 describe("agent-mode factory", () => {
-  it("does not register /mode or /plan; keeps plan-build and brainstorm-deliver", () => {
+  it("does not register /mode, /plan or the old /plan-build; registers the plan panel commands", () => {
     const { commands } = load();
     expect(commands).not.toContain("mode");
     expect(commands).not.toContain("plan");
-    expect(commands).toEqual(expect.arrayContaining(["plan-build", "brainstorm-deliver"]));
+    expect(commands).not.toContain("plan-build");
+    expect(commands).toEqual(
+      expect.arrayContaining(["plan-update", "plan-confirm", "plan-cancel", "plan-finish", "brainstorm-deliver"]),
+    );
   });
 
   it("watchConfig applies desktop AGENT_MODE to tools and setStatus", async () => {
@@ -94,30 +97,6 @@ describe("agent-mode factory", () => {
     expect(result).toMatchObject({ block: true });
   });
 
-  it("plan-build 之后 live 为 agent，门闩放行 write", async () => {
-    const { handlers, commandHandlers } = load();
-    const session = ctx("D:/proj-a", [
-      {
-        type: "custom",
-        customType: "agent-mode",
-        data: {
-          mode: "plan",
-          todos: [{ step: 1, text: "写文件", completed: false }],
-          executing: false,
-        },
-      },
-    ]);
-    vi.mocked(getConfig).mockImplementation((name: string) =>
-      name === agentModeConfigKey("D:/proj-a") ? "plan" : undefined,
-    );
-    await handlers.session_start?.({}, session);
-    expect(getAgentMode("D:/proj-a")).toBe("plan");
-    await commandHandlers["plan-build"]?.("", session);
-    expect(getAgentMode("D:/proj-a")).toBe("agent");
-    const result = await handlers.tool_call?.({ toolName: "write", input: { path: "a.ts" } }, session);
-    expect(result).toBeUndefined();
-  });
-
   it("session_start 不覆盖已写入的 live", async () => {
     setAgentMode("plan", "D:/proj-a");
     vi.mocked(getConfig).mockImplementation((name: string) =>
@@ -143,51 +122,6 @@ describe("agent-mode factory", () => {
     expect(session.ui.setStatus).toHaveBeenCalledWith("agent-mode", "ask");
   });
 
-  it("session_start 文件与条目同为 agent 时保留 executing 与 todos", async () => {
-    const key = agentModeConfigKey("D:/proj-a");
-    vi.mocked(getConfig).mockImplementation((name: string) =>
-      name === key ? "agent" : undefined,
-    );
-    const { handlers, appendEntry } = load();
-    const session = ctx("D:/proj-a", [
-      {
-        type: "custom",
-        customType: "agent-mode",
-        data: {
-          mode: "agent",
-          todos: [{ step: 1, text: "写文件", completed: false }],
-          executing: true,
-        },
-      },
-    ]);
-    await handlers.session_start?.({}, session);
-    expect(appendEntry).not.toHaveBeenCalled();
-    const injected = await handlers.before_agent_start?.({});
-    expect(injected).toMatchObject({ message: { customType: "plan-execution-context" } });
-  });
-
-  it("before_agent_start 离开 plan 时清 todos", async () => {
-    const { handlers, commandHandlers } = load();
-    const session = ctx("D:/proj-a", [
-      {
-        type: "custom",
-        customType: "agent-mode",
-        data: {
-          mode: "plan",
-          todos: [{ step: 1, text: "写文件", completed: false }],
-          executing: false,
-        },
-      },
-    ]);
-    vi.mocked(getConfig).mockImplementation((name: string) =>
-      name === agentModeConfigKey("D:/proj-a") ? "plan" : undefined,
-    );
-    await handlers.session_start?.({}, session);
-    setAgentMode("ask", "D:/proj-a");
-    await handlers.before_agent_start?.({});
-    await commandHandlers["plan-build"]?.("", session);
-    expect(session.ui.notify).toHaveBeenCalledWith("没有可执行的计划步骤。", "warning");
-  });
 });
 
 describe("agent-mode per session", () => {

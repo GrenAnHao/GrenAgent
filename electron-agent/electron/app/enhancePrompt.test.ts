@@ -604,6 +604,72 @@ describe('createEnhancePrompt 实验路径', () => {
     for (const name of toolNames.flat()) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     expect(req).toHaveBeenCalledWith('wiki.search', expect.objectContaining({ query: '登录' }));
   });
+
+  it('read_recent_turn 把点击时的最近一轮交给模型，并按步骤上报状态', async () => {
+    const request = vi.fn();
+    const phases: string[] = [];
+    const resultTexts: string[] = [];
+    let round = 0;
+    async function* impl(context: { messages: Array<{ role?: string; content?: Array<{ text?: string }> }> }) {
+      for (const msg of context.messages) {
+        if (msg.role === 'toolResult' && Array.isArray(msg.content)) resultTexts.push(msg.content[0]?.text ?? '');
+      }
+      round += 1;
+      if (round === 1) {
+        yield {
+          type: 'done',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: '1', name: 'read_recent_turn', arguments: {} }],
+            reason: 'toolUse',
+          },
+        };
+        return;
+      }
+      yield { type: 'text_delta', delta: '按 auth.ts 补错误处理' };
+      yield { type: 'done', message: { role: 'assistant', content: [{ type: 'text', text: '按 auth.ts 补错误处理' }], reason: 'stop' } };
+    }
+    const { service, request: req } = projectSetup(impl, request);
+    await expect(
+      service.run(
+        { workspace: '/ws', text: '按上面的方案', recentTurn: '用户：\n修登录\n\n助手：\n改 auth.ts' },
+        () => {},
+        (phase) => phases.push(phase),
+      ),
+    ).resolves.toEqual({ ok: true, content: '按 auth.ts 补错误处理' });
+    expect(req).not.toHaveBeenCalled();
+    expect(resultTexts).toEqual(['用户：\n修登录\n\n助手：\n改 auth.ts']);
+    expect(phases).toContain('正在决定要查什么');
+    expect(phases).toContain('正在读取最近一轮对话');
+    expect(phases.at(-1)).toBe('正在写改写稿');
+  });
+
+  it('没有最近一轮时工具返回说明，不编造对话', async () => {
+    const resultTexts: string[] = [];
+    let round = 0;
+    async function* impl(context: { messages: Array<{ role?: string; content?: Array<{ text?: string }> }> }) {
+      for (const msg of context.messages) {
+        if (msg.role === 'toolResult' && Array.isArray(msg.content)) resultTexts.push(msg.content[0]?.text ?? '');
+      }
+      round += 1;
+      if (round === 1) {
+        yield {
+          type: 'done',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: '1', name: 'read_recent_turn', arguments: {} }],
+            reason: 'toolUse',
+          },
+        };
+        return;
+      }
+      yield { type: 'text_delta', delta: '稿' };
+      yield { type: 'done', message: { role: 'assistant', content: [{ type: 'text', text: '稿' }], reason: 'stop' } };
+    }
+    const { service } = projectSetup(impl);
+    await expect(service.run({ workspace: '/ws', text: '按上面的' }, () => {})).resolves.toMatchObject({ ok: true, content: '稿' });
+    expect(resultTexts).toEqual(['没有更早的对话']);
+  });
 });
 
 describe('createEnhancePrompt 准备阶段', () => {

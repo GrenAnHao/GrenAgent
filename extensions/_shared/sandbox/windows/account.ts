@@ -45,18 +45,19 @@ const LIST_RIGHTS = new Set<GrantRights>(["RD", "RD1"]);
 /** FILE_LIST_DIRECTORY: what the Windows Temp grant must show when read back. */
 const LIST_DIRECTORY = 1;
 
-export function icaclsGrantArgs(target: string, username: string, rights: GrantRights, propagate: boolean): string[] {
+export function icaclsGrantArgs(target: string, username: string, rights: GrantRights): string[] {
   // RAX is this directory only: read attributes + traverse, so node realpath can
   // lstat ancestors without granting list or read of their contents.
   // RD/RD1 is list on this directory only: FindFirstFile and readdir need it.
+  // M/RX are (OI)(CI) on the root only, never /T: writing the root makes Windows propagate the inherited
+  // entry through the tree once, while /T writes every object and each write propagates again below it
+  // (70k files: 21s against 320s). Objects with inheritance turned off do not get the entry.
   const ace = rights === "RAX"
     ? `${username}:(RA,X)`
     : LIST_RIGHTS.has(rights)
       ? `${username}:(S,RD,RA)`
       : `${username}:(OI)(CI)${rights}`;
-  const args = [target, "/grant:r", ace, "/C"];
-  if (propagate && !LIST_RIGHTS.has(rights) && rights !== "RAX") args.push("/T");
-  return args;
+  return [target, "/grant:r", ace, "/C"];
 }
 
 /** Profile directory the sandbox account actually owns. */
@@ -143,7 +144,7 @@ export interface AccountIo {
   provision(username: string, group: string, password: string, blobPath: string): Promise<void>;
   readGrants(path: string): Promise<Record<string, string>>;
   writeGrants(path: string, grants: Record<string, string>): Promise<void>;
-  grant(target: string, username: string, rights: GrantRights, propagate: boolean, signal?: AbortSignal): Promise<void>;
+  grant(target: string, username: string, rights: GrantRights, signal?: AbortSignal): Promise<void>;
   /** Paths the sandbox account cannot read attributes of. Without it, workspace ancestors are left alone. */
   unreachable?(paths: string[], signal?: AbortSignal): Promise<string[]>;
   /** Stamps a write-deny for the account on world-writable system directories (one elevation); returns the confirmed ones. */
@@ -267,26 +268,65 @@ export function createProvision(deps: ProvisionDeps): AccountIo["provision"] {
 let listGrantElevatedAt = 0;
 const ELEVATION_COOLDOWN_MS = 5 * 60 * 1000;
 
+// An inheritable grant propagates through the whole tree: a workspace with node_modules (70k files) took longer
+// than 5s, icacls was killed every time, nothing was recorded, and every command failed the same way.
+// Same budget as the protect steps.
+const TREE_GRANT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Time one grant may take before it is killed. */
+export function grantTimeoutMs(rights: GrantRights): number {
+  // Add-Type compiles C# on first use; with powershell.exe startup that alone can pass 5s.
+  if (rights === "RAX") return 30_000;
+  if (rights === "M" || rights === "RX") return TREE_GRANT_TIMEOUT_MS;
+  return 5000;
+}
+
+const inFlight = new Map<string, Promise<void>>();
+
+/**
+ * Parallel commands in one process share a running grant instead of each walking the same tree.
+ * The run itself ignores the callers' signals; a caller that aborts only stops waiting for it.
+ */
+export function shareInFlight(key: string, run: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("aborted"));
+  let shared = inFlight.get(key);
+  if (!shared) {
+    shared = run().finally(() => inFlight.delete(key));
+    inFlight.set(key, shared);
+  }
+  if (!signal) return shared;
+  const pending = shared;
+  return new Promise((resolvePromise, reject) => {
+    const onAbort = () => reject(new Error("aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(resolvePromise, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 async function defaultGrant(
   target: string,
   username: string,
   rights: GrantRights,
-  propagate: boolean,
   signal?: AbortSignal,
 ): Promise<void> {
+  const timeoutMs = grantTimeoutMs(rights);
   if (rights === "RAX") {
-    // Add-Type compiles C# on first use; with powershell.exe startup that alone can pass 5s.
     await runCommand(windowsPowerShellPath(), [
       "-NoProfile",
       "-NonInteractive",
       "-Command",
       raxScript(target, username),
-    ], signal, 30_000);
+    ], signal, timeoutMs);
     return;
   }
-  const args = icaclsGrantArgs(target, username, rights, propagate);
+  const args = icaclsGrantArgs(target, username, rights);
   if (!LIST_RIGHTS.has(rights)) {
-    await runCommand(windowsSystemExe("icacls.exe"), args, signal);
+    if (timeoutMs > 5000) {
+      // A tree walk killed half way is redone from scratch next time: let it finish even if this caller gives up.
+      await shareInFlight(`${grantKey(target)}|${args.join(" ")}`, () => runCommand(windowsSystemExe("icacls.exe"), args, undefined, timeoutMs), signal);
+    } else {
+      await runCommand(windowsSystemExe("icacls.exe"), args, signal, timeoutMs);
+    }
     return;
   }
   try {
@@ -565,10 +605,10 @@ export async function grantSandboxAccess(
     if (!existsSync(target.path)) continue;
     if (!needsGrant(grants, target.path, target.rights)) continue;
     try {
-      const propagate = target.rights === "M" || target.rights === "RX";
-      await io.grant(target.path, username, target.rights, propagate, signal);
+      await io.grant(target.path, username, target.rights, signal);
       grants[grantKey(target.path)] = target.rights;
-      // /T sets the account's entry on every object below, protected ones too: protect again afterwards.
+      // A grant that is missing from the record may follow a reclaim, whose `/remove:g /T` also stripped the
+      // read entry the protection put on the configuration directories: protect again afterwards.
       if (target.rights === "M") forgetProtectionUnder(grants, grantKey(target.path));
       changed = true;
     } catch (error) {
@@ -656,7 +696,7 @@ async function grantWorkspaceAncestors(
       continue;
     }
     try {
-      await io.grant(dir, username, "RAX", false, signal);
+      await io.grant(dir, username, "RAX", signal);
       grants[key] = "RAX";
       changed = true;
     } catch (error) {

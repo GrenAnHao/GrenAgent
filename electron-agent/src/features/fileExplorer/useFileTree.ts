@@ -26,9 +26,9 @@ function errorText(error: unknown): string {
 
 /**
  * 文件树数据：只列根，展开时再列那一层；展开着的目录交给主进程监听。
- * extraWatch 是树之外也要盯着的目录（当前打开文件所在的目录）。
+ * extraWatch 是树之外也要盯着的目录（打开着的文件标签所在的目录）。
  */
-export function useFileTree(workspace: string, watchId: string, extraWatch: string | null): FileTreeState {
+export function useFileTree(workspace: string, watchId: string, extraWatch: readonly string[]): FileTreeState {
   const [root, setRoot] = useState<string | null>(null);
   const [dirs, setDirs] = useState<DirMap>(() => new Map());
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -37,6 +37,8 @@ export function useFileTree(workspace: string, watchId: string, extraWatch: stri
   const [attempt, setAttempt] = useState(0);
   const dirsRef = useRef(dirs);
   dirsRef.current = dirs;
+  // 调用方每次渲染都可能给新数组：按内容比，不按引用。
+  const extraWatchKey = extraWatch.join('\n');
 
   const markTruncated = useCallback((dir: string, truncated: boolean) => {
     setTruncatedDirs((prev) => {
@@ -93,12 +95,14 @@ export function useFileTree(workspace: string, watchId: string, extraWatch: stri
   useEffect(() => {
     if (!root) return;
     const wanted = dirsToWatch(root, dirs, expanded);
-    if (extraWatch && !wanted.includes(extraWatch)) wanted.push(extraWatch);
+    for (const dir of extraWatchKey ? extraWatchKey.split('\n') : []) {
+      if (!wanted.includes(dir)) wanted.push(dir);
+    }
     const timer = setTimeout(() => {
       files.watchDirs(workspace, watchId, wanted).catch(() => {});
     }, WATCH_SYNC_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [workspace, watchId, root, dirs, expanded, extraWatch]);
+  }, [workspace, watchId, root, dirs, expanded, extraWatchKey]);
 
   useEffect(
     () => () => {

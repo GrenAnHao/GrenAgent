@@ -13,6 +13,7 @@ import FileIcon from '../../components/FileIcon';
 import { openTurnReview } from '../dock/openLauncherTab';
 import { openWorkspaceFile } from '../dock/openWorkspaceFile';
 import { openPath, revealItemInDir } from '../../platform/runtime';
+import { revealInFolderLabel } from '../../lib/revealLabel';
 import type { ChangeFile, PresentedFile } from './turnDeliverables';
 import { resolveSessionFile } from './sessionCwd';
 
@@ -365,12 +366,7 @@ function cardDescription(file: PresentedFile): string {
   return trimmed ? trimmed : fallbackDescription(file.path);
 }
 
-function revealFolderLabel(): string {
-  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  if (ua.includes('Windows')) return '在文件资源管理器中显示';
-  if (ua.includes('Mac') || ua.includes('Macintosh')) return '在 Finder 中显示';
-  return '打开所在文件夹';
-}
+const revealFolderLabel = revealInFolderLabel;
 
 function phaseStatus(phase: OpenPhase, reveal: string): string {
   if (phase === 'opening') return '正在打开…';

@@ -77,8 +77,7 @@ const styles = createStaticStyles(({ css }) => ({
 
 function statusLabel(slot: EnhancePromptSlot): string {
   if (slot.status === 'error') return '失败';
-  if (slot.awaitingContext) return '正在结合项目上下文…';
-  if (slot.status === 'streaming') return slot.preview ? '生成中' : '等待模型响应…';
+  if (slot.status === 'streaming') return slot.phase || (slot.preview ? '正在写改写稿' : '等待模型响应');
   if (slot.status === 'done') return '完成';
   return '';
 }

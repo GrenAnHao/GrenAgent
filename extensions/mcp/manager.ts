@@ -16,6 +16,7 @@ import { serverNamesConflict } from "./naming.js";
 import type { ProbeResult } from "./probe.js";
 import { appendCappedLog } from "./logRotate.js";
 import { readToolsCache, writeToolsCacheEntry } from "./toolsCache.js";
+import { summary, type ServerSummary } from "./summary.js";
 import { mcpConfigPaths, watchMcpConfigFiles } from "../resource-manager/mcp-store.js";
 
 export const MCP_TIMEOUT_MS = Number(process.env.MCP_TIMEOUT_MS ?? "60000") || 60000;
@@ -817,8 +818,19 @@ export function getMcpManager(): McpManager {
   return getMcpManagerFor(currentWorkspaceContext()?.workspace ?? process.cwd());
 }
 
-export async function reloadMcpServer(workspace: string, name: string): Promise<void> {
-  await getMcpManagerFor(workspace).reloadServer(name);
+/**
+ * 设置页「重载」。重连完把这个工作区 manager 的状态带回去，由主进程按同一个 workspace 推给界面。
+ * 会话里的扩展订阅也会推，但那条路要求有活会话订阅着这个 manager、会话 cwd 还能映射回面板的 key；
+ * 任一环对不上，重连成功了面板也停在上一次的「连接失败」。
+ */
+export async function reloadMcpServer(
+  workspace: string,
+  name: string,
+  managerFor: (workspace: string) => McpManager = getMcpManagerFor,
+): Promise<ServerSummary[]> {
+  const mgr = managerFor(workspace);
+  await mgr.reloadServer(name);
+  return summary(mgr.snapshot());
 }
 
 export function disposeMcpManager(workspace: string): Promise<void> {
