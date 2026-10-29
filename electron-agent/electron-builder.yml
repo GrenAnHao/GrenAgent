@@ -16,7 +16,20 @@ files:
     to: out/preload
   - from: out-pkg/renderer
     to: dist
+  # 以下两个包由 @lobehub/ui 声明为依赖，本项目并未引用（不在 out-pkg/** 的引用链上）。
+  # @splinetool/runtime 上游既无 license 字段也无许可文件，只有 © 2025 Spline, Inc.，不能推定可再分发；
+  # giscus 同理只是不要无主代码。排除后 Electron 默认的 node_modules 收集不会把它们塞进 asar。
+  # scripts/collect-third-party-licenses.cjs 读同一份排除清单，声明与打包面一致。
+  - '!node_modules/@splinetool/**'
+  - '!node_modules/giscus/**'
+  - '!node_modules/@giscus/**'
 asar: true
+# 第三方许可证不放进 asar：asar 对最终用户不透明，MIT/ISC/Apache/EPL/OFL 都要求接收方能看到声明。
+# 打包前收集到 build/licenses/，再以 extraResources 摊到 resources/licenses/。
+extraResources:
+  - from: build/licenses
+    to: licenses
+beforePack: ./scripts/collect-third-party-licenses.cjs
 # @homebridge/node-pty-prebuilt-multiarch 是 Node-API 预编译包。
 # 发布的 npm 包没有 src/ 与 deps/winpty，electron-rebuild 看到 binding.gyp
 # 后回退 node-gyp 会因 winpty.gyp 缺失失败。生产依赖里只有这一个 binding.gyp。

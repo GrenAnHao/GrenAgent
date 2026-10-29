@@ -1,6 +1,7 @@
 {
   "name": "grenagent-agent-sidecar",
   "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "description": "GrenAgent's pi-based agent sidecar with bundled extensions.",
   "type": "module",
   "bin": {

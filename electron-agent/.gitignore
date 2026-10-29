@@ -4,6 +4,8 @@ out/
 out-pkg/
 release/
 resources/
+# 打包前由 scripts/collect-third-party-licenses.cjs 生成，随 extraResources 进安装包，不入库。
+build/licenses/
 D/
 *.log
 *.tsbuildinfo

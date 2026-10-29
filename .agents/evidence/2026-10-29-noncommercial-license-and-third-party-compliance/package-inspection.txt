@@ -1,0 +1,12 @@
+win-unpacked asar 内容核对（--dir 打包产物）：
+  @splinetool: 0 个文件
+  giscus: 0 个文件
+  elkjs: 7 个文件
+  @fontsource/inter: 418 个文件
+  dompurify: 22 个文件
+  总文件数: 80495
+
+resources/licenses 顶层条目: 580（含 INDEX.md / LICENSE.txt / third-party-notices.md）
+  elkjs 许可原文: 有
+  Inter 字体许可: 有
+  Pi SDK 占位: 有

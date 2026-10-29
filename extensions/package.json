@@ -1,6 +1,7 @@
 {
   "name": "pi-extensions-pack",
   "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "description": "GrenAgent Pi extensions with local memory and knowledge modules.",
   "type": "module",
   "keywords": [

@@ -1,5 +1,6 @@
 {
   "name": "Pi-root",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "scripts": {
     "verify-notes": "pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts && pnpm exec tsx .agents/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts && pnpm exec tsx .agents/scripts/verify-note-evidence.ts",

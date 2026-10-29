@@ -90,6 +90,8 @@ describe('source code protection: electron-builder', () => {
     files?: Array<string | { from?: string; to?: string }>;
     asar?: boolean | { disableIntegrity?: boolean };
     asarUnpack?: string[];
+    extraResources?: Array<string | { from?: string; to?: string }>;
+    beforePack?: string;
     electronFuses?: {
       enableEmbeddedAsarIntegrityValidation?: boolean;
       onlyLoadAppFromAsar?: boolean;
@@ -143,5 +145,22 @@ describe('source code protection: electron-builder', () => {
     expect(config.asarUnpack).toContain('out-pkg/main/pi-worker.jsc');
     expect(config.asarUnpack).toContain('out-pkg/main/bytecode-loader.cjs');
     expect(config.asarUnpack).not.toContain('out-pkg/main/main.jsc');
+  });
+
+  it('ships its own and third-party license texts outside the asar', () => {
+    // asar 对最终用户不透明；MIT/ISC/Apache/EPL/OFL 都要求接收方看得到声明。
+    expect(config.beforePack).toBe('./scripts/collect-third-party-licenses.cjs');
+    expect(config.extraResources).toContainEqual({ from: 'build/licenses', to: 'licenses' });
+  });
+
+  it('keeps the undeclarable Spline runtime and the unused giscus packages out of the bundle', () => {
+    // @splinetool/runtime 上游无 license 字段与许可文件（只有 © 2025 Spline, Inc.），
+    // @lobehub/ui 声明了它但本项目不引用；两个 giscus 包同理。没有授权声明就不能随包分发。
+    const excluded = (config.files ?? []).filter((item): item is string => typeof item === 'string' && item.startsWith('!'));
+    expect(excluded).toEqual(expect.arrayContaining([
+      '!node_modules/@splinetool/**',
+      '!node_modules/giscus/**',
+      '!node_modules/@giscus/**',
+    ]));
   });
 });
