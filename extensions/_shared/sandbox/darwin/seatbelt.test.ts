@@ -64,16 +64,18 @@ describe("seatbeltArgv", () => {
 });
 
 describe("seatbeltProfile follows no symlinks", () => {
-  it("allows the real path as well as the spelling it was given", () => {
+  // seatbelt 只跑在 macOS。Windows 上既没有这个语义，tmpdir() 本身又已经是 8.3 短名，
+  // realpathSync.native 会把 junction 展开成长名、和 profile 里的短名对不上，前提不成立。
+  it.skipIf(process.platform === "win32")("allows the real path as well as the spelling it was given", () => {
     // macOS 的 /tmp、/var 都是符号链接；内核按真实路径比对 subpath，
     // 所以 profile 里必须两种写法都有，否则 /var/folders/... 下的工作区写不进去。
     const link = join(tmpdir(), `pi-seatbelt-link-${process.pid}-${Date.now()}`);
     const real = mkdtempSync(join(tmpdir(), "pi-seatbelt-real-"));
     try {
       try {
-        symlinkSync(real, link, process.platform === "win32" ? "junction" : "dir");
+        symlinkSync(real, link, "dir");
       } catch {
-        return; // 没有建链接的权限（Windows 非开发者模式），这条前提就不成立。
+        return; // 没有建链接的权限，这条前提就不成立。
       }
       const profile = seatbeltProfile({ mode: "workspace-write", workspaceRoot: link }, tempDir);
       expect(profile).toContain(writeAllow(link.replace(/\\/g, "/")));
