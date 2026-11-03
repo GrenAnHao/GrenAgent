@@ -1,7 +1,7 @@
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
@@ -40,8 +40,11 @@ function writeProbeArgv(inside: string, outside: string): string[] {
   return ["bash", "-c", `echo in > "${posix(inside)}"; echo out > "${posix(outside)}"`];
 }
 
+// 首次 confine 要建沙箱账户、盖系统目录的写拒绝，CI 上远超 vitest 默认的 5 秒。
+const LIVE_TIMEOUT_MS = 180_000;
+
 describe.skipIf(!live)("live OS isolation", () => {
-  it("blocks writes outside the workspace and allows inside", async () => {
+  it("blocks writes outside the workspace and allows inside", { timeout: LIVE_TIMEOUT_MS }, async () => {
     const root = await scratchDir(tmpdir(), "sbx-");
     const inside = join(root, "ok.txt");
     const outsideDir = await scratchDir(tmpdir(), "sbx-out-");
@@ -152,7 +155,7 @@ async function pingProcessCount(): Promise<number> {
 describe.skipIf(!live || process.platform !== "win32")("live windows job hardening", () => {
   const comspec = process.env.ComSpec || "cmd.exe";
 
-  it("still runs ordinary commands under the UI restrictions", async () => {
+  it("still runs ordinary commands under the UI restrictions", { timeout: LIVE_TIMEOUT_MS }, async () => {
     const cmd = await runConfinedWin([comspec, "/c", "echo ok"], process.env.PI_SANDBOX_LIVE_HELPER);
     expect(cmd.exitCode).toBe(0);
     const ps = await runConfinedWin(
@@ -168,7 +171,7 @@ describe.skipIf(!live || process.platform !== "win32")("live windows job hardeni
   });
 
   // 对照：旧 helper（无 UI 限制）下 `echo | clip` 退出码为 0，见笔记的验证段。
-  it("blocks clipboard writes from inside the sandbox", async () => {
+  it("blocks clipboard writes from inside the sandbox", { timeout: LIVE_TIMEOUT_MS }, async () => {
     const result = await runConfinedWin([comspec, "/c", "echo secret| clip"], process.env.PI_SANDBOX_LIVE_HELPER);
     expect(result.exitCode).not.toBe(0);
   });
@@ -193,13 +196,13 @@ describe.skipIf(!live || process.platform !== "win32")("live windows ambient wri
     { name: "Public", dir: process.env.PUBLIC },
   ];
 
-  it("lets the sandbox write inside its workspace (control)", async () => {
+  it("lets the sandbox write inside its workspace (control)", { timeout: LIVE_TIMEOUT_MS }, async () => {
     const result = await runConfinedWin([comspec, "/c", "echo x>ok.txt"]);
     await expect(readFile(join(result.root, "ok.txt"), "utf8")).resolves.toMatch(/x/);
   });
 
   for (const { name, dir } of cases) {
-    it.skipIf(!dir)(`cannot write into ${name}`, async () => {
+    it.skipIf(!dir)(`cannot write into ${name}`, { timeout: LIVE_TIMEOUT_MS }, async () => {
       const file = join(dir as string, `pi-probe-${Date.now()}.txt`);
       await runConfinedWin([comspec, "/c", `echo x>${file}`]);
       await expect(readFile(file, "utf8")).rejects.toThrow();
@@ -208,9 +211,23 @@ describe.skipIf(!live || process.platform !== "win32")("live windows ambient wri
 });
 
 // 数据盘根上写权限来自 Authenticated Users:(M)，PiSandbox 靠这个组写进工作区的兄弟目录。
+// 没有这条 ACE 的卷（GitHub runner 的 D: 就是）兄弟目录本来就能写，无从验证受限令牌，跳过。
+function driveRootGrantsAuthenticatedUsersWrite(root: string): boolean {
+  try {
+    const acl = execFileSync("icacls", [root], { encoding: "utf8", windowsHide: true });
+    // 逐行看：只有同一行里的 Authenticated Users 带写权限才算，别的行里的 (M) 不算。
+    return acl
+      .split(/\r?\n/)
+      .some((line) => /authenticated users/i.test(line) && /\((M|F)(,[A-Z]+)*\)/i.test(line));
+  } catch {
+    return false;
+  }
+}
+
 describe.skipIf(!live || process.platform !== "win32")("live windows write boundary on the data drive", () => {
   const comspec = process.env.ComSpec || "cmd.exe";
   const driveRoot = parse(process.cwd()).root;
+  const grantsWriteToAuthenticatedUsers = driveRootGrantsAuthenticatedUsersWrite(driveRoot);
 
   async function tryWrite(workspace: string, file: string): Promise<boolean> {
     const provider = createSandboxProvider(process.env.PI_SANDBOX_LIVE_HELPER ? { helperPath: process.env.PI_SANDBOX_LIVE_HELPER } : {});
@@ -232,17 +249,21 @@ describe.skipIf(!live || process.platform !== "win32")("live windows write bound
     }
   }
 
-  it("writes inside the workspace but not into a sibling directory on the same drive", async () => {
-    const workspace = await scratchDir(driveRoot, "sbx-bnd-ws-");
-    const sibling = await scratchDir(driveRoot, "sbx-bnd-sib-");
-    try {
-      expect(await tryWrite(workspace, join(workspace, "in.txt"))).toBe(true);
-      expect(await tryWrite(workspace, join(sibling, "out.txt"))).toBe(false);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(sibling, { recursive: true, force: true });
-    }
-  });
+  it.skipIf(!grantsWriteToAuthenticatedUsers)(
+    "writes inside the workspace but not into a sibling directory on the same drive",
+    { timeout: LIVE_TIMEOUT_MS },
+    async () => {
+      const workspace = await scratchDir(driveRoot, "sbx-bnd-ws-");
+      const sibling = await scratchDir(driveRoot, "sbx-bnd-sib-");
+      try {
+        expect(await tryWrite(workspace, join(workspace, "in.txt"))).toBe(true);
+        expect(await tryWrite(workspace, join(sibling, "out.txt"))).toBe(false);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+        await rm(sibling, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 // 沙箱以 PiSandbox 运行，工作区归真实用户所有；没有 safe.directory 注入时 git 会报 dubious ownership。
@@ -306,7 +327,8 @@ describe.skipIf(!live || process.platform !== "win32")("live Git Bash through th
     expect(result.sandbox).toMatchObject({ mode: "workspace-write", denied: false });
     expect(result.sandbox.runnerFailed).toBeUndefined();
     expect(result.text).toContain("中文");
-    expect(result.text).toContain(box.root.replace(/\\/g, "/"));
+    // runner 的 %TEMP% 是 8.3 短名（RUNNER~1），`pwd -W` 回的是长名；用 native 展开后比。
+    expect(result.text).toContain(realpathSync.native(box.root).replace(/\\/g, "/"));
     expect(result.text).toContain("inside_ok");
     expect(result.text).toMatch(/git version \d/);
     // 登录用户的家目录不带进沙箱：msys 按令牌的账户取家目录（/c/Users/PiSandbox）。
