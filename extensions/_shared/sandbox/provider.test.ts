@@ -212,7 +212,9 @@ describe("createSandboxProvider", () => {
     ]);
   });
 
-  it("uses acquireTempDir on win32 and releases it on dispose", async () => {
+  // 宿主临时目录决定 --temp 落在哪：非 Windows 上 acquireTempDir 用的是 /tmp，
+  // 断言"C 盘之外"没有意义，所以只在 Windows 跑。
+  it.skipIf(process.platform !== "win32")("uses acquireTempDir on win32 and releases it on dispose", async () => {
     const helperPath = fileURLToPath(import.meta.url);
     const sessionId = `win-temp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const provider = createSandboxProvider({

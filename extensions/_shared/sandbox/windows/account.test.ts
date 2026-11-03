@@ -28,7 +28,12 @@ import {
 } from "./account.js";
 import { ELEVATED_DONE, PS_ICACLS } from "./elevate.js";
 
-describe("windows sandbox account grants", () => {
+// 这些模块只在 Windows 上运行，测试里的路径常量是 `C:/...`；在 POSIX 上 node:path
+// 会把它们解析成别的东西（resolve("C:/x") 变成 "$PWD/C:/x"），前提就不成立。
+// 所以非 Windows 平台整体跳过，而不是让它们以错误的前提跑红。
+const describeWindows = process.platform === "win32" ? describe : describe.skip;
+
+describeWindows("windows sandbox account grants", () => {
   it("builds an inheritable icacls grant on the root and leaves the tree to inheritance, never /T", () => {
     // /T writes every object and each write propagates again below it: 70k files took 320s instead of 21s.
     expect(icaclsGrantArgs("C:/work/repo", "PiSandbox", "M")).toEqual([
@@ -145,7 +150,7 @@ describe("windows sandbox account grants", () => {
   });
 });
 
-describe("workspace ancestor traverse grants", () => {
+describeWindows("workspace ancestor traverse grants", () => {
   let root: string;
   let workspace: string;
   let tempDir: string;
@@ -273,7 +278,7 @@ describe("workspace ancestor traverse grants", () => {
     expect(argv.join(" ").length).toBeLessThan(400);
   });
 });
-describe("account setup and the Windows Temp list grant without temp files", () => {
+describeWindows("account setup and the Windows Temp list grant without temp files", () => {
   const CIPHER = "Q0lQSEVSVEVYVA==";
 
   it("creates the account in one elevated script that only ever sees the DPAPI ciphertext", () => {

@@ -19,6 +19,11 @@ import {
   windowsSystemExe,
 } from "./elevate.js";
 
+// 这些模块只在 Windows 上运行，测试里的路径常量是 `C:/...`；在 POSIX 上 node:path
+// 会把它们解析成别的东西（resolve("C:/x") 变成 "$PWD/C:/x"），前提就不成立。
+// 所以非 Windows 平台整体跳过，而不是让它们以错误的前提跑红。
+const describeWindows = process.platform === "win32" ? describe : describe.skip;
+
 const SHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
 function payloadOf(launcher: string): string {
@@ -27,7 +32,7 @@ function payloadOf(launcher: string): string {
   return Buffer.from(match[1], "base64").toString("utf16le");
 }
 
-describe("elevation without files", () => {
+describeWindows("elevation without files", () => {
   it("encodes a script the way -EncodedCommand expects (UTF-16LE base64)", () => {
     const script = "exit 3 # 沙箱";
     expect(Buffer.from(encodePowerShell(script), "base64").toString("utf16le")).toBe(script);

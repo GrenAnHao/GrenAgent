@@ -16,11 +16,25 @@ function findPwsh(): string | undefined {
 
 const pwsh = findPwsh();
 
+/**
+ * 管理员能绕过这份 ACL（SeTakeOwnership / SeBackupPrivilege），"删不掉"的前提不成立。
+ * GitHub 的 Windows runner 就是管理员，所以那里跳过；本地普通账户照跑。
+ */
+function isElevated(): boolean {
+  if (process.platform !== "win32") return false;
+  try {
+    execFileSync("net.exe", ["session"], { windowsHide: true, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // C:\Windows\Temp gives Users add-file but not list. PowerShell 7 Remove-Item
 // and cmd del call FindFirstFile on the parent and fail. DeleteFileW still
 // works, and so does Windows PowerShell 5.1. Adding synchronize+list makes
 // the four paths agree. This recreates that ACL on a private directory.
-describe.skipIf(pwsh === undefined)("windows delete without list", () => {
+describe.skipIf(pwsh === undefined || isElevated())("windows delete without list", () => {
   it("splits until the directory allows FindFirstFile", () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-del-"));
     const user = process.env.USERNAME || "";

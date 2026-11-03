@@ -15,7 +15,12 @@ import {
   type ProtectTarget,
 } from "./protect.js";
 
-describe("what the sandbox account may not change in a workspace", () => {
+// 这些模块只在 Windows 上运行，测试里的路径常量是 `C:/...`；在 POSIX 上 node:path
+// 会把它们解析成别的东西（resolve("C:/x") 变成 "$PWD/C:/x"），前提就不成立。
+// 所以非 Windows 平台整体跳过，而不是让它们以错误的前提跑红。
+const describeWindows = process.platform === "win32" ? describe : describe.skip;
+
+describeWindows("what the sandbox account may not change in a workspace", () => {
   let root: string;
 
   beforeEach(() => {
@@ -61,7 +66,7 @@ describe("what the sandbox account may not change in a workspace", () => {
   });
 });
 
-describe("protect commands", () => {
+describeWindows("protect commands", () => {
   it("takes ownership away from the sandbox account first, then stops inheriting, then replaces its entry with read and execute", () => {
     expect(protectSteps("C:\\w\\.pi", "PiSandbox", "alice")).toEqual([
       ["C:\\w\\.pi", "/setowner", "alice", "/T", "/L", "/C", "/Q"],
@@ -85,7 +90,7 @@ describe("protect commands", () => {
   });
 });
 
-describe("applyWorkspaceProtection", () => {
+describeWindows("applyWorkspaceProtection", () => {
   const pi: ProtectTarget = { path: "C:\\w\\.pi", relative: ".pi", id: "11" };
   const vscode: ProtectTarget = { path: "C:\\w\\.vscode", relative: ".vscode", id: "22" };
   const key = protectedKey(grantKey("C:\\w"));
@@ -173,7 +178,7 @@ describe("applyWorkspaceProtection", () => {
   });
 });
 
-describe("grantSandboxAccess protects the workspace in write mode only", () => {
+describeWindows("grantSandboxAccess protects the workspace in write mode only", () => {
   let root: string;
   let workspace: string;
   let tempDir: string;

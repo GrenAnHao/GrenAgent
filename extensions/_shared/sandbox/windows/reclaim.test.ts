@@ -15,6 +15,11 @@ import {
   USED_REFRESH_MS,
 } from "./reclaim.js";
 
+// 这些模块只在 Windows 上运行，测试里的路径常量是 `C:/...`；在 POSIX 上 node:path
+// 会把它们解析成别的东西（resolve("C:/x") 变成 "$PWD/C:/x"），前提就不成立。
+// 所以非 Windows 平台整体跳过，而不是让它们以错误的前提跑红。
+const describeWindows = process.platform === "win32" ? describe : describe.skip;
+
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
 
@@ -29,19 +34,19 @@ function opts(overrides: Partial<Parameters<typeof reclaimGrants>[1]> = {}) {
   };
 }
 
-describe("path keys", () => {
+describeWindows("path keys", () => {
   it("are the same as the keys account.ts records grants under", () => {
     for (const p of ["C:\\Work\\Repo\\", "d:/x/Y", "C:\\a\\..\\b"]) expect(pathKey(p)).toBe(grantKey(p));
   });
 });
 
-describe("revoke command", () => {
+describeWindows("revoke command", () => {
   it("removes only the grant entries of the sandbox account, so denies stay", () => {
     expect(revokeArgs("C:\\work\\old", "PiSandbox")).toEqual(["C:\\work\\old", "/remove:g", "PiSandbox", "/T", "/C", "/Q"]);
   });
 });
 
-describe("reclaimGrants", () => {
+describeWindows("reclaimGrants", () => {
   it("drops records of paths that no longer exist, along with their last-used time", () => {
     const grants = {
       [grantKey("C:/gone")]: "M",
@@ -141,7 +146,7 @@ describe("reclaimGrants", () => {
   });
 });
 
-describe("reclaimGrants: what the review found", () => {
+describeWindows("reclaimGrants: what the review found", () => {
   const OLD = String(NOW - 2 * GRANT_MAX_IDLE_MS);
 
   it("revokes the longest idle first", () => {
@@ -256,7 +261,7 @@ describe("reclaimGrants: what the review found", () => {
   });
 });
 
-describe("reclaimGrants and the workspace protection records", () => {
+describeWindows("reclaimGrants and the workspace protection records", () => {
   const OLD = String(NOW - 2 * GRANT_MAX_IDLE_MS);
 
   it("drops the protection record of a workspace that no longer exists", () => {
@@ -287,7 +292,7 @@ describe("reclaimGrants and the workspace protection records", () => {
   });
 });
 
-describe("mergeGrantChanges", () => {
+describeWindows("mergeGrantChanges", () => {
   it("applies only this run's additions and removals on top of what is on disk now", () => {
     const before = { a: "M", b: "M", c: "M" };
     const after = { a: "M", c: "RX", d: "M" };
@@ -308,7 +313,7 @@ describe("mergeGrantChanges", () => {
   });
 });
 
-describe("grantSandboxAccess reclaims as it goes", () => {
+describeWindows("grantSandboxAccess reclaims as it goes", () => {
   let root: string;
   let workspace: string;
   let tempDir: string;

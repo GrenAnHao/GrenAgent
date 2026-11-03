@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -823,7 +823,9 @@ describe.skipIf(process.platform !== "win32")("Git Bash bootstrap live", () => {
       );
       expect(result.code).toBe(5);
       expect(result.out).toContain("中文");
-      expect(result.out).toContain(cwd.replace(/\\/g, "/"));
+      // runner 的 %TEMP% 是 8.3 短名（RUNNER~1 / runneradmin），`pwd -W` 回的是长名；
+      // 两边都取真实路径再比，不然跑在 GitHub runner 上会误报。
+      expect(result.out).toContain(realpathSync(cwd).replace(/\\/g, "/"));
       expect(result.out).toContain("leaked=no/no");
       expect(result.out).toContain(`a'b"c`);
       expect(result.err).toBe("");
